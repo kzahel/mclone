@@ -18,12 +18,12 @@ use mclone_mesh::{
     TexturedRenderSectionMetadata,
 };
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
-use mclone_render::far_lod::FarTerrainLodMesh;
+use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::LoadingProgressOverlay;
 
-use crate::far_lod::FarTerrainLodConfig;
+use crate::far_lod::{FarTerrainLodConfig, FarTerrainLodProducerStats};
 use crate::host_mode::SingleViewHostMode;
 use crate::lod_coverage::LodReplacementCounters;
 use crate::monotonic::MonotonicDeadline;
@@ -59,13 +59,16 @@ pub trait SceneRuntimeService {
         sections: TexturedRenderSectionBuildReport,
     ) -> Result<()>;
     fn clear_far_lod(&mut self);
-    fn prepare_far_lod_mesh(
+    fn prepare_far_lod_frame(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
         center: ChunkPos,
         camera_position: Vec3,
-    ) -> Option<&FarTerrainLodMesh>;
+        build_budget: usize,
+        upload_budget: usize,
+    ) -> Result<Option<&FarTerrainLodFrameUpdate>>;
+    fn far_lod_stats(&self) -> FarTerrainLodProducerStats;
     fn lod_coverage_counters(&self) -> LodReplacementCounters;
     fn release_render_compile_jobs(&mut self, count: usize) -> usize;
     fn simulation_cadence(&self) -> Option<SimulationCadenceConfig>;

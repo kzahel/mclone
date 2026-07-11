@@ -26,7 +26,7 @@ use mclone_app_runtime::client_session_policy::{
 };
 use mclone_app_runtime::debug_overlay::DebugPaneStats;
 use mclone_app_runtime::far_lod::{
-    FarTerrainLodConfig, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    FarTerrainLodConfig, FarTerrainLodProducerStats, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_app_runtime::frame_pacing::{
@@ -1445,6 +1445,27 @@ impl McloneSceneHost {
         } else {
             Vec::new()
         };
+        let far_lod_config = self.scene.far_lod;
+        let far_lod_seed = self.scene.seed;
+        let far_lod_center = self.camera.snapshot().chunk_pos;
+        let sky_clear_color = self.sky_clear_color();
+        let time_of_day = self.time_of_day();
+        let sun_angle = self.sun_angle();
+        let center_position =
+            (terrain_views[0].camera_position + terrain_views[1].camera_position) * 0.5;
+        let lod_grant = self.render_admission_policy.lod_grant();
+        let far_lod_frame = if let Some(runtime) = self.runtime.as_mut() {
+            runtime.prepare_far_lod_frame(
+                far_lod_config,
+                far_lod_seed,
+                far_lod_center,
+                center_position,
+                lod_grant.build_tiles,
+                lod_grant.upload_tiles,
+            )?
+        } else {
+            None
+        };
         let records_start = self.services.clock.now();
         let (prepared_records, record_cache_prepare) =
             self.draw.prepare_render_records_with_stats();
@@ -1459,7 +1480,7 @@ impl McloneSceneHost {
             target.color_view,
             &target.depth.view,
             target.size,
-            self.sky_clear_color(),
+            sky_clear_color,
         );
         if include_sky {
             let sky_start = self.services.clock.now();
@@ -1468,18 +1489,39 @@ impl McloneSceneHost {
                 queue,
                 &mut encoder,
                 target.color_view,
-                self.sky_clear_color(),
+                sky_clear_color,
                 [
                     terrain_views[0].sky_view_projection(),
                     terrain_views[1].sky_view_projection(),
                 ],
-                self.time_of_day(),
-                self.sun_angle(),
+                time_of_day,
+                sun_angle,
             )?;
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_sky_ms = elapsed_ms(self.services.clock.elapsed_since(sky_start));
             }
             render_target = render_target.with_loaded_color();
+        }
+        if include_sky && far_lod_frame.is_some_and(|frame| !frame.is_empty()) {
+            let far_lod_start = self.services.clock.now();
+            let far_lod_stats = self.far_lod.render_multiview(
+                device,
+                queue,
+                &mut encoder,
+                target.color_view,
+                &target.depth.view,
+                terrain_views,
+                far_lod_frame,
+            );
+            self.render_stats.far_lod_vertex_count = far_lod_stats.vertex_count;
+            self.render_stats.far_lod_index_count = far_lod_stats.index_count;
+            self.render_stats.far_lod_region_draw_count = far_lod_stats.region_draw_count;
+            self.render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_far_lod_ms +=
+                    elapsed_ms(self.services.clock.elapsed_since(far_lod_start));
+            }
+            render_target = render_target.with_loaded_color().with_loaded_depth();
         }
         let terrain_start = self.services.clock.now();
         let prepared_stereo_draw =
@@ -1895,11 +1937,25 @@ impl McloneSceneHost {
                 runtime.has_pending_render_work(camera_position),
             )
         };
+        let far_lod_stats = self
+            .runtime
+            .as_ref()
+            .expect("runtime presence checked before poll")
+            .far_lod_stats();
+        self.render_admission_policy.set_lod_queue_telemetry(
+            far_lod_stats
+                .pending_builds
+                .saturating_add(far_lod_stats.inflight_builds),
+            far_lod_stats.oldest_build_age_ms,
+            far_lod_stats.queued_uploads,
+        );
         let target_period_ms = self.render_admission_target_period_ms();
         let budget_host_mode = match self.runtime_host_mode() {
             XrTerrainHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
             XrTerrainHostMode::RemoteDedicated => BudgetHostMode::RemoteHost,
         };
+        self.render_admission_policy
+            .set_lod_producer_active(self.scene.far_lod.enabled);
         let render_admission_grant = self.render_admission_policy.decide(
             target_period_ms,
             budget_host_mode,
@@ -2590,14 +2646,19 @@ impl McloneSceneHost {
         let far_lod_config = self.scene.far_lod;
         let far_lod_seed = self.scene.seed;
         let far_lod_center = self.camera.snapshot().chunk_pos;
-        let far_lod_mesh = self.runtime.as_mut().and_then(|runtime| {
-            runtime.prepare_far_lod_mesh(
+        let lod_grant = self.render_admission_policy.lod_grant();
+        let far_lod_mesh = if let Some(runtime) = self.runtime.as_mut() {
+            runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
                 far_lod_center,
                 render_view.camera_position,
-            )
-        });
+                lod_grant.build_tiles,
+                lod_grant.upload_tiles,
+            )?
+        } else {
+            None
+        };
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);

@@ -21,6 +21,16 @@ impl ResidentTileKey for RenderSectionKey {
     }
 }
 
+impl ResidentTileKey for mclone_core::LodTileKey {
+    fn chunk_pos(self) -> ChunkPos {
+        self.chunk
+    }
+
+    fn lod_level(self) -> u8 {
+        self.level
+    }
+}
+
 #[derive(Clone, Debug)]
 struct ResidentTileSlot<M> {
     metadata: M,
@@ -230,6 +240,18 @@ impl ResidentTileUploadPayload<RenderSectionKey> for TexturedRenderSectionMesh {
 
     fn estimated_owned_bytes(&self) -> usize {
         TexturedRenderSectionMesh::estimated_owned_bytes(self)
+    }
+}
+
+impl ResidentTileUploadPayload<mclone_core::LodTileKey>
+    for mclone_render::far_lod::FarTerrainLodTileMesh
+{
+    fn tile_key(&self) -> mclone_core::LodTileKey {
+        self.key()
+    }
+
+    fn estimated_owned_bytes(&self) -> usize {
+        self.estimated_owned_bytes()
     }
 }
 

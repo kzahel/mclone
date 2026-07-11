@@ -2,9 +2,11 @@
 
 Status: active coordinating parent 2026-07-11. The native and browser scene-host
 convergence series and runtime asset-pack implementation are closed. Tactical
-166 — Shared Resident-Tile Substrate Slices 1–2 have landed; its Slice 3 is the
-next implementation step. This parent owns the cross-thread burn-down and final
-status reconciliation, not duplicate implementations of its child tacticals.
+166 — Shared Resident-Tile Substrate Slices 1–3 have landed. Milestone D, the
+production browser far-LOD proof and first possible exception removal, is the
+next implementation step. This parent owns the cross-thread burn-down and
+final status reconciliation, not duplicate implementations of its child
+tacticals.
 
 Topic: `convergence-and-parity-closeout`
 
@@ -64,7 +66,7 @@ explicit re-scope:
 | Runtime asset-pack selection and replacement | Tactical 169 — Runtime Asset Pack Selection | **Closed.** Slices 0–6 landed across native and web. | Track optional worker/bootstrap gaps below without reopening the tactical. |
 | Browser host adoption | Tactical 170 — Web Scene-Host Adoption | **Closed.** Slices 0–6 landed; the old browser orchestrator is deleted. | Burn down only the exact web feature exceptions below. |
 | Existing synthetic and future reduced-real LOD | Tactical 162 — Real-Chunk LOD Reduction Draft | **Paused after landed Slices 0A–2.** Its proposed Slice 3 was superseded. | Resume at Slice 4 only after the shared substrate can host another producer. |
-| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slices 1–2 landed.** | Implement Slice 3 next, then Slice 4 behind its performance and pixel gates. |
+| Shared real-section/LOD lifecycle | Tactical 166 — Shared Resident-Tile Substrate | **Active. Slices 1–3 landed.** | Run this parent's browser proof, then consider Slice 4 behind the landed performance and pixel gates. |
 | Cross-thread status and browser parity | Tactical 171 — Convergence And Parity Closeout | **Active.** Initial ledger and stale-doc reconciliation landed with Tactical 166 — Shared Resident-Tile Substrate Slice 1. | Close only after the milestones below and explicit deferred decisions are recorded. |
 
 ## Asset-Pack Follow-Ups That Do Not Reopen The Closed Series
@@ -93,7 +95,7 @@ needs more than one bounded slice.
 
 | Browser exception | Current reason | Promotion gate |
 |---|---|---|
-| `FarLod` | The current synthetic path still performs synchronous generation, monolithic remeshing, and whole-buffer uploads. | Complete Tactical 166 — Shared Resident-Tile Substrate Slices 2–3, then prove browser runtime, UI, diagnostics, worker/transport behavior, performance, and pixels before flipping support. |
+| `FarLod` | The shared resident-tile implementation is not yet integrated and proven in the production browser worker/runtime lanes. | Prove browser runtime, UI, diagnostics, local-worker/remote transport behavior, performance, and pixels before flipping support. |
 | `TravelAssist` | Browser input, UI, and movement behavior are not proven together. | Shared action/effect handling, desktop-equivalent browser input semantics, settings UI, movement smoke, and visible state evidence. |
 | `FramePipelineOverlay` | Browser frame-accounting reports are not fully projected into the shared overlay. | Shared accountant inputs, honest unavailable fields, UI toggle, report conservation tests, and inspected browser capture. |
 | `DebugDiagnostics` | Browser diagnostic presenter/panel wiring lacks complete proof. | Shared diagnostic facts, browser presenter wiring, UI toggle, focused tests, and inspected desktop/mobile browser captures. |
@@ -132,11 +134,11 @@ silently expanding or redefining these five rows.
 
 ### Milestone C — Synthetic far LOD onto the substrate
 
-- [ ] Implement Tactical 166 — Shared Resident-Tile Substrate Slice 3.
-- [ ] Move generation and meshing to the shared render-compile worker pool.
-- [ ] Replace monolithic remesh/re-upload with per-tile lifecycle and
+- [x] Implement Tactical 166 — Shared Resident-Tile Substrate Slice 3.
+- [x] Move generation and meshing to the shared render-compile worker pool.
+- [x] Replace monolithic remesh/re-upload with per-tile lifecycle and
   region-arena uploads/draws.
-- [ ] Pass desktop, per-eye XR, full-frame multiview, Quest movement, and
+- [x] Pass desktop, per-eye XR, full-frame multiview, Quest movement, and
   far-LOD-off invariance gates.
 
 ### Milestone D — First browser exception removal
@@ -175,10 +177,13 @@ silently expanding or redefining these five rows.
 
 ## Current Next Step
 
-Implement Tactical 166 — Shared Resident-Tile Substrate Slice 3: make synthetic
-far LOD a real producer on the shared worker/admission/residency substrate,
-replace monolithic remesh/re-upload with per-tile region-arena lifecycle, and
-pass the desktop, browser, per-eye, multiview, and Quest movement gates without
-changing the far-LOD-off path.
+Execute Milestone D of Tactical 171 — Convergence And Parity Closeout: integrate
+the landed resident-tile far-LOD producer with the production browser scene
+host and shared Web Worker compiler/session path, then prove settings UI,
+local-worker and IndexedDB worlds, remote WebSocket mode, diagnostics,
+performance, and pixels. Remove only `FarLod` from
+`WEB_FEATURE_PARITY_EXCEPTIONS` if every gate passes; leave the other four
+reasons byte-for-byte intact. Do not begin Tactical 166 — Shared Resident-Tile
+Substrate Slice 4 before that proof.
 
 Topic: convergence-and-parity-closeout

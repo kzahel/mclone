@@ -485,7 +485,7 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
 }
 
 const WEB_FAR_LOD_REASON: &str =
-    "Far LOD needs the shared resident-tile substrate plus browser performance and rendering proof";
+    "Far LOD needs browser worker/runtime integration plus performance and rendering proof";
 const WEB_TRAVEL_ASSIST_REASON: &str =
     "Travel assist needs browser input, UI, and movement smoke coverage";
 const WEB_FRAME_PIPELINE_OVERLAY_REASON: &str =

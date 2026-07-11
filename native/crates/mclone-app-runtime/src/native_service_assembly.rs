@@ -22,7 +22,7 @@ use mclone_mesh::{
     TexturedRenderSectionMetadata,
 };
 use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
-use mclone_render::far_lod::FarTerrainLodMesh;
+use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
@@ -42,8 +42,8 @@ use crate::deferred_drop::{
     DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropBacklog, DeferredDropService,
 };
 use crate::far_lod::{
-    FarTerrainLodCache, FarTerrainLodConfig, FarTerrainLodCoverage,
-    STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET, StartupLodPrewarmConfig,
+    FarTerrainLodCache, FarTerrainLodCompiler, FarTerrainLodConfig, FarTerrainLodCoverage,
+    FarTerrainLodProducerStats, STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET, StartupLodPrewarmConfig,
 };
 use crate::host_mode::{
     RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
@@ -1204,7 +1204,9 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     }
 
     pub fn clear_far_lod(&mut self) {
-        self.far_lod_cache.clear();
+        let abandoned = self.far_lod_cache.clear();
+        self.render_compile_dispatcher
+            .release_completed_far_lod_jobs(abandoned);
         self.lod_coverage.clear();
     }
 
@@ -1213,32 +1215,39 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         self.lod_coverage.counters()
     }
 
-    pub fn prepare_far_lod_mesh(
+    pub fn prepare_far_lod_frame(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
         center: ChunkPos,
         camera_position: Vec3,
-    ) -> Option<&FarTerrainLodMesh> {
+        build_budget: usize,
+        upload_budget: usize,
+    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
+        if !config.enabled {
+            self.clear_far_lod();
+            return Ok(None);
+        }
         let normal_terrain_chunks = traversal_ready_chunks(
             &self
                 .core
                 .traversal_ready_render_section_keys(camera_position),
         );
-        // Advance and build the synthetic mesh first, then release the cache
-        // borrow so the coverage coordinator can read what the synthetic source
-        // now offers. `mesh_for_camera` already stores the merged mesh, so
-        // `current_mesh` returns the same product afterwards.
-        let _ = self.far_lod_cache.mesh_for_camera(
+        let materials = self.mesh_assets.far_lod_materials.clone();
+        self.far_lod_cache.advance_for_camera(
             config,
             seed,
             center,
             self.core.render_distance(),
             Some(&normal_terrain_chunks),
-            self.mesh_assets.far_lod_materials.as_ref(),
-        );
-        self.resolve_lod_coverage(&normal_terrain_chunks);
-        self.far_lod_cache.current_mesh()
+            materials.as_ref(),
+            &mut self.render_compile_dispatcher,
+            build_budget,
+        )?;
+        self.far_lod_cache
+            .drain_render_uploads(upload_budget, &mut self.render_compile_dispatcher);
+        let visible = self.resolve_lod_coverage(&normal_terrain_chunks);
+        Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
     }
 
     /// Drive the shared LOD coverage coordinator with this frame's drawable
@@ -1246,7 +1255,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     /// per-tile precedence (normal drawable > reduced real > synthetic > nothing)
     /// explicit and records replacement/pop diagnostics; it does not rebuild the
     /// mesh (a derived product of the synthetic cache).
-    fn resolve_lod_coverage(&mut self, normal_drawable: &BTreeSet<ChunkPos>) {
+    fn resolve_lod_coverage(&mut self, normal_drawable: &BTreeSet<ChunkPos>) -> BTreeSet<ChunkPos> {
         let normal_loaded: BTreeSet<ChunkPos> =
             self.core.client().loaded_chunk_positions().collect();
         let synthetic: Vec<LodTileAvailability> = self
@@ -1255,7 +1264,8 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             .map(LodTileAvailability::synthetic)
             .collect();
         self.lod_coverage
-            .resolve(normal_drawable, &normal_loaded, synthetic);
+            .resolve(normal_drawable, &normal_loaded, synthetic)
+            .visible_lod_tiles
     }
 
     /// Build cheap retained far-LOD coverage during startup with an explicit
@@ -1282,7 +1292,12 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             Some(&normal_terrain_chunks),
             self.mesh_assets.far_lod_materials.as_ref(),
             chunk_budget,
+            &mut self.render_compile_dispatcher,
         )
+    }
+
+    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
+        self.far_lod_cache.stats()
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -1936,18 +1951,39 @@ where
         }
     }
 
-    pub fn prepare_far_lod_mesh(
+    pub fn prepare_far_lod_frame(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
         center: ChunkPos,
         camera_position: Vec3,
-    ) -> Option<&FarTerrainLodMesh> {
+        build_budget: usize,
+        upload_budget: usize,
+    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
         match self {
-            Self::Local(scene) => scene.prepare_far_lod_mesh(config, seed, center, camera_position),
-            Self::RemoteDedicated(scene) => {
-                scene.prepare_far_lod_mesh(config, seed, center, camera_position)
-            }
+            Self::Local(scene) => scene.prepare_far_lod_frame(
+                config,
+                seed,
+                center,
+                camera_position,
+                build_budget,
+                upload_budget,
+            ),
+            Self::RemoteDedicated(scene) => scene.prepare_far_lod_frame(
+                config,
+                seed,
+                center,
+                camera_position,
+                build_budget,
+                upload_budget,
+            ),
+        }
+    }
+
+    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
+        match self {
+            Self::Local(scene) => scene.far_lod_stats(),
+            Self::RemoteDedicated(scene) => scene.far_lod_stats(),
         }
     }
 
@@ -2804,7 +2840,9 @@ where
     }
 
     pub fn clear_far_lod(&mut self) {
-        self.far_lod_cache.clear();
+        let abandoned = self.far_lod_cache.clear();
+        self.render_compile_dispatcher
+            .release_completed_far_lod_jobs(abandoned);
         self.lod_coverage.clear();
     }
 
@@ -2813,26 +2851,37 @@ where
         self.lod_coverage.counters()
     }
 
-    pub fn prepare_far_lod_mesh(
+    pub fn prepare_far_lod_frame(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
         center: ChunkPos,
         camera_position: Vec3,
-    ) -> Option<&FarTerrainLodMesh> {
+        build_budget: usize,
+        upload_budget: usize,
+    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
+        if !config.enabled {
+            self.clear_far_lod();
+            return Ok(None);
+        }
         let normal_terrain_chunks = traversal_ready_chunks(
             &self
                 .core
                 .traversal_ready_render_section_keys(camera_position),
         );
-        let _ = self.far_lod_cache.mesh_for_camera(
+        let materials = self.mesh_assets.far_lod_materials.clone();
+        self.far_lod_cache.advance_for_camera(
             config,
             seed,
             center,
             self.core.render_distance(),
             Some(&normal_terrain_chunks),
-            self.mesh_assets.far_lod_materials.as_ref(),
-        );
+            materials.as_ref(),
+            &mut self.render_compile_dispatcher,
+            build_budget,
+        )?;
+        self.far_lod_cache
+            .drain_render_uploads(upload_budget, &mut self.render_compile_dispatcher);
         let normal_loaded: BTreeSet<ChunkPos> =
             self.core.client().loaded_chunk_positions().collect();
         let synthetic: Vec<LodTileAvailability> = self
@@ -2840,9 +2889,15 @@ where
             .drawable_lod_tiles()
             .map(LodTileAvailability::synthetic)
             .collect();
-        self.lod_coverage
-            .resolve(&normal_terrain_chunks, &normal_loaded, synthetic);
-        self.far_lod_cache.current_mesh()
+        let visible = self
+            .lod_coverage
+            .resolve(&normal_terrain_chunks, &normal_loaded, synthetic)
+            .visible_lod_tiles;
+        Ok(Some(self.far_lod_cache.prepare_render_update(&visible)))
+    }
+
+    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
+        self.far_lod_cache.stats()
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -3354,14 +3409,28 @@ where
         NativeSceneServices::clear_far_lod(self);
     }
 
-    fn prepare_far_lod_mesh(
+    fn prepare_far_lod_frame(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
         center: ChunkPos,
         camera_position: Vec3,
-    ) -> Option<&FarTerrainLodMesh> {
-        NativeSceneServices::prepare_far_lod_mesh(self, config, seed, center, camera_position)
+        build_budget: usize,
+        upload_budget: usize,
+    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
+        NativeSceneServices::prepare_far_lod_frame(
+            self,
+            config,
+            seed,
+            center,
+            camera_position,
+            build_budget,
+            upload_budget,
+        )
+    }
+
+    fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
+        NativeSceneServices::far_lod_stats(self)
     }
 
     fn lod_coverage_counters(&self) -> LodReplacementCounters {

@@ -156,8 +156,9 @@ and `ServerSimulationCadence` gated with explicit reasons. Tactical 170 — Web
 Scene-Host Adoption Slice 6 audits them as the exact tested
 `WEB_FEATURE_PARITY_EXCEPTIONS` ledger. Tactical 171 — Convergence And Parity
 Closeout now coordinates their burn-down. Far LOD remains first, after Tactical
-166 — Shared Resident-Tile Substrate removes the current synchronous,
-monolithic implementation and the browser performance/rendering proof passes.
+166 — Shared Resident-Tile Substrate Slices 1–3 removed the synchronous,
+monolithic native implementation. Promotion now waits only on the production
+browser integration and performance/rendering proof.
 
 ## Remaining Follow-Ups
 

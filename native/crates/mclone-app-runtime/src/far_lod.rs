@@ -1,10 +1,17 @@
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetPath, AssetSource};
-use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord};
-use mclone_render::far_lod::FarTerrainLodMesh;
+use mclone_core::{CHUNK_WIDTH, ChunkPos, LodTileKey, chunk_min_block_coord};
+use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodTileMesh};
+use mclone_render_session::{
+    ResidentTileCache, ResidentTileUploadCoordinator, ResidentTileUploadPayload,
+};
 use mclone_worldgen::block::{
     ANDESITE, BEDROCK, BLACK_TERRACOTTA, BLUE_TERRACOTTA, BROWN_TERRACOTTA, CLAY, COARSE_DIRT,
     CYAN_TERRACOTTA, DIORITE, DIRT, GRANITE, GRASS_BLOCK, GRAVEL, GRAY_TERRACOTTA,
@@ -39,7 +46,71 @@ pub const STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET: usize = 24;
 
 pub const SEA_LEVEL: f32 = 63.0;
 pub const FAR_TERRAIN_LOD_MATERIALS_PATH: &str = "assets/mclone/lod/materials.v1.json";
-const FAR_TERRAIN_LOD_VERTEX_FLOATS: usize = 7;
+
+#[derive(Clone, Debug)]
+pub struct FarTerrainLodBuildRequest {
+    pub key: LodTileKey,
+    source_key: FarTerrainLodSourceKey,
+    materials: Option<Arc<FarTerrainLodMaterialPalette>>,
+    queued_at: Instant,
+}
+
+impl FarTerrainLodBuildRequest {
+    fn new(
+        pos: ChunkPos,
+        source_key: FarTerrainLodSourceKey,
+        materials: Option<Arc<FarTerrainLodMaterialPalette>>,
+        queued_at: Instant,
+    ) -> Self {
+        Self {
+            key: LodTileKey::synthetic(pos),
+            source_key,
+            materials,
+            queued_at,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn synthetic_test_request(pos: ChunkPos) -> Self {
+        Self::new(
+            pos,
+            FarTerrainLodSourceKey::new(12345, FarTerrainLodConfig::enabled(), false),
+            None,
+            Instant::now(),
+        )
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FarTerrainLodBuildResult {
+    pub key: LodTileKey,
+    pub queued_at: Instant,
+    pub mesh: FarTerrainLodTileMesh,
+    source_key: FarTerrainLodSourceKey,
+}
+
+pub trait FarTerrainLodCompiler {
+    fn available_far_lod_job_slots(&self) -> usize;
+    fn submit_far_lod(&mut self, request: FarTerrainLodBuildRequest) -> Result<()>;
+    fn try_recv_completed_far_lod(&mut self) -> Result<Vec<FarTerrainLodBuildResult>>;
+    fn release_completed_far_lod_jobs(&mut self, count: usize) -> usize;
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FarTerrainLodProducerStats {
+    pub desired_tiles: usize,
+    pub resident_tiles: usize,
+    pub visible_tiles: usize,
+    pub pending_builds: usize,
+    pub inflight_builds: usize,
+    pub oldest_build_age_ms: Option<f64>,
+    pub submitted_builds: u64,
+    pub completed_builds: u64,
+    pub stale_builds: u64,
+    pub queued_uploads: usize,
+    pub last_upload_bytes: usize,
+    pub total_upload_bytes: u64,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FarTerrainLodConfig {
@@ -404,19 +475,6 @@ impl FarTerrainLodBuildKey {
             normal_chunk_hash: normal_terrain_chunk_hash(normal_terrain_chunks),
         }
     }
-
-    #[cfg(test)]
-    fn revision(self) -> u64 {
-        let mut hash = 0x9e37_79b9_7f4a_7c15_u64;
-        hash = mix_hash(hash ^ self.seed as u64);
-        hash = mix_hash(hash ^ self.center.x as u32 as u64);
-        hash = mix_hash(hash ^ ((self.center.z as u32 as u64) << 1));
-        hash = mix_hash(hash ^ ((self.render_distance as u64) << 2));
-        hash = mix_hash(hash ^ ((self.start_margin_chunks as u64) << 8));
-        hash = mix_hash(hash ^ ((self.extra_radius_chunks as u64) << 16));
-        hash = mix_hash(hash ^ ((self.sample_spacing_blocks as u64) << 24));
-        mix_hash(hash ^ self.normal_chunk_hash)
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -464,17 +522,54 @@ struct FarTerrainLodPatch {
     indices: Vec<u32>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FarTerrainLodTileMetadata {
+    vertex_count: usize,
+    index_count: usize,
+    owned_bytes: usize,
+}
+
+#[derive(Debug)]
 pub struct FarTerrainLodCache {
     source_key: Option<FarTerrainLodSourceKey>,
     view_key: Option<FarTerrainLodBuildKey>,
     desired_chunks: BTreeSet<ChunkPos>,
-    pending_chunks: VecDeque<ChunkPos>,
-    retained_patches: BTreeMap<ChunkPos, FarTerrainLodPatch>,
-    surface_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
-    mesh_revision: u64,
-    mesh_dirty: bool,
-    mesh: Option<FarTerrainLodMesh>,
+    pending_builds: VecDeque<FarTerrainLodBuildRequest>,
+    inflight_builds: BTreeMap<LodTileKey, Instant>,
+    resident_tiles: ResidentTileCache<LodTileKey, FarTerrainLodTileMetadata>,
+    uploaded_tiles: BTreeSet<LodTileKey>,
+    uploads: ResidentTileUploadCoordinator<LodTileKey, FarTerrainLodTileMesh>,
+    materials: Option<Arc<FarTerrainLodMaterialPalette>>,
+    frame: FarTerrainLodFrameUpdate,
+    handed_off_lifecycle_items: usize,
+    submitted_builds: u64,
+    completed_builds: u64,
+    stale_builds: u64,
+    last_upload_bytes: usize,
+    total_upload_bytes: u64,
+}
+
+impl Default for FarTerrainLodCache {
+    fn default() -> Self {
+        Self {
+            source_key: None,
+            view_key: None,
+            desired_chunks: BTreeSet::new(),
+            pending_builds: VecDeque::new(),
+            inflight_builds: BTreeMap::new(),
+            resident_tiles: ResidentTileCache::default(),
+            uploaded_tiles: BTreeSet::new(),
+            uploads: ResidentTileUploadCoordinator::default(),
+            materials: None,
+            frame: FarTerrainLodFrameUpdate::default(),
+            handed_off_lifecycle_items: 0,
+            submitted_builds: 0,
+            completed_builds: 0,
+            stale_builds: 0,
+            last_upload_bytes: 0,
+            total_upload_bytes: 0,
+        }
+    }
 }
 
 impl FarTerrainLodCache {
@@ -482,19 +577,24 @@ impl FarTerrainLodCache {
         Self::default()
     }
 
-    pub fn clear(&mut self) {
+    pub fn clear(&mut self) -> usize {
+        let abandoned_jobs = self.inflight_builds.len();
         self.source_key = None;
         self.view_key = None;
         self.desired_chunks.clear();
-        self.pending_chunks.clear();
-        self.retained_patches.clear();
-        self.surface_chunks.clear();
-        self.mesh_revision = 0;
-        self.mesh_dirty = false;
-        self.mesh = None;
+        self.pending_builds.clear();
+        self.inflight_builds.clear();
+        self.resident_tiles = ResidentTileCache::default();
+        self.uploaded_tiles.clear();
+        self.uploads.clear();
+        self.materials = None;
+        self.frame = FarTerrainLodFrameUpdate::default();
+        self.handed_off_lifecycle_items = 0;
+        self.last_upload_bytes = 0;
+        abandoned_jobs
     }
 
-    pub fn mesh_for_camera(
+    pub fn advance_for_camera<C: FarTerrainLodCompiler>(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
@@ -502,29 +602,38 @@ impl FarTerrainLodCache {
         render_distance: u32,
         normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
         materials: Option<&FarTerrainLodMaterialPalette>,
-    ) -> Option<&FarTerrainLodMesh> {
+        compiler: &mut C,
+        build_budget: usize,
+    ) -> Result<()> {
         if !config.enabled {
-            self.clear();
-            return None;
+            let abandoned = self.clear();
+            compiler.release_completed_far_lod_jobs(abandoned);
+            return Ok(());
         }
-        self.advance_for_camera(
-            config,
+        let source_key = FarTerrainLodSourceKey::new(seed, config, materials.is_some());
+        if self.source_key != Some(source_key) {
+            let abandoned = self.reset_for_source(source_key, materials);
+            compiler.release_completed_far_lod_jobs(abandoned);
+        }
+        let key = FarTerrainLodBuildKey::new(
             seed,
             center,
             render_distance,
+            config,
             normal_terrain_chunks,
-            materials,
-            DEFAULT_FAR_TERRAIN_LOD_CHUNK_BUILD_BUDGET,
         );
-        self.mesh.as_ref()
+        self.update_target(key, normal_terrain_chunks);
+        self.accept_completed(compiler)?;
+        self.submit_builds(compiler, build_budget)?;
+        Ok(())
     }
 
     /// Advance retained coverage toward `render_distance + config.extra_radius`
     /// with an explicit build budget and report how much of the desired coverage
     /// is currently drawable. Used by startup prewarm; shares the same retained
-    /// patches and source key as [`Self::mesh_for_camera`] so prewarmed tiles are
+    /// tiles and source key as [`Self::advance_for_camera`] so prewarmed tiles are
     /// reused (not reset) once live rendering takes over.
-    pub fn prewarm(
+    pub fn prewarm<C: FarTerrainLodCompiler>(
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
@@ -533,30 +642,73 @@ impl FarTerrainLodCache {
         normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
         materials: Option<&FarTerrainLodMaterialPalette>,
         chunk_budget: usize,
+        compiler: &mut C,
     ) -> FarTerrainLodCoverage {
-        if !config.enabled {
-            self.clear();
-            return FarTerrainLodCoverage::default();
-        }
-        self.advance_for_camera(
+        let _ = self.advance_for_camera(
             config,
             seed,
             center,
             render_distance,
             normal_terrain_chunks,
             materials,
+            compiler,
             chunk_budget,
         );
         self.coverage()
     }
 
-    /// The most recently built merged LOD mesh, without advancing coverage.
-    ///
-    /// Lets callers read the mesh handoff after driving coverage through the LOD
-    /// coverage coordinator, instead of holding the `&mut self` borrow that
-    /// [`Self::mesh_for_camera`] returns.
-    pub fn current_mesh(&self) -> Option<&FarTerrainLodMesh> {
-        self.mesh.as_ref()
+    pub fn drain_render_uploads<C: FarTerrainLodCompiler>(
+        &mut self,
+        upload_budget: usize,
+        compiler: &mut C,
+    ) {
+        if self.handed_off_lifecycle_items > 0 {
+            let released = self
+                .uploads
+                .complete_applied_lifecycle_items(self.handed_off_lifecycle_items);
+            compiler.release_completed_far_lod_jobs(released);
+            self.handed_off_lifecycle_items = 0;
+        }
+        self.frame.uploads.clear();
+        self.frame.removals.clear();
+
+        let drain = self.uploads.drain_budgeted(Some(upload_budget), None);
+        for mesh in &drain.uploads {
+            self.uploaded_tiles.insert(mesh.key());
+        }
+        for tile in &drain.removed_tile_keys {
+            self.uploaded_tiles.remove(tile);
+        }
+        let upload_bytes = drain
+            .uploads
+            .iter()
+            .map(ResidentTileUploadPayload::estimated_owned_bytes)
+            .sum::<usize>();
+        self.last_upload_bytes = upload_bytes;
+        self.total_upload_bytes = self.total_upload_bytes.saturating_add(upload_bytes as u64);
+        self.frame.uploads = drain.uploads;
+        self.frame.removals = drain.removed_tile_keys;
+        self.handed_off_lifecycle_items = drain.lifecycle_item_count;
+    }
+
+    pub fn prepare_render_update(
+        &mut self,
+        visible_chunks: &BTreeSet<ChunkPos>,
+    ) -> &FarTerrainLodFrameUpdate {
+        let visible_tiles = visible_chunks
+            .iter()
+            .copied()
+            .map(LodTileKey::synthetic)
+            .filter(|key| self.uploaded_tiles.contains(key))
+            .collect::<BTreeSet<_>>();
+        let changed = !self.frame.uploads.is_empty()
+            || !self.frame.removals.is_empty()
+            || self.frame.visible_tiles != visible_tiles;
+        if changed {
+            self.frame.revision = self.frame.revision.wrapping_add(1);
+            self.frame.visible_tiles = visible_tiles;
+        }
+        &self.frame
     }
 
     /// Chunk-aligned tiles that currently have a drawable retained synthetic
@@ -568,7 +720,7 @@ impl FarTerrainLodCache {
         self.desired_chunks
             .iter()
             .copied()
-            .filter(|pos| self.retained_patches.contains_key(pos))
+            .filter(|pos| self.uploaded_tiles.contains(&LodTileKey::synthetic(*pos)))
     }
 
     /// How many of the currently desired chunk patches are already retained.
@@ -576,7 +728,10 @@ impl FarTerrainLodCache {
         let ready_tiles = self
             .desired_chunks
             .iter()
-            .filter(|pos| self.retained_patches.contains_key(pos))
+            .filter(|pos| {
+                self.resident_tiles
+                    .contains_tile(LodTileKey::synthetic(**pos))
+            })
             .count();
         FarTerrainLodCoverage {
             ready_tiles,
@@ -584,44 +739,48 @@ impl FarTerrainLodCache {
         }
     }
 
-    fn advance_for_camera(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        center: ChunkPos,
-        render_distance: u32,
-        normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
-        materials: Option<&FarTerrainLodMaterialPalette>,
-        chunk_budget: usize,
-    ) {
-        let source_key = FarTerrainLodSourceKey::new(seed, config, materials.is_some());
-        if self.source_key != Some(source_key) {
-            self.reset_for_source(source_key);
-        }
-        let key = FarTerrainLodBuildKey::new(
-            seed,
-            center,
-            render_distance,
-            config,
-            normal_terrain_chunks,
-        );
-        self.update_target(key, normal_terrain_chunks);
-        self.advance_build(chunk_budget, materials);
-        if self.mesh_dirty {
-            self.rebuild_mesh();
+    pub fn stats(&self) -> FarTerrainLodProducerStats {
+        let oldest = self
+            .pending_builds
+            .iter()
+            .map(|request| request.queued_at)
+            .chain(self.inflight_builds.values().copied())
+            .min();
+        let upload_stats = self.uploads.stats();
+        FarTerrainLodProducerStats {
+            desired_tiles: self.desired_chunks.len(),
+            resident_tiles: self.resident_tiles.len(),
+            visible_tiles: self.frame.visible_tiles.len(),
+            pending_builds: self.pending_builds.len(),
+            inflight_builds: self.inflight_builds.len(),
+            oldest_build_age_ms: oldest.map(|queued| queued.elapsed().as_secs_f64() * 1_000.0),
+            submitted_builds: self.submitted_builds,
+            completed_builds: self.completed_builds,
+            stale_builds: self.stale_builds,
+            queued_uploads: upload_stats.queued_uploads,
+            last_upload_bytes: self.last_upload_bytes,
+            total_upload_bytes: self.total_upload_bytes,
         }
     }
 
-    fn reset_for_source(&mut self, source_key: FarTerrainLodSourceKey) {
+    fn reset_for_source(
+        &mut self,
+        source_key: FarTerrainLodSourceKey,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+    ) -> usize {
+        let abandoned = self.inflight_builds.len();
         self.source_key = Some(source_key);
         self.view_key = None;
         self.desired_chunks.clear();
-        self.pending_chunks.clear();
-        self.retained_patches.clear();
-        self.surface_chunks.clear();
-        self.mesh_revision = 0;
-        self.mesh_dirty = true;
-        self.mesh = Some(FarTerrainLodMesh::empty(self.mesh_revision));
+        self.pending_builds.clear();
+        self.inflight_builds.clear();
+        self.resident_tiles = ResidentTileCache::default();
+        self.uploaded_tiles.clear();
+        self.uploads.clear();
+        self.materials = materials.cloned().map(Arc::new);
+        self.frame = FarTerrainLodFrameUpdate::default();
+        self.handed_off_lifecycle_items = 0;
+        abandoned
     }
 
     fn update_target(
@@ -629,113 +788,124 @@ impl FarTerrainLodCache {
         key: FarTerrainLodBuildKey,
         normal_terrain_chunks: Option<&BTreeSet<ChunkPos>>,
     ) {
+        if self.view_key == Some(key) {
+            return;
+        }
         let desired_queue = capped_far_lod_chunk_positions(key, normal_terrain_chunks);
         let desired_chunks = desired_queue.iter().copied().collect::<BTreeSet<_>>();
-        if self.view_key != Some(key) || self.desired_chunks != desired_chunks {
-            self.view_key = Some(key);
-            self.desired_chunks = desired_chunks;
-            self.mesh_dirty = true;
-        }
-        self.pending_chunks = desired_queue
+        self.view_key = Some(key);
+        self.desired_chunks = desired_chunks;
+        let now = Instant::now();
+        self.pending_builds = desired_queue
             .into_iter()
-            .filter(|pos| !self.retained_patches.contains_key(pos))
+            .filter(|pos| {
+                let tile = LodTileKey::synthetic(*pos);
+                !self.resident_tiles.contains_tile(tile)
+                    && !self.inflight_builds.contains_key(&tile)
+            })
+            .map(|pos| {
+                FarTerrainLodBuildRequest::new(
+                    pos,
+                    self.source_key.expect("far LOD source initialized"),
+                    self.materials.clone(),
+                    now,
+                )
+            })
             .collect();
-        if self.evict_retained_patches(key) {
-            self.pending_chunks = capped_far_lod_chunk_positions(key, normal_terrain_chunks)
-                .into_iter()
-                .filter(|pos| !self.retained_patches.contains_key(pos))
-                .collect();
-            self.mesh_dirty = true;
-        }
+        self.evict_resident_tiles(key);
     }
 
-    fn advance_build(
+    fn submit_builds<C: FarTerrainLodCompiler>(
         &mut self,
-        chunk_budget: usize,
-        materials: Option<&FarTerrainLodMaterialPalette>,
-    ) {
-        let Some(source_key) = self.source_key else {
-            return;
-        };
-        let mut generated_chunks = 0;
-        for _ in 0..chunk_budget {
-            let Some(pos) = self.pending_chunks.pop_front() else {
+        compiler: &mut C,
+        build_budget: usize,
+    ) -> Result<()> {
+        let admitted = build_budget.min(compiler.available_far_lod_job_slots());
+        for _ in 0..admitted {
+            let Some(request) = self.pending_builds.pop_front() else {
                 break;
             };
-            if self.retained_patches.contains_key(&pos) || !self.desired_chunks.contains(&pos) {
+            if !self.desired_chunks.contains(&request.key.chunk)
+                || self.resident_tiles.contains_tile(request.key)
+                || self.inflight_builds.contains_key(&request.key)
+            {
                 continue;
             }
-            let patch = build_retained_far_terrain_lod_patch(
-                &mut self.surface_chunks,
-                pos,
-                source_key,
-                materials,
-            );
-            self.retained_patches.insert(pos, patch);
-            generated_chunks += 1;
+            let key = request.key;
+            let queued_at = request.queued_at;
+            compiler.submit_far_lod(request)?;
+            self.inflight_builds.insert(key, queued_at);
+            self.submitted_builds = self.submitted_builds.saturating_add(1);
         }
-        if generated_chunks > 0 {
-            self.mesh_dirty = true;
-        }
+        Ok(())
     }
 
-    fn evict_retained_patches(&mut self, key: FarTerrainLodBuildKey) -> bool {
-        let retain_radius = far_lod_retain_radius(key);
-        let before = self.retained_patches.len();
-        self.retained_patches
-            .retain(|pos, _| chunk_distance_from_center_chunk(key.center, *pos) <= retain_radius);
+    fn accept_completed<C: FarTerrainLodCompiler>(&mut self, compiler: &mut C) -> Result<()> {
+        let completed = compiler.try_recv_completed_far_lod()?;
+        for result in completed {
+            self.inflight_builds.remove(&result.key);
+            let retain = self.source_key == Some(result.source_key)
+                && self.view_key.is_some_and(|key| {
+                    chunk_distance_from_center_chunk(key.center, result.key.chunk)
+                        <= far_lod_retain_radius(key)
+                });
+            if !retain {
+                self.stale_builds = self.stale_builds.saturating_add(1);
+                compiler.release_completed_far_lod_jobs(1);
+                continue;
+            }
+            let metadata = FarTerrainLodTileMetadata {
+                vertex_count: result.mesh.vertex_count(),
+                index_count: result.mesh.index_count(),
+                owned_bytes: result.mesh.estimated_owned_bytes(),
+            };
+            self.resident_tiles.insert(result.key, metadata);
+            self.uploads.enqueue(vec![result.mesh], BTreeSet::new(), 1);
+            self.completed_builds = self.completed_builds.saturating_add(1);
+        }
+        Ok(())
+    }
 
+    fn evict_resident_tiles(&mut self, key: FarTerrainLodBuildKey) {
+        let retain_radius = far_lod_retain_radius(key);
+        let mut removals = self
+            .resident_tiles
+            .tile_keys()
+            .filter(|tile| chunk_distance_from_center_chunk(key.center, tile.chunk) > retain_radius)
+            .collect::<BTreeSet<_>>();
         let limit = max_retained_lod_patches(key);
-        if self.retained_patches.len() > limit {
+        if self.resident_tiles.len().saturating_sub(removals.len()) > limit {
             let mut eviction_order = self
-                .retained_patches
-                .keys()
-                .copied()
-                .map(|pos| {
-                    let desired = self.desired_chunks.contains(&pos);
-                    let distance = chunk_distance_from_center_chunk(key.center, pos);
-                    (pos, desired, distance)
+                .resident_tiles
+                .tile_keys()
+                .filter(|tile| !removals.contains(tile))
+                .map(|tile| {
+                    let desired = self.desired_chunks.contains(&tile.chunk);
+                    let distance = chunk_distance_from_center_chunk(key.center, tile.chunk);
+                    (tile, desired, distance)
                 })
                 .collect::<Vec<_>>();
-            eviction_order.sort_by_key(|(pos, desired, distance)| {
+            eviction_order.sort_by_key(|(tile, desired, distance)| {
                 (
                     *desired,
                     std::cmp::Reverse(*distance),
-                    std::cmp::Reverse(pos.z),
-                    std::cmp::Reverse(pos.x),
+                    std::cmp::Reverse(tile.chunk.z),
+                    std::cmp::Reverse(tile.chunk.x),
                 )
             });
-            for (pos, _, _) in eviction_order
+            for (tile, _, _) in eviction_order
                 .into_iter()
-                .take(self.retained_patches.len() - limit)
+                .take(self.resident_tiles.len().saturating_sub(removals.len()) - limit)
             {
-                self.retained_patches.remove(&pos);
+                removals.insert(tile);
             }
         }
-
-        let surface_retain_radius = retain_radius.saturating_add(1);
-        self.surface_chunks.retain(|pos, _| {
-            chunk_distance_from_center_chunk(key.center, *pos) <= surface_retain_radius
-        });
-
-        before != self.retained_patches.len()
-    }
-
-    fn rebuild_mesh(&mut self) {
-        let mut vertices = Vec::new();
-        let mut indices = Vec::new();
-        for (pos, patch) in &self.retained_patches {
-            if self.desired_chunks.contains(pos) {
-                append_retained_patch_mesh(&mut vertices, &mut indices, patch);
-            }
+        for tile in &removals {
+            self.resident_tiles.remove(*tile);
         }
-        self.mesh_revision = self.mesh_revision.wrapping_add(1);
-        self.mesh = Some(FarTerrainLodMesh::new(
-            vertices,
-            indices,
-            self.mesh_revision,
-        ));
-        self.mesh_dirty = false;
+        if !removals.is_empty() {
+            self.uploads.enqueue(Vec::new(), removals, 0);
+        }
     }
 }
 
@@ -818,35 +988,42 @@ fn build_retained_far_terrain_lod_patch(
     FarTerrainLodPatch { vertices, indices }
 }
 
-fn append_retained_patch_mesh(
-    vertices: &mut Vec<f32>,
-    indices: &mut Vec<u32>,
-    patch: &FarTerrainLodPatch,
-) {
-    let base = u32::try_from(vertices.len() / FAR_TERRAIN_LOD_VERTEX_FLOATS)
-        .expect("far terrain LOD merged vertex count fits u32");
-    vertices.extend_from_slice(&patch.vertices);
-    indices.extend(patch.indices.iter().map(|index| index + base));
+pub(crate) fn compile_far_terrain_lod_request(
+    request: FarTerrainLodBuildRequest,
+) -> FarTerrainLodBuildResult {
+    let mut surface_chunks = BTreeMap::new();
+    let patch = build_retained_far_terrain_lod_patch(
+        &mut surface_chunks,
+        request.key.chunk,
+        request.source_key,
+        request.materials.as_deref(),
+    );
+    FarTerrainLodBuildResult {
+        key: request.key,
+        queued_at: request.queued_at,
+        mesh: FarTerrainLodTileMesh::new(request.key, patch.vertices, patch.indices),
+        source_key: request.source_key,
+    }
 }
 
 #[cfg(test)]
-fn build_far_terrain_lod_mesh(key: FarTerrainLodBuildKey) -> FarTerrainLodMesh {
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    let mut surface_chunks = BTreeMap::new();
-    for pos in far_lod_chunk_positions(key, None) {
-        append_far_terrain_lod_chunk_patch(
-            &mut vertices,
-            &mut indices,
-            &mut surface_chunks,
+fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarTerrainLodTileMesh {
+    compile_far_terrain_lod_request(FarTerrainLodBuildRequest::new(
+        pos,
+        FarTerrainLodSourceKey::new(
             key.seed,
-            pos,
-            key,
-            FarTerrainNormalCoverage::Radius,
-            None,
-        );
-    }
-    FarTerrainLodMesh::new(vertices, indices, key.revision())
+            FarTerrainLodConfig {
+                enabled: true,
+                start_margin_chunks: 0,
+                extra_radius_chunks: 1,
+                sample_spacing_blocks: key.sample_spacing_blocks,
+            },
+            false,
+        ),
+        None,
+        Instant::now(),
+    ))
+    .mesh
 }
 
 fn append_far_terrain_lod_chunk_patch(
@@ -1352,6 +1529,62 @@ fn mix_hash(mut value: u64) -> u64 {
 mod tests {
     use super::*;
 
+    #[derive(Default)]
+    struct ImmediateFarLodCompiler {
+        completed: Vec<FarTerrainLodBuildResult>,
+        submitted: Vec<LodTileKey>,
+        released: usize,
+    }
+
+    impl FarTerrainLodCompiler for ImmediateFarLodCompiler {
+        fn available_far_lod_job_slots(&self) -> usize {
+            MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES
+        }
+
+        fn submit_far_lod(&mut self, request: FarTerrainLodBuildRequest) -> Result<()> {
+            self.submitted.push(request.key);
+            self.completed
+                .push(compile_far_terrain_lod_request(request));
+            Ok(())
+        }
+
+        fn try_recv_completed_far_lod(&mut self) -> Result<Vec<FarTerrainLodBuildResult>> {
+            Ok(std::mem::take(&mut self.completed))
+        }
+
+        fn release_completed_far_lod_jobs(&mut self, count: usize) -> usize {
+            self.released += count;
+            count
+        }
+    }
+
+    fn advance_until_complete(
+        cache: &mut FarTerrainLodCache,
+        compiler: &mut ImmediateFarLodCompiler,
+        config: FarTerrainLodConfig,
+        center: ChunkPos,
+        build_budget: usize,
+    ) {
+        for _ in 0..64 {
+            cache
+                .advance_for_camera(config, 12345, center, 0, None, None, compiler, build_budget)
+                .unwrap();
+            if cache.coverage().is_complete() {
+                return;
+            }
+        }
+        panic!("far LOD coverage did not complete within the test bound");
+    }
+
+    fn upload_all_desired(
+        cache: &mut FarTerrainLodCache,
+        compiler: &mut ImmediateFarLodCompiler,
+    ) -> FarTerrainLodFrameUpdate {
+        let visible = cache.desired_chunks.clone();
+        cache.drain_render_uploads(MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES, compiler);
+        cache.prepare_render_update(&visible).clone()
+    }
+
     #[test]
     fn far_terrain_lod_config_defaults_disabled() {
         assert!(!FarTerrainLodConfig::default().enabled);
@@ -1367,17 +1600,24 @@ mod tests {
     #[test]
     fn far_terrain_lod_cache_returns_none_when_disabled() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
 
-        let mesh = cache.mesh_for_camera(
-            FarTerrainLodConfig::default(),
-            12345,
-            ChunkPos::new(0, 0),
-            5,
-            None,
-            None,
-        );
+        cache
+            .advance_for_camera(
+                FarTerrainLodConfig::default(),
+                12345,
+                ChunkPos::new(0, 0),
+                5,
+                None,
+                None,
+                &mut compiler,
+                4,
+            )
+            .unwrap();
 
-        assert!(mesh.is_none());
+        assert_eq!(cache.coverage(), FarTerrainLodCoverage::default());
+        assert_eq!(cache.stats(), FarTerrainLodProducerStats::default());
+        assert!(compiler.submitted.is_empty());
     }
 
     #[test]
@@ -1385,12 +1625,14 @@ mod tests {
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config, None);
 
-        let mesh = build_far_terrain_lod_mesh(key);
+        let mesh = build_far_terrain_lod_tile(key, ChunkPos::new(1, 0));
 
         assert!(mesh.vertex_count() > 0);
         assert!(mesh.index_count() > 0);
         assert_eq!(mesh.index_count() % 3, 0);
-        assert_eq!(mesh.revision(), key.revision());
+        assert_eq!(mesh.key(), LodTileKey::synthetic(ChunkPos::new(1, 0)));
+        assert!(mesh.vertex_count() <= 512);
+        assert!(mesh.index_count() <= 768);
     }
 
     #[test]
@@ -1600,54 +1842,54 @@ mod tests {
     #[test]
     fn far_terrain_lod_cache_advances_incrementally_then_stabilizes() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
-        let first = cache
-            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None, None)
-            .expect("enabled LOD returns mesh")
-            .revision();
-        assert_eq!(cache.pending_chunks.len(), 4);
-        let second = cache
-            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None, None)
-            .expect("enabled LOD returns mesh")
-            .revision();
-        assert!(second > first);
-        assert!(cache.pending_chunks.is_empty());
-        let third = cache
-            .mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None, None)
-            .expect("enabled LOD returns mesh")
-            .revision();
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                3,
+            )
+            .unwrap();
+        assert_eq!(cache.stats().inflight_builds, 3);
+        assert_eq!(cache.stats().pending_builds, 5);
 
-        assert_eq!(second, third);
+        advance_until_complete(&mut cache, &mut compiler, config, ChunkPos::new(0, 0), 3);
+        let frame = upload_all_desired(&mut cache, &mut compiler);
+        assert_eq!(frame.uploads.len(), 8);
+        assert_eq!(frame.visible_tiles.len(), 8);
+        let stable_revision = frame.revision;
+        let visible = cache.desired_chunks.clone();
+        cache.drain_render_uploads(3, &mut compiler);
+        assert_eq!(
+            cache.prepare_render_update(&visible).revision,
+            stable_revision
+        );
     }
 
     #[test]
     fn far_terrain_lod_cache_retains_overlapping_patches_after_chunk_move() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let first_center = ChunkPos::new(0, 0);
         let moved_center = ChunkPos::new(1, 0);
 
-        cache.mesh_for_camera(config, 12345, first_center, 0, None, None);
-        cache.mesh_for_camera(config, 12345, first_center, 0, None, None);
-        assert!(cache.pending_chunks.is_empty());
+        advance_until_complete(&mut cache, &mut compiler, config, first_center, 32);
         let first_ready = cache
-            .retained_patches
-            .keys()
-            .copied()
+            .resident_tiles
+            .tile_keys()
+            .map(|tile| tile.chunk)
             .collect::<BTreeSet<_>>();
         assert_eq!(first_ready.len(), 8);
-        let first_revision = cache
-            .mesh
-            .as_ref()
-            .expect("mesh exists after fill")
-            .revision();
-
-        let (moved_revision, moved_empty) = {
-            let moved_mesh = cache
-                .mesh_for_camera(config, 12345, moved_center, 0, None, None)
-                .expect("enabled LOD returns mesh");
-            (moved_mesh.revision(), moved_mesh.is_empty())
-        };
+        cache
+            .advance_for_camera(config, 12345, moved_center, 0, None, None, &mut compiler, 0)
+            .unwrap();
 
         let moved_key = FarTerrainLodBuildKey::new(12345, moved_center, 0, config, None);
         let moved_desired = far_lod_chunk_positions(moved_key, None)
@@ -1659,26 +1901,41 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(!reused.is_empty());
         for pos in reused {
-            assert!(cache.retained_patches.contains_key(&pos));
+            assert!(
+                cache
+                    .resident_tiles
+                    .contains_tile(LodTileKey::synthetic(pos))
+            );
         }
-        assert!(moved_revision > first_revision);
-        assert!(!moved_empty);
+        assert!(!cache.desired_chunks.is_empty());
     }
 
     #[test]
     fn far_terrain_lod_cache_caps_desired_patch_count() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
         let config = FarTerrainLodConfig::enabled()
             .with_extra_radius_chunks(MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS);
 
-        cache.mesh_for_camera(config, 12345, ChunkPos::new(0, 0), 0, None, None);
+        cache
+            .advance_for_camera(
+                config,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
 
         assert_eq!(
             cache.desired_chunks.len(),
             MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES
         );
         assert!(
-            cache.retained_patches.len() + cache.pending_chunks.len()
+            cache.resident_tiles.len() + cache.pending_builds.len() + cache.inflight_builds.len()
                 <= MAX_FAR_TERRAIN_LOD_RETAINED_PATCHES
         );
     }
@@ -1730,13 +1987,23 @@ mod tests {
     #[test]
     fn far_terrain_lod_cache_prewarm_fills_coverage_incrementally() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
         let config = StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true)
             .with_extra_chunks(1)
             .far_lod_config();
 
-        let first = cache.prewarm(config, 12345, ChunkPos::new(0, 0), 0, None, None, 3);
+        let first = cache.prewarm(
+            config,
+            12345,
+            ChunkPos::new(0, 0),
+            0,
+            None,
+            None,
+            3,
+            &mut compiler,
+        );
         assert_eq!(first.target_tiles, 8);
-        assert_eq!(first.ready_tiles, 3);
+        assert_eq!(first.ready_tiles, 0);
         assert!(!first.is_complete());
 
         let mut coverage = first;
@@ -1744,7 +2011,16 @@ mod tests {
             if coverage.is_complete() {
                 break;
             }
-            coverage = cache.prewarm(config, 12345, ChunkPos::new(0, 0), 0, None, None, 3);
+            coverage = cache.prewarm(
+                config,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                3,
+                &mut compiler,
+            );
         }
         assert!(coverage.is_complete());
         assert_eq!(coverage.ready_tiles, 8);
@@ -1754,6 +2030,7 @@ mod tests {
     #[test]
     fn far_terrain_lod_cache_prewarm_patches_are_reused_by_live_mesh() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
         let live = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let prewarm = StartupLodPrewarmConfig::for_far_lod(live, true)
             .with_extra_chunks(1)
@@ -1762,25 +2039,47 @@ mod tests {
         // Prewarm to full coverage before any live frame.
         let mut coverage = FarTerrainLodCoverage::default();
         for _ in 0..8 {
-            coverage = cache.prewarm(prewarm, 12345, ChunkPos::new(0, 0), 0, None, None, 24);
+            coverage = cache.prewarm(
+                prewarm,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                24,
+                &mut compiler,
+            );
             if coverage.is_complete() {
                 break;
             }
         }
         assert!(coverage.is_complete());
         let prewarmed = cache
-            .retained_patches
-            .keys()
-            .copied()
+            .resident_tiles
+            .tile_keys()
+            .map(|tile| tile.chunk)
             .collect::<BTreeSet<_>>();
         assert_eq!(prewarmed.len(), 8);
 
         // The first live frame must reuse the prewarmed patches, not reset them:
         // prewarm and live share the same source key (seed + spacing + materials).
-        cache.mesh_for_camera(live, 12345, ChunkPos::new(0, 0), 0, None, None);
+        cache
+            .advance_for_camera(
+                live,
+                12345,
+                ChunkPos::new(0, 0),
+                0,
+                None,
+                None,
+                &mut compiler,
+                0,
+            )
+            .unwrap();
         for pos in &prewarmed {
             assert!(
-                cache.retained_patches.contains_key(pos),
+                cache
+                    .resident_tiles
+                    .contains_tile(LodTileKey::synthetic(*pos)),
                 "live rendering should reuse prewarmed patch {pos:?}"
             );
         }
@@ -1789,24 +2088,28 @@ mod tests {
     #[test]
     fn far_terrain_lod_cache_evicts_patches_outside_retention_radius() {
         let mut cache = FarTerrainLodCache::new();
+        let mut compiler = ImmediateFarLodCompiler::default();
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let first_center = ChunkPos::new(0, 0);
         let far_center = ChunkPos::new(10, 0);
 
-        cache.mesh_for_camera(config, 12345, first_center, 0, None, None);
-        cache.mesh_for_camera(config, 12345, first_center, 0, None, None);
+        advance_until_complete(&mut cache, &mut compiler, config, first_center, 32);
         let first_ready = cache
-            .retained_patches
-            .keys()
-            .copied()
+            .resident_tiles
+            .tile_keys()
+            .map(|tile| tile.chunk)
             .collect::<BTreeSet<_>>();
         assert!(!first_ready.is_empty());
 
-        cache.mesh_for_camera(config, 12345, far_center, 0, None, None);
+        cache
+            .advance_for_camera(config, 12345, far_center, 0, None, None, &mut compiler, 0)
+            .unwrap();
 
         for pos in first_ready {
             assert!(
-                !cache.retained_patches.contains_key(&pos),
+                !cache
+                    .resident_tiles
+                    .contains_tile(LodTileKey::synthetic(pos)),
                 "old patch {pos:?} should be evicted after a far move"
             );
         }

@@ -1,14 +1,15 @@
 # 166: Shared Resident-Tile Substrate (Real Sections + LOD)
 
-Status: active 2026-07-11. Slices 1–2 landed the behavior-preserving
-resident-tile/cache extraction and shared budget vocabulary with real sections
-as the level-zero producer and inert LOD build/upload families. Slice 3, moving
-synthetic far LOD onto that substrate, is next. Opened after a far-LOD stutter
-investigation found that far LOD
-reimplemented a crude, unbudgeted copy of the real-section residency/upload
-pipeline instead of sharing it. This tactical owns the shared substrate; it
-**pauses and re-scopes** Tactical 162 — Real-Chunk LOD Reduction Draft Slice 3+
-(see Relationship).
+Status: active 2026-07-11. Slices 1–3 landed the behavior-preserving
+resident-tile/cache extraction, shared budget vocabulary, and synthetic far-LOD
+producer on shared workers, admission, residency, and per-tile region arenas.
+The coordinating next step is Tactical 171 — Convergence And Parity Closeout
+Milestone D, the production browser far-LOD proof. Slice 4 multi-level rings
+remain later work. Opened after a far-LOD stutter investigation found that far
+LOD reimplemented a crude, unbudgeted copy of the real-section
+residency/upload pipeline instead of sharing it. This tactical owns the shared
+substrate; it **pauses and re-scopes** Tactical 162 — Real-Chunk LOD Reduction
+Draft Slice 3+ (see Relationship).
 
 Workstream: native Rust shared runtime/render-session/render boundary. Desktop
 validation first, but the target shape must stay host-neutral across flat, XR,
@@ -587,6 +588,52 @@ Gate:
   uniforms across a submission;
 - real-section perf lanes still within spread; far-LOD-off still
   byte-identical.
+
+Landed evidence (2026-07-11):
+
+- `LodTileKey` is the shared core identity. Synthetic tiles now compile below
+  real sections on the existing render-compile worker threads, with one real
+  slot reserved under shared capacity. The event-driven cache uses
+  `ResidentTileCache` and `ResidentTileUploadCoordinator`; startup prewarm
+  drives that same asynchronous path. `FarTerrainLodMesh`, `rebuild_mesh`, and
+  the old whole-buffer `upload_mesh` path were deleted.
+- `FarTerrainLodRenderer` now owns fixed tile slots in 16-by-16-chunk region
+  arenas. It uploads only changed tile vertex ranges, repacks a dirty region's
+  visible indices, and submits one draw per visible region. Per-eye rendering
+  has distinct per-region uniforms; supported adapters lazily create the true
+  two-layer multiview pipeline so desktop adapters do not validate an unusable
+  multiview shader.
+- The formerly inert `LodBuildAdmission` and `LodUpload` families now report
+  queue depth, age, grants, and skip reasons whenever the producer is enabled.
+  Real work retains priority. A bounded cold-start floor admits at most four
+  builds and sixteen uploads before the first complete frame report; inactive
+  traces remain zero. Debug/offscreen and Quest markers expose region draws and
+  per-frame upload bytes.
+- Focused post-proof validation passed `92/92` scene tests, the browser Wasm
+  build, thin-adapter purity, formatting, the real-work-priority worker test,
+  and the far-LOD/runtime/render-session/frame-budget suites. The full native
+  workspace test run, desktop movement smoke, release timedemo, Quest release
+  APK build, per-eye launch, and full-frame multiview validation also passed.
+- Far-LOD-off remained byte-identical to Slice 2: the fixed 960x540 capture has
+  SHA-256 `052647136ff313c20bb91216f478772e715fcae48406c4a3262d84e1081151f2`
+  with `64` resident and `11` drawn sections. The inspected RD2 overview
+  `/tmp/mclone-t166-s3-far-lod-overview.png` showed a continuous coarse shell
+  around detailed terrain with four region draws and `226944` upload bytes on
+  the final initial frame. No capture is committed.
+- The inspected 1280x640 per-eye capture
+  `/tmp/mclone-t166-s3-xr-per-eye.png` showed the LOD horizon in both eyes with
+  `268608` differing pixels. Production Quest full-frame multiview swapchain
+  readback passed after actual LOD became drawable: `127` submitted/runtime
+  frames, zero skips, two layers at 1680x1760, one far-LOD region draw,
+  `12512` far-LOD upload bytes, and `287862` differing pixels against a minimum
+  of `2956`. Evidence is in
+  `/tmp/mclone-t166-s3-quest-multiview-proof-logcat.txt`.
+- Paired Quest 3 RD1 30-second frame-overlap orbits had no skipped frames,
+  dropped-frame delta, or over-period frames. Far LOD off measured GPU
+  `1.827ms`, app-work p95 `4.211ms`, and zero region draws/uploads; far LOD on
+  measured GPU `2.536ms`, app-work p95 `6.780ms`, up to six region draws, and
+  `616032` upload bytes during bounded ring changes. The clean comparison is
+  retained under `/tmp/mclone-t166-s3-quest-rd1-far-lod-{off,on}.txt`.
 
 ### Slice 4: Multi-level rings
 

@@ -12,7 +12,7 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
     ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats, ActorTextureAtlas,
 };
-use mclone_render::far_lod::{FarTerrainLodMesh, FarTerrainLodRenderer};
+use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodRenderer};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
@@ -103,6 +103,10 @@ pub struct RenderStreamStats {
     pub actor_count: usize,
     pub drawn_actor_count: usize,
     pub drawn_actor_index_count: u32,
+    pub far_lod_vertex_count: usize,
+    pub far_lod_index_count: usize,
+    pub far_lod_region_draw_count: usize,
+    pub far_lod_uploaded_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -120,6 +124,8 @@ pub struct FullFrameRenderSummary {
     pub flat_hud_retained_cache: UiDrawCacheStats,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
+    pub far_lod_region_draw_count: usize,
+    pub far_lod_uploaded_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -337,7 +343,7 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
-        far_lod_mesh: Option<&FarTerrainLodMesh>,
+        far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -376,7 +382,7 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
-        far_lod_mesh: Option<&FarTerrainLodMesh>,
+        far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -415,7 +421,7 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
-        far_lod_mesh: Option<&FarTerrainLodMesh>,
+        far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -987,7 +993,7 @@ pub fn render_full_frame_for_view_with_far_lod<BuildGuiDraw>(
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
     far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodMesh>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
     gui_renderer: Option<&mut GuiRenderer>,
@@ -1304,7 +1310,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_in_slot<BuildGuiDraw
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
     far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodMesh>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<FullFrameRenderSummary>
@@ -1461,7 +1467,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot<BuildG
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
     far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodMesh>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
@@ -1518,7 +1524,7 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     build_gui_draw: BuildGuiDraw,
     view_slot: PerViewSlot,
     far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodMesh>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut timing: Option<&mut FullFrameRenderTiming>,
@@ -1575,7 +1581,7 @@ where
             far_lod.is_some() && far_lod_mesh.is_some_and(|mesh| !mesh.is_empty());
         if let Some(far_lod) = far_lod {
             let far_lod_start = timing.is_some().then(std::time::Instant::now);
-            let _ = far_lod.render_in_slot(
+            let far_lod_stats = far_lod.render_in_slot(
                 frame.device,
                 frame.queue,
                 frame.encoder,
@@ -1585,6 +1591,10 @@ where
                 far_lod_mesh,
                 view_slot,
             );
+            render_stats.far_lod_vertex_count = far_lod_stats.vertex_count;
+            render_stats.far_lod_index_count = far_lod_stats.index_count;
+            render_stats.far_lod_region_draw_count = far_lod_stats.region_draw_count;
+            render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), far_lod_start) {
                 timing.far_lod_ms += start.elapsed().as_secs_f64() * 1000.0;
             }
@@ -1727,6 +1737,8 @@ where
         flat_hud_retained_cache: UiDrawCacheStats::default(),
         actor_count: actor_instances.len(),
         drawn_actor_count: actor_stats.drawn_actor_count,
+        far_lod_region_draw_count: render_stats.far_lod_region_draw_count,
+        far_lod_uploaded_bytes: render_stats.far_lod_uploaded_bytes,
     })
 }
 

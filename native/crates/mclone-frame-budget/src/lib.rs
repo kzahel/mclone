@@ -185,6 +185,15 @@ pub struct BudgetControllerInput {
     pub catch_up_gameplay_ticks: u32,
     pub windows: Vec<BudgetTelemetryWindow>,
     pub costs: BudgetCostEstimates,
+    #[serde(default)]
+    pub family_queues: BTreeMap<BudgetDecisionFamily, BudgetFamilyQueueTelemetry>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetFamilyQueueTelemetry {
+    pub depth: u64,
+    pub oldest_age_ms: Option<f64>,
 }
 
 impl BudgetControllerInput {
@@ -195,6 +204,7 @@ impl BudgetControllerInput {
             catch_up_gameplay_ticks: 1,
             windows: Vec::new(),
             costs: BudgetCostEstimates::default(),
+            family_queues: BTreeMap::new(),
         }
     }
 
@@ -205,6 +215,22 @@ impl BudgetControllerInput {
 
     pub fn with_costs(mut self, costs: BudgetCostEstimates) -> Self {
         self.costs = costs;
+        self
+    }
+
+    pub fn with_family_queue(
+        mut self,
+        family: BudgetDecisionFamily,
+        depth: u64,
+        oldest_age_ms: Option<f64>,
+    ) -> Self {
+        self.family_queues.insert(
+            family,
+            BudgetFamilyQueueTelemetry {
+                depth,
+                oldest_age_ms: oldest_age_ms.map(sanitize_ms),
+            },
+        );
         self
     }
 }
@@ -272,6 +298,11 @@ impl FamilyBudgetConfig {
     pub const fn with_pending_units(mut self, floor: u32, cap: u32) -> Self {
         self.floor_pending_units = Some(floor);
         self.cap_pending_units = Some(cap);
+        self
+    }
+
+    pub const fn with_producer_active(mut self, producer_active: bool) -> Self {
+        self.producer_active = producer_active;
         self
     }
 
@@ -400,18 +431,30 @@ impl Default for BudgetControllerConfig {
                     0.0,
                     0.0,
                 ),
-                FamilyBudgetConfig::inert(
+                FamilyBudgetConfig::new(
                     LodBuildAdmission,
                     BudgetDecisionAddress::new(
                         DesktopFlatWinit,
                         BeforeRender,
                         RenderSectionAdmission,
                     ),
-                ),
-                FamilyBudgetConfig::inert(
+                    1,
+                    4,
+                    0.01,
+                    0.08,
+                )
+                .with_pending_units(0, 0)
+                .with_producer_active(false),
+                FamilyBudgetConfig::new(
                     LodUpload,
                     BudgetDecisionAddress::new(DesktopFlatWinit, BeforeRender, UploadApply),
-                ),
+                    1,
+                    16,
+                    0.01,
+                    0.08,
+                )
+                .with_pending_units(0, 0)
+                .with_producer_active(false),
             ],
         }
     }
@@ -470,18 +513,30 @@ pub fn render_frame_budget_controller_config(
                 0.0,
                 0.0,
             ),
-            FamilyBudgetConfig::inert(
+            FamilyBudgetConfig::new(
                 LodBuildAdmission,
                 BudgetDecisionAddress::new(
                     host_kind,
                     admission_window,
                     StageId::RenderSectionAdmission,
                 ),
-            ),
-            FamilyBudgetConfig::inert(
+                1,
+                4,
+                0.01,
+                0.08,
+            )
+            .with_pending_units(0, 0)
+            .with_producer_active(false),
+            FamilyBudgetConfig::new(
                 LodUpload,
                 BudgetDecisionAddress::new(host_kind, admission_window, StageId::UploadApply),
-            ),
+                1,
+                16,
+                0.01,
+                0.08,
+            )
+            .with_pending_units(0, 0)
+            .with_producer_active(false),
         ],
     }
 }
@@ -729,6 +784,27 @@ impl BudgetController {
         }
     }
 
+    pub fn set_producer_active(
+        &mut self,
+        family: BudgetDecisionFamily,
+        producer_active: bool,
+    ) -> bool {
+        let Some(config) = self
+            .config
+            .families
+            .iter_mut()
+            .find(|config| config.family == family)
+        else {
+            return false;
+        };
+        if config.producer_active == producer_active {
+            return false;
+        }
+        config.producer_active = producer_active;
+        self.states.insert(family, FamilyState::floor(*config));
+        true
+    }
+
     pub fn decide(&mut self, input: &BudgetControllerInput) -> BudgetDecisionPanelReport {
         let target_period_ms = finite_positive(input.target_period_ms);
         let missing_input = target_period_ms.is_none() || input.windows.is_empty();
@@ -777,7 +853,11 @@ impl BudgetController {
                 address: family_config.address,
                 grant: state.grant(
                     *family_config,
-                    target_period_ms.unwrap_or(0.0),
+                    if family_config.producer_active {
+                        target_period_ms.unwrap_or(0.0)
+                    } else {
+                        0.0
+                    },
                     input.costs.cost_for(family_config.family),
                 ),
                 trace: BudgetDecisionTraceReport {
@@ -1068,14 +1148,19 @@ fn input_snapshot(
     snapshot.dropped_frames_delta = input.windows.iter().map(|w| w.dropped_frames_delta).sum();
     snapshot.stale_frames_delta = input.windows.iter().map(|w| w.stale_frames_delta).sum();
     if producer_active {
-        snapshot.queue_depth = input
-            .windows
-            .iter()
-            .map(|w| w.queue_depth)
-            .max()
-            .unwrap_or_default();
-        snapshot.oldest_queue_age_ms =
-            max_option(input.windows.iter().filter_map(|w| w.oldest_queue_age_ms));
+        if let Some(queue) = input.family_queues.get(&family) {
+            snapshot.queue_depth = queue.depth;
+            snapshot.oldest_queue_age_ms = queue.oldest_age_ms;
+        } else {
+            snapshot.queue_depth = input
+                .windows
+                .iter()
+                .map(|w| w.queue_depth)
+                .max()
+                .unwrap_or_default();
+            snapshot.oldest_queue_age_ms =
+                max_option(input.windows.iter().filter_map(|w| w.oldest_queue_age_ms));
+        }
         snapshot.per_unit_cost_ms = input.costs.cost_for(family);
     }
     snapshot

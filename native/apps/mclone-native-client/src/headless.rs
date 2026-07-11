@@ -51,6 +51,8 @@ pub(crate) struct HeadlessScreenshotReport {
     pub(crate) entity_count: usize,
     pub(crate) actor_count: usize,
     pub(crate) drawn_actor_count: usize,
+    pub(crate) far_lod_region_draw_count: usize,
+    pub(crate) far_lod_uploaded_bytes: usize,
     pub(crate) underwater: bool,
 }
 
@@ -1238,6 +1240,8 @@ pub(crate) fn run_headless_screenshot(
         entity_count: report.entity_count,
         actor_count: report.summary.actor_count,
         drawn_actor_count: report.summary.drawn_actor_count,
+        far_lod_region_draw_count: report.summary.far_lod_region_draw_count,
+        far_lod_uploaded_bytes: report.summary.far_lod_uploaded_bytes,
         underwater: report.underwater,
     })
 }

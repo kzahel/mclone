@@ -18,6 +18,27 @@ pub struct ChunkPos {
     pub z: i32,
 }
 
+/// Chunk-aligned identity for a resident reduced-detail terrain tile.
+///
+/// Every level retains the same one-chunk X/Z footprint. Level zero remains
+/// reserved for authoritative real render sections; synthetic far terrain
+/// starts at level one.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub struct LodTileKey {
+    pub chunk: ChunkPos,
+    pub level: u8,
+}
+
+impl LodTileKey {
+    pub const fn new(chunk: ChunkPos, level: u8) -> Self {
+        Self { chunk, level }
+    }
+
+    pub const fn synthetic(chunk: ChunkPos) -> Self {
+        Self::new(chunk, 1)
+    }
+}
+
 impl ChunkPos {
     pub const fn new(x: i32, z: i32) -> Self {
         Self { x, z }

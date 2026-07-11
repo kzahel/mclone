@@ -18,6 +18,12 @@ pub struct RenderAdmissionGrant {
     pub max_compile_requests: usize,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LodFrameBudgetGrant {
+    pub build_tiles: usize,
+    pub upload_tiles: usize,
+}
+
 /// Host-neutral adaptive render-section admission policy.
 ///
 /// Drivers provide only their target frame period. The policy consumes the
@@ -31,6 +37,9 @@ pub struct RenderAdmissionPolicy {
     estimator: EwmaCostEstimator,
     latest_report: Option<Arc<FramePipelineReport>>,
     last_panel: BudgetDecisionPanelReport,
+    lod_build_queue_depth: u64,
+    lod_build_oldest_age_ms: Option<f64>,
+    lod_upload_queue_depth: u64,
 }
 
 impl RenderAdmissionPolicy {
@@ -45,6 +54,9 @@ impl RenderAdmissionPolicy {
             estimator: EwmaCostEstimator::new(DEFAULT_COST_EWMA_ALPHA),
             latest_report: None,
             last_panel: BudgetDecisionPanelReport::empty(),
+            lod_build_queue_depth: 0,
+            lod_build_oldest_age_ms: None,
+            lod_upload_queue_depth: 0,
         }
     }
 
@@ -64,6 +76,24 @@ impl RenderAdmissionPolicy {
         self.latest_report = None;
     }
 
+    pub fn set_lod_producer_active(&mut self, active: bool) {
+        self.controller
+            .set_producer_active(BudgetDecisionFamily::LodBuildAdmission, active);
+        self.controller
+            .set_producer_active(BudgetDecisionFamily::LodUpload, active);
+    }
+
+    pub fn set_lod_queue_telemetry(
+        &mut self,
+        build_depth: usize,
+        build_oldest_age_ms: Option<f64>,
+        upload_depth: usize,
+    ) {
+        self.lod_build_queue_depth = u64::try_from(build_depth).unwrap_or(u64::MAX);
+        self.lod_build_oldest_age_ms = build_oldest_age_ms;
+        self.lod_upload_queue_depth = u64::try_from(upload_depth).unwrap_or(u64::MAX);
+    }
+
     pub fn decide(
         &mut self,
         target_period_ms: Option<f64>,
@@ -71,7 +101,20 @@ impl RenderAdmissionPolicy {
         max_compile_requests_override: Option<usize>,
     ) -> Option<RenderAdmissionGrant> {
         let Some(target_period_ms) = target_period_ms.and_then(finite_positive_ms) else {
-            self.last_panel = BudgetDecisionPanelReport::empty();
+            let mut input = BudgetControllerInput::new(0.0);
+            input.host_mode = host_mode;
+            input = input
+                .with_family_queue(
+                    BudgetDecisionFamily::LodBuildAdmission,
+                    self.lod_build_queue_depth,
+                    self.lod_build_oldest_age_ms,
+                )
+                .with_family_queue(
+                    BudgetDecisionFamily::LodUpload,
+                    self.lod_upload_queue_depth,
+                    None,
+                );
+            self.last_panel = self.controller.decide(&input);
             return None;
         };
         let mut input = BudgetControllerInput::new(target_period_ms);
@@ -85,6 +128,17 @@ impl RenderAdmissionPolicy {
                 self.admission_window,
             ));
         }
+        input = input
+            .with_family_queue(
+                BudgetDecisionFamily::LodBuildAdmission,
+                self.lod_build_queue_depth,
+                self.lod_build_oldest_age_ms,
+            )
+            .with_family_queue(
+                BudgetDecisionFamily::LodUpload,
+                self.lod_upload_queue_depth,
+                None,
+            );
         self.last_panel = self.controller.decide(&input);
         clamp_render_admission_grant(&mut self.last_panel, max_compile_requests_override);
         let decision =
@@ -123,6 +177,30 @@ impl RenderAdmissionPolicy {
         &self.last_panel
     }
 
+    pub fn lod_grant(&self) -> LodFrameBudgetGrant {
+        let units = |family| {
+            decision_for_family(&self.last_panel, family)
+                .map(|decision| usize::try_from(decision.grant.max_units).unwrap_or(usize::MAX))
+                .unwrap_or_default()
+        };
+        let mut grant = LodFrameBudgetGrant {
+            build_tiles: units(BudgetDecisionFamily::LodBuildAdmission),
+            upload_tiles: units(BudgetDecisionFamily::LodUpload),
+        };
+        // Startup prewarm feeds the same producer/upload queues before a frame
+        // accountant report exists. Give that cold backlog one bounded burst;
+        // subsequent reported frames use the adaptive family decisions.
+        if self.latest_report.is_none() {
+            if grant.build_tiles > 0 && self.lod_build_queue_depth > 0 {
+                grant.build_tiles = grant.build_tiles.max(4);
+            }
+            if grant.upload_tiles > 0 && self.lod_upload_queue_depth > 0 {
+                grant.upload_tiles = grant.upload_tiles.max(16);
+            }
+        }
+        grant
+    }
+
     pub fn clear_panel(&mut self) {
         self.last_panel = BudgetDecisionPanelReport::empty();
     }
@@ -135,6 +213,9 @@ impl RenderAdmissionPolicy {
         self.estimator = EwmaCostEstimator::new(DEFAULT_COST_EWMA_ALPHA);
         self.latest_report = None;
         self.last_panel = BudgetDecisionPanelReport::empty();
+        self.lod_build_queue_depth = 0;
+        self.lod_build_oldest_age_ms = None;
+        self.lod_upload_queue_depth = 0;
     }
 }
 
@@ -273,14 +354,32 @@ mod tests {
     }
 
     #[test]
-    fn missing_target_disables_admission_and_clears_panel() {
+    fn missing_target_disables_real_admission_and_keeps_lod_floor_trace() {
         let mut policy =
             RenderAdmissionPolicy::new(FrameHostKind::DesktopFlatWinit, WorkWindow::BeforeRender);
         assert_eq!(
             policy.decide(None, BudgetHostMode::LocalIntegrated, None),
             None
         );
-        assert!(policy.panel().decisions.is_empty());
+        assert_eq!(
+            render_decision(&policy).trace.reason,
+            mclone_diagnostics::BudgetDecisionReason::MissingInputFloor
+        );
+        assert_eq!(policy.lod_grant(), LodFrameBudgetGrant::default());
+
+        policy.set_lod_producer_active(true);
+        policy.set_lod_queue_telemetry(8, Some(25.0), 8);
+        assert_eq!(
+            policy.decide(None, BudgetHostMode::LocalIntegrated, None),
+            None
+        );
+        assert_eq!(
+            policy.lod_grant(),
+            LodFrameBudgetGrant {
+                build_tiles: 4,
+                upload_tiles: 16,
+            }
+        );
     }
 
     #[test]

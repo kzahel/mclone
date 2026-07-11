@@ -543,9 +543,9 @@ app-fatal marker.
 ## Recommended Next Work
 
 The adoption series is closed. Continue through Tactical 171 — Convergence And
-Parity Closeout: first implement Tactical 166 — Shared Resident-Tile Substrate
-Slices 2–3 so far LOD no longer uses synchronous generation, monolithic
-remeshing, and whole-buffer upload. Then promote `far_lod` only with complete
-browser runtime, UI, diagnostic, worker/transport, performance, and pixel
-evidence, removing that one exact ledger entry. Keep the other four entries
+Parity Closeout. Tactical 166 — Shared Resident-Tile Substrate Slices 1–3 have
+removed the synchronous monolithic far-LOD path on native targets. Next run the
+production browser integration and promotion proof with complete runtime, UI,
+diagnostic, worker/transport, performance, and pixel evidence. Remove only the
+`FarLod` ledger entry if every gate passes; keep the other four entries
 unchanged until their own complete proofs land.

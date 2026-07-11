@@ -247,6 +247,13 @@ impl McloneSceneHost {
         self.runtime.as_ref().map(|runtime| runtime.stats())
     }
 
+    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
+        self.runtime
+            .as_ref()
+            .map(|runtime| runtime.far_lod_stats())
+            .unwrap_or_default()
+    }
+
     pub fn runtime_poll_diagnostics(&self) -> Option<RuntimePollDiagnostics> {
         self.runtime
             .as_ref()
@@ -1034,10 +1041,14 @@ impl McloneSceneHost {
         };
         let target = runtime.target_render_work_stats(camera_position);
         let upload = self.section_uploads.stats();
+        let far_lod = runtime.far_lod_stats();
         target.inflight_render_sections
             + usize::from(target.ready_render_work_pending)
             + upload.queued_upload_sections
             + upload.queued_lifecycle_items
+            + far_lod.pending_builds
+            + far_lod.inflight_builds
+            + far_lod.queued_uploads
     }
 
     fn render_mono_frame_inner(
@@ -1098,14 +1109,19 @@ impl McloneSceneHost {
 
         // `runtime`, `far_lod`, `mono_gui`, `sky`, `draw`, `actors`, and
         // `screen_effects` are disjoint fields, so these borrows coexist.
-        let far_lod_mesh = self.runtime.as_mut().and_then(|runtime| {
-            runtime.prepare_far_lod_mesh(
+        let lod_grant = self.render_admission_policy.lod_grant();
+        let far_lod_mesh = if let Some(runtime) = self.runtime.as_mut() {
+            runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
                 far_lod_center,
                 render_view.camera_position,
-            )
-        });
+                lod_grant.build_tiles,
+                lod_grant.upload_tiles,
+            )?
+        } else {
+            None
+        };
         let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
         let world_gui = FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
         let mut summary = render_full_frame_for_view_with_far_lod(

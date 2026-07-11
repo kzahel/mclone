@@ -434,11 +434,12 @@ lower-level render residency and explicit product/evidence gaps:
 3. **Finish shared resident-tile/LOD convergence, then burn down browser feature
    exceptions.** Browser worker/WebSocket/IndexedDB mechanisms are now typed
    services below `McloneSceneHost`; the old browser policy host is gone. The
-   active architectural fork is lower down: synthetic far LOD still owns a
-   synchronous monolithic residency/upload path beside real sections. Tactical
-   166 — Shared Resident-Tile Substrate removes that fork. Tactical 171 —
-   Convergence And Parity Closeout then coordinates the exact five browser
-   feature promotions.
+   native architectural fork is now closed: Tactical 166 — Shared
+   Resident-Tile Substrate Slices 1–3 moved synthetic far LOD onto shared
+   workers, admission, residency, and region-arena uploads. Tactical 171 —
+   Convergence And Parity Closeout now starts with the production browser
+   far-LOD integration/proof, then coordinates the remaining exact feature
+   promotions.
 4. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, and user
    headset validation says it works mostly fine. Flat Android consumes

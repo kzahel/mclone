@@ -641,6 +641,11 @@ impl McloneSceneHost {
     pub(crate) fn debug_diagnostics_overlay(&self) -> DebugOverlay {
         let snapshot = self.camera.snapshot();
         let runtime_stats = self.runtime.as_ref().map(|runtime| runtime.stats());
+        let far_lod_stats = self
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.far_lod_stats())
+            .unwrap_or_default();
         let render_distance =
             runtime_stats.map_or(self.scene.render_distance, |stats| stats.render_distance);
         let tracking_radius = runtime_stats.map_or(0, |stats| stats.chunk_tracking_radius);
@@ -712,6 +717,17 @@ impl McloneSceneHost {
                 "PENDING R{} C{}",
                 runtime_stats.map_or(0, |stats| stats.pending_render_chunks),
                 self.render_stats.last_pending_compile_jobs
+            ),
+            format!(
+                "LOD D{} R{} V{} B{}/{} U{} Q{} BY{}",
+                far_lod_stats.desired_tiles,
+                far_lod_stats.resident_tiles,
+                far_lod_stats.visible_tiles,
+                far_lod_stats.pending_builds,
+                far_lod_stats.inflight_builds,
+                far_lod_stats.queued_uploads,
+                self.render_stats.far_lod_region_draw_count,
+                self.render_stats.far_lod_uploaded_bytes
             ),
             format!(
                 "OPTIONS OCC {} FULL {} {}",

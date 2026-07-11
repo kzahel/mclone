@@ -32,6 +32,7 @@ pub const ARG_MOVEMENT_SPEED_MULTIPLIER: &str = "--movement-speed-multiplier";
 pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
+pub const ARG_FAR_LOD: &str = "--far-lod";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
@@ -59,6 +60,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_DEBUG_PASSIVE_SHOWCASE,
     ARG_LIGHTING,
     ARG_LIGHT_STATUS_BATCH_SIZE,
+    ARG_FAR_LOD,
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
@@ -401,6 +403,9 @@ impl StartupArgState {
             ARG_LIGHT_STATUS_BATCH_SIZE => {
                 self.scene.light_status_batch_size =
                     parse_usize_arg(ARG_LIGHT_STATUS_BATCH_SIZE, args.next())?;
+            }
+            ARG_FAR_LOD => {
+                self.scene.far_lod.enabled = parse_bool_arg(ARG_FAR_LOD, args.next())?;
             }
             ARG_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
@@ -774,6 +779,8 @@ mod tests {
             "false",
             ARG_LIGHT_STATUS_BATCH_SIZE,
             "5",
+            ARG_FAR_LOD,
+            "true",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
             ARG_SCREENSHOT_EYE,
@@ -798,7 +805,7 @@ mod tests {
                 debug_passive_showcase: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
-                far_lod: FarTerrainLodConfig::default(),
+                far_lod: FarTerrainLodConfig::enabled(),
             }
         );
         assert_eq!(

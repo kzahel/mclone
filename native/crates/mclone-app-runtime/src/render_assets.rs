@@ -17,6 +17,10 @@ use mclone_render_session::{
 };
 
 use crate::elapsed_ms;
+use crate::far_lod::{
+    FarTerrainLodBuildRequest, FarTerrainLodBuildResult, FarTerrainLodCompiler,
+    compile_far_terrain_lod_request,
+};
 pub use crate::render_asset_data::{
     SceneTexturedSections, TextureAtlasImage, TexturedMeshAssets,
     load_textured_mesh_assets_from_source,
@@ -46,8 +50,16 @@ struct RenderSectionCompileQueue {
 struct RenderSectionCompileQueueState {
     request_slots: Vec<Option<RenderSectionCompileRequest>>,
     pending_slots: VecDeque<usize>,
+    pending_far_lod: VecDeque<FarTerrainLodBuildRequest>,
     queued_slots: VecDeque<usize>,
+    queued_far_lod: VecDeque<FarTerrainLodBuildRequest>,
     shutdown: bool,
+}
+
+#[derive(Debug)]
+enum RenderCompileWork {
+    Section(RenderSectionCompileRequest),
+    FarLod(FarTerrainLodBuildRequest),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -133,12 +145,28 @@ impl RenderSectionCompileQueue {
             state: Mutex::new(RenderSectionCompileQueueState {
                 request_slots: vec![None; slot_count],
                 pending_slots: VecDeque::new(),
+                pending_far_lod: VecDeque::new(),
                 queued_slots: VecDeque::new(),
+                queued_far_lod: VecDeque::new(),
                 shutdown: false,
             }),
             dispatch_available: Condvar::new(),
             work_available: Condvar::new(),
         }
+    }
+
+    fn enqueue_far_lod(&self, request: FarTerrainLodBuildRequest) -> Result<()> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("render compile queue lock poisoned"))?;
+        if state.shutdown {
+            bail!("render compile queue is shutting down");
+        }
+        state.pending_far_lod.push_back(request);
+        drop(state);
+        self.dispatch_available.notify_one();
+        Ok(())
     }
 
     fn enqueue(
@@ -188,7 +216,8 @@ impl RenderSectionCompileQueue {
             Ok(state) => state,
             Err(_) => return RenderSectionCompileDispatchStatus::Shutdown,
         };
-        while state.pending_slots.is_empty() && !state.shutdown {
+        while state.pending_slots.is_empty() && state.pending_far_lod.is_empty() && !state.shutdown
+        {
             state = match self.dispatch_available.wait(state) {
                 Ok(state) => state,
                 Err(_) => return RenderSectionCompileDispatchStatus::Shutdown,
@@ -197,16 +226,19 @@ impl RenderSectionCompileQueue {
         if state.shutdown {
             return RenderSectionCompileDispatchStatus::Shutdown;
         }
-        let Some(slot_index) = state.pending_slots.pop_front() else {
+        if let Some(slot_index) = state.pending_slots.pop_front() {
+            state.queued_slots.push_back(slot_index);
+        } else if let Some(request) = state.pending_far_lod.pop_front() {
+            state.queued_far_lod.push_back(request);
+        } else {
             return RenderSectionCompileDispatchStatus::Shutdown;
-        };
-        state.queued_slots.push_back(slot_index);
+        }
         drop(state);
         self.work_available.notify_one();
         RenderSectionCompileDispatchStatus::Dispatched
     }
 
-    fn take_next(&self) -> Option<RenderSectionCompileRequest> {
+    fn take_next(&self) -> Option<RenderCompileWork> {
         let mut state = self.state.lock().ok()?;
         loop {
             if state.shutdown {
@@ -214,9 +246,12 @@ impl RenderSectionCompileQueue {
             }
             if let Some(slot_index) = state.queued_slots.pop_front() {
                 if let Some(request) = state.request_slots[slot_index].take() {
-                    return Some(request);
+                    return Some(RenderCompileWork::Section(request));
                 }
                 continue;
+            }
+            if let Some(request) = state.queued_far_lod.pop_front() {
+                return Some(RenderCompileWork::FarLod(request));
             }
             state = self.work_available.wait(state).ok()?;
         }
@@ -225,7 +260,12 @@ impl RenderSectionCompileQueue {
     fn queued_task_count(&self) -> usize {
         self.state
             .lock()
-            .map(|state| state.pending_slots.len() + state.queued_slots.len())
+            .map(|state| {
+                state.pending_slots.len()
+                    + state.pending_far_lod.len()
+                    + state.queued_slots.len()
+                    + state.queued_far_lod.len()
+            })
             .unwrap_or_default()
     }
 
@@ -233,7 +273,9 @@ impl RenderSectionCompileQueue {
         if let Ok(mut state) = self.state.lock() {
             state.shutdown = true;
             state.pending_slots.clear();
+            state.pending_far_lod.clear();
             state.queued_slots.clear();
+            state.queued_far_lod.clear();
             for slot in &mut state.request_slots {
                 *slot = None;
             }
@@ -253,8 +295,10 @@ enum RenderSectionCompileDispatchStatus {
 pub struct RenderSectionCompileWorker {
     queue: Arc<RenderSectionCompileQueue>,
     receiver: mpsc::Receiver<RenderSectionCompileResult>,
+    far_lod_receiver: mpsc::Receiver<FarTerrainLodBuildResult>,
     handles: Vec<thread::JoinHandle<()>>,
     pending_jobs: usize,
+    pending_far_lod_jobs: usize,
     max_pending_jobs: usize,
     worker_count: usize,
     worker_timing_enabled: bool,
@@ -378,6 +422,24 @@ impl RenderSectionCompiler for NativeRenderSectionCompileDispatcher {
     }
 }
 
+impl FarTerrainLodCompiler for NativeRenderSectionCompileDispatcher {
+    fn available_far_lod_job_slots(&self) -> usize {
+        self.worker.available_far_lod_job_slots()
+    }
+
+    fn submit_far_lod(&mut self, request: FarTerrainLodBuildRequest) -> Result<()> {
+        self.worker.submit_far_lod(request)
+    }
+
+    fn try_recv_completed_far_lod(&mut self) -> Result<Vec<FarTerrainLodBuildResult>> {
+        self.worker.try_recv_completed_far_lod()
+    }
+
+    fn release_completed_far_lod_jobs(&mut self, count: usize) -> usize {
+        self.worker.release_completed_far_lod_jobs(count)
+    }
+}
+
 impl RenderSectionCompileWorker {
     pub fn new(catalog: TexturedMeshCatalog) -> Result<Self> {
         Self::with_worker_count(catalog, DEFAULT_RENDER_SECTION_COMPILE_WORKERS)
@@ -422,6 +484,7 @@ impl RenderSectionCompileWorker {
 
         let queue = Arc::new(RenderSectionCompileQueue::new(max_pending_jobs));
         let (result_sender, receiver) = mpsc::channel::<RenderSectionCompileResult>();
+        let (far_lod_result_sender, far_lod_receiver) = mpsc::channel::<FarTerrainLodBuildResult>();
         let mut handles = Vec::with_capacity(worker_count + 1);
         let metrics = RenderSectionCompileWorkerMetricsStore::new();
 
@@ -438,6 +501,7 @@ impl RenderSectionCompileWorker {
             let catalog = catalog.clone();
             let queue = Arc::clone(&queue);
             let result_sender = result_sender.clone();
+            let far_lod_result_sender = far_lod_result_sender.clone();
             #[cfg(feature = "perf-diagnostics")]
             let worker_metrics = metrics.clone();
             let thread_name = if worker_count == 1 {
@@ -448,20 +512,22 @@ impl RenderSectionCompileWorker {
             let handle = thread::Builder::new()
                 .name(thread_name)
                 .spawn(move || {
-                    while let Some(request) = queue.take_next() {
+                    while let Some(work) = queue.take_next() {
                         #[cfg(feature = "perf-diagnostics")]
-                        let result = if worker_timing_enabled {
-                            let compile_start = Instant::now();
-                            let result = compile_render_section_request(&catalog, request);
-                            let compile_us = compile_start.elapsed().as_micros();
-                            worker_metrics.record_task(compile_us);
-                            result
-                        } else {
-                            compile_render_section_request(&catalog, request)
+                        let compile_start = worker_timing_enabled.then(Instant::now);
+                        let sent = match work {
+                            RenderCompileWork::Section(request) => result_sender
+                                .send(compile_render_section_request(&catalog, request))
+                                .is_ok(),
+                            RenderCompileWork::FarLod(request) => far_lod_result_sender
+                                .send(compile_far_terrain_lod_request(request))
+                                .is_ok(),
                         };
-                        #[cfg(not(feature = "perf-diagnostics"))]
-                        let result = compile_render_section_request(&catalog, request);
-                        if result_sender.send(result).is_err() {
+                        #[cfg(feature = "perf-diagnostics")]
+                        if let Some(compile_start) = compile_start {
+                            worker_metrics.record_task(compile_start.elapsed().as_micros());
+                        }
+                        if !sent {
                             break;
                         }
                     }
@@ -473,8 +539,10 @@ impl RenderSectionCompileWorker {
         Ok(Self {
             queue,
             receiver,
+            far_lod_receiver,
             handles,
             pending_jobs: 0,
+            pending_far_lod_jobs: 0,
             max_pending_jobs,
             worker_count,
             worker_timing_enabled,
@@ -483,7 +551,7 @@ impl RenderSectionCompileWorker {
     }
 
     pub fn pending_job_count(&self) -> usize {
-        self.pending_jobs
+        self.pending_jobs.saturating_add(self.pending_far_lod_jobs)
     }
 
     pub fn max_pending_job_count(&self) -> usize {
@@ -491,12 +559,19 @@ impl RenderSectionCompileWorker {
     }
 
     pub fn available_pending_job_slots(&self) -> usize {
-        self.max_pending_jobs.saturating_sub(self.pending_jobs)
+        self.max_pending_jobs
+            .saturating_sub(self.pending_job_count())
     }
 
     pub fn release_completed_jobs(&mut self, count: usize) -> usize {
         let released = count.min(self.pending_jobs);
         self.pending_jobs -= released;
+        released
+    }
+
+    fn release_completed_far_lod_jobs(&mut self, count: usize) -> usize {
+        let released = count.min(self.pending_far_lod_jobs);
+        self.pending_far_lod_jobs -= released;
         released
     }
 
@@ -515,11 +590,11 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
         request: RenderSectionCompileRequest,
     ) -> Result<RenderSectionCompileSubmitTiming> {
         let capacity_start = Instant::now();
-        if self.pending_jobs >= self.max_pending_jobs {
+        if self.pending_job_count() >= self.max_pending_jobs {
             bail!(
                 "render section compile worker has no free compile slots \
                  (pending_jobs={}, max_pending_jobs={})",
-                self.pending_jobs,
+                self.pending_job_count(),
                 self.max_pending_jobs
             );
         }
@@ -566,7 +641,7 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
     }
 
     fn pending_job_count(&self) -> usize {
-        self.pending_jobs
+        self.pending_job_count()
     }
 
     fn max_pending_job_count(&self) -> usize {
@@ -591,6 +666,50 @@ impl RenderSectionCompiler for RenderSectionCompileWorker {
 
     fn max_compile_worker_task_us(&self) -> u128 {
         self.metrics_snapshot().max_task_us
+    }
+}
+
+impl FarTerrainLodCompiler for RenderSectionCompileWorker {
+    fn available_far_lod_job_slots(&self) -> usize {
+        let available = self.available_pending_job_slots();
+        if self.max_pending_jobs > 1 {
+            available.saturating_sub(1)
+        } else {
+            available
+        }
+    }
+
+    fn submit_far_lod(&mut self, request: FarTerrainLodBuildRequest) -> Result<()> {
+        if self.pending_job_count() >= self.max_pending_jobs {
+            bail!(
+                "shared render compile worker has no free LOD slots \
+                 (pending_jobs={}, max_pending_jobs={})",
+                self.pending_job_count(),
+                self.max_pending_jobs
+            );
+        }
+        self.queue
+            .enqueue_far_lod(request)
+            .context("failed to submit far LOD build task")?;
+        self.pending_far_lod_jobs = self.pending_far_lod_jobs.saturating_add(1);
+        Ok(())
+    }
+
+    fn try_recv_completed_far_lod(&mut self) -> Result<Vec<FarTerrainLodBuildResult>> {
+        let mut completed = Vec::new();
+        loop {
+            match self.far_lod_receiver.try_recv() {
+                Ok(result) => completed.push(result),
+                Err(mpsc::TryRecvError::Empty) => return Ok(completed),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    bail!("far LOD render compile worker disconnected")
+                }
+            }
+        }
+    }
+
+    fn release_completed_far_lod_jobs(&mut self, count: usize) -> usize {
+        self.release_completed_far_lod_jobs(count)
     }
 }
 
@@ -1271,6 +1390,33 @@ mod tests {
         assert_eq!(health.max_pending_jobs, 2);
         assert_eq!(health.available_job_slots, 1);
         assert!(health.queued_compile_tasks <= health.pending_jobs);
+        Ok(())
+    }
+
+    #[test]
+    fn shared_render_compile_queue_keeps_real_sections_ahead_of_far_lod() -> Result<()> {
+        let queue = RenderSectionCompileQueue::new(2);
+        queue.enqueue_far_lod(FarTerrainLodBuildRequest::synthetic_test_request(
+            mclone_core::ChunkPos::new(8, 8),
+        ))?;
+        assert_eq!(
+            queue.dispatch_next_ready_slot_blocking(),
+            RenderSectionCompileDispatchStatus::Dispatched
+        );
+        queue.enqueue(empty_compile_request())?;
+        assert_eq!(
+            queue.dispatch_next_ready_slot_blocking(),
+            RenderSectionCompileDispatchStatus::Dispatched
+        );
+
+        assert!(matches!(
+            queue.take_next(),
+            Some(RenderCompileWork::Section(_))
+        ));
+        assert!(matches!(
+            queue.take_next(),
+            Some(RenderCompileWork::FarLod(_))
+        ));
         Ok(())
     }
 }

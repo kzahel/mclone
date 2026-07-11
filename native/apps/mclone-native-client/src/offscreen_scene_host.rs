@@ -556,9 +556,13 @@ impl OffscreenDriver {
                     .is_some_and(|progress| !progress.cells.is_empty())
             }),
             StartupWaitPolicy::Playable => self.drive_until(device, queue, |driver, summary| {
+                let far_lod = driver.host.far_lod_stats();
+                let far_lod_ready = !driver.host.scene_options().far_lod.enabled
+                    || (far_lod.visible_tiles > 0 && far_lod.queued_uploads == 0);
                 driver.host.local_startup_complete()
                     && driver.host.has_runtime()
                     && summary.render.section_count > 0
+                    && far_lod_ready
             }),
             StartupWaitPolicy::Idle => {
                 let mut stable = 0usize;

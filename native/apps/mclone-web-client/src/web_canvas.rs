@@ -57,7 +57,7 @@ use mclone_protocol::{ClientCommand, ServerUpdate, decode_server_update, encode_
 use mclone_render::actor_assets::load_actor_texture_assets;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
-use mclone_render::far_lod::FarTerrainLodMesh;
+use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompileQueueHealth, RenderSectionCompileRequest,
@@ -1729,14 +1729,20 @@ impl SceneRuntimeService for WebSceneRuntimeService {
 
     fn clear_far_lod(&mut self) {}
 
-    fn prepare_far_lod_mesh(
+    fn prepare_far_lod_frame(
         &mut self,
         _config: FarTerrainLodConfig,
         _seed: i64,
         _center: ChunkPos,
         _camera_position: glam::Vec3,
-    ) -> Option<&FarTerrainLodMesh> {
-        None
+        _build_budget: usize,
+        _upload_budget: usize,
+    ) -> anyhow::Result<Option<&FarTerrainLodFrameUpdate>> {
+        Ok(None)
+    }
+
+    fn far_lod_stats(&self) -> mclone_app_runtime::far_lod::FarTerrainLodProducerStats {
+        Default::default()
     }
 
     fn lod_coverage_counters(&self) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
