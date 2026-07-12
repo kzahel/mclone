@@ -1648,20 +1648,26 @@ struct GpuTexturedChunkMeshUploadTiming {
 }
 
 impl GpuTexturedChunkMesh {
-    pub fn new(device: &wgpu::Device, mesh: &TexturedVisibleChunkMesh) -> Result<Self> {
-        Self::with_visibility(device, mesh, VisibilitySet::all_visible())
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        mesh: &TexturedVisibleChunkMesh,
+    ) -> Result<Self> {
+        Self::with_visibility(device, queue, mesh, VisibilitySet::all_visible())
     }
 
     pub fn with_visibility(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         mesh: &TexturedVisibleChunkMesh,
         visibility: VisibilitySet,
     ) -> Result<Self> {
-        Self::with_visibility_timed(device, mesh, visibility).map(|(mesh, _timing)| mesh)
+        Self::with_visibility_timed(device, queue, mesh, visibility).map(|(mesh, _timing)| mesh)
     }
 
     fn with_visibility_timed(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         mesh: &TexturedVisibleChunkMesh,
         visibility: VisibilitySet,
     ) -> Result<(Self, GpuTexturedChunkMeshUploadTiming)> {
@@ -1674,21 +1680,25 @@ impl GpuTexturedChunkMesh {
         let vertex_bytes = textured_vertex_bytes(mesh);
         timing.vertex_bytes_ms = timing_elapsed_ms(vertex_bytes_start);
         let vertex_buffer_start = timing_now();
-        let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mclone_textured_chunk_vertices"),
-            contents: &vertex_bytes,
-            usage: wgpu::BufferUsages::VERTEX,
-        });
+        let vertex_buffer = create_uploaded_buffer(
+            device,
+            queue,
+            "mclone_textured_chunk_vertices",
+            &vertex_bytes,
+            wgpu::BufferUsages::VERTEX,
+        );
         timing.vertex_buffer_ms = timing_elapsed_ms(vertex_buffer_start);
         let index_bytes_start = timing_now();
         let indices = index_bytes(&mesh.indices);
         timing.index_bytes_ms = timing_elapsed_ms(index_bytes_start);
         let index_buffer_start = timing_now();
-        let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("mclone_textured_chunk_indices"),
-            contents: &indices,
-            usage: wgpu::BufferUsages::INDEX,
-        });
+        let index_buffer = create_uploaded_buffer(
+            device,
+            queue,
+            "mclone_textured_chunk_indices",
+            &indices,
+            wgpu::BufferUsages::INDEX,
+        );
         timing.index_buffer_ms = timing_elapsed_ms(index_buffer_start);
         timing.total_ms = timing_elapsed_ms(total_start);
         Ok((
@@ -1728,6 +1738,23 @@ impl GpuTexturedChunkMesh {
     pub fn visibility(&self) -> VisibilitySet {
         self.visibility
     }
+}
+
+fn create_uploaded_buffer(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: &str,
+    contents: &[u8],
+    usage: wgpu::BufferUsages,
+) -> wgpu::Buffer {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: contents.len().max(4) as wgpu::BufferAddress,
+        usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    queue.write_buffer(&buffer, 0, contents);
+    buffer
 }
 
 fn draw_textured_mesh_range(
@@ -2450,7 +2477,7 @@ impl TexturedChunkDrawResources {
                 .context("failed to upload chunk texture atlas")?;
         Ok(Self {
             renderer,
-            mesh: GpuTexturedChunkMesh::new(device, mesh)
+            mesh: GpuTexturedChunkMesh::new(device, queue, mesh)
                 .context("failed to upload textured chunk mesh")?,
             atlas,
         })
@@ -2463,9 +2490,10 @@ impl TexturedChunkDrawResources {
     pub fn update_mesh(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         mesh: &TexturedVisibleChunkMesh,
     ) -> Result<()> {
-        self.mesh = GpuTexturedChunkMesh::new(device, mesh)
+        self.mesh = GpuTexturedChunkMesh::new(device, queue, mesh)
             .context("failed to upload textured chunk mesh")?;
         Ok(())
     }
@@ -2605,6 +2633,7 @@ pub struct TexturedSectionDrawResources {
     traversal_ready_sections: BTreeSet<RenderSectionKey>,
     section_set_generation: u64,
     atlas: GpuChunkTextureAtlas,
+    queue: wgpu::Queue,
     // Slice F (docs/tactical/106): the prepared culling records only change when
     // the section set / readiness changes (upload, removal, traversal refresh),
     // not on camera movement. Cache them across frames and rebuild lazily on the
@@ -2645,6 +2674,7 @@ impl TexturedSectionDrawResources {
             traversal_ready_sections: BTreeSet::new(),
             section_set_generation: 0,
             atlas,
+            queue: queue.clone(),
             cached_records: RefCell::new(None),
             records_dirty: Cell::new(true),
             record_dirty_causes: Cell::new(TexturedSectionRecordDirtyCauses::INITIAL),
@@ -2758,6 +2788,7 @@ impl TexturedSectionDrawResources {
             report.uploaded_index_count += stats.index_count;
             let (gpu_mesh, mesh_timing) = GpuTexturedChunkMesh::with_visibility_timed(
                 device,
+                &self.queue,
                 &section.mesh,
                 section.visibility,
             )

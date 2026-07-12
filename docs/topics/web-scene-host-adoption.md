@@ -569,3 +569,28 @@ Slice 4 subsequently landed multi-level rings while preserving the proven
 native and browser worker/admission/upload paths. The macro next step is
 Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4; keep the remaining four
 web exceptions unchanged until their own complete proofs land.
+
+## Mobile Touch Follow-Up (2026-07-12)
+
+The scene-host cutover initially copied the browser `TouchOverlay` into
+`MonoUiContext` but left `resolved_input` at its keyboard/mouse default. The
+shared HUD correctly filtered the overlay out, so touch movement remained live
+while the menu, action buttons, and active joystick were invisible. The web
+adapter now projects touch visibility and prompt capability into the shared
+input context. Browser glue also makes a best-effort fullscreen request from
+the first touch gesture, applies `viewport-fit=cover`, and suppresses the
+focusable canvas's default outline, which was the thin light border seen along
+the screen edges.
+
+Restoring the touch HUD exposed Chrome WebGPU's mapped-at-creation size limit
+for a large textured section upload. Shared textured terrain uploads now use
+unmapped `COPY_DST` buffers plus `Queue::write_buffer`, preserving the shared
+renderer path for native and web. Focused UI/web Rust tests (79 + 11 plus the
+three web ABI locks), web typecheck, and native render/web checks pass. The
+mobile smoke proves touch movement/look/buttons, the pause shortcut, one-shot
+fullscreen invocation, and exact horizontal viewport coverage. Its automated
+pixel capture remains blocked by the already documented intermittent Chrome
+WebGPU all-black readback artifact in this environment; runtime reports reached
+playable rendering with 396 GUI commands and no page or WebGPU error after the
+upload fix. The inspected `/tmp` captures confirmed the focus border was gone
+but were otherwise affected by that black readback artifact.

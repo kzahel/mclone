@@ -27,7 +27,8 @@ use mclone_assets::PackedAssetSource;
 use mclone_client::BlockInteractionTarget;
 use mclone_core::{BlockPos, ChunkPos, Direction, Vec3d};
 use mclone_input::{
-    FlatInputAction, FlatInputFrame, LookDelta, MovementImpulse, TouchControlsMode,
+    FlatInputAction, FlatInputFrame, InputPromptKind, LookDelta, MovementImpulse,
+    ResolvedFlatInput, TouchControlsMode,
 };
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
@@ -1492,6 +1493,18 @@ impl WebSceneHost {
 
     fn refresh_mono_ui_context(&mut self) -> Result<(), JsValue> {
         let mut context = MonoUiContext::default();
+        context.resolved_input = ResolvedFlatInput {
+            preferred_prompt: Some(if self.touch_overlay.visible {
+                InputPromptKind::Touch
+            } else {
+                InputPromptKind::KeyboardMouse
+            }),
+            touch_controls_visible: self.touch_overlay.visible,
+            accepts_keyboard_mouse: true,
+            accepts_touch: self.touch_settings_available,
+            accepts_gamepad: false,
+            accepts_xr_controller: false,
+        };
         context.touch_overlay = self.touch_overlay.clone();
         context.touch_controls_mode = Some(self.touch_controls_mode);
         context.touch_settings = self

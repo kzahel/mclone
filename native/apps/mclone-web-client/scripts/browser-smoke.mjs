@@ -2546,6 +2546,14 @@ async function captureNativeUiProbe(page, canvas) {
  * @param {Locator} canvas
  */
 async function exerciseMobileTouchControls(page, canvas) {
+  await page.evaluate(() => {
+    document.documentElement.dataset.mcloneFullscreenRequestCount = "0";
+    document.documentElement.requestFullscreen = () => {
+      const count = Number(document.documentElement.dataset.mcloneFullscreenRequestCount) || 0;
+      document.documentElement.dataset.mcloneFullscreenRequestCount = String(count + 1);
+      return Promise.resolve();
+    };
+  });
   const initial = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     return {
@@ -2568,6 +2576,11 @@ async function exerciseMobileTouchControls(page, canvas) {
     yFraction: 0.72,
     buttons: 1,
   });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.fullscreenAttempted === true,
+    undefined,
+    { timeout: 10_000 },
+  );
   await dispatchCanvasPointerEvent(page, "pointermove", {
     pointerId: 31,
     xFraction: 0.31,
@@ -2644,6 +2657,16 @@ async function exerciseMobileTouchControls(page, canvas) {
       touch: globalThis.__mcloneWebApp.touchControlState?.(),
     };
   }, { start: movementStart, activeMovementProbe });
+
+  const firstTapProbe = await page.evaluate(() => ({
+    fullscreenAttempted: globalThis.__mcloneWebApp.state.fullscreenAttempted === true,
+    fullscreenRequestCount: Number(document.documentElement.dataset.mcloneFullscreenRequestCount),
+    viewport: {
+      left: document.getElementById("mclone-canvas")?.getBoundingClientRect().left,
+      right: document.getElementById("mclone-canvas")?.getBoundingClientRect().right,
+      width: window.innerWidth,
+    },
+  }));
 
   const lookStart = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
@@ -2760,6 +2783,10 @@ async function exerciseMobileTouchControls(page, canvas) {
   return {
     ok: initial.debugOverlayVisible === false
       && initial.touchControlsVisible === true
+      && firstTapProbe.fullscreenAttempted === true
+      && firstTapProbe.fullscreenRequestCount === 1
+      && firstTapProbe.viewport.left === 0
+      && firstTapProbe.viewport.right === firstTapProbe.viewport.width
       && activeMovementProbe?.ok === true
       && movementProbe.ok
       && lookProbe.ok
@@ -2772,6 +2799,7 @@ async function exerciseMobileTouchControls(page, canvas) {
       && nativeMenuCanvasPixels.distinctInteriorColorCount > 2
       && closedNativeMenu.uiActive === false,
     initial,
+    firstTap: firstTapProbe,
     movement: movementProbe,
     look: lookProbe,
     button: buttonProbe,
