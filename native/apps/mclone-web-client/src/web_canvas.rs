@@ -158,13 +158,58 @@ pub fn mclone_web_render_canvas_report(canvas: HtmlCanvasElement) -> js_sys::Pro
 }
 
 #[wasm_bindgen]
-pub fn mclone_web_startup_options_from_query(search: String) -> Result<JsValue, JsValue> {
+pub fn mclone_web_startup_options_from_query(search: String) -> Result<WebStartupConfig, JsValue> {
     let options = parse_startup_options_from_query(&search)?;
     let storage = parse_web_world_storage_from_query(&search, options.scene.seed)?;
-    let value = startup_options_to_js_value(&options).map_err(JsValue::from)?;
-    let object: js_sys::Object = value.unchecked_into();
-    attach_web_world_storage_startup_options(&object, &storage).map_err(JsValue::from)?;
-    Ok(object.into())
+    Ok(WebStartupConfig { options, storage })
+}
+
+#[wasm_bindgen]
+pub struct WebStartupConfig {
+    options: StartupOptions,
+    storage: WebWorldStorageStartupOptions,
+}
+
+#[wasm_bindgen]
+impl WebStartupConfig {
+    #[wasm_bindgen(js_name = browserPlan)]
+    pub fn browser_plan(&self) -> Result<JsValue, JsValue> {
+        let object = js_sys::Object::new();
+        set_number(
+            &object,
+            "renderDistance",
+            f64::from(self.options.scene.render_distance),
+        )
+        .map_err(JsValue::from)?;
+        set_bool(
+            &object,
+            "sectionOcclusionCulling",
+            self.options.render_options.section_occlusion_culling,
+        )
+        .map_err(JsValue::from)?;
+        set_bool(
+            &object,
+            "forceFullbright",
+            self.options.render_options.force_fullbright,
+        )
+        .map_err(JsValue::from)?;
+        set_string(
+            &object,
+            "renderColorProfile",
+            self.options.render_options.color_profile.as_str(),
+        )
+        .map_err(JsValue::from)?;
+        if let Some(remote_addr) = &self.options.scene.remote_addr {
+            set_string(&object, "remoteWebSocketUrl", remote_addr).map_err(JsValue::from)?;
+        }
+        Ok(object.into())
+    }
+}
+
+impl WebStartupConfig {
+    pub(super) fn into_parts(self) -> (StartupOptions, WebWorldStorageStartupOptions) {
+        (self.options, self.storage)
+    }
 }
 
 #[wasm_bindgen]
@@ -2992,10 +3037,10 @@ fn parse_startup_options_from_query(search: &str) -> Result<StartupOptions, JsVa
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-struct WebWorldStorageStartupOptions {
-    world_storage: String,
-    world_id: String,
-    clear_world_storage: bool,
+pub(super) struct WebWorldStorageStartupOptions {
+    pub(super) world_storage: String,
+    pub(super) world_id: String,
+    pub(super) clear_world_storage: bool,
 }
 
 fn parse_web_world_storage_from_query(
@@ -3026,15 +3071,6 @@ fn parse_web_world_storage_from_query(
         world_id,
         clear_world_storage: query_truthy(&params, WEB_QUERY_CLEAR_WORLD_STORAGE),
     })
-}
-
-fn attach_web_world_storage_startup_options(
-    object: &js_sys::Object,
-    options: &WebWorldStorageStartupOptions,
-) -> Result<(), String> {
-    set_string(object, "worldStorage", &options.world_storage)?;
-    set_string(object, "worldId", &options.world_id)?;
-    set_bool(object, "clearWorldStorage", options.clear_world_storage)
 }
 
 fn normalize_web_world_storage_label(value: &str) -> Result<String, String> {
@@ -3069,76 +3105,6 @@ fn web_render_distance_limits() -> RenderDistanceLimits {
         WEB_MIN_RENDER_DISTANCE as u32,
         WEB_MAX_RENDER_DISTANCE as u32,
     )
-}
-
-pub(super) fn startup_render_options(
-    section_occlusion_culling: bool,
-    force_fullbright: bool,
-    render_color_profile: &str,
-) -> Result<TexturedSectionRenderOptions, String> {
-    let color_profile = render_color_profile
-        .parse::<RenderColorProfile>()
-        .map_err(|message| format!("renderColorProfile {message}"))?;
-    Ok(TexturedSectionRenderOptions {
-        section_occlusion_culling,
-        force_fullbright,
-        color_profile,
-        ..TexturedSectionRenderOptions::default()
-    })
-}
-
-fn startup_options_to_js_value(options: &StartupOptions) -> Result<JsValue, String> {
-    let object = js_sys::Object::new();
-    set_bool(&object, "ok", true)?;
-    set_string(&object, "seedText", &options.scene.seed.to_string())?;
-    set_number(&object, "seed", options.scene.seed as f64)?;
-    set_number(&object, "chunkX", f64::from(options.scene.chunk_x))?;
-    set_number(&object, "chunkZ", f64::from(options.scene.chunk_z))?;
-    set_number(
-        &object,
-        "renderDistance",
-        f64::from(options.scene.render_distance),
-    )?;
-    set_number(
-        &object,
-        "movementSpeedMultiplier",
-        f64::from(options.scene.movement_speed_multiplier),
-    )?;
-    if let Some(remote_addr) = &options.scene.remote_addr {
-        set_string(&object, "remoteWebSocketUrl", remote_addr)?;
-    }
-    if let Some(day_time) = options.scene.day_time_override {
-        set_number(&object, "dayTime", day_time as f64)?;
-    }
-    set_bool(&object, "freezeTime", options.scene.freeze_time)?;
-    set_bool(
-        &object,
-        "debugPassiveShowcase",
-        options.scene.debug_passive_showcase,
-    )?;
-    set_bool(&object, "lightingEnabled", options.scene.lighting_enabled)?;
-    set_bool(&object, "farLodEnabled", options.scene.far_lod.enabled)?;
-    set_number(
-        &object,
-        "lightStatusBatchSize",
-        options.scene.light_status_batch_size as f64,
-    )?;
-    set_bool(
-        &object,
-        "sectionOcclusionCulling",
-        options.render_options.section_occlusion_culling,
-    )?;
-    set_bool(
-        &object,
-        "forceFullbright",
-        options.render_options.force_fullbright,
-    )?;
-    set_string(
-        &object,
-        "renderColorProfile",
-        options.render_options.color_profile.as_str(),
-    )?;
-    Ok(object.into())
 }
 
 pub(super) struct WebCanvasContext {

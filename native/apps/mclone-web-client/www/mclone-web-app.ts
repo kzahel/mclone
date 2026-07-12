@@ -53,22 +53,15 @@ interface PendingCompile {
   workerError: string | null;
 }
 
-interface WebStartupOptions extends WasmReport {
-  seedText: string;
-  chunkX: number;
-  chunkZ: number;
+interface WebStartupPlan extends WasmReport {
   renderDistance: number;
-  movementSpeedMultiplier: number;
-  lightStatusBatchSize: number;
   remoteWebSocketUrl?: string;
   sectionOcclusionCulling: boolean;
   forceFullbright: boolean;
-  farLodEnabled: boolean;
   renderColorProfile: string;
-  worldStorage: "transient" | "indexeddb";
-  worldId: string;
-  clearWorldStorage: boolean;
 }
+
+type WebStartupConfig = ReturnType<WasmModule["mclone_web_startup_options_from_query"]>;
 
 interface AppRuntimeState extends Record<string, any> {
   ok: boolean;
@@ -422,17 +415,17 @@ class WebFrameDriver {
         throw new Error(`missing ${name} export`);
       }
     }
-    const startup = startupOptionsFromLocation(module);
-    const remoteWebSocketUrl = startupRemoteWebSocketUrl(startup);
-    this.radiusChunks = clampRadiusChunks(startup.renderDistance);
-    this.sectionOcclusionCulling = Boolean(startup.sectionOcclusionCulling);
-    this.forceFullbright = Boolean(startup.forceFullbright);
+    const { config: startup, plan: startupPlan } = startupOptionsFromLocation(module);
+    const remoteWebSocketUrl = startupRemoteWebSocketUrl(startupPlan);
+    this.radiusChunks = clampRadiusChunks(startupPlan.renderDistance);
+    this.sectionOcclusionCulling = Boolean(startupPlan.sectionOcclusionCulling);
+    this.forceFullbright = Boolean(startupPlan.forceFullbright);
     runtime.state.radiusChunks = this.radiusChunks;
     runtime.state.clientHost = remoteWebSocketUrl ? "remote-dedicated" : "worker-integrated";
     runtime.state.remoteWebSocketUrl = remoteWebSocketUrl;
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
-    runtime.state.renderColorProfile = startup.renderColorProfile;
+    runtime.state.renderColorProfile = startupPlan.renderColorProfile;
 
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
@@ -458,44 +451,20 @@ class WebFrameDriver {
         assetPack,
         authoredAssetPack,
         fallbackAssetPack,
-        remoteWebSocketUrl,
-        startup.chunkX,
-        startup.chunkZ,
-        this.radiusChunks,
-        startup.movementSpeedMultiplier,
-        this.sectionOcclusionCulling,
-        this.forceFullbright,
-        startup.farLodEnabled,
-        startup.renderColorProfile,
+        startup,
         compilerWake,
       );
     } else {
-      const seed = parseSeedBigInt(startup.seedText);
-      if (seed === null) {
-        throw new Error(`invalid startup seed ${JSON.stringify(startup.seedText)}`);
-      }
       this.session = await module.mclone_web_create_worker_scene_host_with_startup(
         this.canvas,
         assetPack,
         authoredAssetPack,
         fallbackAssetPack,
-        seed,
-        startup.chunkX,
-        startup.chunkZ,
-        this.radiusChunks,
-        startup.movementSpeedMultiplier,
-        startup.lightStatusBatchSize,
-        this.sectionOcclusionCulling,
-        this.forceFullbright,
-        startup.farLodEnabled,
-        startup.renderColorProfile,
+        startup,
         SERVER_WORKER_URL.href,
         SERVER_JOB_WORKER_URL.href,
         BINDGEN_JS_URL.href,
         BINDGEN_WASM_URL.href,
-        startup.worldStorage,
-        startup.worldId,
-        startup.clearWorldStorage,
         compilerWake,
       );
     }
@@ -1891,30 +1860,26 @@ function parseSeedBigInt(value: unknown): bigint | null {
   return null;
 }
 
-function startupOptionsFromLocation(module: WasmModule): WebStartupOptions {
-  const raw = module.mclone_web_startup_options_from_query(globalThis.location.search) as WebStartupOptions;
-  if (!raw?.ok) {
-    throw new Error("failed to parse startup options");
-  }
+function startupOptionsFromLocation(
+  module: WasmModule,
+): { config: WebStartupConfig; plan: WebStartupPlan } {
+  const config = module.mclone_web_startup_options_from_query(
+    globalThis.location.search,
+  ) as WebStartupConfig;
+  const raw = config.browserPlan();
   return {
-    ...raw,
-    seedText: String(raw.seedText ?? "12345"),
-    chunkX: finiteInteger(raw.chunkX, 0),
-    chunkZ: finiteInteger(raw.chunkZ, 0),
-    renderDistance: clampRadiusChunks(raw.renderDistance),
-    movementSpeedMultiplier: finiteNumber(raw.movementSpeedMultiplier, 1.0),
-    lightStatusBatchSize: Math.max(1, finiteInteger(raw.lightStatusBatchSize, 9)),
-    sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
-    forceFullbright: Boolean(raw.forceFullbright),
-    farLodEnabled: Boolean(raw.farLodEnabled),
-    renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
-    worldStorage: raw.worldStorage === "indexeddb" ? "indexeddb" : "transient",
-    worldId: String(raw.worldId ?? ""),
-    clearWorldStorage: Boolean(raw.clearWorldStorage),
+    config,
+    plan: {
+      ...raw,
+      renderDistance: clampRadiusChunks(raw.renderDistance),
+      sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
+      forceFullbright: Boolean(raw.forceFullbright),
+      renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
+    },
   };
 }
 
-function startupRemoteWebSocketUrl(options: WebStartupOptions): string | null {
+function startupRemoteWebSocketUrl(options: WebStartupPlan): string | null {
   if (typeof options.remoteWebSocketUrl !== "string") {
     return null;
   }
@@ -1924,11 +1889,6 @@ function startupRemoteWebSocketUrl(options: WebStartupOptions): string | null {
 
 function finiteInteger(value: unknown, fallback: number): number {
   const parsed = Math.trunc(Number(value));
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
-function finiteNumber(value: unknown, fallback: number): number {
-  const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 

@@ -388,28 +388,17 @@ async function renderCanvas() {
       workerName: "mclone-render-compiler-smoke",
     });
     const compilerMetrics = createCompilerWake(compiler);
+    const startup = module.mclone_web_startup_options_from_query("?renderDistance=1");
     const session = await module.mclone_web_create_worker_scene_host_with_startup(
       canvas,
       assetPack,
       authoredAssetPack,
       fallbackAssetPack,
-      12345n,
-      0,
-      0,
-      1,
-      1.0,
-      9,
-      true,
-      false,
-      false,
-      "vanilla",
+      startup,
       SERVER_WORKER_URL.href,
       SERVER_JOB_WORKER_URL.href,
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
-      "transient",
-      "",
-      false,
       compilerMetrics.wake,
     );
     if (
@@ -585,28 +574,19 @@ async function createIndexedDbSmokeSession(
     fetchAssetPack(AUTHORED_ASSET_PACK_URL),
     fetchAssetPack(FALLBACK_ASSET_PACK_URL),
   ]);
+  const startup = module.mclone_web_startup_options_from_query(
+    `?seed=424242&renderDistance=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}&clearWorldStorage=${clearWorldStorage}`,
+  );
   return await module.mclone_web_create_worker_scene_host_with_startup(
     canvas,
     assetPack,
     authoredAssetPack,
     fallbackAssetPack,
-    424242n,
-    0,
-    0,
-    1,
-    1.0,
-    9,
-    true,
-    false,
-    false,
-    "vanilla",
+    startup,
     SERVER_WORKER_URL.href,
     SERVER_JOB_WORKER_URL.href,
     BINDGEN_JS_URL.href,
     BINDGEN_WASM_URL.href,
-    "indexeddb",
-    worldId,
-    clearWorldStorage,
     compilerWake,
   );
 }

@@ -46,9 +46,9 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::web_canvas::{
-    WebCanvasContext, WebSceneRuntimeService, decode_world_catalog_response, gui_key_from_label,
-    prepare_web_scene_assets_from_pack, prepare_web_scene_assets_from_selection,
-    startup_render_options, ui_action_label, web_asset_pack_catalog,
+    WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, decode_world_catalog_response,
+    gui_key_from_label, prepare_web_scene_assets_from_pack,
+    prepare_web_scene_assets_from_selection, ui_action_label, web_asset_pack_catalog,
 };
 use crate::web_scene_protocol::{
     WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState,
@@ -1097,43 +1097,33 @@ impl WebSceneHost {
 }
 
 #[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
 pub async fn mclone_web_create_worker_scene_host_with_startup(
     canvas: HtmlCanvasElement,
     reference_pack_bytes: js_sys::Uint8Array,
     authored_pack_bytes: js_sys::Uint8Array,
     fallback_pack_bytes: js_sys::Uint8Array,
-    seed: i64,
-    initial_center_x: i32,
-    initial_center_z: i32,
-    render_distance: u32,
-    movement_speed_multiplier: f32,
-    light_status_batch_size: usize,
-    section_occlusion_culling: bool,
-    force_fullbright: bool,
-    far_lod_enabled: bool,
-    render_color_profile: String,
+    startup: WebStartupConfig,
     server_worker_url: String,
     server_job_worker_url: String,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
-    world_storage: String,
-    world_id: String,
-    clear_world_storage: bool,
     compiler_wake: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
-    let center = ChunkPos::new(initial_center_x, initial_center_z);
+    let (options, storage) = startup.into_parts();
+    let scene_startup = options.scene;
+    let render_options = options.render_options;
+    let center = ChunkPos::new(scene_startup.chunk_x, scene_startup.chunk_z);
     let mut config = WebIntegratedServerRunnerConfig::new(
-        seed,
+        scene_startup.seed,
         server_worker_url,
         server_job_worker_url,
         bindgen_js_url,
         bindgen_wasm_url,
     )
-    .with_light_status_batch_size(light_status_batch_size);
-    if world_storage == "indexeddb" {
-        config = config.with_indexed_db_world(world_id, clear_world_storage);
-    } else if world_storage != "transient" {
+    .with_light_status_batch_size(scene_startup.light_status_batch_size);
+    if storage.world_storage == "indexeddb" {
+        config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
+    } else if storage.world_storage != "transient" {
         return Err(JsValue::from_str("unsupported browser world storage"));
     }
     let mut runtime = crate::WebRuntime::web_worker_integrated_at(config, center)
@@ -1142,30 +1132,17 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     runtime
         .request_chunk_view_deferred(
             center,
-            render_distance,
-            chunk_tracking_radius_for_render_distance(render_distance),
+            scene_startup.render_distance,
+            chunk_tracking_radius_for_render_distance(scene_startup.render_distance),
         )
         .map_err(JsValue::from)?;
     let descriptor = ActiveSessionDescriptor::LocalWorld {
-        seed,
+        seed: scene_startup.seed,
         id: None,
         display_name: None,
     };
-    let startup = mclone_app_runtime::startup_args::StartupSceneOptions {
-        seed,
-        chunk_x: center.x,
-        chunk_z: center.z,
-        render_distance,
-        movement_speed_multiplier,
-        far_lod: if far_lod_enabled {
-            mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled()
-        } else {
-            Default::default()
-        },
-        ..Default::default()
-    };
     let scene = McloneSceneHostOptions {
-        startup,
+        startup: scene_startup,
         use_initial_spawn_center: false,
         startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
@@ -1178,65 +1155,44 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         runtime,
         descriptor,
         scene,
-        startup_render_options(
-            section_occlusion_culling,
-            force_fullbright,
-            &render_color_profile,
-        )
-        .map_err(JsValue::from)?,
+        render_options,
         compiler_wake,
     )
     .await
 }
 
 #[wasm_bindgen]
-#[allow(clippy::too_many_arguments)]
 pub async fn mclone_web_create_remote_scene_host_with_startup(
     canvas: HtmlCanvasElement,
     reference_pack_bytes: js_sys::Uint8Array,
     authored_pack_bytes: js_sys::Uint8Array,
     fallback_pack_bytes: js_sys::Uint8Array,
-    websocket_url: String,
-    initial_center_x: i32,
-    initial_center_z: i32,
-    render_distance: u32,
-    movement_speed_multiplier: f32,
-    section_occlusion_culling: bool,
-    force_fullbright: bool,
-    far_lod_enabled: bool,
-    render_color_profile: String,
+    startup: WebStartupConfig,
     compiler_wake: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
-    let center = ChunkPos::new(initial_center_x, initial_center_z);
+    let (options, _storage) = startup.into_parts();
+    let scene_startup = options.scene;
+    let render_options = options.render_options;
+    let websocket_url = scene_startup
+        .remote_addr
+        .clone()
+        .ok_or_else(|| JsValue::from_str("remote browser startup requires remoteWebSocketUrl"))?;
+    let center = ChunkPos::new(scene_startup.chunk_x, scene_startup.chunk_z);
     let mut runtime = crate::WebRuntime::websocket_remote_at(websocket_url.clone(), center)
         .await
         .map_err(JsValue::from)?;
     runtime
         .request_chunk_view_deferred(
             center,
-            render_distance,
-            chunk_tracking_radius_for_render_distance(render_distance),
+            scene_startup.render_distance,
+            chunk_tracking_radius_for_render_distance(scene_startup.render_distance),
         )
         .map_err(JsValue::from)?;
     let descriptor = ActiveSessionDescriptor::Remote {
         endpoint: RemoteSessionEndpoint::new(websocket_url.clone()),
     };
-    let startup = mclone_app_runtime::startup_args::StartupSceneOptions {
-        seed: DEFAULT_SEED,
-        chunk_x: center.x,
-        chunk_z: center.z,
-        render_distance,
-        movement_speed_multiplier,
-        remote_addr: Some(websocket_url),
-        far_lod: if far_lod_enabled {
-            mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled()
-        } else {
-            Default::default()
-        },
-        ..Default::default()
-    };
     let scene = McloneSceneHostOptions {
-        startup,
+        startup: scene_startup,
         use_initial_spawn_center: false,
         startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
@@ -1249,12 +1205,7 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
         runtime,
         descriptor,
         scene,
-        startup_render_options(
-            section_occlusion_culling,
-            force_fullbright,
-            &render_color_profile,
-        )
-        .map_err(JsValue::from)?,
+        render_options,
         compiler_wake,
     )
     .await

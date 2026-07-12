@@ -3,7 +3,7 @@
 Status: active; opened 2026-07-12. Slice 0 inventory and characterization
 landed; Slice 1 canonical defaults, Android overlays, and desktop DTO cleanup
 landed; Slice 2 canonical scene-host retention and configured camera factory
-landed.
+landed; Slice 3 opaque browser configuration handle landed.
 
 Workstream: native Rust shared launch/startup configuration in
 `mclone-app-runtime` and `mclone-scene`, with adoption by desktop flat,
@@ -349,19 +349,38 @@ cow, chicken, terrain, and foliage without camera/framing regression.
 
 ## Slice 3: Browser Configuration Handle
 
-- [ ] Keep parsed query configuration Rust-owned across the wasm boundary.
-- [ ] Replace the TypeScript `movementSpeedMultiplier`-style scalar schema with
+- [x] Keep parsed query configuration Rust-owned across the wasm boundary.
+- [x] Replace the TypeScript `movementSpeedMultiplier`-style scalar schema with
   an opaque configuration handle or one versioned Rust-owned object.
-- [ ] Expose only the derived browser startup facts TypeScript needs to choose
+- [x] Expose only the derived browser startup facts TypeScript needs to choose
   worker, IndexedDB, or WebSocket resources.
-- [ ] Make local-worker, IndexedDB, and remote-WebSocket creation return to one
+- [x] Make local-worker, IndexedDB, and remote-WebSocket creation return to one
   Rust scene-host constructor with the same canonical configuration.
-- [ ] Delete duplicated TypeScript defaults for shared settings.
-- [ ] Add web tests for query parsing, local and remote launch, and preservation
+- [x] Delete duplicated TypeScript defaults for shared settings.
+- [x] Add web tests for query parsing, local and remote launch, and preservation
   of at least two unrelated shared values through host creation.
 
 Exit criteria: a new shared startup field does not add a TypeScript interface
 field or another positional argument to multiple web constructors.
+
+Slice 3 replaces the JS object containing fifteen shared scalar fields with an
+opaque wasm-bindgen `WebStartupConfig`. Rust retains `StartupOptions` plus
+browser storage intent, and both the worker-integrated and remote-WebSocket
+constructors consume that same handle. TypeScript sees only `browserPlan()`:
+remote/local choice, initial render distance for UI state, and the three render
+presentation facts needed before the first host report. Seed, center, movement
+speed, lighting, light batching, far LOD, storage intent, and all other shared
+values no longer have TypeScript fields, defaults, or constructor parameters.
+
+The normal local-worker smoke passed with query render distance 1 and retained
+that radius through host creation; its 922x520 canvas showed the expected sky,
+crosshair, hotbar, and terrain edge. The remote-WebSocket app smoke passed with
+the query endpoint and default render distance 3 retained through host
+creation, 49 loaded chunks, 350 resident sections, and two drawn actors. Visual
+inspection of its 1280x720 canvas showed textured terrain/foliage, HUD, and the
+remote-WebSocket diagnostic overlay. The IndexedDB smoke helper now also
+creates the same opaque handle from its seed/storage query instead of supplying
+a separate scalar schema.
 
 ## Slice 4: Movement Mode As The Canary
 
