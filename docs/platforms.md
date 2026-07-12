@@ -30,6 +30,12 @@ Additional host lane:
 | Headset-free XR emulation | active acceptance lane | The default desktop binary feeds fixed-IPD synthetic Stereo views and optional keyboard-translated controller input through `OffscreenDriver` and the same `McloneSceneHost` used by OpenXR. `pnpm native:xr-emulation:smoke` writes a side-by-side capture to `/tmp/mclone-xr-emulation.png`; it does not initialize or depend on OpenXR. This is a render/input/host seam gate, not an OpenXR runtime substitute. |
 | Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
+Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
+2026-07-12. The native client builds and the full-frame offscreen smoke renders
+without X11, Wayland, or a window manager, using either Mesa llvmpipe or a real
+Vulkan render node. See [`linux-setup.md`](linux-setup.md) for the reproducible
+package, Rust, vanilla-reference, GPU-permission, and smoke sequence.
+
 Asset-pack selection is now a shared cross-platform contract. Desktop,
 offscreen, flat Android, desktop/Android XR, and web discover or fetch platform
 bytes but use one shared catalog, UI, preference reconciliation, provenance,

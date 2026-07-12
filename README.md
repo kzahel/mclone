@@ -38,6 +38,7 @@ Current project posture and work indexes:
 - [`docs/tactical/`](docs/tactical/README.md) — native Rust workstream tacticals
 - [`docs/topics/`](docs/topics/README.md) — durable subsystem progress indexes
 - [`docs/native-web.md`](docs/native-web.md) — Rust/WASM web build, smoke, and deploy notes
+- [`docs/linux-setup.md`](docs/linux-setup.md) — Linux toolchain, assets, GPU access, and no-window smoke setup
 - [`docs/reference-minecraft.md`](docs/reference-minecraft.md) — Minecraft 1.17.1 reference tree, bootstrap scripts, and mapping notes
 
 Core architecture docs:
