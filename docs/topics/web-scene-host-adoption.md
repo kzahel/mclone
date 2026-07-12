@@ -613,3 +613,12 @@ mobile smoke captures `/tmp/mclone-native-web-mobile-startup.png` at
 that milestone. Chrome's canvas readback is still black in this environment,
 but the live report proves a non-empty chunk target and GUI command list before
 admission; the DOM bootstrap has already retired at that point.
+
+Device feedback then exposed a high-DPI coordinate-space regression isolated
+to the moving joystick visual. Browser touch input and overlay positions are
+measured in canvas pixels, while the shared HUD draws in scaled GUI units. The
+web adapter had passed the pixel positions through unchanged, placing the
+active stick outside the visible GUI on typical mobile device-pixel ratios.
+It now converts the base and thumb through the active `GuiScale`; the mobile
+smoke locks that the active joystick reaches the shared HUD inside its bounds
+and captures `/tmp/mclone-native-web-mobile-joystick.png` while held.

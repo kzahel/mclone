@@ -108,6 +108,8 @@ const mobileStartupScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_STARTUP
   ?? "/tmp/mclone-native-web-mobile-startup.png";
 const mobileBootstrapScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_BOOTSTRAP_SCREENSHOT
   ?? "/tmp/mclone-native-web-mobile-bootstrap.png";
+const mobileJoystickScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_JOYSTICK_SCREENSHOT
+  ?? "/tmp/mclone-native-web-mobile-joystick.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
@@ -2650,6 +2652,8 @@ async function exerciseMobileTouchControls(page, canvas) {
         const dz = Number(state?.cameraZ) - start.cameraZ;
         return state?.ok === true
           && state.touchJoystickActive === true
+          && state.lastReport?.touchJoystickGuiActive === true
+          && state.lastReport?.touchJoystickGuiInBounds === true
           && impulse?.active === true
           && impulse.left < -0.05
           && impulse.forward > 0.05
@@ -2660,22 +2664,39 @@ async function exerciseMobileTouchControls(page, canvas) {
       movementStart,
       { timeout: 60_000 },
     );
-    activeMovementProbe = await page.evaluate((start) => {
+    const activeMovementSnapshot = await page.evaluate((start) => {
       const state = globalThis.__mcloneWebApp.state;
       const impulse = globalThis.__mcloneWebApp.touchControlState?.()?.movementImpulse;
       const dx = Number(state.cameraX) - start.cameraX;
       const dz = Number(state.cameraZ) - start.cameraZ;
       return {
         ok: impulse?.active === true
+          && state.lastReport?.touchJoystickGuiActive === true
+          && state.lastReport?.touchJoystickGuiInBounds === true
           && impulse.left < -0.05
           && impulse.forward > 0.05
           && Math.abs(impulse.left) < 1
           && impulse.forward < 1
           && Math.hypot(dx, dz) > 0.15,
         impulse,
+        gui: {
+          active: state.lastReport?.touchJoystickGuiActive,
+          inBounds: state.lastReport?.touchJoystickGuiInBounds,
+          baseX: state.lastReport?.touchJoystickGuiBaseX,
+          baseY: state.lastReport?.touchJoystickGuiBaseY,
+        },
         distance: Math.hypot(dx, dz),
       };
     }, movementStart);
+    const activeJoystickPng = await canvas.screenshot({
+      path: mobileJoystickScreenshotPath,
+      timeout: 60_000,
+    });
+    activeMovementProbe = {
+      ...activeMovementSnapshot,
+      canvasScreenshotPath: mobileJoystickScreenshotPath,
+      canvasPixels: analyzePng(activeJoystickPng),
+    };
   } finally {
     await dispatchCanvasPointerEvent(page, "pointerup", {
       pointerId: 31,

@@ -623,9 +623,13 @@ impl WebSceneHost {
         descend_pressed: bool,
         menu_pressed: bool,
     ) -> Result<JsValue, JsValue> {
-        let point = |x: f64, y: f64| Point {
-            x: (x as f32).clamp(0.0, self.context.width as f32),
-            y: (y as f32).clamp(0.0, self.context.height as f32),
+        let scale = GuiScale::from_pixels(self.context.width, self.context.height);
+        let point = |x: f64, y: f64| {
+            let point = scale.client_to_gui(x, y);
+            Point {
+                x: point.x.clamp(0.0, scale.width),
+                y: point.y.clamp(0.0, scale.height),
+            }
         };
         self.touch_overlay = TouchOverlay {
             visible,
@@ -2304,6 +2308,30 @@ impl WebSceneHost {
             &object,
             "guiCommandCount",
             self.last_frame.gui_command_count as f64,
+        )?;
+        let gui_scale = GuiScale::from_pixels(self.context.width, self.context.height);
+        report_set_bool(
+            &object,
+            "touchJoystickGuiActive",
+            self.touch_overlay.movement.active,
+        )?;
+        report_set_number(
+            &object,
+            "touchJoystickGuiBaseX",
+            self.touch_overlay.movement.base.x as f64,
+        )?;
+        report_set_number(
+            &object,
+            "touchJoystickGuiBaseY",
+            self.touch_overlay.movement.base.y as f64,
+        )?;
+        report_set_bool(
+            &object,
+            "touchJoystickGuiInBounds",
+            self.touch_overlay.movement.base.x >= 0.0
+                && self.touch_overlay.movement.base.x <= gui_scale.width
+                && self.touch_overlay.movement.base.y >= 0.0
+                && self.touch_overlay.movement.base.y <= gui_scale.height,
         )?;
         report_set_number(
             &object,
