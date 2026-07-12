@@ -594,3 +594,22 @@ WebGPU all-black readback artifact in this environment; runtime reports reached
 playable rendering with 396 GUI commands and no page or WebGPU error after the
 upload fix. The inspected `/tmp` captures confirmed the focus border was gone
 but were otherwise affected by that black readback artifact.
+
+Follow-up device feedback found that the fullscreen hook above was still
+installed too late: `TouchControls` was constructed only after WASM, assets,
+WebGPU, and the worker runtime were ready. It now installs at module bootstrap
+and fires on the first touch/pen `pointerup`, which is the transient-activation
+edge browsers grant for non-mouse pointers. The mobile smoke sends that tap
+before scene-host initialization and locks one fullscreen invocation.
+
+The same follow-up restored honest startup presentation. A platform bootstrap
+status covers the pre-WebGPU phases, then retires after the first shared frame.
+While the external web runtime is awaiting startup admission, `mclone-scene`
+now feeds its worker-owned view-readiness snapshot into the same shared loading
+grid used by native-owned startup. Web reports retain observed progress counts
+after the worker diagnostics bridge carries compact loading/view cell grids
+instead of dropping those detailed snapshots at the worker boundary. The
+mobile smoke captures `/tmp/mclone-native-web-mobile-startup.png` at
+that milestone. Chrome's canvas readback is still black in this environment,
+but the live report proves a non-empty chunk target and GUI command list before
+admission; the DOM bootstrap has already retired at that point.

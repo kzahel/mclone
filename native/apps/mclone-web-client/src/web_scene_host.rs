@@ -2058,6 +2058,26 @@ impl WebSceneHost {
                 host.pending_stream_work(camera_position) as f64,
             )?;
             report_set_bool(&object, "startupReady", host.gameplay_startup_complete())?;
+            if let Some(progress) = host.mono_loading_progress_overlay() {
+                report_set_bool(&object, "startupProgressVisible", true)?;
+                report_set_number(
+                    &object,
+                    "startupProgressReadyChunks",
+                    progress.target_ready_chunks as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "startupProgressChunkCount",
+                    progress.target_chunk_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "startupProgressPercent",
+                    f64::from(progress.percent()),
+                )?;
+            } else {
+                report_set_bool(&object, "startupProgressVisible", false)?;
+            }
             if let Some(stats) = host.runtime_stats() {
                 report_set_string(&object, "hostMode", stats.host_mode.label())?;
                 report_set_string(

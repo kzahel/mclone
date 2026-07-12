@@ -176,6 +176,11 @@ const runtime: AppRuntime = {
     compileFinalizingCount: 0,
     streamingSettled: false,
     startupReady: false,
+    startupProgressVisible: false,
+    startupProgressObserved: false,
+    startupProgressReadyChunks: 0,
+    startupProgressChunkCount: 0,
+    startupProgressPercent: 0,
     startupHoldCameraY: null as number | null,
     minimumPreStartupCameraY: null as number | null,
     startupAdmissionFrame: null as number | null,
@@ -249,10 +254,12 @@ const runtime: AppRuntime = {
     clientHost: "worker-integrated",
     remoteWebSocketUrl: null,
     status: "booting",
+    bootstrapStatusRetired: false,
   },
 };
 
 globalThis.__mcloneWebApp = runtime;
+installFirstTouchFullscreen(runtime.state);
 
 async function boot(): Promise<WasmReport> {
   const app = new WebFrameDriver();
@@ -753,6 +760,9 @@ class WebFrameDriver {
     }
     this.hasRendered ||= Boolean(frame.rendered);
     this.applyReport(frame);
+    if (frame.rendered) {
+      hideBootstrapStatus();
+    }
     this.settleAssetCompilerSwap(frame);
     if (
       Number(frame.acceptedCompileSectionCount) > 0
@@ -885,6 +895,11 @@ class WebFrameDriver {
     const wasStartupReady = runtime.state.startupReady === true;
     this.applyCameraState(report);
     runtime.state.startupReady = Boolean(report.startupReady);
+    runtime.state.startupProgressVisible = Boolean(report.startupProgressVisible);
+    runtime.state.startupProgressObserved ||= runtime.state.startupProgressVisible;
+    runtime.state.startupProgressReadyChunks = Number(report.startupProgressReadyChunks) || 0;
+    runtime.state.startupProgressChunkCount = Number(report.startupProgressChunkCount) || 0;
+    runtime.state.startupProgressPercent = Number(report.startupProgressPercent) || 0;
     if (!runtime.state.startupReady) {
       runtime.state.startupHoldCameraY ??= runtime.state.cameraY;
       runtime.state.minimumPreStartupCameraY = Math.min(
@@ -1994,8 +2009,89 @@ function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
   }
 }
 
-function publishRuntimeState(_state: AppRuntimeState): void {
-  // The visible DOM UI is retired; runtime.state itself is the test/debug publication surface.
+function publishRuntimeState(state: AppRuntimeState): void {
+  const status = document.getElementById("mclone-bootstrap-status");
+  if (!status || status.dataset.retired === "true") {
+    return;
+  }
+  status.textContent = startupStatusLabel(state.status);
+}
+
+function hideBootstrapStatus(): void {
+  const status = document.getElementById("mclone-bootstrap-status");
+  if (!status) {
+    return;
+  }
+  status.dataset.retired = "true";
+  status.hidden = true;
+  runtime.state.bootstrapStatusRetired = true;
+}
+
+function startupStatusLabel(status: unknown): string {
+  switch (status) {
+    case "loading wasm":
+      return "Loading engine…";
+    case "loading assets":
+      return "Loading assets…";
+    case "initializing webgpu":
+      return "Preparing renderer…";
+    case "connecting remote websocket":
+      return "Connecting to server…";
+    case "rendering":
+      return "Generating world…";
+    default:
+      return typeof status === "string" && status.length > 0 ? status : "Starting mclone…";
+  }
+}
+
+function installFirstTouchFullscreen(state: AppRuntimeState): void {
+  const root = document.documentElement as HTMLElement & {
+    webkitRequestFullscreen?: () => Promise<void> | void;
+  };
+  const request = root.requestFullscreen?.bind(root) ?? root.webkitRequestFullscreen?.bind(root);
+  state.fullscreenSupported = typeof request === "function";
+  state.fullscreenAttempted = false;
+  state.fullscreenActive = Boolean(document.fullscreenElement);
+  state.fullscreenError = null;
+
+  document.addEventListener("fullscreenchange", () => {
+    state.fullscreenActive = Boolean(document.fullscreenElement);
+  });
+  document.addEventListener("fullscreenerror", () => {
+    state.fullscreenError = "fullscreen request rejected";
+  });
+
+  const onFirstTouch = (event: PointerEvent): void => {
+    if (event.pointerType !== "touch" && event.pointerType !== "pen") {
+      return;
+    }
+    window.removeEventListener("pointerup", onFirstTouch, true);
+    state.fullscreenAttempted = true;
+    if (!request || document.fullscreenElement) {
+      return;
+    }
+    try {
+      const result = request();
+      if (result && typeof result.then === "function") {
+        void result.then(
+          () => {
+            state.fullscreenActive = Boolean(document.fullscreenElement);
+          },
+          (error: unknown) => {
+            state.fullscreenError = stringifyError(error);
+          },
+        );
+      }
+    } catch (error) {
+      state.fullscreenError = stringifyError(error);
+    }
+  };
+  // Touch/pen activation is granted on pointerup (mouse activation is on
+  // pointerdown), so request fullscreen when the first tap is released.
+  window.addEventListener("pointerup", onFirstTouch, {
+    capture: true,
+    passive: true,
+  });
 }
 
 function nextAnimationFrame(): Promise<void> {

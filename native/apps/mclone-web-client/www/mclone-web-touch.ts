@@ -55,7 +55,6 @@ export interface TouchControlApp {
 }
 
 interface TouchRuntimeState extends Record<string, any> {
-  fullscreenAttempted?: boolean;
   touchControlsVisible?: boolean;
   touchJoystickActive?: boolean;
   touchMovementLeftImpulse?: number;
@@ -92,7 +91,6 @@ export class TouchControls {
   private lookLastY: number;
   private readonly buttonPointers: Map<number, TouchButtonKey>;
   private lastTouchAt: number;
-  private fullscreenAttempted: boolean;
 
   constructor(app: TouchControlApp, runtimeState: TouchRuntimeState) {
     this.app = app;
@@ -110,7 +108,6 @@ export class TouchControls {
     this.lookLastY = 0;
     this.buttonPointers = new Map();
     this.lastTouchAt = 0;
-    this.fullscreenAttempted = false;
 
     this.setVisible(hasTouchInput());
     this.bindCanvas();
@@ -131,7 +128,6 @@ export class TouchControls {
     }
     this.markTouchEvent();
     event.preventDefault();
-    this.requestFullscreenOnce();
     this.setVisible(true);
     this.canvas.focus();
 
@@ -352,32 +348,6 @@ export class TouchControls {
 
   private markTouchEvent(): void {
     this.lastTouchAt = performance.now();
-  }
-
-  private requestFullscreenOnce(): void {
-    if (this.fullscreenAttempted) {
-      return;
-    }
-    this.fullscreenAttempted = true;
-    this.runtimeState.fullscreenAttempted = true;
-    if (document.fullscreenElement) {
-      return;
-    }
-    const root = document.documentElement as HTMLElement & {
-      webkitRequestFullscreen?: () => Promise<void> | void;
-    };
-    const request = root.requestFullscreen?.bind(root) ?? root.webkitRequestFullscreen?.bind(root);
-    if (!request) {
-      return;
-    }
-    try {
-      const result = request();
-      if (result && typeof result.catch === "function") {
-        void result.catch(() => {});
-      }
-    } catch (_error) {
-      // Fullscreen is best-effort; unsupported browsers keep the normal viewport.
-    }
   }
 
   shouldIgnoreMouseEvent(): boolean {

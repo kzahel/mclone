@@ -779,6 +779,15 @@ impl McloneSceneHost {
         self.local_startup
             .as_ref()
             .and_then(SceneLocalStartup::progress_overlay)
+            .or_else(|| {
+                self.external_runtime_startup_pending
+                    .then(|| {
+                        self.runtime
+                            .as_ref()
+                            .and_then(|runtime| runtime.startup_progress_overlay())
+                    })
+                    .flatten()
+            })
     }
 
     pub(crate) fn active_remote_addr(&self) -> Option<String> {

@@ -104,6 +104,10 @@ const mobileNativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_
   ?? "/tmp/mclone-native-web-mobile-ui-canvas.png";
 const mobileNativeOptionsCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_OPTIONS_CANVAS_SCREENSHOT
   ?? "/tmp/mclone-native-web-mobile-options-canvas.png";
+const mobileStartupScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_STARTUP_SCREENSHOT
+  ?? "/tmp/mclone-native-web-mobile-startup.png";
+const mobileBootstrapScreenshotPath = process.env.MCLONE_NATIVE_WEB_MOBILE_BOOTSTRAP_SCREENSHOT
+  ?? "/tmp/mclone-native-web-mobile-bootstrap.png";
 const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPORT
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
@@ -187,6 +191,16 @@ async function run() {
           hasTouch: true,
         }
       : undefined);
+    if (mobileAppLoop) {
+      await page.addInitScript(() => {
+        globalThis.sessionStorage?.setItem("mclone.fullscreenRequestCount", "0");
+        Element.prototype.requestFullscreen = function requestFullscreen() {
+          const count = Number(globalThis.sessionStorage?.getItem("mclone.fullscreenRequestCount")) || 0;
+          globalThis.sessionStorage?.setItem("mclone.fullscreenRequestCount", String(count + 1));
+          return Promise.resolve();
+        };
+      });
+    }
     /** @type {string[]} */
     const pageErrors = [];
     /** @type {string[]} */
@@ -234,6 +248,44 @@ async function run() {
         undefined,
         { timeout: 20_000 },
       );
+      let mobileStartupProbe = null;
+      if (mobileAppLoop) {
+        await page.screenshot({
+          path: mobileBootstrapScreenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        });
+        // Exercise the bootstrap-installed listener before the WASM scene host
+        // and TouchControls have finished initializing.
+        await page.touchscreen.tap(195, 422);
+        await page.waitForFunction(
+          () => {
+            const app = globalThis.__mcloneWebApp;
+            return app?.state?.startupProgressVisible === true
+              || app?.ready === true
+              || app?.state?.failed === true;
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+        mobileStartupProbe = await page.evaluate(() => {
+          const state = globalThis.__mcloneWebApp.state;
+          const bootstrap = document.getElementById("mclone-bootstrap-status");
+          return {
+            visible: state.startupProgressVisible === true,
+            readyChunks: Number(state.startupProgressReadyChunks) || 0,
+            chunkCount: Number(state.startupProgressChunkCount) || 0,
+            percent: Number(state.startupProgressPercent) || 0,
+            guiCommandCount: Number(state.guiCommandCount) || 0,
+            bootstrapHidden: bootstrap?.hidden === true,
+          };
+        });
+        await page.screenshot({
+          path: mobileStartupScreenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        });
+      }
       try {
         await page.waitForFunction(
           () => {
@@ -488,7 +540,13 @@ async function run() {
         const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
         const canvasPixels = analyzePng(canvasPng);
 
-        assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouchProbe);
+        assertMobileAppLoopResult(
+          result,
+          pageErrors,
+          canvasPixels,
+          mobileTouchProbe,
+          mobileStartupProbe,
+        );
         console.log(JSON.stringify({
           url: appUrl,
           screenshotPath,
@@ -500,6 +558,9 @@ async function run() {
           remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
           canvasPixels,
           mobileTouchProbe,
+          mobileStartupProbe,
+          mobileStartupScreenshotPath,
+          mobileBootstrapScreenshotPath,
           result,
         }, null, 2));
         return;
@@ -2546,14 +2607,6 @@ async function captureNativeUiProbe(page, canvas) {
  * @param {Locator} canvas
  */
 async function exerciseMobileTouchControls(page, canvas) {
-  await page.evaluate(() => {
-    document.documentElement.dataset.mcloneFullscreenRequestCount = "0";
-    document.documentElement.requestFullscreen = () => {
-      const count = Number(document.documentElement.dataset.mcloneFullscreenRequestCount) || 0;
-      document.documentElement.dataset.mcloneFullscreenRequestCount = String(count + 1);
-      return Promise.resolve();
-    };
-  });
   const initial = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     return {
@@ -2660,7 +2713,7 @@ async function exerciseMobileTouchControls(page, canvas) {
 
   const firstTapProbe = await page.evaluate(() => ({
     fullscreenAttempted: globalThis.__mcloneWebApp.state.fullscreenAttempted === true,
-    fullscreenRequestCount: Number(document.documentElement.dataset.mcloneFullscreenRequestCount),
+    fullscreenRequestCount: Number(globalThis.sessionStorage?.getItem("mclone.fullscreenRequestCount")),
     viewport: {
       left: document.getElementById("mclone-canvas")?.getBoundingClientRect().left,
       right: document.getElementById("mclone-canvas")?.getBoundingClientRect().right,
@@ -3823,8 +3876,15 @@ function assertNativeUiProbe(nativeUiProbe) {
  * @param {string[]} pageErrors
  * @param {any} canvasPixels
  * @param {any} mobileTouchProbe
+ * @param {any} mobileStartupProbe
  */
-function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouchProbe) {
+function assertMobileAppLoopResult(
+  result,
+  pageErrors,
+  canvasPixels,
+  mobileTouchProbe,
+  mobileStartupProbe,
+) {
   if (pageErrors.length > 0) {
     throw new Error(`browser mobile app page errors:\n${pageErrors.join("\n")}`);
   }
@@ -3841,6 +3901,17 @@ function assertMobileAppLoopResult(result, pageErrors, canvasPixels, mobileTouch
     || result.pendingCompileJobCount !== 0
   ) {
     throw new Error(`native web mobile app did not maintain the expected rendered world:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (result.startupProgressObserved !== true || result.bootstrapStatusRetired !== true) {
+    throw new Error(`mobile web startup never exposed shared chunk progress:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    mobileStartupProbe?.visible !== true
+    || mobileStartupProbe.chunkCount < 1
+    || mobileStartupProbe.guiCommandCount < 1
+    || mobileStartupProbe.bootstrapHidden !== true
+  ) {
+    throw new Error(`mobile web startup progress was not visibly presented:\n${JSON.stringify(mobileStartupProbe, null, 2)}`);
   }
   if (!mobileTouchProbe?.ok) {
     throw new Error(`native web mobile controls did not satisfy movement/look/native UI probes:\n${JSON.stringify({ mobileTouchProbe, result }, null, 2)}`);

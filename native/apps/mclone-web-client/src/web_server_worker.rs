@@ -10,17 +10,18 @@ use mclone_app_runtime::client_connection::{
     ClientConnectionDrainResult, ClientConnectionQueueMetrics, QueuedServerUpdate,
 };
 use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, ChunkStatus};
 use mclone_protocol::{
     ChunkView, ClientCommand, ServerUpdate, decode_client_command, decode_server_update,
     encode_client_command, encode_server_update,
 };
 use mclone_server::{
-    ChunkRecord, ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME,
-    IntegratedServer, IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics,
-    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
-    ServerUpdateEnvelope, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
-    WorldStore, WorldStoreCompletion, WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind,
+    ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
+    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServer,
+    IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics, ServerRunnerError,
+    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
+    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind, WorldStore,
+    WorldStoreCompletion, WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind,
     compute_light_status_job_frame, decode_chunk_record, decode_entity_chunk_record,
     encode_chunk_record, encode_entity_chunk_record,
 };
@@ -1409,6 +1410,10 @@ fn parse_diagnostics(
     diagnostics.last_tick.chunk_tick = number_prop(value, "lastChunkTick").unwrap_or(0.0) as u64;
     diagnostics.last_tick.wall_us = number_prop(value, "lastTickWallUs").unwrap_or(0.0) as u128;
     diagnostics.last_error = string_prop(value, "lastError").filter(|message| !message.is_empty());
+    diagnostics.loading_progress_snapshot = reflect_get(value, "loadingProgressSnapshot")
+        .and_then(|value| loading_progress_snapshot_from_js(&value));
+    diagnostics.view_readiness_snapshot = reflect_get(value, "viewReadinessSnapshot")
+        .and_then(|value| loading_progress_snapshot_from_js(&value));
     Some(diagnostics)
 }
 
@@ -2348,7 +2353,142 @@ fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, S
         "lastError",
         diagnostics.last_error.as_deref().unwrap_or(""),
     )?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("loadingProgressSnapshot"),
+        &loading_progress_snapshot_to_js(diagnostics.loading_progress_snapshot.as_ref())?,
+    )
+    .map_err(|error| format!("failed to attach loading progress snapshot: {error:?}"))?;
+    Reflect::set(
+        &object,
+        &JsValue::from_str("viewReadinessSnapshot"),
+        &loading_progress_snapshot_to_js(diagnostics.view_readiness_snapshot.as_ref())?,
+    )
+    .map_err(|error| format!("failed to attach view readiness snapshot: {error:?}"))?;
     Ok(object.into())
+}
+
+fn loading_progress_snapshot_to_js(
+    snapshot: Option<&ChunkLoadingProgressSnapshot>,
+) -> Result<JsValue, String> {
+    let Some(snapshot) = snapshot else {
+        return Ok(JsValue::NULL);
+    };
+    let object = Object::new();
+    let stats = snapshot.stats;
+    set_number(&object, "centerX", f64::from(stats.center.x))?;
+    set_number(&object, "centerZ", f64::from(stats.center.z))?;
+    set_number(&object, "targetRadius", f64::from(stats.target_radius))?;
+    set_number(
+        &object,
+        "targetStatus",
+        f64::from(chunk_status_code(stats.target_status)),
+    )?;
+    set_number(&object, "targetChunkCount", stats.target_chunk_count as f64)?;
+    set_number(
+        &object,
+        "targetReadyChunks",
+        stats.target_ready_chunks as f64,
+    )?;
+    set_number(&object, "playableX", f64::from(stats.playable_chunk.x))?;
+    set_number(&object, "playableZ", f64::from(stats.playable_chunk.z))?;
+    set_number(
+        &object,
+        "playableGateRadius",
+        f64::from(stats.playable_gate_radius),
+    )?;
+    set_number(
+        &object,
+        "playableGateChunkCount",
+        stats.playable_gate_chunk_count as f64,
+    )?;
+    set_number(
+        &object,
+        "playableGateReadyChunks",
+        stats.playable_gate_ready_chunks as f64,
+    )?;
+    set_bool(&object, "playableChunkReady", stats.playable_chunk_ready)?;
+    let cells = Array::new();
+    for cell in &snapshot.cells {
+        let encoded = Array::new();
+        encoded.push(&JsValue::from_f64(f64::from(cell.relative_x)));
+        encoded.push(&JsValue::from_f64(f64::from(cell.relative_z)));
+        encoded.push(&JsValue::from_f64(
+            cell.status
+                .map_or(-1.0, |status| f64::from(chunk_status_code(status))),
+        ));
+        encoded.push(&JsValue::from_bool(cell.target_ready));
+        encoded.push(&JsValue::from_bool(cell.playable));
+        cells.push(&encoded);
+    }
+    Reflect::set(&object, &JsValue::from_str("cells"), &cells)
+        .map_err(|error| format!("failed to attach loading progress cells: {error:?}"))?;
+    Ok(object.into())
+}
+
+fn loading_progress_snapshot_from_js(value: &JsValue) -> Option<ChunkLoadingProgressSnapshot> {
+    let cells_value = reflect_get(value, "cells")?;
+    if !Array::is_array(&cells_value) {
+        return None;
+    }
+    let cells = Array::from(&cells_value)
+        .iter()
+        .filter_map(|value| {
+            if !Array::is_array(&value) {
+                return None;
+            }
+            let values = Array::from(&value);
+            Some(ChunkLoadingProgressCell {
+                relative_x: values.get(0).as_f64()? as i32,
+                relative_z: values.get(1).as_f64()? as i32,
+                status: chunk_status_from_code(values.get(2).as_f64()? as i32),
+                target_ready: values.get(3).as_bool()?,
+                playable: values.get(4).as_bool()?,
+            })
+        })
+        .collect();
+    Some(ChunkLoadingProgressSnapshot {
+        stats: ChunkLoadingProgressStats {
+            center: ChunkPos::new(
+                number_prop(value, "centerX")? as i32,
+                number_prop(value, "centerZ")? as i32,
+            ),
+            target_radius: number_prop(value, "targetRadius")? as u32,
+            target_status: chunk_status_from_code(number_prop(value, "targetStatus")? as i32)?,
+            target_chunk_count: number_prop(value, "targetChunkCount")? as usize,
+            target_ready_chunks: number_prop(value, "targetReadyChunks")? as usize,
+            playable_chunk: ChunkPos::new(
+                number_prop(value, "playableX")? as i32,
+                number_prop(value, "playableZ")? as i32,
+            ),
+            playable_gate_radius: number_prop(value, "playableGateRadius")? as u32,
+            playable_gate_chunk_count: number_prop(value, "playableGateChunkCount")? as usize,
+            playable_gate_ready_chunks: number_prop(value, "playableGateReadyChunks")? as usize,
+            playable_chunk_ready: bool_prop(value, "playableChunkReady")?,
+        },
+        cells,
+    })
+}
+
+const fn chunk_status_code(status: ChunkStatus) -> u8 {
+    match status {
+        ChunkStatus::Terrain => 0,
+        ChunkStatus::Surface => 1,
+        ChunkStatus::Features => 2,
+        ChunkStatus::Light => 3,
+        ChunkStatus::Full => 4,
+    }
+}
+
+const fn chunk_status_from_code(code: i32) -> Option<ChunkStatus> {
+    match code {
+        0 => Some(ChunkStatus::Terrain),
+        1 => Some(ChunkStatus::Surface),
+        2 => Some(ChunkStatus::Features),
+        3 => Some(ChunkStatus::Light),
+        4 => Some(ChunkStatus::Full),
+        _ => None,
+    }
 }
 
 fn reflect_get(value: &JsValue, name: &str) -> Option<JsValue> {

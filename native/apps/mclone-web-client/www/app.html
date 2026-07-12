@@ -45,6 +45,24 @@
         user-select: none;
         outline: none;
       }
+
+      #mclone-bootstrap-status {
+        position: fixed;
+        inset: 0;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        background: #080a0d;
+        color: #dce7ef;
+        font: 600 16px/1.4 system-ui, sans-serif;
+        letter-spacing: 0.02em;
+        pointer-events: none;
+      }
+
+      #mclone-bootstrap-status[hidden] {
+        display: none;
+      }
     </style>
   </head>
   <body>
@@ -53,6 +71,7 @@
         <canvas id="mclone-canvas" width="960" height="540" tabindex="0"></canvas>
       </section>
     </main>
+    <div id="mclone-bootstrap-status" role="status" aria-live="polite">Starting mclone…</div>
     <script>
       globalThis["__MCLONE_NATIVE_WEB_ASSET" + "_VERSION__"] = "__MCLONE_NATIVE_WEB_ASSET_VERSION__";
     </script>
