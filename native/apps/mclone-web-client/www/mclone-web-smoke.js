@@ -388,7 +388,9 @@ async function renderCanvas() {
       workerName: "mclone-render-compiler-smoke",
     });
     const compilerMetrics = createCompilerWake(compiler);
-    const startup = module.mclone_web_startup_options_from_query("?renderDistance=1");
+    const startup = module.mclone_web_startup_options_from_query(
+      "?renderDistance=1&movementMode=fly",
+    );
     const session = await module.mclone_web_create_worker_scene_host_with_startup(
       canvas,
       assetPack,

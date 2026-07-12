@@ -3,7 +3,8 @@
 Status: active; opened 2026-07-12. Slice 0 inventory and characterization
 landed; Slice 1 canonical defaults, Android overlays, and desktop DTO cleanup
 landed; Slice 2 canonical scene-host retention and configured camera factory
-landed; Slice 3 opaque browser configuration handle landed.
+landed; Slice 3 opaque browser configuration handle and Slice 4 movement-mode
+canary landed.
 
 Workstream: native Rust shared launch/startup configuration in
 `mclone-app-runtime` and `mclone-scene`, with adoption by desktop flat,
@@ -387,22 +388,41 @@ a separate scalar schema.
 This slice intentionally uses the original small request only after the
 configuration shape is fixed.
 
-- [ ] Add one shared movement-mode startup value with accepted labels
+- [x] Add one shared movement-mode startup value with accepted labels
   `walk`, `fly`, `hand-push`, and `thruster` (final product labels may follow
   the existing shared movement taxonomy).
-- [ ] Define its collision interaction through the existing shared movement
+- [x] Define its collision interaction through the existing shared movement
   experience reducer; do not encode a desktop shortcut assumption in startup
   parsing.
-- [ ] Add `--movement-mode` to shared argv parsing and `movementMode` to shared
+- [x] Add `--movement-mode` to shared argv parsing and `movementMode` to shared
   browser-query parsing.
-- [ ] Apply it through the single shared scene/camera configuration boundary.
-- [ ] Prove desktop flat, offscreen, web, flat Android, desktop XR, and Android
+- [x] Apply it through the single shared scene/camera configuration boundary.
+- [x] Prove desktop flat, offscreen, web, flat Android, desktop XR, and Android
   XR consume the value without platform-specific setting code.
-- [ ] Record the actual diff footprint and compare it with the acceptance
+- [x] Record the actual diff footprint and compare it with the acceptance
   budget below.
 
 Exit criteria: the canary adds no platform DTO field, no app-local movement
 enum, no platform startup setter, and no web scalar-constructor parameter.
+
+Slice 4 adds `GameMovementMode` only to canonical `StartupSceneOptions`, with
+shared argv/query spellings and parser tests for `walk`, `fly`, `hand-push`,
+`gorilla`, and `thruster`. `SceneCameraConfig` feeds the selected mode through
+the existing `ClientExperienceSettingsState` reducer, then applies the reduced
+movement and collision modes at the single camera factory. Startup Fly is
+therefore collision-backed rather than inheriting the desktop toggle's no-clip
+shortcut; Hand Push and Thruster also normalize to normal collision.
+
+The production diff footprint is the shared parser/config, the shared camera
+factory/reducer import, and desktop help text. There is no platform DTO field,
+app-local enum, Android/XR setter, TypeScript schema field, or wasm constructor
+parameter. Desktop flat/offscreen tests passed, desktop XR and both Android
+apps compiled, and the browser local-worker smoke parsed `movementMode=fly`
+through the opaque Rust handle and reported `movementMode: FLY`. The 2560x1600
+offscreen Fly capture retained the expected daylight spruce slope, cow,
+chicken, and framing. This meets the acceptance budget: implementation touched
+the canonical parser, one shared application point, tests, smoke input, and
+help/documentation only.
 
 ## Slice 5: Enforcement And Documentation
 

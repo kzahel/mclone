@@ -9,13 +9,21 @@ use mclone_app_runtime::session::SessionStorageIntent;
 pub(crate) struct SceneCameraConfig {
     movement_speed_multiplier: f64,
     first_person_player_visible: bool,
+    movement_mode: EngineCameraMovementMode,
+    collision_mode: EngineCameraCollisionMode,
 }
 
 impl SceneCameraConfig {
     pub(crate) fn from_scene(scene: &McloneSceneHostOptions) -> Self {
+        let mut movement = ClientExperienceSettingsState::default();
+        movement.apply_movement_experience_change(
+            ClientExperienceMovementSettingChange::MovementMode(scene.movement_mode),
+        );
         Self {
             movement_speed_multiplier: f64::from(scene.movement_speed_multiplier),
             first_person_player_visible: scene.first_person_player_visible,
+            movement_mode: engine_movement_mode(movement.movement_mode),
+            collision_mode: engine_collision_mode(movement.collision_mode),
         }
     }
 
@@ -55,6 +63,8 @@ impl SceneCameraConfig {
     fn apply_with_speed(self, camera: &mut EngineCameraController, movement_speed_multiplier: f64) {
         camera.set_movement_speed_multiplier(movement_speed_multiplier);
         camera.set_first_person_player_visible(self.first_person_player_visible);
+        camera.set_movement_mode(self.movement_mode);
+        camera.set_collision_mode(self.collision_mode);
     }
 }
 
@@ -2304,5 +2314,29 @@ mod camera_config_tests {
 
         assert_eq!(camera.movement_speed_multiplier(), 3.5);
         assert!(camera.first_person_player_visible());
+    }
+
+    #[test]
+    fn configured_camera_applies_movement_through_shared_reducer() {
+        for (mode, engine_mode) in [
+            (GameMovementMode::Walk, EngineCameraMovementMode::Walking),
+            (GameMovementMode::Fly, EngineCameraMovementMode::Fly),
+            (
+                GameMovementMode::HandPush,
+                EngineCameraMovementMode::HandPush,
+            ),
+            (
+                GameMovementMode::Thruster,
+                EngineCameraMovementMode::Thruster,
+            ),
+        ] {
+            let mut scene = McloneSceneHostOptions::default();
+            scene.movement_mode = mode;
+
+            let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
+
+            assert_eq!(camera.movement_mode(), engine_mode);
+            assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+        }
     }
 }

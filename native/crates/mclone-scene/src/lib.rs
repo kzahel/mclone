@@ -17,9 +17,10 @@ use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCata
 use mclone_app_runtime::client_experience::xr_native_client_experience_profile;
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
-    ClientExperienceGameplayEffect, ClientExperienceProfile, ClientExperienceProjectionEffect,
-    ClientExperienceSettingsEffects, ClientExperienceSettingsState,
-    client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
+    ClientExperienceGameplayEffect, ClientExperienceMovementSettingChange, ClientExperienceProfile,
+    ClientExperienceProjectionEffect, ClientExperienceSettingsEffects,
+    ClientExperienceSettingsState, client_experience_should_apply_ui_projection,
+    desktop_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::client_session_failed_start_ui_effects;
 use mclone_app_runtime::client_session_policy::{

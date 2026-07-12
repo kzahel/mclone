@@ -9,6 +9,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
 use mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE;
+use mclone_ui::GameMovementMode;
 
 use crate::far_lod::{FarLodDetailMode, FarTerrainLodConfig};
 use crate::{
@@ -29,6 +30,7 @@ pub const ARG_TRANSIENT: &str = "--transient";
 pub const ARG_DAY_TIME: &str = "--day-time";
 pub const ARG_FREEZE_TIME: &str = "--freeze-time";
 pub const ARG_MOVEMENT_SPEED_MULTIPLIER: &str = "--movement-speed-multiplier";
+pub const ARG_MOVEMENT_MODE: &str = "--movement-mode";
 pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
@@ -58,6 +60,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_DAY_TIME,
     ARG_FREEZE_TIME,
     ARG_MOVEMENT_SPEED_MULTIPLIER,
+    ARG_MOVEMENT_MODE,
     ARG_DEBUG_PASSIVE_SHOWCASE,
     ARG_LIGHTING,
     ARG_LIGHT_STATUS_BATCH_SIZE,
@@ -81,6 +84,7 @@ pub const QUERY_REMOTE_WS_URL: &str = "remoteWsUrl";
 pub const QUERY_DAY_TIME: &str = "dayTime";
 pub const QUERY_FREEZE_TIME: &str = "freezeTime";
 pub const QUERY_MOVEMENT_SPEED_MULTIPLIER: &str = "movementSpeedMultiplier";
+pub const QUERY_MOVEMENT_MODE: &str = "movementMode";
 pub const QUERY_DEBUG_PASSIVE_SHOWCASE: &str = "debugPassiveShowcase";
 pub const QUERY_LIGHTING: &str = "lighting";
 pub const QUERY_LIGHT_STATUS_BATCH_SIZE: &str = "lightStatusBatchSize";
@@ -102,6 +106,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_DAY_TIME,
     QUERY_FREEZE_TIME,
     QUERY_MOVEMENT_SPEED_MULTIPLIER,
+    QUERY_MOVEMENT_MODE,
     QUERY_DEBUG_PASSIVE_SHOWCASE,
     QUERY_LIGHTING,
     QUERY_LIGHT_STATUS_BATCH_SIZE,
@@ -142,6 +147,7 @@ pub struct StartupSceneOptions {
     pub day_time_override: Option<u64>,
     pub freeze_time: bool,
     pub movement_speed_multiplier: f32,
+    pub movement_mode: GameMovementMode,
     pub debug_passive_showcase: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
@@ -165,6 +171,7 @@ impl Default for StartupSceneOptions {
             day_time_override: None,
             freeze_time: false,
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
+            movement_mode: GameMovementMode::Walk,
             debug_passive_showcase: true,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -418,6 +425,9 @@ impl StartupArgState {
                     args.next(),
                 )?;
             }
+            ARG_MOVEMENT_MODE => {
+                self.scene.movement_mode = parse_movement_mode_arg(ARG_MOVEMENT_MODE, args.next())?;
+            }
             ARG_DEBUG_PASSIVE_SHOWCASE => {
                 self.scene.debug_passive_showcase =
                     parse_bool_arg(ARG_DEBUG_PASSIVE_SHOWCASE, args.next())?;
@@ -511,6 +521,9 @@ impl StartupArgState {
             QUERY_MOVEMENT_SPEED_MULTIPLIER => {
                 self.scene.movement_speed_multiplier =
                     parse_movement_speed_multiplier_arg(QUERY_MOVEMENT_SPEED_MULTIPLIER, value)?;
+            }
+            QUERY_MOVEMENT_MODE => {
+                self.scene.movement_mode = parse_movement_mode_arg(QUERY_MOVEMENT_MODE, value)?;
             }
             QUERY_DEBUG_PASSIVE_SHOWCASE => {
                 self.scene.debug_passive_showcase =
@@ -718,6 +731,17 @@ pub fn parse_movement_speed_multiplier_arg(flag: &str, value: Option<String>) ->
     Ok(parsed)
 }
 
+pub fn parse_movement_mode_arg(flag: &str, value: Option<String>) -> Result<GameMovementMode> {
+    let value = parse_string_arg(flag, value)?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "walk" | "walking" | "player" => Ok(GameMovementMode::Walk),
+        "fly" | "flying" => Ok(GameMovementMode::Fly),
+        "hand-push" | "hand_push" | "handpush" | "gorilla" => Ok(GameMovementMode::HandPush),
+        "thruster" | "thrust" => Ok(GameMovementMode::Thruster),
+        _ => bail!("{flag} must be walk, fly, hand-push, or thruster, got `{value}`"),
+    }
+}
+
 fn parse_remote_addr_arg(value: Option<String>) -> Result<Option<String>> {
     parse_remote_addr_value(ARG_REMOTE_ADDR, value)
 }
@@ -777,6 +801,7 @@ mod tests {
                 day_time_override: None,
                 freeze_time: false,
                 movement_speed_multiplier: 1.0,
+                movement_mode: GameMovementMode::Walk,
                 debug_passive_showcase: true,
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -828,6 +853,8 @@ mod tests {
             ARG_FREEZE_TIME,
             ARG_MOVEMENT_SPEED_MULTIPLIER,
             "1.75",
+            ARG_MOVEMENT_MODE,
+            "thruster",
             ARG_LIGHTING,
             "false",
         ]);
@@ -839,6 +866,7 @@ mod tests {
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
             (QUERY_MOVEMENT_SPEED_MULTIPLIER, "1.75"),
+            (QUERY_MOVEMENT_MODE, "thruster"),
             (QUERY_LIGHTING, "false"),
         ] {
             assert!(
@@ -877,6 +905,8 @@ mod tests {
             ARG_FREEZE_TIME,
             ARG_MOVEMENT_SPEED_MULTIPLIER,
             "2.5",
+            ARG_MOVEMENT_MODE,
+            "fly",
             ARG_DEBUG_PASSIVE_SHOWCASE,
             "false",
             ARG_LIGHT_STATUS_BATCH_SIZE,
@@ -906,6 +936,7 @@ mod tests {
                 day_time_override: Some(6000),
                 freeze_time: true,
                 movement_speed_multiplier: 2.5,
+                movement_mode: GameMovementMode::Fly,
                 debug_passive_showcase: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
@@ -946,6 +977,28 @@ mod tests {
 
         let options = parse(&[ARG_LIGHTING, "false", ARG_FULLBRIGHT, "false"]);
         assert!(!options.render_options.force_fullbright);
+    }
+
+    #[test]
+    fn movement_mode_accepts_product_labels_and_aliases() {
+        for (value, expected) in [
+            ("walk", GameMovementMode::Walk),
+            ("fly", GameMovementMode::Fly),
+            ("hand-push", GameMovementMode::HandPush),
+            ("gorilla", GameMovementMode::HandPush),
+            ("thruster", GameMovementMode::Thruster),
+        ] {
+            assert_eq!(
+                parse_movement_mode_arg(ARG_MOVEMENT_MODE, Some(value.to_owned())).unwrap(),
+                expected
+            );
+        }
+        assert!(
+            parse_movement_mode_arg(ARG_MOVEMENT_MODE, Some("spectator".to_owned()))
+                .unwrap_err()
+                .to_string()
+                .contains("walk, fly, hand-push, or thruster")
+        );
     }
 
     #[test]
@@ -1174,6 +1227,7 @@ mod tests {
                 day_time_override: Some(6000),
                 freeze_time: true,
                 movement_speed_multiplier: 0.5,
+                movement_mode: GameMovementMode::Walk,
                 debug_passive_showcase: false,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
