@@ -793,7 +793,7 @@ pub(crate) fn write_headless_dual_view(
     let base_camera = ChunkCamera::overview_for_chunk_area(
         options.scene.chunk_x,
         options.scene.chunk_z,
-        options.scene.render_distance,
+        i32::try_from(options.scene.render_distance).context("render distance exceeds i32")?,
     );
     let cameras = dual_view_cameras(base_camera);
     let scene = options.scene.clone();

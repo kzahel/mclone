@@ -61,11 +61,7 @@ use mclone_render::headless::{HeadlessClearOptions, write_headless_clear_png};
 #[cfg(test)]
 use mclone_render_session::snapshot_mesh_block_state_ids;
 
-const DEFAULT_SEED: i64 = 12345;
-const DEFAULT_CHUNK_X: i32 = 0;
-const DEFAULT_CHUNK_Z: i32 = 0;
 const MIN_RENDER_DISTANCE: i32 = 2;
-const DEFAULT_RENDER_DISTANCE: i32 = 5;
 const MAX_RENDER_DISTANCE: i32 = 32;
 const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;
 const DEFAULT_MOVEMENT_PERF_PATH_RADIUS: i32 = 4;

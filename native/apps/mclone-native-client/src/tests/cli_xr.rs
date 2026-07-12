@@ -1,4 +1,5 @@
 use super::*;
+use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 #[test]
 fn cli_parses_xr_clear_smoke_options() {
@@ -48,12 +49,15 @@ fn cli_parses_xr_mclone_smoke_options() {
         Cli::XrMcloneSmoke {
             options: XrMcloneSmokeOptions {
                 scene: SceneOptions {
-                    seed: 54321,
-                    chunk_x: 2,
-                    chunk_z: -1,
-                    render_distance: 3,
-                    day_time_override: Some(6000),
-                    freeze_time: true,
+                    startup: StartupSceneOptions {
+                        seed: 54321,
+                        chunk_x: 2,
+                        chunk_z: -1,
+                        render_distance: 3,
+                        day_time_override: Some(6000),
+                        freeze_time: true,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions {

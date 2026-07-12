@@ -1,8 +1,8 @@
 # 173: Shared Startup Configuration
 
 Status: active; opened 2026-07-12. Slice 0 inventory and characterization
-landed; Slice 1 canonical defaults and Android overlays landed; Slice 2 began
-with canonical scene-host retention.
+landed; Slice 1 canonical defaults, Android overlays, and desktop DTO cleanup
+landed; Slice 2 canonical scene-host retention is in progress.
 
 Workstream: native Rust shared launch/startup configuration in
 `mclone-app-runtime` and `mclone-scene`, with adoption by desktop flat,
@@ -277,9 +277,9 @@ replaces flat Android's complete shared literal with the named
 
 - [x] Make `StartupOptions` (or a deliberately renamed replacement) the
   canonical retained launch value.
-- [ ] Separate canonical shared scene/session settings from render, initial
+- [x] Separate canonical shared scene/session settings from render, initial
   camera, storage intent, and source-local options without duplicating fields.
-- [ ] Replace desktop `SceneOptions` shared-field copies with a nested canonical
+- [x] Replace desktop `SceneOptions` shared-field copies with a nested canonical
   configuration plus desktop/harness-only records.
 - [x] Replace full Android shared-option literals with neutral defaults and
   named, minimal overlays.
@@ -291,6 +291,16 @@ replaces flat Android's complete shared literal with the named
 Flat Android now uses the shared neutral default plus a named fixed-time
 overlay. Android XR now uses the canonical neutral default directly instead of
 deriving it through a scene-host round-trip.
+
+Desktop `SceneOptions` now nests `StartupSceneOptions` and retains only
+desktop/harness policy beside it: capacity-reporting mode, worker timing,
+resolved filesystem roots, simulation cadence, visibility, adaptive budgets,
+and LOD prewarm. The old signed `i32` render-distance copy was removed; APIs
+that truly require a signed radius convert at their call boundary. Parser
+completion now installs the canonical record whole, while host assembly clones
+it and applies only the derived-capacity overlay. Desktop flat and desktop XR
+remote replacement clone the canonical record and change only remote intent.
+The old field-enumerating desktop `to_*` / `from_*` projections are gone.
 
 Exit criteria: adding a field to canonical shared scene configuration does not
 force a mechanical edit to desktop or Android option structures.

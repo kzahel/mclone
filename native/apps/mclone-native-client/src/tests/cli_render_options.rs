@@ -1,4 +1,5 @@
 use super::*;
+use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 #[test]
 fn cli_parses_render_distance() {
@@ -15,7 +16,10 @@ fn cli_parses_render_distance() {
         screenshot_cli(
             "/tmp/mclone-frame.png",
             SceneOptions {
-                render_distance: 32,
+                startup: StartupSceneOptions {
+                    render_distance: 32,
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             TexturedSectionRenderOptions::default(),
@@ -39,8 +43,11 @@ fn cli_parses_render_compile_workers() {
         Cli::MovementPerf {
             options: MovementPerfOptions {
                 scene: SceneOptions {
-                    render_compile_worker_count: 2,
-                    render_compile_max_pending_jobs: Some(6),
+                    startup: StartupSceneOptions {
+                        render_compile_worker_count: 2,
+                        render_compile_max_pending_jobs: Some(6),
+                        ..Default::default()
+                    },
                     render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
                     ..SceneOptions::default()
                 },
@@ -65,7 +72,10 @@ fn cli_parses_far_lod_opt_in() {
         screenshot_cli(
             "/tmp/mclone-frame.png",
             SceneOptions {
-                far_lod: mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled(),
+                startup: StartupSceneOptions {
+                    far_lod: mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled(),
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             TexturedSectionRenderOptions::default(),
@@ -95,7 +105,10 @@ fn cli_parses_startup_lod_prewarm_opt_out() {
         screenshot_cli(
             "/tmp/mclone-frame.png",
             SceneOptions {
-                far_lod: mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled(),
+                startup: StartupSceneOptions {
+                    far_lod: mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled(),
+                    ..Default::default()
+                },
                 startup_lod_prewarm: false,
                 ..SceneOptions::default()
             },
@@ -119,7 +132,10 @@ fn cli_parses_movement_speed_multiplier() {
         screenshot_cli(
             "/tmp/mclone-frame.png",
             SceneOptions {
-                movement_speed_multiplier: 2.25,
+                startup: StartupSceneOptions {
+                    movement_speed_multiplier: 2.25,
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             TexturedSectionRenderOptions::default(),
@@ -319,7 +335,10 @@ fn cli_parses_lighting_false_as_runtime_bypass() {
         cli,
         Cli::Window {
             scene: SceneOptions {
-                lighting_enabled: false,
+                startup: StartupSceneOptions {
+                    lighting_enabled: false,
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             render_options: TexturedSectionRenderOptions {
@@ -344,7 +363,10 @@ fn cli_parses_lighting_false_as_runtime_bypass() {
         cli,
         Cli::Window {
             scene: SceneOptions {
-                lighting_enabled: false,
+                startup: StartupSceneOptions {
+                    lighting_enabled: false,
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             render_options: TexturedSectionRenderOptions::default(),

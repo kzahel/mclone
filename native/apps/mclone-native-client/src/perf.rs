@@ -3240,7 +3240,8 @@ pub(crate) fn run_loading_settle_perf(
         let mut scene = options.scene.clone();
         scene.chunk_x = spawn_center.x;
         scene.chunk_z = spawn_center.z;
-        scene.render_distance = render_distance;
+        scene.render_distance =
+            u32::try_from(render_distance).context("render distance must be non-negative")?;
         scene.world_dir = None;
         let spectator = SpectatorCamera::spawn_for_scene(&scene);
 
@@ -3957,7 +3958,8 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
     };
     Ok(TimedemoReport {
         options: options.clone(),
-        loaded_render_distance,
+        loaded_render_distance: i32::try_from(loaded_render_distance)
+            .context("loaded render distance exceeds i32")?,
         visibility_graph_stats: state.warmup.visibility_graph,
         scene_build_ms: state.warmup.elapsed_ms,
         section_count,
@@ -4260,11 +4262,12 @@ fn frame_budget_probe_spectator(
 }
 
 fn timedemo_loaded_scene(options: &TimedemoOptions) -> Result<SceneOptions> {
-    let loaded_radius = options
-        .scene
-        .render_distance
-        .max(options.path_radius_chunks);
-    if loaded_radius > MAX_RENDER_DISTANCE {
+    let path_radius = u32::try_from(options.path_radius_chunks)
+        .context("timedemo path radius must be non-negative")?;
+    let loaded_radius = options.scene.render_distance.max(path_radius);
+    if loaded_radius
+        > u32::try_from(MAX_RENDER_DISTANCE).expect("maximum render distance is non-negative")
+    {
         bail!(
             "--timedemo requires static loaded radius {loaded_radius}, but the current max is {MAX_RENDER_DISTANCE}; lower --path-radius"
         );
@@ -4367,6 +4370,7 @@ fn timedemo_camera(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_app_runtime::startup_args::StartupSceneOptions;
 
     #[test]
     fn frame_budget_summary_uses_shared_accounting_math() {
@@ -4457,7 +4461,10 @@ mod tests {
     fn timedemo_loaded_scene_covers_camera_path_radius() {
         let options = TimedemoOptions {
             scene: SceneOptions {
-                render_distance: 1,
+                startup: StartupSceneOptions {
+                    render_distance: 1,
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             path_radius_chunks: 4,
@@ -4474,7 +4481,10 @@ mod tests {
     fn timedemo_loaded_scene_rejects_oversized_static_radius() {
         let options = TimedemoOptions {
             scene: SceneOptions {
-                render_distance: 1,
+                startup: StartupSceneOptions {
+                    render_distance: 1,
+                    ..Default::default()
+                },
                 ..SceneOptions::default()
             },
             path_radius_chunks: MAX_RENDER_DISTANCE + 1,

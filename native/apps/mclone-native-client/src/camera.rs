@@ -78,6 +78,7 @@ impl SpectatorCamera {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_app_runtime::startup_args::StartupSceneOptions;
 
     #[test]
     fn world_coord_to_chunk_coord_floors_negative_positions() {
@@ -96,8 +97,11 @@ mod tests {
     #[test]
     fn spectator_spawn_starts_interest_in_scene_center_chunk() {
         let scene = SceneOptions {
-            chunk_x: 3,
-            chunk_z: -2,
+            startup: StartupSceneOptions {
+                chunk_x: 3,
+                chunk_z: -2,
+                ..Default::default()
+            },
             ..SceneOptions::default()
         };
         let spectator = SpectatorCamera::spawn_for_scene(&scene);

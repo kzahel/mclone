@@ -835,7 +835,7 @@ fn xr_scene_options_from_desktop_scene(
     debug_ui_screen: Option<CliXrDebugUiScreen>,
 ) -> Result<McloneSceneHostOptions> {
     let mut options = McloneSceneHostOptions::from_startup_scene(
-        scene.to_startup_scene(),
+        scene.startup_for_host(),
         scene.world_root.clone(),
         scene.world_dir.clone(),
     );
@@ -868,22 +868,14 @@ fn desktop_scene_options_for_xr_remote(
     endpoint: &RemoteSessionEndpoint,
     scene: &McloneSceneHostOptions,
 ) -> SceneOptions {
-    SceneOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: scene.render_distance as i32,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
-        simulation_cadence: Default::default(),
+    let startup = mclone_app_runtime::startup_args::StartupSceneOptions {
         remote_addr: Some(endpoint.address.clone()),
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
+        ..scene.startup.clone()
+    };
+    SceneOptions {
+        startup,
+        simulation_cadence: Default::default(),
         first_person_player_visible: false,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
-        far_lod: scene.far_lod,
         world_root: scene.world_root.clone(),
         world_dir: None,
         ..SceneOptions::default()

@@ -1,4 +1,5 @@
 use super::*;
+use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 #[test]
 fn cli_parses_headless_dual_view_scene_options() {
@@ -26,9 +27,12 @@ fn cli_parses_headless_dual_view_scene_options() {
                 width: 960,
                 height: 640,
                 scene: SceneOptions {
-                    seed: 54321,
-                    chunk_x: 2,
-                    chunk_z: -1,
+                    startup: StartupSceneOptions {
+                        seed: 54321,
+                        chunk_x: 2,
+                        chunk_z: -1,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -220,7 +224,10 @@ fn cli_parses_renderer_rebuild_smoke_options() {
                 width: 640,
                 height: 360,
                 scene: SceneOptions {
-                    seed: 99,
+                    startup: StartupSceneOptions {
+                        seed: 99,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions {
@@ -289,8 +296,11 @@ fn cli_parses_remote_player_visual_smoke_options() {
                 width: 800,
                 height: 450,
                 scene: SceneOptions {
-                    seed: 77,
-                    lighting_enabled: false,
+                    startup: StartupSceneOptions {
+                        seed: 77,
+                        lighting_enabled: false,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions {
@@ -404,7 +414,10 @@ fn cli_parses_full_frame_screenshot_options() {
                 width: 960,
                 height: 540,
                 scene: SceneOptions {
-                    remote_addr: Some("127.0.0.1:25565".to_owned()),
+                    startup: StartupSceneOptions {
+                        remote_addr: Some("127.0.0.1:25565".to_owned()),
+                        ..Default::default()
+                    },
                     adaptive_chunk_publication_budget: false,
                     ..SceneOptions::default()
                 },
@@ -528,32 +541,13 @@ fn cli_parses_screenshot_scene_options() {
         screenshot_cli(
             "/tmp/mclone-frame.png",
             SceneOptions {
-                seed: -9,
-                chunk_x: 2,
-                chunk_z: -3,
-                render_distance: DEFAULT_RENDER_DISTANCE,
-                render_compile_worker_count:
-                    mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-                render_compile_max_pending_jobs: Some(
-                    mclone_app_runtime::render_assets::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
-                ),
-                render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Default,
-                render_compile_worker_timing_enabled: true,
-                remote_addr: None,
-                world_root: SceneOptions::default().world_root,
-                world_dir: None,
-                day_time_override: None,
-                freeze_time: false,
-                movement_speed_multiplier: 1.0,
-                simulation_cadence: mclone_server::SimulationCadenceConfig::default(),
-                first_person_player_visible: false,
-                debug_passive_showcase: true,
-                lighting_enabled: true,
-                light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
-                adaptive_chunk_publication_budget: true,
-                adaptive_render_admission_budget: false,
-                far_lod: Default::default(),
-                startup_lod_prewarm: true,
+                startup: StartupSceneOptions {
+                    seed: -9,
+                    chunk_x: 2,
+                    chunk_z: -3,
+                    ..Default::default()
+                },
+                ..SceneOptions::default()
             },
             TexturedSectionRenderOptions::default(),
         )

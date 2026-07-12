@@ -8,6 +8,7 @@ use mclone_app_runtime::prepared_assets::{
     AssetPackSourceRegistry, reference_asset_pack_selection,
 };
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
+use mclone_app_runtime::startup_args::StartupSceneOptions;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_scene::{McloneSceneHost, McloneSceneHostOptions, XrStartupViewPose};
 
@@ -141,7 +142,7 @@ pub(crate) fn configure_desktop_asset_pack_sources(
 pub(crate) fn scene_host_options_from_desktop(
     scene: &SceneOptions,
 ) -> Result<McloneSceneHostOptions> {
-    let startup = scene.to_startup_scene();
+    let startup = scene.startup_for_host();
     McloneSceneHostOptions {
         startup,
         render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
@@ -165,26 +166,17 @@ fn desktop_scene_options_for_remote(
     endpoint: &RemoteSessionEndpoint,
     scene: &McloneSceneHostOptions,
 ) -> SceneOptions {
-    SceneOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: scene.render_distance as i32,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
-        render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
-        simulation_cadence: scene.simulation_cadence,
+    let startup = StartupSceneOptions {
         remote_addr: Some(endpoint.address.clone()),
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
-        debug_passive_showcase: scene.debug_passive_showcase,
+        ..scene.startup.clone()
+    };
+    SceneOptions {
+        startup,
+        render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
+        simulation_cadence: scene.simulation_cadence,
         first_person_player_visible: scene.first_person_player_visible,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
         adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
         adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        far_lod: scene.far_lod,
         startup_lod_prewarm: scene.startup_lod_prewarm,
         world_root: scene.world_root.clone(),
         world_dir: None,
@@ -203,25 +195,28 @@ mod tests {
 
     fn customized_scene() -> SceneOptions {
         SceneOptions {
-            seed: -42,
-            chunk_x: 7,
-            chunk_z: -9,
-            render_distance: 6,
-            render_compile_worker_count: 3,
-            render_compile_max_pending_jobs: Some(11),
+            startup: StartupSceneOptions {
+                seed: -42,
+                chunk_x: 7,
+                chunk_z: -9,
+                render_distance: 6,
+                render_compile_worker_count: 3,
+                render_compile_max_pending_jobs: Some(11),
+                movement_speed_multiplier: 1.25,
+                day_time_override: Some(13_000),
+                freeze_time: true,
+                debug_passive_showcase: false,
+                lighting_enabled: false,
+                light_status_batch_size: 5,
+                far_lod: FarTerrainLodConfig::enabled().with_extra_radius_chunks(8),
+                ..Default::default()
+            },
             render_compile_worker_timing_enabled: false,
-            movement_speed_multiplier: 1.25,
             simulation_cadence: SimulationCadenceConfig::new(30, 30, 60)
                 .with_max_catch_up_host_frames(7),
-            day_time_override: Some(13_000),
-            freeze_time: true,
             first_person_player_visible: true,
-            debug_passive_showcase: false,
-            lighting_enabled: false,
-            light_status_batch_size: 5,
             adaptive_chunk_publication_budget: false,
             adaptive_render_admission_budget: true,
-            far_lod: FarTerrainLodConfig::enabled().with_extra_radius_chunks(8),
             startup_lod_prewarm: false,
             world_root: Some(PathBuf::from("world-root")),
             world_dir: Some(PathBuf::from("world-dir")),
@@ -234,6 +229,7 @@ mod tests {
         let scene = customized_scene();
         let mono = scene_host_options_from_desktop(&scene).expect("valid Mono scene");
 
+        assert_eq!(mono.startup, scene.startup);
         assert_eq!(mono.seed, scene.seed);
         assert_eq!(mono.chunk_x, scene.chunk_x);
         assert_eq!(mono.chunk_z, scene.chunk_z);

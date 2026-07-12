@@ -1,19 +1,16 @@
+use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
-use mclone_app_runtime::far_lod::FarTerrainLodConfig;
 use mclone_app_runtime::frame_render::{MAX_FLAT_RENDER_SCALE, MIN_FLAT_RENDER_SCALE};
-use mclone_app_runtime::render_assets::{
-    DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-};
 use mclone_app_runtime::startup_args::{
     RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupSceneOptions,
     parse_bool_arg, parse_i32_arg, parse_u32_arg, parse_u64_arg,
 };
 use mclone_input::KeyboardKey;
 use mclone_render::chunk::TexturedSectionRenderOptions;
-use mclone_render_session::{ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, EngineCameraViewMode};
-use mclone_server::{DEFAULT_LIGHT_STATUS_BATCH_SIZE, SimulationCadenceConfig};
+use mclone_render_session::EngineCameraViewMode;
+use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScreen};
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
@@ -21,13 +18,12 @@ use crate::render_compile_capacity::{
     RenderCompileCapacityHostKind, preflight_render_compile_capacity_report,
 };
 use crate::{
-    DEFAULT_CHUNK_X, DEFAULT_CHUNK_Z, DEFAULT_FRAME_BUDGET_PROBE_FRAMES,
-    DEFAULT_FRAME_BUDGET_TARGET_HZ, DEFAULT_MOVEMENT_PERF_PATH_RADIUS, DEFAULT_MOVEMENT_PERF_STEPS,
-    DEFAULT_RENDER_DISTANCE, DEFAULT_SEED, DEFAULT_STARTUP_STREAMING_PERF_FRAMES,
-    DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS, MAX_FRAME_BUDGET_PROBE_FRAMES,
-    MAX_LOADING_SETTLE_DISTANCE_COUNT, MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS,
-    MAX_RENDER_DISTANCE, MAX_STARTUP_STREAMING_PERF_FRAMES, MAX_TIMEDEMO_FRAMES,
-    MIN_RENDER_DISTANCE,
+    DEFAULT_FRAME_BUDGET_PROBE_FRAMES, DEFAULT_FRAME_BUDGET_TARGET_HZ,
+    DEFAULT_MOVEMENT_PERF_PATH_RADIUS, DEFAULT_MOVEMENT_PERF_STEPS,
+    DEFAULT_STARTUP_STREAMING_PERF_FRAMES, DEFAULT_TIMEDEMO_FRAMES, DEFAULT_TIMEDEMO_PATH_RADIUS,
+    MAX_FRAME_BUDGET_PROBE_FRAMES, MAX_LOADING_SETTLE_DISTANCE_COUNT,
+    MAX_MOVEMENT_PERF_PATH_RADIUS, MAX_MOVEMENT_PERF_STEPS, MAX_RENDER_DISTANCE,
+    MAX_STARTUP_STREAMING_PERF_FRAMES, MAX_TIMEDEMO_FRAMES, MIN_RENDER_DISTANCE,
 };
 
 const MAX_SCREENSHOT_REMOTE_SETTLE_MS: u64 = 10_000;
@@ -127,39 +123,17 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneOptions {
-    pub(crate) seed: i64,
-    pub(crate) chunk_x: i32,
-    pub(crate) chunk_z: i32,
-    pub(crate) render_distance: i32,
-    pub(crate) render_compile_worker_count: usize,
-    pub(crate) render_compile_max_pending_jobs: Option<usize>,
+    pub(crate) startup: StartupSceneOptions,
     pub(crate) render_compile_capacity_mode: RenderCompileCapacityMode,
     pub(crate) render_compile_worker_timing_enabled: bool,
-    pub(crate) remote_addr: Option<String>,
     pub(crate) world_root: Option<PathBuf>,
     pub(crate) world_dir: Option<PathBuf>,
-    /// Debug override: force the day/night clock to this `dayTime` (ticks) for
-    /// captures, instead of using whatever the simulation has advanced to.
-    pub(crate) day_time_override: Option<u64>,
-    /// Debug: stop the integrated server from advancing the day/night clock, so a
-    /// forced (or initial) `dayTime` stays put for inspection.
-    pub(crate) freeze_time: bool,
-    pub(crate) movement_speed_multiplier: f32,
     pub(crate) simulation_cadence: SimulationCadenceConfig,
     pub(crate) first_person_player_visible: bool,
-    pub(crate) debug_passive_showcase: bool,
-    /// Debug/perf switch: bypass native `ChunkStatus::Light` promotion and let
-    /// generated `Features` snapshots stream directly to the client.
-    pub(crate) lighting_enabled: bool,
-    /// Debug/perf controller for how many feature publications are coalesced
-    /// into one initial light-status worker batch.
-    pub(crate) light_status_batch_size: usize,
     /// Experimental shared scheduler controller for feature/light publication.
     pub(crate) adaptive_chunk_publication_budget: bool,
     /// Experimental shared controller for live desktop render admission.
     pub(crate) adaptive_render_admission_budget: bool,
-    /// Experimental, opt-in far surface LOD shell. Disabled by default.
-    pub(crate) far_lod: FarTerrainLodConfig,
     /// Startup LOD prewarm (tactical 162 Slice 1): build cheap retained far-LOD
     /// coverage before the first playable frame. Only active when `far_lod` is
     /// enabled. Defaults on so `--far-lod true` prewarms; disable with
@@ -545,88 +519,59 @@ impl Default for FrameBudgetProbeOptions {
 impl Default for SceneOptions {
     fn default() -> Self {
         Self {
-            seed: DEFAULT_SEED,
-            chunk_x: DEFAULT_CHUNK_X,
-            chunk_z: DEFAULT_CHUNK_Z,
-            render_distance: DEFAULT_RENDER_DISTANCE,
-            render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
+            startup: StartupSceneOptions::default(),
             render_compile_capacity_mode: RenderCompileCapacityMode::Default,
             render_compile_worker_timing_enabled: true,
-            remote_addr: None,
             world_root: Some(default_native_world_root()),
             world_dir: None,
-            day_time_override: None,
-            freeze_time: false,
-            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             simulation_cadence: SimulationCadenceConfig::default(),
             first_person_player_visible: false,
-            debug_passive_showcase: true,
-            lighting_enabled: true,
-            light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
-            far_lod: FarTerrainLodConfig::default(),
             startup_lod_prewarm: true,
         }
     }
 }
 
 impl SceneOptions {
-    pub(crate) fn to_startup_scene(&self) -> StartupSceneOptions {
-        StartupSceneOptions {
-            seed: self.seed,
-            chunk_x: self.chunk_x,
-            chunk_z: self.chunk_z,
-            render_distance: u32::try_from(self.render_distance)
-                .expect("desktop default render distance is non-negative"),
-            render_compile_worker_count: self.render_compile_worker_count,
-            render_compile_max_pending_jobs: self.render_compile_max_pending_jobs,
-            render_compile_capacity_request: if self.render_compile_capacity_mode
-                == RenderCompileCapacityMode::DerivedApplied
-            {
+    pub(crate) fn startup_for_host(&self) -> StartupSceneOptions {
+        let mut startup = self.startup.clone();
+        startup.render_compile_capacity_request =
+            if self.render_compile_capacity_mode == RenderCompileCapacityMode::DerivedApplied {
                 RenderCompileCapacityRequest::Derived
             } else {
                 RenderCompileCapacityRequest::Default
-            },
-            remote_addr: self.remote_addr.clone(),
-            day_time_override: self.day_time_override,
-            freeze_time: self.freeze_time,
-            movement_speed_multiplier: self.movement_speed_multiplier,
-            debug_passive_showcase: self.debug_passive_showcase,
-            lighting_enabled: self.lighting_enabled,
-            light_status_batch_size: self.light_status_batch_size,
-            far_lod: self.far_lod,
-        }
+            };
+        startup
     }
 
-    fn from_startup_scene(scene: StartupSceneOptions) -> Result<Self> {
-        Ok(Self {
-            seed: scene.seed,
-            chunk_x: scene.chunk_x,
-            chunk_z: scene.chunk_z,
-            render_distance: i32::try_from(scene.render_distance)
-                .context("desktop render distance does not fit i32")?,
-            render_compile_worker_count: scene.render_compile_worker_count,
-            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+    fn with_startup(startup: StartupSceneOptions) -> Self {
+        Self {
+            startup,
             render_compile_capacity_mode: RenderCompileCapacityMode::Default,
             render_compile_worker_timing_enabled: true,
-            remote_addr: scene.remote_addr,
             world_root: Some(default_native_world_root()),
             world_dir: None,
-            day_time_override: scene.day_time_override,
-            freeze_time: scene.freeze_time,
-            movement_speed_multiplier: scene.movement_speed_multiplier,
             simulation_cadence: SimulationCadenceConfig::default(),
             first_person_player_visible: false,
-            debug_passive_showcase: scene.debug_passive_showcase,
-            lighting_enabled: scene.lighting_enabled,
-            light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
-            far_lod: scene.far_lod,
             startup_lod_prewarm: true,
-        })
+        }
+    }
+}
+
+impl Deref for SceneOptions {
+    type Target = StartupSceneOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.startup
+    }
+}
+
+impl DerefMut for SceneOptions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.startup
     }
 }
 
@@ -722,7 +667,7 @@ impl Cli {
         let mut width = None;
         let mut height = None;
         let mut startup_args = StartupArgState::new(
-            SceneOptions::default().to_startup_scene(),
+            SceneOptions::default().startup,
             TexturedSectionRenderOptions::default(),
         );
         let mut screenshot_ui = HeadlessScreenshotUi::None;
@@ -1472,7 +1417,7 @@ impl Cli {
         let startup_options = startup_args.finish();
         let startup_camera = startup_options.camera;
         let startup_storage = startup_options.storage;
-        let mut scene = SceneOptions::from_startup_scene(startup_options.scene)?;
+        let mut scene = SceneOptions::with_startup(startup_options.scene);
         scene.first_person_player_visible = first_person_player_visible;
         scene.simulation_cadence = simulation_cadence;
         scene.startup_lod_prewarm = startup_lod_prewarm;

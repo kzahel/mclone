@@ -1,4 +1,5 @@
 use super::*;
+use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 fn startup_streaming_defaults() -> StartupStreamingPerfOptions {
     StartupStreamingPerfOptions {
@@ -35,7 +36,10 @@ fn cli_parses_movement_perf_options() {
         Cli::MovementPerf {
             options: MovementPerfOptions {
                 scene: SceneOptions {
-                    render_distance: 2,
+                    startup: StartupSceneOptions {
+                        render_distance: 2,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -68,10 +72,13 @@ fn cli_parses_loading_settle_perf_options() {
         Cli::LoadingSettlePerf {
             options: LoadingSettlePerfOptions {
                 scene: SceneOptions {
-                    seed: 99,
-                    render_compile_worker_count: 2,
+                    startup: StartupSceneOptions {
+                        seed: 99,
+                        render_compile_worker_count: 2,
+                        debug_passive_showcase: false,
+                        ..Default::default()
+                    },
                     render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
-                    debug_passive_showcase: false,
                     ..SceneOptions::default()
                 },
                 distances: vec![5, 10, 30],
@@ -134,13 +141,16 @@ fn cli_parses_startup_streaming_perf_options() {
         Cli::StartupStreamingPerf {
             options: StartupStreamingPerfOptions {
                 scene: SceneOptions {
-                    render_distance: 20,
-                    render_compile_worker_count: 2,
-                    render_compile_max_pending_jobs: Some(8),
+                    startup: StartupSceneOptions {
+                        render_distance: 20,
+                        render_compile_worker_count: 2,
+                        render_compile_max_pending_jobs: Some(8),
+                        debug_passive_showcase: false,
+                        light_status_batch_size: 5,
+                        ..Default::default()
+                    },
                     render_compile_capacity_mode: crate::cli::RenderCompileCapacityMode::Manual,
                     render_compile_worker_timing_enabled: false,
-                    debug_passive_showcase: false,
-                    light_status_batch_size: 5,
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -469,7 +479,10 @@ fn cli_parses_timedemo_options() {
         Cli::Timedemo {
             options: TimedemoOptions {
                 scene: SceneOptions {
-                    render_distance: 2,
+                    startup: StartupSceneOptions {
+                        render_distance: 2,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -508,7 +521,10 @@ fn cli_parses_frame_budget_probe_options() {
         Cli::FrameBudgetProbe {
             options: FrameBudgetProbeOptions {
                 scene: SceneOptions {
-                    render_distance: 2,
+                    startup: StartupSceneOptions {
+                        render_distance: 2,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -566,7 +582,10 @@ fn cli_parses_movement_frame_probe_options() {
         Cli::FrameBudgetProbe {
             options: FrameBudgetProbeOptions {
                 scene: SceneOptions {
-                    render_distance: 2,
+                    startup: StartupSceneOptions {
+                        render_distance: 2,
+                        ..Default::default()
+                    },
                     ..SceneOptions::default()
                 },
                 render_options: TexturedSectionRenderOptions::default(),
@@ -598,7 +617,10 @@ fn cli_parses_remote_addr() {
         screenshot_cli(
             "/tmp/mclone-frame.png",
             SceneOptions {
-                remote_addr: Some("127.0.0.1:25565".to_owned()),
+                startup: StartupSceneOptions {
+                    remote_addr: Some("127.0.0.1:25565".to_owned()),
+                    ..Default::default()
+                },
                 adaptive_chunk_publication_budget: false,
                 ..SceneOptions::default()
             },
