@@ -21,3 +21,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   browser feature-parity, asset follow-up, and documentation burn-down
 - `far-lod-settle-contract` — tactical 172 settle-state harness, coverage
   correctness burn-down, and LOD detail modes
+- `shared-startup-configuration` — tactical 173 canonical launch
+  configuration, scene-host consumption, and thin platform-source adapters

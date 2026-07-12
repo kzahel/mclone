@@ -173,12 +173,35 @@ impl Default for StartupSceneOptions {
     }
 }
 
+impl StartupSceneOptions {
+    /// Applies the flat-client product default of starting at a fixed day time.
+    ///
+    /// Platform adapters should use named overlays like this instead of
+    /// restating the complete shared startup schema.
+    pub fn with_initial_time_frozen_at(mut self, day_time: u64) -> Self {
+        self.day_time_override = Some(day_time);
+        self.freeze_time = true;
+        self
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartupOptions {
     pub scene: StartupSceneOptions,
     pub storage: StartupWorldStorageOptions,
     pub render_options: TexturedSectionRenderOptions,
     pub camera: StartupCameraOptions,
+}
+
+impl Default for StartupOptions {
+    fn default() -> Self {
+        Self {
+            scene: StartupSceneOptions::default(),
+            storage: StartupWorldStorageOptions::default(),
+            render_options: TexturedSectionRenderOptions::default(),
+            camera: StartupCameraOptions::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -772,6 +795,64 @@ mod tests {
             StartupArgState::default().finish().camera,
             StartupCameraOptions::default()
         );
+    }
+
+    #[test]
+    fn named_time_overlay_changes_only_time_policy() {
+        let baseline = StartupSceneOptions::default();
+        let configured = baseline.clone().with_initial_time_frozen_at(6000);
+
+        assert_eq!(configured.day_time_override, Some(6000));
+        assert!(configured.freeze_time);
+        assert_eq!(
+            StartupSceneOptions {
+                day_time_override: None,
+                freeze_time: false,
+                ..configured
+            },
+            baseline
+        );
+    }
+
+    #[test]
+    fn argv_and_query_sources_produce_equivalent_shared_configuration() {
+        let argv = parse(&[
+            ARG_SEED,
+            "-77",
+            ARG_RENDER_DISTANCE,
+            "6",
+            ARG_REMOTE_ADDR,
+            "example.test:25565",
+            ARG_DAY_TIME,
+            "6000",
+            ARG_FREEZE_TIME,
+            ARG_MOVEMENT_SPEED_MULTIPLIER,
+            "1.75",
+            ARG_LIGHTING,
+            "false",
+        ]);
+        let mut query = StartupArgState::default();
+        for (key, value) in [
+            (QUERY_SEED, "-77"),
+            (QUERY_RENDER_DISTANCE, "6"),
+            (QUERY_REMOTE_WS_URL, "example.test:25565"),
+            (QUERY_DAY_TIME, "6000"),
+            (QUERY_FREEZE_TIME, ""),
+            (QUERY_MOVEMENT_SPEED_MULTIPLIER, "1.75"),
+            (QUERY_LIGHTING, "false"),
+        ] {
+            assert!(
+                query
+                    .parse_query_param(
+                        key,
+                        Some(value.to_owned()),
+                        RenderDistanceLimits::new(1, 16),
+                    )
+                    .unwrap()
+            );
+        }
+
+        assert_eq!(query.finish(), argv);
     }
 
     #[test]

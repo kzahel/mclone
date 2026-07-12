@@ -2,10 +2,6 @@ use std::ffi::{CStr, CString, c_char};
 
 use anyhow::{Context, Result, bail};
 use mclone_android_platform::{android_app_data_world_root, normalize_android_legacy_remote_addr};
-use mclone_app_runtime::far_lod::FarTerrainLodConfig;
-use mclone_app_runtime::render_assets::{
-    DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-};
 use mclone_app_runtime::render_compile_capacity::{
     RenderCompileCapacityHostKind, host_total_memory_bytes,
     preflight_render_compile_capacity_report,
@@ -16,7 +12,6 @@ use mclone_app_runtime::startup_args::{
 };
 use mclone_core::Vec3d;
 use mclone_render::chunk::TexturedSectionRenderOptions;
-use mclone_render_session::ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER;
 use mclone_scene::{McloneSceneHost, McloneSceneHostOptions};
 use winit::platform::android::activity::AndroidApp;
 
@@ -166,23 +161,7 @@ fn parse_android_startup_options(
 }
 
 fn android_startup_scene_defaults() -> StartupSceneOptions {
-    StartupSceneOptions {
-        seed: 12345,
-        chunk_x: 0,
-        chunk_z: 0,
-        render_distance: 5,
-        render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-        render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
-        render_compile_capacity_request: Default::default(),
-        movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
-        remote_addr: None,
-        day_time_override: Some(6000),
-        freeze_time: true,
-        debug_passive_showcase: true,
-        lighting_enabled: true,
-        light_status_batch_size: StartupSceneOptions::default().light_status_batch_size,
-        far_lod: FarTerrainLodConfig::default(),
-    }
+    StartupSceneOptions::default().with_initial_time_frozen_at(6000)
 }
 
 pub(crate) fn apply_startup_camera_options(
