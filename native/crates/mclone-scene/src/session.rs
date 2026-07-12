@@ -5,6 +5,59 @@ use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::session::SessionStorageIntent;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SceneCameraConfig {
+    movement_speed_multiplier: f64,
+    first_person_player_visible: bool,
+}
+
+impl SceneCameraConfig {
+    pub(crate) fn from_scene(scene: &McloneSceneHostOptions) -> Self {
+        Self {
+            movement_speed_multiplier: f64::from(scene.movement_speed_multiplier),
+            first_person_player_visible: scene.first_person_player_visible,
+        }
+    }
+
+    fn spawn_for_chunk(self, center: ChunkPos) -> EngineCameraController {
+        self.spawn_for_chunk_with_speed(center, self.movement_speed_multiplier)
+    }
+
+    fn spawn_for_chunk_with_speed(
+        self,
+        center: ChunkPos,
+        movement_speed_multiplier: f64,
+    ) -> EngineCameraController {
+        let mut camera = EngineCameraController::spawn_for_chunk(center);
+        self.apply_with_speed(&mut camera, movement_speed_multiplier);
+        camera
+    }
+
+    pub(crate) fn from_eye_pose(
+        self,
+        eye: Vec3d,
+        yaw_radians: f64,
+        pitch_radians: f64,
+        speed_blocks_per_second: f64,
+        collision_mode: EngineCameraCollisionMode,
+    ) -> EngineCameraController {
+        let mut camera = EngineCameraController::from_eye_pose(
+            eye,
+            yaw_radians,
+            pitch_radians,
+            speed_blocks_per_second,
+        );
+        self.apply_with_speed(&mut camera, self.movement_speed_multiplier);
+        camera.set_collision_mode(collision_mode);
+        camera
+    }
+
+    fn apply_with_speed(self, camera: &mut EngineCameraController, movement_speed_multiplier: f64) {
+        camera.set_movement_speed_multiplier(movement_speed_multiplier);
+        camera.set_first_person_player_visible(self.first_person_player_visible);
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) trait SceneSessionRuntimeFactory {
     fn start(
@@ -15,7 +68,6 @@ pub(crate) trait SceneSessionRuntimeFactory {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        movement_speed_multiplier: f32,
         clock: &MonotonicClockHandle,
     ) -> Result<StartedSceneRuntime>;
 }
@@ -44,16 +96,16 @@ where
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        movement_speed_multiplier: f32,
         clock: &MonotonicClockHandle,
     ) -> Result<StartedSceneRuntime> {
+        let camera_config = SceneCameraConfig::from_scene(&scene);
         let runtime = (self.factory)(endpoint, scene, mesh_assets)?;
         start_scene_runtime(
             device,
             queue,
             color_format,
             runtime,
-            movement_speed_multiplier,
+            camera_config,
             None,
             clock,
         )
@@ -205,9 +257,7 @@ impl McloneSceneHost {
             .world_root
             .clone()
             .map(native_world_catalog_operations);
-        let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
-        camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
-        camera.set_first_person_player_visible(scene.first_person_player_visible);
+        let mut camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
         if let Some(view_pose) = startup_view_pose {
             apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
                 .context("apply initial XR local startup view pose")?;
@@ -379,7 +429,7 @@ impl McloneSceneHost {
             queue,
             color_format,
             runtime,
-            scene.movement_speed_multiplier,
+            SceneCameraConfig::from_scene(&scene),
             startup_view_pose,
             &clock,
         )?;
@@ -517,9 +567,6 @@ impl McloneSceneHost {
             rendered_frames: 0,
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
-        state
-            .camera
-            .set_first_person_player_visible(scene.first_person_player_visible);
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
         state.apply_debug_ui_screen();
         Ok(state)
@@ -556,9 +603,8 @@ impl McloneSceneHost {
             );
         }
         let mesh_assets = active_assets.mesh.clone();
-        let mut camera = EngineCameraController::spawn_for_chunk(runtime.interest_center());
-        camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
-        camera.set_first_person_player_visible(scene.first_person_player_visible);
+        let mut camera =
+            SceneCameraConfig::from_scene(&scene).spawn_for_chunk(runtime.interest_center());
         if let Some(view_pose) = startup_view_pose {
             apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
                 .context("apply initial scene startup view pose")?;
@@ -859,9 +905,8 @@ impl McloneSceneHost {
         }
 
         let movement_speed_multiplier = self.camera.movement_speed_multiplier();
-        let mut camera = EngineCameraController::spawn_for_chunk(runtime.interest_center());
-        camera.set_movement_speed_multiplier(movement_speed_multiplier);
-        camera.set_first_person_player_visible(pending.scene.first_person_player_visible);
+        let camera = SceneCameraConfig::from_scene(&pending.scene)
+            .spawn_for_chunk_with_speed(runtime.interest_center(), movement_speed_multiplier);
         self.draw = TexturedSectionDrawResources::new(
             device,
             queue,
@@ -1089,9 +1134,7 @@ impl McloneSceneHost {
             mesh_assets,
         )
         .context("create XR local world startup pump")?;
-        let mut camera = EngineCameraController::spawn_for_chunk(scene.center());
-        camera.set_movement_speed_multiplier(f64::from(scene.movement_speed_multiplier));
-        camera.set_first_person_player_visible(scene.first_person_player_visible);
+        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
         self.local_startup = Some(SceneLocalStartup {
             request: request.clone(),
             descriptor,
@@ -1417,7 +1460,6 @@ impl McloneSceneHost {
             return Err(error);
         };
         let scene = scene.validated()?;
-        let movement_speed_multiplier = scene.movement_speed_multiplier;
         let started = match factory.start(
             endpoint.clone(),
             scene.clone(),
@@ -1425,7 +1467,6 @@ impl McloneSceneHost {
             device,
             queue,
             self.color_format,
-            movement_speed_multiplier,
             &self.services.clock,
         ) {
             Ok(started) => started,
@@ -1439,8 +1480,6 @@ impl McloneSceneHost {
         self.mesh_assets = started.runtime.mesh_assets().clone();
         self.runtime = Some(started.runtime);
         self.camera = started.camera;
-        self.camera
-            .set_first_person_player_visible(self.scene.first_person_player_visible);
         self.draw = started.draw;
         self.render_stats = started.render_stats;
         self.sync_player_appearance()
@@ -2027,7 +2066,7 @@ pub(crate) fn start_scene_runtime<S>(
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
     runtime: NativeSessionServices<S>,
-    movement_speed_multiplier: f32,
+    camera_config: SceneCameraConfig,
     startup_view_pose: Option<XrStartupViewPose>,
     clock: &MonotonicClockHandle,
 ) -> Result<StartedSceneRuntime>
@@ -2038,8 +2077,7 @@ where
     let render_distance = runtime.render_distance();
     let host_label = runtime.host_label();
     let session_label = active_session_label(runtime.active_session());
-    let mut camera = EngineCameraController::spawn_for_chunk(center);
-    camera.set_movement_speed_multiplier(f64::from(movement_speed_multiplier));
+    let mut camera = camera_config.spawn_for_chunk(center);
     // docs/tactical/167 Slice 3/4: drive the shared startup pump synchronously to a
     // drawable active view instead of `poll_until_idle` + `sync_all_render_sections`,
     // reconciling the final startup pose *inside* the drive. If the accepted server
@@ -2236,5 +2274,35 @@ pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) ->
             format!("remote:{}", endpoint.address)
         }
         None => "none".to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod camera_config_tests {
+    use super::*;
+
+    #[test]
+    fn configured_camera_applies_launch_defaults_once() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.movement_speed_multiplier = 2.25;
+        scene.first_person_player_visible = true;
+
+        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
+
+        assert_eq!(camera.movement_speed_multiplier(), 2.25);
+        assert!(camera.first_person_player_visible());
+    }
+
+    #[test]
+    fn replacement_camera_preserves_runtime_speed_and_applies_scene_visibility() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.movement_speed_multiplier = 1.25;
+        scene.first_person_player_visible = true;
+
+        let camera = SceneCameraConfig::from_scene(&scene)
+            .spawn_for_chunk_with_speed(ChunkPos::new(4, -3), 3.5);
+
+        assert_eq!(camera.movement_speed_multiplier(), 3.5);
+        assert!(camera.first_person_player_visible());
     }
 }

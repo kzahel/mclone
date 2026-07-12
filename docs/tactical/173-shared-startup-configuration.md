@@ -2,7 +2,8 @@
 
 Status: active; opened 2026-07-12. Slice 0 inventory and characterization
 landed; Slice 1 canonical defaults, Android overlays, and desktop DTO cleanup
-landed; Slice 2 canonical scene-host retention is in progress.
+landed; Slice 2 canonical scene-host retention and configured camera factory
+landed.
 
 Workstream: native Rust shared launch/startup configuration in
 `mclone-app-runtime` and `mclone-scene`, with adoption by desktop flat,
@@ -311,13 +312,13 @@ force a mechanical edit to desktop or Android option structures.
   shared configuration without restating its parsed fields.
 - [ ] Split host-only tuning and harness controls into nested records where
   that avoids false platform ownership.
-- [ ] Delete bidirectional projections that enumerate shared fields.
-- [ ] Introduce one shared configured camera/session construction path.
-- [ ] Route initial local, initial remote, menu-driven replacement, startup
+- [x] Delete bidirectional projections that enumerate shared fields.
+- [x] Introduce one shared configured camera/session construction path.
+- [x] Route initial local, initial remote, menu-driven replacement, startup
   pose replacement, and mono/stereo setup through that path.
-- [ ] Preserve runtime user changes across camera replacement where the current
+- [x] Preserve runtime user changes across camera replacement where the current
   behavior requires it; distinguish those from launch defaults explicitly.
-- [ ] Add tests for initial startup and replacement so configured values cannot
+- [x] Add tests for initial startup and replacement so configured values cannot
   reset silently.
 
 Exit criteria: scene and camera policy have one shared application point, and
@@ -333,6 +334,18 @@ Web local/remote constructors now build that same nested record; the remote
 constructor also retains its remote launch intent instead of allowing the old
 reverse projection to replace it with `None`. The opaque web configuration
 handle and scalar-constructor deletion remain Slice 3 work.
+
+The next Slice 2 commit introduces `SceneCameraConfig`, derived once from the
+scene host configuration. Initial local, initial external/remote, queued local,
+remote replacement, startup-pose, and mono camera replacement paths all use
+that configured factory. Launch construction applies configured movement speed
+and first-person visibility once. External session replacement explicitly
+passes the current runtime speed as an override while applying the replacement
+scene's visibility, preserving the existing user-settings contract. Focused
+tests lock both policies. The native offscreen smoke passed at 2560x1600 (64
+sections, 11 drawn, two visible actors), and visual inspection of
+`/tmp/mclone-desktop-offscreen.png` showed the expected daylight spruce slope,
+cow, chicken, terrain, and foliage without camera/framing regression.
 
 ## Slice 3: Browser Configuration Handle
 

@@ -363,15 +363,13 @@ impl McloneSceneHost {
         speed_blocks_per_second: f64,
         collision_mode: EngineCameraCollisionMode,
     ) {
-        let mut camera = EngineCameraController::from_eye_pose(
+        let camera = SceneCameraConfig::from_scene(&self.scene).from_eye_pose(
             eye,
             yaw_radians,
             pitch_radians,
             speed_blocks_per_second,
+            collision_mode,
         );
-        camera.set_movement_speed_multiplier(f64::from(self.scene.movement_speed_multiplier));
-        camera.set_first_person_player_visible(self.scene.first_person_player_visible);
-        camera.set_collision_mode(collision_mode);
         if let Some(startup) = &mut self.local_startup {
             startup.replace_camera(camera.clone());
         }
