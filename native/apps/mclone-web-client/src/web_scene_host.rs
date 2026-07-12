@@ -1151,18 +1151,22 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         id: None,
         display_name: None,
     };
-    let scene = McloneSceneHostOptions {
+    let startup = mclone_app_runtime::startup_args::StartupSceneOptions {
         seed,
         chunk_x: center.x,
         chunk_z: center.z,
         render_distance,
         movement_speed_multiplier,
-        use_initial_spawn_center: false,
         far_lod: if far_lod_enabled {
             mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled()
         } else {
             Default::default()
         },
+        ..Default::default()
+    };
+    let scene = McloneSceneHostOptions {
+        startup,
+        use_initial_spawn_center: false,
         startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
     };
@@ -1217,18 +1221,23 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
     let descriptor = ActiveSessionDescriptor::Remote {
         endpoint: RemoteSessionEndpoint::new(websocket_url.clone()),
     };
-    let scene = McloneSceneHostOptions {
+    let startup = mclone_app_runtime::startup_args::StartupSceneOptions {
         seed: DEFAULT_SEED,
         chunk_x: center.x,
         chunk_z: center.z,
         render_distance,
         movement_speed_multiplier,
-        use_initial_spawn_center: false,
+        remote_addr: Some(websocket_url),
         far_lod: if far_lod_enabled {
             mclone_app_runtime::far_lod::FarTerrainLodConfig::enabled()
         } else {
             Default::default()
         },
+        ..Default::default()
+    };
+    let scene = McloneSceneHostOptions {
+        startup,
+        use_initial_spawn_center: false,
         startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
     };

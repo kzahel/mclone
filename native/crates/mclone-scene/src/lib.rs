@@ -30,7 +30,7 @@ use mclone_app_runtime::client_session_policy::{
 };
 use mclone_app_runtime::debug_overlay::DebugPaneStats;
 use mclone_app_runtime::far_lod::{
-    FarTerrainLodConfig, FarTerrainLodProducerStats, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
+    FarTerrainLodProducerStats, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
     MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
 };
 use mclone_app_runtime::frame_pacing::{
@@ -126,13 +126,12 @@ use mclone_render::uniform::{
     SINGLE_VIEW_SLOT,
 };
 use mclone_render_session::{
-    ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER,
-    ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER,
-    ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MOUSE_SENSITIVITY,
-    EngineCameraCollisionMode, EngineCameraController, EngineCameraFrameState, EngineCameraInput,
-    EngineCameraMovementImpulse, EngineCameraMovementMode, EngineCameraSnapshot,
-    EngineCameraViewMode, EngineDebugVisualOptions, EngineHandPushInput,
-    EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
+    ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
+    ENGINE_CAMERA_MOUSE_SENSITIVITY, EngineCameraCollisionMode, EngineCameraController,
+    EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
+    EngineCameraMovementMode, EngineCameraSnapshot, EngineCameraViewMode, EngineDebugVisualOptions,
+    EngineHandPushInput, EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
     RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
     RenderSectionUploadPhaseReport, XrFov, XrRenderView, XrView, XrViewPose,
     actor_instances_from_presentations, engine_debug_world_lines,
@@ -184,10 +183,6 @@ pub use frame_pipeline_reporter::{
     xr_frame_pipeline_stage_spans,
 };
 
-pub const DEFAULT_XR_SEED: i64 = 12_345;
-pub const DEFAULT_XR_CHUNK_X: i32 = 0;
-pub const DEFAULT_XR_CHUNK_Z: i32 = 0;
-pub const DEFAULT_XR_RENDER_DISTANCE: u32 = 5;
 pub const MAX_XR_RENDER_DISTANCE: u32 = 16;
 pub const XR_NEAR: f32 = 0.05;
 pub const XR_FAR: f32 = 700.0;

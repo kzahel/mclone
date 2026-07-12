@@ -1,8 +1,8 @@
 # 173: Shared Startup Configuration
 
 Status: active; opened 2026-07-12. Slice 0 inventory and characterization
-landed; Slice 1 began with canonical defaults and the first named platform
-overlay.
+landed; Slice 1 canonical defaults and Android overlays landed; Slice 2 began
+with canonical scene-host retention.
 
 Workstream: native Rust shared launch/startup configuration in
 `mclone-app-runtime` and `mclone-scene`, with adoption by desktop flat,
@@ -281,7 +281,7 @@ replaces flat Android's complete shared literal with the named
   camera, storage intent, and source-local options without duplicating fields.
 - [ ] Replace desktop `SceneOptions` shared-field copies with a nested canonical
   configuration plus desktop/harness-only records.
-- [ ] Replace full Android shared-option literals with neutral defaults and
+- [x] Replace full Android shared-option literals with neutral defaults and
   named, minimal overlays.
 - [ ] Make invalid combinations fail in shared validation before a platform
   resource is created.
@@ -289,15 +289,15 @@ replaces flat Android's complete shared literal with the named
   sources produce equivalent canonical values for equivalent inputs.
 
 Flat Android now uses the shared neutral default plus a named fixed-time
-overlay. Android XR still derives its startup scene through a scene-host
-round-trip and is the remaining Android cleanup for this checkbox.
+overlay. Android XR now uses the canonical neutral default directly instead of
+deriving it through a scene-host round-trip.
 
 Exit criteria: adding a field to canonical shared scene configuration does not
 force a mechanical edit to desktop or Android option structures.
 
 ## Slice 2: Scene-Host Consumption And Camera Factory
 
-- [ ] Make `McloneSceneHostOptions` contain or losslessly consume canonical
+- [x] Make `McloneSceneHostOptions` contain or losslessly consume canonical
   shared configuration without restating its parsed fields.
 - [ ] Split host-only tuning and harness controls into nested records where
   that avoids false platform ownership.
@@ -312,6 +312,17 @@ force a mechanical edit to desktop or Android option structures.
 
 Exit criteria: scene and camera policy have one shared application point, and
 platform adapters pass resources and cadence facts rather than startup values.
+
+The first Slice 2 commit nests `StartupSceneOptions` directly in
+`McloneSceneHostOptions`, removes all thirteen restated parsed fields, and
+deletes the scene host's enumerating reverse projection. `Deref`/`DerefMut`
+temporarily preserve source compatibility for shared scene internals while the
+remaining desktop DTO is migrated. Desktop host construction now supplies its
+one parser projection as the nested value and enumerates only host policy.
+Web local/remote constructors now build that same nested record; the remote
+constructor also retains its remote launch intent instead of allowing the old
+reverse projection to replace it with `None`. The opaque web configuration
+handle and scalar-constructor deletion remain Slice 3 work.
 
 ## Slice 3: Browser Configuration Handle
 

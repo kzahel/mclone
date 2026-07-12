@@ -1,4 +1,5 @@
 use super::*;
+use std::ops::{Deref, DerefMut};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum XrUnderwaterDetectionMode {
@@ -42,26 +43,14 @@ impl XrDebugUiScreen {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct McloneSceneHostOptions {
-    pub seed: i64,
-    pub chunk_x: i32,
-    pub chunk_z: i32,
-    pub render_distance: u32,
-    pub render_compile_worker_count: usize,
-    pub render_compile_max_pending_jobs: Option<usize>,
+    pub startup: mclone_app_runtime::startup_args::StartupSceneOptions,
     pub render_compile_worker_timing_enabled: bool,
-    pub movement_speed_multiplier: f32,
     pub simulation_cadence: SimulationCadenceConfig,
     pub first_person_player_visible: bool,
-    pub day_time_override: Option<u64>,
-    pub freeze_time: bool,
-    pub debug_passive_showcase: bool,
     pub use_initial_spawn_center: bool,
     pub freeze_scheduled_fluid_ticks: bool,
-    pub lighting_enabled: bool,
-    pub light_status_batch_size: usize,
     pub adaptive_chunk_publication_budget: bool,
     pub adaptive_render_admission_budget: bool,
-    pub far_lod: FarTerrainLodConfig,
     pub startup_lod_prewarm: bool,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
     pub debug_ui_screen: Option<XrDebugUiScreen>,
@@ -73,30 +62,14 @@ pub struct McloneSceneHostOptions {
 impl Default for McloneSceneHostOptions {
     fn default() -> Self {
         Self {
-            seed: DEFAULT_XR_SEED,
-            chunk_x: DEFAULT_XR_CHUNK_X,
-            chunk_z: DEFAULT_XR_CHUNK_Z,
-            render_distance: DEFAULT_XR_RENDER_DISTANCE,
-            render_compile_worker_count: mclone_app_runtime::DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
-            render_compile_max_pending_jobs: Some(
-                mclone_app_runtime::DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS,
-            ),
+            startup: mclone_app_runtime::startup_args::StartupSceneOptions::default(),
             render_compile_worker_timing_enabled: true,
-            movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             simulation_cadence: SimulationCadenceConfig::default(),
             first_person_player_visible: false,
-            day_time_override: None,
-            freeze_time: false,
-            debug_passive_showcase: true,
             use_initial_spawn_center: true,
             freeze_scheduled_fluid_ticks: false,
-            lighting_enabled: true,
-            light_status_batch_size:
-                mclone_app_runtime::startup_args::StartupSceneOptions::default()
-                    .light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: true,
-            far_lod: FarTerrainLodConfig::default(),
             startup_lod_prewarm: true,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
@@ -114,52 +87,20 @@ impl McloneSceneHostOptions {
         world_dir: Option<PathBuf>,
     ) -> Self {
         Self {
-            seed: scene.seed,
-            chunk_x: scene.chunk_x,
-            chunk_z: scene.chunk_z,
-            render_distance: scene.render_distance,
-            render_compile_worker_count: scene.render_compile_worker_count,
-            render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+            startup: scene,
             render_compile_worker_timing_enabled: true,
-            movement_speed_multiplier: scene.movement_speed_multiplier,
             simulation_cadence: SimulationCadenceConfig::default(),
             first_person_player_visible: false,
-            day_time_override: scene.day_time_override,
-            freeze_time: scene.freeze_time,
-            debug_passive_showcase: scene.debug_passive_showcase,
             use_initial_spawn_center: true,
             freeze_scheduled_fluid_ticks: false,
-            lighting_enabled: scene.lighting_enabled,
-            light_status_batch_size: scene.light_status_batch_size,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: true,
-            far_lod: scene.far_lod,
             startup_lod_prewarm: true,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,
             world_root,
             world_dir,
-        }
-    }
-
-    pub fn to_startup_scene(&self) -> mclone_app_runtime::startup_args::StartupSceneOptions {
-        mclone_app_runtime::startup_args::StartupSceneOptions {
-            seed: self.seed,
-            chunk_x: self.chunk_x,
-            chunk_z: self.chunk_z,
-            render_distance: self.render_distance,
-            render_compile_worker_count: self.render_compile_worker_count,
-            render_compile_max_pending_jobs: self.render_compile_max_pending_jobs,
-            render_compile_capacity_request: Default::default(),
-            movement_speed_multiplier: self.movement_speed_multiplier,
-            remote_addr: None,
-            day_time_override: self.day_time_override,
-            freeze_time: self.freeze_time,
-            debug_passive_showcase: self.debug_passive_showcase,
-            lighting_enabled: self.lighting_enabled,
-            light_status_batch_size: self.light_status_batch_size,
-            far_lod: self.far_lod,
         }
     }
 
@@ -196,6 +137,20 @@ impl McloneSceneHostOptions {
             );
         }
         Ok(self)
+    }
+}
+
+impl Deref for McloneSceneHostOptions {
+    type Target = mclone_app_runtime::startup_args::StartupSceneOptions;
+
+    fn deref(&self) -> &Self::Target {
+        &self.startup
+    }
+}
+
+impl DerefMut for McloneSceneHostOptions {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.startup
     }
 }
 
@@ -302,8 +257,9 @@ mod tests {
         scene.chunk_z = 7;
         scene.render_distance = 3;
         scene.freeze_time = true;
+        scene.remote_addr = Some("example.test:25565".to_owned());
         scene.adaptive_chunk_publication_budget = false;
-        let startup = scene.to_startup_scene();
+        let startup = scene.startup.clone();
         let projected = McloneSceneHostOptions::from_startup_scene(
             startup,
             Some(PathBuf::from("/tmp/worlds")),
@@ -315,6 +271,7 @@ mod tests {
         assert_eq!(projected.chunk_z, scene.chunk_z);
         assert_eq!(projected.render_distance, scene.render_distance);
         assert_eq!(projected.freeze_time, scene.freeze_time);
+        assert_eq!(projected.remote_addr, scene.remote_addr);
         assert_eq!(projected.world_root, Some(PathBuf::from("/tmp/worlds")));
         assert_eq!(projected.world_dir, Some(PathBuf::from("/tmp/worlds/demo")));
         // Platform policy is deliberately layered after the shared projection.

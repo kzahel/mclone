@@ -975,7 +975,7 @@ mod android {
     }
 
     fn android_xr_startup_scene_defaults() -> StartupSceneOptions {
-        McloneSceneHostOptions::default().to_startup_scene()
+        StartupSceneOptions::default()
     }
 
     fn android_xr_scene_options_from_startup(

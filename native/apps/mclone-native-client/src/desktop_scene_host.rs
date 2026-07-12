@@ -141,28 +141,16 @@ pub(crate) fn configure_desktop_asset_pack_sources(
 pub(crate) fn scene_host_options_from_desktop(
     scene: &SceneOptions,
 ) -> Result<McloneSceneHostOptions> {
+    let startup = scene.to_startup_scene();
     McloneSceneHostOptions {
-        seed: scene.seed,
-        chunk_x: scene.chunk_x,
-        chunk_z: scene.chunk_z,
-        render_distance: u32::try_from(scene.render_distance)
-            .context("desktop render distance must fit u32")?,
-        render_compile_worker_count: scene.render_compile_worker_count,
-        render_compile_max_pending_jobs: scene.render_compile_max_pending_jobs,
+        startup,
         render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
-        movement_speed_multiplier: scene.movement_speed_multiplier,
         simulation_cadence: scene.simulation_cadence,
         first_person_player_visible: scene.first_person_player_visible,
-        day_time_override: scene.day_time_override,
-        freeze_time: scene.freeze_time,
-        debug_passive_showcase: scene.debug_passive_showcase,
         use_initial_spawn_center: false,
         freeze_scheduled_fluid_ticks: false,
-        lighting_enabled: scene.lighting_enabled,
-        light_status_batch_size: scene.light_status_batch_size,
         adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
         adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        far_lod: scene.far_lod,
         startup_lod_prewarm: scene.startup_lod_prewarm,
         underwater_detection_mode: mclone_scene::XrUnderwaterDetectionMode::Midpoint,
         debug_ui_screen: None,
