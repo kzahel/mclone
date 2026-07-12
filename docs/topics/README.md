@@ -69,6 +69,14 @@ series implements the same concern, normally reuse the document slug in its
 - [`falling-tree-physics.md`](falling-tree-physics.md): Dynamic Falling Tree
   and Sable reference investigation for future tree felling, moving voxel
   assemblies, and impact effects.
+- [`embedded-worlds.md`](embedded-worlds.md): design north-star for rendering a
+  second world inside the current one — lobby diorama, seed-explorer console,
+  network "palantir" window, warm world switching, walkable seams, and
+  shrink-and-fall nesting. Records geometry-first XR composition, the
+  baked→live-local→remote-spectator→joined-warm fidelity ladder, N-world budget,
+  runtime/authority/render seams, and the protected single-world fast path. A
+  first non-rendering app-runtime smoke retains two isolated integrated hosts;
+  composition and product switching remain unbuilt.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
   focus/capture, virtual-keyboard text entry, input contexts, render staging,

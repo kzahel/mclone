@@ -23,3 +23,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   correctness burn-down, and LOD detail modes
 - `shared-startup-configuration` — tactical 173 canonical launch
   configuration, scene-host consumption, and thin platform-source adapters
+- `embedded-worlds` — nested/second-world rendering and warm-world runtime
+  foundation (lobby diorama, seed explorer, network palantir, quick switching,
+  seams/portals, shrink-and-fall); geometry-first XR composition, fidelity
+  ladder, authority/runtime/render seams, and protected single-world fast path.
+  Initial dual-integrated-host ownership smoke added; no commit series yet
