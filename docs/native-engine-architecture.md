@@ -107,6 +107,30 @@ platform input/lifecycle
   -> mclone-render
 ```
 
+Shared launch values enter through
+`mclone-app-runtime::startup_args::StartupOptions`. Its nested
+`StartupSceneOptions` is the canonical retained scene/session configuration:
+platforms collect argv, Android launch properties, or browser query values,
+then carry that record without restating its fields. Desktop `SceneOptions`
+and `McloneSceneHostOptions` nest the canonical value beside desktop/harness or
+scene-host policy. Storage remains an unresolved intent until a platform
+projects its root/resource, while render and initial-camera options remain
+canonical siblings rather than fields copied into app DTOs.
+
+The browser keeps parsed `StartupOptions` behind opaque wasm-bindgen
+`WebStartupConfig`. TypeScript receives only a narrow browser plan for choosing
+local worker versus remote WebSocket and presenting initial render state; both
+scene constructors return the same handle to Rust. Shared fields, defaults,
+and validation must not become TypeScript interfaces or positional wasm
+parameters.
+
+`mclone-scene::SceneCameraConfig` is the single application boundary for
+launch-time camera policy. It applies movement speed, first-person visibility,
+and reducer-normalized movement/collision to initial local, remote, XR, and
+mono cameras. Replacement paths use the same factory and explicitly preserve
+runtime-adjusted speed where required. Platform adapters must not apply shared
+startup camera setters themselves.
+
 This covers desktop flat, offscreen flat, headset-free XR emulation, flat
 Android, and the browser canvas. The browser's `WebFrameDriver` owns rAF,
 canvas/surface acquisition, DOM input, promise execution, browser resource

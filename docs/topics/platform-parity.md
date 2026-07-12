@@ -78,7 +78,12 @@ burn-down.
 > compatibility runtime/startup wrappers, neutralized the public host/options
 > names, consolidated startup and XR idle-poll constants, and added executable
 > native thin-adapter and host-purity tripwires. The native non-web exception
-> ledger remains empty. Gamepad input is retained as a dated shared contract;
+> ledger remains empty. Refreshed on 2026-07-12 after tactical 173 made shared
+> startup configuration canonical across desktop, offscreen, web, Android, and
+> XR: browser query configuration stays behind an opaque Rust handle, camera
+> startup/replacement uses one scene-owned factory, and the shared movement-mode
+> launch canary reaches every lane without platform DTOs or setters.
+> Gamepad input is retained as a dated shared contract;
 > no native adapter advertises it until a real platform event source and device
 > validation land.
 > Refreshed on 2026-07-11 after Tactical 170 — Web Scene-Host Adoption moved

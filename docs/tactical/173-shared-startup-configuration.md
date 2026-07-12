@@ -1,10 +1,8 @@
 # 173: Shared Startup Configuration
 
-Status: active; opened 2026-07-12. Slice 0 inventory and characterization
-landed; Slice 1 canonical defaults, Android overlays, and desktop DTO cleanup
-landed; Slice 2 canonical scene-host retention and configured camera factory
-landed; Slice 3 opaque browser configuration handle and Slice 4 movement-mode
-canary landed.
+Status: complete 2026-07-12. Slices 0–5 landed: inventory and characterization,
+canonical defaults/DTO cleanup, scene-host retention and camera factory, opaque
+browser configuration, the movement-mode canary, and enforcement/documentation.
 
 Workstream: native Rust shared launch/startup configuration in
 `mclone-app-runtime` and `mclone-scene`, with adoption by desktop flat,
@@ -285,7 +283,7 @@ replaces flat Android's complete shared literal with the named
   configuration plus desktop/harness-only records.
 - [x] Replace full Android shared-option literals with neutral defaults and
   named, minimal overlays.
-- [ ] Make invalid combinations fail in shared validation before a platform
+- [x] Make invalid combinations fail in shared validation before a platform
   resource is created.
 - [x] Add equality/round-trip tests proving that native argv and web query
   sources produce equivalent canonical values for equivalent inputs.
@@ -311,7 +309,7 @@ force a mechanical edit to desktop or Android option structures.
 
 - [x] Make `McloneSceneHostOptions` contain or losslessly consume canonical
   shared configuration without restating its parsed fields.
-- [ ] Split host-only tuning and harness controls into nested records where
+- [x] Split host-only tuning and harness controls into nested records where
   that avoids false platform ownership.
 - [x] Delete bidirectional projections that enumerate shared fields.
 - [x] Introduce one shared configured camera/session construction path.
@@ -426,19 +424,19 @@ help/documentation only.
 
 ## Slice 5: Enforcement And Documentation
 
-- [ ] Add a source or API tripwire that rejects new app-owned copies of
+- [x] Add a source or API tripwire that rejects new app-owned copies of
   canonical shared startup fields.
-- [ ] Add conformance tests covering all shared argv consumers and the browser
+- [x] Add conformance tests covering all shared argv consumers and the browser
   query source against the same expected canonical configuration.
-- [ ] Keep `STARTUP_ARG_FLAGS` / `STARTUP_QUERY_KEYS` coverage checks, but add a
+- [x] Keep `STARTUP_ARG_FLAGS` / `STARTUP_QUERY_KEYS` coverage checks, but add a
   propagation test that reaches `McloneSceneHost` configuration.
-- [ ] Reject complete canonical shared-config literals in app crates unless a
+- [x] Reject complete canonical shared-config literals in app crates unless a
   narrowly documented test fixture needs one.
-- [ ] Update `docs/native-engine-architecture.md` with the canonical config and
+- [x] Update `docs/native-engine-architecture.md` with the canonical config and
   platform-source boundary.
-- [ ] Update `docs/topics/platform-parity.md` only if visible support or a lane
+- [x] Update `docs/topics/platform-parity.md` only if visible support or a lane
   contract changes.
-- [ ] Update this tactical and the tactical index with landed evidence.
+- [x] Update this tactical and the tactical index with landed evidence.
 
 Candidate mechanical checks:
 
@@ -452,6 +450,30 @@ rg -n "movementSpeedMultiplier|renderDistance|debugPassiveShowcase" \
 
 The checks should be encoded as focused tests or a maintained script with an
 allowlist, not left as prose-only audit commands.
+
+Slice 5 adds `startup_config_ownership_lock`, a source-lock integration suite
+that requires desktop and scene-host options to nest `StartupSceneOptions`,
+rejects restated canonical fields, rejects complete app-owned startup literals,
+requires both wasm constructors to consume `WebStartupConfig`, and rejects the
+retired TypeScript scalar schema. Existing shared parser equality tests prove
+argv/query conformance; scene and desktop conversion tests prove propagation to
+`McloneSceneHost`. Host policy stays directly on the scene-owned host record:
+it already has the correct shared owner, so adding another nesting layer would
+not remove false platform ownership. Shared parser and host validation run
+before platform resources are constructed.
+
+Durable ownership is now documented in `native-engine-architecture.md`, and
+the all-lane launch-config/movement canary support change is recorded in the
+platform-parity topic. The migration closes with no app-owned shared schema and
+no known platform exception.
+
+Closeout validation passed: 240 `mclone-app-runtime` tests (including the three
+new ownership locks), 97 `mclone-scene` tests, 146 desktop-client tests, native
+thin-adapter/scene-host/XR-frame-driver/browser-adoption purity checks, web
+wasm/typecheck and local-worker browser smoke, flat Android debug APK assembly,
+Android XR release APK assembly, formatting, and `git diff --check`. Earlier
+slice evidence includes the remote-WebSocket browser smoke and inspected native
+and browser captures.
 
 ## Acceptance Budget
 
