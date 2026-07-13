@@ -82,6 +82,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "active_world",
     "standby_world",
     "warm_world_standby",
+    "warm_world_switch_sequence",
+    "last_warm_world_switch",
     "services",
     "color_format",
     "mesh_assets",
@@ -162,7 +164,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 20);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 71);
+    assert_eq!(host_fields.len(), 73);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -200,6 +202,86 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("active_world,"));
         assert!(constructor.contains("standby_world: None,"));
         assert!(constructor.contains("warm_world_standby: None,"));
+        assert!(constructor.contains("warm_world_switch_sequence: 0,"));
+        assert!(constructor.contains("last_warm_world_switch: None,"));
+    }
+}
+
+#[test]
+fn warm_world_selection_exchanges_complete_slots_without_reconstruction() {
+    let source = read("src/session.rs");
+    let select = braced_item(&source, "fn swap_with_switchable_warm_world(");
+    assert_in_order(
+        select,
+        &[
+            "mapped warm-world return destination is not GPU/traversal ready",
+            "Self::commit_world_slot_camera(&mut self.active_world",
+            "Self::commit_world_slot_camera(standby",
+            "self.active_world.accepted_entry_pose = Some(source_entry_pose);",
+            "std::mem::swap(",
+            "self.active_world.lifecycle = WorldSlotLifecycle::ActiveReady;",
+            ".lifecycle = WorldSlotLifecycle::StandbySwitchable;",
+            "self.session.complete_start(destination_descriptor);",
+            "self.clear_world_selection_presentation_state();",
+            "self.retarget_warm_world_state_after_switch(",
+        ],
+    );
+    for forbidden in [
+        "TexturedSectionDrawResources::new(",
+        "DrawableWorldSlot::new(",
+        "prepare_world_slot(",
+        "advance_warm_world_gpu(",
+        "clear_stream_state(",
+    ] {
+        assert!(
+            !select.contains(forbidden),
+            "selection must not perform `{forbidden}`"
+        );
+    }
+    for conservation in [
+        "switch_uploaded_section_count: 0,",
+        "switch_submitted_compile_section_count: 0,",
+        "switch_accepted_compile_result_count: 0,",
+        "switch_materialized_renderer: false,",
+    ] {
+        assert!(select.contains(conservation));
+    }
+
+    let prepare_source = read("src/lib.rs");
+    let prepare = braced_item(&prepare_source, "fn poll_runtime_and_upload(");
+    assert!(prepare.contains("first_frame_after_warm_world_selection"));
+    assert!(prepare.contains("max_compile_requests: first_frame_after_warm_world_selection"));
+    assert!(prepare.contains("then_some(Duration::from_micros(750))"));
+
+    let reset = braced_item(&source, "fn clear_world_selection_presentation_state(");
+    for presentation_state in [
+        "underwater_effects",
+        "last_underwater_update",
+        "tracking_origin",
+        "prefetched_live_upload",
+        "last_locomotion_update",
+        "first_eye_summary",
+        "last_ui_panel_stats",
+        "last_ui_draw_cache_stats",
+        "rendered_frames",
+    ] {
+        assert!(
+            reset.contains(presentation_state),
+            "missing selection reset `{presentation_state}`"
+        );
+    }
+    for slot_state in [
+        "clear_stream_state",
+        "traversal_ready_sections",
+        "section_uploads",
+        "draw =",
+        "runtime =",
+        "camera =",
+    ] {
+        assert!(
+            !reset.contains(slot_state),
+            "selection reset must preserve slot-owned `{slot_state}`"
+        );
     }
 }
 
@@ -258,7 +340,8 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     let host = read("src/lib.rs");
     let active = braced_item(&host, "fn poll_runtime_and_upload(");
     assert!(active.contains("poll_budget: RuntimeUpdatePumpBudget::unlimited()"));
-    assert!(active.contains("upload_budget: self.render_section_upload_budget"));
+    assert!(active.contains("upload_budget: selection_budget(self.render_section_upload_budget)"));
+    assert!(active.contains("first_frame_after_warm_world_selection"));
     assert!(active.contains("Self::prepare_world_slot("));
     assert_in_order(
         active,

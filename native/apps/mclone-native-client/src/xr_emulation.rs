@@ -70,6 +70,15 @@ pub(crate) fn run_xr_emulation_screenshot(
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_streamed(device, queue, views)?;
+            drive_warm_world_swap_roundtrip_if_requested(
+                &mut driver,
+                device,
+                queue,
+                size,
+                left_view,
+                right_view,
+            )?;
+            views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             drive_asset_replacement_roundtrip_if_requested(
                 &mut driver,
                 device,
@@ -134,6 +143,94 @@ pub(crate) fn run_xr_emulation_screenshot(
         gui_command_count: summary.gui_command_count,
         ui_panel_composite_count: summary.ui_panel.composite_count,
     })
+}
+
+fn drive_warm_world_swap_roundtrip_if_requested(
+    driver: &mut OffscreenDriver,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: [u32; 2],
+    left_view: &wgpu::TextureView,
+    right_view: &wgpu::TextureView,
+) -> Result<()> {
+    if driver.host().warm_world_standby_snapshot().is_none() {
+        return Ok(());
+    }
+    let source_id = driver.host().active_world_instance_id();
+    let first = driver.host_mut().apply_warm_world_selection_command(
+        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
+    )?;
+    let destination_id = driver.host().active_world_instance_id();
+    if destination_id == source_id {
+        bail!("synthetic-stereo warm-world selection retained the source identity");
+    }
+    let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+    driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+    let destination = driver.render_stereo(device, queue, views, left_view, right_view)?;
+    let first = driver
+        .host()
+        .last_warm_world_switch_report()
+        .unwrap_or(first);
+    validate_stereo_warm_world_switch(&first, destination.drawn_section_count)?;
+
+    let second = driver.host_mut().apply_warm_world_selection_command(
+        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
+    )?;
+    if driver.host().active_world_instance_id() != source_id {
+        bail!("synthetic-stereo warm-world round trip lost the source identity");
+    }
+    let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+    driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+    let source = driver.render_stereo(device, queue, views, left_view, right_view)?;
+    let second = driver
+        .host()
+        .last_warm_world_switch_report()
+        .unwrap_or(second);
+    validate_stereo_warm_world_switch(&second, source.drawn_section_count)?;
+    if first.source_instance_id != source_id
+        || first.destination_instance_id != destination_id
+        || second.source_instance_id != destination_id
+        || second.destination_instance_id != source_id
+    {
+        bail!("synthetic-stereo warm-world switch reports lost A-to-B-to-A identity");
+    }
+    eprintln!(
+        "warm_world_swap_stereo A={} B={} first_drawn={} return_drawn={} first_ms={:.3} return_ms={:.3}",
+        first.source_seed,
+        first.destination_seed,
+        destination.drawn_section_count,
+        source.drawn_section_count,
+        first.switch_elapsed_ms,
+        second.switch_elapsed_ms,
+    );
+    Ok(())
+}
+
+fn validate_stereo_warm_world_switch(
+    report: &mclone_scene::WarmWorldSwitchReport,
+    drawn_section_count: usize,
+) -> Result<()> {
+    if report.first_drawable_destination_frame != Some(1)
+        || report.first_drawn_section_count == 0
+        || drawn_section_count == 0
+        || report.switch_uploaded_section_count != 0
+        || report.switch_submitted_compile_section_count != 0
+        || report.switch_accepted_compile_result_count != 0
+        || report.switch_materialized_renderer
+    {
+        bail!(
+            "synthetic-stereo warm-world switch {} violated next-frame/conservation facts: frame={:?} reported_drawn={} rendered_drawn={} uploaded={} submitted={} accepted={} materialized={}",
+            report.sequence,
+            report.first_drawable_destination_frame,
+            report.first_drawn_section_count,
+            drawn_section_count,
+            report.switch_uploaded_section_count,
+            report.switch_submitted_compile_section_count,
+            report.switch_accepted_compile_result_count,
+            report.switch_materialized_renderer,
+        );
+    }
+    Ok(())
 }
 
 fn drive_asset_replacement_roundtrip_if_requested(

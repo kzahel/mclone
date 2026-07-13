@@ -43,6 +43,7 @@ use crate::headless::{
     write_actor_walk_review, write_headless_dual_view,
 };
 use crate::lod_settle_probe::run_lod_settle_probe;
+use crate::offscreen_flat_client::run_offscreen_warm_world_swap_smoke;
 use crate::perf::{
     run_frame_budget_probe, run_loading_settle_perf, run_movement_perf_smoke,
     run_startup_streaming_perf, run_timedemo,
@@ -120,6 +121,22 @@ fn main() -> Result<()> {
                 report.far_lod_region_draw_count,
                 report.far_lod_uploaded_bytes,
                 report.underwater
+            );
+            Ok(())
+        }
+        Cli::WarmWorldSwapSmoke { options } => {
+            let report = run_offscreen_warm_world_swap_smoke(&options)?;
+            println!(
+                "warm-world swap smoke saved to {} ({}x{}, A={} B={}, frames={}, switches={}, A/B differing pixels={:.3}%, B steady delta={:.3}%)",
+                report.directory.display(),
+                report.width,
+                report.height,
+                report.source_seed,
+                report.destination_seed,
+                report.frames.len(),
+                report.switches.len(),
+                report.source_destination_difference_ratio * 100.0,
+                report.destination_steady_difference_ratio * 100.0,
             );
             Ok(())
         }

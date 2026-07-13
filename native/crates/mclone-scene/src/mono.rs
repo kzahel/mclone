@@ -1267,6 +1267,7 @@ impl McloneSceneHost {
 
         self.active_world.render_stats = render_stats;
         self.rendered_frames = self.rendered_frames.wrapping_add(1);
+        self.record_warm_world_first_destination_frame(summary.drawn_section_count, upload);
         Ok(MonoSceneFrameSummary {
             render: summary,
             timing,

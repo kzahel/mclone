@@ -6,18 +6,25 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design plus a Slice 4 scene-owned, GPU-ready warm standby.** The
-engine does not yet compose or switch live worlds, but `McloneSceneHost` now
+Status: **design plus a Slice 5 scene-owned scripted warm-world hot swap.** The
+engine does not yet compose live worlds or expose an interactive gate, but
+`McloneSceneHost` now
 owns one direct active `DrawableWorldSlot` and one optional detached standby.
 The launch-only harness runs two complete integrated hosts concurrently,
 acknowledges the standby's seed-dependent spawn pose, resolves paired
 terrain-relative endpoint candidates, and incrementally admits its retained
 CPU seed through the ordinary terrain upload lifecycle. The standby reaches an
-explicit `Switchable` state only after its entry terrain is GPU-resident and
-traversal-ready and its required renderer topology is materialized. Active
-terrain preparation remains first and the standby has hard poll, compile,
-result-acceptance, upload, and elapsed-work caps. It is still neither drawn nor
-selectable: there is no world registry, selection command, slot swap, or gate.
+explicit `Switchable` state only after its mapped gate-exit terrain is
+GPU-resident and traversal-ready and its required renderer topology is
+materialized. Active terrain preparation remains first and the standby has
+hard poll, compile, result-acceptance, upload, and elapsed-work caps. It is
+still neither drawn nor
+simultaneously composed, but a shared selection command now maps the camera
+through paired endpoints and atomically swaps the complete active/standby
+slots. The previous active remains the ready return slot. A deterministic flat
+and synthetic-stereo A-to-B-to-A smoke proves next-frame drawing with no
+runtime reconstruction, switch-boundary upload, or lazy renderer creation.
+There is still no world registry or gate model/renderer.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -35,7 +42,7 @@ implementation milestone is
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 4 checkpoint).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 5 checkpoint).
 
 ## Motivation
 
@@ -130,13 +137,13 @@ idle/warm, verifies neither replica receives the other's chunks, changes the
 logical active selection without reconstructing either runtime, and relies on
 ordinary owned-value drop for independent shutdown.
 
-This proves instanceability and isolation, not yet product switching. Slice 4
+This proves instanceability and isolation below the scene owner. Slice 5
 keeps the production scene's direct active `DrawableWorldSlot` plus one
 optional detached slot with independent runtime, camera, lifecycle, storage,
 terrain draw/upload state, and provisional endpoint. Persistent-root isolation,
 authoritative pose acknowledgement, budgeted standby GPU admission, and exact
-entry/topology readiness are proven. Selection and gate interaction remain
-later slices.
+entry/topology readiness are proven. The scene command now swaps both complete
+slots, while gate interaction remains a later slice.
 
 The representative launch smoke (`12345` active, `67890` standby, render
 distance 2) reaches GPU `Switchable` readiness in about 0.69 seconds flat and
@@ -154,6 +161,18 @@ control measured 2.679/4.650 ms, clearing Slice 4 despite system-level drift
 from the older clean anchors. These are desktop-host receipts. A
 `MULTIVIEW`-capable device will materialize the lazy standby renderer before
 readiness, but the current Mac cannot supply that final device receipt.
+
+The Slice 5 scripted smoke maps to each seed's paired surface-relative exit and
+preserves the sequence `1/12345 -> 2/67890 -> 1/12345`. Both atomic exchanges
+measured about 0.008 ms, did no renderer construction, compile submission,
+result acceptance, or GPU upload, and drew the destination on selected-world
+frame 1. Flat captures drew 27/4/6/27 sections across A-before, B-first,
+B-steady, and A-return; A/B differed in 86.896% of pixels and B's two frames
+were identical. Synthetic stereo likewise completed the round trip with both
+eyes on the same selected world. The final guarded no-standby release batch
+measured 2.504 ms median average / 4.346 ms median P95 with 1.1%/2.5% ranges,
+zero missed budgets, and zero accounting violations, clearing the single-world
+performance invariant. Interactive selection still waits for the opaque gate.
 
 The near-term product shape is:
 
@@ -407,18 +426,17 @@ Ship independently valuable increments while keeping the one-world path direct:
 The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
 
-1. Keep the landed active-plus-optional-standby path and its desktop/XR plus
-   contemporaneous-control no-request frame-budget receipts green. Implement
-   Tactical 174 Slice 5 as one atomic scripted A-to-B-to-A slot swap; retain
-   both runtimes and their GPU terrain throughout.
+1. Keep the landed active-plus-optional-standby path, atomic scripted
+   A-to-B-to-A swap, and desktop/XR/no-request frame-budget receipts green.
+   Implement Tactical 174 Slice 6's shared opaque gate without changing the
+   complete-slot ownership exchange.
 2. Keep the dual-host view and persistent-root isolation smokes green.
    Preserve the materialized mono/per-eye/multiview readiness contract and
    close its outstanding capable-device receipt on XR/Windows. Generalize to
    an N-world registry only after the bounded hot-swap milestone needs one.
-3. Prove warm local switching: the destination is drawable on the next frame,
-   neither runtime is reconstructed, and the old active slot becomes the ready
-   return destination. Record switch latency, uploads, compile submissions,
-   camera corrections, and single-world before/after frame accounting.
+3. Extend the frame-advancing script from direct selection to deterministic
+   signed-distance gate crossing, preserving next-frame drawing, no
+   reconstruction, and the old active as the ready return destination.
 4. Lobby spawn: authoritative world behavior profile + authored room.
 5. T0 baked diorama: placement transform, transformed fog/culling, shared depth,
    and both mono/per-eye/multiview validation.

@@ -460,6 +460,9 @@ pub struct McloneSceneHost {
     active_world: DrawableWorldSlot,
     standby_world: Option<DrawableWorldSlot>,
     warm_world_standby: Option<WarmWorldStandbyState>,
+    #[cfg(not(target_arch = "wasm32"))]
+    warm_world_switch_sequence: u64,
+    last_warm_world_switch: Option<WarmWorldSwitchReport>,
     services: SceneHostServices,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
@@ -1218,7 +1221,9 @@ impl McloneSceneHost {
         ui_draw_cache_stats.add(right_eye.ui_draw_cache);
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
+        let first_drawn_section_count = left_eye.summary.drawn_section_count;
         self.record_eye0_summary(left_eye.summary);
+        self.record_warm_world_first_destination_frame(first_drawn_section_count, upload);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
 
@@ -1401,6 +1406,10 @@ impl McloneSceneHost {
         self.active_world.render_stats.drawn_face_count = left.drawn_face_count();
         self.active_world.render_stats.drawn_index_count = left.drawn_index_count;
         self.rendered_frames += 1;
+        self.record_warm_world_first_destination_frame(
+            left.drawn_section_count,
+            XrTerrainUploadSummary::default(),
+        );
         Ok(XrTerrainStereoFrameSummary {
             rendered_frames: self.rendered_frames,
             section_count: self.active_world.draw.section_count(),
@@ -1841,6 +1850,7 @@ impl McloneSceneHost {
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         self.rendered_frames += 1;
+        self.record_warm_world_first_destination_frame(stats[0].drawn_section_count, upload);
         Ok(XrTerrainMultiviewFrameSummary {
             rendered_frames: self.rendered_frames,
             section_count: self.active_world.draw.section_count(),
@@ -2071,15 +2081,28 @@ impl McloneSceneHost {
         frame_deadline: Option<MonotonicDeadline>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
+        let first_frame_after_warm_world_selection =
+            self.last_warm_world_switch.as_ref().is_some_and(|report| {
+                report.destination_instance_id == self.active_world.id
+                    && report.first_drawable_destination_frame.is_none()
+            });
+        let selection_budget = |configured: Option<usize>| {
+            first_frame_after_warm_world_selection
+                .then(|| configured.unwrap_or(1).min(1))
+                .or(configured)
+        };
         let policy = WorldPreparationPolicy {
             clock: self.services.clock.clone(),
             target_period_ms: self.render_admission_target_period_ms(),
             poll_budget: RuntimeUpdatePumpBudget::unlimited(),
-            upload_budget: self.render_section_upload_budget,
-            accept_budget: self.render_section_accept_budget,
-            completed_result_accept_budget: self.render_completed_result_accept_budget,
-            max_compile_requests: None,
-            work_elapsed_budget: None,
+            upload_budget: selection_budget(self.render_section_upload_budget),
+            accept_budget: selection_budget(self.render_section_accept_budget),
+            completed_result_accept_budget: selection_budget(
+                self.render_completed_result_accept_budget,
+            ),
+            max_compile_requests: first_frame_after_warm_world_selection.then_some(1),
+            work_elapsed_budget: first_frame_after_warm_world_selection
+                .then_some(Duration::from_micros(750)),
             defer_sync_after_pre_drain: false,
         };
         let standby_deadline = frame_deadline.clone();

@@ -19,6 +19,8 @@ const PROVISIONAL_GATE_FORWARD_BLOCKS: f64 = 6.0;
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) const PROVISIONAL_GATE_SEARCH_RADIUS_BLOCKS: i32 = 16;
 #[cfg(not(target_arch = "wasm32"))]
+const PROVISIONAL_GATE_EXIT_OFFSET_BLOCKS: f64 = 1.25;
+#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_HALF_WIDTH_BLOCKS: i32 = 1;
 #[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_APPROACH_DEPTH_BLOCKS: i32 = 2;
@@ -55,6 +57,16 @@ impl WarmWorldStandbyRequest {
     pub const fn new(seed: i64, entry_center: ChunkPos) -> Self {
         Self { seed, entry_center }
     }
+}
+
+/// Shared scene command for atomically selecting the retained warm world.
+///
+/// Platform adapters may request this command between presented frames, but
+/// readiness, camera reconciliation, ownership exchange, and diagnostics stay
+/// inside `McloneSceneHost`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WarmWorldSelectionCommand {
+    SwapWithStandby,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -176,6 +188,53 @@ pub struct WarmWorldStandbySnapshot {
     pub source_endpoint: Option<WorldGateEndpointCandidate>,
     pub destination_endpoint: Option<WorldGateEndpointCandidate>,
     pub failure: Option<String>,
+}
+
+/// Evidence produced by one complete active/standby ownership exchange.
+///
+/// The switch itself does no renderer preparation. First-frame fields are
+/// filled by the next scene render so the scripted smoke can distinguish the
+/// atomic selection cost from destination runtime/terrain work.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WarmWorldSwitchReport {
+    pub sequence: u64,
+    pub source_instance_id: WorldInstanceId,
+    pub source_seed: i64,
+    pub destination_instance_id: WorldInstanceId,
+    pub destination_seed: i64,
+    pub command_after_source_frame: u32,
+    pub switch_elapsed_ms: f64,
+    pub source_camera_commit_changed: bool,
+    pub destination_camera_commit_changed: bool,
+    pub source_camera_position_changed: bool,
+    pub destination_camera_position_changed: bool,
+    pub camera_commit_ms: f64,
+    pub source_cadence_changed: bool,
+    pub destination_cadence_changed: bool,
+    pub source_queue_lifecycle_items_before: usize,
+    pub source_queue_mesh_owned_bytes_before: usize,
+    pub destination_queue_lifecycle_items_before: usize,
+    pub destination_queue_mesh_owned_bytes_before: usize,
+    pub source_pending_compile_jobs_before: usize,
+    pub destination_pending_compile_jobs_before: usize,
+    pub source_runtime_command_count_before: usize,
+    pub source_runtime_update_count_before: usize,
+    pub destination_runtime_command_count_before: usize,
+    pub destination_runtime_update_count_before: usize,
+    pub switch_uploaded_section_count: usize,
+    pub switch_submitted_compile_section_count: usize,
+    pub switch_accepted_compile_result_count: usize,
+    pub switch_materialized_renderer: bool,
+    pub first_drawable_destination_frame: Option<u32>,
+    pub first_drawn_section_count: usize,
+    pub first_frame_uploaded_section_count: usize,
+    pub first_frame_submitted_compile_section_count: usize,
+    pub first_frame_accepted_compile_result_count: usize,
+    pub first_frame_queue_lifecycle_items: usize,
+    pub first_frame_queue_mesh_owned_bytes: usize,
+    pub first_frame_pending_compile_jobs_after: usize,
+    pub destination_runtime_command_count_after_first_frame: usize,
+    pub destination_runtime_update_count_after_first_frame: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -357,6 +416,22 @@ pub(crate) fn entry_support_render_section(pose: WorldEntryPose) -> Option<Rende
         block_to_section_coord(support_y),
         block_to_chunk_coord(support_z),
     ))
+}
+
+/// Map a crossing to the clear approach on the far side of an endpoint.
+/// Endpoint normals point back toward their authored approach, so arrival
+/// proceeds opposite the normal and faces away from the gate.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn world_gate_destination_entry_pose(
+    endpoint: WorldGateEndpointCandidate,
+) -> WorldEntryPose {
+    let forward = endpoint.normal.scale(-1.0);
+    WorldEntryPose {
+        feet_position: endpoint
+            .feet_position
+            .add(forward.scale(PROVISIONAL_GATE_EXIT_OFFSET_BLOCKS)),
+        yaw_radians: forward.x.atan2(forward.z),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -541,5 +616,19 @@ mod tests {
             entry_support_render_section(flat_pose()),
             Some(RenderSectionKey::new(0, 3, 0))
         );
+    }
+
+    #[test]
+    fn destination_entry_maps_just_beyond_and_faces_away_from_gate() {
+        let endpoint = WorldGateEndpointCandidate {
+            feet_position: Vec3d::new(0.5, 64.0, 6.5),
+            center: Vec3d::new(0.5, 66.0, 6.5),
+            normal: Vec3d::new(0.0, 0.0, -1.0),
+        };
+
+        let pose = world_gate_destination_entry_pose(endpoint);
+
+        assert_eq!(pose.feet_position, Vec3d::new(0.5, 64.0, 7.75));
+        assert_eq!(pose.yaw_radians, 0.0);
     }
 }

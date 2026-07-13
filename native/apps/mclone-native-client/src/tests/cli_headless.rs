@@ -2,6 +2,49 @@ use super::*;
 use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 #[test]
+fn cli_parses_warm_world_swap_smoke_options() {
+    let cli = Cli::parse([
+        "--warm-world-swap-smoke".to_owned(),
+        "/tmp/mclone-warm-world-swap".to_owned(),
+        "--width".to_owned(),
+        "640".to_owned(),
+        "--height".to_owned(),
+        "360".to_owned(),
+        "--seed".to_owned(),
+        "12345".to_owned(),
+        "--warm-world-standby-seed".to_owned(),
+        "67890".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::WarmWorldSwapSmoke { options } = cli else {
+        panic!("expected warm-world swap smoke CLI mode");
+    };
+    assert_eq!(
+        options.directory,
+        PathBuf::from("/tmp/mclone-warm-world-swap")
+    );
+    assert_eq!([options.width, options.height], [640, 360]);
+    assert_eq!(options.scene.seed, 12345);
+    assert_eq!(options.scene.warm_world_standby_seed, Some(67890));
+}
+
+#[test]
+fn cli_requires_standby_seed_for_warm_world_swap_smoke() {
+    let error = Cli::parse([
+        "--warm-world-swap-smoke".to_owned(),
+        "/tmp/mclone-warm-world-swap".to_owned(),
+    ])
+    .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("requires --warm-world-standby-seed")
+    );
+}
+
+#[test]
 fn cli_parses_headless_dual_view_scene_options() {
     let cli = Cli::parse([
         "--headless-dual-view".to_owned(),

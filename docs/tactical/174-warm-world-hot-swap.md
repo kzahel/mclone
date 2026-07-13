@@ -1085,6 +1085,81 @@ Deliverables:
 Exit criteria: scripted swaps render the already-resident destination on the
 next frame and round-trip without restarting either integrated host.
 
+Checkpoint evidence (2026-07-13):
+
+- `WarmWorldSelectionCommand::SwapWithStandby` is a shared scene command. It
+  reconciles both cameras, maps the destination just beyond its paired
+  terrain-relative endpoint through the normal pose/interest commit, restores
+  each runtime's configured cadence, and exchanges the complete
+  `DrawableWorldSlot` values with `std::mem::swap`. The selected descriptor is
+  republished to `GameSessionCoordinator`; app adapters own no selection
+  policy.
+- Readiness now targets the actual mapped gate-exit support section instead of
+  merely the accepted spawn section. A late destination correction invalidates
+  endpoint/readiness state before selection. Both the selected exit and reverse
+  return coverage are validated before ownership changes. The old active saves
+  its departure pose, retains runtime/draw/traversal/upload state, becomes the
+  switchable return slot, and the warm-state endpoints reverse for repeated
+  round trips.
+- The audited selection reset clears only underwater/prefetch/tracking/
+  locomotion/summary presentation caches and the selected-world frame counter.
+  It does not clear either slot's runtime, camera, traversal cache, upload
+  coordinator, draw store, or render-admission state. Source characterization
+  locks the whole-slot exchange and forbids renderer construction,
+  preparation, or stream clearing inside the command.
+- The first real smoke exposed one chunk-column compile request (16 vertical
+  sections) on the first presented destination frame after mapped interest
+  changed. The selected world's first preparation pass now has a one-upload,
+  one-result, one-compile-request, 0.75 ms cap; ordinary active budgets resume
+  after that frame. The no-request path only observes a false optional-report
+  check and retains its configured budgets.
+- `OffscreenScript` now has explicit frame-advance checkpoints and a shared
+  warm-world selection step. `--warm-world-swap-smoke` and
+  `pnpm native:warm-world-swap-smoke` capture `a-before.png`, `b-first.png`,
+  `b-steady.png`, `a-return.png`, and `report.json` under
+  `/tmp/mclone-warm-world-swap`. The accepted run preserved instance/seed
+  sequence `1/12345 -> 2/67890 -> 1/12345`; its drawn-section counts were
+  27, 4, 6, and 27. A/B differed in 86.896% of pixels while B-first/B-steady
+  were identical. All four images were visually inspected.
+- The two atomic commands took 0.011 and 0.005 ms, materialized no renderer, and
+  performed zero upload, compile submission, or result acceptance. Both
+  destinations were recorded drawable on selected-world frame 1. B's first
+  frame applied one bounded upload; the return applied none, and neither first
+  frame submitted or accepted compile work. Runtime command and update counters
+  remained monotonic through B and back to A.
+- The opt-in synthetic-stereo round-trip renders both eyes from B on its first
+  frame and both eyes from A on return. It measured four drawn sections on B,
+  26 on returned A, 312,521 differing left/right pixels, and UI composition in
+  both eyes. The returned-A capture was visually inspected. The default
+  no-standby stereo lane retains 42 resident/eight drawn sections, 249,679
+  differing eye pixels, and UI in both eyes.
+- The no-standby desktop capture retains 64 resident/11 drawn sections and two
+  actors. Scene (103 unit plus eight ownership tests), native-client (151
+  tests), dual-integrated-host, thin-adapter purity, desktop-offscreen,
+  timedemo smoke, frame-budget smoke, synthetic-stereo, and web/WASM gates
+  pass. The release timedemo retains exactly 664 loaded sections and 307.325
+  average drawn sections; its 3.732 ms average remains characterization only.
+- Performance timing was not accepted until the host was actually quiet.
+  Earlier batches overlapped an unrelated 353%-CPU `physbox_engine` test,
+  Android `cargo check`, and later an AVD/QEMU run; those rejected reports are
+  retained separately under `/tmp/mclone-174-slice5-perf` and
+  `/tmp/mclone-174-slice5-perf-clean`. Before the guarded final batch, idle
+  samples reached 98.9-99.9% and no compiler/emulator process remained; each
+  run also rechecked process/idle state afterward.
+- The five accepted direct-release averages were 2.495, 2.504, 2.499, 2.518,
+  and 2.523 ms (median 2.504; 1.1% range). P95 values were 4.251, 4.359,
+  4.346, 4.325, and 4.353 ms (median 4.346; 2.5% range). Every run retained
+  1,936 initial sections with zero over-budget frames and zero accounting
+  violations. Those medians are 6.4%/4.9% faster than the Slice 4 candidate
+  medians; treat that as no-regression evidence, not a claimed optimization.
+
+Exit result: Slice 5 is complete for flat and synthetic per-eye stereo. A
+scripted selection maps through paired endpoints, draws the resident
+destination on the next frame, and returns without restarting either host or
+constructing/uploading a world at the atomic boundary. Interactive crossing,
+the opaque gate model/renderer, occlusion fixtures, and a capable-device
+multiview receipt remain Slice 6/7 work.
+
 ### Slice 6: Shared Opaque World Gate
 
 Turn scripted selection into the interactive milestone.

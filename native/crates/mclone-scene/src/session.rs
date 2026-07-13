@@ -325,6 +325,9 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            warm_world_switch_sequence: 0,
+            last_warm_world_switch: None,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -504,6 +507,9 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            warm_world_switch_sequence: 0,
+            last_warm_world_switch: None,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -695,6 +701,9 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            warm_world_switch_sequence: 0,
+            last_warm_world_switch: None,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -1262,6 +1271,10 @@ impl McloneSceneHost {
         let renderer_multiview_required = device.features().contains(wgpu::Features::MULTIVIEW);
         let multiview_started_at = self.services.clock.now();
         if renderer_multiview_required {
+            self.active_world
+                .draw
+                .materialize_multiview_renderer(device)
+                .context("materialize active multiview terrain pipelines for return standby")?;
             draw.materialize_multiview_renderer(device)
                 .context("materialize detached standby multiview terrain pipelines")?;
         }
@@ -1379,6 +1392,496 @@ impl McloneSceneHost {
         self.warm_world_standby
             .as_ref()
             .map(|state| state.snapshot(self.services.clock.now()))
+    }
+
+    pub fn active_world_instance_id(&self) -> WorldInstanceId {
+        self.active_world.id
+    }
+
+    pub fn active_world_seed(&self) -> i64 {
+        self.active_world.scene.seed
+    }
+
+    pub fn last_warm_world_switch_report(&self) -> Option<WarmWorldSwitchReport> {
+        self.last_warm_world_switch.clone()
+    }
+
+    /// Apply one shared warm-world selection command between presented frames.
+    /// The complete slot moves atomically; no runtime, draw store, renderer, or
+    /// upload work is constructed here.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn apply_warm_world_selection_command(
+        &mut self,
+        command: WarmWorldSelectionCommand,
+    ) -> Result<WarmWorldSwitchReport> {
+        match command {
+            WarmWorldSelectionCommand::SwapWithStandby => self.swap_with_switchable_warm_world(),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn swap_with_switchable_warm_world(&mut self) -> Result<WarmWorldSwitchReport> {
+        let state = self
+            .warm_world_standby
+            .as_ref()
+            .context("warm-world selection requested without standby state")?;
+        if state.phase != WarmWorldStandbyPhase::Switchable || !state.readiness.switchable {
+            bail!(
+                "warm-world standby is not switchable: phase={} readiness={}",
+                state.phase.label(),
+                state.readiness.switchable,
+            );
+        }
+        let selected_source_endpoint = state
+            .source_endpoint
+            .context("switchable warm-world state has no source endpoint")?;
+        let selected_destination_endpoint = state
+            .destination_endpoint
+            .context("switchable warm-world state has no destination endpoint")?;
+        let standby = self
+            .standby_world
+            .as_ref()
+            .context("switchable warm-world state has no retained standby slot")?;
+        if standby.lifecycle != WorldSlotLifecycle::StandbySwitchable {
+            bail!(
+                "warm-world standby slot has lifecycle {:?}, expected switchable",
+                standby.lifecycle,
+            );
+        }
+        if standby.asset_epoch != self.active_world.asset_epoch
+            || standby.asset_epoch != self.active_assets.epoch
+        {
+            bail!(
+                "warm-world selection rejected mixed asset epochs: active={} standby={} assets={}",
+                self.active_world.asset_epoch,
+                standby.asset_epoch,
+                self.active_assets.epoch,
+            );
+        }
+
+        let renderer_multiview_required = state.renderer_multiview_required;
+        let source_renderer_ready = !renderer_multiview_required
+            || self.active_world.draw.multiview_renderer_materialized();
+        let destination_renderer_ready =
+            !renderer_multiview_required || standby.draw.multiview_renderer_materialized();
+        if !source_renderer_ready || !destination_renderer_ready {
+            bail!(
+                "warm-world selection would leave lazy terrain topology: source={} destination={}",
+                source_renderer_ready,
+                destination_renderer_ready,
+            );
+        }
+        let destination_entry_pose =
+            world_gate_destination_entry_pose(selected_destination_endpoint);
+        let destination_entry_section = entry_support_render_section(destination_entry_pose)
+            .context("mapped warm-world destination pose has no entry section")?;
+        if !standby.draw.contains_section(destination_entry_section)
+            || !standby
+                .draw
+                .traversal_ready_contains_section(destination_entry_section)
+        {
+            bail!(
+                "mapped warm-world destination is not GPU/traversal ready at section {:?}",
+                destination_entry_section,
+            );
+        }
+        let return_entry_pose = world_gate_destination_entry_pose(selected_source_endpoint);
+        let return_entry_section = entry_support_render_section(return_entry_pose)
+            .context("mapped warm-world return pose has no entry section")?;
+        if !self
+            .active_world
+            .draw
+            .contains_section(return_entry_section)
+            || !self
+                .active_world
+                .draw
+                .traversal_ready_contains_section(return_entry_section)
+        {
+            bail!(
+                "mapped warm-world return destination is not GPU/traversal ready at section {:?}",
+                return_entry_section,
+            );
+        }
+
+        let source_id = self.active_world.id;
+        let source_seed = self.active_world.scene.seed;
+        let destination_id = standby.id;
+        let destination_seed = standby.scene.seed;
+        let command_after_source_frame = self.rendered_frames;
+        let source_queue = self.active_world.section_uploads.stats();
+        let destination_queue = standby.section_uploads.stats();
+        let source_stats = self
+            .active_world
+            .runtime
+            .as_ref()
+            .context("active warm-world source has no runtime")?
+            .stats();
+        let destination_stats = standby
+            .runtime
+            .as_ref()
+            .context("switchable warm-world destination has no runtime")?
+            .stats();
+
+        let switch_started_at = self.services.clock.now();
+        let camera_started_at = self.services.clock.now();
+        let (source_camera_commit_changed, source_camera_position_changed) =
+            Self::commit_world_slot_camera(&mut self.active_world, &self.services.clock)
+                .context("reconcile warm-world source camera before selection")?;
+        let (mut destination_camera_commit_changed, destination_camera_position_changed) = {
+            let standby = self
+                .standby_world
+                .as_mut()
+                .expect("standby presence checked before camera reconcile");
+            Self::commit_world_slot_camera(standby, &self.services.clock)
+                .context("reconcile warm-world destination camera before selection")?
+        };
+        if destination_camera_position_changed {
+            self.invalidate_warm_world_destination_after_correction();
+            bail!(
+                "warm-world destination received a late camera correction; readiness must settle again"
+            );
+        }
+
+        let destination_mapped_position_changed = {
+            let standby = self
+                .standby_world
+                .as_mut()
+                .expect("standby presence checked before endpoint mapping");
+            let pitch_radians = standby.camera.snapshot().pitch_radians;
+            standby.camera.set_player_feet_pose(
+                destination_entry_pose.feet_position,
+                destination_entry_pose.yaw_radians,
+                pitch_radians,
+            );
+            let (changed, position_changed) =
+                Self::commit_world_slot_camera(standby, &self.services.clock)
+                    .context("commit mapped warm-world destination camera and interest")?;
+            destination_camera_commit_changed |= changed;
+            position_changed
+        };
+        if destination_mapped_position_changed {
+            self.invalidate_warm_world_destination_after_correction();
+            bail!(
+                "warm-world destination corrected the mapped gate-entry pose; readiness must settle again"
+            );
+        }
+        let camera_commit_ms = elapsed_ms(self.services.clock.elapsed_since(camera_started_at));
+
+        // Camera reconciliation may consume an already-pending authoritative
+        // correction. Save and admit the return pose only after that reconcile
+        // so it describes the source pose we actually leave.
+        let source_entry_pose = WorldEntryPose::from_camera(&self.active_world.camera);
+        let source_entry_section = entry_support_render_section(source_entry_pose)
+            .context("active camera cannot produce return entry coverage")?;
+        if !self
+            .active_world
+            .draw
+            .contains_section(source_entry_section)
+            || !self
+                .active_world
+                .draw
+                .traversal_ready_contains_section(source_entry_section)
+        {
+            bail!(
+                "active world cannot become an immediate return standby at section {:?}",
+                source_entry_section,
+            );
+        }
+
+        let source_cadence = self.active_world.scene.simulation_cadence;
+        let source_cadence_changed = self
+            .active_world
+            .runtime
+            .as_mut()
+            .expect("active runtime presence checked")
+            .set_simulation_cadence(source_cadence)
+            .context("restore source world simulation cadence before demotion")?;
+        let destination_cadence_changed = {
+            let standby = self
+                .standby_world
+                .as_mut()
+                .expect("standby presence checked before cadence restore");
+            let cadence = standby.scene.simulation_cadence;
+            standby
+                .runtime
+                .as_mut()
+                .expect("standby runtime presence checked")
+                .set_simulation_cadence(cadence)
+                .context("restore destination world simulation cadence before selection")?
+        };
+
+        self.active_world.accepted_entry_pose = Some(source_entry_pose);
+        self.active_world.camera.clear_keys();
+        self.standby_world
+            .as_mut()
+            .expect("standby presence checked before ownership exchange")
+            .camera
+            .clear_keys();
+        std::mem::swap(
+            &mut self.active_world,
+            self.standby_world
+                .as_mut()
+                .expect("standby presence checked before ownership exchange"),
+        );
+        self.active_world.lifecycle = WorldSlotLifecycle::ActiveReady;
+        self.standby_world
+            .as_mut()
+            .expect("ownership exchange retains old active slot")
+            .lifecycle = WorldSlotLifecycle::StandbySwitchable;
+
+        let destination_descriptor = self
+            .active_world
+            .descriptor
+            .clone()
+            .context("selected warm world has no active-session descriptor")?;
+        self.session.complete_start(destination_descriptor);
+        self.clear_world_selection_presentation_state();
+
+        self.retarget_warm_world_state_after_switch(
+            renderer_multiview_required,
+            Some(selected_destination_endpoint),
+            Some(selected_source_endpoint),
+        )?;
+
+        self.warm_world_switch_sequence = self.warm_world_switch_sequence.saturating_add(1);
+        let report = WarmWorldSwitchReport {
+            sequence: self.warm_world_switch_sequence,
+            source_instance_id: source_id,
+            source_seed,
+            destination_instance_id: destination_id,
+            destination_seed,
+            command_after_source_frame,
+            switch_elapsed_ms: elapsed_ms(self.services.clock.elapsed_since(switch_started_at)),
+            source_camera_commit_changed,
+            destination_camera_commit_changed,
+            source_camera_position_changed,
+            destination_camera_position_changed,
+            camera_commit_ms,
+            source_cadence_changed,
+            destination_cadence_changed,
+            source_queue_lifecycle_items_before: source_queue.queued_lifecycle_items,
+            source_queue_mesh_owned_bytes_before: source_queue.queued_upload_mesh_owned_bytes,
+            destination_queue_lifecycle_items_before: destination_queue.queued_lifecycle_items,
+            destination_queue_mesh_owned_bytes_before: destination_queue
+                .queued_upload_mesh_owned_bytes,
+            source_pending_compile_jobs_before: source_stats.pending_render_compile_jobs,
+            destination_pending_compile_jobs_before: destination_stats.pending_render_compile_jobs,
+            source_runtime_command_count_before: source_stats.command_count,
+            source_runtime_update_count_before: source_stats.update_count,
+            destination_runtime_command_count_before: destination_stats.command_count,
+            destination_runtime_update_count_before: destination_stats.update_count,
+            switch_uploaded_section_count: 0,
+            switch_submitted_compile_section_count: 0,
+            switch_accepted_compile_result_count: 0,
+            switch_materialized_renderer: false,
+            first_drawable_destination_frame: None,
+            first_drawn_section_count: 0,
+            first_frame_uploaded_section_count: 0,
+            first_frame_submitted_compile_section_count: 0,
+            first_frame_accepted_compile_result_count: 0,
+            first_frame_queue_lifecycle_items: 0,
+            first_frame_queue_mesh_owned_bytes: 0,
+            first_frame_pending_compile_jobs_after: 0,
+            destination_runtime_command_count_after_first_frame: 0,
+            destination_runtime_update_count_after_first_frame: 0,
+        };
+        log::info!(
+            "warm-world switch sequence={} source={} seed={} destination={} seed={} source_frame={} switch_ms={:.3} camera_ms={:.3} source_queue={} destination_queue={}",
+            report.sequence,
+            report.source_instance_id.get(),
+            report.source_seed,
+            report.destination_instance_id.get(),
+            report.destination_seed,
+            report.command_after_source_frame,
+            report.switch_elapsed_ms,
+            report.camera_commit_ms,
+            report.source_queue_lifecycle_items_before,
+            report.destination_queue_lifecycle_items_before,
+        );
+        self.last_warm_world_switch = Some(report.clone());
+        Ok(report)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn commit_world_slot_camera(
+        slot: &mut DrawableWorldSlot,
+        clock: &MonotonicClockHandle,
+    ) -> Result<(bool, bool)> {
+        let before = slot.camera.snapshot();
+        let before_feet = slot.camera.feet_position();
+        let runtime = slot
+            .runtime
+            .as_mut()
+            .context("warm-world camera reconcile requires a runtime")?;
+        let changed = mclone_app_runtime::commit_engine_camera_player_pose(
+            runtime,
+            &mut slot.camera,
+            XR_CAMERA_COMMIT_CONTEXT,
+            clock,
+            None,
+        )?;
+        let after = slot.camera.snapshot();
+        let position_changed = before.eye != after.eye
+            || before.yaw_radians != after.yaw_radians
+            || before.pitch_radians != after.pitch_radians
+            || before_feet != slot.camera.feet_position();
+        Ok((changed, position_changed))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn invalidate_warm_world_destination_after_correction(&mut self) {
+        let standby = self
+            .standby_world
+            .as_mut()
+            .expect("warm-world correction invalidation requires a standby");
+        standby.accepted_entry_pose = Some(WorldEntryPose::from_camera(&standby.camera));
+        let state = self
+            .warm_world_standby
+            .as_mut()
+            .expect("warm-world correction invalidation requires standby state");
+        state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
+        state.destination_endpoint = None;
+        state.readiness.cpu_ready = false;
+        state.readiness.entry_section = None;
+        state.readiness.entry_section_gpu_resident = false;
+        state.readiness.entry_section_traversal_ready = false;
+        state.readiness.switchable = false;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn retarget_warm_world_state_after_switch(
+        &mut self,
+        renderer_multiview_required: bool,
+        source_endpoint: Option<WorldGateEndpointCandidate>,
+        destination_endpoint: Option<WorldGateEndpointCandidate>,
+    ) -> Result<()> {
+        let standby = self
+            .standby_world
+            .as_ref()
+            .context("ownership exchange lost its return standby")?;
+        let entry_pose = destination_endpoint
+            .map(world_gate_destination_entry_pose)
+            .context("return standby lost its mapped destination endpoint")?;
+        let entry_section = entry_support_render_section(entry_pose)
+            .context("return standby departure pose has no entry section")?;
+        let entry_section_gpu_resident = standby.draw.contains_section(entry_section);
+        let entry_section_traversal_ready =
+            standby.draw.traversal_ready_contains_section(entry_section);
+        let renderer_multiview_materialized = standby.draw.multiview_renderer_materialized();
+        let renderer_topology_ready =
+            !renderer_multiview_required || renderer_multiview_materialized;
+        if !entry_section_gpu_resident || !entry_section_traversal_ready || !renderer_topology_ready
+        {
+            bail!(
+                "ownership exchange produced a non-switchable return slot: gpu={} traversal={} topology={}",
+                entry_section_gpu_resident,
+                entry_section_traversal_ready,
+                renderer_topology_ready,
+            );
+        }
+        let runtime = standby
+            .runtime
+            .as_ref()
+            .context("return standby lost its runtime")?;
+        let queue = standby.section_uploads.stats();
+        let now = self.services.clock.now();
+        let state = self
+            .warm_world_standby
+            .as_mut()
+            .context("ownership exchange lost warm-world state")?;
+        state.instance_id = standby.id;
+        state.seed = standby.scene.seed;
+        state.phase = WarmWorldStandbyPhase::Switchable;
+        state.started_at = now;
+        state.renderer_shell_create_ms = 0.0;
+        state.renderer_multiview_create_ms = 0.0;
+        state.renderer_multiview_required = renderer_multiview_required;
+        state.renderer_multiview_materialized = renderer_multiview_materialized;
+        state.asset_epoch = standby.asset_epoch;
+        state.poll_count = 0;
+        state.poll_ms = 0.0;
+        state.last_advance_ms = 0.0;
+        state.worst_advance_ms = 0.0;
+        state.worst_startup_step_ms = 0.0;
+        state.worst_runtime_poll_ms = 0.0;
+        state.endpoint_resolution_ms = 0.0;
+        state.gpu_warm_started_at = Some(now);
+        state.gpu_ready_at = Some(now);
+        state.upload_queue_nonempty_since = (queue.queued_lifecycle_items > 0).then_some(now);
+        state.last_gpu_advance_ms = 0.0;
+        state.worst_gpu_advance_ms = 0.0;
+        state.gpu_advance_count = 0;
+        state.gpu_ready_advance_count = 0;
+        state.gpu_skipped_no_slack_count = 0;
+        state.last_gpu_advance_frame = None;
+        state.camera_reconciled = true;
+        state.loaded_chunks = runtime.client().loaded_chunk_count();
+        state.startup_seed_sections = 0;
+        state.startup_seed_drawable_sections = 0;
+        state.startup_seed_owned_bytes = 0;
+        state.initial_upload_lifecycle_items = 0;
+        state.initial_upload_applied_lifecycle_items = 0;
+        state.initial_upload_released_compile_jobs = 0;
+        state.queued_upload_sections = queue.queued_upload_sections;
+        state.queued_upload_lifecycle_items = queue.queued_lifecycle_items;
+        state.queued_upload_mesh_owned_bytes = queue.queued_upload_mesh_owned_bytes;
+        state.gpu_section_count = standby.draw.section_count();
+        state.gpu_vertex_count = standby.draw.vertex_count();
+        state.gpu_index_count = standby.draw.index_count();
+        state.accepted_compile_result_count = 0;
+        state.released_compile_job_count = 0;
+        state.readiness = WarmWorldReadiness {
+            cpu_ready: true,
+            startup_seed_enqueued: true,
+            startup_seed_drained: true,
+            entry_section: Some(entry_section),
+            entry_section_gpu_resident,
+            entry_section_traversal_ready,
+            renderer_topology_ready,
+            switchable: true,
+        };
+        state.source_endpoint = source_endpoint;
+        state.destination_endpoint = destination_endpoint;
+        state.failure = None;
+        Ok(())
+    }
+
+    pub(crate) fn record_warm_world_first_destination_frame(
+        &mut self,
+        drawn_section_count: usize,
+        upload: XrTerrainUploadSummary,
+    ) {
+        let Some(report) = self.last_warm_world_switch.as_mut() else {
+            return;
+        };
+        if report.first_drawable_destination_frame.is_some()
+            || report.destination_instance_id != self.active_world.id
+        {
+            return;
+        }
+        report.first_drawable_destination_frame = Some(self.rendered_frames);
+        report.first_drawn_section_count = drawn_section_count;
+        report.first_frame_uploaded_section_count = upload.uploaded_section_count;
+        report.first_frame_submitted_compile_section_count = upload.submitted_compile_section_count;
+        report.first_frame_accepted_compile_result_count = upload.accepted_compile_result_count;
+        report.first_frame_queue_lifecycle_items = upload.queued_upload_lifecycle_item_count;
+        report.first_frame_queue_mesh_owned_bytes = upload.queued_upload_mesh_owned_bytes;
+        report.first_frame_pending_compile_jobs_after = upload.pending_compile_jobs_after;
+        if let Some(runtime) = self.active_world.runtime.as_ref() {
+            let stats = runtime.stats();
+            report.destination_runtime_command_count_after_first_frame = stats.command_count;
+            report.destination_runtime_update_count_after_first_frame = stats.update_count;
+        }
+        log::info!(
+            "warm-world first destination frame sequence={} frame={} drawn={} uploads={} submitted={} accepted={} queue={}",
+            report.sequence,
+            self.rendered_frames,
+            report.first_drawn_section_count,
+            report.first_frame_uploaded_section_count,
+            report.first_frame_submitted_compile_section_count,
+            report.first_frame_accepted_compile_result_count,
+            report.first_frame_queue_lifecycle_items,
+        );
     }
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
@@ -1617,8 +2120,8 @@ impl McloneSceneHost {
             if source_endpoint.is_some() && destination_endpoint.is_some() {
                 state.phase = WarmWorldStandbyPhase::CpuReady;
                 state.readiness.cpu_ready = true;
-                state.readiness.entry_section = slot
-                    .accepted_entry_pose
+                state.readiness.entry_section = destination_endpoint
+                    .map(world_gate_destination_entry_pose)
                     .and_then(entry_support_render_section);
                 log::info!(
                     "warm-world standby CPU-ready id={} seed={} elapsed_ms={:.3} polls={} poll_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
@@ -1817,9 +2320,7 @@ impl McloneSceneHost {
             slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
             state.destination_endpoint = None;
             state.readiness.cpu_ready = false;
-            state.readiness.entry_section = slot
-                .accepted_entry_pose
-                .and_then(entry_support_render_section);
+            state.readiness.entry_section = None;
             state.readiness.switchable = false;
             state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
         }
@@ -2112,6 +2613,22 @@ impl McloneSceneHost {
         self.last_underwater_update = None;
         self.prefetched_live_upload = None;
         self.active_world.clear_stream_state();
+    }
+
+    /// Clear only host presentation caches whose meaning changes when another
+    /// complete world slot becomes active. Slot-owned traversal, uploads, draw
+    /// resources, runtime state, and camera state intentionally survive.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn clear_world_selection_presentation_state(&mut self) {
+        self.underwater_effects = XrUnderwaterEffectStates::default();
+        self.last_underwater_update = None;
+        self.tracking_origin = None;
+        self.prefetched_live_upload = None;
+        self.last_locomotion_update = None;
+        self.first_eye_summary = None;
+        self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
+        self.last_ui_draw_cache_stats = UiDrawCacheStats::default();
+        self.rendered_frames = 0;
     }
 
     pub(crate) fn clear_transient_world_state(&mut self) {

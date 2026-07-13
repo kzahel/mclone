@@ -15,6 +15,7 @@ use mclone_ui::{GameTravelAssistMode, Point};
 use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions, StartupWaitPolicy,
+    WarmWorldSwapSmokeOptions,
 };
 use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
@@ -74,6 +75,18 @@ pub(crate) enum OffscreenScriptStep {
         point: Point,
         require_action: Option<mclone_ui::GameUiAction>,
     },
+    AdvanceFrame {
+        checkpoint: OffscreenScriptCheckpoint,
+    },
+    SwapWarmWorldStandby,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum OffscreenScriptCheckpoint {
+    SourceBefore,
+    DestinationFirst,
+    DestinationSteady,
+    SourceReturn,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -82,6 +95,112 @@ pub(crate) struct OffscreenScriptReport {
     pub(crate) world_action_count: usize,
     pub(crate) ui_pointer_click_count: usize,
     pub(crate) ui_action_count: usize,
+    pub(crate) advance_frame_count: usize,
+    pub(crate) warm_world_swap_count: usize,
+}
+
+struct OffscreenScriptRunner {
+    script: OffscreenScript,
+    cursor: usize,
+    report: OffscreenScriptReport,
+    switch_reports: Vec<mclone_scene::WarmWorldSwitchReport>,
+}
+
+impl OffscreenScriptRunner {
+    fn new(script: OffscreenScript) -> Self {
+        Self {
+            script,
+            cursor: 0,
+            report: OffscreenScriptReport::default(),
+            switch_reports: Vec::new(),
+        }
+    }
+
+    fn prepare_next_frame(
+        &mut self,
+        host: &mut OffscreenFlatClientHost,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Option<OffscreenScriptCheckpoint>> {
+        while let Some(step) = self.script.steps.get(self.cursor).copied() {
+            self.cursor += 1;
+            match step {
+                OffscreenScriptStep::AdvanceFrame { checkpoint } => {
+                    self.report.advance_frame_count += 1;
+                    return Ok(Some(checkpoint));
+                }
+                OffscreenScriptStep::SwapWarmWorldStandby => {
+                    self.report.warm_world_swap_count += 1;
+                    let report = host.driver.host_mut().apply_warm_world_selection_command(
+                        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
+                    )?;
+                    self.switch_reports.push(report);
+                }
+                immediate => {
+                    let step_report =
+                        host.run_script(&OffscreenScript::from_steps([immediate]), device, queue)?;
+                    self.report.input_frame_count += step_report.input_frame_count;
+                    self.report.world_action_count += step_report.world_action_count;
+                    self.report.ui_pointer_click_count += step_report.ui_pointer_click_count;
+                    self.report.ui_action_count += step_report.ui_action_count;
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    fn observe_rendered_frame(&mut self, host: &OffscreenFlatClientHost) {
+        let Some(pending) = self.switch_reports.last_mut() else {
+            return;
+        };
+        if pending.first_drawable_destination_frame.is_some() {
+            return;
+        }
+        let Some(updated) = host.driver.host().last_warm_world_switch_report() else {
+            return;
+        };
+        if updated.sequence == pending.sequence {
+            *pending = updated;
+        }
+    }
+
+    fn complete(&self) -> bool {
+        self.cursor == self.script.steps.len()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WarmWorldSwapSmokeFrameReport {
+    pub(crate) checkpoint: OffscreenScriptCheckpoint,
+    pub(crate) path: PathBuf,
+    pub(crate) instance_id: mclone_scene::WorldInstanceId,
+    pub(crate) seed: i64,
+    pub(crate) drawn_section_count: usize,
+    pub(crate) byte_len: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct WarmWorldSwapSmokeReport {
+    pub(crate) directory: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) source_seed: i64,
+    pub(crate) destination_seed: i64,
+    pub(crate) frames: Vec<WarmWorldSwapSmokeFrameReport>,
+    pub(crate) switches: Vec<mclone_scene::WarmWorldSwitchReport>,
+    pub(crate) source_destination_difference_ratio: f64,
+    pub(crate) destination_steady_difference_ratio: f64,
+}
+
+struct WarmWorldSwapSmokeState {
+    host: OffscreenFlatClientHost,
+    script: OffscreenScriptRunner,
+    frames: Vec<(
+        OffscreenScriptCheckpoint,
+        mclone_scene::WorldInstanceId,
+        i64,
+        usize,
+    )>,
 }
 
 pub(crate) struct OffscreenFlatClientHost {
@@ -520,6 +639,17 @@ impl OffscreenFlatClientHost {
                         );
                     }
                 }
+                OffscreenScriptStep::SwapWarmWorldStandby => {
+                    report.warm_world_swap_count += 1;
+                    self.driver.host_mut().apply_warm_world_selection_command(
+                        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
+                    )?;
+                }
+                OffscreenScriptStep::AdvanceFrame { checkpoint } => {
+                    bail!(
+                        "offscreen script checkpoint {checkpoint:?} requires the frame-advancing runner"
+                    );
+                }
             }
         }
         Ok(report)
@@ -623,6 +753,357 @@ impl OffscreenFlatClientHost {
         self.driver.commit_camera()?;
         Ok(())
     }
+
+    fn frame_warm_world_source_gate_approach(&mut self) -> Result<()> {
+        let endpoint = self
+            .driver
+            .host()
+            .warm_world_standby_snapshot()
+            .and_then(|snapshot| snapshot.source_endpoint)
+            .context("warm-world source endpoint is unavailable for smoke framing")?;
+        let feet = endpoint.feet_position.add(endpoint.normal.scale(1.25));
+        let eye = Vec3::new(
+            feet.x as f32,
+            (feet.y + mclone_client::LOCAL_PLAYER_STANDING_EYE_HEIGHT) as f32,
+            feet.z as f32,
+        );
+        let target = Vec3::new(
+            endpoint.center.x as f32,
+            endpoint.center.y as f32,
+            endpoint.center.z as f32,
+        );
+        self.set_camera_look_at(eye, target);
+        self.commit_camera()?;
+        Ok(())
+    }
+}
+
+fn warm_world_swap_script() -> OffscreenScript {
+    OffscreenScript::from_steps([
+        OffscreenScriptStep::AdvanceFrame {
+            checkpoint: OffscreenScriptCheckpoint::SourceBefore,
+        },
+        OffscreenScriptStep::SwapWarmWorldStandby,
+        OffscreenScriptStep::AdvanceFrame {
+            checkpoint: OffscreenScriptCheckpoint::DestinationFirst,
+        },
+        OffscreenScriptStep::AdvanceFrame {
+            checkpoint: OffscreenScriptCheckpoint::DestinationSteady,
+        },
+        OffscreenScriptStep::SwapWarmWorldStandby,
+        OffscreenScriptStep::AdvanceFrame {
+            checkpoint: OffscreenScriptCheckpoint::SourceReturn,
+        },
+    ])
+}
+
+fn warm_world_checkpoint_label(checkpoint: OffscreenScriptCheckpoint) -> &'static str {
+    match checkpoint {
+        OffscreenScriptCheckpoint::SourceBefore => "a-before",
+        OffscreenScriptCheckpoint::DestinationFirst => "b-first",
+        OffscreenScriptCheckpoint::DestinationSteady => "b-steady",
+        OffscreenScriptCheckpoint::SourceReturn => "a-return",
+    }
+}
+
+fn rgba_pixel_difference_ratio(left: &[u8], right: &[u8]) -> Result<f64> {
+    if left.len() != right.len() || left.len() % 4 != 0 {
+        bail!(
+            "cannot compare RGBA captures with lengths {} and {}",
+            left.len(),
+            right.len()
+        );
+    }
+    let differing = left
+        .chunks_exact(4)
+        .zip(right.chunks_exact(4))
+        .filter(|(left, right)| left[..3] != right[..3])
+        .count();
+    Ok(differing as f64 / (left.len() / 4).max(1) as f64)
+}
+
+fn validate_warm_world_switch_report(report: &mclone_scene::WarmWorldSwitchReport) -> Result<()> {
+    // One admitted render-compile request is one vertical chunk column in the
+    // current 1.17.1 world shape, hence at most 16 submitted sections.
+    const MAX_FIRST_FRAME_COMPILE_SECTIONS: usize = 16;
+    if report.switch_uploaded_section_count != 0
+        || report.switch_submitted_compile_section_count != 0
+        || report.switch_accepted_compile_result_count != 0
+        || report.switch_materialized_renderer
+    {
+        bail!(
+            "warm-world switch {} performed forbidden reconstruction/upload work",
+            report.sequence
+        );
+    }
+    if report.first_drawable_destination_frame != Some(1) || report.first_drawn_section_count == 0 {
+        bail!(
+            "warm-world switch {} was not drawable on its next frame: frame={:?} drawn={}",
+            report.sequence,
+            report.first_drawable_destination_frame,
+            report.first_drawn_section_count,
+        );
+    }
+    if report.first_frame_uploaded_section_count > 1
+        || report.first_frame_submitted_compile_section_count > MAX_FIRST_FRAME_COMPILE_SECTIONS
+        || report.first_frame_accepted_compile_result_count > 1
+    {
+        bail!(
+            "warm-world switch {} caused a first-frame work burst: uploaded={} submitted={} accepted={}",
+            report.sequence,
+            report.first_frame_uploaded_section_count,
+            report.first_frame_submitted_compile_section_count,
+            report.first_frame_accepted_compile_result_count,
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn run_offscreen_warm_world_swap_smoke(
+    options: &WarmWorldSwapSmokeOptions,
+) -> Result<WarmWorldSwapSmokeReport> {
+    let destination_seed = options
+        .scene
+        .warm_world_standby_seed
+        .context("warm-world swap smoke requires a standby seed")?;
+    std::fs::create_dir_all(&options.directory).with_context(|| {
+        format!(
+            "create warm-world swap output directory {}",
+            options.directory.display()
+        )
+    })?;
+
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let startup_camera = screenshot_startup_camera(&scene, StartupWaitPolicy::Idle);
+    let (loop_report, frame_pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: 4,
+            pace_frame_duration: None,
+        },
+        move |device, queue, format, size| {
+            let mut host = OffscreenFlatClientHost::new(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                startup_camera,
+            )?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Idle)?;
+            host.frame_warm_world_source_gate_approach()?;
+            host.drive_until_streamed_at_output_size(device, queue)?;
+            Ok(WarmWorldSwapSmokeState {
+                host,
+                script: OffscreenScriptRunner::new(warm_world_swap_script()),
+                frames: Vec::with_capacity(4),
+            })
+        },
+        |index, frame, state| {
+            let checkpoint = state
+                .script
+                .prepare_next_frame(&mut state.host, frame.device, frame.queue)?
+                .with_context(|| format!("warm-world script ended before capture frame {index}"))?;
+            let summary = state
+                .host
+                .render_frame(frame, OffscreenFlatClientFrameOptions::default())?;
+            state.script.observe_rendered_frame(&state.host);
+            state.frames.push((
+                checkpoint,
+                state.host.driver.host().active_world_instance_id(),
+                state.host.driver.host().active_world_seed(),
+                summary.drawn_section_count,
+            ));
+            Ok(())
+        },
+    )?;
+
+    if !state.script.complete()
+        || state.script.report.advance_frame_count != 4
+        || state.script.report.warm_world_swap_count != 2
+    {
+        bail!(
+            "warm-world script did not complete its 4-frame/2-switch sequence: {:#?}",
+            state.script.report
+        );
+    }
+    let expected_checkpoints = [
+        OffscreenScriptCheckpoint::SourceBefore,
+        OffscreenScriptCheckpoint::DestinationFirst,
+        OffscreenScriptCheckpoint::DestinationSteady,
+        OffscreenScriptCheckpoint::SourceReturn,
+    ];
+    if state.frames.len() != expected_checkpoints.len()
+        || !state
+            .frames
+            .iter()
+            .zip(expected_checkpoints)
+            .all(|((checkpoint, _, _, _), expected)| *checkpoint == expected)
+    {
+        bail!("warm-world script captured an unexpected checkpoint sequence");
+    }
+    if state.script.switch_reports.len() != 2 {
+        bail!("warm-world script did not retain both switch reports");
+    }
+    for report in &state.script.switch_reports {
+        validate_warm_world_switch_report(report)?;
+    }
+
+    let first = &state.script.switch_reports[0];
+    let second = &state.script.switch_reports[1];
+    let source_id = state.frames[0].1;
+    let destination_id = state.frames[1].1;
+    if source_id == destination_id
+        || state.frames[2].1 != destination_id
+        || state.frames[3].1 != source_id
+        || first.source_instance_id != source_id
+        || first.destination_instance_id != destination_id
+        || second.source_instance_id != destination_id
+        || second.destination_instance_id != source_id
+    {
+        bail!("warm-world A-to-B-to-A instance identity was not conserved");
+    }
+    if state.frames[0].2 != options.scene.seed
+        || state.frames[1].2 != destination_seed
+        || state.frames[2].2 != destination_seed
+        || state.frames[3].2 != options.scene.seed
+    {
+        bail!("warm-world A-to-B-to-A seed selection was not conserved");
+    }
+    if second.source_runtime_command_count_before
+        < first.destination_runtime_command_count_after_first_frame
+        || second.source_runtime_update_count_before
+            < first.destination_runtime_update_count_after_first_frame
+        || second.destination_runtime_command_count_before
+            < first.source_runtime_command_count_before
+        || second.destination_runtime_update_count_before < first.source_runtime_update_count_before
+    {
+        bail!("warm-world runtime counters regressed across the round trip");
+    }
+
+    let source_destination_difference_ratio =
+        rgba_pixel_difference_ratio(&frame_pixels[0], &frame_pixels[1])?;
+    let destination_steady_difference_ratio =
+        rgba_pixel_difference_ratio(&frame_pixels[1], &frame_pixels[2])?;
+    if source_destination_difference_ratio < 0.02 {
+        bail!(
+            "warm-world destination is not visually distinct from source: {:.3}% differing pixels",
+            source_destination_difference_ratio * 100.0
+        );
+    }
+
+    let mut frames = Vec::with_capacity(4);
+    for ((checkpoint, instance_id, seed, drawn_section_count), pixels) in
+        state.frames.iter().copied().zip(&frame_pixels)
+    {
+        if drawn_section_count == 0 {
+            bail!("warm-world checkpoint {checkpoint:?} rendered a blank terrain frame");
+        }
+        let path = options
+            .directory
+            .join(format!("{}.png", warm_world_checkpoint_label(checkpoint)));
+        save_rgba_png(&path, loop_report.width, loop_report.height, pixels)?;
+        frames.push(WarmWorldSwapSmokeFrameReport {
+            checkpoint,
+            path,
+            instance_id,
+            seed,
+            drawn_section_count,
+            byte_len: pixels.len(),
+        });
+    }
+
+    let switch_json = |report: &mclone_scene::WarmWorldSwitchReport| {
+        serde_json::json!({
+            "sequence": report.sequence,
+            "source_instance_id": report.source_instance_id.get(),
+            "source_seed": report.source_seed,
+            "destination_instance_id": report.destination_instance_id.get(),
+            "destination_seed": report.destination_seed,
+            "command_after_source_frame": report.command_after_source_frame,
+            "switch_elapsed_ms": report.switch_elapsed_ms,
+            "camera_commit_ms": report.camera_commit_ms,
+            "source_camera_commit_changed": report.source_camera_commit_changed,
+            "destination_camera_commit_changed": report.destination_camera_commit_changed,
+            "source_camera_position_changed": report.source_camera_position_changed,
+            "destination_camera_position_changed": report.destination_camera_position_changed,
+            "source_cadence_changed": report.source_cadence_changed,
+            "destination_cadence_changed": report.destination_cadence_changed,
+            "source_queue_lifecycle_items_before": report.source_queue_lifecycle_items_before,
+            "source_queue_mesh_owned_bytes_before": report.source_queue_mesh_owned_bytes_before,
+            "destination_queue_lifecycle_items_before": report.destination_queue_lifecycle_items_before,
+            "destination_queue_mesh_owned_bytes_before": report.destination_queue_mesh_owned_bytes_before,
+            "source_pending_compile_jobs_before": report.source_pending_compile_jobs_before,
+            "destination_pending_compile_jobs_before": report.destination_pending_compile_jobs_before,
+            "switch_uploaded_section_count": report.switch_uploaded_section_count,
+            "switch_submitted_compile_section_count": report.switch_submitted_compile_section_count,
+            "switch_accepted_compile_result_count": report.switch_accepted_compile_result_count,
+            "switch_materialized_renderer": report.switch_materialized_renderer,
+            "first_drawable_destination_frame": report.first_drawable_destination_frame,
+            "first_drawn_section_count": report.first_drawn_section_count,
+            "first_frame_uploaded_section_count": report.first_frame_uploaded_section_count,
+            "first_frame_submitted_compile_section_count": report.first_frame_submitted_compile_section_count,
+            "first_frame_accepted_compile_result_count": report.first_frame_accepted_compile_result_count,
+            "first_frame_queue_lifecycle_items": report.first_frame_queue_lifecycle_items,
+            "first_frame_queue_mesh_owned_bytes": report.first_frame_queue_mesh_owned_bytes,
+            "first_frame_pending_compile_jobs_after": report.first_frame_pending_compile_jobs_after,
+            "source_runtime_command_count_before": report.source_runtime_command_count_before,
+            "source_runtime_update_count_before": report.source_runtime_update_count_before,
+            "destination_runtime_command_count_before": report.destination_runtime_command_count_before,
+            "destination_runtime_update_count_before": report.destination_runtime_update_count_before,
+            "destination_runtime_command_count_after_first_frame": report.destination_runtime_command_count_after_first_frame,
+            "destination_runtime_update_count_after_first_frame": report.destination_runtime_update_count_after_first_frame,
+        })
+    };
+    let report_path = options.directory.join("report.json");
+    std::fs::write(
+        &report_path,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema": 1,
+            "width": loop_report.width,
+            "height": loop_report.height,
+            "source_seed": options.scene.seed,
+            "destination_seed": destination_seed,
+            "source_destination_difference_ratio": source_destination_difference_ratio,
+            "destination_steady_difference_ratio": destination_steady_difference_ratio,
+            "loop_timing_ms": {
+                "setup": loop_report.setup_ms,
+                "total": loop_report.total_frame_ms,
+                "average": loop_report.average_frame_ms,
+                "min": loop_report.min_frame_ms,
+                "max": loop_report.max_frame_ms,
+            },
+            "frames": frames.iter().map(|frame| serde_json::json!({
+                "checkpoint": warm_world_checkpoint_label(frame.checkpoint),
+                "path": frame.path,
+                "instance_id": frame.instance_id.get(),
+                "seed": frame.seed,
+                "drawn_section_count": frame.drawn_section_count,
+                "byte_len": frame.byte_len,
+            })).collect::<Vec<_>>(),
+            "switches": state.script.switch_reports.iter().map(switch_json).collect::<Vec<_>>(),
+        }))?,
+    )
+    .with_context(|| format!("write warm-world swap report {}", report_path.display()))?;
+
+    Ok(WarmWorldSwapSmokeReport {
+        directory: options.directory.clone(),
+        width: loop_report.width,
+        height: loop_report.height,
+        source_seed: options.scene.seed,
+        destination_seed,
+        frames,
+        switches: state.script.switch_reports,
+        source_destination_difference_ratio,
+        destination_steady_difference_ratio,
+    })
 }
 
 pub(crate) fn run_offscreen_flat_client_screenshot(
@@ -1270,6 +1751,33 @@ mod tests {
                 point: stored_point,
                 require_action: Some(mclone_ui::GameUiAction::ToggleCrosshair),
             } if stored_point == point
+        ));
+    }
+
+    #[test]
+    fn warm_world_swap_script_advances_a_to_b_to_a_at_frame_boundaries() {
+        let script = warm_world_swap_script();
+
+        assert_eq!(script.steps().len(), 6);
+        assert!(matches!(
+            script.steps()[0],
+            OffscreenScriptStep::AdvanceFrame {
+                checkpoint: OffscreenScriptCheckpoint::SourceBefore,
+            }
+        ));
+        assert_eq!(
+            script
+                .steps()
+                .iter()
+                .filter(|step| matches!(step, OffscreenScriptStep::SwapWarmWorldStandby))
+                .count(),
+            2
+        );
+        assert!(matches!(
+            script.steps()[5],
+            OffscreenScriptStep::AdvanceFrame {
+                checkpoint: OffscreenScriptCheckpoint::SourceReturn,
+            }
         ));
     }
 }
