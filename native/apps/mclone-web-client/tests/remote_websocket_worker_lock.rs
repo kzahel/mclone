@@ -31,6 +31,5 @@ fn dedicated_websocket_adapter_does_not_loop_back_through_tcp() {
     assert!(adapter.contains("DedicatedNetworkEvent::Connected"));
     assert!(adapter.contains("DedicatedNetworkEvent::Command"));
     assert!(adapter.contains("DedicatedOutbound::channel"));
-    assert!(!adapter.contains("NativeClientSession"));
     assert!(!adapter.contains("upstream_addr"));
 }

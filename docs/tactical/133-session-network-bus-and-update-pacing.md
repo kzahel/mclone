@@ -1,27 +1,12 @@
 # 133: Session Network Bus And Update Pacing
 
-Status: active tracking doc; Slice 1 send-only high-frequency command policy
-landed for local integrated play; direction revised 2026-07-03 to strict
-receive-order update application (vanilla parity) with a frame-budget stall,
-replacing the earlier priority-class plan; Slice 2 local integrated ordered
-update pump landed; Slice 3A batched dirty intent and resident cache lookup
-landed; Slice 3B local integrated producer-side decoded update queue landed;
-Slice 3C local integrated chunk-interest unload hysteresis landed; Slice 3D
-resident cached-section dirty flags landed; Slice 3E local chunk-view churn
-validation landed; Slice 3F Quest-controlled chunk-view churn validation
-landed and reproduced the unload client-apply tail; Slice 3G default
-unload-count pump cap landed and reduced the Quest unload tail but did not
-eliminate it; Slice 3H client entity-by-chunk unload index landed and cut the
-Quest update-pump tail below 4 ms; Slice 3I batched packed-section patching
-landed and improved the section-block client tail; Slice 3J deferred client
-chunk snapshot payload drops landed and removed the Quest unload client-apply
-tail while making cleanup cost explicit in poll diagnostics; Slice 3K native
-deferred payload drop worker landed and moved that cleanup off the app frame;
-remote `SendOnly` and response-readiness fixes landed under tactical 149;
-focused native/web remote inbound-queue work completed under tactical 151;
-server-push protocol broadening handed to focused Tactical
-[`176`](176-dedicated-autonomous-push-runtime.md); broader terrain coordinator
-lifecycle remains active
+Status: complete 2026-07-13. The shared strict-order, decoded, budgeted client
+bus and its local/native/web ingress convergence are complete. Tactical
+[`176`](176-dedicated-autonomous-push-runtime.md) completed autonomous remote
+server push, pressure bounds, and adapter conformance. Remaining terrain
+dirty-to-drawable coordinator lifecycle work belongs to Tactical
+[`128`](128-terrain-render-pipeline-coordination.md), not this network bus.
+
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -104,22 +89,20 @@ ordered queue behind a common policy boundary.
   envelope at a time and preserves queue depth/byte accounting. The runner
   still uses the shared update codec on the server thread to compute
   `encoded_len` for diagnostics, but the runtime pump no longer decodes local
-  integrated update payloads. `drain_updates` remains as an unlimited
-  compatibility helper.
+  integrated update payloads. `drain_updates` remains an explicit unlimited
+  off-frame startup/test convenience over `try_recv_update`.
 - Local integrated play uses the shared player-chunk tracking policy with a
   one-chunk unload hysteresis margin for Java-shaped radii. The first view is
   exact, tiny debug views stay exact, and chunks just outside the accepted view
   can remain retained across boundary oscillation to avoid immediate unload /
   reload churn.
-- `send_gameplay_command*` helpers default to `DrainImmediately`; Slice 1 added
-  `SendOnly` and switched pose sync to it.
+- Normal gameplay/session command paths enqueue without draining inbound
+  publications; the runtime pump is the sole frame-owned apply point.
 - `LocalSingleViewSceneRuntime::set_chunk_view` sends the view command only;
   resulting snapshots/unloads arrive through the runtime pump.
-- The local `NativeSingleViewSessionRuntime::set_chunk_view` wrapper now
-  preserves that deferred-update local path instead of routing through the
-  default immediate-drain gameplay helper. Remote dedicated now honors
-  `SendOnly` too. Its wire protocol is still paired response batches, but the
-  app/runtime-facing boundary is the shared `ClientConnection` queue.
+- The local `NativeSingleViewSessionRuntime::set_chunk_view` wrapper preserves
+  that deferred-update local path. Remote dedicated uses independent command
+  and publication streams behind the same `ClientConnection` queue.
 - `LocalSingleViewSceneRuntime::poll` applies updates in strict receive order
   under the default elapsed-time budget, while startup and `poll_until_idle`
   use an explicit unlimited pump.
@@ -135,10 +118,10 @@ ordered queue behind a common policy boundary.
 - `poll_until_idle` treats runner idle plus `update_queue_depth == 0` as done.
   Slice 2 must keep undrained updates observable (leave them in the channel)
   so idle and startup/bootstrap semantics stay correct.
-- Native remote TCP no longer drains remote `SendOnly` responses inside the
-  command send path. Desktop, Android, and Android XR remote wrappers hold
-  `NativeClientIoSession`, whose IO actor owns the TCP stream, response reads,
-  and decode. Normal remote `poll()` drains decoded queued updates through the
+- Native remote TCP never drains publications inside the command send path.
+  Desktop, Android, and Android XR remote wrappers use
+  `NativeClientIoSession`, whose independent writer/reader own TCP IO and
+  decode. Normal remote `poll()` drains decoded queued updates through the
   shared app-runtime pump.
 - Web integrated and web remote WebSocket adapters implement the same
   `ClientConnection` boundary. Worker/WebSocket async mechanics stay in the web
@@ -1018,11 +1001,10 @@ another doc, explicitly decide where these remaining valuable items live:
   run). Keep this note as the easy-to-find place to retune the cleanup budget
   or split payload items further if sustained movement shows memory/backlog
   pressure.
-- Server-push protocol broadening: native TCP and WebSocket server paths still
-  emit one response batch per command. Tactical 151 finished the client inbound
-  boundary; Tactical 176 now owns autonomous cadence, unsolicited publication,
-  bounded queues, native/web producer mechanics, and conformance as one
-  coordinated milestone.
+- Server-push protocol broadening is complete under Tactical 176: native TCP
+  and direct WebSocket paths carry unsolicited ordered publications from an
+  autonomous host, production browser receipt/decode is worker-owned, and
+  per-peer/client queues are bounded and observable.
 - Correction latency fast-lane: keep this only as the recorded escalation path
   if measured queue age proves corrections/lifecycle updates need it. Do not
   introduce chunk-stream priority classes for local play.

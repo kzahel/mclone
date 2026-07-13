@@ -547,8 +547,7 @@ mod tests {
     use super::*;
     use mclone_core::ChunkPos;
     use mclone_net::{
-        NativeClientIoSession, NativeClientSession, NativeTransportError,
-        complete_client_handshake_with_version,
+        NativeClientIoSession, NativeTransportError, complete_client_handshake_with_version,
     };
     use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
 
@@ -564,14 +563,15 @@ mod tests {
         let clients = (0..CLIENT_COUNT)
             .map(|index| {
                 thread::spawn(move || {
-                    let mut session = NativeClientSession::connect(addr).unwrap();
+                    let mut session = NativeClientIoSession::connect(addr).unwrap();
                     session
-                        .send_command(&ClientCommand::SetChunkView(ChunkView {
+                        .send_command_only(ClientCommand::SetChunkView(ChunkView {
                             center: ChunkPos::new(index as i32, 0),
                             render_distance: 0,
                             chunk_tracking_radius: 0,
                         }))
-                        .unwrap()
+                        .unwrap();
+                    session.drain_update_batch().unwrap().into_updates()
                 })
             })
             .collect::<Vec<_>>();

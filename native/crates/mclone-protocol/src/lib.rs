@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [

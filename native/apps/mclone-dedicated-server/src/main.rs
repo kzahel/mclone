@@ -380,7 +380,6 @@ fn run_server_loop_inner(
             pending_events.push_back(event);
         }
 
-        let mut command_publications = BTreeSet::new();
         let mut active_summary_connections = BTreeSet::new();
         let mut exit_after_boundary = false;
         let mut exit_error = None;
@@ -414,7 +413,6 @@ fn run_server_loop_inner(
                     match session.handle_client_command(server, command) {
                         Ok(()) => {
                             summary.record_command();
-                            command_publications.insert(id);
                             let connection_command_count =
                                 session_command_counts.entry(id).or_default();
                             *connection_command_count = connection_command_count.saturating_add(1);
@@ -513,7 +511,7 @@ fn run_server_loop_inner(
             let updates = server
                 .try_drain_updates_for_player(session.player_id())
                 .with_context(|| format!("failed to drain publications for client {id}"))?;
-            if updates.is_empty() && !command_publications.contains(&id) {
+            if updates.is_empty() {
                 continue;
             }
             let update_count = updates.len();

@@ -1017,8 +1017,8 @@ function frameMetricsActive(metrics, transportKind) {
     && metrics.transportKind === transportKind
     && Number(metrics.requestFrames) > 0
     && Number(metrics.requestBytes) > 0
-    && Number(metrics.responseFrames) > 0
-    && Number(metrics.responseBytes) > 0
+    && Number(metrics.inboundFrames) > 0
+    && Number(metrics.inboundBytes) > 0
   );
 }
 
@@ -1028,8 +1028,8 @@ function sharedBufferPoolUsed(metrics) {
     metrics
     && Number(metrics.sharedBufferCapacityBytes) > 0
     && Number(metrics.maxSharedBufferCapacityBytes) >= Number(metrics.sharedBufferCapacityBytes)
-    && Number(metrics.sharedBufferPooledResponseFrames) > 0
-    && Number(metrics.sharedBufferFallbackResponseFrames) === 0
+    && Number(metrics.sharedBufferPooledInboundFrames) > 0
+    && Number(metrics.sharedBufferFallbackInboundFrames) === 0
   );
 }
 
@@ -1057,8 +1057,8 @@ function sharedRunnerStressActive(report) {
     && Number(metrics.sharedBufferPoolDrops) > 0
     && Number(metrics.sharedBufferCapacityBytes) > 0
     && Number(metrics.maxSharedBufferCapacityBytes) >= Number(metrics.sharedBufferCapacityBytes)
-    && Number(metrics.sharedBufferPooledResponseFrames) > 0
-    && Number(metrics.sharedBufferFallbackResponseFrames) > 0
+    && Number(metrics.sharedBufferPooledInboundFrames) > 0
+    && Number(metrics.sharedBufferFallbackInboundFrames) > 0
     && frameMetricsActive(report.worldgenJobFrameMetrics, "shared-memory")
     && frameMetricsActive(report.lightStatusJobFrameMetrics, "shared-memory")
     && report.shutdown
@@ -1078,8 +1078,8 @@ function fallbackRunnerStressActive(report) {
     && Number(metrics.sharedBufferPoolHits) === 0
     && Number(metrics.sharedBufferPoolMisses) === 0
     && Number(metrics.sharedBufferPoolDrops) === 0
-    && Number(metrics.sharedBufferPooledResponseFrames) === 0
-    && Number(metrics.sharedBufferFallbackResponseFrames) === 0
+    && Number(metrics.sharedBufferPooledInboundFrames) === 0
+    && Number(metrics.sharedBufferFallbackInboundFrames) === 0
     && report.shutdown
     && report.shutdown.running === false
   );
@@ -1109,7 +1109,7 @@ function remoteWebSocketActive(report) {
     && Number(report.runnerUpdateQueueDepth) === 0
     && frameMetricsActive(metrics, "websocket")
     && Number(metrics.requestFrames) >= 3
-    && Number(metrics.responseFrames) >= 3
+    && Number(metrics.inboundFrames) >= 3
   );
 }
 

@@ -46,14 +46,14 @@ pub fn frame_pipeline_report_lines(
     }
     for peer in &report.peer_thread_panel.peers {
         lines.push(format!(
-            "{marker_prefix}_PEER lane={} active={} pending_jobs={} request_frames={} response_frames={} request_bytes={} response_bytes={} max_pending_frames={} busy_ms={} idle_ms={} last_request_ms={} total_request_ms={:.3} max_request_ms={:.3} conservation_violations={} availability={}",
+            "{marker_prefix}_PEER lane={} active={} pending_jobs={} request_frames={} inbound_frames={} request_bytes={} inbound_bytes={} max_pending_frames={} busy_ms={} idle_ms={} last_request_ms={} total_request_ms={:.3} max_request_ms={:.3} conservation_violations={} availability={}",
             peer_thread_id_label(&peer.lane),
             peer.active,
             peer.pending_jobs,
             peer.request_frames,
-            peer.response_frames,
+            peer.inbound_frames,
             peer.request_bytes,
-            peer.response_bytes,
+            peer.inbound_bytes,
             peer.max_pending_frames,
             format_optional_f64(peer.busy_ms),
             format_optional_f64(peer.idle_ms),

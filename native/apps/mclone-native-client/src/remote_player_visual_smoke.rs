@@ -11,7 +11,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_net::{
-    NativeClientSession, NativeTransportError, complete_server_handshake,
+    NativeClientIoSession, NativeTransportError, complete_server_handshake,
     try_read_client_command_frame, write_server_update_batch,
 };
 use mclone_protocol::{
@@ -247,7 +247,7 @@ enum ServerIoCommand {
     ClientCommand {
         player_id: ServerPlayerId,
         command: ClientCommand,
-        response_tx: mpsc::Sender<std::result::Result<Vec<ServerUpdate>, String>>,
+        publication_tx: mpsc::Sender<std::result::Result<Vec<ServerUpdate>, String>>,
     },
     Disconnect {
         player_id: ServerPlayerId,
@@ -264,7 +264,7 @@ fn drain_server_commands(
             ServerIoCommand::ClientCommand {
                 player_id,
                 command,
-                response_tx,
+                publication_tx,
             } => {
                 let result = connections
                     .get_mut(&player_id)
@@ -273,7 +273,7 @@ fn drain_server_commands(
                         handle_client_command(connection, server, player_id, command)
                     })
                     .map_err(|err| format!("{err:#}"));
-                let _ = response_tx.send(result);
+                let _ = publication_tx.send(result);
             }
             ServerIoCommand::Disconnect { player_id } => {
                 connections.remove(&player_id);
@@ -317,17 +317,19 @@ fn request_server_command(
     player_id: ServerPlayerId,
     command: ClientCommand,
 ) -> Result<Vec<ServerUpdate>> {
-    let (response_tx, response_rx) = mpsc::channel();
+    // This deterministic visual fixture steps its embedded authority on demand.
+    // Production remote sessions use the autonomous dedicated host instead.
+    let (publication_tx, publication_rx) = mpsc::channel();
     command_tx
         .send(ServerIoCommand::ClientCommand {
             player_id,
             command,
-            response_tx,
+            publication_tx,
         })
         .map_err(|_| anyhow!("loopback smoke server command channel closed"))?;
-    response_rx
+    publication_rx
         .recv()
-        .context("loopback smoke server response channel closed")?
+        .context("loopback smoke server publication channel closed")?
         .map_err(|message| anyhow!(message))
 }
 
@@ -478,13 +480,15 @@ fn run_remote_actor_client(
     release_rx: mpsc::Receiver<()>,
 ) -> Result<()> {
     let mut session =
-        NativeClientSession::connect(addr).context("failed to connect remote actor client")?;
+        NativeClientIoSession::connect(addr).context("failed to connect remote actor client")?;
     let mut current_position = Vec3d::ZERO;
     let mut saw_position = false;
 
-    let updates = session
-        .send_command(&ClientCommand::SetChunkView(smoke_chunk_view(scene)?))
-        .context("remote actor failed to set chunk view")?;
+    let updates = exchange_remote_actor_command(
+        &mut session,
+        ClientCommand::SetChunkView(smoke_chunk_view(scene)?),
+    )
+    .context("remote actor failed to set chunk view")?;
     let position_update =
         accept_player_position_updates(&mut session, &updates, current_position, saw_position)?;
     current_position = position_update.position;
@@ -493,28 +497,30 @@ fn run_remote_actor_client(
         bail!("remote actor did not receive an initial player position");
     }
 
-    let updates = session
-        .send_command(&ClientCommand::SetPlayerAppearance(
-            SetPlayerAppearanceCommand {
-                appearance: PlayerAppearance {
-                    model: PlayerModelKind::UprightBear,
-                },
+    let updates = exchange_remote_actor_command(
+        &mut session,
+        ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
+            appearance: PlayerAppearance {
+                model: PlayerModelKind::UprightBear,
             },
-        ))
-        .context("remote actor failed to set upright bear appearance")?;
+        }),
+    )
+    .context("remote actor failed to set upright bear appearance")?;
     let position_update =
         accept_player_position_updates(&mut session, &updates, current_position, saw_position)?;
     current_position = position_update.position;
     saw_position = position_update.saw_position;
 
-    let updates = session
-        .send_command(&ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+    let updates = exchange_remote_actor_command(
+        &mut session,
+        ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
             position: current_position,
             y_rot_degrees: 180.0,
             x_rot_degrees: 0.0,
             on_ground: true,
-        }))
-        .context("remote actor failed to publish position")?;
+        }),
+    )
+    .context("remote actor failed to publish position")?;
     let position_update =
         accept_player_position_updates(&mut session, &updates, current_position, saw_position)?;
     current_position = position_update.position;
@@ -534,14 +540,16 @@ fn run_remote_actor_client(
             current_position.y,
             current_position.z + REMOTE_ACTOR_MOVE_STEP_BLOCKS,
         );
-        let updates = session
-            .send_command(&ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        let updates = exchange_remote_actor_command(
+            &mut session,
+            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
                 position: next_position,
                 y_rot_degrees: 180.0,
                 x_rot_degrees: 0.0,
                 on_ground: true,
-            }))
-            .context("remote actor failed to publish walking position")?;
+            }),
+        )
+        .context("remote actor failed to publish walking position")?;
         let position_update =
             accept_player_position_updates(&mut session, &updates, next_position, saw_position)?;
         current_position = position_update.position;
@@ -557,7 +565,7 @@ struct AcceptedPositionUpdates {
 }
 
 fn accept_player_position_updates(
-    session: &mut NativeClientSession,
+    session: &mut NativeClientIoSession,
     updates: &[ServerUpdate],
     mut position: Vec3d,
     mut saw_position: bool,
@@ -568,16 +576,26 @@ fn accept_player_position_updates(
         };
         position = apply_position_update(position, *update);
         saw_position = true;
-        session
-            .send_command(&ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+        exchange_remote_actor_command(
+            session,
+            ClientCommand::AcceptTeleport(AcceptTeleportCommand {
                 id: update.teleport_id,
-            }))
-            .context("remote actor failed to accept teleport")?;
+            }),
+        )
+        .context("remote actor failed to accept teleport")?;
     }
     Ok(AcceptedPositionUpdates {
         position,
         saw_position,
     })
+}
+
+fn exchange_remote_actor_command(
+    session: &mut NativeClientIoSession,
+    command: ClientCommand,
+) -> Result<Vec<ServerUpdate>> {
+    session.send_command_only(command)?;
+    Ok(session.drain_update_batch()?.into_updates())
 }
 
 fn apply_position_update(current: Vec3d, update: PlayerPositionUpdate) -> Vec3d {

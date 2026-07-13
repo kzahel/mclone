@@ -149,7 +149,7 @@ impl WasmJobWorker {
                     };
                 match frame_result {
                     Ok(frame) => {
-                        frame_metrics.borrow_mut().record_response(frame.len());
+                        frame_metrics.borrow_mut().record_inbound(frame.len());
                         completed_frames.borrow_mut().push_back(frame);
                     }
                     Err(error) => {
@@ -434,15 +434,15 @@ fn shared_response_frame(value: &JsValue) -> Result<SharedResponseFrame, String>
             "shared server job worker completed with unexpected status {status}"
         ));
     }
-    let response_bytes = Atomics::load(&control, SHARED_RESPONSE_BYTES_INDEX).map_err(|error| {
+    let inbound_bytes = Atomics::load(&control, SHARED_RESPONSE_BYTES_INDEX).map_err(|error| {
         format!(
             "failed to read shared server job byte count: {}",
             js_error_string(&error)
         )
     })?;
-    if response_bytes < 0 {
+    if inbound_bytes < 0 {
         return Err(format!(
-            "shared server job worker returned negative byte count {response_bytes}"
+            "shared server job worker returned negative byte count {inbound_bytes}"
         ));
     }
     let Some(frame_buffer) = reflect_get(value, "frameBuffer") else {
@@ -451,8 +451,7 @@ fn shared_response_frame(value: &JsValue) -> Result<SharedResponseFrame, String>
     if !frame_buffer.is_instance_of::<SharedArrayBuffer>() {
         return Err("shared server job worker frame buffer was not a SharedArrayBuffer".to_owned());
     }
-    let frame =
-        Uint8Array::new_with_byte_offset_and_length(&frame_buffer, 0, response_bytes as u32);
+    let frame = Uint8Array::new_with_byte_offset_and_length(&frame_buffer, 0, inbound_bytes as u32);
     Ok(SharedResponseFrame {
         frame: frame.to_vec(),
         pooled_response: bool_prop(value, "pooledResponse").unwrap_or(false),
@@ -491,17 +490,17 @@ fn ensure_slot_request_capacity(
 
 fn grow_slot_response_buffer(
     slot: &mut SharedJobSlot,
-    response_bytes: usize,
+    inbound_bytes: usize,
     frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
 ) {
-    let Ok(response_bytes) = u32::try_from(response_bytes) else {
+    let Ok(inbound_bytes) = u32::try_from(inbound_bytes) else {
         return;
     };
-    if response_bytes <= slot.response_capacity {
+    if inbound_bytes <= slot.response_capacity {
         return;
     }
     let previous_capacity = slot.response_capacity;
-    let response_capacity = shared_capacity_for_len(response_bytes, DEFAULT_SHARED_RESPONSE_BYTES);
+    let response_capacity = shared_capacity_for_len(inbound_bytes, DEFAULT_SHARED_RESPONSE_BYTES);
     slot.response_buffer = SharedArrayBuffer::new(response_capacity);
     slot.response_capacity = response_capacity;
     frame_metrics

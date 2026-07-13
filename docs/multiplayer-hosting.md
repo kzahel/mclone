@@ -48,16 +48,27 @@ builds directly on `mclone-server::IntegratedServer` and drives clients through
 the same protocol/client/server boundary as singleplayer.
 
 - **Default listener:** native TCP on `127.0.0.1:25565`.
-- **`--listen-ws HOST:PORT`** adds a WebSocket listener that bridges each browser
-  connection into the same server loop, so TCP and WebSocket clients share one
-  world.
-- The server is **launched with a seed** and currently uses a non-persistent
-  chunk store (`NullChunkSnapshotStore`). There is no `--world-dir`, world id, or
-  save yet — every launch regenerates from seed. (A `FilesystemSnapshotStore`
-  exists in the engine but no app wires it; see persistence note below.)
+- **`--listen-ws HOST:PORT`** adds a WebSocket listener whose peers terminate
+  directly in the same authoritative connection registry as TCP; there is no
+  TCP loopback bridge.
+- The host advances autonomously at the shared default 20/20/60 cadence,
+  drains ready commands at host boundaries, and publishes each player's
+  ordered stream through an independent bounded writer. Client traffic does
+  not clock world time, worldgen publication, entity tracking, or autosave.
+- Without a world argument, or with `--transient`, the server uses transient
+  storage. `--world-dir PATH` opens a persistent SQLite-backed world;
+  `--world-root ROOT --world-name NAME` selects a named directory. Dirty chunks
+  autosave every 6000 gameplay ticks and save again during graceful shutdown.
+  The seed is still supplied per launch and is not yet protected by persisted
+  world metadata, so operators must reuse the same seed.
+- Every peer has a nonblocking 64-publication-frame / 64 MiB exact-byte
+  outbound queue. A saturated slow consumer is disconnected without delaying
+  the authority loop; summary markers report queue high-water marks and
+  pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION` is negotiated in the handshake (see [`protocol.md`](./protocol.md)).
+- `PROTOCOL_VERSION = 20` is negotiated with strict equality in the handshake
+  (see [`protocol.md`](./protocol.md)).
 
 Client connect status (full grid in
 [`topics/platform-parity.md`](./topics/platform-parity.md)):
@@ -92,9 +103,11 @@ the dedicated server also serve the built web client and asset pack alongside th
 WebSocket endpoint. Graceful, admin-only config reload/restart is a later server
 lifecycle feature, not a client debug shortcut.
 
-Persistence is the nearest concrete gap: the engine has the chunk store and
-`IntegratedServer::with_chunk_store`, but the dedicated server needs a
-`--world-dir`/config path to actually save and reload a world.
+The next hosting lifecycle gaps are persistent world metadata (seed,
+generation profile, and day time), durable player identity/state, login and
+capability negotiation, keepalive/timeouts, and explicit disconnect reasons.
+Those belong in the shared session/persistence layers rather than app-specific
+TCP or WebSocket wrappers.
 
 ## Future Static P2P / WebRTC
 

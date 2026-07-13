@@ -579,17 +579,17 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
         .is_none();
     let command_count_before_idle = runtime.command_count();
     let day_time_before_idle = runtime.client().day_time();
-    let response_frames_before_idle = runtime
+    let inbound_frames_before_idle = runtime
         .runner_diagnostics()
         .runner_frame_metrics
-        .response_frames;
+        .inbound_frames;
     let mut unsolicited_publication = false;
     for _ in 0..250 {
         wait_for_remote_worker_turn(10).await?;
         runtime.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
         let idle_diagnostics = runtime.runner_diagnostics();
         if runtime.command_count() == command_count_before_idle
-            && idle_diagnostics.runner_frame_metrics.response_frames > response_frames_before_idle
+            && idle_diagnostics.runner_frame_metrics.inbound_frames > inbound_frames_before_idle
             && runtime.client().day_time() != day_time_before_idle
         {
             unsolicited_publication = true;
@@ -602,7 +602,7 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
         && diagnostics.kind == ServerRunnerKind::RemoteWebSocket
         && metrics.transport_kind == mclone_server::WorkerFrameTransportKind::WebSocket
         && metrics.request_frames >= 2
-        && metrics.response_frames >= 3
+        && metrics.inbound_frames >= 3
         && center_chunk_loaded
         && moved_chunk_loaded
         && previous_chunk_unloaded
@@ -633,12 +633,12 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
     set_number(
         &object,
         "idleResponseFramesBefore",
-        response_frames_before_idle as f64,
+        inbound_frames_before_idle as f64,
     )?;
     set_number(
         &object,
         "idleResponseFramesAfter",
-        metrics.response_frames as f64,
+        metrics.inbound_frames as f64,
     )?;
     set_bool(&object, "transportDrained", runtime.transport_drained())?;
     set_bool(
@@ -3399,13 +3399,13 @@ pub(super) fn set_worker_frame_metrics(
     )?;
     set_number(
         &metrics_object,
-        "responseFrames",
-        metrics.response_frames as f64,
+        "inboundFrames",
+        metrics.inbound_frames as f64,
     )?;
     set_number(
         &metrics_object,
-        "responseBytes",
-        metrics.response_bytes as f64,
+        "inboundBytes",
+        metrics.inbound_bytes as f64,
     )?;
     set_number(
         &metrics_object,
@@ -3454,13 +3454,13 @@ pub(super) fn set_worker_frame_metrics(
     )?;
     set_number(
         &metrics_object,
-        "sharedBufferPooledResponseFrames",
-        metrics.shared_buffer_pooled_response_frames as f64,
+        "sharedBufferPooledInboundFrames",
+        metrics.shared_buffer_pooled_inbound_frames as f64,
     )?;
     set_number(
         &metrics_object,
-        "sharedBufferFallbackResponseFrames",
-        metrics.shared_buffer_fallback_response_frames as f64,
+        "sharedBufferFallbackInboundFrames",
+        metrics.shared_buffer_fallback_inbound_frames as f64,
     )?;
     js_sys::Reflect::set(object, &JsValue::from_str(key), &metrics_object)
         .map(|_| ())

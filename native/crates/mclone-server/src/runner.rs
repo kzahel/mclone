@@ -142,8 +142,8 @@ pub struct WorkerFrameMetrics {
     pub transport_kind: WorkerFrameTransportKind,
     pub request_frames: usize,
     pub request_bytes: usize,
-    pub response_frames: usize,
-    pub response_bytes: usize,
+    pub inbound_frames: usize,
+    pub inbound_bytes: usize,
     pub max_pending_frames: usize,
     pub last_request_us: u128,
     pub total_request_us: u128,
@@ -153,8 +153,8 @@ pub struct WorkerFrameMetrics {
     pub shared_buffer_pool_drops: usize,
     pub shared_buffer_capacity_bytes: usize,
     pub max_shared_buffer_capacity_bytes: usize,
-    pub shared_buffer_pooled_response_frames: usize,
-    pub shared_buffer_fallback_response_frames: usize,
+    pub shared_buffer_pooled_inbound_frames: usize,
+    pub shared_buffer_fallback_inbound_frames: usize,
 }
 
 impl WorkerFrameMetrics {
@@ -163,8 +163,8 @@ impl WorkerFrameMetrics {
             transport_kind: WorkerFrameTransportKind::MessageTransfer,
             request_frames: 0,
             request_bytes: 0,
-            response_frames: 0,
-            response_bytes: 0,
+            inbound_frames: 0,
+            inbound_bytes: 0,
             max_pending_frames: 0,
             last_request_us: 0,
             total_request_us: 0,
@@ -174,8 +174,8 @@ impl WorkerFrameMetrics {
             shared_buffer_pool_drops: 0,
             shared_buffer_capacity_bytes: 0,
             max_shared_buffer_capacity_bytes: 0,
-            shared_buffer_pooled_response_frames: 0,
-            shared_buffer_fallback_response_frames: 0,
+            shared_buffer_pooled_inbound_frames: 0,
+            shared_buffer_fallback_inbound_frames: 0,
         }
     }
 
@@ -184,8 +184,8 @@ impl WorkerFrameMetrics {
             transport_kind: WorkerFrameTransportKind::SharedMemory,
             request_frames: 0,
             request_bytes: 0,
-            response_frames: 0,
-            response_bytes: 0,
+            inbound_frames: 0,
+            inbound_bytes: 0,
             max_pending_frames: 0,
             last_request_us: 0,
             total_request_us: 0,
@@ -195,8 +195,8 @@ impl WorkerFrameMetrics {
             shared_buffer_pool_drops: 0,
             shared_buffer_capacity_bytes: 0,
             max_shared_buffer_capacity_bytes: 0,
-            shared_buffer_pooled_response_frames: 0,
-            shared_buffer_fallback_response_frames: 0,
+            shared_buffer_pooled_inbound_frames: 0,
+            shared_buffer_fallback_inbound_frames: 0,
         }
     }
 
@@ -205,8 +205,8 @@ impl WorkerFrameMetrics {
             transport_kind: WorkerFrameTransportKind::WebSocket,
             request_frames: 0,
             request_bytes: 0,
-            response_frames: 0,
-            response_bytes: 0,
+            inbound_frames: 0,
+            inbound_bytes: 0,
             max_pending_frames: 0,
             last_request_us: 0,
             total_request_us: 0,
@@ -216,8 +216,8 @@ impl WorkerFrameMetrics {
             shared_buffer_pool_drops: 0,
             shared_buffer_capacity_bytes: 0,
             max_shared_buffer_capacity_bytes: 0,
-            shared_buffer_pooled_response_frames: 0,
-            shared_buffer_fallback_response_frames: 0,
+            shared_buffer_pooled_inbound_frames: 0,
+            shared_buffer_fallback_inbound_frames: 0,
         }
     }
 
@@ -226,9 +226,9 @@ impl WorkerFrameMetrics {
         self.request_bytes = self.request_bytes.saturating_add(bytes);
     }
 
-    pub fn record_response(&mut self, bytes: usize) {
-        self.response_frames = self.response_frames.saturating_add(1);
-        self.response_bytes = self.response_bytes.saturating_add(bytes);
+    pub fn record_inbound(&mut self, bytes: usize) {
+        self.inbound_frames = self.inbound_frames.saturating_add(1);
+        self.inbound_bytes = self.inbound_bytes.saturating_add(bytes);
     }
 
     pub fn observe_pending_frames(&mut self, pending_frames: usize) {
@@ -264,14 +264,13 @@ impl WorkerFrameMetrics {
     }
 
     pub fn record_shared_buffer_pooled_response(&mut self) {
-        self.shared_buffer_pooled_response_frames =
-            self.shared_buffer_pooled_response_frames.saturating_add(1);
+        self.shared_buffer_pooled_inbound_frames =
+            self.shared_buffer_pooled_inbound_frames.saturating_add(1);
     }
 
     pub fn record_shared_buffer_fallback_response(&mut self) {
-        self.shared_buffer_fallback_response_frames = self
-            .shared_buffer_fallback_response_frames
-            .saturating_add(1);
+        self.shared_buffer_fallback_inbound_frames =
+            self.shared_buffer_fallback_inbound_frames.saturating_add(1);
     }
 }
 
@@ -1732,7 +1731,7 @@ mod native {
 
             metrics.record_request(7);
             metrics.record_request(11);
-            metrics.record_response(13);
+            metrics.record_inbound(13);
             metrics.observe_pending_frames(1);
             metrics.observe_pending_frames(3);
             metrics.observe_pending_frames(2);
@@ -1748,8 +1747,8 @@ mod native {
 
             assert_eq!(metrics.request_frames, 2);
             assert_eq!(metrics.request_bytes, 18);
-            assert_eq!(metrics.response_frames, 1);
-            assert_eq!(metrics.response_bytes, 13);
+            assert_eq!(metrics.inbound_frames, 1);
+            assert_eq!(metrics.inbound_bytes, 13);
             assert_eq!(metrics.max_pending_frames, 3);
             assert_eq!(metrics.last_request_us, 2);
             assert_eq!(metrics.total_request_us, 7);
@@ -1759,8 +1758,8 @@ mod native {
             assert_eq!(metrics.shared_buffer_pool_drops, 1);
             assert_eq!(metrics.shared_buffer_capacity_bytes, 80);
             assert_eq!(metrics.max_shared_buffer_capacity_bytes, 96);
-            assert_eq!(metrics.shared_buffer_pooled_response_frames, 1);
-            assert_eq!(metrics.shared_buffer_fallback_response_frames, 1);
+            assert_eq!(metrics.shared_buffer_pooled_inbound_frames, 1);
+            assert_eq!(metrics.shared_buffer_fallback_inbound_frames, 1);
 
             let shared = WorkerFrameMetrics::shared_memory();
             assert_eq!(

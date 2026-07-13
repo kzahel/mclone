@@ -439,7 +439,7 @@ fn queue_worker_updates(
     *queued_update_bytes.borrow_mut() = next_bytes;
     let mut metrics = frame_metrics.borrow_mut();
     metrics.transport_kind = WorkerFrameTransportKind::WebSocket;
-    metrics.record_response(received_bytes);
+    metrics.record_inbound(received_bytes);
     metrics.observe_pending_frames(next_frames);
     Ok(())
 }

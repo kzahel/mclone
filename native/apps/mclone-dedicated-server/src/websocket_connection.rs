@@ -293,9 +293,9 @@ mod tests {
         };
         let expected_updates = vec![ServerUpdate::TimeUpdate { day_time: 123 }];
         outbound.publish(expected_updates.clone()).unwrap();
-        let response = socket.read().unwrap().into_data();
+        let publication = socket.read().unwrap().into_data();
         assert_eq!(
-            decode_websocket_server_update_batch(&response).unwrap(),
+            decode_websocket_server_update_batch(&publication).unwrap(),
             expected_updates
         );
 

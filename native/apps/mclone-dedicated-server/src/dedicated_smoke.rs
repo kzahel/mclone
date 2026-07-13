@@ -10,11 +10,11 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d, block_to_section_coord, chunk_section_index, local_block_coord,
     local_section_block_coord,
 };
-use mclone_net::NativeClientSession;
+use mclone_net::NativeClientIoSession;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, PlayerAppearance, RemotePlayerId, ServerUpdate,
-    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, UseItemOnCommand,
+    PlayerActionCommand, PlayerActionKind, RemotePlayerId, ServerUpdate, SetCarriedItemCommand,
+    SetDebugHotbarSlotCommand, UseItemOnCommand,
 };
 use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics, SimulationCadence};
 
@@ -29,6 +29,7 @@ const DIRT_BLOCK_STATE_ID: BlockStateId = BlockStateId(5);
 #[derive(Debug)]
 enum SmokeClientControl {
     Command(ClientCommand),
+    DrainPublications,
     Close,
 }
 
@@ -165,18 +166,19 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, break_block_command(non_overlapping_target))?;
     let _non_overlap_break_diagnostics = smoke_server.process_commands(1)?;
     let actor_break_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command())?;
-    let non_overlap_poll_diagnostics = smoke_server.process_commands(1)?;
-    let observer_poll_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    let non_overlap_reports = merge_phase_reports(actor_break_reports, observer_poll_reports);
+    let non_overlap_publication_diagnostics = smoke_server.publish_ready_updates()?;
+    drain_client_publications(&controls, 1)?;
+    let observer_publication_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let non_overlap_reports =
+        merge_phase_reports(actor_break_reports, observer_publication_reports);
     assert_non_overlapping_block_delta_phase(
-        &non_overlap_poll_diagnostics,
+        &non_overlap_publication_diagnostics,
         &non_overlap_reports,
         non_overlapping_target,
     )?;
     phases.push(PhaseReport {
         name: "non_overlapping_block_delta",
-        diagnostics: non_overlap_poll_diagnostics,
+        diagnostics: non_overlap_publication_diagnostics,
         client_reports: non_overlap_reports,
     });
 
@@ -214,20 +216,22 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, break_block_command(overlapping_target))?;
     let _overlap_break_diagnostics = smoke_server.process_commands(1)?;
     let actor_overlap_break_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command())?;
-    let overlap_poll_diagnostics = smoke_server.process_commands(1)?;
-    let observer_overlap_poll_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    let overlap_reports =
-        merge_phase_reports(actor_overlap_break_reports, observer_overlap_poll_reports);
+    let overlap_publication_diagnostics = smoke_server.publish_ready_updates()?;
+    drain_client_publications(&controls, 1)?;
+    let observer_overlap_publication_reports = wait_for_client_reports_count(&result_rx, 1)?;
+    let overlap_reports = merge_phase_reports(
+        actor_overlap_break_reports,
+        observer_overlap_publication_reports,
+    );
     assert_overlapping_block_delta_phase(
-        &overlap_poll_diagnostics,
+        &overlap_publication_diagnostics,
         &overlap_reports,
         overlapping_target,
         actor_remote_id,
     )?;
     phases.push(PhaseReport {
         name: "overlapping_block_delta",
-        diagnostics: overlap_poll_diagnostics,
+        diagnostics: overlap_publication_diagnostics,
         client_reports: overlap_reports,
     });
 
@@ -263,13 +267,13 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
     let _empty_place_diagnostics = smoke_server.process_commands(1)?;
     let actor_empty_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command())?;
-    let empty_place_poll_diagnostics = smoke_server.process_commands(1)?;
+    let empty_place_publication_diagnostics = smoke_server.publish_ready_updates()?;
+    drain_client_publications(&controls, 1)?;
     let observer_empty_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let empty_place_reports =
         merge_phase_reports(actor_empty_place_reports, observer_empty_place_reports);
     assert_rejected_place_phase(
-        &empty_place_poll_diagnostics,
+        &empty_place_publication_diagnostics,
         &empty_place_reports,
         placement_target,
         1,
@@ -277,7 +281,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     .context("empty_slot_place_rejected phase failed")?;
     phases.push(PhaseReport {
         name: "empty_slot_place_rejected",
-        diagnostics: empty_place_poll_diagnostics,
+        diagnostics: empty_place_publication_diagnostics,
         client_reports: empty_place_reports,
     });
 
@@ -312,13 +316,13 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
     let _far_place_diagnostics = smoke_server.process_commands(1)?;
     let actor_far_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command())?;
-    let far_place_poll_diagnostics = smoke_server.process_commands(1)?;
+    let far_place_publication_diagnostics = smoke_server.publish_ready_updates()?;
+    drain_client_publications(&controls, 1)?;
     let observer_far_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let far_place_reports =
         merge_phase_reports(actor_far_place_reports, observer_far_place_reports);
     assert_rejected_place_phase(
-        &far_place_poll_diagnostics,
+        &far_place_publication_diagnostics,
         &far_place_reports,
         placement_target,
         1,
@@ -327,7 +331,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     assert_remote_player_removed_phase(&far_place_reports, actor_remote_id)?;
     phases.push(PhaseReport {
         name: "far_place_rejected",
-        diagnostics: far_place_poll_diagnostics,
+        diagnostics: far_place_publication_diagnostics,
         client_reports: far_place_reports,
     });
 
@@ -349,19 +353,19 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, use_item_on_command(placement_target.clicked))?;
     let _place_diagnostics = smoke_server.process_commands(1)?;
     let actor_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    send_client_command(&controls, 1, poll_command())?;
-    let place_poll_diagnostics = smoke_server.process_commands(1)?;
+    let place_publication_diagnostics = smoke_server.publish_ready_updates()?;
+    drain_client_publications(&controls, 1)?;
     let observer_place_reports = wait_for_client_reports_count(&result_rx, 1)?;
     let place_reports = merge_phase_reports(actor_place_reports, observer_place_reports);
     assert_place_block_delta_phase(
-        &place_poll_diagnostics,
+        &place_publication_diagnostics,
         &place_reports,
         placement_target,
         actor_remote_id,
     )?;
     phases.push(PhaseReport {
         name: "overlapping_place_delta",
-        diagnostics: place_poll_diagnostics,
+        diagnostics: place_publication_diagnostics,
         client_reports: place_reports,
     });
 
@@ -422,6 +426,23 @@ impl SmokeServer {
             self.handle_event(event, true)?;
         }
         Ok(())
+    }
+
+    fn publish_ready_updates(&mut self) -> Result<PlayerChunkTrackingDiagnostics> {
+        for (&id, session) in &self.sessions {
+            let updates = self
+                .server
+                .try_drain_updates_for_player(session.player_id())?;
+            if updates.is_empty() {
+                continue;
+            }
+            self.outbound
+                .get(&id)
+                .context("smoke client has no outbound writer")?
+                .publish(updates)
+                .with_context(|| format!("smoke client {id} outbound publication failed"))?;
+        }
+        Ok(self.server.chunk_tracking_diagnostics())
     }
 
     fn recv_event(&self) -> Result<DedicatedNetworkEvent> {
@@ -528,7 +549,7 @@ fn spawn_smoke_client(
     thread::Builder::new()
         .name(format!("mclone-dedicated-smoke-client-{index}"))
         .spawn(move || {
-            let mut session = match NativeClientSession::connect(addr) {
+            let mut session = match NativeClientIoSession::connect(addr) {
                 Ok(session) => {
                     let _ = ready_tx.send(Ok(index));
                     session
@@ -545,9 +566,28 @@ fn spawn_smoke_client(
                 match control {
                     SmokeClientControl::Command(command) => {
                         let result = session
-                            .send_command(&command)
-                            .map(|updates| SmokeClientReport { index, updates })
+                            .send_command_only(command)
+                            .and_then(|()| session.drain_update_batch())
+                            .map(|batch| SmokeClientReport {
+                                index,
+                                updates: batch.into_updates(),
+                            })
                             .map_err(|err| format!("smoke client {index} command failed: {err}"));
+                        let should_stop = result.is_err();
+                        if result_tx.send(result).is_err() || should_stop {
+                            return;
+                        }
+                    }
+                    SmokeClientControl::DrainPublications => {
+                        let result = session
+                            .drain_update_batch()
+                            .map(|batch| SmokeClientReport {
+                                index,
+                                updates: batch.into_updates(),
+                            })
+                            .map_err(|err| {
+                                format!("smoke client {index} publication drain failed: {err}")
+                            });
                         let should_stop = result.is_err();
                         if result_tx.send(result).is_err() || should_stop {
                             return;
@@ -605,6 +645,14 @@ fn send_client_command(
         .with_context(|| format!("missing smoke client control {index}"))?
         .send(SmokeClientControl::Command(command))
         .with_context(|| format!("failed to send smoke client {index} command"))
+}
+
+fn drain_client_publications(controls: &[Sender<SmokeClientControl>], index: usize) -> Result<()> {
+    controls
+        .get(index)
+        .with_context(|| format!("missing smoke client control {index}"))?
+        .send(SmokeClientControl::DrainPublications)
+        .with_context(|| format!("failed to request smoke client {index} publication drain"))
 }
 
 fn send_indexed_phase_commands(
@@ -1090,12 +1138,6 @@ fn clear_debug_hotbar_slot_command(slot: u8) -> ClientCommand {
     ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
         slot,
         block_state: None,
-    })
-}
-
-fn poll_command() -> ClientCommand {
-    ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
-        appearance: PlayerAppearance::default(),
     })
 }
 

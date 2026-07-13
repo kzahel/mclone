@@ -42,7 +42,7 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `16`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `20`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
@@ -70,6 +70,9 @@ model.
 | `UseItemOn` | server-authoritative use/place against a `BlockHitResult` |
 | `SetCarriedItem` | select the active hotbar slot |
 | `AcceptTeleport` | acknowledge a server `PlayerPosition` teleport id |
+| `SetPlayerAppearance` | publish the player's current model/appearance choice |
+| `SetDebugHotbarSlot` | debug-only mutation of one server-owned hotbar slot |
+| `ShootDebugPhysicsCube` | debug-only request to spawn a physics test entity |
 
 `SetChunkView` is an interest command, not a synchronous "load my whole view
 now" RPC — chunk snapshots come back as host updates. There is no world-open or
@@ -81,6 +84,7 @@ commands are intents, not client-owned state mutations.
 
 | Update | Purpose |
 |---|---|
+| `WorldInfo` | connection-scoped world facts currently carrying the obfuscated biome zoom seed |
 | `ChunkSnapshot` | baseline chunk facts; **packed sky/block light rides inside the snapshot** (no separate light message) |
 | `ChunkUnload` | release a chunk from client view/cache |
 | `SectionBlockUpdates` | block mutations within a loaded section after the baseline |
@@ -94,15 +98,36 @@ commands are intents, not client-owned state mutations.
 Failures are surfaced through the transport handshake and connection errors, not
 yet an in-band error update.
 
-Current native TCP and WebSocket remote transports are still
-**request/response-shaped**: the host emits queued updates as the reply to a
-client command. That is a transport implementation detail, not the long-term
-session model. The target client architecture is a session bus with separate
-outbound command and inbound update streams; see
+Native TCP and WebSocket remote transports are full-duplex publication
+streams. Client commands and server publication frames move independently on
+one reliable ordered connection. The dedicated host advances on its own
+cadence, drains ready commands at host boundaries, and publishes routed chunk,
+entity, remote-player, correction, and periodic time updates even when a client
+sends no command. See
 [`session-network-architecture.md`](./session-network-architecture.md) and
-[`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md).
-A server-push lane — so a player who stops sending commands still sees others
-move — is still to come for remote dedicated transports.
+[`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md).
+
+A wire batch is only a publication-frame container; it does not acknowledge or
+complete a command. Teleport acceptance and other gameplay acknowledgements
+remain explicit logical messages. Producers decode off the drawable thread,
+and every client applies decoded updates in receive order through the shared
+budgeted runtime pump.
+
+Current framing is deliberately simple:
+
+- native commands are one little-endian `u32` payload length followed by one
+  encoded `ClientCommand`;
+- a native publication frame is a little-endian `u32` update count followed by
+  one length-prefixed encoded `ServerUpdate` per entry; and
+- WebSocket carries the same command payload and publication-batch contents in
+  binary messages after its version handshake.
+
+Frames are capped at 64 MiB. Each dedicated peer has an independent 64-frame /
+64 MiB exact-encoded-byte outbound queue; saturation disconnects that slow peer
+without blocking authority. Native client ingress is capped at 256 decoded
+publication batches. Browser remote additionally caps worker-unacknowledged
+publications and main transferable ingress at 64 MiB (4096 main-side updates)
+and caps socket command buffering at 8 MiB.
 
 ### Entity Snapshots
 
@@ -127,7 +152,7 @@ than chicken-specific or one-off update messages.
 |---|---|
 | `chunk_delta` | broader block/section/light/block-entity mutation batching |
 | `session_state` / `world_opened` / `world_error` | explicit session/world lifecycle and a stable in-band failure surface |
-| `ack_world_updates` | client acknowledgement for a reliable streaming/push lane |
+| `keepalive` / `disconnect` | liveness, timeout, and explicit close reason once the session layer lands |
 | `inventory_state` | player inventory and container state |
 | `join_world` / `resume_session` | named player-slot join split from world open, once persisted players exist |
 
@@ -149,7 +174,7 @@ reduce prediction instead of silently drifting.
 
 ## Rate Separation Rule
 
-The logical protocol must not imply that one transport request, one host world
+The logical protocol must not imply that one command frame, one host world
 tick, one snapshot, or one render frame equals one movement step. Movement is
 sequenced command records plus authoritative correction snapshots. The host may
 drain multiple movement commands inside one lower-rate world/network tick, and
@@ -174,19 +199,22 @@ plus app-owned sockets):
 
 - **`LocalTransport`** — in-process loopback for native singleplayer and tests.
 - **Native TCP** — length-prefixed binary frames, versioned handshake,
-  request/response batches. Desktop's remote-dedicated path.
+  independent command and publication streams. Desktop and native Android/XR
+  remote-dedicated path.
 - **WebSocket** — `mclone-net` owns the frame/handshake codec; the socket lives
-  in the app (tungstenite on the dedicated server's `--listen-ws` bridge,
-  `web-sys` WebSocket in the browser client). The playable browser app can join
-  through `?remoteWsUrl=ws://HOST:PORT`, and `native:web:remote-smoke` validates
-  that path against a native dedicated WebSocket server.
+  in transport adapters (tungstenite terminates directly in the dedicated
+  connection registry; the production browser module worker owns
+  `WebSocket`, handshake, command send, receipt, and decode). The playable
+  browser app can join through `?remoteWsUrl=ws://HOST:PORT`, and
+  `native:web:remote-smoke` validates that worker path against the native
+  dedicated WebSocket server.
 
 There is no HTTP, WebTransport, or WebRTC gameplay transport, and no Node/Deno
 host.
 
-A future **server-push** lane (and later, if measured to be worth it, a WebRTC
-datagram lane for high-rate entity/player snapshots) should preserve three
-logical lanes — reliable ordered (interest, chunks, interactions, errors),
-realtime superseding (movement/entity snapshots where newer replaces older), and
-bulk/binary (packed chunk/light payloads) — without redesigning authority around
-the transport.
+The reliable ordered publication lane is now implemented. A later measured
+WebRTC/datagram or coalescing lane for high-rate entity/player transforms must
+preserve spawn/despawn, correction, and keyframe ordering and must not redesign
+authority around the carrier. Compression, login/profile capabilities,
+keepalive/timeouts, and explicit disconnect messages remain future protocol
+work.

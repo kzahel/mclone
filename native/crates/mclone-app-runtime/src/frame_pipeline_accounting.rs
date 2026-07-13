@@ -629,11 +629,11 @@ fn worker_metrics_peer_report(
         .with_pending_jobs(usize_to_u64(pending_jobs))
         .with_frames(
             usize_to_u64(metrics.request_frames),
-            usize_to_u64(metrics.response_frames),
+            usize_to_u64(metrics.inbound_frames),
         )
         .with_bytes(
             usize_to_u64(metrics.request_bytes),
-            usize_to_u64(metrics.response_bytes),
+            usize_to_u64(metrics.inbound_bytes),
         )
         .with_max_pending_frames(usize_to_u64(metrics.max_pending_frames))
         .with_request_timing_ms(

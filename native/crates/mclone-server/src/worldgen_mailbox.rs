@@ -339,7 +339,7 @@ impl WorldgenMailboxBackend {
                                 timing: result.timing,
                             };
                             if let Ok(mut metrics) = worker_metrics.lock() {
-                                metrics.record_response(0);
+                                metrics.record_inbound(0);
                                 metrics.record_request_time_us(request_start.elapsed().as_micros());
                             }
                             if completion_sender.send(completed).is_err() {

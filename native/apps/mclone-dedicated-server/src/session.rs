@@ -457,9 +457,9 @@ mod tests {
         assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 3);
 
         let written = stream.written();
-        let mut response = std::io::Cursor::new(written);
-        let first = read_server_update_batch(&mut response).unwrap();
-        let second = read_server_update_batch(&mut response).unwrap();
+        let mut publications = std::io::Cursor::new(written);
+        let first = read_server_update_batch(&mut publications).unwrap();
+        let second = read_server_update_batch(&mut publications).unwrap();
         assert!(
             first
                 .iter()

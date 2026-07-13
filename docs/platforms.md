@@ -28,7 +28,7 @@ Additional host lane:
 |---|---|---|
 | Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path with shared `--startup-wait none\|playable\|idle\|frames:N` readiness policy; screenshots default to `idle`, while desktop defaults to `playable`. Older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
 | Headset-free XR emulation | active acceptance lane | The default desktop binary feeds fixed-IPD synthetic Stereo views and optional keyboard-translated controller input through `OffscreenDriver` and the same `McloneSceneHost` used by OpenXR. `pnpm native:xr-emulation:smoke` writes a side-by-side capture to `/tmp/mclone-xr-emulation.png`; it does not initialize or depend on OpenXR. This is a render/input/host seam gate, not an OpenXR runtime substitute. |
-| Native dedicated server | active | `native/apps/mclone-dedicated-server` validates the protocol/server boundary without a renderer. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
+| Native dedicated server | active | `native/apps/mclone-dedicated-server` owns listener/CLI/process lifecycle around the shared authoritative host. TCP and direct WebSocket peers share one registry, autonomous cadence, and per-peer 64-frame / 64 MiB outbound policy. Transient and persistent SQLite-backed worlds are supported. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The shared warm-world diagnostic is validated in desktop flat and synthetic
 per-eye stereo, including A-to-B-to-A selection, no-request performance, paired
@@ -77,6 +77,13 @@ is a useful default for bring-up and offline validation, but every supported
 client lane should retain a path to dedicated-server play. Future P2P or
 shared-session modes should reuse the same command/update protocol and runtime
 contracts, with only the transport/session adapter changing.
+
+Remote networking is one shared semantic lane. Desktop flat/XR and Android
+flat/XR select `NativeRemoteServerSession`, whose independent TCP writer/reader
+feeds the shared ready-only `ClientConnection` pump. Browser remote uses a
+worker-owned WebSocket/decode adapter behind that same pump contract. Platform
+rims own endpoint and lifecycle wiring only; they do not own command ordering,
+publication polling, ingress budgets, or response bookkeeping.
 
 The platform posture is now validation-backed across the five client targets.
 New shared features should be designed against shared contracts first, then
@@ -451,12 +458,13 @@ manual checks:
    controller-click replacement/menu smoke, a web Join Remote connect-screen
    smoke, and shared `mclone-ui` text input so users can choose endpoints/worlds
    in app instead of through CLI/properties/query params.
-5. **Finish host-mode convergence for web and make Android XR remote validation repeatable.**
+5. **Finish web host-lifecycle convergence and keep Android XR remote validation repeatable.**
    Native desktop, desktop XR, flat Android, and Android XR now share
    `mclone-app-runtime` host-mode and native scene-shell contracts where
-   applicable. Web still has an async `WebRuntimeHost`; Android XR remote works
-   over LAN after host firewall allow and through the first-class
-   `--adb-reverse` validator path.
+   applicable. Browser remote networking is worker-owned and semantically
+   converged, but web still has an async `WebRuntimeHost` lifecycle shell.
+   Android XR remote works over LAN after host firewall allow and through the
+   first-class `--adb-reverse` validator path.
 6. **Keep XR scene convergence complete as features grow.** `mclone-scene`
    now owns shared terrain/actor rendering, startup pose, locomotion, and
    local/remote-capable host shape. Keep future UI, comfort, and interaction

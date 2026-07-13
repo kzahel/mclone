@@ -381,8 +381,7 @@ Native remote TCP:
   `ServerUpdate`s from queues.
 - The existing TCP update-batch framing may remain initially, but a batch is a
   publication frame rather than a command response. Native response-count
-  bookkeeping is gone; temporary empty compatibility frames are removed in
-  Tactical 176's final cleanup.
+  bookkeeping and command-triggered empty compatibility frames are gone.
 - Desktop flat, desktop XR, flat Android, and Android XR instantiate this same
   adapter. Their app crates do not wrap it with private drain or polling
   semantics.

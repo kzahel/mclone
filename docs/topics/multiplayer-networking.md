@@ -2,11 +2,12 @@
 
 Topic: multiplayer-networking
 
-Status: implementation active — autonomous dedicated ticking, native TCP and
-WebSocket server push, native/browser consumer convergence, bounded pressure,
-and cross-adapter conformance evidence landed 2026-07-13; compatibility/doc
-closeout is next. Tactical
-[`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
+Status: first production push milestone complete 2026-07-13. Tactical
+[`176`](../tactical/176-dedicated-autonomous-push-runtime.md) delivered
+autonomous dedicated ticking, native TCP/direct WebSocket push,
+native/browser consumer convergence, bounded pressure, conformance evidence,
+and compatibility cleanup. Session lifecycle and persistence metadata are the
+next priorities.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -19,7 +20,7 @@ the client-replica topology argument lives in
 
 ## Current state (verified 2026-07-13)
 
-Tactical 176 implementation began 2026-07-13. The dedicated server now runs
+Tactical 176 completed 2026-07-13. The dedicated server now runs
 one 20/20/60 authoritative cadence independently of command traffic, drains
 ordered commands at host boundaries, publishes every player's routed stream
 through independent bounded TCP writers, and autosaves every 6000 gameplay
@@ -54,7 +55,7 @@ The autonomous wire now has the intended first production shape, but session
 and durability work remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, strict
-  `PROTOCOL_VERSION = 19` equality check
+  `PROTOCOL_VERSION = 20` equality check
   (`native/crates/mclone-protocol/src/lib.rs:12`). ~9 `ClientCommand` and ~12
   `ServerUpdate` variants covering chunk view/snapshots/unloads, section block
   deltas, vanilla-shaped move/teleport-ack, remote players, entities, time,
@@ -219,18 +220,18 @@ first?":
   real: seed + world metadata in the save (correctness bug today), and
   player records keyed by a durable id (`player_records` table already
   exists as a placeholder). `day_time` durability rides along.
-- **Docs cleanup is cheap and should ride the first slice**: `protocol.md`
-  says version 16 (code is 19) and is missing newer variants;
-  `multiplayer-hosting.md` still claims the dedicated server has no
-  persistence (it has `--world-dir` + SQLite with a restart test);
-  `platform-parity.md:299` copies the same stale claim.
+- **Documentation cleanup is complete.** `protocol.md` records version 20 and
+  autonomous publication framing; `multiplayer-hosting.md` records persistent
+  worlds and direct WebSocket hosting; platform docs record the one shared
+  native/browser semantic boundary.
 
 ## Phased plan
 
 Order matters; the first coordinated milestone has a focused tactical while
 later phases remain topic-level direction.
 
-1. **Dedicated autonomous tick plus server-push transport.** Tactical
+1. **Dedicated autonomous tick plus server-push transport — complete
+   2026-07-13.** Tactical
    [`176`](../tactical/176-dedicated-autonomous-push-runtime.md) treats these
    as one coordinated milestone because autonomous publication without a push
    writer strands updates, while a push-capable transport without an
@@ -298,10 +299,11 @@ lane, expressed in time units.
   trusted fast path.
 - Compression codec choice and threshold once frames are measured
   post-push-wire.
-- Exact outbound queue byte/count bounds. The first push implementation
-  disconnects a slow core-stream consumer rather than dropping or reordering
-  reliable world/gameplay updates. Entity superseding/coalescing remains a
-  later measured option with explicit spawn/despawn ordering rules.
+- Whether later measured entity transform traffic warrants a separate
+  superseding/coalescing lane. The current reliable stream keeps exact
+  64-frame / 64 MiB per-peer bounds and disconnects a slow consumer rather
+  than dropping or reordering gameplay updates; any future lane must define
+  spawn/despawn and correction ordering first.
 
 ## Code and doc map
 
@@ -313,10 +315,9 @@ lane, expressed in time units.
   `native_session_runtime.rs`, `host_mode.rs`
 - Persistence: `native/crates/mclone-server/src/persistence.rs`,
   [`../persistence-architecture.md`](../persistence-architecture.md)
-- Session/bus status quo: [`../session-network-architecture.md`](../session-network-architecture.md)
-  (accurate), [`../protocol.md`](../protocol.md) (stale: version, tables),
-  [`../multiplayer-hosting.md`](../multiplayer-hosting.md) (stale:
-  persistence claims)
+- Session/bus status quo: [`../session-network-architecture.md`](../session-network-architecture.md),
+  [`../protocol.md`](../protocol.md), and
+  [`../multiplayer-hosting.md`](../multiplayer-hosting.md)
 - Tacticals: 009 (original wire shape), 133 (bus/pacing; Slice 6 handed to
   176),
   151 (inbound pipeline), 154 (ingress cleanup), 167 (startup contract),

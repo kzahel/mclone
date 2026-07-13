@@ -322,11 +322,11 @@ impl LightStatusMailboxBackend {
                                 }
                             }
                             if let Ok(mut metrics) = worker_metrics.lock() {
-                                metrics.record_response(0);
+                                metrics.record_inbound(0);
                                 metrics.record_request_time_us(compute_us);
                                 let pending_frames = metrics
                                     .request_frames
-                                    .saturating_sub(metrics.response_frames);
+                                    .saturating_sub(metrics.inbound_frames);
                                 metrics.observe_pending_frames(pending_frames);
                             }
                             if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
@@ -386,7 +386,7 @@ impl LightStatusMailboxBackend {
             metrics.record_request(0);
             let pending_frames = metrics
                 .request_frames
-                .saturating_sub(metrics.response_frames);
+                .saturating_sub(metrics.inbound_frames);
             metrics.observe_pending_frames(pending_frames);
             if let Ok(mut mailbox_metrics) = self.mailbox_metrics.lock() {
                 mailbox_metrics.record_enqueue(batch_statuses, pending_frames, pending_statuses);

@@ -4239,20 +4239,20 @@ function assertProductionHostMode(
 function assertSharedWorkerTransport(metrics, label, { requireTraffic = true } = {}) {
   const numericFields = [
     "requestFrames",
-    "responseFrames",
+    "inboundFrames",
     "maxPendingFrames",
     "sharedBufferPoolHits",
     "sharedBufferPoolMisses",
     "sharedBufferPoolDrops",
     "sharedBufferCapacityBytes",
     "maxSharedBufferCapacityBytes",
-    "sharedBufferPooledResponseFrames",
-    "sharedBufferFallbackResponseFrames",
+    "sharedBufferPooledInboundFrames",
+    "sharedBufferFallbackInboundFrames",
   ];
   if (
     metrics?.transportKind !== "shared-memory"
     || (requireTraffic && Number(metrics.requestFrames) <= 0)
-    || (requireTraffic && Number(metrics.responseFrames) <= 0)
+    || (requireTraffic && Number(metrics.inboundFrames) <= 0)
     || numericFields.some((field) => !Number.isFinite(Number(metrics[field])) || Number(metrics[field]) < 0)
   ) {
     throw new Error(`${label} did not expose bounded shared-memory transport metrics:\n${JSON.stringify(metrics, null, 2)}`);

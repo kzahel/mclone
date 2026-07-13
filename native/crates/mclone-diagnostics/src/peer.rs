@@ -21,9 +21,9 @@ pub struct PeerThreadActivityReport {
     pub active: bool,
     pub pending_jobs: u64,
     pub request_frames: u64,
-    pub response_frames: u64,
+    pub inbound_frames: u64,
     pub request_bytes: u64,
-    pub response_bytes: u64,
+    pub inbound_bytes: u64,
     pub max_pending_frames: u64,
     pub busy_ms: Option<f64>,
     pub idle_ms: Option<f64>,
@@ -41,9 +41,9 @@ impl PeerThreadActivityReport {
             active: false,
             pending_jobs: 0,
             request_frames: 0,
-            response_frames: 0,
+            inbound_frames: 0,
             request_bytes: 0,
-            response_bytes: 0,
+            inbound_bytes: 0,
             max_pending_frames: 0,
             busy_ms: None,
             idle_ms: None,
@@ -60,17 +60,17 @@ impl PeerThreadActivityReport {
         self
     }
 
-    pub fn with_frames(mut self, request_frames: u64, response_frames: u64) -> Self {
+    pub fn with_frames(mut self, request_frames: u64, inbound_frames: u64) -> Self {
         self.request_frames = request_frames;
-        self.response_frames = response_frames;
-        self.active |= request_frames > 0 || response_frames > 0;
+        self.inbound_frames = inbound_frames;
+        self.active |= request_frames > 0 || inbound_frames > 0;
         self
     }
 
-    pub fn with_bytes(mut self, request_bytes: u64, response_bytes: u64) -> Self {
+    pub fn with_bytes(mut self, request_bytes: u64, inbound_bytes: u64) -> Self {
         self.request_bytes = request_bytes;
-        self.response_bytes = response_bytes;
-        self.active |= request_bytes > 0 || response_bytes > 0;
+        self.inbound_bytes = inbound_bytes;
+        self.active |= request_bytes > 0 || inbound_bytes > 0;
         self
     }
 
@@ -148,7 +148,7 @@ mod tests {
             .with_request_timing_ms(Some(1.25), 3.0, 2.0);
         assert!(report.active);
         assert_eq!(report.request_frames, 2);
-        assert_eq!(report.response_frames, 1);
+        assert_eq!(report.inbound_frames, 1);
         assert_eq!(report.last_request_ms, Some(1.25));
     }
 
@@ -169,9 +169,9 @@ mod tests {
                 "active": false,
                 "pendingJobs": 0,
                 "requestFrames": 0,
-                "responseFrames": 0,
+                "inboundFrames": 0,
                 "requestBytes": 0,
-                "responseBytes": 0,
+                "inboundBytes": 0,
                 "maxPendingFrames": 0,
                 "busyMs": null,
                 "idleMs": null,

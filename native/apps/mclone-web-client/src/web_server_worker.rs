@@ -62,7 +62,7 @@ pub struct WebIntegratedServerRunnerConfig {
     pub bindgen_wasm_url: String,
     pub world_storage: WebIntegratedServerWorldStorage,
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
-    pub runner_initial_response_bytes: u32,
+    pub runner_initial_inbound_bytes: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -92,7 +92,7 @@ impl WebIntegratedServerRunnerConfig {
             bindgen_wasm_url: bindgen_wasm_url.into(),
             world_storage: WebIntegratedServerWorldStorage::Transient,
             runner_transport_kind: None,
-            runner_initial_response_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
+            runner_initial_inbound_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
         }
     }
 
@@ -126,11 +126,11 @@ impl WebIntegratedServerRunnerConfig {
         self
     }
 
-    pub const fn with_runner_initial_response_bytes(
+    pub const fn with_runner_initial_inbound_bytes(
         mut self,
-        runner_initial_response_bytes: u32,
+        runner_initial_inbound_bytes: u32,
     ) -> Self {
-        self.runner_initial_response_bytes = runner_initial_response_bytes;
+        self.runner_initial_inbound_bytes = runner_initial_inbound_bytes;
         self
     }
 }
@@ -151,7 +151,7 @@ pub struct WebIntegratedServerRunner {
     runner_frame_metrics: Rc<RefCell<WorkerFrameMetrics>>,
     shared_pool: Rc<RefCell<Vec<RunnerSharedSlot>>>,
     shared_inflight: Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
-    runner_initial_response_bytes: u32,
+    runner_initial_inbound_bytes: u32,
     update_frames: Rc<RefCell<Vec<Vec<u8>>>>,
     diagnostics: Rc<RefCell<ServerRunnerDiagnostics>>,
     message_closure: Closure<dyn FnMut(MessageEvent)>,
@@ -218,8 +218,8 @@ impl WebIntegratedServerRunner {
             None if shared_transport_available => WorkerFrameTransportKind::SharedMemory,
             _ => WorkerFrameTransportKind::MessageTransfer,
         };
-        let runner_initial_response_bytes = config
-            .runner_initial_response_bytes
+        let runner_initial_inbound_bytes = config
+            .runner_initial_inbound_bytes
             .max(RUNNER_SHARED_CONTROL_BYTES);
         let pending = Rc::new(RefCell::new(BTreeMap::new()));
         let request_start_ms_by_id: Rc<RefCell<BTreeMap<u32, f64>>> =
@@ -286,7 +286,7 @@ impl WebIntegratedServerRunner {
             runner_frame_metrics,
             shared_pool,
             shared_inflight,
-            runner_initial_response_bytes,
+            runner_initial_inbound_bytes,
             update_frames,
             diagnostics,
             message_closure,
@@ -683,7 +683,7 @@ impl WebIntegratedServerRunner {
             let slot = RunnerSharedSlot::new(
                 runner_shared_capacity_for_len(request_bytes, MIN_RUNNER_SHARED_REQUEST_BYTES),
                 runner_shared_capacity_for_len(
-                    self.runner_initial_response_bytes,
+                    self.runner_initial_inbound_bytes,
                     RUNNER_SHARED_CONTROL_BYTES,
                 ),
             );
@@ -924,7 +924,7 @@ async fn shared_topology_stress_report(
             bindgen_wasm_url.clone(),
         )
         .with_runner_transport_kind(WorkerFrameTransportKind::SharedMemory)
-        .with_runner_initial_response_bytes(4 * 1024),
+        .with_runner_initial_inbound_bytes(4 * 1024),
     )
     .await?;
     let fallback_runner = run_message_transfer_runner_probe(
@@ -1032,7 +1032,7 @@ async fn run_shared_runner_stress(
             metrics.request_frames >= FIRE_AND_FORGET_COMMANDS as usize
                 && metrics.shared_buffer_pool_misses >= FIRE_AND_FORGET_COMMANDS as usize
                 && metrics.shared_buffer_pool_drops > 0
-                && metrics.shared_buffer_fallback_response_frames > 0
+                && metrics.shared_buffer_fallback_inbound_frames > 0
                 && runner_diagnostics_settled(diagnostics)
         },
         "shared runner pool overflow and fallback",
@@ -1053,7 +1053,7 @@ async fn run_shared_runner_stress(
             let metrics = diagnostics.runner_frame_metrics;
             metrics.request_frames >= (FIRE_AND_FORGET_COMMANDS + REUSE_COMMANDS) as usize
                 && metrics.shared_buffer_pool_hits >= REUSE_COMMANDS as usize
-                && metrics.shared_buffer_pooled_response_frames > 0
+                && metrics.shared_buffer_pooled_inbound_frames > 0
                 && frame_metrics_shared_worker_active(metrics)
                 && frame_metrics_shared_worker_active(diagnostics.worldgen_job_frame_metrics)
                 && frame_metrics_shared_worker_active(diagnostics.light_status_job_frame_metrics)
@@ -1070,11 +1070,11 @@ async fn run_shared_runner_stress(
         && diagnostics.runner_frame_metrics.shared_buffer_pool_hits >= REUSE_COMMANDS as usize
         && diagnostics
             .runner_frame_metrics
-            .shared_buffer_fallback_response_frames
+            .shared_buffer_fallback_inbound_frames
             > 0
         && diagnostics
             .runner_frame_metrics
-            .shared_buffer_pooled_response_frames
+            .shared_buffer_pooled_inbound_frames
             > 0
         && update_count > 0
         && runner_diagnostics_settled(&diagnostics);
@@ -1111,7 +1111,7 @@ async fn run_message_transfer_runner_probe(
     let ok = diagnostics.runner_frame_metrics.transport_kind
         == WorkerFrameTransportKind::MessageTransfer
         && diagnostics.runner_frame_metrics.request_frames > 0
-        && diagnostics.runner_frame_metrics.response_frames > 0
+        && diagnostics.runner_frame_metrics.inbound_frames > 0
         && diagnostics.runner_frame_metrics.shared_buffer_pool_hits == 0
         && diagnostics.runner_frame_metrics.shared_buffer_pool_misses == 0
         && diagnostics.runner_frame_metrics.shared_buffer_pool_drops == 0
@@ -1192,16 +1192,16 @@ fn frame_metrics_shared_worker_active(metrics: WorkerFrameMetrics) -> bool {
     metrics.transport_kind == WorkerFrameTransportKind::SharedMemory
         && metrics.request_frames > 0
         && metrics.request_bytes > 0
-        && metrics.response_frames > 0
-        && metrics.response_bytes > 0
+        && metrics.inbound_frames > 0
+        && metrics.inbound_bytes > 0
 }
 
 fn frame_metrics_transfer_worker_active(metrics: WorkerFrameMetrics) -> bool {
     metrics.transport_kind == WorkerFrameTransportKind::MessageTransfer
         && metrics.request_frames > 0
         && metrics.request_bytes > 0
-        && metrics.response_frames > 0
-        && metrics.response_bytes > 0
+        && metrics.inbound_frames > 0
+        && metrics.inbound_bytes > 0
 }
 
 #[derive(Clone)]
@@ -1251,7 +1251,7 @@ fn handle_runner_message(
         } else {
             None
         };
-        match shared_runner_response_frames(&data) {
+        match shared_runner_inbound_frames(&data) {
             Ok(response) => {
                 if let Some(mut slot) = slot.take() {
                     record_runner_shared_response_metrics(runner_frame_metrics, &response);
@@ -1295,7 +1295,7 @@ fn handle_runner_message(
             if !frames.is_empty() {
                 let mut metrics = runner_frame_metrics.borrow_mut();
                 for frame in &frames {
-                    metrics.record_response(frame.len());
+                    metrics.record_inbound(frame.len());
                 }
                 drop(metrics);
                 let mut queued = update_frames.borrow_mut();
@@ -1446,7 +1446,7 @@ struct SharedRunnerResponse {
     pooled_response: bool,
 }
 
-fn shared_runner_response_frames(value: &JsValue) -> Result<SharedRunnerResponse, String> {
+fn shared_runner_inbound_frames(value: &JsValue) -> Result<SharedRunnerResponse, String> {
     let Some(control_buffer) = reflect_get(value, "controlBuffer") else {
         return Err("shared runner response returned no control buffer".to_owned());
     };
@@ -1465,16 +1465,16 @@ fn shared_runner_response_frames(value: &JsValue) -> Result<SharedRunnerResponse
             "shared runner response completed with unexpected status {status}"
         ));
     }
-    let response_bytes =
+    let inbound_bytes =
         Atomics::load(&control, RUNNER_SHARED_RESPONSE_BYTES_INDEX).map_err(|error| {
             format!(
                 "failed to read shared runner response byte count: {}",
                 js_error_string(&error)
             )
         })?;
-    if response_bytes < 0 {
+    if inbound_bytes < 0 {
         return Err(format!(
-            "shared runner response returned negative byte count {response_bytes}"
+            "shared runner response returned negative byte count {inbound_bytes}"
         ));
     }
     let Some(update_buffer) = reflect_get(value, "updateBuffer") else {
@@ -1483,11 +1483,11 @@ fn shared_runner_response_frames(value: &JsValue) -> Result<SharedRunnerResponse
     if !update_buffer.is_instance_of::<SharedArrayBuffer>() {
         return Err("shared runner update buffer was not a SharedArrayBuffer".to_owned());
     }
-    let response_bytes = response_bytes as u32;
-    let packed = Uint8Array::new_with_byte_offset_and_length(&update_buffer, 0, response_bytes);
+    let inbound_bytes = inbound_bytes as u32;
+    let packed = Uint8Array::new_with_byte_offset_and_length(&update_buffer, 0, inbound_bytes);
     Ok(SharedRunnerResponse {
         frames: unpack_runner_update_frames(&packed.to_vec())?,
-        packed_bytes: response_bytes as usize,
+        packed_bytes: inbound_bytes as usize,
         pooled_response: bool_prop(value, "pooledResponse").unwrap_or(false),
     })
 }
@@ -2011,9 +2011,7 @@ fn worker_response(
     let packed_updates = Array::new();
     for update in updates {
         let frame = encode_server_update(&update).map_err(|error| error.to_string())?;
-        diagnostics
-            .runner_frame_metrics
-            .record_response(frame.len());
+        diagnostics.runner_frame_metrics.record_inbound(frame.len());
         packed_updates.push(&Uint8Array::from(frame.as_slice()));
     }
     set_bool(&object, "ok", true)?;
@@ -2570,10 +2568,10 @@ fn frame_metrics_prop(
             .unwrap_or(fallback.request_frames as f64) as usize,
         request_bytes: number_prop(&value, "requestBytes").unwrap_or(fallback.request_bytes as f64)
             as usize,
-        response_frames: number_prop(&value, "responseFrames")
-            .unwrap_or(fallback.response_frames as f64) as usize,
-        response_bytes: number_prop(&value, "responseBytes")
-            .unwrap_or(fallback.response_bytes as f64) as usize,
+        inbound_frames: number_prop(&value, "inboundFrames")
+            .unwrap_or(fallback.inbound_frames as f64) as usize,
+        inbound_bytes: number_prop(&value, "inboundBytes").unwrap_or(fallback.inbound_bytes as f64)
+            as usize,
         max_pending_frames: number_prop(&value, "maxPendingFrames")
             .unwrap_or(fallback.max_pending_frames as f64) as usize,
         last_request_us: number_prop(&value, "lastRequestUs")
@@ -2597,17 +2595,14 @@ fn frame_metrics_prop(
         max_shared_buffer_capacity_bytes: number_prop(&value, "maxSharedBufferCapacityBytes")
             .unwrap_or(fallback.max_shared_buffer_capacity_bytes as f64)
             as usize,
-        shared_buffer_pooled_response_frames: number_prop(
-            &value,
-            "sharedBufferPooledResponseFrames",
-        )
-        .unwrap_or(fallback.shared_buffer_pooled_response_frames as f64)
+        shared_buffer_pooled_inbound_frames: number_prop(&value, "sharedBufferPooledInboundFrames")
+            .unwrap_or(fallback.shared_buffer_pooled_inbound_frames as f64)
             as usize,
-        shared_buffer_fallback_response_frames: number_prop(
+        shared_buffer_fallback_inbound_frames: number_prop(
             &value,
-            "sharedBufferFallbackResponseFrames",
+            "sharedBufferFallbackInboundFrames",
         )
-        .unwrap_or(fallback.shared_buffer_fallback_response_frames as f64)
+        .unwrap_or(fallback.shared_buffer_fallback_inbound_frames as f64)
             as usize,
     }
 }
@@ -2631,8 +2626,8 @@ fn frame_metrics_to_js(metrics: WorkerFrameMetrics) -> Result<JsValue, String> {
     set_string(&object, "transportKind", metrics.transport_kind.label())?;
     set_number(&object, "requestFrames", metrics.request_frames as f64)?;
     set_number(&object, "requestBytes", metrics.request_bytes as f64)?;
-    set_number(&object, "responseFrames", metrics.response_frames as f64)?;
-    set_number(&object, "responseBytes", metrics.response_bytes as f64)?;
+    set_number(&object, "inboundFrames", metrics.inbound_frames as f64)?;
+    set_number(&object, "inboundBytes", metrics.inbound_bytes as f64)?;
     set_number(
         &object,
         "maxPendingFrames",
@@ -2668,13 +2663,13 @@ fn frame_metrics_to_js(metrics: WorkerFrameMetrics) -> Result<JsValue, String> {
     )?;
     set_number(
         &object,
-        "sharedBufferPooledResponseFrames",
-        metrics.shared_buffer_pooled_response_frames as f64,
+        "sharedBufferPooledInboundFrames",
+        metrics.shared_buffer_pooled_inbound_frames as f64,
     )?;
     set_number(
         &object,
-        "sharedBufferFallbackResponseFrames",
-        metrics.shared_buffer_fallback_response_frames as f64,
+        "sharedBufferFallbackInboundFrames",
+        metrics.shared_buffer_fallback_inbound_frames as f64,
     )?;
     Ok(object.into())
 }
@@ -2704,18 +2699,18 @@ fn ensure_runner_slot_request_capacity(
 
 fn grow_runner_slot_response_buffer(
     slot: &mut RunnerSharedSlot,
-    response_bytes: usize,
+    inbound_bytes: usize,
     frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
 ) {
-    let Ok(response_bytes) = u32::try_from(response_bytes) else {
+    let Ok(inbound_bytes) = u32::try_from(inbound_bytes) else {
         return;
     };
-    if response_bytes <= slot.response_capacity {
+    if inbound_bytes <= slot.response_capacity {
         return;
     }
     let previous_capacity = slot.response_capacity;
     let response_capacity =
-        runner_shared_capacity_for_len(response_bytes, DEFAULT_RUNNER_SHARED_RESPONSE_BYTES);
+        runner_shared_capacity_for_len(inbound_bytes, DEFAULT_RUNNER_SHARED_RESPONSE_BYTES);
     slot.response_buffer = SharedArrayBuffer::new(response_capacity);
     slot.response_capacity = response_capacity;
     frame_metrics

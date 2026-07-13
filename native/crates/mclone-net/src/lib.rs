@@ -12,12 +12,11 @@ use mclone_protocol::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
     NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY, NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY,
-    NativeClientIoDiagnostics, NativeClientIoSession, NativeClientSession, NativeServerUpdateBatch,
+    NativeClientIoDiagnostics, NativeClientIoSession, NativeServerUpdateBatch,
     NativeServerUpdateEnvelope, NativeTransportError, NativeTransportResult,
     complete_client_handshake, complete_client_handshake_with_version, complete_server_handshake,
     read_client_command_frame, read_client_command_frames, read_server_update_batch,
-    request_server_updates, try_read_client_command_frame, write_client_command_frame,
-    write_server_update_batch,
+    try_read_client_command_frame, write_client_command_frame, write_server_update_batch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -436,72 +435,6 @@ mod native_tcp {
     impl From<ProtocolCodecError> for NativeTransportError {
         fn from(value: ProtocolCodecError) -> Self {
             Self::Protocol(value)
-        }
-    }
-
-    /// Low-level request/response TCP client helper.
-    ///
-    /// Normal app runtimes should use `NativeClientIoSession`, which owns socket
-    /// reads on an IO actor and exposes queued update batches to the shared
-    /// `ClientConnection` pump. This type remains for protocol tests and
-    /// standalone smoke/probe tools that intentionally exercise the legacy
-    /// synchronous shape.
-    #[derive(Debug)]
-    pub struct NativeClientSession {
-        stream: TcpStream,
-    }
-
-    impl NativeClientSession {
-        pub fn connect(addr: impl ToSocketAddrs) -> NativeTransportResult<Self> {
-            let mut stream = TcpStream::connect(addr)?;
-            complete_client_handshake(&mut stream)?;
-            Ok(Self { stream })
-        }
-
-        pub fn send_command_only(&mut self, command: &ClientCommand) -> NativeTransportResult<()> {
-            write_client_command_frame(&mut self.stream, command)?;
-            self.stream.flush()?;
-            Ok(())
-        }
-
-        pub fn drain_command_updates(&mut self) -> NativeTransportResult<Vec<ServerUpdate>> {
-            read_server_update_batch(&mut self.stream)
-        }
-
-        pub fn try_drain_command_updates(
-            &mut self,
-        ) -> NativeTransportResult<Option<Vec<ServerUpdate>>> {
-            if !self.server_update_batch_available()? {
-                return Ok(None);
-            }
-            self.drain_command_updates().map(Some)
-        }
-
-        pub fn send_command(
-            &mut self,
-            command: &ClientCommand,
-        ) -> NativeTransportResult<Vec<ServerUpdate>> {
-            self.send_command_only(command)?;
-            self.drain_command_updates()
-        }
-
-        fn server_update_batch_available(&self) -> NativeTransportResult<bool> {
-            self.stream.set_nonblocking(true)?;
-            let mut byte = [0u8; 1];
-            let peek_result = loop {
-                match self.stream.peek(&mut byte) {
-                    Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                    result => break result,
-                }
-            };
-            self.stream.set_nonblocking(false)?;
-
-            match peek_result {
-                Ok(0) => Ok(true),
-                Ok(_) => Ok(true),
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => Ok(false),
-                Err(err) => Err(err.into()),
-            }
         }
     }
 
@@ -1086,16 +1019,6 @@ mod native_tcp {
         Ok(updates)
     }
 
-    pub fn request_server_updates(
-        addr: impl ToSocketAddrs,
-        command: &ClientCommand,
-    ) -> NativeTransportResult<Vec<ServerUpdate>> {
-        let mut session = NativeClientSession::connect(addr)?;
-        let updates = session.send_command(command)?;
-        session.stream.shutdown(Shutdown::Write)?;
-        Ok(updates)
-    }
-
     fn write_client_handshake(
         writer: &mut impl Write,
         protocol_version: u32,
@@ -1461,7 +1384,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn native_tcp_loopback_requests_updates() {
+    fn native_tcp_loopback_exchanges_independent_frames() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let command = ClientCommand::SetChunkView(ChunkView {
@@ -1485,7 +1408,9 @@ mod tests {
             write_server_update_batch(&mut stream, &server_updates).unwrap();
         });
 
-        let updates = request_server_updates(addr, &command).unwrap();
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session.send_command_only(command).unwrap();
+        let updates = session.drain_update_batch().unwrap().into_updates();
         server.join().unwrap();
 
         assert_eq!(updates, expected_updates);
@@ -1493,7 +1418,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn native_tcp_client_session_reuses_one_connection() {
+    fn native_tcp_client_io_session_reuses_one_connection() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let first_command = ClientCommand::SetChunkView(ChunkView {
@@ -1534,10 +1459,15 @@ mod tests {
         });
 
         {
-            let mut session = NativeClientSession::connect(addr).unwrap();
-            assert_eq!(session.send_command(&first_command).unwrap(), first_updates);
+            let mut session = NativeClientIoSession::connect(addr).unwrap();
+            session.send_command_only(first_command).unwrap();
             assert_eq!(
-                session.send_command(&second_command).unwrap(),
+                session.drain_update_batch().unwrap().into_updates(),
+                first_updates
+            );
+            session.send_command_only(second_command).unwrap();
+            assert_eq!(
+                session.drain_update_batch().unwrap().into_updates(),
                 second_updates
             );
         }
@@ -1546,50 +1476,7 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn native_tcp_client_try_drain_does_not_wait_for_delayed_response() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let command = ClientCommand::SetChunkView(ChunkView {
-            center: ChunkPos::new(0, 0),
-            render_distance: 0,
-            chunk_tracking_radius: 0,
-        });
-        let server_command = command.clone();
-        let expected_updates = vec![ServerUpdate::TimeUpdate { day_time: 1234 }];
-        let server_updates = expected_updates.clone();
-
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            complete_server_handshake(&mut stream).unwrap();
-            assert_eq!(
-                read_client_command_frame(&mut stream).unwrap(),
-                server_command
-            );
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            write_server_update_batch(&mut stream, &server_updates).unwrap();
-        });
-
-        let mut session = NativeClientSession::connect(addr).unwrap();
-        session.send_command_only(&command).unwrap();
-
-        let poll_start = std::time::Instant::now();
-        assert_eq!(session.try_drain_command_updates().unwrap(), None);
-        assert!(
-            poll_start.elapsed() < std::time::Duration::from_millis(100),
-            "try_drain_command_updates blocked on a delayed server response"
-        );
-
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        assert_eq!(
-            session.try_drain_command_updates().unwrap(),
-            Some(expected_updates)
-        );
-        server.join().unwrap();
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn native_tcp_client_io_actor_send_does_not_wait_for_delayed_response() {
+    fn native_tcp_client_io_actor_send_does_not_wait_for_delayed_publication() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let command = ClientCommand::SetChunkView(ChunkView {
@@ -1617,7 +1504,7 @@ mod tests {
         session.send_command_only(command).unwrap();
         assert!(
             send_start.elapsed() < std::time::Duration::from_millis(100),
-            "actor-backed send waited for a delayed server response"
+            "actor-backed send waited for a delayed server publication"
         );
         assert_eq!(session.try_drain_update_batch().unwrap(), None);
 
@@ -1649,7 +1536,8 @@ mod tests {
         let second_server_updates = second_updates.clone();
         let (first_command_read_tx, first_command_read_rx) = std::sync::mpsc::channel();
         let (second_command_read_tx, second_command_read_rx) = std::sync::mpsc::channel();
-        let (release_first_response_tx, release_first_response_rx) = std::sync::mpsc::channel();
+        let (release_first_publication_tx, release_first_publication_rx) =
+            std::sync::mpsc::channel();
         let (release_server_tx, release_server_rx) = std::sync::mpsc::channel();
 
         let server = std::thread::spawn(move || {
@@ -1665,7 +1553,7 @@ mod tests {
                 second_server_command
             );
             second_command_read_tx.send(()).unwrap();
-            release_first_response_rx
+            release_first_publication_rx
                 .recv_timeout(std::time::Duration::from_secs(5))
                 .unwrap();
             write_server_update_batch(&mut stream, &first_server_updates).unwrap();
@@ -1685,7 +1573,7 @@ mod tests {
         session.send_command_only(second_command).unwrap();
         assert!(
             send_start.elapsed() < std::time::Duration::from_millis(100),
-            "actor-backed send waited for the prior held response"
+            "actor-backed send waited for the prior held publication"
         );
         second_command_read_rx
             .recv_timeout(std::time::Duration::from_secs(5))
@@ -1693,7 +1581,7 @@ mod tests {
         assert_eq!(session.try_drain_update_batch().unwrap(), None);
         assert_eq!(session.diagnostics().outbound_command_depth, 0);
 
-        release_first_response_tx.send(()).unwrap();
+        release_first_publication_tx.send(()).unwrap();
         let first_batch = session.drain_update_batch().unwrap();
         assert_eq!(first_batch.inbound_frame_sequence, 1);
         assert_eq!(first_batch.into_updates(), first_updates);
