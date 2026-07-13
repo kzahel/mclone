@@ -19,8 +19,9 @@ tail while making cleanup cost explicit in poll diagnostics; Slice 3K native
 deferred payload drop worker landed and moved that cleanup off the app frame;
 remote `SendOnly` and response-readiness fixes landed under tactical 149;
 focused native/web remote inbound-queue work completed under tactical 151;
-server-push protocol broadening and broader terrain coordinator lifecycle
-remain active
+server-push protocol broadening handed to focused Tactical
+[`176`](176-dedicated-autonomous-push-runtime.md); broader terrain coordinator
+lifecycle remains active
 Workstream: shared native Rust app runtime, local integrated server runner,
 native remote transport, web/WASM host convergence, Android XR frame pacing
 
@@ -967,7 +968,13 @@ normal-frame polling drain through the shared `ClientConnection` pump.
 
 ### Slice 6 - Server-Push Protocol Broadening
 
-Goal: make remote dedicated fully event/update-stream shaped.
+Status: superseded by focused Tactical
+[`176-dedicated-autonomous-push-runtime.md`](176-dedicated-autonomous-push-runtime.md),
+which coordinates server push with the required target-neutral simulation API,
+autonomous dedicated cadence, bounded connection queues, production web-worker
+ownership, and cross-adapter conformance.
+
+Original goal: make remote dedicated fully event/update-stream shaped.
 
 - Extend native TCP and WebSocket server paths so updates can arrive without a
   paired command response.
@@ -979,8 +986,9 @@ Goal: make remote dedicated fully event/update-stream shaped.
   keeps the strict ordered stream.
 - Preserve the logical `ClientCommand` / `ServerUpdate` protocol model.
 
-This is not required for the first local integrated Quest fix, but the shared
-bus should be designed so this does not require another client-runtime rewrite.
+The completed shared bus was designed so Tactical 176 does not require another
+client-runtime rewrite. Keep this section as the historical handoff; record
+implementation and evidence only in Tactical 176.
 
 ## Closeout Notes / Deferred Valuable Work
 
@@ -1012,8 +1020,9 @@ another doc, explicitly decide where these remaining valuable items live:
   pressure.
 - Server-push protocol broadening: native TCP and WebSocket server paths still
   emit one response batch per command. Tactical 151 finished the client inbound
-  boundary; this tactical's remaining remote bus work is deciding whether and
-  how updates can arrive without a paired command response.
+  boundary; Tactical 176 now owns autonomous cadence, unsolicited publication,
+  bounded queues, native/web producer mechanics, and conformance as one
+  coordinated milestone.
 - Correction latency fast-lane: keep this only as the recorded escalation path
   if measured queue age proves corrections/lifecycle updates need it. Do not
   introduce chunk-stream priority classes for local play.

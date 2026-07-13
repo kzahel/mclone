@@ -10,8 +10,9 @@ frame-budget stall) and drop the earlier priority-class design; native remote
 `SendOnly` and TCP-readiness fixes landed 2026-07-06; shared `ClientConnection`
 plus focused remote inbound queue work completed 2026-07-07 under
 [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md),
-with remaining server-push/protocol broadening tracked in
-[`tactical/133-session-network-bus-and-update-pacing.md`](./tactical/133-session-network-bus-and-update-pacing.md)
+with autonomous dedicated tick, full-duplex server push, bounded connection
+queues, and production web-worker transport now planned under
+[`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md)
 
 ## Purpose
 
@@ -21,12 +22,14 @@ logical protocol stays shared, but command sending and server-update
 application must stop looking like a synchronous request/response helper inside
 the render frame.
 
-The immediate performance trigger is the Quest render-distance-7 frame pacing
-work: high-frequency XR pose sync currently calls a helper that sends a
-movement command and then opportunistically drains/applies all pending
-integrated-server updates. When the pending updates are chunk snapshots and
-unloads, a cheap pose command can turn into multi-ms chunk dirty marking on the
-render frame.
+The original performance trigger was the Quest render-distance-7 frame pacing
+work: high-frequency XR pose sync called a helper that sent a movement command
+and then opportunistically drained/applied all pending integrated-server
+updates. The shared update pump has removed that local and remote client-frame
+coupling. The remaining architectural gap is producer-side: remote transports
+still pair one update batch with every command, the dedicated world advances
+once per received command, and production web remote does not yet prove
+worker-owned socket/decode work.
 
 This doc records the desired state so implementation slices do not drift into
 one-off caps or platform-specific network paths.
@@ -180,10 +183,12 @@ render compile/upload actors
     budgets
 ```
 
-Native should start with a dedicated blocking-IO thread for TCP rather than
-forcing async through the engine. Web should use browser WebSocket/WebRTC
-callbacks or a worker to feed the same inbound queue. The runtime stays
-frame-driven on all platforms.
+Native uses independent blocking reader and writer ownership rather than
+forcing async through the engine. Production web uses a Web Worker to own the
+WebSocket plus update-frame decode and feeds the same logical inbound queue;
+browser-main-thread callbacks and inline server paths remain explicit
+smoke/fallback implementations. The runtime stays frame-driven on all
+platforms.
 
 ## Shared Boundary
 
@@ -226,6 +231,14 @@ singleplayer memory channels. Mclone should not keep separate runtime-facing
 interfaces for local integrated and remote dedicated play. Platform adapters
 may be async internally; the shared runtime should not become async just
 because one backend is.
+
+The shared contract is semantic rather than a promise that every producer has
+the same physical threads. Native TCP uses OS reader/writer threads, native
+integrated play uses the server runner and Rust channels, browser remote uses a
+Web Worker and browser WebSocket events, and browser integrated play uses a
+server worker. Every producer must nevertheless expose the same ordered
+command stream, ordered decoded-update stream, bounded-pressure state, and
+ready-only runtime drain.
 
 This is a boundary match, not a Netty clone. Java integrated singleplayer uses
 `LocalChannel` / `LocalServerChannel` and drains all queued packet handlers on
@@ -280,6 +293,27 @@ Parked, not planned:
   define spawn/despawn ordering rules before it coalesces anything. It is not
   a local-play mechanism.
 
+## Frame-Thread Work Boundary
+
+The drawable/frame thread is allowed to:
+
+- enqueue a command without waiting for physical write or queue capacity;
+- drain only already-decoded ready updates;
+- apply updates in receive order under `RuntimeUpdatePumpBudget`; and
+- hand resident dirty facts to the bounded compile/upload pipeline.
+
+It must not perform socket reads or writes, block for a response or queue slot,
+decode a transport frame or chunk snapshot, wait for worldgen or persistence,
+run connect/reconnect work, or synchronously compile terrain. An unlimited
+startup drain changes only the update-application budget; producer IO and
+decode remain off-frame.
+
+Commands need explicit pressure semantics. Reliable ordered interactions,
+inventory actions, movement records, and teleport accepts cannot be dropped or
+reordered. A high-frequency command may be latest-wins only when its logical
+contract explicitly permits replacement, such as a superseded view center.
+No command path may silently turn bounded queue pressure into a frame wait.
+
 ## Ordering, Pacing, And Backpressure
 
 Inbound updates form one logical stream:
@@ -316,6 +350,12 @@ Backpressure should be visible in diagnostics:
 - producer-side decode time,
 - time spent in apply, dirty marking, client apply, and render dirty handoff.
 
+The first full-duplex remote implementation uses bounded queues and disconnects
+a persistently slow core-stream consumer instead of dropping reliable updates.
+Exact bounds are measured implementation constants, not platform-owned policy.
+Dropping or coalescing entity transforms remains future measured work and must
+first define spawn/despawn and correction ordering.
+
 ## Native Implementation Shape
 
 Local integrated:
@@ -332,15 +372,28 @@ Local integrated:
 
 Native remote TCP:
 
-- `NativeClientIoSession` owns TCP stream IO on a client actor thread; that
-  actor owns blocking socket reads and payload decode.
+- `NativeClientIoSession` owns independent TCP writer and reader lanes. The
+  writer consumes the ordered bounded command queue; the reader continuously
+  receives and decodes unsolicited update frames into the inbound queue.
 - The app thread enqueues `ClientCommand` frames and drains decoded
   `ServerUpdate`s from queues.
-- The current implementation keeps the TCP frame codec and one response batch
-  per command on the wire. The boundary change is complete: a ready batch
-  becomes queued decoded updates before the runtime pump sees it.
-- Server-push wire changes remain tactical 133 work; the app/runtime boundary
-  no longer needs another rewrite for that broadening.
+- The existing TCP update-batch framing may remain initially, but a batch is a
+  publication frame rather than a command response. Empty response batches and
+  response-count bookkeeping disappear.
+- Desktop flat, desktop XR, flat Android, and Android XR instantiate this same
+  adapter. Their app crates do not wrap it with private drain or polling
+  semantics.
+
+Native dedicated server:
+
+- connection readers enqueue commands and connection writers consume bounded
+  outbound publication queues;
+- one authoritative server thread drains commands at tick boundaries,
+  advances global simulation once, and routes per-player updates;
+- it never waits for worldgen or socket IO, and autosave is cadence/shutdown
+  owned rather than command owned; and
+- TCP and WebSocket sessions terminate at the same host/session boundary. The
+  current one-WebSocket-to-one-loopback-TCP bridge is not the target topology.
 
 Android XR and flat Android should consume the same native bus boundary. The
 Android app crates should own platform lifecycle and launch arguments, not
@@ -348,17 +401,20 @@ private transport semantics.
 
 ## Web Implementation Shape
 
-Web converges on the same bus semantics while preserving browser-owned
-async mechanics:
+Web converges on the same bus semantics while preserving browser-owned async
+mechanics:
 
-- WebSocket `message` callbacks push decoded updates onto the same inbound
-  queue in receive order. Future WebRTC data-channel callbacks should do the
-  same.
+- Production remote WebSocket ownership and update-frame decode live in a Web
+  Worker. Its message/event callbacks push decoded updates or transferable
+  decoded buffers onto the same logical inbound queue in receive order.
 - A worker-integrated server publishes updates through the same logical queue.
 - The Rust runtime drains updates on its normal frame/update cadence through
   `ClientConnection`.
-- Hot paths can later use `SharedArrayBuffer`/atomics, but the policy remains
-  the same as native: command enqueue and update drain are separate operations.
+- `SharedArrayBuffer`/atomics can replace transferable-buffer handoff later,
+  but the policy remains the same as native: command enqueue and update drain
+  are separate operations.
+- Main-thread WebSocket callbacks and inline integrated servers are named
+  compatibility/smoke fallbacks, not production-quality completion evidence.
 
 This avoids a web-only engine architecture while still allowing browser APIs to
 stay event-driven.
@@ -373,6 +429,9 @@ stay event-driven.
 - The pump runs every frame in every client lane. Queue depth and oldest
   queued update age are diagnostics so starvation is detectable rather than
   assumed absent.
+- Frame paths use ready-only drains and nonblocking command enqueue. No
+  platform adapter may hide a socket read, decode, promise wait, response wait,
+  reconnect, or bounded-queue wait behind the shared call.
 - Update application stays thin: producer-side decode, resident-slot dirty
   marking. New per-update work at the pump (payload decode, allocation,
   ordered-set churn) is a regression smell.
@@ -383,6 +442,10 @@ stay event-driven.
   application path.
 - Web and native may differ in transport mechanics, not in command/update
   semantics.
+- Native flat/XR/Android lanes use one native remote adapter. Cross-platform
+  semantic parity is proven by one connection conformance suite over
+  integrated, TCP, and web-worker/WebSocket implementations; XR adds frame
+  accounting rather than a forked transport contract.
 - Old render output remains visible until replacement compile/upload work is
   complete; network pacing feeds, not bypasses, the terrain lifecycle.
 
@@ -417,3 +480,7 @@ stay event-driven.
 - [`tactical/154-client-ingress-adapter-cleanup.md`](./tactical/154-client-ingress-adapter-cleanup.md)
   tracks post-151 cleanup that quarantines compatibility/probe helpers without
   changing the shared client ingress behavior.
+- [`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md)
+  owns the coordinated autonomous dedicated tick, full-duplex remote push,
+  bounded queues, production web-worker transport, and cross-adapter
+  conformance implementation.

@@ -2,8 +2,10 @@
 
 Topic: multiplayer-networking
 
-Status: planning — research pass completed 2026-07-10; no protocol slices
-started under this topic yet.
+Status: planning — research pass completed 2026-07-10; autonomous dedicated
+tick plus full-duplex server-push selected 2026-07-13 as the next coordinated
+milestone under Tactical
+[`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -125,6 +127,51 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
   disconnect-with-reason, and a capability field so debug variants can be
   gated rather than baked in.
 
+## Shared ownership and frame-thread contract
+
+The push conversion must not create separate desktop, XR, Android, and web
+networking policies. Shared owners are:
+
+- `mclone-protocol`: logical commands, updates, codec rules, and ordered-stream
+  semantics;
+- `mclone-server`: autonomous cadence, command dispatch, global simulation,
+  per-player routing, publication, and outbound pressure policy;
+- `mclone-net`: transport-neutral framing and native TCP mechanics;
+- `mclone-app-runtime`: `ClientConnection`, decoded update envelopes, common
+  queue diagnostics, and the budgeted ordered update pump;
+- `mclone-client`: authoritative update application to the client replica;
+- `mclone-scene`: the frame-owned pump point and handoff into the existing
+  terrain dirty/compile/upload lifecycle.
+
+Desktop flat, desktop XR, flat Android, and Android XR must instantiate the
+same native remote connection implementation. Platform apps select and wire a
+connection; they do not own ordering, drain budgets, command policies,
+publication cadence, or backpressure. Web uses different browser mechanics
+behind the same logical boundary, not a different engine policy.
+
+The drawable/frame thread may only enqueue a command without waiting, drain
+already-decoded ready updates, apply them in receive order under an explicit
+budget, and hand dirty state to bounded render workers. It must never read or
+write a socket, wait for queue capacity or a command acknowledgement, decode a
+wire frame or chunk snapshot, wait for worldgen, run reconnect/connect work, or
+build a chunk mesh. Startup may choose an unlimited *apply* budget, but it does
+not move socket IO or payload decode onto the frame.
+
+Native remote therefore uses independent blocking reader and writer ownership
+around bounded command/update queues. Production web remote must put WebSocket
+ownership plus frame decode in a Web Worker; a browser-main-thread callback or
+inline integrated server may remain an explicit smoke/fallback path, not the
+target production topology. Transferable buffers are an acceptable first
+worker handoff; `SharedArrayBuffer` can replace that mechanism later without
+changing `ClientConnection` semantics.
+
+One adapter-conformance suite must exercise integrated runner, native TCP, and
+web-worker/WebSocket implementations. It owns command/update ordering,
+unsolicited delivery, ready-only nonblocking drain, queue saturation,
+disconnect/reconnect state, and budgeted deferral without loss or reordering.
+XR validation adds frame-accounting evidence rather than a forked semantic
+suite because XR consumes the same native adapter.
+
 Deliberate divergences from vanilla, each preserving a parity path:
 
 - Variable tick rates via the existing cadence lanes (below) — vanilla is
@@ -163,38 +210,36 @@ first?":
 
 ## Phased plan
 
-Each phase is a candidate tactical; order matters, sizes are rough.
+Order matters; the first coordinated milestone has a focused tactical while
+later phases remain topic-level direction.
 
-1. **Dedicated server autonomous tick.** Move the dedicated loop onto the
-   shared paced cadence loop (reuse `runner.rs` machinery); command handling
-   becomes enqueue + drain-at-tick-boundary; delete `wait_for_server_jobs`
-   and per-command saves (autosave on a tick period instead, vanilla: every
-   6000 ticks); `SetChunkView` acks immediately, snapshots publish as
-   worldgen completes. The world ticks with zero clients.
-2. **Server-push wire.** Replace one-batch-per-command with independent
-   command/update streams: per-connection reader + writer threads on TCP;
-   WS sessions served natively by the server loop (retire the 1:1 TCP-
-   loopback bridge shape); client IO actor splits its lockstep loop into
-   send and receive lanes feeding the existing ordered pump. In-process and
-   web-worker runners keep their channels but adopt the same push semantics.
-   Add per-connection outbound queue bounds with a disconnect policy
-   (replacing today's unbounded queues + diagnostics-only stance).
-3. **Session lifecycle.** Login phase carrying player profile (name, stable
+1. **Dedicated autonomous tick plus server-push transport.** Tactical
+   [`176`](../tactical/176-dedicated-autonomous-push-runtime.md) treats these
+   as one coordinated milestone because autonomous publication without a push
+   writer strands updates, while a push-capable transport without an
+   autonomous host leaves simulation command-clocked. Its staged commits
+   first separate global simulation from per-player drains, prepare duplex
+   lanes, then atomically switch the dedicated host to tick-boundary command
+   drain and unsolicited publication. It removes `wait_for_server_jobs` and
+   per-command saves, publishes snapshots as worldgen completes, bounds
+   per-connection queues, converts production web remote to worker-owned
+   WebSocket/decode, and proves one cross-adapter contract.
+2. **Session lifecycle.** Login phase carrying player profile (name, stable
    UUID) and capabilities; join sequence ordered like vanilla
    `placeNewPlayer`; keepalive/timeout (15 s / 30 s to start); explicit
    disconnect messages; rejoin-as-same-player keyed on profile id (needs the
    persistence track's player records for position/inventory restore).
-4. **Movement validation (basic anti-teleport).** Vanilla's checks server-
+3. **Movement validation (basic anti-teleport).** Vanilla's checks server-
    side: packet-burst clamp, moved-too-quickly, collision replay +
    moved-wrongly, floating kick, with the local-integrated owner exempted
    like vanilla's singleplayer owner. Detailed in
    [`client-prediction.md`](client-prediction.md).
-5. **Variable tick over the wire.** Carry gameplay/publication rates in the
+4. **Variable tick over the wire.** Carry gameplay/publication rates in the
    join handshake; make client-side tick-denominated behavior (move
    reminder, interpolation windows, day-time conversion) rate-aware; add the
    cadence knob to the dedicated server CLI/config. See the next section for
    the semantics decision this forces.
-6. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
+5. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
    zlib over 256 bytes; we control both ends, so lz4/zstd are candidates —
    must build on wasm), capability-based protocol evolution instead of
    strict version equality, chunk-send pacing/budgets per player, metrics.
@@ -236,8 +281,10 @@ lane, expressed in time units.
   trusted fast path.
 - Compression codec choice and threshold once frames are measured
   post-push-wire.
-- Outbound backpressure policy: disconnect slow consumers (vanilla
-  effectively does via TCP + timeouts) vs. drop/coalesce entity updates.
+- Exact outbound queue byte/count bounds. The first push implementation
+  disconnects a slow core-stream consumer rather than dropping or reordering
+  reliable world/gameplay updates. Entity superseding/coalescing remains a
+  later measured option with explicit spawn/despawn ordering rules.
 
 ## Code and doc map
 
@@ -253,7 +300,8 @@ lane, expressed in time units.
   (accurate), [`../protocol.md`](../protocol.md) (stale: version, tables),
   [`../multiplayer-hosting.md`](../multiplayer-hosting.md) (stale:
   persistence claims)
-- Tacticals: 009 (original wire shape), 133 (bus/pacing; Slice 6 = push),
+- Tacticals: 009 (original wire shape), 133 (bus/pacing; Slice 6 handed to
+  176),
   151 (inbound pipeline), 154 (ingress cleanup), 167 (startup contract),
-  116 (cadence)
+  116 (cadence), 176 (autonomous dedicated push milestone)
 - Vanilla receipts: [`vanilla/networking.md`](vanilla/networking.md)
