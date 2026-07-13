@@ -226,6 +226,29 @@ fn cli_parses_launch_only_live_diorama_placement() {
 }
 
 #[test]
+fn cli_defaults_live_diorama_to_authored_fixture_anchors() {
+    let cli = Cli::parse([
+        "--world-dir".to_owned(),
+        "/tmp/table-a".to_owned(),
+        "--live-diorama-world-dir".to_owned(),
+        "/tmp/island-b".to_owned(),
+    ])
+    .unwrap();
+    let Cli::Window { scene, .. } = cli else {
+        panic!("expected window mode");
+    };
+    let diorama = scene.live_diorama.expect("live diorama parsed");
+    assert_eq!(
+        diorama.placement.source_anchor(),
+        mclone_core::Vec3d::new(8.5, 65.0, 8.5)
+    );
+    assert_eq!(
+        diorama.placement.composition_anchor(),
+        mclone_core::Vec3d::new(8.0, 65.03125, 8.0)
+    );
+}
+
+#[test]
 fn cli_rejects_conflicting_retained_world_presentations() {
     let error = Cli::parse([
         "--live-diorama-world-dir".to_owned(),

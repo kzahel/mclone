@@ -2,8 +2,9 @@
 
 Status: active 2026-07-13. Slices 0–3 landed: contract/baseline,
 authored-only server/content foundation, static placed terrain, and the first
-live local two-host composition. The work is paused at the required Slice 3
-human review checkpoint before mutation, water, or activation. Capable-device
+live local two-host composition. The required Slice 3 human review has been
+incorporated before mutation, water, or activation: its correction replaced the
+oversized elevated table and coplanar preview. Slice 4 is next; capable-device
 multiview remains a shared named validation gap.
 
 Topic: `embedded-worlds`
@@ -95,8 +96,9 @@ does not introduce an N-world registry.
 
 The first checked-in fixture is intentionally small and deterministic:
 
-- **World A:** a persistence-backed authored grass platform with a recognizable
-  block-built table near its accepted safe spawn.
+- **World A:** a persistence-backed authored grass platform with a two-by-two,
+  four-block brick display plinth resting directly on the ground near its
+  accepted safe spawn.
 - **World B:** a separate persistence-backed authored grass/stone island. Slice
   5 adds the water/ocean presentation after opaque composition is correct.
 - **Missing chunks:** deterministic void/air through an `AuthoredOnly` world
@@ -105,8 +107,9 @@ The first checked-in fixture is intentionally small and deterministic:
   radius and explicit vertical section range. A void neighbor ring makes the
   fixture boundary naturally closed before arbitrary-world boundary treatment
   lands.
-- **Placement:** source surface anchor mapped to the table-top anchor at a
-  uniform positive scale, provisionally `1/16`. Source coordinates are rebased
+- **Placement:** source surface anchor mapped `1/32` block above the display
+  top at a uniform positive scale, provisionally `1/16`. The deliberate small
+  clearance prevents coplanar depth fighting. Source coordinates are rebased
   around the source anchor before scaling so a distant source is not translated
   through one large absolute `f32` matrix.
 - **Sky:** only A's sky is drawn. B terrain keeps its own packed block/sky light
@@ -589,8 +592,9 @@ fixture:
   and safely rebuilds only a matching fixture. Each root contains a center
   authored chunk plus a radius-three lit void ring (49 records), exact spawn,
   preview anchor, and mutation coordinates.
-- Fixture `table-a` is a grass platform with a brick table; `island-b` is a
-  separate grass/stone island. The diagnostic command writes them to
+- Fixture `table-a` is a grass platform with a four-block ground-level brick
+  display plinth; `island-b` is a separate grass/stone island. The diagnostic
+  command writes them to
   `/tmp/mclone-live-diorama-fixtures/{table-a,island-b}` by default:
 
 ```bash
@@ -840,8 +844,9 @@ The launch-only desktop projection is explicit and provisional:
 ```
 
 Supplying only B's root uses the checked-in fixture facts: region
-`0,0,0,3,5`, source anchor `8.5,65,8.5`, table anchor `8.5,68,8.5`, and scale
-`1/16`. A fixture marker supplies B's seed and stored generation profile.
+`0,0,0,3,5`, source anchor `8.5,65,8.5`, display anchor
+`8,65.03125,8`, and scale `1/16`. A fixture marker supplies B's seed and stored
+generation profile.
 Malformed or missing markers fail startup rather than silently opening the
 wrong content. A diorama root and the old gate seed are rejected together.
 The review smoke deliberately uses `1/8`: the first inspected `1/16` image was
@@ -858,21 +863,21 @@ It rebuilds the idempotent A/B fixture roots, captures A alone, front/side/
 behind A+B views, and a synthetic stereo pair, then writes
 `/tmp/mclone-live-diorama-smoke/report.json`. The accepted receipt reports:
 
-- 1,492 A-only versus A+B changed pixels at the front camera;
+- 3,854 A-only versus A+B changed pixels at the front camera;
 - three bounded B section records, two drawn sections, and 5,112 drawn indices;
-- 115,057 differing left/right pixels with B present in both eyes; and
+- 151,898 differing left/right pixels with B present in both eyes; and
 - the requested B cadence still applied at `5/5/5` after preview drawing.
 
 The individually inspected images and SHA-256 receipts are:
 
-- `a-alone.png`: `2d4e398c...a607044`;
-- `a-plus-b-front.png`: `ce72ebf3...225a136`;
-- `a-plus-b-side.png`: `a4dff52c...8443c3`;
-- `a-plus-b-behind.png`: `0b788186...340548`; and
-- `a-plus-b-stereo.png`: `7f6db613...1c951369`.
+- `a-alone.png`: `4c387c75...9177c44`;
+- `a-plus-b-front.png`: `eb4dd92a...f18e152`;
+- `a-plus-b-side.png`: `104a2fa9...ab1119`;
+- `a-plus-b-behind.png`: `0b43c9a7...1f7bb4c`; and
+- `a-plus-b-stereo.png`: `5891cd4a...3a34835`.
 
 The front/side/behind views show the same grass/stone miniature on the brick
-table and exercise shared-depth ordering from opposite sides. The stereo image
+display and exercise shared-depth ordering from opposite sides. The stereo image
 shows ordinary physical parallax without render-to-texture. The Mac adapter
 still lacks `MULTIVIEW`; its eager shader/pipeline path compiles and is wired
 into full-frame composition, but capable-device pixels remain an explicit
@@ -899,6 +904,16 @@ warnings. A strict all-target Clippy attempt remains blocked before reaching
 this slice by existing unrelated lints in `mclone-core`, `mclone-input`, and
 `mclone-diagnostics`; no Clippy-clean claim is made.
 
+The first interactive review found that the authored table read as a giant
+elevated structure above the player and that the preview's grass surface was
+exactly coplanar with the brick top. The corrective pass replaces its 5-by-5
+top and three-block legs with exactly four bricks at world y=64, centered under
+the preview, and moves the composition plane from y=68 to y=65.03125. A server
+test locks both the four-block footprint and the positive sub-tenth-block
+clearance. Regenerated front/side/behind and stereo captures show a
+player-scale display with an unbroken grass silhouette and visible brick rim;
+no coplanar flicker or brick breakthrough is visible in the inspected images.
+
 For the required interactive review, first build the fixtures, then launch A
 with B at the more visible `1/8` review scale:
 
@@ -915,11 +930,11 @@ cargo run --manifest-path native/Cargo.toml -p mclone-native-client \
   --live-diorama-scale 0.125 --warm-world-standby-cadence 5/5/5
 ```
 
-The player begins near `(0.5, 64, 0.5)`; the brick table and composition anchor
-are near `(8.5, 68, 8.5)`. Review the miniature from multiple sides and compare
-`--live-diorama-scale 0.0625`, `0.125`, and `0.25` if useful. Slice 4 must not
-start until scale, placement, framing, lighting, culling, and XR presence have
-received this human check.
+The player begins near `(0.5, 64, 0.5)`; the four-block display and composition
+anchor are near `(8, 65, 8)`. Review the miniature from multiple sides and
+compare `--live-diorama-scale 0.0625`, `0.125`, and `0.25` if useful. Slice 4
+must not start until scale, placement, framing, lighting, culling, and XR
+presence have received this human check.
 
 ## Slice 4: Live Updates, Bounds, And Background Budgets
 

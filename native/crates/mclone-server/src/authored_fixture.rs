@@ -62,14 +62,17 @@ impl AuthoredWorldFixtureKind {
 
     pub const fn preview_anchor(self) -> [f64; 3] {
         match self {
-            Self::Table => [8.5, 68.0, 8.5],
+            // The table is a two-by-two brick plinth whose top is y=65. Keep
+            // the composition plane a small, deliberate distance above that
+            // surface instead of making it coplanar and depth-unstable.
+            Self::Table => [8.0, 65.03125, 8.0],
             Self::Island => [8.5, 65.0, 8.5],
         }
     }
 
     pub const fn mutation_block(self) -> [i32; 3] {
         match self {
-            Self::Table => [8, 67, 8],
+            Self::Table => [7, 64, 7],
             Self::Island => [13, 67, 10],
         }
     }
@@ -287,14 +290,11 @@ fn author_table_chunk(chunk: &mut MutableChunkBlockBuffer) {
         }
     }
 
-    for &(x, z) in &[(6, 6), (6, 10), (10, 6), (10, 10)] {
-        for y in 64..=66 {
-            chunk.set_block_at_y(x, y, z, BRICKS);
-        }
-    }
-    for z in 6..=10 {
-        for x in 6..=10 {
-            chunk.set_block_at_y(x, 67, z, BRICKS);
+    // Four blocks on the grass make a player-scale display plinth. The live
+    // miniature is placed just above its y=65 top surface.
+    for z in 7..=8 {
+        for x in 7..=8 {
+            chunk.set_block_at_y(x, 64, z, BRICKS);
         }
     }
 }
@@ -382,6 +382,35 @@ mod tests {
                 AIR_BLOCK_STATE_ID
             );
         }
+    }
+
+    #[test]
+    fn table_fixture_is_player_scale_and_preview_clears_its_top() {
+        let (manifest, records) =
+            authored_world_fixture_records(AuthoredWorldFixtureKind::Table).unwrap();
+        let center = records
+            .iter()
+            .find(|record| record.pos() == AUTHORED_WORLD_FIXTURE_CENTER)
+            .unwrap();
+        let bricks = generated_block_state_id(BRICKS);
+        let mut brick_positions = Vec::new();
+        for y in 64..=68 {
+            for z in 0..16 {
+                for x in 0..16 {
+                    if snapshot_block_state(&center.snapshot, BlockPos::new(x, y, z)) == bricks {
+                        brick_positions.push([x, y, z]);
+                    }
+                }
+            }
+        }
+
+        assert_eq!(
+            brick_positions,
+            vec![[7, 64, 7], [8, 64, 7], [7, 64, 8], [8, 64, 8]]
+        );
+        assert_eq!(manifest.preview_anchor, [8.0, 65.03125, 8.0]);
+        assert!(manifest.preview_anchor[1] > 65.0);
+        assert!(manifest.preview_anchor[1] < 65.1);
     }
 
     #[test]

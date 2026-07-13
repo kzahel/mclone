@@ -9,7 +9,8 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone and an active
-live-diorama tactical paused at the completed Slice 3 manual checkpoint.**
+live-diorama tactical whose completed Slice 3 has incorporated its first manual
+table review.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -293,11 +294,14 @@ no physical authority or second sky/Far-LOD/overlay stack. The launch
 diagnostic exposes B root, region, anchors, scale, and standby cadence without
 allocating preview state in the ordinary path. The deterministic smoke draws
 two B sections / 5,112 indices in three table views and both stereo eyes;
-115,057 pixels differ between eyes, and the requested `5/5/5` standby cadence
+151,898 pixels differ between eyes, and the requested `5/5/5` standby cadence
 remains applied. The accepted no-preview medians are 2.724 ms average and 4.235
-ms P95, still inside the Slice 0 gate. Human review of the provisional scale,
-placement, framing, lighting, culling, and XR presence is required before
-Slice 4 adds mutation and budget instrumentation.
+ms P95, still inside the Slice 0 gate. The first manual review rejected the
+oversized elevated 5-by-5 table and exposed coplanar grass/brick depth fighting.
+The fixture now uses a four-block ground-level display and maps the miniature
+1/32 block above its top; regenerated mono/stereo views show clean separation.
+Slice 4 can add mutation and budget instrumentation without preserving those
+provisional fixture mistakes.
 
 ### Same-world previews and non-recursive composition
 
