@@ -14,11 +14,12 @@ Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
 current startup/reset/asset-epoch contracts, and records renderer-shell,
 thread/cadence, offscreen, frame-budget, and synthetic-stereo baselines. A
 maintainer manual desktop-flat smoke found ordinary single-world behavior
-normal, and clean commit `64505c01` anchors repeatable 240-frame release
-timedemo and frame-budget comparisons on the current M4 Pro Mac. This records
-the larger vision, the fidelity ladder, concrete engine seams, and the
-warm-world burn-down so future slices do not have to re-derive them. The bounded
-first implementation milestone is
+normal. A five-run audit on the current M4 Pro Mac accepts the 240-frame 120 Hz
+frame-budget probe as the flat release timing anchor and marks timedemo frame
+timing too variable for regression decisions on this host. This records the
+larger vision, the fidelity ladder, concrete engine seams, and the warm-world
+burn-down so future slices do not have to re-derive them. The bounded first
+implementation milestone is
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md): retain
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
@@ -329,14 +330,16 @@ warm or visible. In particular:
 - retain before/after frame-accounting and offscreen/XR performance evidence
   for every extraction that touches the existing hot path.
 
-Tactical 174 fixes the first release comparison anchor at clean commit
-`64505c01`: 2.603 ms average in the 240-frame timedemo and 2.329 ms average /
-3.884 ms p95 in the 240-frame 120 Hz frame-budget probe, with no over-budget
-frames or accounting violations. Ownership and frame-path checkpoints rerun
-both release lanes on the same machine. A greater-than-10% average or p95
-slowdown triggers repeated median comparison rather than a conclusion from one
-sample; new accounting violations or repeatable over-budget behavior fail the
-checkpoint.
+Tactical 174 fixes the flat release comparison anchor from five clean 240-frame
+120 Hz frame-budget runs: 2.346 ms median average and 3.916 ms median p95. Their
+within-batch ranges were 6.2% and 5.2% of the medians, respectively. One
+isolated 9.765 ms maximum is retained in the evidence; the other maxima were
+4.148–4.467 ms, and no run had an accounting violation. Ownership and
+frame-path checkpoints rerun five release samples on the same machine. A range
+greater than 10% is unstable, while a candidate median slowdown greater than
+10% triggers investigation. Timedemo work counts remain useful, but its five
+averages ranged from 1.889–3.699 ms despite an idle host and identical work, so
+its frame timing is not currently a regression gate.
 
 The first ownership proof adds only an integration test and no production-frame
 collection, branch, namespace lookup, shader uniform, or render pass.

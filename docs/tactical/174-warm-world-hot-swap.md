@@ -4,11 +4,13 @@ Status: Slice 1 architecture checkpoint ready for review 2026-07-13. Slice 0's
 lower-level dual-integrated-host proof landed in commit `a31ac944`; the Slice 1
 ownership audit, characterization locks, and one-world baselines are recorded
 below. A maintainer manual desktop-flat smoke at commit `64505c01` found normal
-single-world behavior, and that clean checkpoint now has 240-frame release
-performance anchors. Slices 2–7 are unimplemented. First-multiview-pipeline
-timing remains a named device-evidence gap because the current macOS adapter
-does not expose `wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows
-lane before Slice 4 can declare a standby switchable.
+single-world behavior. A five-run repeatability audit now accepts the 120 Hz
+frame-budget probe as the flat release timing anchor and marks the timedemo
+timing too variable for regression decisions on this machine. Slices 2–7 are
+unimplemented. First-multiview-pipeline timing remains a named device-evidence
+gap because the current macOS adapter does not expose
+`wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows lane before Slice
+4 can declare a standby switchable.
 
 Topic: `embedded-worlds`
 
@@ -293,10 +295,13 @@ synthetic-stereo asset replacement
   249,679 differing eye pixels after restore; UI in both eyes
 ```
 
-The clean `64505c01` checkpoint also has a desktop-flat release comparison
-anchor from the same date. It was recorded on an Apple M4 Pro MacBook Pro
-(`Mac16,7`, 14 CPU cores, 48 GiB memory) running macOS 26.5.1. These are
-headless engine measurements rather than window-present FPS:
+The production-equivalent clean `64505c01` and documentation-only `740fbcb4`
+checkpoints also have desktop-flat release measurements from the same date.
+They were recorded on an Apple M4 Pro MacBook Pro (`Mac16,7`, 14 CPU cores,
+48 GiB memory) running macOS 26.5.1. These are headless engine measurements
+rather than window-present FPS.
+
+The initial clean single samples were:
 
 ```text
 native:timedemo:perf (240 frames, release, 1280x720)
@@ -309,16 +314,50 @@ native:frame-budget:perf (240 frames, release, 1280x720, 120 Hz)
   0 over-budget frames; 0 accounting conservation violations
 ```
 
+A repeatability audit sampled the machine before each five-run batch. CPU was
+85.9–94.4% idle with load average 2.1–2.3 on 14 cores, and no `cargo`, `rustc`,
+Clang, linker, CMake, Ninja, or Xcode build process was active. Both probes ran
+directly from the already-built release binary so compilation could not overlap
+them.
+
+```text
+timedemo average frame ms
+  runs     2.218, 3.400, 1.889, 2.884, 3.699
+  median   2.884
+  range    1.889-3.699 (1.810 ms; 62.8% of median)
+  work     664 loaded; 307.325 average drawn in every run
+frame-budget average frame ms
+  runs     2.345, 2.317, 2.346, 2.374, 2.462
+  median   2.346
+  range    2.317-2.462 (0.145 ms; 6.2% of median)
+frame-budget p95 frame ms
+  runs     3.891, 3.844, 3.916, 3.943, 4.046
+  median   3.916
+  range    3.844-4.046 (0.202 ms; 5.2% of median)
+frame-budget accounting
+  0 conservation violations in all runs
+  one isolated 9.765 ms maximum / over-budget frame in run 5
+  other run maxima 4.148-4.467 ms
+```
+
+The timedemo workload is deterministic, but its frame timing is not repeatable
+enough on this host to accept as a regression metric. Retain it for scene-build,
+section-count, and draw-count characterization while investigating timing only
+when a stable batch exists. The frame-budget average and p95 are the accepted
+flat release anchors: their original single sample is within 1% of the five-run
+median.
+
 For every Slice 2-or-later change that touches scene ownership, frame polling,
-upload, culling, or drawing, run both release commands on the same machine
-before accepting the checkpoint. Compare timedemo average frame time and drawn
-section counts, plus frame-budget average/p95, over-budget frames, and
-accounting conservation. A greater-than-10% average or p95 slowdown is an
-investigation trigger, not an automatic conclusion from one noisy sample:
-repeat the candidate three times and compare medians against an equivalently
-repeated clean anchor. Max-frame time remains diagnostic because host scheduling
-can dominate one sample. Any new accounting violation or repeatable over-budget
-behavior is a failure regardless of the average.
+upload, culling, or drawing, run five frame-budget release samples on the same
+machine before accepting the checkpoint. Compare the median average/p95,
+over-budget frames, accounting conservation, and work counts. A within-batch
+average or p95 range greater than 10% of its median is unstable and cannot be
+accepted; first recheck machine activity, then rerun or diagnose. A candidate
+median more than 10% slower than the clean anchor is also an investigation
+trigger rather than an automatic conclusion. Record every run: an isolated
+maximum may be classified separately when average/p95 remain stable, but do not
+silently delete it. Any new accounting violation or repeatable over-budget
+behavior is a failure regardless of the median.
 
 The desktop, ordinary stereo, Mono baseline/first-party/restored, and restored
 stereo captures under `/tmp` were visually inspected. Terrain and actors were
@@ -942,17 +981,17 @@ pnpm native:web:build
 ```
 
 At each review checkpoint that touches the existing one-world hot path, also
-run the release comparison pair and record deltas against the clean Slice 1
-anchor above:
+run the release comparison pair against the clean Slice 1 evidence above. Run
+the frame-budget command five times and use the documented stability rule;
+timedemo timing remains characterization rather than a gate until it produces a
+stable batch:
 
 ```bash
 pnpm native:timedemo:perf
 pnpm native:frame-budget:perf
 ```
 
-Use the investigation/repetition rule in `Characterization Locks And Baseline
-Evidence`; do not compare a release candidate against the shorter debug smoke
-numbers.
+Do not compare a release candidate against the shorter debug smoke numbers.
 
 Slice 5 must add a dedicated `pnpm native:warm-world-swap-smoke` wrapper and its
 CLI hook over the extended frame-advancing `OffscreenScript` harness. Slice 6
