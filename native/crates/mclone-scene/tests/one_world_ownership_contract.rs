@@ -1,5 +1,5 @@
-//! Tactical 174 characterization locks for the concrete one-world drawable
-//! slot and its installation/reset seams.
+//! Tactical 174 characterization locks for the concrete drawable-world slot,
+//! its one-active/optional-standby ownership, and installation/reset seams.
 
 use std::path::{Path, PathBuf};
 
@@ -56,6 +56,11 @@ fn field_names(item: &str) -> Vec<&str> {
 }
 
 const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
+    "id",
+    "descriptor",
+    "storage",
+    "lifecycle",
+    "asset_epoch",
     "scene",
     "runtime",
     "local_startup",
@@ -69,10 +74,14 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "far_lod",
     "render_stats",
     "render_admission_policy",
+    "accepted_entry_pose",
+    "pending_startup_sections",
 ];
 
-const ONE_WORLD_HOST_FIELDS: &[&str] = &[
+const SCENE_HOST_FIELDS: &[&str] = &[
     "active_world",
+    "standby_world",
+    "warm_world_standby",
     "services",
     "color_format",
     "mesh_assets",
@@ -144,18 +153,37 @@ const ONE_WORLD_HOST_FIELDS: &[&str] = &[
 ];
 
 #[test]
-fn one_world_host_has_one_exact_concrete_drawable_slot() {
+fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let source = read("src/lib.rs");
     let slot = braced_item(&source, "struct DrawableWorldSlot {");
     let host = braced_item(&source, "pub struct McloneSceneHost {");
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 13);
-    assert_eq!(host_fields, ONE_WORLD_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 69);
+    assert_eq!(slot_fields.len(), 20);
+    assert_eq!(host_fields, SCENE_HOST_FIELDS);
+    assert_eq!(host_fields.len(), 71);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
-    assert!(!host.contains("standby"));
+    assert_eq!(
+        host.matches("standby_world: Option<DrawableWorldSlot>")
+            .count(),
+        1
+    );
+    assert_eq!(
+        host.matches("warm_world_standby: Option<WarmWorldStandbyState>")
+            .count(),
+        1
+    );
+    for collection in [
+        "Vec<DrawableWorldSlot>",
+        "HashMap<WorldInstanceId",
+        "BTreeMap<WorldInstanceId",
+    ] {
+        assert!(
+            !host.contains(collection),
+            "Slice 3 must retain exactly one optional standby, not `{collection}`"
+        );
+    }
 }
 
 #[test]
@@ -170,7 +198,43 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("let active_world = DrawableWorldSlot::new("));
         assert!(constructor.contains("DrawableWorldSlotInstall {"));
         assert!(constructor.contains("active_world,"));
+        assert!(constructor.contains("standby_world: None,"));
+        assert!(constructor.contains("warm_world_standby: None,"));
     }
+}
+
+#[test]
+fn detached_standby_is_opt_in_bounded_and_cpu_only() {
+    let source = read("src/session.rs");
+    let begin = braced_item(&source, "pub fn begin_warm_world_standby(");
+    assert_in_order(
+        begin,
+        &[
+            "scene.world_root = None;",
+            "scene.world_dir = None;",
+            "scene.use_initial_spawn_center = false;",
+            "TexturedSectionDrawResources::new(",
+            "LocalIntegratedStartupPump::with_mesh_assets(",
+            "id: instance_id,",
+            "lifecycle: WorldSlotLifecycle::Starting,",
+            "runtime: None,",
+            "local_startup: Some(SceneLocalStartup {",
+            "self.warm_world_standby = Some(WarmWorldStandbyState {",
+        ],
+    );
+    assert!(begin.contains("&[],"));
+    assert!(!begin.contains("self.active_world.install("));
+
+    let advance = braced_item(&source, "fn advance_warm_world_standby(");
+    assert!(advance.contains("startup.pump.step(camera_position)"));
+    assert!(advance.contains("reconcile_xr_startup_pose("));
+    assert!(advance.contains("runtime.poll()"));
+    assert!(advance.contains("resolve_world_gate_endpoint("));
+    assert!(advance.contains("into_runtime_with_startup_sections"));
+    assert!(advance.contains("complete_detached_local_startup("));
+    assert!(!advance.contains("TexturedSectionDrawResources::new("));
+    assert!(!advance.contains("drain_budgeted("));
+    assert!(!advance.contains("render_full_frame"));
 }
 
 #[test]
@@ -332,7 +396,7 @@ fn world_and_physical_resets_are_explicit_and_keep_one_world_call_order() {
 }
 
 #[test]
-fn asset_epoch_replacement_preserves_world_identity_and_resets_streaming() {
+fn asset_replacement_cancels_mid_warm_standby_before_preserving_active_identity() {
     let source = read("src/asset_replacement.rs");
     let commit = braced_item(&source, "fn commit_asset_replacement(");
 
@@ -347,6 +411,7 @@ fn asset_epoch_replacement_preserves_world_identity_and_resets_streaming() {
     assert_in_order(
         commit,
         &[
+            "self.cancel_warm_world_standby(\"asset replacement\");",
             "runtime.replace_asset_epoch(",
             "self.mesh_assets = assets.mesh.clone();",
             "self.active_world.draw = draw;",

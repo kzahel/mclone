@@ -333,6 +333,28 @@ impl OffscreenFlatClientHost {
         let report = self
             .driver
             .drive_to_wait_policy(device, queue, startup_wait)?;
+        if self.driver.host().warm_world_standby_snapshot().is_some() {
+            let standby = self
+                .driver
+                .drive_until_warm_world_standby_ready(device, queue)?;
+            eprintln!(
+                "warm_world_standby id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
+                standby.instance_id.get(),
+                standby.seed,
+                standby.phase.label(),
+                standby.elapsed_ms,
+                standby.renderer_shell_create_ms,
+                standby.poll_count,
+                standby.loaded_chunks,
+                standby.startup_seed_sections,
+                standby.startup_seed_drawable_sections,
+                standby.startup_seed_owned_bytes,
+                standby.worst_advance_ms,
+                standby.worst_startup_step_ms,
+                standby.worst_runtime_poll_ms,
+                standby.endpoint_resolution_ms,
+            );
+        }
         if matches!(
             startup_wait,
             StartupWaitPolicy::Playable | StartupWaitPolicy::Idle

@@ -1406,28 +1406,50 @@ impl McloneSceneHost {
                 .frame_state(&self.active_world.interaction);
             let snapshot = self.active_world.camera.snapshot();
             let render_options = self.effective_render_options(glam_vec3_from_vec3d(snapshot.eye));
-            hud.debug = Some(
-                DebugPaneStats {
-                    position: glam_vec3_from_vec3d(snapshot.eye),
-                    speed: camera.camera.speed_blocks_per_second as f32,
-                    movement_mode: format!(
-                        "{}/{}",
-                        camera.movement_mode_label(),
-                        camera.collision_mode_label()
+            let debug = DebugPaneStats {
+                position: glam_vec3_from_vec3d(snapshot.eye),
+                speed: camera.camera.speed_blocks_per_second as f32,
+                movement_mode: format!(
+                    "{}/{}",
+                    camera.movement_mode_label(),
+                    camera.collision_mode_label()
+                ),
+                on_ground: camera.on_ground,
+                seed: self.active_world.scene.seed,
+                runtime: runtime.stats(),
+                render: self.active_world.render_stats,
+                frame: context.frame_timing,
+                pacing: context.pacing_debug,
+                section_occlusion: render_options.section_occlusion_culling,
+                force_fullbright: render_options.force_fullbright,
+                color_profile: render_options.color_profile.label(),
+                render_scale: context.render_scale,
+            }
+            .overlay();
+            let mut debug_overlay = debug.to_debug_overlay();
+            if let Some(standby) = self.warm_world_standby_snapshot() {
+                let mut warm_lines = vec![
+                    format!(
+                        "WARM {} S{} C{} M{}/{}",
+                        standby.phase.label().to_ascii_uppercase(),
+                        standby.seed,
+                        standby.loaded_chunks,
+                        standby.startup_seed_drawable_sections,
+                        standby.startup_seed_sections,
                     ),
-                    on_ground: camera.on_ground,
-                    seed: self.active_world.scene.seed,
-                    runtime: runtime.stats(),
-                    render: self.active_world.render_stats,
-                    frame: context.frame_timing,
-                    pacing: context.pacing_debug,
-                    section_occlusion: render_options.section_occlusion_culling,
-                    force_fullbright: render_options.force_fullbright,
-                    color_profile: render_options.color_profile.label(),
-                    render_scale: context.render_scale,
+                    format!(
+                        "WARM {:.0}MS STEP {:.2} END {:.2}",
+                        standby.elapsed_ms,
+                        standby.worst_startup_step_ms,
+                        standby.endpoint_resolution_ms,
+                    ),
+                ];
+                if let Some(failure) = standby.failure {
+                    warm_lines.push(format!("WARM FAIL {failure}"));
                 }
-                .hud_debug_overlay(),
-            );
+                debug_overlay.lines.splice(0..0, warm_lines);
+            }
+            hud.debug = Some(FlatHudDebugOverlay::new(debug_overlay));
         }
         Some(hud)
     }

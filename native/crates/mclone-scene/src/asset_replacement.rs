@@ -494,6 +494,10 @@ impl McloneSceneHost {
             target_sections: _,
             sections,
         } = replacement;
+        // A retained standby is bound to the active asset epoch. Tear it down
+        // before committing the new epoch rather than allowing two incompatible
+        // catalogs or atlases to coexist behind a later swap.
+        self.cancel_warm_world_standby("asset replacement");
         let active_asset_bytes = estimated_prepared_asset_bytes(&self.active_assets);
         let candidate_asset_bytes = estimated_prepared_asset_bytes(&assets);
         let active_section_bytes = self.active_world.runtime.as_ref().map_or(0, |runtime| {
@@ -598,6 +602,7 @@ impl McloneSceneHost {
         self.active_world.far_lod = far_lod;
         self.services.audio = audio;
         self.active_assets = assets;
+        self.active_world.asset_epoch = self.active_assets.epoch;
         self.active_world.traversal_ready_sections.clear();
         self.active_world.section_uploads.clear();
         self.prefetched_live_upload = None;

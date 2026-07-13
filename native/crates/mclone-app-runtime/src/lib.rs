@@ -2885,7 +2885,7 @@ pub fn snapshot_block_state_at_world(
             .sections
             .iter()
             .find(|section| section.section_y == section_y)
-            .map(|section| section.unpack_block_state_ids()[index])
+            .map(|section| section.block_state_id_at(index))
             .unwrap_or(AIR_BLOCK_STATE_ID),
     )
 }

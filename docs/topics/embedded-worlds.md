@@ -6,12 +6,14 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design, a non-rendering dual-host proof, and a Slice 2 one-slot
-ownership checkpoint.** The engine does not yet compose or switch live worlds,
-but `McloneSceneHost` now owns one concrete 13-field `DrawableWorldSlot` through
-the existing direct one-world frame path. All current startup and replacement
-flows publish the same target-neutral slot install aggregate; there is still no
-standby owner, collection, or selection branch. Separately,
+Status: **design plus a Slice 3 scene-owned, non-rendering warm standby.** The
+engine does not yet compose or switch live worlds, but `McloneSceneHost` now
+owns one direct active `DrawableWorldSlot` and one optional detached standby.
+The launch-only harness has run two complete integrated hosts concurrently,
+acknowledged the standby's seed-dependent spawn pose, retained its CPU mesh
+seed, and resolved paired terrain-relative endpoint candidates while the active
+world continued to render. There is no world registry, selection branch, gate,
+or standby GPU terrain yet. Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -28,7 +30,7 @@ implementation milestone is
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 2 checkpoint).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 3 checkpoint).
 
 ## Motivation
 
@@ -123,13 +125,24 @@ idle/warm, verifies neither replica receives the other's chunks, changes the
 logical active selection without reconstructing either runtime, and relies on
 ordinary owned-value drop for independent shutdown.
 
-This proves instanceability and isolation, not yet product switching. Slice 2
-now groups the production scene's runtime, camera, interaction/player state,
-GPU terrain store, traversal/upload/Far-LOD state, statistics, admission policy,
-canonical scene options, and startup state in one direct
-`DrawableWorldSlot`. It deliberately retains exactly one slot: persistence-root
-isolation, detached startup, standby readiness, and selection remain later
-slices.
+This proves instanceability and isolation, not yet product switching. Slice 3
+now keeps the production scene's direct active `DrawableWorldSlot` plus one
+optional detached slot with independent runtime, camera, lifecycle, storage,
+CPU mesh seed, and provisional endpoint. Persistent-root isolation and
+authoritative pose acknowledgement are proven. Budgeted standby GPU admission,
+selection, and gate interaction remain later slices.
+
+The representative launch smoke (`12345` active, `67890` standby, render
+distance 2) reaches detached CPU readiness in about 0.5–0.65 seconds. Flat and
+synthetic-stereo runs measured roughly 1–1.5 ms worst scene-frame contribution,
+about 15 ms to enqueue the duplicate empty renderer shell before presentation,
+and 4.55 MiB of retained CPU startup meshes. A direct packed-section block
+lookup was required to make the bounded endpoint search honest: the first
+whole-section-unpacking implementation cost about 300 ms, while the corrected
+allocation-free search costs about 1–1.5 ms. No-request five-run release medians
+remain 2.371 ms average / 3.955 ms P95, within about 1% of the clean anchors.
+These are desktop-host receipts, not a substitute for the later capable-XR
+multiview materialization gate.
 
 The near-term product shape is:
 
@@ -226,11 +239,11 @@ Confirmed against the renderer (see Seams for file:line):
   today.
 - **Second runtime is instanceable, not a rewrite:** ownership is encapsulated
   with no globals. `McloneSceneHost` now holds one concrete
-  `active_world: DrawableWorldSlot` and one session coordinator
-  (`mclone-scene/src/lib.rs`), while `EngineRenderSession`/`SingleViewRuntime`
-  each cleanly wrap one `ClientRuntime`. Keep those single-world leaf types.
-  Slice 3 adds only one optional detached standby above the leaf; an N-world
-  collection waits until the bounded milestone proves it is needed. Placement,
+  `active_world: DrawableWorldSlot`, one optional detached standby, and one
+  session coordinator (`mclone-scene/src/lib.rs`), while
+  `EngineRenderSession`/`SingleViewRuntime` each cleanly wrap one
+  `ClientRuntime`. Keep those single-world leaf types. An N-world collection
+  waits until the bounded milestone proves it is needed. Placement,
   lifecycle/readiness, authority role, and budget remain explicit additions;
   a plain `Vec<SceneSessionRuntime>` would still be insufficient.
 - **Visibility is separate from placement:** a general submission needs a
@@ -383,14 +396,14 @@ Ship independently valuable increments while keeping the one-world path direct:
 The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
 
-1. Keep the landed one-slot direct path and its byte-identical desktop/XR plus
-   five-run frame-budget receipts green. Implement Tactical 174 Slice 3 by
-   constructing one optional detached standby without replacing the active
-   slot or exposing selection.
-2. Keep the dual-integrated-host ownership smoke green; extend it through
-   persistent storage-root isolation and explicit shutdown evidence when the
-   detached standby lands. Generalize active-plus-optional-standby to an N-world
-   registry only after the bounded hot-swap milestone needs one.
+1. Keep the landed active-plus-optional-standby path and its desktop/XR plus
+   five-run no-request frame-budget receipts green. Implement Tactical 174
+   Slice 4 by converting the retained CPU seed into budgeted standby GPU work;
+   keep active acceptance/upload ahead of background work.
+2. Keep the dual-host view and persistent-root isolation smokes green.
+   Materialize mono/per-eye/multiview terrain resources before publishing
+   `Switchable`. Generalize to an N-world registry only after the bounded
+   hot-swap milestone needs one.
 3. Prove warm local switching: both worlds reach drawable readiness, switching
    selects an already-built terrain store, and neither runtime is reconstructed.
    Record switch latency and single-world before/after frame accounting.

@@ -127,6 +127,26 @@ impl PackedChunkSection {
     }
 
     pub fn unpack_block_state_ids(&self) -> Vec<BlockStateId> {
+        self.validate_encoding();
+        (0..CHUNK_SECTION_VOLUME)
+            .map(|index| self.block_state_id_at_unchecked(index))
+            .collect()
+    }
+
+    /// Read one section-local block without allocating and unpacking the full
+    /// 4,096-entry section. Spatial queries and collision probes routinely need
+    /// only a handful of cells.
+    pub fn block_state_id_at(&self, index: usize) -> BlockStateId {
+        self.validate_encoding();
+        assert!(
+            index < CHUNK_SECTION_VOLUME,
+            "packed chunk section {} index {index} is out of bounds",
+            self.section_y
+        );
+        self.block_state_id_at_unchecked(index)
+    }
+
+    fn validate_encoding(&self) {
         assert!(
             !self.palette_state_ids.is_empty(),
             "packed chunk section {} has an empty palette",
@@ -138,27 +158,31 @@ impl PackedChunkSection {
             "packed chunk section {} has invalid bits_per_block",
             self.section_y
         );
-
-        let storage = BitStorage::from_raw(
-            self.bits_per_block,
-            CHUNK_SECTION_VOLUME,
-            self.packed_block_indices.clone(),
+        let values_per_word = 64 / usize::from(self.bits_per_block);
+        assert_eq!(
+            self.packed_block_indices.len(),
+            CHUNK_SECTION_VOLUME.div_ceil(values_per_word),
+            "packed chunk section {} has invalid packed word count",
+            self.section_y,
         );
-        storage
-            .get_all()
-            .into_iter()
-            .map(|palette_index| {
-                *self
-                    .palette_state_ids
-                    .get(palette_index as usize)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "packed chunk section {} referenced palette entry {palette_index}",
-                            self.section_y
-                        )
-                    })
+    }
+
+    fn block_state_id_at_unchecked(&self, index: usize) -> BlockStateId {
+        let bits = usize::from(self.bits_per_block);
+        let values_per_word = 64 / bits;
+        let word_index = index / values_per_word;
+        let bit_index = (index - word_index * values_per_word) * bits;
+        let mask = (1_u64 << self.bits_per_block) - 1;
+        let palette_index = ((self.packed_block_indices[word_index] >> bit_index) & mask) as usize;
+        *self
+            .palette_state_ids
+            .get(palette_index)
+            .unwrap_or_else(|| {
+                panic!(
+                    "packed chunk section {} referenced palette entry {palette_index}",
+                    self.section_y
+                )
             })
-            .collect()
     }
 }
 
@@ -511,9 +535,27 @@ mod tests {
 
         assert_eq!(section.bits_per_block, 4);
         assert_eq!(
+            section.block_state_id_at(chunk_section_index(1, 2, 3)),
+            BlockStateId(5)
+        );
+        assert_eq!(
             section.unpack_block_state_ids()[chunk_section_index(1, 2, 3)],
             BlockStateId(5)
         );
+        assert_eq!(section.unpack_block_state_ids(), blocks);
+    }
+
+    #[test]
+    fn packed_section_direct_lookup_handles_word_boundaries() {
+        let blocks = (0..CHUNK_SECTION_VOLUME)
+            .map(|index| BlockStateId((index % 17) as u32))
+            .collect::<Vec<_>>();
+        let section = PackedChunkSection::pack(0, &blocks);
+
+        assert_eq!(section.bits_per_block, 5);
+        for index in [0, 11, 12, 23, 24, CHUNK_SECTION_VOLUME - 1] {
+            assert_eq!(section.block_state_id_at(index), blocks[index]);
+        }
         assert_eq!(section.unpack_block_state_ids(), blocks);
     }
 

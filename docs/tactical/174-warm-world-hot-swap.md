@@ -1,14 +1,15 @@
 # 174: Warm World Hot Swap
 
-Status: Slice 2 one-slot extraction checkpoint ready for review 2026-07-13.
+Status: Slice 3 detached-standby checkpoint ready for review 2026-07-13.
 Slice 0's lower-level dual-integrated-host proof landed in commit `a31ac944`;
 Slice 1's ownership audit, characterization locks, and one-world baselines are
-recorded below. Slice 2 now groups the audited 13 per-world fields in exactly
-one concrete `DrawableWorldSlot`, routes every current frame/startup/replacement
-path through it, and adds no standby owner or frame branch. Pre/post desktop and
-synthetic-stereo captures are byte-identical, and the accepted five-run flat
-release timing gate remains within 2% of the clean median anchors. Slices 3–7
-are unimplemented. First-multiview-pipeline timing remains a named
+recorded below. Slice 2 grouped the audited 13 per-world fields in one concrete
+`DrawableWorldSlot`. Slice 3 adds stable world identity/storage/lifecycle facts,
+one optional detached slot, a launch-only two-host harness, authoritative pose
+acknowledgement, CPU seed retention, endpoint resolution, and explicit failure
+diagnostics. Flat and synthetic-stereo two-host smokes pass while the no-request
+five-run release timing gate remains within 2% of the clean median anchors.
+Slices 4–7 are unimplemented. First-multiview-pipeline timing remains a named
 device-evidence gap because the current macOS adapter does not expose
 `wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows lane before Slice
 4 can declare a standby switchable.
@@ -49,7 +50,7 @@ blank frame nor startup work charged to either switch.
 
 ## Current Evidence
 
-`native/crates/mclone-app-runtime/tests/dual_integrated_hosts.rs` already proves
+`native/crates/mclone-app-runtime/tests/dual_integrated_hosts.rs` proves
 that two `NativeIntegratedServerRunner` → `IntegratedRunnerConnection` →
 `SingleViewRuntime` stacks can coexist. The test uses different seeds and
 disjoint chunk views, waits for both to become warm/idle, proves the replicas
@@ -64,13 +65,21 @@ statistics, admission policy, canonical scene options, and startup facts now
 move as that direct aggregate. Physical presentation, shared renderer/content
 resources, and global budgets remain host-owned.
 
+Slice 3 now retains one `standby_world: Option<DrawableWorldSlot>` beside the
+direct active slot. `--warm-world-standby-seed` constructs a second local
+startup pump and empty terrain shell before presentation, advances it once per
+scene frame, accepts its authoritative safe-surface pose into its own camera,
+and retains its startup meshes as CPU data. It continues polling ordered
+updates, but does not upload or draw standby terrain. A public diagnostic
+snapshot reports phase, timing, memory, pose/endpoints, and failure state.
+
 `StartedSceneRuntime` in `mclone-scene/src/session.rs` remains a useful partial
 native seam: it already returns runtime, camera, draw resources, and render
 stats before the caller installs them. Slice 2 adds the separate target-neutral
 `DrawableWorldSlotInstall` aggregate and makes initial local/native,
 provided-runtime, provided-scene-runtime, local completion, external/web
 completion, and native replacement publish the same core cluster. Detached
-standby construction and readiness remain Slice 3 work.
+standby GPU admission and switchable readiness remain Slice 4 work.
 
 ## Slice 1 Architecture Checkpoint
 
@@ -829,6 +838,82 @@ Exit criteria: two complete scene-owned runtimes coexist and active play
 continues while standby reaches CPU startup readiness, acknowledges its initial
 authoritative pose, and records a valid endpoint pair or explicit placement
 failure. No switch is exposed.
+
+Checkpoint evidence (2026-07-13):
+
+- `McloneSceneHost` owns one direct active slot and one optional standby, not a
+  registry. `DrawableWorldSlot` now has 20 fields: the original 13-field world
+  cluster plus stable `WorldInstanceId`, descriptor, storage intent/root,
+  lifecycle, asset epoch, accepted entry pose, and retained startup meshes.
+  Every constructor initializes both standby options to `None`; without the
+  CLI request there is no allocation, server, gate state, or poll work beyond
+  the optional-state check.
+- `--warm-world-standby-seed <i64>` is a desktop/offscreen launch harness and
+  is rejected for remote sessions. The standby copies active render settings
+  and asset epoch, uses transient storage, starts interest at the intended
+  entry chunk, and never replaces the active session/UI/camera. Asset
+  replacement and active teardown cancel/drop it before changing epochs or
+  worlds.
+- Startup advances one pump step per scene frame. It drains and acknowledges
+  the initial `PlayerPosition`, follows corrected interest, observes a stable
+  post-correction step, then converts the pump into a complete second runtime
+  plus retained CPU startup meshes. Post-startup polling continues, while the
+  standby draw store remains empty and no upload coordinator or draw path is
+  entered.
+- Progress and terminal state are exposed through
+  `WarmWorldStandbySnapshot`; the existing flat debug pane adds warm phase,
+  seed, loaded/mesh counts, elapsed/step/endpoint timing, and failure detail.
+  The active session status and loading overlays are never replaced.
+- Provisional endpoint resolution is deterministic, surface-relative, bounded
+  to a 16-block ring, requires the documented 3×4 opening/approach clearance,
+  and mutates no blocks. Seed `67890` produces a valid pair against active seed
+  `12345`; standby seed `-98765` exercises explicit `placement-failed` state
+  (`source=true`, `destination=false`) rather than becoming switchable.
+- The first endpoint implementation exposed a 299.840 ms search. The cause was
+  spatial probes allocating and unpacking an entire 4,096-block packed section
+  per block lookup. `PackedChunkSection::block_state_id_at` now performs a
+  direct allocation-free palette lookup and both client/app-runtime spatial
+  accessors use it. The same representative flat smoke then measured 539.173 ms
+  total standby warm time, 14.723 ms second-shell enqueue, 4,769,464 retained
+  CPU seed bytes, 1.490 ms worst frame contribution, 0.102 ms worst startup
+  step, 0.114 ms worst post-ready poll, and 1.441 ms endpoint-pair resolution.
+- The synthetic-stereo two-host smoke measured 642.798 ms total, 15.597 ms
+  shell enqueue, the same 64 seed/23 drawable sections and 4,769,464 CPU bytes,
+  1.092 ms worst contribution, and 0.995 ms endpoint resolution. Its inspected
+  640×640-per-eye capture retained 268,363 differing eye pixels, 166 active
+  sections, 24 drawn sections, and UI in both eyes. The inspected flat standby
+  capture retained ordinary active-world pixels, 96 active sections, 22 drawn
+  sections, and two drawn actors; the standby itself remains invisible.
+- The duplicate shell characterization reports a 1,024×2,048 atlas:
+  8,388,608 base bytes and 11,173,888 bytes across five uploaded mip levels.
+  A device-wait-inclusive standalone shell creation measured 129.528 ms; the
+  already-initialized host's second-shell CPU enqueue is the 14–16 ms value
+  above. Multiview shell materialization remains unavailable on this adapter
+  and is still a Slice 4 device gate.
+- The dual-host integration test now gives same-seed live hosts different
+  SQLite roots, edits and flushes only the first, proves the second live replica
+  is unchanged, reopens both roots, and proves only the first persisted the
+  edit. The original different-seed/disjoint-view isolation test remains green.
+- No-request desktop and synthetic-stereo captures retain the exact Slice 2
+  counts (64/11 active resident/drawn sections and two actors; 42/8 stereo
+  sections, 249,679 differing eye pixels, UI in both eyes) and were visually
+  inspected. Web/WASM build, thin-adapter purity, focused/full tests, timedemo
+  smoke, frame-budget smoke, and `git diff --check` pass.
+- Before release measurement the host sampled 94.55% CPU idle with no active
+  Cargo/Rust/compiler/linker build. Five direct-binary frame-budget averages
+  were 2.388, 2.331, 2.387, 2.371, and 2.345 ms (median 2.371; 2.4% range).
+  P95 values were 3.950, 3.895, 3.967, 3.955, and 3.971 ms (median 3.955;
+  1.9% range). Those medians are 1.1% and 1.0% above the clean 2.346/3.916 ms
+  anchors and slightly below Slice 2. All runs retained 1,936 initial sections
+  with zero over-budget frames and zero accounting violations. The release
+  timedemo retained 664 loaded and 307.325 average drawn sections at 3.971 ms;
+  timing remains characterization-only on this host.
+
+Exit result: Slice 3 is complete. Two scene-owned runtimes coexist and the
+standby reaches CPU-ready with an acknowledged pose and endpoint pair (or an
+explicit non-switchable placement failure). No standby terrain is GPU-resident,
+no selection/switch/gate is exposed, and Slice 4 begins at CPU-seed conversion,
+budgeted acceptance/upload, and topology-specific renderer materialization.
 
 ### Slice 4: Budgeted Standby Compile And GPU Warmup
 

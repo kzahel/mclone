@@ -17,8 +17,8 @@ use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::XrView;
 use mclone_scene::{
     HostEffects, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
-    XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary, record_mono_frame_pipeline,
-    xr_frame_pipeline_accounting_config,
+    WarmWorldStandbyPhase, WarmWorldStandbySnapshot, XrStartupViewPose, XrTerrainEyeTarget,
+    XrTerrainFrameSummary, record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point};
 
@@ -448,12 +448,42 @@ impl OffscreenDriver {
                     && self.host.has_runtime()
                     && summary.drawn_section_count > 0
                     && pending == 0
+                    && self
+                        .host
+                        .warm_world_standby_snapshot()
+                        .is_none_or(|snapshot| snapshot.phase.terminal())
                 {
                     stable += 1;
                 } else {
                     stable = 0;
                 }
                 if stable >= STREAM_STABLE_FRAMES {
+                    if let Some(snapshot) = self.host.warm_world_standby_snapshot() {
+                        if snapshot.phase != WarmWorldStandbyPhase::CpuReady {
+                            bail!(
+                                "warm-world standby ended in phase {} during stereo warmup: {}",
+                                snapshot.phase.label(),
+                                snapshot.failure.as_deref().unwrap_or("no failure detail"),
+                            );
+                        }
+                        eprintln!(
+                            "warm_world_standby_stereo id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
+                            snapshot.instance_id.get(),
+                            snapshot.seed,
+                            snapshot.phase.label(),
+                            snapshot.elapsed_ms,
+                            snapshot.renderer_shell_create_ms,
+                            snapshot.poll_count,
+                            snapshot.loaded_chunks,
+                            snapshot.startup_seed_sections,
+                            snapshot.startup_seed_drawable_sections,
+                            snapshot.startup_seed_owned_bytes,
+                            snapshot.worst_advance_ms,
+                            snapshot.worst_startup_step_ms,
+                            snapshot.worst_runtime_poll_ms,
+                            snapshot.endpoint_resolution_ms,
+                        );
+                    }
                     return Ok(());
                 }
                 std::thread::sleep(Duration::from_millis(1));
@@ -601,6 +631,31 @@ impl OffscreenDriver {
         queue: &wgpu::Queue,
     ) -> Result<OffscreenWarmupReport> {
         self.drive_to_wait_policy(device, queue, StartupWaitPolicy::Idle)
+    }
+
+    pub(crate) fn drive_until_warm_world_standby_ready(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WarmWorldStandbySnapshot> {
+        self.drive_until(device, queue, |driver, _| {
+            driver
+                .host
+                .warm_world_standby_snapshot()
+                .is_some_and(|snapshot| snapshot.phase.terminal())
+        })?;
+        let snapshot = self
+            .host
+            .warm_world_standby_snapshot()
+            .context("warm-world standby readiness requested without a standby")?;
+        if snapshot.phase != WarmWorldStandbyPhase::CpuReady {
+            bail!(
+                "warm-world standby ended in phase {}: {}",
+                snapshot.phase.label(),
+                snapshot.failure.as_deref().unwrap_or("no failure detail"),
+            );
+        }
+        Ok(snapshot)
     }
 
     /// Re-run the idle gate at the actual capture size. The normal warmup path

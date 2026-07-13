@@ -1025,6 +1025,13 @@ impl LocalIntegratedStartupPump {
             .expect("local startup pump always owns a local integrated runtime")
     }
 
+    /// Mutable shared-service view used by scene-owned detached startup to
+    /// acknowledge the authoritative initial pose without exposing the native
+    /// runner or duplicating startup policy.
+    pub fn runtime_services_mut(&mut self) -> &mut NativeSessionServices<LocalOnlySession> {
+        self.inner.runtime_mut()
+    }
+
     /// Startup render-seed sections accumulated so far, including empty sections.
     pub fn render_seed_section_count(&self) -> usize {
         self.inner.render_seed_section_count()
@@ -1033,6 +1040,11 @@ impl LocalIntegratedStartupPump {
     /// Startup render-seed sections carrying drawable geometry.
     pub fn render_seed_drawable_section_count(&self) -> usize {
         self.inner.render_seed_drawable_section_count()
+    }
+
+    /// CPU mesh payload retained by the one-shot startup seed.
+    pub fn render_seed_estimated_owned_bytes(&self) -> usize {
+        self.inner.render_seed.estimated_owned_bytes()
     }
 
     pub fn into_runtime(self) -> LocalIntegratedSceneRuntime {

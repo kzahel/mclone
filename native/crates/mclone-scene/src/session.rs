@@ -294,6 +294,10 @@ impl McloneSceneHost {
         session.begin_start(request.clone());
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
+                id: WorldInstanceId::new(1),
+                descriptor: descriptor.clone(),
+                lifecycle: WorldSlotLifecycle::Starting,
+                asset_epoch: 0,
                 scene: scene.clone(),
                 runtime: None,
                 local_startup: Some(SceneLocalStartup {
@@ -308,6 +312,8 @@ impl McloneSceneHost {
                 camera,
                 draw,
                 render_stats: RenderStreamStats::default(),
+                accepted_entry_pose: None,
+                pending_startup_sections: Vec::new(),
             },
             FarTerrainLodRenderer::new(device, color_format),
             RenderAdmissionPolicy::new(
@@ -317,6 +323,8 @@ impl McloneSceneHost {
         );
         let mut state = Self {
             active_world,
+            standby_world: None,
+            warm_world_standby: None,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -451,7 +459,7 @@ impl McloneSceneHost {
             .context("XR runtime did not expose an active session")?;
         let ui = xr_game_ui_for_session(Some(&active_session), scene.seed);
         let mut session = GameSessionCoordinator::new();
-        session.complete_start(active_session);
+        session.complete_start(active_session.clone());
         let mesh_assets = started.runtime.mesh_assets().clone();
         let active_assets = PreparedSceneAssets::startup(
             0,
@@ -469,8 +477,13 @@ impl McloneSceneHost {
         world_gui_renderer
             .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
             .context("upload XR GUI atlas")?;
+        let accepted_entry_pose = Some(WorldEntryPose::from_camera(&started.camera));
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
+                id: WorldInstanceId::new(1),
+                descriptor: Some(active_session),
+                lifecycle: WorldSlotLifecycle::ActiveReady,
+                asset_epoch: 0,
                 scene: scene.clone(),
                 runtime: Some(started.runtime),
                 local_startup: None,
@@ -478,6 +491,8 @@ impl McloneSceneHost {
                 camera: started.camera,
                 draw: started.draw,
                 render_stats: started.render_stats,
+                accepted_entry_pose,
+                pending_startup_sections: Vec::new(),
             },
             FarTerrainLodRenderer::new(device, color_format),
             RenderAdmissionPolicy::new(
@@ -487,6 +502,8 @@ impl McloneSceneHost {
         );
         let mut state = Self {
             active_world,
+            standby_world: None,
+            warm_world_standby: None,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -651,9 +668,13 @@ impl McloneSceneHost {
         .context("initialize scene screen effects")?;
         let ui = xr_game_ui_for_session(Some(&active_session), scene.seed);
         let mut session = GameSessionCoordinator::new();
-        session.complete_start(active_session);
+        session.complete_start(active_session.clone());
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
+                id: WorldInstanceId::new(1),
+                descriptor: Some(active_session),
+                lifecycle: WorldSlotLifecycle::Starting,
+                asset_epoch: active_assets.epoch,
                 scene: scene.clone(),
                 runtime: Some(runtime),
                 local_startup: None,
@@ -661,6 +682,8 @@ impl McloneSceneHost {
                 camera,
                 draw,
                 render_stats: RenderStreamStats::default(),
+                accepted_entry_pose: None,
+                pending_startup_sections: Vec::new(),
             },
             FarTerrainLodRenderer::new(device, color_format),
             RenderAdmissionPolicy::new(
@@ -670,6 +693,8 @@ impl McloneSceneHost {
         );
         let mut state = Self {
             active_world,
+            standby_world: None,
+            warm_world_standby: None,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -932,6 +957,10 @@ impl McloneSceneHost {
         )
         .context("reset scene terrain for external session start")?;
         self.active_world.install(DrawableWorldSlotInstall {
+            id: self.active_world.id,
+            descriptor: Some(active.clone()),
+            lifecycle: WorldSlotLifecycle::Starting,
+            asset_epoch: self.active_assets.epoch,
             scene: pending.scene,
             runtime: Some(runtime),
             local_startup: None,
@@ -939,6 +968,8 @@ impl McloneSceneHost {
             camera,
             draw,
             render_stats: RenderStreamStats::default(),
+            accepted_entry_pose: None,
+            pending_startup_sections: Vec::new(),
         });
         self.clear_transient_world_state();
         self.clear_menu_input_state();
@@ -1179,8 +1210,155 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    /// Construct Tactical 174's one detached local standby without replacing
+    /// the active slot. The empty renderer shell is deliberately created here,
+    /// before the interactive frame loop begins; terrain remains CPU-only until
+    /// the later budgeted-warm slice.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn advance_local_startup(
+    pub fn begin_warm_world_standby(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        request: WarmWorldStandbyRequest,
+    ) -> Result<()> {
+        if self.warm_world_standby.is_some() || self.standby_world.is_some() {
+            bail!("a warm-world standby request already exists");
+        }
+        if matches!(
+            self.active_world.descriptor,
+            Some(ActiveSessionDescriptor::Remote { .. })
+        ) {
+            bail!("warm-world standby currently requires an active local world");
+        }
+        if self.active_world.scene.seed == request.seed {
+            bail!("warm-world standby seed must differ from the active seed");
+        }
+
+        let started_at = self.services.clock.now();
+        let mut scene = self.active_world.scene.clone();
+        scene.seed = request.seed;
+        scene.chunk_x = request.entry_center.x;
+        scene.chunk_z = request.entry_center.z;
+        scene.remote_addr = None;
+        scene.world_root = None;
+        scene.world_dir = None;
+        scene.use_initial_spawn_center = false;
+        let scene = scene.validated()?;
+        let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
+        let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
+        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
+
+        let shell_started_at = self.services.clock.now();
+        let draw = TexturedSectionDrawResources::new(
+            device,
+            queue,
+            self.color_format,
+            &[],
+            self.mesh_assets.atlas.as_upload(),
+        )
+        .context("initialize detached standby terrain renderer shell")?;
+        let renderer_shell_create_ms =
+            elapsed_ms(self.services.clock.elapsed_since(shell_started_at));
+        let pump = LocalIntegratedStartupPump::with_mesh_assets(
+            local_integrated_scene_options(&scene),
+            self.mesh_assets.clone(),
+        )
+        .context("create detached standby local startup pump")?;
+        let instance_id = WorldInstanceId::new(2);
+        let asset_epoch = self.active_assets.epoch;
+
+        self.standby_world = Some(DrawableWorldSlot::new(
+            DrawableWorldSlotInstall {
+                id: instance_id,
+                descriptor: Some(descriptor.clone()),
+                lifecycle: WorldSlotLifecycle::Starting,
+                asset_epoch,
+                scene: scene.clone(),
+                runtime: None,
+                local_startup: Some(SceneLocalStartup {
+                    request: startup_request,
+                    descriptor: Some(descriptor),
+                    scene: scene.clone(),
+                    pump,
+                    camera: camera.clone(),
+                    startup_view_pose: None,
+                }),
+                external_runtime_startup_pending: false,
+                camera,
+                draw,
+                render_stats: RenderStreamStats::default(),
+                accepted_entry_pose: None,
+                pending_startup_sections: Vec::new(),
+            },
+            FarTerrainLodRenderer::new(device, self.color_format),
+            RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
+        ));
+        self.warm_world_standby = Some(WarmWorldStandbyState {
+            instance_id,
+            seed: request.seed,
+            phase: WarmWorldStandbyPhase::Warming,
+            started_at,
+            renderer_shell_create_ms,
+            atlas_size: [self.mesh_assets.atlas.width, self.mesh_assets.atlas.height],
+            atlas_base_bytes: self.mesh_assets.atlas.byte_len(),
+            asset_epoch,
+            poll_count: 0,
+            poll_ms: 0.0,
+            last_advance_ms: 0.0,
+            worst_advance_ms: 0.0,
+            worst_startup_step_ms: 0.0,
+            worst_runtime_poll_ms: 0.0,
+            endpoint_resolution_ms: 0.0,
+            camera_reconciled: false,
+            loaded_chunks: 0,
+            startup_seed_sections: 0,
+            startup_seed_drawable_sections: 0,
+            startup_seed_owned_bytes: 0,
+            source_endpoint: None,
+            destination_endpoint: None,
+            failure: None,
+        });
+        log::info!(
+            "warm-world standby queued id={} seed={} center=({}, {}) renderer_shell_ms={:.3} atlas={}x{} base_bytes={}",
+            instance_id.get(),
+            request.seed,
+            request.entry_center.x,
+            request.entry_center.z,
+            renderer_shell_create_ms,
+            self.mesh_assets.atlas.width,
+            self.mesh_assets.atlas.height,
+            self.mesh_assets.atlas.byte_len(),
+        );
+        Ok(())
+    }
+
+    pub fn warm_world_standby_snapshot(&self) -> Option<WarmWorldStandbySnapshot> {
+        self.warm_world_standby.as_ref().map(|state| {
+            state.snapshot(elapsed_ms(
+                self.services.clock.elapsed_since(state.started_at),
+            ))
+        })
+    }
+
+    pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
+        let Some(state) = self.warm_world_standby.as_mut() else {
+            return;
+        };
+        self.standby_world = None;
+        state.phase = WarmWorldStandbyPhase::Cancelled;
+        state.failure = Some(reason.to_owned());
+        log::info!(
+            "warm-world standby cancelled id={} seed={} reason={reason}",
+            state.instance_id.get(),
+            state.seed,
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn advance_active_local_startup(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -1240,6 +1418,263 @@ impl McloneSceneHost {
                 Ok(false)
             }
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn advance_warm_world_standby(&mut self) {
+        let Some(mut state) = self.warm_world_standby.take() else {
+            return;
+        };
+        let Some(mut slot) = self.standby_world.take() else {
+            // Failed/cancelled diagnostics intentionally outlive the dropped
+            // runtime so the harness and debug surfaces can report why it is
+            // not switchable.
+            self.warm_world_standby = Some(state);
+            return;
+        };
+        if matches!(
+            state.phase,
+            WarmWorldStandbyPhase::Failed | WarmWorldStandbyPhase::Cancelled
+        ) {
+            self.warm_world_standby = Some(state);
+            return;
+        }
+
+        let advance_started_at = self.services.clock.now();
+        let mut retain_slot = true;
+
+        if state.phase == WarmWorldStandbyPhase::Warming {
+            let startup_step_started_at = self.services.clock.now();
+            let step_result = {
+                let startup = slot
+                    .local_startup
+                    .as_mut()
+                    .expect("warming standby owns its startup pump");
+                let camera_position = glam_vec3_from_vec3d(startup.camera.snapshot().eye);
+                startup.pump.step(camera_position).map(|step| {
+                    state.poll_count = step.poll_count;
+                    state.poll_ms = step.poll_ms;
+                    state.loaded_chunks = startup.pump.runtime().loaded_chunk_count();
+                    state.startup_seed_sections = startup.pump.render_seed_section_count();
+                    state.startup_seed_drawable_sections =
+                        startup.pump.render_seed_drawable_section_count();
+                    state.startup_seed_owned_bytes =
+                        startup.pump.render_seed_estimated_owned_bytes();
+                    step
+                })
+            };
+            state.worst_startup_step_ms = state.worst_startup_step_ms.max(elapsed_ms(
+                self.services.clock.elapsed_since(startup_step_started_at),
+            ));
+            match step_result {
+                Err(error) => {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.failure = Some(format!("advance startup pump: {error:#}"));
+                    retain_slot = false;
+                }
+                Ok(step) if step.playable_ready => {
+                    let reconciliation = {
+                        let startup = slot
+                            .local_startup
+                            .as_mut()
+                            .expect("playable standby owns its startup pump");
+                        reconcile_xr_startup_pose(
+                            startup.pump.runtime_services_mut(),
+                            &mut startup.camera,
+                            None,
+                            &self.services.clock,
+                        )
+                    };
+                    match reconciliation {
+                        Err(error) => {
+                            state.phase = WarmWorldStandbyPhase::Failed;
+                            state.failure = Some(format!(
+                                "acknowledge initial standby camera correction: {error:#}"
+                            ));
+                            retain_slot = false;
+                        }
+                        Ok(true) => {
+                            // Always observe one stable post-ack step. If the
+                            // correction moved interest, the pump must establish
+                            // readiness around the corrected camera before its
+                            // render seed is detached.
+                            state.camera_reconciled = true;
+                        }
+                        Ok(false) if !state.camera_reconciled => {
+                            // Even when no correction was queued, require one
+                            // subsequent stable pump step before detaching.
+                            state.camera_reconciled = true;
+                        }
+                        Ok(false) => {
+                            let startup = slot
+                                .local_startup
+                                .take()
+                                .expect("stable playable standby owns its startup pump");
+                            let SceneLocalStartup {
+                                descriptor,
+                                pump,
+                                camera,
+                                ..
+                            } = startup;
+                            match descriptor {
+                                None => {
+                                    state.phase = WarmWorldStandbyPhase::Failed;
+                                    state.failure = Some(
+                                        "standby startup has no session descriptor".to_owned(),
+                                    );
+                                    retain_slot = false;
+                                }
+                                Some(descriptor) => {
+                                    state.startup_seed_sections = pump.render_seed_section_count();
+                                    state.startup_seed_drawable_sections =
+                                        pump.render_seed_drawable_section_count();
+                                    state.startup_seed_owned_bytes =
+                                        pump.render_seed_estimated_owned_bytes();
+                                    let (runtime, startup_sections) =
+                                        pump.into_runtime_with_startup_sections();
+                                    let runtime: SceneSessionRuntime = NativeSessionServices::<
+                                        mclone_app_runtime::LocalOnlySession,
+                                    >::from_active_runtime_with_descriptor(
+                                        descriptor.clone(),
+                                        NativeSceneServices::Local(runtime),
+                                    )
+                                    .into();
+                                    state.loaded_chunks = runtime.client().loaded_chunk_count();
+                                    slot.complete_detached_local_startup(
+                                        descriptor,
+                                        runtime,
+                                        camera,
+                                        startup_sections,
+                                    );
+                                    state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(_) => {}
+            }
+        }
+
+        if retain_slot && slot.lifecycle == WorldSlotLifecycle::StandbyCpuReady {
+            let runtime_poll_started_at = self.services.clock.now();
+            let runtime_result = {
+                let runtime = slot
+                    .runtime
+                    .as_mut()
+                    .expect("CPU-ready standby owns a runtime");
+                runtime.poll().and_then(|_| {
+                    state.poll_count = state.poll_count.saturating_add(1);
+                    mclone_app_runtime::apply_pending_engine_camera_position_updates(
+                        runtime,
+                        &mut slot.camera,
+                        XR_CAMERA_COMMIT_CONTEXT,
+                    )
+                })
+            };
+            state.worst_runtime_poll_ms = state.worst_runtime_poll_ms.max(elapsed_ms(
+                self.services.clock.elapsed_since(runtime_poll_started_at),
+            ));
+            match runtime_result {
+                Err(error) => {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.failure = Some(format!("poll detached standby runtime: {error:#}"));
+                    retain_slot = false;
+                }
+                Ok(camera_changed) => {
+                    let runtime = slot
+                        .runtime
+                        .as_ref()
+                        .expect("CPU-ready standby owns a runtime");
+                    state.loaded_chunks = runtime.client().loaded_chunk_count();
+                    if camera_changed {
+                        slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
+                        state.destination_endpoint = None;
+                        state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
+                    }
+                }
+            }
+        }
+
+        if retain_slot
+            && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
+            && self.active_world.lifecycle == WorldSlotLifecycle::ActiveReady
+        {
+            let endpoint_started_at = self.services.clock.now();
+            let source_endpoint = self
+                .active_world
+                .runtime
+                .as_ref()
+                .zip(self.active_world.accepted_entry_pose)
+                .and_then(|(runtime, pose)| resolve_world_gate_endpoint(runtime, pose));
+            let destination_endpoint = slot
+                .runtime
+                .as_ref()
+                .zip(slot.accepted_entry_pose)
+                .and_then(|(runtime, pose)| resolve_world_gate_endpoint(runtime, pose));
+            state.endpoint_resolution_ms =
+                elapsed_ms(self.services.clock.elapsed_since(endpoint_started_at));
+            state.source_endpoint = source_endpoint;
+            state.destination_endpoint = destination_endpoint;
+            if source_endpoint.is_some() && destination_endpoint.is_some() {
+                state.phase = WarmWorldStandbyPhase::CpuReady;
+                log::info!(
+                    "warm-world standby CPU-ready id={} seed={} elapsed_ms={:.3} polls={} poll_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
+                    state.instance_id.get(),
+                    state.seed,
+                    elapsed_ms(self.services.clock.elapsed_since(state.started_at)),
+                    state.poll_count,
+                    state.poll_ms,
+                    state.loaded_chunks,
+                    state.startup_seed_sections,
+                    state.startup_seed_drawable_sections,
+                    state.startup_seed_owned_bytes,
+                    state.worst_startup_step_ms,
+                    state.worst_runtime_poll_ms,
+                    state.endpoint_resolution_ms,
+                );
+            } else {
+                state.phase = WarmWorldStandbyPhase::PlacementFailed;
+                state.failure = Some(format!(
+                    "no clear loaded provisional gate endpoint within {} blocks (source={}, destination={})",
+                    PROVISIONAL_GATE_SEARCH_RADIUS_BLOCKS,
+                    source_endpoint.is_some(),
+                    destination_endpoint.is_some(),
+                ));
+                log::warn!(
+                    "warm-world standby endpoint placement failed id={} seed={} reason={}",
+                    state.instance_id.get(),
+                    state.seed,
+                    state.failure.as_deref().unwrap_or("unknown"),
+                );
+            }
+        }
+
+        let advance_ms = elapsed_ms(self.services.clock.elapsed_since(advance_started_at));
+        state.last_advance_ms = advance_ms;
+        state.worst_advance_ms = state.worst_advance_ms.max(advance_ms);
+        if !retain_slot {
+            log::error!(
+                "warm-world standby failed id={} seed={} reason={}",
+                state.instance_id.get(),
+                state.seed,
+                state.failure.as_deref().unwrap_or("unknown"),
+            );
+        } else {
+            self.standby_world = Some(slot);
+        }
+        self.warm_world_standby = Some(state);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn advance_local_startup(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        let active_completed = self.advance_active_local_startup(device, queue)?;
+        self.advance_warm_world_standby();
+        Ok(active_completed)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1326,7 +1761,12 @@ impl McloneSceneHost {
         let index_count = draw.index_count();
         let face_count = quad_face_count_from_indices(index_count);
         let mesh_assets = runtime.mesh_assets().clone();
+        let accepted_entry_pose = Some(WorldEntryPose::from_camera(&camera));
         self.active_world.install(DrawableWorldSlotInstall {
+            id: self.active_world.id,
+            descriptor: Some(descriptor.clone()),
+            lifecycle: WorldSlotLifecycle::ActiveReady,
+            asset_epoch: self.active_assets.epoch,
             scene,
             runtime: Some(runtime),
             local_startup: None,
@@ -1339,6 +1779,8 @@ impl McloneSceneHost {
                 face_count,
                 ..RenderStreamStats::default()
             },
+            accepted_entry_pose,
+            pending_startup_sections: Vec::new(),
         });
         self.mesh_assets = mesh_assets;
         self.sync_player_appearance()
@@ -1450,6 +1892,7 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
+        self.cancel_warm_world_standby("active world teardown");
         if let Some(operations) = self.services.catalog_operations.as_mut() {
             for request in operations.begin_epoch() {
                 let _ = self.client_experience.catalog_mut().apply_catalog_error(
@@ -1460,6 +1903,10 @@ impl McloneSceneHost {
         }
         self.active_world.local_startup = None;
         self.active_world.external_runtime_startup_pending = false;
+        self.active_world.lifecycle = WorldSlotLifecycle::Empty;
+        self.active_world.descriptor = None;
+        self.active_world.accepted_entry_pose = None;
+        self.active_world.pending_startup_sections.clear();
         if self.active_world.runtime.take().is_some() {
             self.active_world.draw = TexturedSectionDrawResources::new(
                 device,
@@ -1511,7 +1958,12 @@ impl McloneSceneHost {
         };
 
         let mesh_assets = started.runtime.mesh_assets().clone();
+        let accepted_entry_pose = Some(WorldEntryPose::from_camera(&started.camera));
         self.active_world.install(DrawableWorldSlotInstall {
+            id: self.active_world.id,
+            descriptor: Some(descriptor.clone()),
+            lifecycle: WorldSlotLifecycle::ActiveReady,
+            asset_epoch: self.active_assets.epoch,
             scene,
             runtime: Some(started.runtime),
             local_startup: None,
@@ -1519,6 +1971,8 @@ impl McloneSceneHost {
             camera: started.camera,
             draw: started.draw,
             render_stats: started.render_stats,
+            accepted_entry_pose,
+            pending_startup_sections: Vec::new(),
         });
         self.mesh_assets = mesh_assets;
         self.sync_player_appearance()

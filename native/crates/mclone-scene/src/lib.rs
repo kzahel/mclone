@@ -95,7 +95,7 @@ use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, InputPromptKind, ResolvedFlatInput,
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
-use mclone_mesh::quad_face_count_from_indices;
+use mclone_mesh::{TexturedRenderSectionMesh, quad_face_count_from_indices};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -141,12 +141,13 @@ use mclone_render_session::{
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
-    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, GameCollisionMode,
-    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence,
-    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
-    GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
-    Point, Rect, StatusOverlay, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
-    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,
+    GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen,
+    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, TouchOverlay, UiDebugSnapshot,
+    UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay,
+    render_status_overlay,
 };
 
 mod asset_replacement;
@@ -163,6 +164,7 @@ mod teleport;
 mod timing;
 mod tracking;
 mod ui_panels;
+mod warm_world;
 
 pub use comfort::*;
 pub use host_effects::*;
@@ -175,6 +177,7 @@ pub(crate) use teleport::*;
 pub use timing::*;
 pub use tracking::*;
 pub use ui_panels::*;
+pub use warm_world::*;
 
 use diagnostic_panel::XrDiagnosticPanel;
 pub use frame_pipeline_reporter::{
@@ -315,8 +318,13 @@ struct SceneHostServices {
 ///
 /// Tactical 174 Slice 2 deliberately retains exactly one of these. Keeping the
 /// leaf concrete and directly addressed preserves the ordinary one-world frame
-/// path while making a detached second slot possible in a later slice.
+/// path while allowing one explicitly requested detached standby beside it.
 struct DrawableWorldSlot {
+    id: WorldInstanceId,
+    descriptor: Option<ActiveSessionDescriptor>,
+    storage: WorldSlotStorage,
+    lifecycle: WorldSlotLifecycle,
+    asset_epoch: u64,
     scene: McloneSceneHostOptions,
     runtime: Option<SceneSessionRuntime>,
     local_startup: Option<SceneLocalStartup>,
@@ -332,12 +340,18 @@ struct DrawableWorldSlot {
     far_lod: FarTerrainLodRenderer,
     render_stats: RenderStreamStats,
     render_admission_policy: RenderAdmissionPolicy,
+    accepted_entry_pose: Option<WorldEntryPose>,
+    pending_startup_sections: Vec<TexturedRenderSectionMesh>,
 }
 
 /// Target-neutral prepared state for constructing or replacing the runtime
 /// half of a drawable slot. Values are fully prepared before installation, so
 /// a host never exposes a runtime paired with the previous camera or draw map.
 struct DrawableWorldSlotInstall {
+    id: WorldInstanceId,
+    descriptor: Option<ActiveSessionDescriptor>,
+    lifecycle: WorldSlotLifecycle,
+    asset_epoch: u64,
     scene: McloneSceneHostOptions,
     runtime: Option<SceneSessionRuntime>,
     local_startup: Option<SceneLocalStartup>,
@@ -345,6 +359,8 @@ struct DrawableWorldSlotInstall {
     camera: EngineCameraController,
     draw: TexturedSectionDrawResources,
     render_stats: RenderStreamStats,
+    accepted_entry_pose: Option<WorldEntryPose>,
+    pending_startup_sections: Vec<TexturedRenderSectionMesh>,
 }
 
 impl DrawableWorldSlot {
@@ -353,7 +369,13 @@ impl DrawableWorldSlot {
         far_lod: FarTerrainLodRenderer,
         render_admission_policy: RenderAdmissionPolicy,
     ) -> Self {
+        let storage = WorldSlotStorage::from_scene(&install.scene, install.descriptor.as_ref());
         Self {
+            id: install.id,
+            descriptor: install.descriptor,
+            storage,
+            lifecycle: install.lifecycle,
+            asset_epoch: install.asset_epoch,
             scene: install.scene,
             runtime: install.runtime,
             local_startup: install.local_startup,
@@ -367,10 +389,17 @@ impl DrawableWorldSlot {
             far_lod,
             render_stats: install.render_stats,
             render_admission_policy,
+            accepted_entry_pose: install.accepted_entry_pose,
+            pending_startup_sections: install.pending_startup_sections,
         }
     }
 
     fn install(&mut self, install: DrawableWorldSlotInstall) {
+        self.id = install.id;
+        self.descriptor = install.descriptor;
+        self.storage = WorldSlotStorage::from_scene(&install.scene, self.descriptor.as_ref());
+        self.lifecycle = install.lifecycle;
+        self.asset_epoch = install.asset_epoch;
         self.scene = install.scene;
         self.runtime = install.runtime;
         self.local_startup = install.local_startup;
@@ -378,6 +407,8 @@ impl DrawableWorldSlot {
         self.camera = install.camera;
         self.draw = install.draw;
         self.render_stats = install.render_stats;
+        self.accepted_entry_pose = install.accepted_entry_pose;
+        self.pending_startup_sections = install.pending_startup_sections;
     }
 
     fn clear_stream_state(&mut self) {
@@ -385,10 +416,32 @@ impl DrawableWorldSlot {
         self.section_uploads.clear();
         self.render_admission_policy.reset();
     }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn complete_detached_local_startup(
+        &mut self,
+        descriptor: ActiveSessionDescriptor,
+        runtime: SceneSessionRuntime,
+        camera: EngineCameraController,
+        pending_startup_sections: Vec<TexturedRenderSectionMesh>,
+    ) {
+        self.descriptor = Some(descriptor);
+        self.storage = WorldSlotStorage::from_scene(&self.scene, self.descriptor.as_ref());
+        self.lifecycle = WorldSlotLifecycle::StandbyCpuReady;
+        self.runtime = Some(runtime);
+        self.local_startup = None;
+        self.external_runtime_startup_pending = false;
+        self.accepted_entry_pose = Some(WorldEntryPose::from_camera(&camera));
+        self.camera = camera;
+        self.pending_startup_sections = pending_startup_sections;
+        self.render_stats = RenderStreamStats::default();
+    }
 }
 
 pub struct McloneSceneHost {
     active_world: DrawableWorldSlot,
+    standby_world: Option<DrawableWorldSlot>,
+    warm_world_standby: Option<WarmWorldStandbyState>,
     services: SceneHostServices,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
@@ -1199,6 +1252,9 @@ impl McloneSceneHost {
         };
         if evidence.ready() {
             self.active_world.external_runtime_startup_pending = false;
+            self.active_world.lifecycle = WorldSlotLifecycle::ActiveReady;
+            self.active_world.accepted_entry_pose =
+                Some(WorldEntryPose::from_camera(&self.active_world.camera));
         }
     }
 

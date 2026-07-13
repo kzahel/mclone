@@ -9,8 +9,11 @@ use mclone_app_runtime::prepared_assets::{
 };
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::startup_args::StartupSceneOptions;
+use mclone_core::ChunkPos;
 use mclone_render::chunk::TexturedSectionRenderOptions;
-use mclone_scene::{McloneSceneHost, McloneSceneHostOptions, XrStartupViewPose};
+use mclone_scene::{
+    McloneSceneHost, McloneSceneHostOptions, WarmWorldStandbyRequest, XrStartupViewPose,
+};
 
 use crate::cli::SceneOptions;
 use crate::render_cache::load_asset_source;
@@ -115,6 +118,14 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
         )
     });
     configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
+    if let Some(seed) = scene.warm_world_standby_seed {
+        host.begin_warm_world_standby(
+            device,
+            queue,
+            WarmWorldStandbyRequest::new(seed, ChunkPos::new(scene.chunk_x, scene.chunk_z)),
+        )
+        .context("initialize launch-only warm-world standby")?;
+    }
     Ok(host)
 }
 

@@ -741,6 +741,13 @@ impl EngineCameraController {
         EngineCameraSnapshot::from_player(&self.player, self.speed_blocks_per_second)
     }
 
+    /// Authoritative controller feet pose paired with [`Self::snapshot`]'s eye
+    /// pose. Scene-level world handoff and endpoint placement must not infer it
+    /// from a fixed eye-height constant.
+    pub fn feet_position(&self) -> Vec3d {
+        self.player.pose().position
+    }
+
     pub fn frame_state(&self, interaction: &ClientInteractionController) -> EngineCameraFrameState {
         EngineCameraFrameState::from_player(
             &self.player,

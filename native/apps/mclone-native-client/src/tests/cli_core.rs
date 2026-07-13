@@ -174,6 +174,28 @@ fn cli_parses_local_world_dir() {
 }
 
 #[test]
+fn cli_parses_launch_only_warm_world_standby_seed() {
+    let cli = Cli::parse(["--warm-world-standby-seed".to_owned(), "-98765".to_owned()]).unwrap();
+    let Cli::Window { scene, .. } = cli else {
+        panic!("expected window mode");
+    };
+    assert_eq!(scene.warm_world_standby_seed, Some(-98765));
+}
+
+#[test]
+fn cli_rejects_warm_world_standby_for_remote_world() {
+    let error = Cli::parse([
+        "--warm-world-standby-seed".to_owned(),
+        "-98765".to_owned(),
+        "--remote-addr".to_owned(),
+        "127.0.0.1:25565".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("applies only to local integrated worlds"));
+}
+
+#[test]
 fn cli_parses_world_root_and_transient_catalog_mode() {
     let cli = Cli::parse(["--world-root".to_owned(), "/tmp/mclone-worlds".to_owned()]).unwrap();
 
