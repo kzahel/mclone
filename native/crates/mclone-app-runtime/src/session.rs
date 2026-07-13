@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use mclone_server::WorldGenerationProfile;
+
 use crate::world_catalog::{LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -297,6 +299,7 @@ pub fn plan_session_start<O, E>(
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SessionStorageIntent {
     seed: Option<i64>,
+    world_generation_profile: WorldGenerationProfile,
     remote_addr: Option<String>,
     world_dir: Option<PathBuf>,
     suppress_adaptive_chunk_publication_budget: bool,
@@ -306,6 +309,20 @@ impl SessionStorageIntent {
     pub fn transient_local_world(seed: i64) -> Self {
         Self {
             seed: Some(seed),
+            world_generation_profile: WorldGenerationProfile::default(),
+            remote_addr: None,
+            world_dir: None,
+            suppress_adaptive_chunk_publication_budget: false,
+        }
+    }
+
+    pub fn transient_local_world_with_generation_profile(
+        seed: i64,
+        profile: WorldGenerationProfile,
+    ) -> Self {
+        Self {
+            seed: Some(seed),
+            world_generation_profile: profile,
             remote_addr: None,
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: false,
@@ -315,6 +332,7 @@ impl SessionStorageIntent {
     pub fn catalog_world(summary: &LocalWorldSummary, world_dir: PathBuf) -> Self {
         Self {
             seed: Some(summary.seed),
+            world_generation_profile: summary.world_generation_profile,
             remote_addr: None,
             world_dir: Some(world_dir),
             suppress_adaptive_chunk_publication_budget: false,
@@ -324,6 +342,7 @@ impl SessionStorageIntent {
     pub fn remote_session(remote_addr: impl Into<String>) -> Self {
         Self {
             seed: None,
+            world_generation_profile: WorldGenerationProfile::default(),
             remote_addr: Some(remote_addr.into()),
             world_dir: None,
             suppress_adaptive_chunk_publication_budget: true,
@@ -336,6 +355,10 @@ impl SessionStorageIntent {
 
     pub fn remote_addr(&self) -> Option<&str> {
         self.remote_addr.as_deref()
+    }
+
+    pub const fn world_generation_profile(&self) -> WorldGenerationProfile {
+        self.world_generation_profile
     }
 
     pub fn world_dir(&self) -> Option<&Path> {

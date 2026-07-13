@@ -67,7 +67,7 @@ use mclone_app_runtime::session::{
     SessionRuntimeKind, SessionStartPayload, SessionStartRequest, plan_session_start,
 };
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_app_runtime::world_catalog::LocalWorldSummary;
+use mclone_app_runtime::world_catalog::{LocalWorldCreateOptions, LocalWorldSummary};
 use mclone_app_runtime::world_catalog::{
     LocalWorldId, WorldCatalogCapabilities, WorldCatalogError,
 };
@@ -141,6 +141,8 @@ use mclone_render_session::{
     local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
     render_view_from_world_pose,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_server::WorldGenerationProfile;
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,

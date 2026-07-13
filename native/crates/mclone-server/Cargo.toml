@@ -14,6 +14,7 @@ mclone-path.workspace = true
 mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true
 mclone-worldgen.workspace = true
+serde.workspace = true
 
 [features]
 default = []
@@ -38,6 +39,7 @@ web-sys = { workspace = true, features = [
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rusqlite.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true

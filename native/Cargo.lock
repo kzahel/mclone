@@ -1716,6 +1716,7 @@ dependencies = [
  "mclone-protocol",
  "mclone-worldgen",
  "rusqlite",
+ "serde",
  "serde_json",
  "wasm-bindgen",
  "web-sys",

@@ -11,7 +11,7 @@ use std::thread;
 
 use anyhow::{Context, Result, bail};
 use mclone_protocol::PROTOCOL_VERSION;
-use mclone_server::IntegratedServer;
+use mclone_server::{IntegratedServer, WorldGenerationProfile};
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
 use crate::session::{DedicatedSession, DedicatedSessionDiagnostics};
@@ -35,6 +35,7 @@ struct Cli {
     listen: String,
     listen_ws: Option<String>,
     seed: i64,
+    world_generation_profile: WorldGenerationProfile,
     serve_once: bool,
     multi_client_smoke: bool,
     world: DedicatedWorldSelection,
@@ -46,6 +47,7 @@ impl Default for Cli {
             listen: DEFAULT_LISTEN_ADDR.to_owned(),
             listen_ws: None,
             seed: DEFAULT_SEED,
+            world_generation_profile: WorldGenerationProfile::default(),
             serve_once: false,
             multi_client_smoke: false,
             world: DedicatedWorldSelection::Transient,
@@ -91,6 +93,13 @@ impl Cli {
                 }
                 "--seed" => {
                     cli.seed = parse_i64_arg("--seed", args.next())?;
+                }
+                "--generation-profile" => {
+                    let value = args
+                        .next()
+                        .context("--generation-profile requires overworld or authored-only")?;
+                    cli.world_generation_profile =
+                        WorldGenerationProfile::parse_label(&value).map_err(anyhow::Error::msg)?;
                 }
                 "--serve-once" => {
                     cli.serve_once = true;
@@ -179,10 +188,10 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
-         The server accepts persistent native TCP command streams from multiple clients. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws enables a WebSocket bridge for browser clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
+         The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws enables a WebSocket bridge for browser clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
@@ -200,6 +209,9 @@ fn run_server(cli: Cli) -> Result<()> {
         if cli.world.is_persistent() {
             bail!("--multi-client-smoke cannot be combined with persistent world arguments");
         }
+        if cli.world_generation_profile != WorldGenerationProfile::Overworld {
+            bail!("--multi-client-smoke requires --generation-profile overworld");
+        }
         return dedicated_smoke::run_multi_client_smoke(cli.seed);
     }
 
@@ -209,10 +221,11 @@ fn run_server(cli: Cli) -> Result<()> {
         .local_addr()
         .context("failed to read listen addr")?;
     println!(
-        "mclone dedicated server listening on {local_addr} seed={} protocol {} world={}",
+        "mclone dedicated server listening on {local_addr} seed={} protocol {} world={} generation={}",
         cli.seed,
         PROTOCOL_VERSION,
-        cli.world.description()
+        cli.world.description(),
+        cli.world_generation_profile.label(),
     );
 
     let mode = if cli.serve_once {
@@ -222,20 +235,38 @@ fn run_server(cli: Cli) -> Result<()> {
     };
     if let Some(listen_ws) = cli.listen_ws.as_deref() {
         return run_server_with_websocket_bridge(
-            listener, local_addr, listen_ws, cli.seed, cli.world, mode,
+            listener,
+            local_addr,
+            listen_ws,
+            cli.seed,
+            cli.world_generation_profile,
+            cli.world,
+            mode,
         );
     }
-    run_server_loop(listener, cli.seed, cli.world, mode)
+    run_server_loop_with_profile(
+        listener,
+        cli.seed,
+        cli.world_generation_profile,
+        cli.world,
+        mode,
+    )
 }
 
-fn open_dedicated_server(seed: i64, world: &DedicatedWorldSelection) -> Result<IntegratedServer> {
-    match world {
+fn open_dedicated_server(
+    seed: i64,
+    profile: WorldGenerationProfile,
+    world: &DedicatedWorldSelection,
+) -> Result<IntegratedServer> {
+    let mut server = match world {
         DedicatedWorldSelection::Transient => Ok(IntegratedServer::new(seed)),
         DedicatedWorldSelection::Persistent { dir } => {
             IntegratedServer::try_with_threaded_sqlite_world_dir(seed, dir)
                 .with_context(|| format!("failed to open dedicated world at {}", dir.display()))
         }
-    }
+    }?;
+    server.set_world_generation_profile(profile)?;
+    Ok(server)
 }
 
 fn run_server_with_websocket_bridge(
@@ -243,6 +274,7 @@ fn run_server_with_websocket_bridge(
     upstream_addr: std::net::SocketAddr,
     listen_ws: &str,
     seed: i64,
+    profile: WorldGenerationProfile,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
 ) -> Result<()> {
@@ -256,7 +288,9 @@ fn run_server_with_websocket_bridge(
     let (ready_tx, ready_rx) = mpsc::channel();
     let server_thread = thread::Builder::new()
         .name("mclone-dedicated-server-loop".to_owned())
-        .spawn(move || run_server_loop_with_ready(listener, seed, world, mode, Some(ready_tx)))
+        .spawn(move || {
+            run_server_loop_with_ready(listener, seed, profile, world, mode, Some(ready_tx))
+        })
         .context("failed to spawn dedicated server loop for websocket bridge")?;
     match ready_rx.recv() {
         Ok(Ok(())) => {}
@@ -295,18 +329,36 @@ enum ServerRunMode {
     UntilDisconnects(usize),
 }
 
+#[cfg(test)]
 fn run_server_loop(
     listener: TcpListener,
     seed: i64,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
 ) -> Result<()> {
-    run_server_loop_with_ready(listener, seed, world, mode, None)
+    run_server_loop_with_profile(
+        listener,
+        seed,
+        WorldGenerationProfile::Overworld,
+        world,
+        mode,
+    )
+}
+
+fn run_server_loop_with_profile(
+    listener: TcpListener,
+    seed: i64,
+    profile: WorldGenerationProfile,
+    world: DedicatedWorldSelection,
+    mode: ServerRunMode,
+) -> Result<()> {
+    run_server_loop_with_ready(listener, seed, profile, world, mode, None)
 }
 
 fn run_server_loop_with_ready(
     listener: TcpListener,
     seed: i64,
+    profile: WorldGenerationProfile,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
     ready_tx: Option<mpsc::Sender<std::result::Result<(), String>>>,
@@ -320,7 +372,7 @@ fn run_server_loop_with_ready(
             return Err(error);
         }
     };
-    let mut server = match open_dedicated_server(seed, &world) {
+    let mut server = match open_dedicated_server(seed, profile, &world) {
         Ok(server) => {
             if let Some(ready_tx) = ready_tx {
                 let _ = ready_tx.send(Ok(()));
@@ -621,6 +673,8 @@ mod tests {
                 "127.0.0.1:0".to_owned(),
                 "--seed".to_owned(),
                 "-7".to_owned(),
+                "--generation-profile".to_owned(),
+                "authored-only".to_owned(),
                 "--serve-once".to_owned(),
             ])
             .unwrap(),
@@ -628,6 +682,7 @@ mod tests {
                 listen: "127.0.0.1:0".to_owned(),
                 listen_ws: None,
                 seed: -7,
+                world_generation_profile: WorldGenerationProfile::authored_only(),
                 serve_once: true,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Transient,
@@ -651,6 +706,7 @@ mod tests {
                 listen: "127.0.0.1:0".to_owned(),
                 listen_ws: Some("127.0.0.1:0".to_owned()),
                 seed: 17,
+                world_generation_profile: WorldGenerationProfile::Overworld,
                 serve_once: false,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Transient,
@@ -671,6 +727,7 @@ mod tests {
                 listen: DEFAULT_LISTEN_ADDR.to_owned(),
                 listen_ws: None,
                 seed: 99,
+                world_generation_profile: WorldGenerationProfile::Overworld,
                 serve_once: false,
                 multi_client_smoke: true,
                 world: DedicatedWorldSelection::Transient,
@@ -692,6 +749,7 @@ mod tests {
                 listen: DEFAULT_LISTEN_ADDR.to_owned(),
                 listen_ws: None,
                 seed: 77,
+                world_generation_profile: WorldGenerationProfile::Overworld,
                 serve_once: false,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Persistent {
@@ -877,14 +935,67 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn dedicated_server_serves_persistent_authored_fixture() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let root = unique_temp_dir("dedicated-authored-fixture");
+        let manifest = mclone_server::write_authored_world_fixture_dir(
+            &root,
+            mclone_server::AuthoredWorldFixtureKind::Island,
+        )
+        .unwrap();
+        let world = DedicatedWorldSelection::Persistent { dir: root.clone() };
+        let (server, addr) = spawn_serve_once_server_with_profile(
+            manifest.seed,
+            manifest.world_generation_profile,
+            world,
+        );
+
+        let mut session = NativeClientSession::connect(addr).unwrap();
+        let updates = session
+            .send_command(&ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(manifest.center_chunk[0], manifest.center_chunk[1]),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+        let snapshot = chunk_snapshot(&updates, ChunkPos::new(0, 0));
+        assert_ne!(
+            snapshot_block_state(snapshot, BlockPos::new(8, 64, 8)),
+            AIR_BLOCK_STATE_ID
+        );
+        let expected_spawn = manifest.expected_spawn;
+        assert!(updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::PlayerPosition(position)
+                if position.position == Vec3d::new(
+                    expected_spawn[0],
+                    expected_spawn[1],
+                    expected_spawn[2]
+                )
+        )));
+
+        drop(session);
+        server.join().unwrap().unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     fn spawn_serve_once_server(
         seed: i64,
+        world: DedicatedWorldSelection,
+    ) -> (std::thread::JoinHandle<Result<()>>, std::net::SocketAddr) {
+        spawn_serve_once_server_with_profile(seed, WorldGenerationProfile::Overworld, world)
+    }
+
+    fn spawn_serve_once_server_with_profile(
+        seed: i64,
+        profile: WorldGenerationProfile,
         world: DedicatedWorldSelection,
     ) -> (std::thread::JoinHandle<Result<()>>, std::net::SocketAddr) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
-            run_server_loop(listener, seed, world, ServerRunMode::ServeOnce)
+            run_server_loop_with_profile(listener, seed, profile, world, ServerRunMode::ServeOnce)
         });
         (server, addr)
     }

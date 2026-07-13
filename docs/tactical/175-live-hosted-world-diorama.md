@@ -1,8 +1,9 @@
 # 175: Live Hosted World Diorama
 
-Status: active 2026-07-13. Slice 0 contract/baseline checkpoint landed; Slice 1
-authored-only server/content foundation is next. Do not make the retained
-standby visible until Tactical 174's lifecycle/invalidation closeout is green.
+Status: active 2026-07-13. Slice 0 contract/baseline and Slice 1 authored-only
+server/content foundation landed; Slice 2 placed terrain is next. Do not make
+the retained standby visible until Tactical 174's lifecycle/invalidation
+closeout is green.
 
 Topic: `embedded-worlds`
 
@@ -542,6 +543,97 @@ and never enqueue overworld terrain work.
 
 The user may inspect the two worlds independently here, but this is not yet the
 important visual checkpoint.
+
+### Slice 1 completion record — 2026-07-13
+
+The server/content foundation is now production-shaped rather than a renderer
+fixture:
+
+- `WorldGenerationProfile` is a shared serializable `mclone-server` contract.
+  `Overworld` remains the default; `AuthoredOnly { missingChunk: Void }` must be
+  selected before any holder or job exists. Persistence remains first. A true
+  authored miss creates a canonical empty `Features` snapshot, then uses the
+  ordinary lighting, publication, visibility, mutation, cache-save, unload,
+  and reload paths without creating an overworld feature job.
+- Authored misses are admitted in bounded light-batch-sized groups. They count
+  as pending work only for an authored scheduler, preventing an early idle
+  report without changing the established Overworld `pending_jobs` metric.
+- The profile is threaded through native runner and scene startup, dedicated
+  server CLI, catalog create/summary metadata, session storage intent, shared
+  argv/query parsing, and browser Worker/IndexedDB startup. Catalog schema 1 is
+  still compatible: an absent field decodes as `Overworld` on native and web.
+- Seed-derived spawn-center search is now explicitly an Overworld policy.
+  Authored startup keeps its configured entry center, then lets the ordinary
+  first-view safe-surface correction find the exact persisted pose. This fixed
+  the first real offscreen launch, which otherwise followed seed `17501` to an
+  unrelated biome-source chunk containing valid authored void.
+- The shared non-WASM fixture builder emits valid SQLite `Light` records, not
+  renderer meshes. It owns schema/id markers, refuses unrelated nonempty roots,
+  and safely rebuilds only a matching fixture. Each root contains a center
+  authored chunk plus a radius-three lit void ring (49 records), exact spawn,
+  preview anchor, and mutation coordinates.
+- Fixture `table-a` is a grass platform with a brick table; `island-b` is a
+  separate grass/stone island. The diagnostic command writes them to
+  `/tmp/mclone-live-diorama-fixtures/{table-a,island-b}` by default:
+
+```bash
+pnpm native:authored-world-fixtures
+```
+
+They can be inspected independently before composition exists:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --world-dir /tmp/mclone-live-diorama-fixtures/table-a \
+  --generation-profile authored-only --seed 17501 --chunk-x 0 --chunk-z 0 \
+  --render-distance 2 --debug-passive-showcase false --lighting false
+
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client -- \
+  --world-dir /tmp/mclone-live-diorama-fixtures/island-b \
+  --generation-profile authored-only --seed 17502 --chunk-x 0 --chunk-z 0 \
+  --render-distance 2 --debug-passive-showcase false --lighting false
+```
+
+The proof covers both ordinary host shapes. A native local startup at render
+distance two loads the table through the threaded SQLite runner and produces a
+drawable startup seed even with runtime lighting disabled. A real loopback TCP
+dedicated session opens the island root, receives its non-air center and exact
+safe spawn, and reports zero worldgen publication. Server tests also prove both
+fixtures' lit status, root isolation, runtime mutation/restart persistence, and
+a far missing chunk becoming lit void with zero worldgen work.
+
+Visually inspected 960x540 receipts are:
+
+- `/tmp/mclone-authored-table-slice1.png`: two resident/drawn sections,
+  SHA-256
+  `1abe82cee0d6a4d10ef16671412a663b94eddc543eafe222e6e86fa22ebade67`;
+- `/tmp/mclone-authored-island-slice1.png`: two resident/drawn sections,
+  SHA-256
+  `975662114fdf760868fb61ef2991b1f6d8ac033e7f414508664c8f26060bea9a`.
+
+The first five-run no-preview release batch was rejected rather than curated:
+an Android emulator began using about 70% of one core during it, producing
+16.9% average and 31.2% P95 spread. Before the accepted retry, `top` reported
+97.61% CPU idle with no Cargo, Rust, C/C++, or mclone process active and the
+emulator had settled/exited. Accepted runs 6–10 under
+`/tmp/mclone-live-diorama-slice1-perf` measured averages of 2.523, 2.538,
+2.510, 2.509, and 2.436 ms: 2.510 ms median and 4.1% range. P95s were 4.436,
+4.331, 4.412, 4.320, and 4.141 ms: 4.331 ms median and 6.8% range. All retained
+1,936 initial sections and had zero over-budget frames and zero accounting
+violations. Against Slice 0's 2.659/4.252 ms medians, average is 5.6% lower and
+P95 is 1.9% higher; this establishes no significant no-preview regression and
+claims no optimization.
+
+Focused and full validation passes 385 server, 243 app-runtime, 111
+render-session, 132 render (two device tests ignored), 107 scene plus nine
+ownership-contract tests (one device characterization ignored), 154 native
+client, and 20 dedicated-server tests. Browser WASM build plus TypeScript
+typecheck, thin-adapter purity, formatting, and diff whitespace checks pass.
+The current web build retains only pre-existing target-specific warnings.
+
+Slice 1 requires no manual checkpoint. Slice 2 may now build static placed
+terrain. Tactical 174's lifecycle/invalidation closeout remains required before
+Slice 3 exposes the live retained slot.
 
 ## Slice 2: Placed Terrain Renderer
 

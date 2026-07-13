@@ -1120,6 +1120,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         bindgen_js_url,
         bindgen_wasm_url,
     )
+    .with_world_generation_profile(scene_startup.world_generation_profile)
     .with_light_status_batch_size(scene_startup.light_status_batch_size);
     if storage.world_storage == "indexeddb" {
         config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
@@ -1377,10 +1378,11 @@ impl WebSceneHost {
     async fn start_worker_runtime(
         &mut self,
         pending: ExternalSceneSessionStart,
-        config: WebIntegratedServerRunnerConfig,
+        mut config: WebIntegratedServerRunnerConfig,
     ) -> Result<JsValue, JsValue> {
         let center = pending.scene.center();
         let render_distance = pending.scene.render_distance;
+        config.world_generation_profile = pending.scene.world_generation_profile;
         match crate::WebRuntime::web_worker_integrated_at(config, center).await {
             Ok(mut runtime) => {
                 runtime

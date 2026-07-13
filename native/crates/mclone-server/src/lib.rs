@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+#[cfg(not(target_arch = "wasm32"))]
+mod authored_fixture;
 #[cfg(test)]
 mod block_light_bridge;
 mod cadence;
@@ -38,6 +40,7 @@ mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
 mod wasm_job_worker;
+mod world_generation_profile;
 mod worldgen_mailbox;
 
 use mclone_core::{
@@ -47,6 +50,14 @@ use mclone_core::{
 use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use authored_fixture::{
+    AUTHORED_WORLD_FIXTURE_CENTER, AUTHORED_WORLD_FIXTURE_MARKER_FILE,
+    AUTHORED_WORLD_FIXTURE_SCHEMA_VERSION, AUTHORED_WORLD_FIXTURE_VOID_PADDING_RADIUS,
+    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, authored_world_fixture_marker_path,
+    authored_world_fixture_records, write_authored_world_fixture_dir,
+    write_authored_world_fixture_to_store,
+};
 pub use cadence::{
     DEFAULT_GAMEPLAY_RATE_HZ, DEFAULT_HOST_RATE_HZ, DEFAULT_MAX_CATCH_UP_HOST_FRAMES,
     DEFAULT_PHYSICS_RATE_HZ, SimulationCadence, SimulationCadenceAdvance, SimulationCadenceConfig,
@@ -99,6 +110,9 @@ pub use types::{
     ChunkTicketKey, ChunkTicketType, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
     LightStatusMailboxKind, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode,
     UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
+};
+pub use world_generation_profile::{
+    AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredMissingChunk, WorldGenerationProfile,
 };
 
 #[cfg(not(target_arch = "wasm32"))]

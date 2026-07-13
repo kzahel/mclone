@@ -71,7 +71,7 @@ use mclone_render_session::{
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
     summarize_textured_render_section_build_report,
 };
-use mclone_server::{ServerRunnerKind, SimulationCadenceConfig};
+use mclone_server::{ServerRunnerKind, SimulationCadenceConfig, WorldGenerationProfile};
 use mclone_ui::{GameUiAction, GuiKey, LoadingProgressOverlay};
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -2496,6 +2496,7 @@ pub fn mclone_web_catalog_prepare_create_world(
     let now = parse_web_unix_millis(now_unix_millis, "nowUnixMillis").map_err(JsValue::from)?;
     let mut summary = LocalWorldSummary::new(id, options.display_name, options.seed, now)
         .map_err(|error| JsValue::from(error.message))?;
+    summary.world_generation_profile = options.world_generation_profile;
     summary.last_played_unix_millis = Some(now);
     summary.backend_label = Some(WEB_WORLD_BACKEND_LABEL.to_owned());
     encode_web_local_world_summary(&summary).map_err(JsValue::from)
@@ -2818,6 +2819,11 @@ fn decode_web_local_world_create_options(
         options = options
             .with_requested_id(LocalWorldId::new(requested_id).map_err(|error| error.message)?);
     }
+    if let Some(profile) = js_optional_string_property(value, "generationProfile")? {
+        options = options.with_world_generation_profile(
+            WorldGenerationProfile::parse_label(&profile).map_err(|error| error.to_string())?,
+        );
+    }
     Ok(options)
 }
 
@@ -2862,6 +2868,10 @@ fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, 
         js_u64_property(value, "createdUnixMillis")?,
     )
     .map_err(|error| error.message)?;
+    summary.world_generation_profile = js_optional_string_property(value, "generationProfile")?
+        .map(|profile| WorldGenerationProfile::parse_label(&profile))
+        .transpose()?
+        .unwrap_or_default();
     summary.last_played_unix_millis = js_optional_u64_property(value, "lastPlayedUnixMillis")?;
     summary.storage_schema_version =
         js_optional_u32_property(value, "storageSchemaVersion")?.unwrap_or(0);
@@ -2890,6 +2900,11 @@ fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue
     set_string(&object, "id", summary.id.as_str())?;
     set_string(&object, "displayName", &summary.display_name)?;
     set_number(&object, "seed", summary.seed as f64)?;
+    set_string(
+        &object,
+        "generationProfile",
+        summary.world_generation_profile.label(),
+    )?;
     set_number(
         &object,
         "createdUnixMillis",

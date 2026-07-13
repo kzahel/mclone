@@ -306,6 +306,7 @@ mod tests {
                             Ok(summary) => summary,
                             Err(error) => return self.record(Err(error)),
                         };
+                    summary.world_generation_profile = options.world_generation_profile;
                     summary.last_played_unix_millis = Some(1_000);
                     self.worlds.borrow_mut().push(summary.clone());
                     self.record(Ok(WorldCatalogResponse::WorldCreated { summary }))

@@ -66,7 +66,8 @@ use crate::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind, FluidTickList,
     NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
     ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos, WorldStore,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
+    WorldGenerationProfile, WorldStore,
 };
 
 #[cfg(feature = "physics-engine")]
@@ -1140,6 +1141,13 @@ impl IntegratedServer {
 
     pub fn wait_for_light_completion(&mut self, timeout: Duration) -> bool {
         self.scheduler.wait_for_light_completion(timeout)
+    }
+
+    pub fn set_world_generation_profile(
+        &mut self,
+        profile: WorldGenerationProfile,
+    ) -> ChunkStoreResult<()> {
+        self.scheduler.set_world_generation_profile(profile)
     }
 
     pub fn scheduler(&self) -> &ChunkScheduler {

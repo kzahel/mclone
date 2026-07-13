@@ -19,6 +19,8 @@ type IndexedDbCatalogPolicy = Pick<
 let indexedDbCatalogPolicy: IndexedDbCatalogPolicy | null = null;
 let lastCatalogTimestamp = 0;
 
+export type WebWorldGenerationProfile = "overworld" | "authored-only";
+
 function nextCatalogTimestamp(): number {
   lastCatalogTimestamp = Math.max(Date.now(), lastCatalogTimestamp + 1);
   return lastCatalogTimestamp;
@@ -39,6 +41,7 @@ export interface WebLocalWorldSummary {
   id: string;
   displayName: string;
   seed: number;
+  generationProfile: WebWorldGenerationProfile;
   createdUnixMillis: number;
   lastPlayedUnixMillis: number | null;
   storageSchemaVersion: number;
@@ -52,6 +55,7 @@ export interface WebLocalWorldSummary {
 export interface WebLocalWorldCreateOptions {
   displayName: string;
   seed: number;
+  generationProfile?: WebWorldGenerationProfile;
   requestedId?: string | null;
 }
 

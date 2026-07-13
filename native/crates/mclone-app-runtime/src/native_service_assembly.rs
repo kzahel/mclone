@@ -27,8 +27,8 @@ use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueH
 use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
     NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
-    ServerRunnerDiagnostics, SimulationCadenceConfig, host_tick_interval_for_rate_hz,
-    initial_spawn_center_for_seed,
+    ServerRunnerDiagnostics, SimulationCadenceConfig, WorldGenerationProfile,
+    host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -87,6 +87,7 @@ pub fn native_world_catalog_operations(root: PathBuf) -> WorldCatalogOperationSe
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LocalIntegratedSceneOptions {
     pub seed: i64,
+    pub world_generation_profile: WorldGenerationProfile,
     pub center: ChunkPos,
     pub render_distance: u32,
     pub cadence: SimulationCadenceConfig,
@@ -155,6 +156,7 @@ impl LocalIntegratedSceneOptions {
     pub const fn new(seed: i64, center: ChunkPos, render_distance: u32) -> Self {
         Self {
             seed,
+            world_generation_profile: WorldGenerationProfile::Overworld,
             center,
             render_distance,
             cadence: SimulationCadenceConfig::new(20, 20, 60),
@@ -175,6 +177,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
         self.cadence = cadence;
+        self
+    }
+
+    pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
+        self.world_generation_profile = profile;
         self
     }
 
@@ -3383,6 +3390,7 @@ fn native_runner_config(
     options: &LocalIntegratedSceneOptions,
 ) -> NativeIntegratedServerRunnerConfig {
     NativeIntegratedServerRunnerConfig::new(options.seed)
+        .with_world_generation_profile(options.world_generation_profile)
         .with_lighting_enabled(options.lighting_enabled)
         .with_light_status_batch_size(options.light_status_batch_size)
         .with_debug_passive_showcase(options.debug_passive_showcase)
@@ -3695,9 +3703,12 @@ where
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     use super::*;
     use crate::render_assets::extracted_asset_root;
+
+    static AUTHORED_STARTUP_TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
     #[derive(Debug)]
     enum NoRemoteSession {}
@@ -4506,6 +4517,58 @@ mod tests {
         }
 
         panic!("shared local startup pump did not reach playable");
+    }
+
+    #[test]
+    fn authored_sqlite_startup_reaches_playable_through_native_runner() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let sequence = AUTHORED_STARTUP_TEST_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "mclone-authored-native-startup-{}-{sequence}",
+            std::process::id()
+        ));
+        let manifest = mclone_server::write_authored_world_fixture_dir(
+            &root,
+            mclone_server::AuthoredWorldFixtureKind::Table,
+        )
+        .unwrap();
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let mut pump = NativeSessionStartupPump::<LocalOnlySession>::local_with_mesh_assets(
+            LocalIntegratedSceneOptions::new(manifest.seed, ChunkPos::new(0, 0), 2)
+                .with_world_generation_profile(manifest.world_generation_profile)
+                .with_persistent_world_dir(&root)
+                .with_debug_passive_showcase(false)
+                .with_lighting_enabled(false),
+            mesh_assets,
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 104.0, 8.0);
+
+        let mut last_step = None;
+        for _ in 0..2_000 {
+            let step = pump.step(camera_position).unwrap();
+            if step.startup_ready {
+                assert!(step.host_ready);
+                assert!(step.render_seed_drawable_section_count > 0);
+                assert!(pump.runtime().loaded_chunk_count() >= 1);
+                let completion = pump.complete();
+                drop(completion);
+                std::fs::remove_dir_all(root).unwrap();
+                return;
+            }
+            last_step = Some(step);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+
+        let loaded_chunk_count = pump.runtime().loaded_chunk_count();
+        drop(pump);
+        let _ = std::fs::remove_dir_all(root);
+        panic!(
+            "authored native startup did not become playable: loaded_chunks={loaded_chunk_count} {last_step:?}"
+        );
     }
 
     // docs/tactical/167 Slice 4 tripwire: a startup pose correction that teleports

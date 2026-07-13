@@ -884,6 +884,7 @@ impl McloneSceneHost {
             |options| {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = options.seed;
+                scene.world_generation_profile = options.world_generation_profile;
                 scene.world_dir = None;
                 Ok::<_, anyhow::Error>(scene)
             },
@@ -896,6 +897,7 @@ impl McloneSceneHost {
                     .context("local world is not present in the catalog view")?;
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = summary.seed;
+                scene.world_generation_profile = summary.world_generation_profile;
                 scene.world_dir = None;
                 Ok((
                     scene,
@@ -1028,8 +1030,16 @@ impl McloneSceneHost {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn local_world_options(&self, seed: i64) -> McloneSceneHostOptions {
-        self.scene_for_storage_intent(SessionStorageIntent::transient_local_world(seed))
+    pub(crate) fn local_world_options(
+        &self,
+        options: &LocalWorldCreateOptions,
+    ) -> McloneSceneHostOptions {
+        self.scene_for_storage_intent(
+            SessionStorageIntent::transient_local_world_with_generation_profile(
+                options.seed,
+                options.world_generation_profile,
+            ),
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1052,6 +1062,7 @@ impl McloneSceneHost {
         if let Some(seed) = intent.seed() {
             scene.seed = seed;
         }
+        scene.world_generation_profile = intent.world_generation_profile();
         scene.world_dir = intent.world_dir().map(PathBuf::from);
         if intent.suppress_adaptive_chunk_publication_budget() {
             scene.adaptive_chunk_publication_budget = false;
@@ -1099,7 +1110,7 @@ impl McloneSceneHost {
     pub(crate) fn request_session_start(&mut self, request: SessionStartRequest) -> Result<()> {
         let plan = plan_session_start(
             request,
-            |options| Ok(self.local_world_options(options.seed)),
+            |options| Ok(self.local_world_options(options)),
             |id| {
                 let summary = self
                     .client_experience
@@ -3663,10 +3674,17 @@ pub fn local_integrated_scene_options(
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
     let mut options =
         LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance);
-    if scene.use_initial_spawn_center {
+    // The seed-derived spawn center is an overworld biome-source policy. An
+    // authored world deliberately has no overworld terrain to search, so its
+    // configured center is the persistence-backed entry hint whose first view
+    // lets the ordinary safe-surface correction choose the exact pose.
+    if scene.use_initial_spawn_center
+        && scene.world_generation_profile == WorldGenerationProfile::Overworld
+    {
         options = options.with_initial_spawn_center();
     }
     options
+        .with_world_generation_profile(scene.world_generation_profile)
         .with_freeze_scheduled_fluid_ticks(scene.freeze_scheduled_fluid_ticks)
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
@@ -3757,5 +3775,19 @@ mod camera_config_tests {
             assert_eq!(camera.movement_mode(), engine_mode);
             assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
         }
+    }
+
+    #[test]
+    fn authored_local_startup_keeps_the_configured_entry_center() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.seed = 17_501;
+        scene.chunk_x = 3;
+        scene.chunk_z = -2;
+        scene.use_initial_spawn_center = true;
+        scene.world_generation_profile = WorldGenerationProfile::authored_only();
+
+        let options = local_integrated_scene_options(&scene);
+
+        assert_eq!(options.center, ChunkPos::new(3, -2));
     }
 }

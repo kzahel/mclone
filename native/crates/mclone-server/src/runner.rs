@@ -27,6 +27,9 @@ use crate::{
     WorldgenMailboxKind,
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::WorldGenerationProfile;
+
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -622,6 +625,7 @@ mod native {
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
+        pub world_generation_profile: WorldGenerationProfile,
         pub lighting_enabled: bool,
         pub light_status_batch_size: usize,
         pub day_time: Option<u64>,
@@ -639,6 +643,7 @@ mod native {
         pub fn new(seed: i64) -> Self {
             Self {
                 seed,
+                world_generation_profile: WorldGenerationProfile::default(),
                 lighting_enabled: true,
                 light_status_batch_size: crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 day_time: None,
@@ -655,6 +660,11 @@ mod native {
 
         pub fn with_lighting_enabled(mut self, enabled: bool) -> Self {
             self.lighting_enabled = enabled;
+            self
+        }
+
+        pub fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
+            self.world_generation_profile = profile;
             self
         }
 
@@ -1065,6 +1075,10 @@ mod native {
                 }
             }
         };
+        if let Err(error) = server.set_world_generation_profile(config.world_generation_profile) {
+            let _ = ready_tx.send(Err(error.to_string()));
+            return Ok(());
+        }
         server.set_lighting_enabled(config.lighting_enabled);
         server.set_light_status_batch_size(config.light_status_batch_size);
         server.set_publication_budget_config(if config.publication_budget.enabled {

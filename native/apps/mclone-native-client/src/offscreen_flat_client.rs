@@ -1913,7 +1913,10 @@ fn screenshot_startup_camera(
     scene: &SceneOptions,
     startup_wait: StartupWaitPolicy,
 ) -> SpectatorCamera {
-    if scene.remote_addr.is_some() || matches!(startup_wait, StartupWaitPolicy::Idle) {
+    if scene.remote_addr.is_some()
+        || matches!(startup_wait, StartupWaitPolicy::Idle)
+        || scene.world_generation_profile != mclone_server::WorldGenerationProfile::Overworld
+    {
         return SpectatorCamera::spawn_for_scene(scene);
     }
     let spawn = initial_spawn_center_for_seed(scene.seed);
@@ -2138,6 +2141,20 @@ fn require_world_action_changed(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authored_screenshot_starts_at_the_configured_entry_center() {
+        let mut scene = SceneOptions::default();
+        scene.seed = 17_501;
+        scene.chunk_x = 3;
+        scene.chunk_z = -2;
+        scene.world_generation_profile = mclone_server::WorldGenerationProfile::authored_only();
+        let expected = SpectatorCamera::spawn_for_scene(&scene);
+
+        let actual = screenshot_startup_camera(&scene, StartupWaitPolicy::Playable);
+
+        assert_eq!(actual.position, expected.position);
+    }
 
     #[test]
     fn scripted_interaction_script_has_camera_input_and_final_framing_steps() {

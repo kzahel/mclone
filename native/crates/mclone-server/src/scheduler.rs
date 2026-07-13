@@ -66,10 +66,11 @@ use crate::timing::{
 };
 use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
-    CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState, ChunkResidency, ChunkStatusStep, ChunkTicketKey,
-    ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ, FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus,
-    LightStatusMailboxKind, LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL,
-    WorkerFrameMetrics, WorldBlockPos, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState,
+    ChunkResidency, ChunkStatusStep, ChunkTicketKey, ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ,
+    FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, LightStatusMailboxKind,
+    LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics,
+    WorldBlockPos, WorldGenerationProfile, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -476,6 +477,7 @@ struct PendingEntityChunkSave {
 #[derive(Debug)]
 pub struct ChunkScheduler {
     seed: i64,
+    world_generation_profile: WorldGenerationProfile,
     lighting_enabled: bool,
     light_status_batch_size: usize,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
@@ -740,6 +742,7 @@ impl ChunkScheduler {
     pub fn with_persistence(seed: i64, store: PersistenceMailbox) -> Self {
         Self {
             seed,
+            world_generation_profile: WorldGenerationProfile::default(),
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             holders: BTreeMap::new(),
@@ -789,6 +792,7 @@ impl ChunkScheduler {
     ) -> Self {
         Self {
             seed,
+            world_generation_profile: WorldGenerationProfile::default(),
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             holders: BTreeMap::new(),
@@ -832,6 +836,35 @@ impl ChunkScheduler {
 
     pub const fn seed(&self) -> i64 {
         self.seed
+    }
+
+    pub const fn world_generation_profile(&self) -> WorldGenerationProfile {
+        self.world_generation_profile
+    }
+
+    pub fn set_world_generation_profile(
+        &mut self,
+        profile: WorldGenerationProfile,
+    ) -> ChunkStoreResult<()> {
+        if self.world_generation_profile == profile {
+            return Ok(());
+        }
+        if !self.holders.is_empty()
+            || !self.pending_chunk_loads.is_empty()
+            || !self.stored_chunk_misses.is_empty()
+            || !self.jobs.is_empty()
+            || !self.pending_worldgen_publications.is_empty()
+            || !self.pending_light_status_batches.is_empty()
+            || self.worldgen_mailbox.pending_count() != 0
+            || self.light_mailbox.pending_count() != 0
+        {
+            return Err(ChunkStoreError::InvalidData(
+                "world generation profile must be selected before chunk scheduling begins"
+                    .to_string(),
+            ));
+        }
+        self.world_generation_profile = profile;
+        Ok(())
     }
 
     pub const fn lighting_enabled(&self) -> bool {
@@ -901,6 +934,13 @@ impl ChunkScheduler {
         events.extend(self.publish_pending_light_statuses(&mut publication, grants.light)?);
         self.store.process_one_background_write();
         events.extend(self.poll_persistence()?);
+        if self
+            .world_generation_profile
+            .authored_missing_chunk()
+            .is_some()
+        {
+            events.extend(self.enqueue_next_pending_feature_job());
+        }
         publication.pending_worldgen_publication_jobs = self.pending_worldgen_publications.len();
         publication.pending_worldgen_publication_chunks =
             self.pending_worldgen_publication_target_count();
@@ -1345,7 +1385,12 @@ impl ChunkScheduler {
             .values()
             .filter(|job| matches!(job.state, ChunkJobState::Queued | ChunkJobState::Running))
             .count();
+        let pending_authored_misses = self
+            .world_generation_profile
+            .authored_missing_chunk()
+            .map_or(0, |_| self.stored_chunk_misses.len());
         pending_status_jobs
+            + pending_authored_misses
             + self
                 .pending_light_status_batches
                 .values()
@@ -2736,6 +2781,13 @@ impl ChunkScheduler {
         }
 
         let candidates = dedupe_chunk_positions_preserving_order(candidates_in_priority_order);
+        if self
+            .world_generation_profile
+            .authored_missing_chunk()
+            .is_some()
+        {
+            return self.publish_authored_void_chunks(candidates);
+        }
         let target_limit = self.feature_job_target_limit(candidates.len());
         let job_targets = candidates
             .into_iter()
@@ -2770,6 +2822,99 @@ impl ChunkScheduler {
             &job_targets,
             seeded_dependencies,
         );
+        events
+    }
+
+    fn publish_authored_void_chunks(
+        &mut self,
+        candidates_in_priority_order: Vec<ChunkPos>,
+    ) -> Vec<ChunkSchedulerEvent> {
+        // A persistence miss is cheap compared with overworld generation, but
+        // materializing the canonical empty block buffer and snapshot still
+        // allocates a full-height chunk. Bound each admission while allowing a
+        // normal light batch to share one retained-world computation; feeding
+        // the light worker one empty chunk at a time makes authored startup
+        // needlessly repeat its whole batch setup.
+        let target_limit = self
+            .light_status_batch_size
+            .min(STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT);
+        let mut events = Vec::new();
+        let mut pending_light_statuses = Vec::new();
+        for pos in candidates_in_priority_order.into_iter().take(target_limit) {
+            let should_publish = self
+                .holders
+                .get(&pos)
+                .and_then(|holder| holder.status_slot(ChunkStatus::Features))
+                .is_some_and(|slot| {
+                    slot.step == ChunkStatusStep::Scheduled && slot.job_id.is_none()
+                });
+            if !should_publish {
+                self.stored_chunk_misses.remove(&pos);
+                continue;
+            }
+
+            self.stored_chunk_misses.remove(&pos);
+            events.push(status_changed_event(
+                pos,
+                ChunkStatus::Features,
+                ChunkStatusStep::Scheduled,
+            ));
+
+            let chunk = GeneratedChunk::from_mutable_buffer(MutableChunkBlockBuffer::new(
+                pos.x,
+                pos.z,
+                AUTHORED_WORLD_MIN_Y,
+                AUTHORED_WORLD_HEIGHT,
+            ));
+            let revision = ChunkRevision(self.next_revision);
+            self.next_revision = self.next_revision.saturating_add(1);
+            let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
+            self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
+            self.queue_record_save(
+                ChunkRecord::from_snapshot(snapshot.clone()),
+                SaveDurability::Cache,
+            );
+            events.push(status_changed_event(
+                pos,
+                ChunkStatus::Features,
+                ChunkStatusStep::Ready,
+            ));
+
+            let should_light = self.lighting_enabled
+                && self
+                    .holders
+                    .get(&pos)
+                    .and_then(|holder| holder.status_slot(ChunkStatus::Light))
+                    .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
+            if should_light {
+                events.push(status_changed_event(
+                    pos,
+                    ChunkStatus::Light,
+                    ChunkStatusStep::Scheduled,
+                ));
+                pending_light_statuses.push(PendingLightStatus::from_parts(
+                    pos,
+                    snapshot,
+                    chunk.blocks().to_vec(),
+                    Vec::new(),
+                ));
+            } else if self
+                .distance_manager
+                .player_interest_positions()
+                .contains(&pos)
+                && self.snapshot_is_client_ready(&snapshot)
+            {
+                self.holders
+                    .get_mut(&pos)
+                    .expect("holder must exist before marking visible")
+                    .set_client_visible(true);
+                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+            }
+        }
+
+        if !pending_light_statuses.is_empty() {
+            self.enqueue_light_status_batch(pending_light_statuses);
+        }
         events
     }
 
@@ -4325,6 +4470,77 @@ mod tests {
         );
         assert_eq!(metrics.latest_feature_job_first_target, Some(center));
         assert!(scheduler.pending_persistence_load_count() <= BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT);
+    }
+
+    #[test]
+    fn authored_only_persistence_miss_publishes_lit_void_without_worldgen() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::authored_only())
+            .unwrap();
+        let center = ChunkPos::new(4, -3);
+        scheduler
+            .apply_interest(ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+
+        let mut ready = None;
+        for _ in 0..100 {
+            assert_eq!(scheduler.job_count(), 0);
+            assert_eq!(scheduler.worldgen_mailbox_pending_count(), 0);
+            for event in scheduler.poll().unwrap() {
+                if let ChunkSchedulerEvent::SnapshotReady(snapshot) = event {
+                    ready = Some(snapshot);
+                }
+            }
+            if ready.is_some() {
+                break;
+            }
+            if scheduler.light_status_mailbox_pending_count() > 0 {
+                assert!(scheduler.wait_for_light_completion(Duration::from_secs(5)));
+            }
+            std::thread::yield_now();
+        }
+
+        let snapshot = ready.expect("authored persistence miss should reach client-ready light");
+        assert_eq!(snapshot.pos, center);
+        assert_eq!(snapshot.status, ChunkStatus::Light);
+        assert!(snapshot.light_correct);
+        assert_eq!(snapshot.min_y, AUTHORED_WORLD_MIN_Y);
+        assert_eq!(snapshot.height, AUTHORED_WORLD_HEIGHT);
+        assert!(snapshot.sections.iter().all(|section| {
+            section
+                .unpack_block_state_ids()
+                .into_iter()
+                .all(|state| state == BlockStateId(0))
+        }));
+        assert_eq!(scheduler.job_count(), 0);
+        assert_eq!(scheduler.worldgen_mailbox_pending_count(), 0);
+    }
+
+    #[test]
+    fn generation_profile_cannot_change_after_chunk_scheduling_begins() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+
+        let error = scheduler
+            .set_world_generation_profile(WorldGenerationProfile::authored_only())
+            .unwrap_err();
+
+        assert!(error.to_string().contains("before chunk scheduling begins"));
+        assert_eq!(
+            scheduler.world_generation_profile(),
+            WorldGenerationProfile::Overworld
+        );
     }
 
     #[test]

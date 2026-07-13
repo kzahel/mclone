@@ -9,7 +9,7 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **design plus a measured Slice 7 scene-owned warm-world path and an
-active live-diorama tactical with Slice 0 landed.** The engine still does not
+active live-diorama tactical with Slices 0–1 landed.** The engine still does not
 compose two worlds in one frame, but `McloneSceneHost`
 now owns one direct active `DrawableWorldSlot`, one optional detached standby,
 and—only for the launch diagnostic—a paired runtime-only `WorldGate`. The two
@@ -46,7 +46,7 @@ stop before simultaneous rendering. The next bounded composition milestone is
 draw one live local or remote hosted region as scaled geometry on a block-built
 table, then use only a simple blink around the already-proven activation.
 
-Last reconciled: 2026-07-13 (Tactical 175 Slice 0).
+Last reconciled: 2026-07-13 (Tactical 175 Slice 1).
 
 ## Motivation
 
@@ -244,6 +244,22 @@ path. Fresh flat/stereo captures were inspected, and the accepted five-run
 release batch measured 2.659 ms median average and 4.252 ms median P95 with
 9.1%/5.6% within-batch spread, zero over-budget frames, and zero accounting
 violations. That is the comparison anchor for every later no-preview gate.
+
+Slice 1 lands the server/content half of that shape. The serializable
+`WorldGenerationProfile` defaults every old world and host to `Overworld` while
+`AuthoredOnly` maps a true persistence miss to bounded void through the normal
+status/light/publication/persistence pipeline with no overworld feature job.
+The profile crosses native, dedicated, catalog/session, CLI/query, and browser
+Worker/IndexedDB startup. Authored entry uses the configured chunk hint rather
+than an unrelated seed-derived overworld biome search. A shared guarded fixture
+builder now creates the persistent grass/table A and grass/stone-island B roots,
+and ordinary native-runner and dedicated-TCP tests prove their spawn, lighting,
+mutation/restart, missing-void, and zero-worldgen contracts. Independent table
+and island pixels were inspected. The accepted no-preview release batch is
+2.510 ms median average and 4.331 ms median P95, respectively 5.6% lower and
+1.9% higher than Slice 0, with stable spread and no budget/accounting failure.
+No simultaneous-world pixel exists yet; Slice 2 is the static placed-terrain
+renderer proof.
 
 ### Same-world previews and non-recursive composition
 
@@ -556,9 +572,10 @@ bounded simultaneous-geometry plan lives in
    Finish Tactical 174's lifecycle, persistence, cancellation/replacement,
    asset-epoch, surface/device rebuild, and fixture-isolation closeout without
    changing the complete-slot ownership exchange.
-2. Execute Tactical 175's authored-only server profile, persistent A/B fixtures,
-   separate placed-terrain pipeline, and scene-owned local opaque/cutout
-   diorama. Stop at its Slice 3 manual table review before broadening behavior.
+2. With Tactical 175's authored-only server profile and persistent A/B fixtures
+   landed, execute the separate placed-terrain pipeline and scene-owned local
+   opaque/cutout diorama. Stop at its Slice 3 manual table review before
+   broadening behavior.
 3. After that review, prove live mutation, bounded-region enforcement,
    water/translucent ordering, simple blink activation/return, and a remote
    hosted source. Keep the dual-host/root-isolation smokes and materialized

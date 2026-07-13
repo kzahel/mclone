@@ -8,7 +8,7 @@ use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
-use mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE;
+use mclone_server::{DEFAULT_LIGHT_STATUS_BATCH_SIZE, WorldGenerationProfile};
 use mclone_ui::GameMovementMode;
 
 use crate::far_lod::{FarLodDetailMode, FarTerrainLodConfig};
@@ -17,6 +17,7 @@ use crate::{
 };
 
 pub const ARG_SEED: &str = "--seed";
+pub const ARG_GENERATION_PROFILE: &str = "--generation-profile";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
 pub const ARG_CHUNK_Z: &str = "--chunk-z";
 pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
@@ -47,6 +48,7 @@ pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 // need an explicit local registry entry in the app crate.
 pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_SEED,
+    ARG_GENERATION_PROFILE,
     ARG_CHUNK_X,
     ARG_CHUNK_Z,
     ARG_RENDER_DISTANCE,
@@ -74,6 +76,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
 ];
 
 pub const QUERY_SEED: &str = "seed";
+pub const QUERY_GENERATION_PROFILE: &str = "generationProfile";
 pub const QUERY_CHUNK_X: &str = "chunkX";
 pub const QUERY_CHUNK_Z: &str = "chunkZ";
 pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
@@ -96,6 +99,7 @@ pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
 
 pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SEED,
+    QUERY_GENERATION_PROFILE,
     QUERY_CHUNK_X,
     QUERY_CHUNK_Z,
     QUERY_RENDER_DISTANCE,
@@ -137,6 +141,7 @@ impl RenderDistanceLimits {
 #[derive(Clone, Debug, PartialEq)]
 pub struct StartupSceneOptions {
     pub seed: i64,
+    pub world_generation_profile: WorldGenerationProfile,
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub render_distance: u32,
@@ -161,6 +166,7 @@ impl Default for StartupSceneOptions {
     fn default() -> Self {
         Self {
             seed: DEFAULT_STARTUP_SEED,
+            world_generation_profile: WorldGenerationProfile::default(),
             chunk_x: DEFAULT_STARTUP_CHUNK_X,
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
@@ -349,6 +355,12 @@ impl StartupArgState {
             ARG_SEED => {
                 self.scene.seed = parse_i64_arg(ARG_SEED, args.next())?;
             }
+            ARG_GENERATION_PROFILE => {
+                self.scene.world_generation_profile = WorldGenerationProfile::parse_label(
+                    &parse_string_arg(ARG_GENERATION_PROFILE, args.next())?,
+                )
+                .map_err(anyhow::Error::msg)?;
+            }
             ARG_CHUNK_X => {
                 self.scene.chunk_x = parse_i32_arg(ARG_CHUNK_X, args.next())?;
             }
@@ -478,6 +490,12 @@ impl StartupArgState {
         match key {
             QUERY_SEED => {
                 self.scene.seed = parse_i64_arg(QUERY_SEED, value)?;
+            }
+            QUERY_GENERATION_PROFILE => {
+                self.scene.world_generation_profile = WorldGenerationProfile::parse_label(
+                    &parse_string_arg(QUERY_GENERATION_PROFILE, value)?,
+                )
+                .map_err(anyhow::Error::msg)?;
             }
             QUERY_CHUNK_X => {
                 self.scene.chunk_x = parse_i32_arg(QUERY_CHUNK_X, value)?;
@@ -789,6 +807,7 @@ mod tests {
             StartupSceneOptions::default(),
             StartupSceneOptions {
                 seed: 12_345,
+                world_generation_profile: WorldGenerationProfile::Overworld,
                 chunk_x: 0,
                 chunk_z: 0,
                 render_distance: 5,
@@ -844,6 +863,8 @@ mod tests {
         let argv = parse(&[
             ARG_SEED,
             "-77",
+            ARG_GENERATION_PROFILE,
+            "authored-only",
             ARG_RENDER_DISTANCE,
             "6",
             ARG_REMOTE_ADDR,
@@ -861,6 +882,7 @@ mod tests {
         let mut query = StartupArgState::default();
         for (key, value) in [
             (QUERY_SEED, "-77"),
+            (QUERY_GENERATION_PROFILE, "authored-only"),
             (QUERY_RENDER_DISTANCE, "6"),
             (QUERY_REMOTE_WS_URL, "example.test:25565"),
             (QUERY_DAY_TIME, "6000"),
@@ -888,6 +910,8 @@ mod tests {
         let options = parse(&[
             ARG_SEED,
             "-77",
+            ARG_GENERATION_PROFILE,
+            "authored-only",
             ARG_CHUNK_X,
             "4",
             ARG_CHUNK_Z,
@@ -926,6 +950,7 @@ mod tests {
             options.scene,
             StartupSceneOptions {
                 seed: -77,
+                world_generation_profile: WorldGenerationProfile::authored_only(),
                 chunk_x: 4,
                 chunk_z: -3,
                 render_distance: 5,
@@ -1181,6 +1206,7 @@ mod tests {
         let mut state = StartupArgState::default();
         for (key, value) in [
             (QUERY_SEED, "-77"),
+            (QUERY_GENERATION_PROFILE, "authored-only"),
             (QUERY_CHUNK_X, "4"),
             (QUERY_CHUNK_Z, "-3"),
             (QUERY_RENDER_DISTANCE, "6"),
@@ -1217,6 +1243,7 @@ mod tests {
             options.scene,
             StartupSceneOptions {
                 seed: -77,
+                world_generation_profile: WorldGenerationProfile::authored_only(),
                 chunk_x: 4,
                 chunk_z: -3,
                 render_distance: 6,

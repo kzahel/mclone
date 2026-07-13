@@ -29,6 +29,7 @@ interface IntegratedServerWorkerMessage {
   kind?: string;
   requestId?: number;
   seed?: number | string;
+  generationProfile?: "overworld" | "authored-only";
   lightStatusBatchSize?: number;
   jobWorkerUrl?: string;
   bindgenJsUrl?: string;
@@ -210,6 +211,10 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
         String(message.bindgenWasmUrl),
       )
       : new workerConstructor(seed);
+  }
+  const generationProfile = String(message.generationProfile ?? "overworld");
+  if (typeof (server as any).setWorldGenerationProfile === "function") {
+    (server as any).setWorldGenerationProfile(generationProfile);
   }
   const rawLightStatusBatchSize = Number(message.lightStatusBatchSize);
   const lightStatusBatchSize = Number.isFinite(rawLightStatusBatchSize)

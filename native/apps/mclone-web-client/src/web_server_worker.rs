@@ -20,10 +20,10 @@ use mclone_server::{
     ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServer,
     IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics, ServerRunnerError,
     ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind, WorldStore,
-    WorldStoreCompletion, WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind,
-    compute_light_status_job_frame, decode_chunk_record, decode_entity_chunk_record,
-    encode_chunk_record, encode_entity_chunk_record,
+    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    WorldGenerationProfile, WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    WorldgenJobSession, WorldgenMailboxKind, compute_light_status_job_frame, decode_chunk_record,
+    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -54,6 +54,7 @@ const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WebIntegratedServerRunnerConfig {
     pub seed: i64,
+    pub world_generation_profile: WorldGenerationProfile,
     pub light_status_batch_size: usize,
     pub worker_url: String,
     pub job_worker_url: String,
@@ -83,6 +84,7 @@ impl WebIntegratedServerRunnerConfig {
     ) -> Self {
         Self {
             seed,
+            world_generation_profile: WorldGenerationProfile::default(),
             light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             worker_url: worker_url.into(),
             job_worker_url: job_worker_url.into(),
@@ -103,6 +105,11 @@ impl WebIntegratedServerRunnerConfig {
             world_id: world_id.into(),
             clear_existing,
         };
+        self
+    }
+
+    pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
+        self.world_generation_profile = profile;
         self
     }
 
@@ -431,6 +438,11 @@ impl WebIntegratedServerRunner {
         set_string(&message, "kind", "start")?;
         set_number(&message, "requestId", f64::from(request_id))?;
         set_number(&message, "seed", config.seed as f64)?;
+        set_string(
+            &message,
+            "generationProfile",
+            config.world_generation_profile.label(),
+        )?;
         set_number(
             &message,
             "lightStatusBatchSize",
@@ -1755,6 +1767,15 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = setLightStatusBatchSize)]
     pub fn set_light_status_batch_size(&mut self, batch_size: usize) {
         self.server.set_light_status_batch_size(batch_size);
+    }
+
+    #[wasm_bindgen(js_name = setWorldGenerationProfile)]
+    pub fn set_world_generation_profile(&mut self, profile: String) -> Result<(), JsValue> {
+        let profile = WorldGenerationProfile::parse_label(&profile)
+            .map_err(|error| JsValue::from_str(&error))?;
+        self.server
+            .set_world_generation_profile(profile)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
     }
 
     #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]
