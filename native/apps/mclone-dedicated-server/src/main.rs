@@ -3,15 +3,18 @@ mod dedicated_smoke;
 mod session;
 mod websocket_bridge;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_protocol::PROTOCOL_VERSION;
-use mclone_server::{IntegratedServer, WorldGenerationProfile};
+use mclone_server::{
+    IntegratedServer, SimulationCadence, SimulationCadenceConfig, WorldGenerationProfile,
+};
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
 use crate::session::{DedicatedSession, DedicatedSessionDiagnostics};
@@ -21,6 +24,7 @@ const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
 const DEFAULT_SEED: i64 = 12345;
 const DEFAULT_WORLD_ROOT: &str = "worlds";
 const DEFAULT_WORLD_NAME: &str = "world";
+const AUTOSAVE_INTERVAL_GAMEPLAY_TICKS: u64 = 6_000;
 
 #[cfg(test)]
 static DEDICATED_NETWORK_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -412,148 +416,242 @@ fn run_server_loop_inner(
     let mut outbound = BTreeMap::<DedicatedConnectionId, connection::DedicatedOutbound>::new();
     let mut session_command_counts = BTreeMap::<DedicatedConnectionId, usize>::new();
     let mut summary = DedicatedServerSummary::default();
+    let cadence_config = SimulationCadenceConfig::default();
+    let host_interval = Duration::from_secs_f64(1.0 / f64::from(cadence_config.host_rate_hz));
+    let mut cadence = SimulationCadence::new(cadence_config)
+        .expect("default dedicated simulation cadence must be valid");
+    let mut next_host_boundary = Instant::now();
+    let mut pending_events = VecDeque::new();
     #[cfg(test)]
     let mut completed_connections = 0_usize;
 
     loop {
-        match network.recv()? {
-            DedicatedNetworkEvent::Connected {
-                id,
-                peer_addr,
-                outbound: connection_outbound,
-            } => {
-                let player_id = server.add_dedicated_player();
-                sessions.insert(id, DedicatedSession::new(player_id));
-                outbound.insert(id, connection_outbound);
-                session_command_counts.insert(id, 0);
-                log::info!("accepted dedicated client {id} from {peer_addr}");
+        let now = Instant::now();
+        if now < next_host_boundary {
+            if let Some(event) = network.recv_timeout(next_host_boundary - now)? {
+                pending_events.push_back(event);
             }
-            DedicatedNetworkEvent::Command {
-                id,
-                peer_addr,
-                command,
-            } => {
-                let Some(session) = sessions.get_mut(&id) else {
-                    let message = format!("received command for disconnected client {id}");
-                    if let Some(connection_outbound) = outbound.remove(&id) {
-                        let _ = connection_outbound.close(message.clone());
-                    }
-                    log::warn!("{message}");
-                    continue;
-                };
-                let result = session.handle_client_command(server, command);
-                let diagnostics = session.last_diagnostics();
-                match result {
-                    Ok(updates) => {
-                        let update_count = updates.len();
-                        let publish_result = outbound
-                            .get(&id)
-                            .context("dedicated connection has no outbound writer")
-                            .and_then(|connection_outbound| connection_outbound.publish(updates));
-                        if let Err(error) = publish_result {
-                            remove_session_player(server, &mut sessions, id);
-                            outbound.remove(&id);
-                            let command_count =
-                                session_command_counts.remove(&id).unwrap_or_default();
-                            println!(
-                                "{}",
-                                summary.marker_line("final", id, command_count, sessions.len())
-                            );
-                            log::warn!(
-                                "dedicated client {id} {peer_addr} could not queue {update_count} updates: {error:#}"
-                            );
-                        } else {
-                            summary.record_command(diagnostics, update_count);
+            continue;
+        }
+
+        while let Some(event) = network.recv_timeout(Duration::ZERO)? {
+            pending_events.push_back(event);
+        }
+
+        let mut command_publications = BTreeSet::new();
+        let mut active_summary_connections = BTreeSet::new();
+        let mut exit_after_boundary = false;
+        let mut exit_error = None;
+
+        while let Some(event) = pending_events.pop_front() {
+            match event {
+                DedicatedNetworkEvent::Connected {
+                    id,
+                    peer_addr,
+                    outbound: connection_outbound,
+                } => {
+                    let player_id = server.add_dedicated_player();
+                    sessions.insert(id, DedicatedSession::new(player_id));
+                    outbound.insert(id, connection_outbound);
+                    session_command_counts.insert(id, 0);
+                    log::info!("accepted dedicated client {id} from {peer_addr}");
+                }
+                DedicatedNetworkEvent::Command {
+                    id,
+                    peer_addr,
+                    command,
+                } => {
+                    let Some(session) = sessions.get_mut(&id) else {
+                        let message = format!("received command for disconnected client {id}");
+                        if let Some(connection_outbound) = outbound.remove(&id) {
+                            let _ = connection_outbound.close(message.clone());
+                        }
+                        log::warn!("{message}");
+                        continue;
+                    };
+                    match session.handle_client_command(server, command) {
+                        Ok(()) => {
+                            summary.record_command();
+                            command_publications.insert(id);
                             let connection_command_count =
                                 session_command_counts.entry(id).or_default();
                             *connection_command_count = connection_command_count.saturating_add(1);
                             if should_emit_active_summary(*connection_command_count) {
-                                println!(
-                                    "{}",
-                                    summary.marker_line(
-                                        "active",
-                                        id,
-                                        *connection_command_count,
-                                        sessions.len()
-                                    )
+                                active_summary_connections.insert(id);
+                            }
+                        }
+                        Err(err) => {
+                            let message = format!("{err:#}");
+                            if let Some(connection_outbound) = outbound.remove(&id) {
+                                let _ = connection_outbound.close(message.clone());
+                            }
+                            remove_session_player(server, &mut sessions, id);
+                            session_command_counts.remove(&id);
+                            if mode == ServerRunMode::ServeOnce {
+                                exit_error = Some(
+                                    anyhow::anyhow!(err)
+                                        .context(format!("failed to serve {id} {peer_addr}")),
+                                );
+                                exit_after_boundary = true;
+                            } else {
+                                log::warn!(
+                                    "failed to serve dedicated client {id} {peer_addr}: {message}"
                                 );
                             }
-                            log::debug!(
-                                "served dedicated client {id} {peer_addr} with {update_count} updates"
-                            );
                         }
                     }
-                    Err(err) => {
-                        let message = format!("{err:#}");
-                        if let Some(connection_outbound) = outbound.remove(&id) {
-                            let _ = connection_outbound.close(message.clone());
-                        }
-                        remove_session_player(server, &mut sessions, id);
-                        session_command_counts.remove(&id);
-                        if mode == ServerRunMode::ServeOnce {
-                            return Err(err)
-                                .with_context(|| format!("failed to serve {id} {peer_addr}"));
-                        }
-                        log::warn!("failed to serve dedicated client {id} {peer_addr}: {message}");
-                    }
                 }
-            }
-            DedicatedNetworkEvent::Disconnected {
-                id,
-                peer_addr,
-                command_count,
-                reason,
-            } => {
-                outbound.remove(&id);
-                remove_session_player(server, &mut sessions, id);
-                let connection_command_count =
-                    session_command_counts.remove(&id).unwrap_or(command_count);
-                println!(
-                    "{}",
-                    summary.marker_line("final", id, connection_command_count, sessions.len())
-                );
-                #[cfg(test)]
-                if command_count > 0 {
-                    completed_connections += 1;
-                }
-                if let Some(reason) = reason.as_deref() {
-                    log::warn!(
-                        "dedicated client {id} {peer_addr} disconnected after {command_count} commands: {reason}"
+                DedicatedNetworkEvent::Disconnected {
+                    id,
+                    peer_addr,
+                    command_count,
+                    reason,
+                } => {
+                    outbound.remove(&id);
+                    remove_session_player(server, &mut sessions, id);
+                    let connection_command_count =
+                        session_command_counts.remove(&id).unwrap_or(command_count);
+                    println!(
+                        "{}",
+                        summary.marker_line("final", id, connection_command_count, sessions.len())
                     );
-                } else {
-                    log::info!(
-                        "dedicated client {id} {peer_addr} disconnected after {command_count} commands"
-                    );
-                }
-                match mode {
-                    ServerRunMode::Forever => {}
-                    ServerRunMode::ServeOnce => {
-                        if command_count == 0 {
-                            if let Some(reason) = reason.as_deref() {
-                                bail!(
-                                    "connection {id} {peer_addr} closed without client command: {reason}"
-                                );
-                            }
-                            bail!("connection {id} {peer_addr} closed without client command");
-                        }
-                        return Ok(());
-                    }
                     #[cfg(test)]
-                    ServerRunMode::UntilDisconnects(target) => {
-                        if completed_connections >= target {
-                            return Ok(());
+                    {
+                        completed_connections += 1;
+                    }
+                    if let Some(reason) = reason.as_deref() {
+                        log::warn!(
+                            "dedicated client {id} {peer_addr} disconnected after {command_count} commands: {reason}"
+                        );
+                    } else {
+                        log::info!(
+                            "dedicated client {id} {peer_addr} disconnected after {command_count} commands"
+                        );
+                    }
+                    match mode {
+                        ServerRunMode::Forever => {}
+                        ServerRunMode::ServeOnce => {
+                            if command_count == 0 {
+                                let message = reason.map_or_else(
+                                    || format!(
+                                        "connection {id} {peer_addr} closed without client command"
+                                    ),
+                                    |reason| format!(
+                                        "connection {id} {peer_addr} closed without client command: {reason}"
+                                    ),
+                                );
+                                exit_error = Some(anyhow::anyhow!(message));
+                            }
+                            exit_after_boundary = true;
+                        }
+                        #[cfg(test)]
+                        ServerRunMode::UntilDisconnects(target) => {
+                            if completed_connections >= target {
+                                exit_after_boundary = true;
+                            }
                         }
                     }
                 }
-            }
-            DedicatedNetworkEvent::AcceptFailed { message } => {
-                if mode == ServerRunMode::ServeOnce {
-                    bail!(message);
+                DedicatedNetworkEvent::AcceptFailed { message } => {
+                    if mode == ServerRunMode::ServeOnce {
+                        exit_error = Some(anyhow::anyhow!(message));
+                        exit_after_boundary = true;
+                    } else {
+                        log::warn!("{message}");
+                    }
                 }
-                log::warn!("{message}");
             }
         }
+
+        let diagnostics = advance_dedicated_host_frame(server, &mut sessions, &mut cadence)?;
+        summary.record_tick(diagnostics);
+
+        let mut failed_publications = Vec::new();
+        for (&id, session) in &sessions {
+            let updates = server
+                .try_drain_updates_for_player(session.player_id())
+                .with_context(|| format!("failed to drain publications for client {id}"))?;
+            if updates.is_empty() && !command_publications.contains(&id) {
+                continue;
+            }
+            let update_count = updates.len();
+            let publish_result = outbound
+                .get(&id)
+                .context("dedicated connection has no outbound writer")
+                .and_then(|connection_outbound| connection_outbound.publish(updates));
+            match publish_result {
+                Ok(()) => summary.record_publication(update_count),
+                Err(error) => failed_publications.push((id, update_count, error)),
+            }
+        }
+        for (id, update_count, error) in failed_publications {
+            remove_session_player(server, &mut sessions, id);
+            outbound.remove(&id);
+            let command_count = session_command_counts.remove(&id).unwrap_or_default();
+            println!(
+                "{}",
+                summary.marker_line("final", id, command_count, sessions.len())
+            );
+            log::warn!("dedicated client {id} could not queue {update_count} updates: {error:#}");
+        }
+
+        for id in active_summary_connections {
+            let command_count = session_command_counts.get(&id).copied().unwrap_or_default();
+            println!(
+                "{}",
+                summary.marker_line("active", id, command_count, sessions.len())
+            );
+        }
+
+        if let Some(error) = exit_error {
+            return Err(error);
+        }
+        if exit_after_boundary {
+            return Ok(());
+        }
+
+        next_host_boundary += host_interval;
+        let max_catch_up = host_interval * cadence_config.max_catch_up_host_frames;
+        if Instant::now().saturating_duration_since(next_host_boundary) > max_catch_up {
+            next_host_boundary = Instant::now() + host_interval;
+        }
     }
+}
+
+fn advance_dedicated_host_frame(
+    server: &mut IntegratedServer,
+    sessions: &mut BTreeMap<DedicatedConnectionId, DedicatedSession>,
+    cadence: &mut SimulationCadence,
+) -> Result<DedicatedSessionDiagnostics> {
+    for session in sessions.values_mut() {
+        session.finish_tick_boundary(server)?;
+    }
+
+    let frame = cadence.advance_host_frame();
+    if frame.gameplay_ticks != 1 || frame.physics_steps != 3 {
+        bail!(
+            "dedicated default cadence produced unsupported frame gameplay_ticks={} physics_steps={}",
+            frame.gameplay_ticks,
+            frame.physics_steps
+        );
+    }
+    let report = server
+        .try_simulation_tick_report_global()
+        .context("failed to advance autonomous dedicated simulation")?;
+    if should_autosave(report.simulation_tick) {
+        server
+            .save_dirty_chunks()
+            .context("failed to queue dedicated autosave")?;
+    }
+    Ok(DedicatedSessionDiagnostics::from_report(
+        &report,
+        server.pending_job_count(),
+        server.pending_publication_count(),
+    ))
+}
+
+const fn should_autosave(simulation_tick: u64) -> bool {
+    simulation_tick > 0 && simulation_tick.is_multiple_of(AUTOSAVE_INTERVAL_GAMEPLAY_TICKS)
 }
 
 #[derive(Clone, Debug, Default)]
@@ -576,11 +674,17 @@ struct DedicatedServerSummary {
 }
 
 impl DedicatedServerSummary {
-    fn record_command(&mut self, diagnostics: DedicatedSessionDiagnostics, update_count: usize) {
+    fn record_command(&mut self) {
         self.command_count = self.command_count.saturating_add(1);
+    }
+
+    fn record_publication(&mut self, update_count: usize) {
         self.update_batches = self.update_batches.saturating_add(1);
         self.updates_sent = self.updates_sent.saturating_add(update_count);
         self.max_update_batch = self.max_update_batch.max(update_count);
+    }
+
+    fn record_tick(&mut self, diagnostics: DedicatedSessionDiagnostics) {
         self.total_tick_us = self.total_tick_us.saturating_add(diagnostics.tick_total_us);
         self.max_tick_us = self.max_tick_us.max(diagnostics.tick_total_us);
         self.total_scheduler_tick_us = self
@@ -670,10 +774,10 @@ mod tests {
         AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Direction, Vec3d,
         block_to_section_coord, chunk_section_index, local_block_coord, local_section_block_coord,
     };
-    use mclone_net::NativeClientSession;
+    use mclone_net::NativeClientIoSession;
     use mclone_protocol::{
         AcceptTeleportCommand, ChunkView, ClientCommand, MovePlayerCommand, PlayerActionCommand,
-        PlayerActionKind, ServerUpdate,
+        PlayerActionKind, RemotePlayerId, ServerUpdate,
     };
 
     #[test]
@@ -807,29 +911,28 @@ mod tests {
     #[test]
     fn dedicated_server_summary_marker_reports_host_side_scheduler_fields() {
         let mut summary = DedicatedServerSummary::default();
-        summary.record_command(
-            DedicatedSessionDiagnostics {
-                simulation_tick: 7,
-                tick_total_us: 2_500,
-                scheduler_tick_us: 1_250,
-                scheduler_publish_completed_us: 750,
-                publication: mclone_server::ChunkSchedulerPublicationDiagnostics {
-                    completed_feature_jobs_drained: 2,
-                    feature_chunks_published: 3,
-                    feature_chunks_skipped: 1,
-                    completed_light_statuses_drained: 4,
-                    light_statuses_published: 5,
-                    light_statuses_skipped: 1,
-                    pending_worldgen_publication_jobs: 6,
-                    pending_worldgen_publication_chunks: 7,
-                    pending_light_publications: 8,
-                    ..Default::default()
-                },
-                pending_jobs_after: 9,
-                pending_publications_after: 10,
+        summary.record_command();
+        summary.record_publication(11);
+        summary.record_tick(DedicatedSessionDiagnostics {
+            simulation_tick: 7,
+            tick_total_us: 2_500,
+            scheduler_tick_us: 1_250,
+            scheduler_publish_completed_us: 750,
+            publication: mclone_server::ChunkSchedulerPublicationDiagnostics {
+                completed_feature_jobs_drained: 2,
+                feature_chunks_published: 3,
+                feature_chunks_skipped: 1,
+                completed_light_statuses_drained: 4,
+                light_statuses_published: 5,
+                light_statuses_skipped: 1,
+                pending_worldgen_publication_jobs: 6,
+                pending_worldgen_publication_chunks: 7,
+                pending_light_publications: 8,
+                ..Default::default()
             },
-            11,
-        );
+            pending_jobs_after: 9,
+            pending_publications_after: 10,
+        });
 
         let line = summary.marker_line("active", DedicatedConnectionId::test_new(12), 1, 0);
 
@@ -844,6 +947,238 @@ mod tests {
         assert!(line.contains("light_statuses_published=5"));
         assert!(line.contains("pending_worldgen_publication_chunks=7"));
         assert!(line.contains("last_simulation_tick=7"));
+    }
+
+    #[test]
+    fn dedicated_host_advances_without_clients() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        server.disable_local_player();
+        let start_day_time = server.day_time();
+        let mut sessions = BTreeMap::new();
+        let mut cadence = SimulationCadence::default();
+
+        for _ in 0..20 {
+            advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
+        }
+
+        assert_eq!(server.simulation_tick(), 20);
+        assert_eq!(server.day_time(), start_day_time + 20);
+    }
+
+    #[test]
+    fn aggregate_command_volume_does_not_advance_host_clock() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        server.disable_local_player();
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        let id_a = DedicatedConnectionId::test_new(1);
+        let id_b = DedicatedConnectionId::test_new(2);
+        let mut sessions = BTreeMap::from([
+            (id_a, DedicatedSession::new(player_a)),
+            (id_b, DedicatedSession::new(player_b)),
+        ]);
+
+        for index in 0..100 {
+            let id = if index % 2 == 0 { id_a } else { id_b };
+            sessions
+                .get_mut(&id)
+                .unwrap()
+                .handle_client_command(
+                    &mut server,
+                    ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                        position: Vec3d::new(f64::from(index), 64.0, 0.0),
+                        on_ground: true,
+                    }),
+                )
+                .unwrap();
+        }
+        assert_eq!(server.simulation_tick(), 0);
+
+        advance_dedicated_host_frame(
+            &mut server,
+            &mut sessions,
+            &mut SimulationCadence::default(),
+        )
+        .unwrap();
+        assert_eq!(server.simulation_tick(), 1);
+    }
+
+    #[test]
+    fn dedicated_chunk_view_returns_before_snapshot_and_pushes_later() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        server.disable_local_player();
+        server.set_lighting_enabled(false);
+        let player = server.add_dedicated_player();
+        server.try_drain_updates_for_player(player).unwrap();
+        let id = DedicatedConnectionId::test_new(1);
+        let mut sessions = BTreeMap::from([(id, DedicatedSession::new(player))]);
+
+        let command_start = Instant::now();
+        sessions
+            .get_mut(&id)
+            .unwrap()
+            .handle_client_command(
+                &mut server,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }),
+            )
+            .unwrap();
+        assert!(command_start.elapsed() < Duration::from_millis(100));
+        assert!(
+            server
+                .try_drain_updates_for_player(player)
+                .unwrap()
+                .iter()
+                .all(|update| !matches!(update, ServerUpdate::ChunkSnapshot(_)))
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut cadence = SimulationCadence::default();
+        loop {
+            advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
+            let updates = server.try_drain_updates_for_player(player).unwrap();
+            if chunk_snapshot_opt(&updates, ChunkPos::new(0, 0)).is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "snapshot was never published");
+            std::thread::yield_now();
+        }
+    }
+
+    #[test]
+    fn idle_observer_receives_remote_player_movement() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        server.disable_local_player();
+        server.set_lighting_enabled(false);
+        let player_a = server.add_dedicated_player();
+        let player_b = server.add_dedicated_player();
+        let id_a = DedicatedConnectionId::test_new(1);
+        let id_b = DedicatedConnectionId::test_new(2);
+        let mut sessions = BTreeMap::from([
+            (id_a, DedicatedSession::new(player_a)),
+            (id_b, DedicatedSession::new(player_b)),
+        ]);
+        for id in [id_a, id_b] {
+            sessions
+                .get_mut(&id)
+                .unwrap()
+                .handle_client_command(
+                    &mut server,
+                    ClientCommand::SetChunkView(ChunkView {
+                        center: ChunkPos::new(0, 0),
+                        render_distance: 0,
+                        chunk_tracking_radius: 0,
+                    }),
+                )
+                .unwrap();
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut cadence = SimulationCadence::default();
+        let mut spawn_a = None;
+        let mut spawn_b = None;
+        while spawn_a.is_none() || spawn_b.is_none() {
+            advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
+            for (player, spawn) in [(player_a, &mut spawn_a), (player_b, &mut spawn_b)] {
+                for update in server.try_drain_updates_for_player(player).unwrap() {
+                    if let ServerUpdate::PlayerPosition(position) = update {
+                        *spawn = Some(position);
+                    }
+                }
+            }
+            assert!(
+                Instant::now() < deadline,
+                "spawn positions were never published"
+            );
+            std::thread::yield_now();
+        }
+        for (id, spawn) in [(id_a, spawn_a.unwrap()), (id_b, spawn_b.unwrap())] {
+            sessions
+                .get_mut(&id)
+                .unwrap()
+                .handle_client_command(
+                    &mut server,
+                    ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                        id: spawn.teleport_id,
+                    }),
+                )
+                .unwrap();
+        }
+        advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
+        server.try_drain_updates_for_player(player_a).unwrap();
+        server.try_drain_updates_for_player(player_b).unwrap();
+
+        let spawn_position = spawn_a.unwrap().position;
+        let moved = Vec3d::new(spawn_position.x + 0.25, spawn_position.y, spawn_position.z);
+        sessions
+            .get_mut(&id_a)
+            .unwrap()
+            .handle_client_command(
+                &mut server,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: moved,
+                    y_rot_degrees: 90.0,
+                    x_rot_degrees: -15.0,
+                    on_ground: true,
+                }),
+            )
+            .unwrap();
+        advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
+        let observer_updates = server.try_drain_updates_for_player(player_b).unwrap();
+        assert!(observer_updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::RemotePlayerUpdate(remote)
+                if remote.id == RemotePlayerId(player_a.as_u64())
+                    && remote.position == moved
+        )));
+    }
+
+    #[test]
+    fn zero_command_client_receives_periodic_time_push() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            run_server_loop(
+                listener,
+                DEFAULT_SEED,
+                DedicatedWorldSelection::Transient,
+                ServerRunMode::UntilDisconnects(1),
+            )
+            .unwrap();
+        });
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        let updates = wait_for_remote_updates(&mut session, |updates| {
+            let mut times = updates.iter().filter_map(|update| match update {
+                ServerUpdate::TimeUpdate { day_time } => Some(*day_time),
+                _ => None,
+            });
+            let Some(first) = times.next() else {
+                return false;
+            };
+            times.any(|time| time >= first + 20)
+        });
+        assert!(
+            updates
+                .iter()
+                .filter(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+                .count()
+                >= 2
+        );
+        drop(session);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn dedicated_autosave_period_is_six_thousand_gameplay_ticks() {
+        assert!(!should_autosave(0));
+        assert!(!should_autosave(5_999));
+        assert!(should_autosave(6_000));
+        assert!(!should_autosave(6_001));
+        assert!(should_autosave(12_000));
     }
 
     #[test]
@@ -862,24 +1197,30 @@ mod tests {
         });
 
         let client_a = std::thread::spawn(move || {
-            let mut session = NativeClientSession::connect(addr).unwrap();
+            let mut session = NativeClientIoSession::connect(addr).unwrap();
             session
-                .send_command(&ClientCommand::SetChunkView(ChunkView {
+                .send_command_only(ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(0, 0),
                     render_distance: 0,
                     chunk_tracking_radius: 0,
                 }))
-                .unwrap()
+                .unwrap();
+            wait_for_remote_updates(&mut session, |updates| {
+                chunk_snapshot_opt(updates, ChunkPos::new(0, 0)).is_some()
+            })
         });
         let client_b = std::thread::spawn(move || {
-            let mut session = NativeClientSession::connect(addr).unwrap();
+            let mut session = NativeClientIoSession::connect(addr).unwrap();
             session
-                .send_command(&ClientCommand::SetChunkView(ChunkView {
+                .send_command_only(ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(1, 0),
                     render_distance: 0,
                     chunk_tracking_radius: 0,
                 }))
-                .unwrap()
+                .unwrap();
+            wait_for_remote_updates(&mut session, |updates| {
+                chunk_snapshot_opt(updates, ChunkPos::new(1, 0)).is_some()
+            })
         });
 
         let updates_a = client_a.join().unwrap();
@@ -905,26 +1246,35 @@ mod tests {
         let world = DedicatedWorldSelection::Persistent { dir: root.clone() };
         let target = {
             let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world.clone());
-            let mut session = NativeClientSession::connect(addr).unwrap();
-            let updates = session
-                .send_command(&ClientCommand::SetChunkView(ChunkView {
+            let mut session = NativeClientIoSession::connect(addr).unwrap();
+            session
+                .send_command_only(ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(0, 0),
                     render_distance: 0,
                     chunk_tracking_radius: 0,
                 }))
                 .unwrap();
+            let updates = wait_for_remote_updates(&mut session, |updates| {
+                chunk_snapshot_opt(updates, ChunkPos::new(0, 0)).is_some()
+                    && player_position_teleport_id_opt(updates).is_some()
+            });
             let snapshot = chunk_snapshot(&updates, ChunkPos::new(0, 0));
             let target = first_non_air_block(snapshot);
             let teleport_id = player_position_teleport_id(&updates);
             session
-                .send_command(&ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                .send_command_only(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
                     id: teleport_id,
                 }))
                 .unwrap();
             session
-                .send_command(&move_near_block_command(target))
+                .send_command_only(move_near_block_command(target))
                 .unwrap();
-            let break_updates = session.send_command(&break_block_command(target)).unwrap();
+            session
+                .send_command_only(break_block_command(target))
+                .unwrap();
+            let break_updates = wait_for_remote_updates(&mut session, |updates| {
+                has_block_delta_for_block(updates, target, AIR_BLOCK_STATE_ID)
+            });
             assert!(has_block_delta_for_block(
                 &break_updates,
                 target,
@@ -936,14 +1286,17 @@ mod tests {
         };
 
         let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world.clone());
-        let mut session = NativeClientSession::connect(addr).unwrap();
-        let updates = session
-            .send_command(&ClientCommand::SetChunkView(ChunkView {
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
                 center: target.chunk_pos(),
                 render_distance: 0,
                 chunk_tracking_radius: 0,
             }))
             .unwrap();
+        let updates = wait_for_remote_updates(&mut session, |updates| {
+            chunk_snapshot_opt(updates, target.chunk_pos()).is_some()
+        });
         let snapshot = chunk_snapshot(&updates, target.chunk_pos());
         assert_eq!(snapshot_block_state(snapshot, target), AIR_BLOCK_STATE_ID);
         drop(session);
@@ -967,14 +1320,18 @@ mod tests {
             world,
         );
 
-        let mut session = NativeClientSession::connect(addr).unwrap();
-        let updates = session
-            .send_command(&ClientCommand::SetChunkView(ChunkView {
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
                 center: ChunkPos::new(manifest.center_chunk[0], manifest.center_chunk[1]),
                 render_distance: 0,
                 chunk_tracking_radius: 0,
             }))
             .unwrap();
+        let updates = wait_for_remote_updates(&mut session, |updates| {
+            chunk_snapshot_opt(updates, ChunkPos::new(0, 0)).is_some()
+                && player_position_teleport_id_opt(updates).is_some()
+        });
         let snapshot = chunk_snapshot(&updates, ChunkPos::new(0, 0));
         assert_ne!(
             snapshot_block_state(snapshot, BlockPos::new(8, 64, 8)),
@@ -1017,23 +1374,48 @@ mod tests {
     }
 
     fn chunk_snapshot(updates: &[ServerUpdate], pos: ChunkPos) -> &ChunkSnapshot {
-        updates
-            .iter()
-            .find_map(|update| match update {
-                ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos => Some(snapshot),
-                _ => None,
-            })
+        chunk_snapshot_opt(updates, pos)
             .unwrap_or_else(|| panic!("missing chunk snapshot for {pos:?}"))
     }
 
+    fn chunk_snapshot_opt(updates: &[ServerUpdate], pos: ChunkPos) -> Option<&ChunkSnapshot> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos == pos => Some(snapshot),
+            _ => None,
+        })
+    }
+
     fn player_position_teleport_id(updates: &[ServerUpdate]) -> u32 {
-        updates
-            .iter()
-            .find_map(|update| match update {
-                ServerUpdate::PlayerPosition(update) => Some(update.teleport_id),
-                _ => None,
-            })
-            .expect("missing player position update")
+        player_position_teleport_id_opt(updates).expect("missing player position update")
+    }
+
+    fn player_position_teleport_id_opt(updates: &[ServerUpdate]) -> Option<u32> {
+        updates.iter().find_map(|update| match update {
+            ServerUpdate::PlayerPosition(update) => Some(update.teleport_id),
+            _ => None,
+        })
+    }
+
+    fn wait_for_remote_updates(
+        session: &mut NativeClientIoSession,
+        ready: impl Fn(&[ServerUpdate]) -> bool,
+    ) -> Vec<ServerUpdate> {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut updates = Vec::new();
+        loop {
+            while let Some(batch) = session.try_drain_update_batch().unwrap() {
+                updates.extend(batch.into_updates());
+            }
+            if ready(&updates) {
+                return updates;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for autonomous dedicated publication; received {} updates",
+                updates.len()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     fn first_non_air_block(snapshot: &ChunkSnapshot) -> BlockPos {

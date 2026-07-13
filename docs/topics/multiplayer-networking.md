@@ -2,8 +2,9 @@
 
 Topic: multiplayer-networking
 
-Status: implementation active — research completed and autonomous dedicated
-tick plus full-duplex server-push selected 2026-07-13. Tactical
+Status: implementation active — autonomous dedicated ticking and native TCP
+server push landed 2026-07-13; consumer cleanup and web convergence are next.
+Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
@@ -17,14 +18,19 @@ the client-replica topology argument lives in
 
 ## Current state (verified 2026-07-10)
 
-Tactical 176 implementation began 2026-07-13. Its first runtime slice now
-separates one global simulation advance from independent ordered per-player
-publication drains and broadcasts time at the vanilla 20-tick period. Native
-TCP now has independent bounded client/server readers and writers, while the
-authority loop remains command-clocked until the tactical's autonomous-host
-cutover lands.
+Tactical 176 implementation began 2026-07-13. The dedicated server now runs
+one 20/20/60 authoritative cadence independently of command traffic, drains
+ordered commands at host boundaries, publishes every player's routed stream
+through independent bounded TCP writers, and autosaves every 6000 gameplay
+ticks. Worldgen completion and periodic time updates reach idle clients
+without polling commands. Native client/server TCP readers and writers are
+independent, and normal frame polling accepts unsolicited decoded batches.
+Response-era counter and API names still remain in the runtime adapters; their
+removal is the tactical's next slice before the equivalent production web
+worker cutover.
 
-What exists is better than "debug-only", but the wire model is scaffolding:
+The autonomous native wire now has the correct core shape, but session and
+production-web work remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, strict
   `PROTOCOL_VERSION = 19` equality check
@@ -57,24 +63,17 @@ What exists is better than "debug-only", but the wire model is scaffolding:
 
 ## Structural gaps (the reasons this topic exists)
 
-1. **Lockstep request/response wire.** The remote protocol is strictly one
-   update batch per client command; there is no server push. An idle client
-   receives nothing, and the client's 20-tick move reminder is the de facto
-   poll clock (`mclone-net/src/lib.rs:727-729,765-800`,
-   `mclone-app-runtime/src/host_mode.rs:93-99`). Time, entity, and remote
-   player updates only arrive as reply batches. Tactical 133 Slice 6 already
-   names server-push as open work.
-2. **The dedicated server has no autonomous tick.** It blocks on
-   `network.recv()` and runs exactly one simulation tick per inbound client
-   command (`mclone-dedicated-server/src/main.rs:364-365`,
-   `session.rs:77-106`); with zero clients the world freezes, with N chatty
-   clients it ticks at the aggregate command rate. Command handling also
-   synchronously waits up to 120 s for worldgen jobs and saves dirty chunks
-   per command (`session.rs:205-228,88-90`), serializing all clients through
-   one loop thread. This violates
-   [`../authoritative-host-scheduling.md`](../authoritative-host-scheduling.md)
-   (acks fast, snapshots later) and produced the 402-update giant-batch drain
-   incident that motivated tactical 151.
+1. **Response-era consumer compatibility.** Native TCP and dedicated authority
+   are full-duplex/push, but app-runtime/web adapters still expose
+   `pending_response_batches`, `response_sequence`, and
+   `drain_command_updates` names. Native ready-only polling no longer depends
+   on the counter, but the compatibility state obscures the actual stream and
+   queue model until Tactical 176 Slice 4 removes it.
+2. **Production web is not converged yet.** Browser remote still decodes
+   WebSocket frames through main-thread callbacks and the dedicated WebSocket
+   listener remains a one-WebSocket-to-one-native-TCP bridge. Slice 5 moves
+   both sides onto the shared host/connection model with worker-owned browser
+   receipt and decode.
 3. **No session layer.** Connection = anonymous player slot; no identity, no
    join phase beyond a version handshake, no keepalive/timeouts (dead peers
    only detected by IO errors), no rejoin-as-same-player; reconnect wipes the

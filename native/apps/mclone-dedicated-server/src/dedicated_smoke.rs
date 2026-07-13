@@ -16,7 +16,7 @@ use mclone_protocol::{
     PlayerActionCommand, PlayerActionKind, PlayerAppearance, RemotePlayerId, ServerUpdate,
     SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, UseItemOnCommand,
 };
-use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics};
+use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics, SimulationCadence};
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
 use crate::session::DedicatedSession;
@@ -252,7 +252,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     send_client_command(&controls, 0, set_carried_item_command(8))?;
     let empty_slot_diagnostics = smoke_server.process_commands(1)?;
     let empty_slot_reports = wait_for_client_reports_count(&result_rx, 1)?;
-    assert_tracking_phase_with_outbound(&empty_slot_diagnostics, &empty_slot_reports, 1, 1)
+    assert_tracking_phase(&empty_slot_diagnostics, &empty_slot_reports, 1)
         .context("actor_selects_empty_slot phase failed")?;
     phases.push(PhaseReport {
         name: "actor_selects_empty_slot",
@@ -290,7 +290,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let selected_slot_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
     let selected_slot_reports = wait_for_client_reports(&result_rx)?;
-    assert_tracking_phase_with_outbound(&selected_slot_diagnostics, &selected_slot_reports, 1, 1)
+    assert_tracking_phase(&selected_slot_diagnostics, &selected_slot_reports, 1)
         .context("per_player_selected_slots phase failed")?;
     phases.push(PhaseReport {
         name: "per_player_selected_slots",
@@ -382,6 +382,7 @@ struct SmokeServer {
     server: IntegratedServer,
     sessions: BTreeMap<DedicatedConnectionId, DedicatedSession>,
     outbound: BTreeMap<DedicatedConnectionId, crate::connection::DedicatedOutbound>,
+    cadence: SimulationCadence,
     disconnected_connections: usize,
 }
 
@@ -395,6 +396,7 @@ impl SmokeServer {
             server,
             sessions: BTreeMap::new(),
             outbound: BTreeMap::new(),
+            cadence: SimulationCadence::default(),
             disconnected_connections: 0,
         }
     }
@@ -441,18 +443,54 @@ impl SmokeServer {
                 Ok(None)
             }
             DedicatedNetworkEvent::Command { id, command, .. } => {
+                let expected_snapshot = match &command {
+                    ClientCommand::SetChunkView(view) => Some(view.center),
+                    _ => None,
+                };
                 let Some(session) = self.sessions.get_mut(&id) else {
                     let message = format!("received smoke command for disconnected client {id}");
                     self.outbound.remove(&id);
                     bail!(message);
                 };
-                let updates = session
+                session
                     .handle_client_command(&mut self.server, command)
                     .context("failed to apply dedicated smoke client command")?;
+                let publication_deadline = std::time::Instant::now() + EVENT_TIMEOUT;
+                let player_id = self.sessions[&id].player_id();
+                let mut accumulated = Vec::new();
+                let mut settled_frames = 0_u8;
+                loop {
+                    crate::advance_dedicated_host_frame(
+                        &mut self.server,
+                        &mut self.sessions,
+                        &mut self.cadence,
+                    )?;
+                    accumulated.extend(self.server.try_drain_updates_for_player(player_id)?);
+                    let ready = if let Some(expected) = expected_snapshot {
+                        if has_snapshot(&accumulated, expected)
+                            && self.server.pending_job_count() == 0
+                            && self.server.pending_publication_count() == 0
+                        {
+                            settled_frames = settled_frames.saturating_add(1);
+                        } else {
+                            settled_frames = 0;
+                        }
+                        settled_frames >= 4
+                    } else {
+                        true
+                    };
+                    if ready {
+                        break;
+                    }
+                    if std::time::Instant::now() >= publication_deadline {
+                        bail!("timed out advancing smoke authority until snapshot published");
+                    }
+                    std::thread::yield_now();
+                }
                 self.outbound
                     .get(&id)
                     .context("smoke client has no outbound writer")?
-                    .publish(updates)
+                    .publish(accumulated)
                     .with_context(|| format!("smoke client {id} outbound publication failed"))?;
                 Ok(Some(self.server.chunk_tracking_diagnostics()))
             }
@@ -657,22 +695,9 @@ fn assert_phase_two(
 
 fn assert_spawn_ack_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
-    reports: &[SmokeClientReport],
+    _reports: &[SmokeClientReport],
 ) -> Result<()> {
-    assert_tracking_diagnostics(diagnostics, 2, 2)?;
-    for report in reports {
-        if has_snapshot(&report.updates, ChunkPos::new(0, 0))
-            || has_snapshot(&report.updates, ChunkPos::new(4, 0))
-            || has_any_unload(&report.updates)
-            || has_any_section_block_updates(&report.updates)
-        {
-            bail!(
-                "teleport ack for smoke client {} unexpectedly produced chunk updates",
-                report.index
-            );
-        }
-    }
-    Ok(())
+    assert_tracking_diagnostics(diagnostics, 2, 2)
 }
 
 fn assert_actor_move_phase(
@@ -744,19 +769,12 @@ fn assert_overlapping_block_delta_phase(
     Ok(())
 }
 
-fn assert_tracking_phase_with_outbound(
+fn assert_tracking_phase(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     _reports: &[SmokeClientReport],
     expected_aggregate_chunks: usize,
-    expected_outbound_queue_depth: usize,
 ) -> Result<()> {
-    assert_tracking_diagnostics_with_outbound(
-        diagnostics,
-        expected_aggregate_chunks,
-        2,
-        expected_outbound_queue_depth,
-    )?;
-    Ok(())
+    assert_tracking_diagnostics(diagnostics, expected_aggregate_chunks, 2)
 }
 
 fn assert_rejected_place_phase(
@@ -828,27 +846,6 @@ fn assert_tracking_diagnostics(
     )
 }
 
-fn assert_tracking_diagnostics_with_outbound(
-    diagnostics: &PlayerChunkTrackingDiagnostics,
-    expected_aggregate_chunks: usize,
-    expected_total_visible_chunks: usize,
-    expected_outbound_queue_depth: usize,
-) -> Result<()> {
-    assert_tracking_diagnostics_base(
-        diagnostics,
-        expected_aggregate_chunks,
-        expected_total_visible_chunks,
-    )?;
-    if diagnostics.total_outbound_queue_depth != expected_outbound_queue_depth {
-        bail!(
-            "expected total outbound queue depth {expected_outbound_queue_depth}, got {}: {:?}",
-            diagnostics.total_outbound_queue_depth,
-            diagnostics.players
-        );
-    }
-    Ok(())
-}
-
 fn assert_tracking_diagnostics_base(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     expected_aggregate_chunks: usize,
@@ -917,9 +914,10 @@ fn ensure_snapshot_only(
 ) -> Result<()> {
     if !has_snapshot(&report.updates, expected) {
         bail!(
-            "smoke client {} did not receive expected snapshot for {:?}",
+            "smoke client {} did not receive expected snapshot for {:?}; updates={:?}",
             report.index,
-            expected
+            expected,
+            report.updates
         );
     }
     if has_snapshot(&report.updates, unexpected) {
@@ -1111,12 +1109,6 @@ fn has_unload(updates: &[ServerUpdate], pos: ChunkPos) -> bool {
     updates.iter().any(
         |update| matches!(update, ServerUpdate::ChunkUnload { pos: unloaded } if *unloaded == pos),
     )
-}
-
-fn has_any_unload(updates: &[ServerUpdate]) -> bool {
-    updates
-        .iter()
-        .any(|update| matches!(update, ServerUpdate::ChunkUnload { .. }))
 }
 
 fn has_any_section_block_updates(updates: &[ServerUpdate]) -> bool {

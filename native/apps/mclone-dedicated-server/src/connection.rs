@@ -118,6 +118,7 @@ impl DedicatedNetwork {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn recv(&self) -> Result<DedicatedNetworkEvent> {
         self.events
             .recv()

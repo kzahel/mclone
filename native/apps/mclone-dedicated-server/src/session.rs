@@ -1,10 +1,11 @@
 use std::collections::VecDeque;
 #[cfg(test)]
 use std::io::{Read, Write};
-use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result, bail};
-use mclone_protocol::{ClientCommand, MovePlayerCommand, ServerUpdate};
+use anyhow::Result;
+#[cfg(test)]
+use anyhow::{Context, bail};
+use mclone_protocol::{ClientCommand, MovePlayerCommand};
 use mclone_server::{
     ChunkSchedulerPublicationDiagnostics, IntegratedServer, ServerPlayerId,
     ServerSimulationTickReport,
@@ -28,7 +29,6 @@ pub(crate) fn serve_connection(
 pub(crate) struct DedicatedSession {
     player_id: ServerPlayerId,
     connection: DedicatedConnectionState,
-    last_diagnostics: DedicatedSessionDiagnostics,
 }
 
 impl DedicatedSession {
@@ -36,16 +36,11 @@ impl DedicatedSession {
         Self {
             player_id,
             connection: DedicatedConnectionState::default(),
-            last_diagnostics: DedicatedSessionDiagnostics::default(),
         }
     }
 
     pub(crate) const fn player_id(&self) -> ServerPlayerId {
         self.player_id
-    }
-
-    pub(crate) fn last_diagnostics(&self) -> DedicatedSessionDiagnostics {
-        self.last_diagnostics.clone()
     }
 
     #[cfg(test)]
@@ -60,9 +55,15 @@ impl DedicatedSession {
             try_read_client_command_frame(stream).context("failed to read client command")?
         {
             command_count += 1;
-            let updates = self
-                .handle_client_command(server, command)
+            self.handle_client_command(server, command)
                 .context("failed to apply client command")?;
+            self.finish_tick_boundary(server)?;
+            server
+                .try_simulation_tick_report_global()
+                .context("failed to advance compatibility server tick")?;
+            let updates = server
+                .try_drain_updates_for_player(self.player_id)
+                .context("failed to drain compatibility server updates")?;
             update_count += updates.len();
             write_server_update_batch(stream, &updates)
                 .context("failed to write server update batch")?;
@@ -78,31 +79,15 @@ impl DedicatedSession {
         &mut self,
         server: &mut IntegratedServer,
         command: ClientCommand,
-    ) -> Result<Vec<ServerUpdate>> {
-        let mut updates = self
-            .connection
-            .handle_command(server, self.player_id, command)?;
-        updates.extend(self.connection.flush_movement(server, self.player_id)?);
-        updates.extend(wait_for_server_jobs(server, self.player_id)?);
-        updates.extend(self.tick(server)?);
-        server
-            .save_dirty_chunks()
-            .context("failed to save dirty chunks")?;
-        Ok(updates)
+    ) -> Result<()> {
+        self.connection
+            .handle_command(server, self.player_id, command)
     }
 
-    fn tick(&mut self, server: &mut IntegratedServer) -> Result<Vec<ServerUpdate>> {
-        let report = server
-            .try_simulation_tick_report_for_player(self.player_id)
-            .context("failed to tick dedicated server session")?;
-        self.last_diagnostics = DedicatedSessionDiagnostics::from_report(
-            &report,
-            server.pending_job_count(),
-            server.pending_publication_count(),
-        );
-        let updates = report.updates;
+    pub(crate) fn finish_tick_boundary(&mut self, server: &mut IntegratedServer) -> Result<()> {
+        self.connection.flush_movement(server, self.player_id)?;
         self.connection.mark_tick_boundary();
-        Ok(updates)
+        Ok(())
     }
 }
 
@@ -118,7 +103,7 @@ pub(crate) struct DedicatedSessionDiagnostics {
 }
 
 impl DedicatedSessionDiagnostics {
-    fn from_report(
+    pub(crate) fn from_report(
         report: &ServerSimulationTickReport,
         pending_jobs_after: usize,
         pending_publications_after: usize,
@@ -148,16 +133,16 @@ impl DedicatedConnectionState {
         server: &mut IntegratedServer,
         player_id: ServerPlayerId,
         command: ClientCommand,
-    ) -> Result<Vec<ServerUpdate>> {
+    ) -> Result<()> {
         match command {
             ClientCommand::MovePlayer(command) => {
                 self.stage_movement(command);
-                Ok(Vec::new())
+                Ok(())
             }
             command => {
-                let mut updates = self.flush_movement(server, player_id)?;
-                updates.extend(server.try_handle_command_for_player(player_id, command)?);
-                Ok(updates)
+                self.flush_movement(server, player_id)?;
+                server.try_enqueue_command_for_player(player_id, command)?;
+                Ok(())
             }
         }
     }
@@ -171,15 +156,11 @@ impl DedicatedConnectionState {
         &mut self,
         server: &mut IntegratedServer,
         player_id: ServerPlayerId,
-    ) -> Result<Vec<ServerUpdate>> {
-        let mut updates = Vec::new();
+    ) -> Result<()> {
         while let Some(command) = self.pending_movement.pop_front() {
-            updates.extend(
-                server
-                    .try_handle_command_for_player(player_id, ClientCommand::MovePlayer(command))?,
-            );
+            server.try_enqueue_command_for_player(player_id, ClientCommand::MovePlayer(command))?;
         }
-        Ok(updates)
+        Ok(())
     }
 
     fn mark_tick_boundary(&mut self) {
@@ -199,31 +180,6 @@ impl DedicatedConnectionState {
     #[cfg(test)]
     const fn known_move_packet_count(&self) -> u32 {
         self.known_move_packet_count
-    }
-}
-
-fn wait_for_server_jobs(
-    server: &mut IntegratedServer,
-    player_id: ServerPlayerId,
-) -> Result<Vec<ServerUpdate>> {
-    let deadline = Instant::now() + Duration::from_secs(120);
-    let mut updates = Vec::new();
-
-    loop {
-        updates.extend(
-            server
-                .try_poll_for_player(player_id)
-                .context("failed to poll dedicated server worldgen jobs")?,
-        );
-        if server.pending_job_count() == 0 {
-            return Ok(updates);
-        }
-        if Instant::now() >= deadline {
-            bail!("timed out waiting for dedicated server worldgen jobs");
-        }
-        if server.pending_publication_count() == 0 {
-            std::thread::sleep(Duration::from_millis(1));
-        }
     }
 }
 
@@ -275,7 +231,7 @@ mod tests {
     }
 
     #[test]
-    fn serve_connection_returns_chunk_snapshot_spawn_and_tick_updates() {
+    fn serve_connection_does_not_wait_for_chunk_snapshot() {
         let mut request = Vec::new();
         write_client_command_frame(
             &mut request,
@@ -294,17 +250,12 @@ mod tests {
         let updates =
             read_server_update_batch(&mut std::io::Cursor::new(stream.written())).unwrap();
         assert_eq!(updates.len(), update_count);
-        assert!(update_count >= 3);
         assert!(
             updates
                 .iter()
-                .any(|update| matches!(update, ServerUpdate::ChunkSnapshot(_)))
+                .all(|update| !matches!(update, ServerUpdate::ChunkSnapshot(_)))
         );
-        assert!(
-            updates
-                .iter()
-                .any(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
-        );
+        assert!(server.pending_job_count() > 0);
         assert!(
             updates
                 .iter()
@@ -318,7 +269,7 @@ mod tests {
         let player_id = server.add_dedicated_player();
         let mut connection = DedicatedConnectionState::default();
 
-        let updates = connection
+        connection
             .handle_command(
                 &mut server,
                 player_id,
@@ -329,12 +280,11 @@ mod tests {
             )
             .unwrap();
 
-        assert!(updates.is_empty());
         assert_eq!(connection.buffered_move_packet_count(), 1);
         assert_eq!(connection.received_move_packet_count(), 1);
         assert_eq!(connection.known_move_packet_count(), 0);
 
-        let updates = connection
+        connection
             .handle_command(
                 &mut server,
                 player_id,
@@ -342,7 +292,6 @@ mod tests {
             )
             .unwrap();
 
-        assert!(updates.is_empty());
         assert_eq!(connection.buffered_move_packet_count(), 0);
         assert_eq!(connection.received_move_packet_count(), 1);
         assert_eq!(connection.known_move_packet_count(), 0);
@@ -369,7 +318,7 @@ mod tests {
         assert_eq!(session.connection.received_move_packet_count(), 1);
         assert_eq!(session.connection.known_move_packet_count(), 0);
 
-        session.tick(&mut server).unwrap();
+        session.finish_tick_boundary(&mut server).unwrap();
 
         assert_eq!(session.connection.received_move_packet_count(), 1);
         assert_eq!(session.connection.known_move_packet_count(), 1);
@@ -401,6 +350,8 @@ mod tests {
                 }),
             )
             .unwrap();
+        session_a.finish_tick_boundary(&mut server).unwrap();
+        session_b.finish_tick_boundary(&mut server).unwrap();
 
         assert_eq!(
             server.dedicated_player_position(player_a),
@@ -421,7 +372,7 @@ mod tests {
         let mut session_a = DedicatedSession::new(player_a);
         let mut session_b = DedicatedSession::new(player_b);
 
-        let updates_a = session_a
+        session_a
             .handle_client_command(
                 &mut server,
                 ClientCommand::SetChunkView(ChunkView {
@@ -431,7 +382,7 @@ mod tests {
                 }),
             )
             .unwrap();
-        let updates_b = session_b
+        session_b
             .handle_client_command(
                 &mut server,
                 ClientCommand::SetChunkView(ChunkView {
@@ -441,6 +392,10 @@ mod tests {
                 }),
             )
             .unwrap();
+        session_a.finish_tick_boundary(&mut server).unwrap();
+        session_b.finish_tick_boundary(&mut server).unwrap();
+        let [updates_a, updates_b] =
+            collect_player_updates_until_idle(&mut server, [player_a, player_b]);
 
         assert!(has_snapshot(&updates_a, ChunkPos::new(0, 0)));
         assert!(!has_snapshot(&updates_a, ChunkPos::new(4, 0)));
@@ -449,7 +404,7 @@ mod tests {
         assert!(!has_snapshot(&updates_b, ChunkPos::new(0, 0)));
         assert!(has_world_info(&updates_b));
 
-        let updates_a = session_a
+        session_a
             .handle_client_command(
                 &mut server,
                 ClientCommand::SetChunkView(ChunkView {
@@ -459,12 +414,16 @@ mod tests {
                 }),
             )
             .unwrap();
-        let updates_b = session_b
+        session_b
             .handle_client_command(
                 &mut server,
                 ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 1 }),
             )
             .unwrap();
+        session_a.finish_tick_boundary(&mut server).unwrap();
+        session_b.finish_tick_boundary(&mut server).unwrap();
+        let [updates_a, updates_b] =
+            collect_player_updates_until_idle(&mut server, [player_a, player_b]);
 
         assert!(has_unload(&updates_a, ChunkPos::new(0, 0)));
         assert!(has_snapshot(&updates_a, ChunkPos::new(1, 0)));
@@ -530,5 +489,29 @@ mod tests {
         updates
             .iter()
             .any(|update| matches!(update, ServerUpdate::WorldInfo { .. }))
+    }
+
+    fn collect_player_updates_until_idle<const N: usize>(
+        server: &mut IntegratedServer,
+        players: [ServerPlayerId; N],
+    ) -> [Vec<ServerUpdate>; N] {
+        let mut collected = std::array::from_fn(|_| Vec::new());
+        for _ in 0..60_000 {
+            server
+                .try_simulation_tick_report_global()
+                .expect("advance dedicated test host");
+            for (index, player_id) in players.iter().copied().enumerate() {
+                collected[index].extend(
+                    server
+                        .try_drain_updates_for_player(player_id)
+                        .expect("drain dedicated test player"),
+                );
+            }
+            if server.pending_job_count() == 0 {
+                return collected;
+            }
+            std::thread::yield_now();
+        }
+        panic!("timed out advancing dedicated test host until jobs completed");
     }
 }

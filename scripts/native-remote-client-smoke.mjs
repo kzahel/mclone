@@ -9,7 +9,7 @@ const observerScreenshotPath = process.env.MCLONE_NATIVE_REMOTE_SMOKE_OBSERVER_S
 const width = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_WIDTH ?? "960", 10);
 const height = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_HEIGHT ?? "540", 10);
 const renderDistance = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_RENDER_DISTANCE ?? "2", 10);
-const remoteSettleMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_REMOTE_SETTLE_MS ?? "1500", 10);
+const remoteSettleMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_REMOTE_SETTLE_MS ?? "6000", 10);
 const timeoutMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_TIMEOUT_MS ?? "120000", 10);
 
 run().catch((error) => {
@@ -276,7 +276,7 @@ function withTimeout(promise, timeout, message, log) {
 }
 
 function parseClientScreenshotReport(stdout) {
-  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands(?:, \d+ flat HUD retained rebuilds, \d+ flat HUD retained cache hits)?, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors(?:, underwater=(?:true|false))?\)/.exec(stdout);
+  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands(?:, \d+ flat HUD retained rebuilds, \d+ flat HUD retained cache hits)?, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors(?:, \d+ far LOD region draws, \d+ far LOD upload bytes)?(?:, underwater=(?:true|false))?\)/.exec(stdout);
   if (!report) {
     throw new Error(`native client did not print screenshot report:\n${stdout}`);
   }

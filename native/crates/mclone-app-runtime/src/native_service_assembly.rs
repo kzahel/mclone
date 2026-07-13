@@ -2740,7 +2740,7 @@ where
             ));
         }
 
-        if self.pending_response_batches == 0 {
+        if self.pending_response_batches == 0 && mode == ConnectionUpdateDrainMode::Blocking {
             return Ok(ClientConnectionDrainResult::default());
         }
 
@@ -4087,7 +4087,7 @@ mod tests {
         assert_eq!(diagnostics.server_update_queue_depth, 0);
         assert_eq!(diagnostics.updates, 1);
         assert_eq!(runtime.connection.pending_response_batches, 0);
-        assert_eq!(runtime.connection.session.try_drain_count, 2);
+        assert_eq!(runtime.connection.session.try_drain_count, 3);
         assert_eq!(runtime.core().day_time(), 6000);
     }
 

@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slices 0-2 completed 2026-07-13. Slice 3 autonomous dedicated
-host cutover is next.
+Status: active; Slices 0-3 completed 2026-07-13. Slice 4 native consumer
+convergence is next.
 
 Topic: `multiplayer-networking`
 
@@ -434,7 +434,9 @@ Validation evidence:
   after capture on the pre-existing screenshot-summary parser drift recorded
   in Slice 0.
 
-### Slice 3: Autonomous Dedicated Host Cutover
+### Slice 3: Autonomous Dedicated Host Cutover — Complete
+
+Status: completed 2026-07-13.
 
 Switch the dedicated authoritative loop as one behavior change:
 
@@ -467,6 +469,52 @@ Required proofs:
 
 Exit: remote dedicated gameplay no longer has any command-as-clock or
 command-as-poll dependency.
+
+Implemented result:
+
+- The production dedicated loop now collects connection events until a 50 ms
+  boundary, drains all ready events in receive order, flushes buffered player
+  movement, and advances one shared default-cadence host frame. Its global
+  simulation step runs once per boundary regardless of client or command
+  count, with the existing three physics substeps.
+- Every connected player's ordered publication queue is drained after the
+  shared step and handed to that connection's independent bounded writer.
+  Command handling only stages/enqueues authority work; it no longer polls
+  worldgen, advances time, saves, or waits for a response.
+- Worldgen snapshots publish from later scheduler gates. Persistence changed
+  from per-command saves to the vanilla-shaped 6000-gameplay-tick autosave,
+  while the existing process shutdown path retains its explicit dirty flush.
+- A deterministic `advance_dedicated_host_frame` seam owns movement-boundary,
+  cadence, global-simulation, worker-publication, and autosave behavior. The
+  wall-clock loop is now only event collection and pacing around that seam.
+- Native ready-only runtime polling now checks for unsolicited transport
+  frames even when no response-era counter is pending. Full removal of that
+  compatibility counter and terminology is deliberately left to Slice 4.
+- The native remote smoke parser now accepts the current far-LOD screenshot
+  fields, and its autonomous-startup settle window is six seconds. The native
+  inbound frame queue remains bounded and was raised from 64 to 256 batches;
+  exact measured pressure policy and shared diagnostics remain Slice 6 work.
+
+Validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server -p
+  mclone-net -p mclone-app-runtime -p mclone-dedicated-server`: passed 388
+  server, 17 net, 243 app-runtime, and 27 dedicated tests plus integration/doc
+  tests. Dedicated proofs cover a zero-client host step, command-rate
+  independence, zero-command periodic time push, asynchronous chunk-view
+  publication, idle-observer movement, and the 6000-tick autosave boundary.
+- `pnpm --silent native:dedicated:smoke`: passed its two-client fixture over
+  the autonomous host and independent writers.
+- `pnpm --silent native:remote:smoke`: passed with both native clients
+  receiving pushed terrain and observing one remote player, two entities, and
+  three actors. Both `/tmp` captures were inspected. The six- and ten-second
+  captures each had 49 tracked chunks but only 28 resident sections and three
+  drawn sections; the observer view therefore still exposes partial terrain
+  and void at this short smoke horizon. This is retained as explicit streaming
+  evidence for Slice 6 rather than concealed by further increasing the delay.
+- No Quest is available. Device frame-accounting evidence remains deferred as
+  agreed; native flat/offscreen, AVD, local browser/Playwright, and synthetic
+  XR are the available lanes for the remaining slices.
 
 ### Slice 4: Native Consumer Convergence And Response Cleanup
 

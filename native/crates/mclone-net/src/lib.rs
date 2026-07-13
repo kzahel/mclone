@@ -364,7 +364,7 @@ mod native_tcp {
 
     const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
     const CLIENT_COMMAND_QUEUE_CAPACITY: usize = 256;
-    const CLIENT_UPDATE_BATCH_QUEUE_CAPACITY: usize = 64;
+    const CLIENT_UPDATE_BATCH_QUEUE_CAPACITY: usize = 256;
     const HANDSHAKE_MAGIC: &[u8] = b"MCLONE_NATIVE_TCP";
     const SERVER_HANDSHAKE_ACCEPT: u8 = 1;
     const SERVER_HANDSHAKE_REJECT: u8 = 2;
