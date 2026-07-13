@@ -6,14 +6,19 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design plus a Slice 3 scene-owned, non-rendering warm standby.** The
+Status: **design plus a Slice 4 scene-owned, GPU-ready warm standby.** The
 engine does not yet compose or switch live worlds, but `McloneSceneHost` now
 owns one direct active `DrawableWorldSlot` and one optional detached standby.
-The launch-only harness has run two complete integrated hosts concurrently,
-acknowledged the standby's seed-dependent spawn pose, retained its CPU mesh
-seed, and resolved paired terrain-relative endpoint candidates while the active
-world continued to render. There is no world registry, selection branch, gate,
-or standby GPU terrain yet. Separately,
+The launch-only harness runs two complete integrated hosts concurrently,
+acknowledges the standby's seed-dependent spawn pose, resolves paired
+terrain-relative endpoint candidates, and incrementally admits its retained
+CPU seed through the ordinary terrain upload lifecycle. The standby reaches an
+explicit `Switchable` state only after its entry terrain is GPU-resident and
+traversal-ready and its required renderer topology is materialized. Active
+terrain preparation remains first and the standby has hard poll, compile,
+result-acceptance, upload, and elapsed-work caps. It is still neither drawn nor
+selectable: there is no world registry, selection command, slot swap, or gate.
+Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -30,7 +35,7 @@ implementation milestone is
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 3 checkpoint).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 4 checkpoint).
 
 ## Motivation
 
@@ -125,24 +130,30 @@ idle/warm, verifies neither replica receives the other's chunks, changes the
 logical active selection without reconstructing either runtime, and relies on
 ordinary owned-value drop for independent shutdown.
 
-This proves instanceability and isolation, not yet product switching. Slice 3
-now keeps the production scene's direct active `DrawableWorldSlot` plus one
+This proves instanceability and isolation, not yet product switching. Slice 4
+keeps the production scene's direct active `DrawableWorldSlot` plus one
 optional detached slot with independent runtime, camera, lifecycle, storage,
-CPU mesh seed, and provisional endpoint. Persistent-root isolation and
-authoritative pose acknowledgement are proven. Budgeted standby GPU admission,
-selection, and gate interaction remain later slices.
+terrain draw/upload state, and provisional endpoint. Persistent-root isolation,
+authoritative pose acknowledgement, budgeted standby GPU admission, and exact
+entry/topology readiness are proven. Selection and gate interaction remain
+later slices.
 
 The representative launch smoke (`12345` active, `67890` standby, render
-distance 2) reaches detached CPU readiness in about 0.5–0.65 seconds. Flat and
-synthetic-stereo runs measured roughly 1–1.5 ms worst scene-frame contribution,
-about 15 ms to enqueue the duplicate empty renderer shell before presentation,
-and 4.55 MiB of retained CPU startup meshes. A direct packed-section block
-lookup was required to make the bounded endpoint search honest: the first
+distance 2) reaches GPU `Switchable` readiness in about 0.69 seconds flat and
+0.84 seconds synthetic stereo. Its 64 initial lifecycle items drain in exactly
+64 capped GPU advances with no false compile-grant release; the latest flat
+run measured 0.670 ms worst GPU contribution, 23 GPU sections, 155,526 indices,
+and no queue at readiness. The duplicate empty renderer shell still costs about
+15 ms before presentation and the CPU startup seed is roughly 4.5 MiB. A
+direct packed-section block lookup was required to make the bounded endpoint
+search honest: the first
 whole-section-unpacking implementation cost about 300 ms, while the corrected
-allocation-free search costs about 1–1.5 ms. No-request five-run release medians
-remain 2.371 ms average / 3.955 ms P95, within about 1% of the clean anchors.
-These are desktop-host receipts, not a substitute for the later capable-XR
-multiview materialization gate.
+allocation-free search costs about 1–1.5 ms. The latest no-request release batch
+measured 2.676 ms average / 4.569 ms P95; a same-machine untouched-Slice-3
+control measured 2.679/4.650 ms, clearing Slice 4 despite system-level drift
+from the older clean anchors. These are desktop-host receipts. A
+`MULTIVIEW`-capable device will materialize the lazy standby renderer before
+readiness, but the current Mac cannot supply that final device receipt.
 
 The near-term product shape is:
 
@@ -397,16 +408,17 @@ The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives 
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
 
 1. Keep the landed active-plus-optional-standby path and its desktop/XR plus
-   five-run no-request frame-budget receipts green. Implement Tactical 174
-   Slice 4 by converting the retained CPU seed into budgeted standby GPU work;
-   keep active acceptance/upload ahead of background work.
+   contemporaneous-control no-request frame-budget receipts green. Implement
+   Tactical 174 Slice 5 as one atomic scripted A-to-B-to-A slot swap; retain
+   both runtimes and their GPU terrain throughout.
 2. Keep the dual-host view and persistent-root isolation smokes green.
-   Materialize mono/per-eye/multiview terrain resources before publishing
-   `Switchable`. Generalize to an N-world registry only after the bounded
-   hot-swap milestone needs one.
-3. Prove warm local switching: both worlds reach drawable readiness, switching
-   selects an already-built terrain store, and neither runtime is reconstructed.
-   Record switch latency and single-world before/after frame accounting.
+   Preserve the materialized mono/per-eye/multiview readiness contract and
+   close its outstanding capable-device receipt on XR/Windows. Generalize to
+   an N-world registry only after the bounded hot-swap milestone needs one.
+3. Prove warm local switching: the destination is drawable on the next frame,
+   neither runtime is reconstructed, and the old active slot becomes the ready
+   return destination. Record switch latency, uploads, compile submissions,
+   camera corrections, and single-world before/after frame accounting.
 4. Lobby spawn: authoritative world behavior profile + authored room.
 5. T0 baked diorama: placement transform, transformed fog/culling, shared depth,
    and both mono/per-eye/multiview validation.

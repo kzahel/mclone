@@ -73,9 +73,9 @@ use mclone_app_runtime::world_catalog::{
 };
 use mclone_app_runtime::{
     EngineCameraCommitContext, EngineCameraCommitTiming, GameplayCommandTiming,
-    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, SingleViewRuntimeStats,
-    TraversalReadySectionCache, debug_block_palette_overlay, debug_hotbar_icons, elapsed_ms,
-    micros_to_ms, set_player_appearance_command_for_ui_model,
+    GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
+    SingleViewRuntimeStats, TraversalReadySectionCache, debug_block_palette_overlay,
+    debug_hotbar_icons, elapsed_ms, micros_to_ms, set_player_appearance_command_for_ui_model,
 };
 use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, AssetSource};
 #[cfg(not(target_arch = "wasm32"))]
@@ -311,6 +311,24 @@ struct SceneHostServices {
     catalog_operations: Option<WorldCatalogOperationService>,
     teleport_preview: TeleportPreviewCapability,
     audio: AudioOutputCapability,
+}
+
+/// Host policy supplied to one slot's poll/compile/upload preparation pass.
+///
+/// Keeping these inputs together makes the active and standby paths share one
+/// implementation without teaching the single-world leaf about presentation
+/// ownership or reaching back through `McloneSceneHost` for mutable globals.
+#[derive(Clone)]
+struct WorldPreparationPolicy {
+    clock: MonotonicClockHandle,
+    target_period_ms: Option<f64>,
+    poll_budget: RuntimeUpdatePumpBudget,
+    upload_budget: Option<usize>,
+    accept_budget: Option<usize>,
+    completed_result_accept_budget: Option<usize>,
+    max_compile_requests: Option<usize>,
+    work_elapsed_budget: Option<Duration>,
+    defer_sync_after_pre_drain: bool,
 }
 
 /// One complete scene-owned world, including startup/lifecycle state and all
@@ -2002,55 +2020,47 @@ impl McloneSceneHost {
         })
     }
 
-    fn refresh_traversal_ready_sections(
-        &mut self,
+    fn refresh_world_slot_traversal_ready_sections(
+        slot: &mut DrawableWorldSlot,
+        clock: &MonotonicClockHandle,
         camera_position: Vec3,
         upload_backpressured: bool,
         skip_refresh: bool,
         timing: &mut XrTerrainFrameTiming,
     ) -> usize {
-        let ready_start = self.services.clock.now();
+        let ready_start = clock.now();
         if skip_refresh {
-            timing.runtime_ready_sections_ms =
-                elapsed_ms(self.services.clock.elapsed_since(ready_start));
-            let ready_publish_start = self.services.clock.now();
-            self.active_world
-                .draw
+            timing.runtime_ready_sections_ms = elapsed_ms(clock.elapsed_since(ready_start));
+            let ready_publish_start = clock.now();
+            slot.draw
                 .record_traversal_ready_sections_skipped(upload_backpressured);
-            timing.runtime_ready_publish_ms =
-                elapsed_ms(self.services.clock.elapsed_since(ready_publish_start));
-            return self.active_world.draw.traversal_ready_section_count();
+            timing.runtime_ready_publish_ms = elapsed_ms(clock.elapsed_since(ready_publish_start));
+            return slot.draw.traversal_ready_section_count();
         }
-        let draw_section_generation = self.active_world.draw.traversal_ready_source_generation();
+        let draw_section_generation = slot.draw.traversal_ready_source_generation();
         let refresh = {
-            let runtime = self
-                .active_world
+            let runtime = slot
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before ready refresh");
-            self.active_world.traversal_ready_sections.refresh(
+            slot.traversal_ready_sections.refresh(
                 runtime.core(),
                 camera_position,
                 draw_section_generation,
             )
         };
-        timing.runtime_ready_sections_ms =
-            elapsed_ms(self.services.clock.elapsed_since(ready_start));
-        let ready_publish_start = self.services.clock.now();
+        timing.runtime_ready_sections_ms = elapsed_ms(clock.elapsed_since(ready_start));
+        let ready_publish_start = clock.now();
         if refresh.refreshed {
-            self.active_world
-                .draw
-                .set_traversal_ready_sections_with_context(
-                    self.active_world.traversal_ready_sections.ready_sections(),
-                    upload_backpressured,
-                );
+            slot.draw.set_traversal_ready_sections_with_context(
+                slot.traversal_ready_sections.ready_sections(),
+                upload_backpressured,
+            );
         } else {
-            self.active_world
-                .draw
+            slot.draw
                 .record_traversal_ready_sections_skipped(upload_backpressured);
         }
-        timing.runtime_ready_publish_ms =
-            elapsed_ms(self.services.clock.elapsed_since(ready_publish_start));
+        timing.runtime_ready_publish_ms = elapsed_ms(clock.elapsed_since(ready_publish_start));
         refresh.section_count
     }
 
@@ -2061,12 +2071,47 @@ impl McloneSceneHost {
         frame_deadline: Option<MonotonicDeadline>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
+        let policy = WorldPreparationPolicy {
+            clock: self.services.clock.clone(),
+            target_period_ms: self.render_admission_target_period_ms(),
+            poll_budget: RuntimeUpdatePumpBudget::unlimited(),
+            upload_budget: self.render_section_upload_budget,
+            accept_budget: self.render_section_accept_budget,
+            completed_result_accept_budget: self.render_completed_result_accept_budget,
+            max_compile_requests: None,
+            work_elapsed_budget: None,
+            defer_sync_after_pre_drain: false,
+        };
+        let standby_deadline = frame_deadline.clone();
+        let upload = Self::prepare_world_slot(
+            &mut self.active_world,
+            device,
+            camera_position,
+            frame_deadline,
+            &policy,
+            timing,
+        )?;
+        #[cfg(not(target_arch = "wasm32"))]
+        self.advance_warm_world_gpu(device, standby_deadline)?;
+        #[cfg(target_arch = "wasm32")]
+        let _ = standby_deadline;
+        Ok(upload)
+    }
+
+    fn prepare_world_slot(
+        slot: &mut DrawableWorldSlot,
+        device: &wgpu::Device,
+        camera_position: Vec3,
+        frame_deadline: Option<MonotonicDeadline>,
+        policy: &WorldPreparationPolicy,
+        timing: &mut XrTerrainFrameTiming,
+    ) -> Result<XrTerrainUploadSummary> {
         let (
             pending_render_chunks_before,
             pending_compile_jobs_before,
             max_pending_compile_jobs,
             available_compile_slots_before,
-        ) = if let Some(runtime) = self.active_world.runtime.as_ref() {
+        ) = if let Some(runtime) = slot.runtime.as_ref() {
             (
                 runtime.pending_render_chunk_count(),
                 runtime.render_compile_pending_job_count(),
@@ -2074,29 +2119,30 @@ impl McloneSceneHost {
                 runtime.render_compile_available_pending_job_slots(),
             )
         } else {
-            let upload_queue = self.active_world.section_uploads.stats();
+            let upload_queue = slot.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
-                host_mode: self.runtime_host_mode(),
+                host_mode: XrTerrainHostMode::LocalIntegrated,
                 queued_upload_section_count: upload_queue.queued_upload_sections,
                 queued_upload_removed_section_count: upload_queue.queued_removed_sections,
                 queued_upload_lifecycle_item_count: upload_queue.queued_lifecycle_items,
                 queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
                 upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
                 upload_held_compile_job_count: upload_queue.held_compile_jobs,
-                traversal_ready_section_count: self
-                    .active_world
-                    .draw
-                    .traversal_ready_section_count(),
-                record_cache: self.active_world.draw.record_cache_stats(),
+                traversal_ready_section_count: slot.draw.traversal_ready_section_count(),
+                record_cache: slot.draw.record_cache_stats(),
                 ..XrTerrainUploadSummary::default()
             });
         };
-        let poll_start = self.services.clock.now();
-        let poll_changed = self.poll().context("poll XR terrain runtime")?;
-        timing.runtime_poll_ms = elapsed_ms(self.services.clock.elapsed_since(poll_start));
+        let poll_start = policy.clock.now();
+        let poll_changed = slot
+            .runtime
+            .as_mut()
+            .expect("runtime presence checked before poll")
+            .poll_with_update_budget(policy.poll_budget)
+            .context("poll prepared world runtime")?;
+        timing.runtime_poll_ms = elapsed_ms(policy.clock.elapsed_since(poll_start));
         let (poll_summary, has_runtime_render_work) = {
-            let runtime = self
-                .active_world
+            let runtime = slot
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before poll");
@@ -2108,47 +2154,51 @@ impl McloneSceneHost {
                 runtime.has_pending_render_work(camera_position),
             )
         };
-        let far_lod_stats = self
-            .active_world
+        let far_lod_stats = slot
             .runtime
             .as_ref()
             .expect("runtime presence checked before poll")
             .far_lod_stats();
-        self.active_world
-            .render_admission_policy
-            .set_lod_queue_telemetry(
-                far_lod_stats
-                    .pending_builds
-                    .saturating_add(far_lod_stats.inflight_builds),
-                far_lod_stats.oldest_build_age_ms,
-                far_lod_stats.queued_uploads,
-            );
-        let target_period_ms = self.render_admission_target_period_ms();
-        let budget_host_mode = match self.runtime_host_mode() {
+        slot.render_admission_policy.set_lod_queue_telemetry(
+            far_lod_stats
+                .pending_builds
+                .saturating_add(far_lod_stats.inflight_builds),
+            far_lod_stats.oldest_build_age_ms,
+            far_lod_stats.queued_uploads,
+        );
+        let target_period_ms = policy.target_period_ms;
+        let budget_host_mode = match slot
+            .runtime
+            .as_ref()
+            .expect("runtime presence checked before budget decision")
+            .host_mode()
+            .into()
+        {
             XrTerrainHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
             XrTerrainHostMode::RemoteDedicated => BudgetHostMode::RemoteHost,
         };
-        self.active_world
-            .render_admission_policy
-            .set_lod_producer_active(self.active_world.scene.far_lod.enabled);
-        let render_admission_grant = self.active_world.render_admission_policy.decide(
+        slot.render_admission_policy
+            .set_lod_producer_active(slot.scene.far_lod.enabled);
+        let render_admission_grant = slot.render_admission_policy.decide(
             target_period_ms,
             budget_host_mode,
-            self.render_section_upload_budget,
+            policy.upload_budget,
         );
-        if !poll_changed
-            && !has_runtime_render_work
-            && !self.active_world.section_uploads.has_pending_work()
-        {
-            let traversal_ready_section_count =
-                self.refresh_traversal_ready_sections(camera_position, false, false, timing);
-            let runtime = self
-                .active_world
+        if !poll_changed && !has_runtime_render_work && !slot.section_uploads.has_pending_work() {
+            let traversal_ready_section_count = Self::refresh_world_slot_traversal_ready_sections(
+                slot,
+                &policy.clock,
+                camera_position,
+                false,
+                false,
+                timing,
+            );
+            let runtime = slot
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before poll");
             let compile_health = runtime.render_compile_queue_health();
-            let upload_queue = self.active_world.section_uploads.stats();
+            let upload_queue = slot.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
                 poll_changed,
                 pending_render_chunks_before,
@@ -2175,72 +2225,112 @@ impl McloneSceneHost {
                 upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
                 upload_held_compile_job_count: upload_queue.held_compile_jobs,
                 traversal_ready_section_count,
-                record_cache: self.active_world.draw.record_cache_stats(),
+                record_cache: slot.draw.record_cache_stats(),
                 ..poll_summary
             });
         }
-        let upload_frame_policy = RenderSectionUploadFramePolicy::new(
-            self.render_section_upload_budget,
-            self.render_section_accept_budget,
-        );
+        let upload_frame_policy =
+            RenderSectionUploadFramePolicy::new(policy.upload_budget, policy.accept_budget);
         let mut upload_report = TexturedSectionUploadReport::default();
         let mut upload_phase = RenderSectionUploadPhaseReport::default();
-        let drained_pending_uploads_before_sync = self
-            .active_world
+        let drained_pending_uploads_before_sync = slot
             .section_uploads
             .should_drain_before_runtime_sync(upload_frame_policy);
         if drained_pending_uploads_before_sync {
-            let upload_start = self.services.clock.now();
-            let drained_report = self.apply_section_update_uploads(
+            let upload_start = policy.clock.now();
+            let drained_report = Self::apply_world_slot_section_update_uploads(
+                slot,
                 device,
                 RenderSectionCacheUpdate::default(),
                 false,
+                policy,
                 timing,
             )?;
-            let upload_elapsed_ms = elapsed_ms(self.services.clock.elapsed_since(upload_start));
+            let upload_elapsed_ms = elapsed_ms(policy.clock.elapsed_since(upload_start));
             timing.runtime_gpu_upload_ms += upload_elapsed_ms;
             timing.runtime_gpu_upload_pre_sync_ms += upload_elapsed_ms;
             accumulate_upload_report(&mut upload_report, drained_report.upload);
             upload_phase.absorb(drained_report.phase);
-            self.release_render_compile_jobs(drained_report.release_compile_jobs);
+            Self::release_world_slot_render_compile_jobs(slot, drained_report.release_compile_jobs);
         }
         let runtime_work_requested = poll_changed || has_runtime_render_work;
-        let upload_frame_decision = self
-            .active_world
-            .section_uploads
-            .frame_decision_after_pre_sync_drain(
-                upload_frame_policy,
-                runtime_work_requested,
-                drained_pending_uploads_before_sync,
-            );
-        let should_sync_render_sections = upload_frame_decision.should_sync_render_sections;
-        let sync_start = self.services.clock.now();
+        let upload_frame_decision = slot.section_uploads.frame_decision_after_pre_sync_drain(
+            upload_frame_policy,
+            runtime_work_requested,
+            drained_pending_uploads_before_sync,
+        );
+        let should_sync_render_sections = upload_frame_decision.should_sync_render_sections
+            && !(policy.defer_sync_after_pre_drain && drained_pending_uploads_before_sync);
+        let sync_start = policy.clock.now();
         let timed_section_update = if should_sync_render_sections {
             if let Some(grant) = render_admission_grant {
-                let admission_deadline = self.services.clock.deadline_after(grant.elapsed_budget);
-                let deadline = frame_deadline
+                let admission_deadline = policy.clock.deadline_after(grant.elapsed_budget);
+                let mut deadline = frame_deadline
                     .map(|frame_deadline| frame_deadline.earlier(admission_deadline.clone()))
                     .unwrap_or(admission_deadline);
-                self.sync_render_sections_until_deadline_with_admission_budget_timed(
-                    camera_position,
-                    deadline,
-                    grant.max_compile_requests,
-                )
-                .context("sync XR terrain render sections with adaptive admission")?
+                if let Some(work_elapsed_budget) = policy.work_elapsed_budget {
+                    deadline = deadline.earlier(policy.clock.deadline_after(work_elapsed_budget));
+                }
+                let max_compile_requests = policy
+                    .max_compile_requests
+                    .map_or(grant.max_compile_requests, |limit| {
+                        limit.min(grant.max_compile_requests)
+                    });
+                slot.runtime
+                    .as_mut()
+                    .expect("runtime presence checked before section sync")
+                    .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                        camera_position,
+                        deadline,
+                        max_compile_requests,
+                        policy.completed_result_accept_budget,
+                    )
+                    .context("sync prepared world render sections with adaptive admission")?
+            } else if let Some(max_compile_requests) = policy.max_compile_requests {
+                let work_deadline = policy.clock.deadline_after(
+                    policy
+                        .work_elapsed_budget
+                        .expect("bounded compile admission requires an elapsed budget"),
+                );
+                let deadline = frame_deadline
+                    .map(|frame_deadline| frame_deadline.earlier(work_deadline.clone()))
+                    .unwrap_or(work_deadline);
+                slot.runtime
+                    .as_mut()
+                    .expect("runtime presence checked before section sync")
+                    .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
+                        camera_position,
+                        deadline,
+                        max_compile_requests,
+                        policy.completed_result_accept_budget,
+                    )
+                    .context("sync prepared world render sections with bounded admission")?
             } else if let Some(deadline) = frame_deadline {
-                self.sync_render_sections_until_deadline_timed(camera_position, deadline)
-                    .context("sync XR terrain render sections until deadline")?
+                slot.runtime
+                    .as_mut()
+                    .expect("runtime presence checked before section sync")
+                    .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
+                        camera_position,
+                        deadline,
+                        policy.completed_result_accept_budget,
+                    )
+                    .context("sync prepared world render sections until deadline")?
             } else {
-                self.sync_render_sections_timed(camera_position)
-                    .context("sync XR terrain render sections")?
+                slot.runtime
+                    .as_mut()
+                    .expect("runtime presence checked before section sync")
+                    .sync_render_sections_with_completed_result_acceptance_timed(
+                        camera_position,
+                        policy.completed_result_accept_budget,
+                    )
+                    .context("sync prepared world render sections")?
             }
         } else {
             mclone_app_runtime::TimedRenderSectionCacheUpdate::default()
         };
-        self.active_world
-            .render_admission_policy
+        slot.render_admission_policy
             .observe_sync(target_period_ms, &timed_section_update);
-        timing.runtime_sync_ms = elapsed_ms(self.services.clock.elapsed_since(sync_start));
+        timing.runtime_sync_ms = elapsed_ms(policy.clock.elapsed_since(sync_start));
         timing.runtime_result_accept_ms = timed_section_update.timing.completed_result_accept_ms;
         timing.runtime_dirty_seed_ms = timed_section_update.timing.dirty_seed_ms;
         timing.runtime_prepare_ms = timed_section_update.timing.prepare_ms;
@@ -2388,8 +2478,7 @@ impl McloneSceneHost {
         let section_update = timed_section_update.cache_update;
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
-        let runtime_stats = self
-            .active_world
+        let runtime_stats = slot
             .runtime
             .as_ref()
             .expect("runtime presence checked before section sync")
@@ -2423,7 +2512,7 @@ impl McloneSceneHost {
         let queued_completed_compile_result_count = if should_sync_render_sections {
             section_update.queued_completed_compile_result_count
         } else {
-            self.active_world.runtime.as_ref().map_or(0, |runtime| {
+            slot.runtime.as_ref().map_or(0, |runtime| {
                 runtime.pending_completed_compile_result_count()
             })
         };
@@ -2432,8 +2521,7 @@ impl McloneSceneHost {
         let mut pending_compile_jobs_after_sync = if should_sync_render_sections {
             section_update.pending_compile_jobs
         } else {
-            self.active_world
-                .runtime
+            slot.runtime
                 .as_ref()
                 .map_or(0, |runtime| runtime.render_compile_pending_job_count())
         };
@@ -2442,21 +2530,25 @@ impl McloneSceneHost {
         let visibility_graph_worst_ms = section_update.visibility_graph_stats.worst_ms;
         let resident_mesh_stats = section_update.resident_mesh_stats;
         if upload_frame_decision.should_apply_section_update_after_sync {
-            let upload_start = self.services.clock.now();
-            let section_update_report = self.apply_section_update_uploads(
+            let upload_start = policy.clock.now();
+            let section_update_report = Self::apply_world_slot_section_update_uploads(
+                slot,
                 device,
                 section_update,
                 upload_frame_decision.upload_backpressured,
+                policy,
                 timing,
             )?;
-            let upload_elapsed_ms = elapsed_ms(self.services.clock.elapsed_since(upload_start));
+            let upload_elapsed_ms = elapsed_ms(policy.clock.elapsed_since(upload_start));
             timing.runtime_gpu_upload_ms += upload_elapsed_ms;
             timing.runtime_gpu_upload_post_sync_ms += upload_elapsed_ms;
             accumulate_upload_report(&mut upload_report, section_update_report.upload);
             upload_phase.absorb(section_update_report.phase);
-            self.release_render_compile_jobs(section_update_report.release_compile_jobs);
-            pending_compile_jobs_after_sync = self
-                .active_world
+            Self::release_world_slot_render_compile_jobs(
+                slot,
+                section_update_report.release_compile_jobs,
+            );
+            pending_compile_jobs_after_sync = slot
                 .runtime
                 .as_ref()
                 .map_or(0, |runtime| runtime.render_compile_pending_job_count());
@@ -2468,80 +2560,51 @@ impl McloneSceneHost {
         let skip_ready_refresh = upload_frame_decision.upload_backpressured
             && upload_report.uploaded_section_count == 0
             && upload_report.removed_section_count > 0;
-        let traversal_ready_section_count = self.refresh_traversal_ready_sections(
+        let traversal_ready_section_count = Self::refresh_world_slot_traversal_ready_sections(
+            slot,
+            &policy.clock,
             camera_position,
             upload_frame_decision.upload_backpressured,
             skip_ready_refresh,
             timing,
         );
-        let runtime = self
-            .active_world
+        let runtime = slot
             .runtime
             .as_ref()
             .expect("runtime presence checked before section sync");
         let compile_health = runtime.render_compile_queue_health();
-        self.active_world.render_stats.section_count = self.active_world.draw.section_count();
-        self.active_world.render_stats.index_count = self.active_world.draw.index_count();
-        self.active_world.render_stats.face_count =
-            quad_face_count_from_indices(self.active_world.render_stats.index_count);
-        self.active_world.render_stats.last_rebuilt_section_count = rebuilt_section_count;
-        self.active_world.render_stats.last_removed_section_count = removed_section_count;
-        self.active_world.render_stats.last_rebuilt_vertex_count = rebuilt_vertex_count;
-        self.active_world.render_stats.last_rebuilt_face_count =
+        slot.render_stats.section_count = slot.draw.section_count();
+        slot.render_stats.index_count = slot.draw.index_count();
+        slot.render_stats.face_count = quad_face_count_from_indices(slot.render_stats.index_count);
+        slot.render_stats.last_rebuilt_section_count = rebuilt_section_count;
+        slot.render_stats.last_removed_section_count = removed_section_count;
+        slot.render_stats.last_rebuilt_vertex_count = rebuilt_vertex_count;
+        slot.render_stats.last_rebuilt_face_count =
             quad_face_count_from_indices(rebuilt_index_count);
-        self.active_world.render_stats.last_rebuilt_index_count = rebuilt_index_count;
-        self.active_world
-            .render_stats
-            .last_neighbor_ready_section_count = neighbor_ready_section_count;
-        self.active_world
-            .render_stats
-            .last_near_exception_section_count = near_exception_section_count;
-        self.active_world.render_stats.last_deferred_section_count = deferred_section_count;
-        self.active_world
-            .render_stats
-            .last_submitted_compile_section_count = submitted_compile_section_count;
-        self.active_world
-            .render_stats
-            .last_completed_compile_section_count = completed_compile_section_count;
-        self.active_world
-            .render_stats
-            .last_stale_compile_section_count = stale_compile_section_count;
-        self.active_world.render_stats.last_pending_compile_jobs = pending_compile_jobs_after_sync;
-        self.active_world
-            .render_stats
-            .last_visibility_graph_build_count = visibility_graph_build_count;
-        self.active_world
-            .render_stats
-            .last_visibility_graph_total_ms = visibility_graph_total_ms;
-        self.active_world
-            .render_stats
-            .last_visibility_graph_worst_ms = visibility_graph_worst_ms;
+        slot.render_stats.last_rebuilt_index_count = rebuilt_index_count;
+        slot.render_stats.last_neighbor_ready_section_count = neighbor_ready_section_count;
+        slot.render_stats.last_near_exception_section_count = near_exception_section_count;
+        slot.render_stats.last_deferred_section_count = deferred_section_count;
+        slot.render_stats.last_submitted_compile_section_count = submitted_compile_section_count;
+        slot.render_stats.last_completed_compile_section_count = completed_compile_section_count;
+        slot.render_stats.last_stale_compile_section_count = stale_compile_section_count;
+        slot.render_stats.last_pending_compile_jobs = pending_compile_jobs_after_sync;
+        slot.render_stats.last_visibility_graph_build_count = visibility_graph_build_count;
+        slot.render_stats.last_visibility_graph_total_ms = visibility_graph_total_ms;
+        slot.render_stats.last_visibility_graph_worst_ms = visibility_graph_worst_ms;
         if let Some(resident) = resident_mesh_stats {
-            self.active_world
-                .render_stats
-                .resident_cpu_mesh_section_count = resident.resident_section_count;
-            self.active_world
-                .render_stats
-                .resident_cpu_mesh_vertex_count = resident.resident_vertex_count;
-            self.active_world.render_stats.resident_cpu_mesh_face_count =
-                resident.resident_face_count();
-            self.active_world.render_stats.resident_cpu_mesh_index_count =
-                resident.resident_index_count;
-            self.active_world.render_stats.resident_cpu_mesh_owned_bytes =
-                resident.resident_mesh_owned_bytes;
+            slot.render_stats.resident_cpu_mesh_section_count = resident.resident_section_count;
+            slot.render_stats.resident_cpu_mesh_vertex_count = resident.resident_vertex_count;
+            slot.render_stats.resident_cpu_mesh_face_count = resident.resident_face_count();
+            slot.render_stats.resident_cpu_mesh_index_count = resident.resident_index_count;
+            slot.render_stats.resident_cpu_mesh_owned_bytes = resident.resident_mesh_owned_bytes;
         }
-        self.active_world.render_stats.last_uploaded_section_count =
-            upload_report.uploaded_section_count;
-        self.active_world
-            .render_stats
-            .last_upload_removed_section_count = upload_report.removed_section_count;
-        self.active_world.render_stats.last_uploaded_vertex_count =
-            upload_report.uploaded_vertex_count;
-        self.active_world.render_stats.last_uploaded_face_count =
-            upload_report.uploaded_face_count();
-        self.active_world.render_stats.last_uploaded_index_count =
-            upload_report.uploaded_index_count;
-        let upload_queue = self.active_world.section_uploads.stats();
+        slot.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
+        slot.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
+        slot.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
+        slot.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
+        slot.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
+        let upload_queue = slot.section_uploads.stats();
         Ok(XrTerrainUploadSummary {
             poll_changed,
             pending_render_chunks_before,
@@ -2600,7 +2663,7 @@ impl McloneSceneHost {
             upload_accept_limited: upload_phase.accept_limited,
             upload_backpressured: upload_frame_decision.upload_backpressured,
             traversal_ready_section_count,
-            record_cache: self.active_world.draw.record_cache_stats(),
+            record_cache: slot.draw.record_cache_stats(),
             visibility_graph_build_count,
             visibility_graph_total_ms,
             visibility_graph_worst_ms,
@@ -2608,16 +2671,17 @@ impl McloneSceneHost {
         })
     }
 
-    fn apply_section_update_uploads(
-        &mut self,
+    fn apply_world_slot_section_update_uploads(
+        slot: &mut DrawableWorldSlot,
         device: &wgpu::Device,
         section_update: RenderSectionCacheUpdate,
         upload_backpressured: bool,
+        policy: &WorldPreparationPolicy,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadApplyReport> {
-        if self.render_section_upload_budget.is_none()
-            && self.render_section_accept_budget.is_none()
-            && !self.active_world.section_uploads.has_pending_work()
+        if policy.upload_budget.is_none()
+            && policy.accept_budget.is_none()
+            && !slot.section_uploads.has_pending_work()
         {
             let release_compile_jobs =
                 RenderSectionUploadCoordinator::direct_release_count(&section_update);
@@ -2627,9 +2691,8 @@ impl McloneSceneHost {
                 section_update.removed_section_keys.len(),
                 release_compile_jobs,
             );
-            let apply_start = self.services.clock.now();
-            let report = self
-                .active_world
+            let apply_start = policy.clock.now();
+            let report = slot
                 .draw
                 .apply_section_updates_with_context_timed(
                     device,
@@ -2637,9 +2700,8 @@ impl McloneSceneHost {
                     &section_update.removed_section_keys,
                     upload_backpressured,
                 )
-                .context("upload XR terrain render section updates");
-            timing.runtime_upload_apply_ms +=
-                elapsed_ms(self.services.clock.elapsed_since(apply_start));
+                .context("upload prepared world render section updates");
+            timing.runtime_upload_apply_ms += elapsed_ms(policy.clock.elapsed_since(apply_start));
             return report.map(|(upload, upload_timing)| {
                 timing.absorb_upload_apply_timing(upload_timing);
                 XrTerrainUploadApplyReport {
@@ -2650,21 +2712,15 @@ impl McloneSceneHost {
             });
         }
 
-        let enqueue_start = self.services.clock.now();
-        let mut phase = self
-            .active_world
+        let enqueue_start = policy.clock.now();
+        let mut phase = slot.section_uploads.enqueue_cache_update(section_update);
+        timing.runtime_upload_enqueue_ms += elapsed_ms(policy.clock.elapsed_since(enqueue_start));
+        let select_start = policy.clock.now();
+        let drain = slot
             .section_uploads
-            .enqueue_cache_update(section_update);
-        timing.runtime_upload_enqueue_ms +=
-            elapsed_ms(self.services.clock.elapsed_since(enqueue_start));
-        let select_start = self.services.clock.now();
-        let drain = self.active_world.section_uploads.drain_budgeted(
-            self.render_section_upload_budget,
-            self.render_section_accept_budget,
-        );
+            .drain_budgeted(policy.upload_budget, policy.accept_budget);
         phase.absorb(drain.phase_report);
-        timing.runtime_upload_select_ms +=
-            elapsed_ms(self.services.clock.elapsed_since(select_start));
+        timing.runtime_upload_select_ms += elapsed_ms(policy.clock.elapsed_since(select_start));
         if drain.is_empty() {
             return Ok(XrTerrainUploadApplyReport {
                 upload: TexturedSectionUploadReport::default(),
@@ -2672,9 +2728,8 @@ impl McloneSceneHost {
                 release_compile_jobs: phase.released_compile_jobs,
             });
         }
-        let apply_start = self.services.clock.now();
-        let report = self
-            .active_world
+        let apply_start = policy.clock.now();
+        let report = slot
             .draw
             .apply_section_updates_with_context_timed(
                 device,
@@ -2682,19 +2737,14 @@ impl McloneSceneHost {
                 &drain.removed_section_keys,
                 upload_backpressured,
             )
-            .context("accept budgeted XR terrain render section updates");
-        timing.runtime_upload_apply_ms +=
-            elapsed_ms(self.services.clock.elapsed_since(apply_start));
+            .context("accept budgeted prepared-world render section updates");
+        timing.runtime_upload_apply_ms += elapsed_ms(policy.clock.elapsed_since(apply_start));
         report.map(|(upload, upload_timing)| {
             timing.absorb_upload_apply_timing(upload_timing);
-            let released_on_apply = self
-                .active_world
+            let released_on_apply = slot
                 .section_uploads
                 .complete_applied_lifecycle_items(drain.lifecycle_item_count);
-            phase.record_applied_release(
-                released_on_apply,
-                self.active_world.section_uploads.stats(),
-            );
+            phase.record_applied_release(released_on_apply, slot.section_uploads.stats());
             XrTerrainUploadApplyReport {
                 upload,
                 phase,
@@ -2703,12 +2753,11 @@ impl McloneSceneHost {
         })
     }
 
-    fn release_render_compile_jobs(&mut self, count: usize) -> usize {
+    fn release_world_slot_render_compile_jobs(slot: &mut DrawableWorldSlot, count: usize) -> usize {
         if count == 0 {
             return 0;
         }
-        self.active_world
-            .runtime
+        slot.runtime
             .as_mut()
             .map_or(0, |runtime| runtime.release_render_compile_jobs(count))
     }
@@ -3195,64 +3244,6 @@ impl McloneSceneHost {
             .map(|_| ())
             .with_context(|| format!("wait for {label} submission"))?;
         Ok(())
-    }
-
-    fn sync_render_sections_timed(
-        &mut self,
-        camera_position: Vec3,
-    ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
-        let completed_result_accept_budget = self.render_completed_result_accept_budget;
-        self.active_world
-            .runtime
-            .as_mut()
-            .context("XR terrain runtime is not active")?
-            .sync_render_sections_with_completed_result_acceptance_timed(
-                camera_position,
-                completed_result_accept_budget,
-            )
-    }
-
-    fn sync_render_sections_until_deadline_timed(
-        &mut self,
-        camera_position: Vec3,
-        deadline: MonotonicDeadline,
-    ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
-        let completed_result_accept_budget = self.render_completed_result_accept_budget;
-        self.active_world
-            .runtime
-            .as_mut()
-            .context("XR terrain runtime is not active")?
-            .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
-                camera_position,
-                deadline,
-                completed_result_accept_budget,
-            )
-    }
-
-    fn sync_render_sections_until_deadline_with_admission_budget_timed(
-        &mut self,
-        camera_position: Vec3,
-        deadline: MonotonicDeadline,
-        max_compile_requests: usize,
-    ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
-        let completed_result_accept_budget = self.render_completed_result_accept_budget;
-        self.active_world.runtime
-            .as_mut()
-            .context("XR terrain runtime is not active")?
-            .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
-                camera_position,
-                deadline,
-                max_compile_requests,
-                completed_result_accept_budget,
-            )
-    }
-
-    fn poll(&mut self) -> Result<bool> {
-        self.active_world
-            .runtime
-            .as_mut()
-            .context("XR terrain runtime is not active")?
-            .poll()
     }
 
     fn commit_engine_camera_player_pose_timed(

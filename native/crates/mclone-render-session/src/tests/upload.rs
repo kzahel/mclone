@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn startup_seed_conversion_conserves_meshes_without_compile_releases() {
+    let populated_key = RenderSectionKey::new(0, 4, 0);
+    let empty_key = RenderSectionKey::new(0, 5, 0);
+    let vertex = TexturedChunkVertex {
+        position: [0.0, 0.0, 0.0],
+        uv: [0.0, 0.0],
+        color: [1.0, 1.0, 1.0, 1.0],
+        packed_light: 0,
+    };
+    let populated = TexturedRenderSectionMesh {
+        key: populated_key,
+        mesh: TexturedVisibleChunkMesh {
+            vertices: vec![vertex; 4],
+            indices: vec![0, 1, 2, 2, 3, 0],
+            solid_index_count: 6,
+            opaque_index_count: 6,
+        },
+        visibility: VisibilitySet::all_visible(),
+    };
+    let empty = test_section_mesh(empty_key);
+    let update = RenderSectionCacheUpdate::from_startup_seed(vec![populated, empty]);
+
+    assert_eq!(update.rebuilt_section_count(), 2);
+    assert_eq!(update.rebuilt_vertex_count, 4);
+    assert_eq!(update.rebuilt_index_count, 6);
+    assert_eq!(update.accepted_compile_result_count, 0);
+    assert_eq!(update.submitted_compile_section_count, 0);
+
+    let mut coordinator = RenderSectionUploadCoordinator::default();
+    let enqueue = coordinator.enqueue_cache_update(update);
+    assert_eq!(enqueue.queued_lifecycle_items, 2);
+    assert_eq!(enqueue.released_compile_jobs, 0);
+    assert_eq!(coordinator.stats().held_compile_jobs, 0);
+
+    let mut drained_sections = 0;
+    let mut drained_vertices = 0;
+    let mut drained_indices = 0;
+    while coordinator.has_pending_work() {
+        let drain = coordinator.drain_budgeted(Some(1), Some(1));
+        drained_sections += drain.rebuilt_sections.len();
+        for section in &drain.rebuilt_sections {
+            let stats = section.stats();
+            drained_vertices += stats.vertex_count;
+            drained_indices += stats.index_count;
+        }
+        assert_eq!(
+            coordinator.complete_applied_lifecycle_items(drain.lifecycle_item_count),
+            0
+        );
+    }
+    assert_eq!(drained_sections, 2);
+    assert_eq!(drained_vertices, 4);
+    assert_eq!(drained_indices, 6);
+    assert_eq!(coordinator.stats().held_compile_jobs, 0);
+}
+
+#[test]
 fn upload_coordinator_drains_removals_by_accept_budget_and_releases_after_batch_apply() {
     let first = RenderSectionKey::new(0, 4, 0);
     let second = RenderSectionKey::new(1, 4, 0);

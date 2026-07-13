@@ -43,6 +43,32 @@ pub struct RenderSectionCacheUpdate {
 }
 
 impl RenderSectionCacheUpdate {
+    /// Convert an already-compiled one-shot startup seed into ordinary upload
+    /// coordinator work.
+    ///
+    /// These meshes did not consume a live compile-dispatch grant, so the
+    /// accepted-result count deliberately remains zero. Their vertex/index
+    /// totals still describe the payload exactly for diagnostics and
+    /// conservation checks.
+    pub fn from_startup_seed(rebuilt_sections: Vec<TexturedRenderSectionMesh>) -> Self {
+        let (rebuilt_vertex_count, rebuilt_index_count) =
+            rebuilt_sections
+                .iter()
+                .fold((0_u32, 0_u32), |(vertices, indices), section| {
+                    let stats = section.stats();
+                    (
+                        vertices.saturating_add(stats.vertex_count),
+                        indices.saturating_add(stats.index_count),
+                    )
+                });
+        Self {
+            rebuilt_sections,
+            rebuilt_vertex_count,
+            rebuilt_index_count,
+            ..Self::default()
+        }
+    }
+
     pub fn rebuilt_section_count(&self) -> usize {
         self.rebuilt_sections.len()
     }

@@ -459,29 +459,61 @@ impl OffscreenDriver {
                 }
                 if stable >= STREAM_STABLE_FRAMES {
                     if let Some(snapshot) = self.host.warm_world_standby_snapshot() {
-                        if snapshot.phase != WarmWorldStandbyPhase::CpuReady {
+                        if snapshot.phase != WarmWorldStandbyPhase::Switchable {
                             bail!(
                                 "warm-world standby ended in phase {} during stereo warmup: {}",
                                 snapshot.phase.label(),
                                 snapshot.failure.as_deref().unwrap_or("no failure detail"),
                             );
                         }
+                        if !snapshot.readiness.switchable
+                            || snapshot.initial_upload_applied_lifecycle_items
+                                != snapshot.initial_upload_lifecycle_items
+                            || snapshot.initial_upload_released_compile_jobs != 0
+                            || snapshot.gpu_ready_advance_count
+                                != snapshot.initial_upload_lifecycle_items
+                        {
+                            bail!(
+                                "warm-world standby violated stereo switchable conservation: readiness={} initial={}/{} initial_releases={} ready_advances={}",
+                                snapshot.readiness.switchable,
+                                snapshot.initial_upload_applied_lifecycle_items,
+                                snapshot.initial_upload_lifecycle_items,
+                                snapshot.initial_upload_released_compile_jobs,
+                                snapshot.gpu_ready_advance_count,
+                            );
+                        }
                         eprintln!(
-                            "warm_world_standby_stereo id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
+                            "warm_world_standby_stereo id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} multiview_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} initial_uploads={}/{} initial_releases={} gpu_advances={}/{} gpu_ms={:.3} gpu_sections={} gpu_indices={} queue={} queue_bytes={} entry_resident={} topology_ready={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} worst_gpu_ms={:.3} endpoint_ms={:.3} skipped_no_slack={}",
                             snapshot.instance_id.get(),
                             snapshot.seed,
                             snapshot.phase.label(),
                             snapshot.elapsed_ms,
                             snapshot.renderer_shell_create_ms,
+                            snapshot.renderer_multiview_create_ms,
                             snapshot.poll_count,
                             snapshot.loaded_chunks,
                             snapshot.startup_seed_sections,
                             snapshot.startup_seed_drawable_sections,
                             snapshot.startup_seed_owned_bytes,
+                            snapshot.initial_upload_applied_lifecycle_items,
+                            snapshot.initial_upload_lifecycle_items,
+                            snapshot.initial_upload_released_compile_jobs,
+                            snapshot.gpu_advance_count,
+                            snapshot.gpu_ready_advance_count,
+                            snapshot.gpu_warm_ms,
+                            snapshot.gpu_section_count,
+                            snapshot.gpu_index_count,
+                            snapshot.queued_upload_lifecycle_items,
+                            snapshot.queued_upload_mesh_owned_bytes,
+                            snapshot.readiness.entry_section_gpu_resident
+                                && snapshot.readiness.entry_section_traversal_ready,
+                            snapshot.readiness.renderer_topology_ready,
                             snapshot.worst_advance_ms,
                             snapshot.worst_startup_step_ms,
                             snapshot.worst_runtime_poll_ms,
+                            snapshot.worst_gpu_advance_ms,
                             snapshot.endpoint_resolution_ms,
+                            snapshot.gpu_skipped_no_slack_count,
                         );
                     }
                     return Ok(());
@@ -648,11 +680,26 @@ impl OffscreenDriver {
             .host
             .warm_world_standby_snapshot()
             .context("warm-world standby readiness requested without a standby")?;
-        if snapshot.phase != WarmWorldStandbyPhase::CpuReady {
+        if snapshot.phase != WarmWorldStandbyPhase::Switchable {
             bail!(
-                "warm-world standby ended in phase {}: {}",
+                "warm-world standby ended in phase {} before switchable readiness: {}",
                 snapshot.phase.label(),
                 snapshot.failure.as_deref().unwrap_or("no failure detail"),
+            );
+        }
+        if !snapshot.readiness.switchable
+            || snapshot.initial_upload_applied_lifecycle_items
+                != snapshot.initial_upload_lifecycle_items
+            || snapshot.initial_upload_released_compile_jobs != 0
+            || snapshot.gpu_ready_advance_count != snapshot.initial_upload_lifecycle_items
+        {
+            bail!(
+                "warm-world standby violated switchable conservation: readiness={} initial={}/{} initial_releases={} ready_advances={}",
+                snapshot.readiness.switchable,
+                snapshot.initial_upload_applied_lifecycle_items,
+                snapshot.initial_upload_lifecycle_items,
+                snapshot.initial_upload_released_compile_jobs,
+                snapshot.gpu_ready_advance_count,
             );
         }
         Ok(snapshot)

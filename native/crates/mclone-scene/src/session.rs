@@ -1212,8 +1212,8 @@ impl McloneSceneHost {
 
     /// Construct Tactical 174's one detached local standby without replacing
     /// the active slot. The empty renderer shell is deliberately created here,
-    /// before the interactive frame loop begins; terrain remains CPU-only until
-    /// the later budgeted-warm slice.
+    /// before the interactive frame loop begins. Section meshes are admitted
+    /// later through the ordinary budgeted preparation path.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn begin_warm_world_standby(
         &mut self,
@@ -1259,6 +1259,16 @@ impl McloneSceneHost {
         .context("initialize detached standby terrain renderer shell")?;
         let renderer_shell_create_ms =
             elapsed_ms(self.services.clock.elapsed_since(shell_started_at));
+        let renderer_multiview_required = device.features().contains(wgpu::Features::MULTIVIEW);
+        let multiview_started_at = self.services.clock.now();
+        if renderer_multiview_required {
+            draw.materialize_multiview_renderer(device)
+                .context("materialize detached standby multiview terrain pipelines")?;
+        }
+        let renderer_multiview_create_ms = renderer_multiview_required
+            .then(|| elapsed_ms(self.services.clock.elapsed_since(multiview_started_at)))
+            .unwrap_or(0.0);
+        let renderer_multiview_materialized = draw.multiview_renderer_materialized();
         let pump = LocalIntegratedStartupPump::with_mesh_assets(
             local_integrated_scene_options(&scene),
             self.mesh_assets.clone(),
@@ -1302,6 +1312,9 @@ impl McloneSceneHost {
             phase: WarmWorldStandbyPhase::Warming,
             started_at,
             renderer_shell_create_ms,
+            renderer_multiview_create_ms,
+            renderer_multiview_required,
+            renderer_multiview_materialized,
             atlas_size: [self.mesh_assets.atlas.width, self.mesh_assets.atlas.height],
             atlas_base_bytes: self.mesh_assets.atlas.byte_len(),
             asset_epoch,
@@ -1312,22 +1325,49 @@ impl McloneSceneHost {
             worst_startup_step_ms: 0.0,
             worst_runtime_poll_ms: 0.0,
             endpoint_resolution_ms: 0.0,
+            gpu_warm_started_at: None,
+            gpu_ready_at: None,
+            upload_queue_nonempty_since: None,
+            last_gpu_advance_ms: 0.0,
+            worst_gpu_advance_ms: 0.0,
+            gpu_advance_count: 0,
+            gpu_ready_advance_count: 0,
+            gpu_skipped_no_slack_count: 0,
+            last_gpu_advance_frame: None,
             camera_reconciled: false,
             loaded_chunks: 0,
             startup_seed_sections: 0,
             startup_seed_drawable_sections: 0,
             startup_seed_owned_bytes: 0,
+            initial_upload_lifecycle_items: 0,
+            initial_upload_applied_lifecycle_items: 0,
+            initial_upload_released_compile_jobs: 0,
+            queued_upload_sections: 0,
+            queued_upload_lifecycle_items: 0,
+            queued_upload_mesh_owned_bytes: 0,
+            gpu_section_count: 0,
+            gpu_vertex_count: 0,
+            gpu_index_count: 0,
+            accepted_compile_result_count: 0,
+            released_compile_job_count: 0,
+            readiness: WarmWorldReadiness {
+                renderer_topology_ready: !renderer_multiview_required
+                    || renderer_multiview_materialized,
+                ..WarmWorldReadiness::default()
+            },
             source_endpoint: None,
             destination_endpoint: None,
             failure: None,
         });
         log::info!(
-            "warm-world standby queued id={} seed={} center=({}, {}) renderer_shell_ms={:.3} atlas={}x{} base_bytes={}",
+            "warm-world standby queued id={} seed={} center=({}, {}) renderer_shell_ms={:.3} multiview_required={} multiview_ms={:.3} atlas={}x{} base_bytes={}",
             instance_id.get(),
             request.seed,
             request.entry_center.x,
             request.entry_center.z,
             renderer_shell_create_ms,
+            renderer_multiview_required,
+            renderer_multiview_create_ms,
             self.mesh_assets.atlas.width,
             self.mesh_assets.atlas.height,
             self.mesh_assets.atlas.byte_len(),
@@ -1336,11 +1376,9 @@ impl McloneSceneHost {
     }
 
     pub fn warm_world_standby_snapshot(&self) -> Option<WarmWorldStandbySnapshot> {
-        self.warm_world_standby.as_ref().map(|state| {
-            state.snapshot(elapsed_ms(
-                self.services.clock.elapsed_since(state.started_at),
-            ))
-        })
+        self.warm_world_standby
+            .as_ref()
+            .map(|state| state.snapshot(self.services.clock.now()))
     }
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
@@ -1556,46 +1594,6 @@ impl McloneSceneHost {
             }
         }
 
-        if retain_slot && slot.lifecycle == WorldSlotLifecycle::StandbyCpuReady {
-            let runtime_poll_started_at = self.services.clock.now();
-            let runtime_result = {
-                let runtime = slot
-                    .runtime
-                    .as_mut()
-                    .expect("CPU-ready standby owns a runtime");
-                runtime.poll().and_then(|_| {
-                    state.poll_count = state.poll_count.saturating_add(1);
-                    mclone_app_runtime::apply_pending_engine_camera_position_updates(
-                        runtime,
-                        &mut slot.camera,
-                        XR_CAMERA_COMMIT_CONTEXT,
-                    )
-                })
-            };
-            state.worst_runtime_poll_ms = state.worst_runtime_poll_ms.max(elapsed_ms(
-                self.services.clock.elapsed_since(runtime_poll_started_at),
-            ));
-            match runtime_result {
-                Err(error) => {
-                    state.phase = WarmWorldStandbyPhase::Failed;
-                    state.failure = Some(format!("poll detached standby runtime: {error:#}"));
-                    retain_slot = false;
-                }
-                Ok(camera_changed) => {
-                    let runtime = slot
-                        .runtime
-                        .as_ref()
-                        .expect("CPU-ready standby owns a runtime");
-                    state.loaded_chunks = runtime.client().loaded_chunk_count();
-                    if camera_changed {
-                        slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
-                        state.destination_endpoint = None;
-                        state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
-                    }
-                }
-            }
-        }
-
         if retain_slot
             && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
             && self.active_world.lifecycle == WorldSlotLifecycle::ActiveReady
@@ -1618,6 +1616,10 @@ impl McloneSceneHost {
             state.destination_endpoint = destination_endpoint;
             if source_endpoint.is_some() && destination_endpoint.is_some() {
                 state.phase = WarmWorldStandbyPhase::CpuReady;
+                state.readiness.cpu_ready = true;
+                state.readiness.entry_section = slot
+                    .accepted_entry_pose
+                    .and_then(entry_support_render_section);
                 log::info!(
                     "warm-world standby CPU-ready id={} seed={} elapsed_ms={:.3} polls={} poll_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
                     state.instance_id.get(),
@@ -1664,6 +1666,236 @@ impl McloneSceneHost {
             self.standby_world = Some(slot);
         }
         self.warm_world_standby = Some(state);
+    }
+
+    /// Advance at most one budgeted standby GPU-preparation pass after the
+    /// active slot has consumed its render-thread work for this frame.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn advance_warm_world_gpu(
+        &mut self,
+        device: &wgpu::Device,
+        active_frame_deadline: Option<MonotonicDeadline>,
+    ) -> Result<()> {
+        let Some(mut state) = self.warm_world_standby.take() else {
+            return Ok(());
+        };
+        let Some(mut slot) = self.standby_world.take() else {
+            self.warm_world_standby = Some(state);
+            return Ok(());
+        };
+        if matches!(
+            state.phase,
+            WarmWorldStandbyPhase::Warming
+                | WarmWorldStandbyPhase::ResolvingEndpoints
+                | WarmWorldStandbyPhase::PlacementFailed
+                | WarmWorldStandbyPhase::Failed
+                | WarmWorldStandbyPhase::Cancelled
+        ) {
+            self.standby_world = Some(slot);
+            self.warm_world_standby = Some(state);
+            return Ok(());
+        }
+        if state.last_gpu_advance_frame == Some(self.rendered_frames) {
+            self.standby_world = Some(slot);
+            self.warm_world_standby = Some(state);
+            return Ok(());
+        }
+        state.last_gpu_advance_frame = Some(self.rendered_frames);
+        if active_frame_deadline
+            .as_ref()
+            .is_some_and(MonotonicDeadline::is_reached)
+        {
+            state.gpu_skipped_no_slack_count = state.gpu_skipped_no_slack_count.saturating_add(1);
+            self.standby_world = Some(slot);
+            self.warm_world_standby = Some(state);
+            return Ok(());
+        }
+
+        let advance_started_at = self.services.clock.now();
+        if !state.readiness.startup_seed_enqueued {
+            let startup_sections = std::mem::take(&mut slot.pending_startup_sections);
+            if startup_sections.is_empty() {
+                state.phase = WarmWorldStandbyPhase::Failed;
+                state.failure = Some("CPU-ready standby has no startup seed meshes".to_owned());
+                self.warm_world_standby = Some(state);
+                return Ok(());
+            }
+            let expected_lifecycle_items = startup_sections.len();
+            let update = RenderSectionCacheUpdate::from_startup_seed(startup_sections);
+            let enqueue = slot.section_uploads.enqueue_cache_update(update);
+            if enqueue.queued_lifecycle_items != expected_lifecycle_items
+                || enqueue.superseded_lifecycle_items != 0
+                || enqueue.released_compile_jobs != 0
+            {
+                state.phase = WarmWorldStandbyPhase::Failed;
+                state.failure = Some(format!(
+                    "startup seed enqueue violated lifecycle conservation: expected={} queued={} superseded={} released={}",
+                    expected_lifecycle_items,
+                    enqueue.queued_lifecycle_items,
+                    enqueue.superseded_lifecycle_items,
+                    enqueue.released_compile_jobs,
+                ));
+                self.warm_world_standby = Some(state);
+                return Ok(());
+            }
+            state.gpu_warm_started_at = Some(self.services.clock.now());
+            state.upload_queue_nonempty_since = state.gpu_warm_started_at;
+            state.initial_upload_lifecycle_items = expected_lifecycle_items;
+            state.readiness.startup_seed_enqueued = true;
+            slot.lifecycle = WorldSlotLifecycle::StandbyGpuWarming;
+            state.phase = WarmWorldStandbyPhase::GpuWarming;
+        } else if state.phase == WarmWorldStandbyPhase::CpuReady {
+            state.phase = WarmWorldStandbyPhase::GpuWarming;
+        }
+
+        let initial_seed_was_draining = !state.readiness.startup_seed_drained;
+        let policy = WorldPreparationPolicy {
+            clock: self.services.clock.clone(),
+            target_period_ms: self.render_admission_target_period_ms(),
+            poll_budget: RuntimeUpdatePumpBudget::MaxElapsed(Duration::from_micros(500)),
+            upload_budget: Some(1),
+            accept_budget: Some(1),
+            completed_result_accept_budget: Some(1),
+            max_compile_requests: Some(1),
+            work_elapsed_budget: Some(Duration::from_micros(750)),
+            defer_sync_after_pre_drain: true,
+        };
+        let camera_position = glam_vec3_from_vec3d(slot.camera.snapshot().eye);
+        let mut timing = XrTerrainFrameTiming::default();
+        let upload = match Self::prepare_world_slot(
+            &mut slot,
+            device,
+            camera_position,
+            active_frame_deadline,
+            &policy,
+            &mut timing,
+        ) {
+            Ok(upload) => upload,
+            Err(error) => {
+                state.phase = WarmWorldStandbyPhase::Failed;
+                state.failure = Some(format!("prepare standby GPU terrain: {error:#}"));
+                self.warm_world_standby = Some(state);
+                return Ok(());
+            }
+        };
+        state.poll_count = state.poll_count.saturating_add(1);
+        state.worst_runtime_poll_ms = state.worst_runtime_poll_ms.max(timing.runtime_poll_ms);
+        state.accepted_compile_result_count = state
+            .accepted_compile_result_count
+            .saturating_add(upload.accepted_compile_result_count);
+        state.released_compile_job_count = state
+            .released_compile_job_count
+            .saturating_add(upload.upload_released_compile_job_count);
+        if initial_seed_was_draining {
+            state.initial_upload_released_compile_jobs = state
+                .initial_upload_released_compile_jobs
+                .saturating_add(upload.upload_released_compile_job_count);
+        }
+
+        let camera_changed = {
+            let runtime = slot
+                .runtime
+                .as_mut()
+                .expect("GPU-warming standby owns a runtime");
+            match mclone_app_runtime::apply_pending_engine_camera_position_updates(
+                runtime,
+                &mut slot.camera,
+                XR_CAMERA_COMMIT_CONTEXT,
+            ) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.failure = Some(format!(
+                        "apply post-startup standby camera correction: {error:#}"
+                    ));
+                    self.warm_world_standby = Some(state);
+                    return Ok(());
+                }
+            }
+        };
+        if camera_changed {
+            slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
+            state.destination_endpoint = None;
+            state.readiness.cpu_ready = false;
+            state.readiness.entry_section = slot
+                .accepted_entry_pose
+                .and_then(entry_support_render_section);
+            state.readiness.switchable = false;
+            state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
+        }
+
+        let queue = slot.section_uploads.stats();
+        state.loaded_chunks = slot
+            .runtime
+            .as_ref()
+            .map_or(0, |runtime| runtime.client().loaded_chunk_count());
+        state.queued_upload_sections = queue.queued_upload_sections;
+        state.queued_upload_lifecycle_items = queue.queued_lifecycle_items;
+        state.queued_upload_mesh_owned_bytes = queue.queued_upload_mesh_owned_bytes;
+        if queue.queued_lifecycle_items == 0 {
+            state.upload_queue_nonempty_since = None;
+        } else if state.upload_queue_nonempty_since.is_none() {
+            state.upload_queue_nonempty_since = Some(self.services.clock.now());
+        }
+        if !state.readiness.startup_seed_drained {
+            state.initial_upload_applied_lifecycle_items = state
+                .initial_upload_lifecycle_items
+                .saturating_sub(queue.queued_lifecycle_items)
+                .min(state.initial_upload_lifecycle_items);
+            state.readiness.startup_seed_drained = state.initial_upload_lifecycle_items > 0
+                && state.initial_upload_applied_lifecycle_items
+                    == state.initial_upload_lifecycle_items;
+        }
+        state.gpu_section_count = slot.draw.section_count();
+        state.gpu_vertex_count = slot.draw.vertex_count();
+        state.gpu_index_count = slot.draw.index_count();
+        state.renderer_multiview_materialized = slot.draw.multiview_renderer_materialized();
+        state.readiness.renderer_topology_ready =
+            !state.renderer_multiview_required || state.renderer_multiview_materialized;
+        state.readiness.entry_section_gpu_resident = state
+            .readiness
+            .entry_section
+            .is_some_and(|key| slot.draw.contains_section(key));
+        state.readiness.entry_section_traversal_ready = state
+            .readiness
+            .entry_section
+            .is_some_and(|key| slot.draw.traversal_ready_contains_section(key));
+        state.readiness.switchable = state.readiness.cpu_ready
+            && state.readiness.startup_seed_enqueued
+            && state.readiness.startup_seed_drained
+            && state.readiness.entry_section_gpu_resident
+            && state.readiness.entry_section_traversal_ready
+            && state.readiness.renderer_topology_ready;
+
+        let advance_ms = elapsed_ms(self.services.clock.elapsed_since(advance_started_at));
+        state.last_gpu_advance_ms = advance_ms;
+        state.worst_gpu_advance_ms = state.worst_gpu_advance_ms.max(advance_ms);
+        state.gpu_advance_count = state.gpu_advance_count.saturating_add(1);
+        if state.readiness.switchable && state.phase != WarmWorldStandbyPhase::ResolvingEndpoints {
+            if state.gpu_ready_at.is_none() {
+                state.gpu_ready_at = Some(self.services.clock.now());
+                state.gpu_ready_advance_count = state.gpu_advance_count;
+                log::info!(
+                    "warm-world standby switchable id={} seed={} gpu_ms={:.3} advances={} sections={} vertices={} indices={} worst_gpu_ms={:.3}",
+                    state.instance_id.get(),
+                    state.seed,
+                    state.gpu_warm_started_at.map_or(0.0, |started| elapsed_ms(
+                        self.services.clock.elapsed_since(started)
+                    )),
+                    state.gpu_advance_count,
+                    state.gpu_section_count,
+                    state.gpu_vertex_count,
+                    state.gpu_index_count,
+                    state.worst_gpu_advance_ms,
+                );
+            }
+            slot.lifecycle = WorldSlotLifecycle::StandbySwitchable;
+            state.phase = WarmWorldStandbyPhase::Switchable;
+        }
+
+        self.standby_world = Some(slot);
+        self.warm_world_standby = Some(state);
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]

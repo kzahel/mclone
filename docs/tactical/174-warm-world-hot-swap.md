@@ -1,18 +1,22 @@
 # 174: Warm World Hot Swap
 
-Status: Slice 3 detached-standby checkpoint ready for review 2026-07-13.
+Status: Slice 4 GPU-warm standby checkpoint ready for review 2026-07-13.
 Slice 0's lower-level dual-integrated-host proof landed in commit `a31ac944`;
 Slice 1's ownership audit, characterization locks, and one-world baselines are
 recorded below. Slice 2 grouped the audited 13 per-world fields in one concrete
 `DrawableWorldSlot`. Slice 3 adds stable world identity/storage/lifecycle facts,
 one optional detached slot, a launch-only two-host harness, authoritative pose
 acknowledgement, CPU seed retention, endpoint resolution, and explicit failure
-diagnostics. Flat and synthetic-stereo two-host smokes pass while the no-request
-five-run release timing gate remains within 2% of the clean median anchors.
-Slices 4–7 are unimplemented. First-multiview-pipeline timing remains a named
-device-evidence gap because the current macOS adapter does not expose
-`wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows lane before Slice
-4 can declare a standby switchable.
+diagnostics. Slice 4 converts that seed into conserved incremental upload work,
+uses the active preparation path under hard standby caps, publishes exact
+GPU/topology readiness, and reaches `Switchable` without drawing or selecting
+the second world. Flat and synthetic-stereo two-host smokes pass. A
+contemporaneous untouched-Slice-3 control clears the no-request performance
+comparison after both binaries drifted above the older clean timing anchor.
+Slices 5–7 are unimplemented. First-multiview-pipeline device timing remains a
+named evidence gap because the current macOS adapter does not expose
+`wgpu::Features::MULTIVIEW`; the capable-device path now materializes that
+renderer before readiness, but still needs an XR/Windows receipt.
 
 Topic: `embedded-worlds`
 
@@ -79,7 +83,9 @@ stats before the caller installs them. Slice 2 adds the separate target-neutral
 `DrawableWorldSlotInstall` aggregate and makes initial local/native,
 provided-runtime, provided-scene-runtime, local completion, external/web
 completion, and native replacement publish the same core cluster. Detached
-standby GPU admission and switchable readiness remain Slice 4 work.
+standby GPU admission now reuses the same extracted preparation path as the
+active slot. It remains deliberately invisible and unselectable until Slice 5
+adds the atomic selection command.
 
 ## Slice 1 Architecture Checkpoint
 
@@ -228,8 +234,9 @@ cargo test --manifest-path native/Cargo.toml -p mclone-scene \
 
 Synthetic stereo on this Mac is the two-per-eye path and cannot substitute for
 lazy multiview-pipeline evidence. Run the same first/steady empty multiview
-measurement on a `MULTIVIEW` adapter before Slice 4 readiness; no switch frame
-may be the first materialization.
+measurement on a `MULTIVIEW` adapter before final XR closeout. Slice 4 now
+materializes that renderer before publishing readiness on a capable device; no
+switch frame may be the first materialization.
 
 ### Native Runtime And Cadence Cost
 
@@ -254,10 +261,12 @@ CPU for 20/20/60 and 1.1% for 10/10/10. A 60 Hz streaming comparison also
 reduced average app frame work from 4.275 ms to 3.347 ms, but the default run
 contained one unrelated 326.892 ms draw/device outlier.
 
-These are directional single-run observations, not a selected standby policy.
-They establish that `set_simulation_cadence` is an effective sanctioned lever
-and that it does not remove any of the six threads. Slice 4 must select cadence
-from active-frame evidence and restore the normal cadence before authority
+These are directional single-run observations. They establish that
+`set_simulation_cadence` is an effective sanctioned lever and that it does not
+remove any of the six threads. Slice 4 retains the normal cadence because its
+hard preparation caps held the measured active-frame contribution below one
+millisecond; lowering cadence is not justified yet. If later background-cost
+evidence does select it, Slice 5 must restore normal cadence before authority
 handoff.
 
 ### Characterization Locks And Baseline Evidence
@@ -888,8 +897,9 @@ Checkpoint evidence (2026-07-13):
   8,388,608 base bytes and 11,173,888 bytes across five uploaded mip levels.
   A device-wait-inclusive standalone shell creation measured 129.528 ms; the
   already-initialized host's second-shell CPU enqueue is the 14–16 ms value
-  above. Multiview shell materialization remains unavailable on this adapter
-  and is still a Slice 4 device gate.
+  above. Multiview shell materialization remains unavailable on this adapter;
+  Slice 4 implements the capable-device path, but its hardware receipt is still
+  open.
 - The dual-host integration test now gives same-seed live hosts different
   SQLite roots, edits and flushes only the first, proves the second live replica
   is unchanged, reopens both roots, and proves only the first persisted the
@@ -961,9 +971,88 @@ Deliverables:
   default; avoid premature shared queues.
 - Define `WarmWorldReadiness` and lock the `Switchable` gate.
 
+Checkpoint evidence (2026-07-13):
+
+- `poll_runtime_and_upload` is now a small active policy wrapper around one
+  slot-local `prepare_world_slot` implementation. The active policy preserves
+  unlimited runtime polling, the host's existing upload/accept/completed-result
+  budgets, adaptive admission, timing, and accounting. Only after that active
+  call succeeds does the host offer remaining frame-deadline slack to the
+  optional standby.
+- The retained startup mesh vector becomes one ordinary
+  `RenderSectionCacheUpdate`. Its exact vertex/index metadata is conserved and
+  its accepted/submitted compile counts are zero. The upload coordinator drains
+  one lifecycle item per eligible frame; a focused test covers populated and
+  empty meshes and proves final totals with no held or released compile grant.
+- Standby preparation has explicit 500 microsecond runtime-poll, one completed
+  result, one compile request, one upload, one acceptance, and 750 microsecond
+  work-deadline caps. It runs at most once per presented scene frame, skips when
+  the active deadline has expired, and uses its own runtime/compiler pool. No
+  shared worker-pool or immutable-renderer refactor is justified by this
+  checkpoint's measurements.
+- `WarmWorldReadiness` requires CPU/endpoints, startup-seed enqueue and complete
+  initial drain, GPU-resident and traversal-ready support terrain below the
+  admitted entry pose, and the renderer required by the device topology.
+  Ordinary mono/per-eye pipelines are part of the pre-created shell. A device
+  exposing `MULTIVIEW` now materializes the lazy terrain multiview renderer
+  synchronously before the standby starts; `Switchable` cannot publish without
+  it. The present macOS adapter cannot execute that capable-device branch, so
+  its timing/visual receipt remains open for XR/Windows. The explicit GPU
+  characterization test passes with a 16.185 ms flat empty shell and reports
+  multiview unavailable.
+- The diagnostic snapshot now exposes CPU seed bytes, initial lifecycle
+  conservation and compile releases, queue sections/lifecycle/bytes/oldest age,
+  accepted/released live compile work, GPU sections/vertices/indices, entry and
+  topology readiness, total/GPU warm duration, advance counts, deadline skips,
+  and last/worst GPU contribution. The flat debug panel exposes the compact
+  phase, queue, coverage, and timing subset.
+- Flat seed `12345` plus standby `67890` reached `Switchable` in 688.910 ms.
+  The 64-item initial seed drained in exactly 64 GPU advances with zero compile
+  releases; GPU warmup took 250.904 ms, left 23 sections/155,526 indices and no
+  queued work at readiness, and measured a 0.670 ms worst GPU contribution.
+  Entry coverage and topology readiness were both true. Its inspected
+  1280x720 capture showed only the ordinary active world.
+- Synthetic stereo reached readiness on GPU advance 64 and continued bounded
+  streaming through advance 70. At capture it held 26 sections/158,130 indices,
+  had 11 live lifecycle items queued, and retained true entry/topology
+  readiness; the initial 64 items remained fully conserved with zero compile
+  releases. Worst GPU contribution was 0.531 ms. The inspected 640x640-per-eye
+  capture had 268,363 differing eye pixels, 166 active sections, 24 drawn
+  sections, and UI in both eyes without standby leakage or a split-world frame.
+- With no standby request, desktop and synthetic-stereo captures retain the
+  Slice 3 deterministic counts: 64 resident/11 drawn sections and two actors;
+  42 resident/eight drawn sections, 249,679 differing eye pixels, and UI in
+  both eyes. Both were visually inspected. The full native package tests, web
+  build, thin-adapter purity gate, focused conservation/ownership contracts,
+  and `git diff --check` pass.
+- The release timedemo retains exactly 664 loaded sections and 307.325 average
+  drawn sections. Its 3.572 ms average remains characterization-only under the
+  instability rule established in Slice 1.
+- Before candidate timing, CPU samples were 86.26%, 92.65%, and 86.12% idle
+  with no Cargo, Rust, compiler, linker, CMake, Ninja, or Xcode build active.
+  Five direct release-binary averages were 2.709, 2.682, 2.571, 2.676, and
+  2.643 ms (median 2.676; 5.2% range). P95 values were 4.560, 4.569, 4.509,
+  4.638, and 4.602 ms (median 4.569; 2.8% range). All runs retained 1,936
+  initial sections with zero over-budget frames and zero accounting violations.
+- Those medians are 14.1%/16.7% above the older clean 2.346/3.916 ms anchors,
+  so the required investigation built untouched Slice 3 commit `e7774e7c` in a
+  separate worktree and ran five same-machine samples against the same assets.
+  CPU was 90.78%, 96.89%, and 96.80% idle before the control. Its median
+  average/p95 were 2.679/4.650 ms with 5.2%/7.8% ranges, zero over-budget
+  frames, and zero accounting violations. Slice 4 is therefore 0.1% faster in
+  median average and 1.7% faster in median p95 than the contemporaneous control;
+  the older-anchor drift is environmental rather than attributable to this
+  diff. Both complete five-run batches remain recorded under `/tmp`.
+
 Exit criteria: standby reaches switchable GPU coverage while active frames
 continue; a switch would require zero queued initial uploads for the admitted
 entry coverage and no lazy terrain-pipeline creation for the current topology.
+
+Exit result: Slice 4 is complete for the locally available flat and per-eye
+stereo topologies. The retained standby is GPU-ready, but there is still no
+selection command, slot swap, gate renderer, or simultaneous geometry. Slice 5
+starts with atomic scripted A-to-B-to-A selection. Capable-device multiview
+timing remains a named hardware receipt before final XR closeout.
 
 ### Slice 5: Atomic Scripted Hot Swap
 

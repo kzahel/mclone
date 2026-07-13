@@ -119,14 +119,18 @@ target-neutral core install aggregate before publication. Shared assets and
 renderers, physical presentation state, UI/session coordination, clocks, and
 numerical budgets remain on `McloneSceneHost`.
 
-This is Tactical 174 Slice 3's bounded two-world ownership boundary, not a
+This is Tactical 174 Slice 4's bounded two-world ownership boundary, not a
 product multi-world manager: there is no registry, world-id lookup, selection
 branch, gate, or simultaneous rendering. Without the launch-only standby
 request both optional owners are `None`; no second server, renderer shell, or
 startup work is constructed. With the request, the detached runtime advances
-once per scene frame to acknowledged-pose/CPU-seed/endpoint readiness while
-the direct active render path remains selected. Budgeted standby GPU admission
-and switching are later slices.
+to acknowledged-pose/CPU-seed/endpoint readiness, then reuses the active slot's
+extracted preparation logic under explicit one-result/compile/upload caps. The
+active slot always prepares first. The standby publishes `Switchable` only
+after its initial upload lifecycle is conserved and drained, entry-support
+terrain is GPU-resident and traversal-ready, and any required multiview terrain
+renderer is materialized. It remains invisible and unselectable; atomic
+selection is the next slice.
 
 Shared launch values enter through
 `mclone-app-runtime::startup_args::StartupOptions`. Its nested

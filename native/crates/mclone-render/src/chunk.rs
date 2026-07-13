@@ -2866,6 +2866,27 @@ impl TexturedSectionDrawResources {
         self.sections.len()
     }
 
+    pub fn contains_section(&self, key: RenderSectionKey) -> bool {
+        self.sections.contains_key(&key)
+    }
+
+    pub fn traversal_ready_contains_section(&self, key: RenderSectionKey) -> bool {
+        self.traversal_ready_sections.contains(&key)
+    }
+
+    /// Materialize the terrain multiview shader/pipelines without submitting a
+    /// draw. Warm-world admission uses this before publishing switchability so
+    /// first-use pipeline creation can never land on the switch frame.
+    pub fn materialize_multiview_renderer(&self, device: &wgpu::Device) -> Result<bool> {
+        let already_materialized = self.renderer.multiview.borrow().is_some();
+        drop(self.renderer.multiview_renderer(device)?);
+        Ok(!already_materialized)
+    }
+
+    pub fn multiview_renderer_materialized(&self) -> bool {
+        self.renderer.multiview.borrow().is_some()
+    }
+
     pub fn index_count(&self) -> u32 {
         self.sections.values().map(|mesh| mesh.index_count()).sum()
     }

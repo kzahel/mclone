@@ -338,21 +338,37 @@ impl OffscreenFlatClientHost {
                 .driver
                 .drive_until_warm_world_standby_ready(device, queue)?;
             eprintln!(
-                "warm_world_standby id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
+                "warm_world_standby id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} multiview_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} initial_uploads={}/{} initial_releases={} gpu_advances={}/{} gpu_ms={:.3} gpu_sections={} gpu_indices={} queue={} queue_bytes={} entry_resident={} topology_ready={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} worst_gpu_ms={:.3} endpoint_ms={:.3} skipped_no_slack={}",
                 standby.instance_id.get(),
                 standby.seed,
                 standby.phase.label(),
                 standby.elapsed_ms,
                 standby.renderer_shell_create_ms,
+                standby.renderer_multiview_create_ms,
                 standby.poll_count,
                 standby.loaded_chunks,
                 standby.startup_seed_sections,
                 standby.startup_seed_drawable_sections,
                 standby.startup_seed_owned_bytes,
+                standby.initial_upload_applied_lifecycle_items,
+                standby.initial_upload_lifecycle_items,
+                standby.initial_upload_released_compile_jobs,
+                standby.gpu_advance_count,
+                standby.gpu_ready_advance_count,
+                standby.gpu_warm_ms,
+                standby.gpu_section_count,
+                standby.gpu_index_count,
+                standby.queued_upload_lifecycle_items,
+                standby.queued_upload_mesh_owned_bytes,
+                standby.readiness.entry_section_gpu_resident
+                    && standby.readiness.entry_section_traversal_ready,
+                standby.readiness.renderer_topology_ready,
                 standby.worst_advance_ms,
                 standby.worst_startup_step_ms,
                 standby.worst_runtime_poll_ms,
+                standby.worst_gpu_advance_ms,
                 standby.endpoint_resolution_ms,
+                standby.gpu_skipped_no_slack_count,
             );
         }
         if matches!(

@@ -7,6 +7,9 @@ use mclone_app_runtime::session::ActiveSessionDescriptor;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::BlockPos;
 use mclone_core::{ChunkPos, Vec3d};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_core::{block_to_chunk_coord, block_to_section_coord};
+use mclone_mesh::RenderSectionKey;
 use mclone_render_session::EngineCameraController;
 
 use crate::McloneSceneHostOptions;
@@ -84,6 +87,8 @@ pub enum WarmWorldStandbyPhase {
     Warming,
     ResolvingEndpoints,
     CpuReady,
+    GpuWarming,
+    Switchable,
     PlacementFailed,
     Failed,
     Cancelled,
@@ -95,6 +100,8 @@ impl WarmWorldStandbyPhase {
             Self::Warming => "warming",
             Self::ResolvingEndpoints => "resolving-endpoints",
             Self::CpuReady => "cpu-ready",
+            Self::GpuWarming => "gpu-warming",
+            Self::Switchable => "switchable",
             Self::PlacementFailed => "placement-failed",
             Self::Failed => "failed",
             Self::Cancelled => "cancelled",
@@ -104,9 +111,22 @@ impl WarmWorldStandbyPhase {
     pub const fn terminal(self) -> bool {
         matches!(
             self,
-            Self::CpuReady | Self::PlacementFailed | Self::Failed | Self::Cancelled
+            Self::Switchable | Self::PlacementFailed | Self::Failed | Self::Cancelled
         )
     }
+}
+
+/// Exact admission facts which make a retained destination safe to select.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WarmWorldReadiness {
+    pub cpu_ready: bool,
+    pub startup_seed_enqueued: bool,
+    pub startup_seed_drained: bool,
+    pub entry_section: Option<RenderSectionKey>,
+    pub entry_section_gpu_resident: bool,
+    pub entry_section_traversal_ready: bool,
+    pub renderer_topology_ready: bool,
+    pub switchable: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -116,6 +136,9 @@ pub struct WarmWorldStandbySnapshot {
     pub phase: WarmWorldStandbyPhase,
     pub elapsed_ms: f64,
     pub renderer_shell_create_ms: f64,
+    pub renderer_multiview_create_ms: f64,
+    pub renderer_multiview_required: bool,
+    pub renderer_multiview_materialized: bool,
     pub atlas_size: [u32; 2],
     pub atlas_base_bytes: usize,
     pub asset_epoch: u64,
@@ -126,11 +149,30 @@ pub struct WarmWorldStandbySnapshot {
     pub worst_startup_step_ms: f64,
     pub worst_runtime_poll_ms: f64,
     pub endpoint_resolution_ms: f64,
+    pub gpu_warm_ms: f64,
+    pub last_gpu_advance_ms: f64,
+    pub worst_gpu_advance_ms: f64,
+    pub gpu_advance_count: usize,
+    pub gpu_ready_advance_count: usize,
+    pub gpu_skipped_no_slack_count: usize,
     pub camera_reconciled: bool,
     pub loaded_chunks: usize,
     pub startup_seed_sections: usize,
     pub startup_seed_drawable_sections: usize,
     pub startup_seed_owned_bytes: usize,
+    pub initial_upload_lifecycle_items: usize,
+    pub initial_upload_applied_lifecycle_items: usize,
+    pub initial_upload_released_compile_jobs: usize,
+    pub queued_upload_sections: usize,
+    pub queued_upload_lifecycle_items: usize,
+    pub queued_upload_mesh_owned_bytes: usize,
+    pub oldest_queued_upload_age_ms: f64,
+    pub gpu_section_count: usize,
+    pub gpu_vertex_count: u32,
+    pub gpu_index_count: u32,
+    pub accepted_compile_result_count: usize,
+    pub released_compile_job_count: usize,
+    pub readiness: WarmWorldReadiness,
     pub source_endpoint: Option<WorldGateEndpointCandidate>,
     pub destination_endpoint: Option<WorldGateEndpointCandidate>,
     pub failure: Option<String>,
@@ -142,6 +184,10 @@ pub(crate) enum WorldSlotLifecycle {
     ActiveReady,
     #[cfg(not(target_arch = "wasm32"))]
     StandbyCpuReady,
+    #[cfg(not(target_arch = "wasm32"))]
+    StandbyGpuWarming,
+    #[cfg(not(target_arch = "wasm32"))]
+    StandbySwitchable,
     Empty,
 }
 
@@ -190,6 +236,9 @@ pub(crate) struct WarmWorldStandbyState {
     pub phase: WarmWorldStandbyPhase,
     pub started_at: MonotonicInstant,
     pub renderer_shell_create_ms: f64,
+    pub renderer_multiview_create_ms: f64,
+    pub renderer_multiview_required: bool,
+    pub renderer_multiview_materialized: bool,
     pub atlas_size: [u32; 2],
     pub atlas_base_bytes: usize,
     pub asset_epoch: u64,
@@ -200,24 +249,49 @@ pub(crate) struct WarmWorldStandbyState {
     pub worst_startup_step_ms: f64,
     pub worst_runtime_poll_ms: f64,
     pub endpoint_resolution_ms: f64,
+    pub gpu_warm_started_at: Option<MonotonicInstant>,
+    pub gpu_ready_at: Option<MonotonicInstant>,
+    pub upload_queue_nonempty_since: Option<MonotonicInstant>,
+    pub last_gpu_advance_ms: f64,
+    pub worst_gpu_advance_ms: f64,
+    pub gpu_advance_count: usize,
+    pub gpu_ready_advance_count: usize,
+    pub gpu_skipped_no_slack_count: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub last_gpu_advance_frame: Option<u32>,
     pub camera_reconciled: bool,
     pub loaded_chunks: usize,
     pub startup_seed_sections: usize,
     pub startup_seed_drawable_sections: usize,
     pub startup_seed_owned_bytes: usize,
+    pub initial_upload_lifecycle_items: usize,
+    pub initial_upload_applied_lifecycle_items: usize,
+    pub initial_upload_released_compile_jobs: usize,
+    pub queued_upload_sections: usize,
+    pub queued_upload_lifecycle_items: usize,
+    pub queued_upload_mesh_owned_bytes: usize,
+    pub gpu_section_count: usize,
+    pub gpu_vertex_count: u32,
+    pub gpu_index_count: u32,
+    pub accepted_compile_result_count: usize,
+    pub released_compile_job_count: usize,
+    pub readiness: WarmWorldReadiness,
     pub source_endpoint: Option<WorldGateEndpointCandidate>,
     pub destination_endpoint: Option<WorldGateEndpointCandidate>,
     pub failure: Option<String>,
 }
 
 impl WarmWorldStandbyState {
-    pub(crate) fn snapshot(&self, elapsed_ms: f64) -> WarmWorldStandbySnapshot {
+    pub(crate) fn snapshot(&self, now: MonotonicInstant) -> WarmWorldStandbySnapshot {
         WarmWorldStandbySnapshot {
             instance_id: self.instance_id,
             seed: self.seed,
             phase: self.phase,
-            elapsed_ms,
+            elapsed_ms: elapsed_between_ms(self.started_at, now),
             renderer_shell_create_ms: self.renderer_shell_create_ms,
+            renderer_multiview_create_ms: self.renderer_multiview_create_ms,
+            renderer_multiview_required: self.renderer_multiview_required,
+            renderer_multiview_materialized: self.renderer_multiview_materialized,
             atlas_size: self.atlas_size,
             atlas_base_bytes: self.atlas_base_bytes,
             asset_epoch: self.asset_epoch,
@@ -228,16 +302,61 @@ impl WarmWorldStandbyState {
             worst_startup_step_ms: self.worst_startup_step_ms,
             worst_runtime_poll_ms: self.worst_runtime_poll_ms,
             endpoint_resolution_ms: self.endpoint_resolution_ms,
+            gpu_warm_ms: self.gpu_warm_started_at.map_or(0.0, |started_at| {
+                elapsed_between_ms(started_at, self.gpu_ready_at.unwrap_or(now))
+            }),
+            last_gpu_advance_ms: self.last_gpu_advance_ms,
+            worst_gpu_advance_ms: self.worst_gpu_advance_ms,
+            gpu_advance_count: self.gpu_advance_count,
+            gpu_ready_advance_count: self.gpu_ready_advance_count,
+            gpu_skipped_no_slack_count: self.gpu_skipped_no_slack_count,
             camera_reconciled: self.camera_reconciled,
             loaded_chunks: self.loaded_chunks,
             startup_seed_sections: self.startup_seed_sections,
             startup_seed_drawable_sections: self.startup_seed_drawable_sections,
             startup_seed_owned_bytes: self.startup_seed_owned_bytes,
+            initial_upload_lifecycle_items: self.initial_upload_lifecycle_items,
+            initial_upload_applied_lifecycle_items: self.initial_upload_applied_lifecycle_items,
+            initial_upload_released_compile_jobs: self.initial_upload_released_compile_jobs,
+            queued_upload_sections: self.queued_upload_sections,
+            queued_upload_lifecycle_items: self.queued_upload_lifecycle_items,
+            queued_upload_mesh_owned_bytes: self.queued_upload_mesh_owned_bytes,
+            oldest_queued_upload_age_ms: if self.queued_upload_lifecycle_items == 0 {
+                0.0
+            } else {
+                self.upload_queue_nonempty_since
+                    .map_or(0.0, |started_at| elapsed_between_ms(started_at, now))
+            },
+            gpu_section_count: self.gpu_section_count,
+            gpu_vertex_count: self.gpu_vertex_count,
+            gpu_index_count: self.gpu_index_count,
+            accepted_compile_result_count: self.accepted_compile_result_count,
+            released_compile_job_count: self.released_compile_job_count,
+            readiness: self.readiness,
             source_endpoint: self.source_endpoint,
             destination_endpoint: self.destination_endpoint,
             failure: self.failure.clone(),
         }
     }
+}
+
+fn elapsed_between_ms(start: MonotonicInstant, end: MonotonicInstant) -> f64 {
+    end.saturating_duration_since(start).as_secs_f64() * 1_000.0
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn entry_support_render_section(pose: WorldEntryPose) -> Option<RenderSectionKey> {
+    if !pose.feet_position.is_finite() {
+        return None;
+    }
+    let support_x = pose.feet_position.x.floor() as i32;
+    let support_y = (pose.feet_position.y - 0.01).floor() as i32;
+    let support_z = pose.feet_position.z.floor() as i32;
+    Some(RenderSectionKey::new(
+        block_to_chunk_coord(support_x),
+        block_to_section_coord(support_y),
+        block_to_chunk_coord(support_z),
+    ))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -407,5 +526,20 @@ mod tests {
     #[test]
     fn provisional_endpoint_fails_without_loaded_clearance() {
         assert!(resolve_world_gate_endpoint_with(flat_pose(), |_| false, |_| false).is_none());
+    }
+
+    #[test]
+    fn switchable_is_the_only_success_terminal_phase() {
+        assert!(!WarmWorldStandbyPhase::CpuReady.terminal());
+        assert!(!WarmWorldStandbyPhase::GpuWarming.terminal());
+        assert!(WarmWorldStandbyPhase::Switchable.terminal());
+    }
+
+    #[test]
+    fn entry_coverage_uses_the_support_section_below_the_feet() {
+        assert_eq!(
+            entry_support_render_section(flat_pose()),
+            Some(RenderSectionKey::new(0, 3, 0))
+        );
     }
 }

@@ -1438,10 +1438,16 @@ impl McloneSceneHost {
                         standby.startup_seed_sections,
                     ),
                     format!(
-                        "WARM {:.0}MS STEP {:.2} END {:.2}",
-                        standby.elapsed_ms,
-                        standby.worst_startup_step_ms,
-                        standby.endpoint_resolution_ms,
+                        "GPU S{} I{} Q{} {}/{}",
+                        standby.gpu_section_count,
+                        standby.gpu_index_count,
+                        standby.queued_upload_lifecycle_items,
+                        standby.initial_upload_applied_lifecycle_items,
+                        standby.initial_upload_lifecycle_items,
+                    ),
+                    format!(
+                        "WARM {:.0}MS GPU {:.0} W{:.2}",
+                        standby.elapsed_ms, standby.gpu_warm_ms, standby.worst_gpu_advance_ms,
                     ),
                 ];
                 if let Some(failure) = standby.failure {

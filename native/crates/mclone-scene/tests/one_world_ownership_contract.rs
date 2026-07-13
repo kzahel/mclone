@@ -204,7 +204,7 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
 }
 
 #[test]
-fn detached_standby_is_opt_in_bounded_and_cpu_only() {
+fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     let source = read("src/session.rs");
     let begin = braced_item(&source, "pub fn begin_warm_world_standby(");
     assert_in_order(
@@ -228,13 +228,45 @@ fn detached_standby_is_opt_in_bounded_and_cpu_only() {
     let advance = braced_item(&source, "fn advance_warm_world_standby(");
     assert!(advance.contains("startup.pump.step(camera_position)"));
     assert!(advance.contains("reconcile_xr_startup_pose("));
-    assert!(advance.contains("runtime.poll()"));
     assert!(advance.contains("resolve_world_gate_endpoint("));
     assert!(advance.contains("into_runtime_with_startup_sections"));
     assert!(advance.contains("complete_detached_local_startup("));
     assert!(!advance.contains("TexturedSectionDrawResources::new("));
     assert!(!advance.contains("drain_budgeted("));
     assert!(!advance.contains("render_full_frame"));
+
+    let gpu = braced_item(&source, "pub(crate) fn advance_warm_world_gpu(");
+    assert_in_order(
+        gpu,
+        &[
+            "std::mem::take(&mut slot.pending_startup_sections)",
+            "RenderSectionCacheUpdate::from_startup_seed(startup_sections)",
+            "slot.section_uploads.enqueue_cache_update(update)",
+            "poll_budget: RuntimeUpdatePumpBudget::MaxElapsed(Duration::from_micros(500))",
+            "upload_budget: Some(1)",
+            "accept_budget: Some(1)",
+            "completed_result_accept_budget: Some(1)",
+            "max_compile_requests: Some(1)",
+            "Self::prepare_world_slot(",
+        ],
+    );
+    assert!(gpu.contains("active_frame_deadline"));
+    assert!(gpu.contains("entry_section_gpu_resident"));
+    assert!(gpu.contains("entry_section_traversal_ready"));
+    assert!(!gpu.contains("render_full_frame"));
+
+    let host = read("src/lib.rs");
+    let active = braced_item(&host, "fn poll_runtime_and_upload(");
+    assert!(active.contains("poll_budget: RuntimeUpdatePumpBudget::unlimited()"));
+    assert!(active.contains("upload_budget: self.render_section_upload_budget"));
+    assert!(active.contains("Self::prepare_world_slot("));
+    assert_in_order(
+        active,
+        &[
+            "Self::prepare_world_slot(",
+            "self.advance_warm_world_gpu(device, standby_deadline)?;",
+        ],
+    );
 }
 
 #[test]
@@ -488,6 +520,15 @@ fn empty_terrain_shell_reports_real_atlas_and_lazy_multiview_cost() -> anyhow::R
         return Ok(());
     }
 
+    let multiview_started = Instant::now();
+    assert!(draw.materialize_multiview_renderer(&device)?);
+    device.poll(wgpu::PollType::Wait).map_err(|error| {
+        anyhow::anyhow!("wait for terrain multiview materialization: {error:?}")
+    })?;
+    let multiview_materialize_ms = multiview_started.elapsed().as_secs_f64() * 1_000.0;
+    assert!(!draw.materialize_multiview_renderer(&device)?);
+    assert!(draw.multiview_renderer_materialized());
+
     let width = 16;
     let height = 16;
     let color = device.create_texture(&wgpu::TextureDescriptor {
@@ -546,7 +587,7 @@ fn empty_terrain_shell_reports_real_atlas_and_lazy_multiview_cost() -> anyhow::R
     let first_multiview_ms = render_once()?;
     let steady_multiview_ms = render_once()?;
     eprintln!(
-        "terrain_shell first_multiview_ms={first_multiview_ms:.3} steady_empty_multiview_ms={steady_multiview_ms:.3}"
+        "terrain_shell multiview_materialize_ms={multiview_materialize_ms:.3} first_warm_multiview_ms={first_multiview_ms:.3} steady_empty_multiview_ms={steady_multiview_ms:.3}"
     );
     Ok(())
 }
