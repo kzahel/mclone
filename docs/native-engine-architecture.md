@@ -119,27 +119,37 @@ target-neutral core install aggregate before publication. Shared assets and
 renderers, physical presentation state, UI/session coordination, clocks, and
 numerical budgets remain on `McloneSceneHost`.
 
-This is Tactical 174 Slice 5's bounded two-world ownership boundary, not a
-product multi-world manager: there is no registry, world-id lookup, selection
-branch in ordinary frames, gate, or simultaneous rendering. Without the
-launch-only standby request both optional owners are `None`; no second server,
-renderer shell, or startup work is constructed. With the request, the detached
-runtime advances
-to acknowledged-pose/CPU-seed/endpoint readiness, then reuses the active slot's
-extracted preparation logic under explicit one-result/compile/upload caps. The
-active slot always prepares first. The standby publishes `Switchable` only
-after its initial upload lifecycle is conserved and drained, entry-support
-terrain is GPU-resident and traversal-ready, and any required multiview terrain
-renderer is materialized. It remains invisible; atomic selection is exposed
-only through a shared scene command and scripted smoke.
-That command reconciles and maps the destination camera/interest through the
-paired terrain-relative endpoints, restores runtime cadence, then exchanges
-the two complete slot values at a frame boundary. The old active becomes the
-switchable return slot. Selection clears only host presentation caches; it
-does not rebuild a runtime, draw store, traversal cache, upload coordinator, or
-renderer. The first selected frame uses a one-request/result/upload preparation
-cap, after which ordinary active budgets resume. Interactive selection waits
-for Tactical 174's opaque-gate slice.
+This is a bounded two-world ownership boundary, not a product multi-world
+manager: there is no registry or world-id lookup across an arbitrary
+collection. Without a launch-only retained-world request, the standby and its
+presentation are both `None`; no second server, renderer shell, or startup work
+is constructed. With a request, the detached runtime advances to
+acknowledged-pose/CPU-seed readiness, then reuses the active slot's extracted
+preparation logic under explicit one-result/compile/upload caps. The active
+slot always prepares first. The standby publishes `Switchable` only after its
+initial upload lifecycle is conserved and drained, entry/source terrain is
+GPU-resident and traversal-ready, and required multiview topology is
+materialized.
+
+Retained ownership and presentation are separate. Tactical 174's `OpaqueGate`
+presentation resolves paired terrain-relative endpoints and can atomically
+exchange both complete slot values. Tactical 175's `Diorama` presentation owns
+one optional `EmbeddedWorldPreview`: a retained source identity, bounded chunk/
+section region, validated placement, epoch/readiness facts, and opt-in placed
+terrain renderer. It creates no gate renderer. Scene composition has explicit
+mono, per-eye, and multiview branches that submit B opaque/cutout after A
+opaque/cutout and before A actors/translucent terrain into the same targets.
+The no-preview branch still calls the established active-world frame functions
+directly. B contributes no sky, Far LOD, actor, interaction, UI, overlay,
+audio, or physical-camera authority.
+
+Atomic gate selection reconciles and maps the destination camera/interest,
+restores runtime cadence, then exchanges the two complete slot values at a
+frame boundary. The old active becomes the switchable return slot. Selection
+clears only host presentation caches; it does not rebuild a runtime, draw
+store, traversal cache, upload coordinator, or renderer. The first selected
+frame uses a one-request/result/upload preparation cap, after which ordinary
+active budgets resume.
 
 Retained-slot lifecycle follows complete ownership. Backgrounding attempts to
 flush both slot runtimes; a remote runtime remains a no-op because its server

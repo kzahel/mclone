@@ -183,6 +183,62 @@ fn cli_parses_launch_only_warm_world_standby_seed() {
 }
 
 #[test]
+fn cli_parses_launch_only_live_diorama_placement() {
+    let cli = Cli::parse([
+        "--world-dir".to_owned(),
+        "/tmp/table-a".to_owned(),
+        "--live-diorama-world-dir".to_owned(),
+        "/tmp/island-b".to_owned(),
+        "--live-diorama-source-region".to_owned(),
+        "2,-3,1,4,6".to_owned(),
+        "--live-diorama-source-anchor".to_owned(),
+        "8.5,65,8.5".to_owned(),
+        "--live-diorama-composition-anchor".to_owned(),
+        "10,70,-2".to_owned(),
+        "--live-diorama-scale".to_owned(),
+        "0.25".to_owned(),
+        "--warm-world-standby-cadence".to_owned(),
+        "5/5/5".to_owned(),
+    ])
+    .unwrap();
+    let Cli::Window { scene, .. } = cli else {
+        panic!("expected window mode");
+    };
+    let diorama = scene.live_diorama.expect("live diorama parsed");
+    assert_eq!(diorama.world_dir, PathBuf::from("/tmp/island-b"));
+    assert_eq!(diorama.source_region.center(), ChunkPos::new(2, -3));
+    assert_eq!(diorama.source_region.horizontal_radius(), 1);
+    assert_eq!(diorama.source_region.min_section_y(), 4);
+    assert_eq!(diorama.source_region.max_section_y(), 6);
+    assert_eq!(
+        diorama.placement.source_anchor(),
+        mclone_core::Vec3d::new(8.5, 65.0, 8.5)
+    );
+    assert_eq!(
+        diorama.placement.composition_anchor(),
+        mclone_core::Vec3d::new(10.0, 70.0, -2.0)
+    );
+    assert_eq!(diorama.placement.uniform_scale(), 0.25);
+    assert_eq!(
+        scene.warm_world_standby_cadence,
+        Some(mclone_server::SimulationCadenceConfig::new(5, 5, 5))
+    );
+}
+
+#[test]
+fn cli_rejects_conflicting_retained_world_presentations() {
+    let error = Cli::parse([
+        "--live-diorama-world-dir".to_owned(),
+        "/tmp/island-b".to_owned(),
+        "--warm-world-standby-seed".to_owned(),
+        "17502".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("mutually exclusive retained-world presentations"));
+}
+
+#[test]
 fn cli_rejects_warm_world_standby_for_remote_world() {
     let error = Cli::parse([
         "--warm-world-standby-seed".to_owned(),

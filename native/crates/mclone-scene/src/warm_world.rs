@@ -10,10 +10,12 @@ use mclone_core::{ChunkPos, Vec3d};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
+use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::opaque_world_gate::OpaqueWorldGate;
+use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraController;
-use mclone_server::SimulationCadenceConfig;
+use mclone_server::{SimulationCadenceConfig, WorldGenerationProfile};
 
 use crate::McloneSceneHostOptions;
 
@@ -60,11 +62,14 @@ impl WorldInstanceId {
 }
 
 /// Launch-only request for Tactical 174's detached local standby smoke.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct WarmWorldStandbyRequest {
     pub seed: i64,
     pub entry_center: ChunkPos,
     pub standby_cadence: Option<SimulationCadenceConfig>,
+    pub world_dir: Option<PathBuf>,
+    pub world_generation_profile: WorldGenerationProfile,
+    pub presentation: WarmWorldPresentationRequest,
 }
 
 impl WarmWorldStandbyRequest {
@@ -73,12 +78,101 @@ impl WarmWorldStandbyRequest {
             seed,
             entry_center,
             standby_cadence: None,
+            world_dir: None,
+            world_generation_profile: WorldGenerationProfile::Overworld,
+            presentation: WarmWorldPresentationRequest::OpaqueGate,
         }
     }
 
     pub const fn with_standby_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
         self.standby_cadence = Some(cadence);
         self
+    }
+
+    pub fn with_persistent_world_dir(
+        mut self,
+        world_dir: impl Into<PathBuf>,
+        world_generation_profile: WorldGenerationProfile,
+    ) -> Self {
+        self.world_dir = Some(world_dir.into());
+        self.world_generation_profile = world_generation_profile;
+        self
+    }
+
+    pub const fn with_embedded_preview(
+        mut self,
+        region: EmbeddedChunkRegion,
+        placement: WorldPlacement,
+    ) -> Self {
+        self.presentation = WarmWorldPresentationRequest::Diorama { region, placement };
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WarmWorldPresentationRequest {
+    OpaqueGate,
+    Diorama {
+        region: EmbeddedChunkRegion,
+        placement: WorldPlacement,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EmbeddedWorldPreviewPhase {
+    #[default]
+    Warming,
+    Visible,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmbeddedWorldPreviewSnapshot {
+    pub source_world: WorldInstanceId,
+    pub region: EmbeddedChunkRegion,
+    pub placement: WorldPlacement,
+    pub asset_epoch: u64,
+    pub phase: EmbeddedWorldPreviewPhase,
+    pub renderer_topology_ready: bool,
+    pub source_anchor_gpu_resident: bool,
+    pub source_anchor_traversal_ready: bool,
+    pub bounded_section_count: usize,
+    pub last_drawn_section_count: usize,
+    pub last_drawn_index_count: u32,
+    pub failure: Option<String>,
+}
+
+pub(crate) struct EmbeddedWorldPreview {
+    pub source_world: WorldInstanceId,
+    pub region: EmbeddedChunkRegion,
+    pub placement: WorldPlacement,
+    pub asset_epoch: u64,
+    pub phase: EmbeddedWorldPreviewPhase,
+    pub renderer: PlacedTexturedSectionRenderer,
+    pub renderer_topology_ready: bool,
+    pub source_anchor_gpu_resident: bool,
+    pub source_anchor_traversal_ready: bool,
+    pub bounded_section_count: usize,
+    pub last_draw: TexturedSectionRenderStats,
+    pub failure: Option<String>,
+}
+
+impl EmbeddedWorldPreview {
+    pub(crate) fn snapshot(&self) -> EmbeddedWorldPreviewSnapshot {
+        EmbeddedWorldPreviewSnapshot {
+            source_world: self.source_world,
+            region: self.region,
+            placement: self.placement,
+            asset_epoch: self.asset_epoch,
+            phase: self.phase,
+            renderer_topology_ready: self.renderer_topology_ready,
+            source_anchor_gpu_resident: self.source_anchor_gpu_resident,
+            source_anchor_traversal_ready: self.source_anchor_traversal_ready,
+            bounded_section_count: self.bounded_section_count,
+            last_drawn_section_count: self.last_draw.drawn_section_count,
+            last_drawn_index_count: self.last_draw.drawn_index_count,
+            failure: self.failure.clone(),
+        }
     }
 }
 
@@ -587,6 +681,8 @@ impl WorldSlotStorage {
 pub(crate) struct WarmWorldStandbyState {
     pub instance_id: WorldInstanceId,
     pub seed: i64,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub presentation: WarmWorldPresentationRequest,
     pub phase: WarmWorldStandbyPhase,
     pub started_at: MonotonicInstant,
     pub renderer_shell_create_ms: f64,
@@ -730,6 +826,21 @@ pub(crate) fn entry_support_render_section(pose: WorldEntryPose) -> Option<Rende
         block_to_chunk_coord(support_x),
         block_to_section_coord(support_y),
         block_to_chunk_coord(support_z),
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn anchor_render_section(anchor: Vec3d) -> Option<RenderSectionKey> {
+    if !anchor.is_finite() {
+        return None;
+    }
+    let x = anchor.x.floor() as i32;
+    let y = anchor.y.floor() as i32;
+    let z = anchor.z.floor() as i32;
+    Some(RenderSectionKey::new(
+        block_to_chunk_coord(x),
+        block_to_section_coord(y),
+        block_to_chunk_coord(z),
     ))
 }
 

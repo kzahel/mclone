@@ -325,6 +325,7 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            embedded_world_preview: None,
             #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -511,6 +512,7 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            embedded_world_preview: None,
             #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -709,6 +711,7 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            embedded_world_preview: None,
             #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1265,6 +1268,7 @@ impl McloneSceneHost {
         if self.active_world.scene.seed == request.seed {
             bail!("warm-world standby seed must differ from the active seed");
         }
+        let presentation = request.presentation;
 
         let started_at = self.services.clock.now();
         let mut scene = self.active_world.scene.clone();
@@ -1273,7 +1277,8 @@ impl McloneSceneHost {
         scene.chunk_z = request.entry_center.z;
         scene.remote_addr = None;
         scene.world_root = None;
-        scene.world_dir = None;
+        scene.world_dir = request.world_dir.clone();
+        scene.world_generation_profile = request.world_generation_profile;
         scene.use_initial_spawn_center = false;
         let scene = scene.validated()?;
         let standby_cadence = request.standby_cadence.unwrap_or(scene.simulation_cadence);
@@ -1296,7 +1301,10 @@ impl McloneSceneHost {
         let renderer_shell_create_ms =
             elapsed_ms(self.services.clock.elapsed_since(shell_started_at));
         let renderer_multiview_required = device.features().contains(wgpu::Features::MULTIVIEW);
-        let gate_renderer = OpaqueWorldGateRenderer::new(device, self.color_format);
+        let gate_renderer = matches!(presentation, WarmWorldPresentationRequest::OpaqueGate)
+            .then(|| OpaqueWorldGateRenderer::new(device, self.color_format));
+        let placed_renderer = matches!(presentation, WarmWorldPresentationRequest::Diorama { .. })
+            .then(|| draw.create_placed_renderer(device));
         let multiview_started_at = self.services.clock.now();
         if renderer_multiview_required {
             self.active_world
@@ -1305,14 +1313,29 @@ impl McloneSceneHost {
                 .context("materialize active multiview terrain pipelines for return standby")?;
             draw.materialize_multiview_renderer(device)
                 .context("materialize detached standby multiview terrain pipelines")?;
-            gate_renderer
-                .materialize_multiview_renderer(device)
-                .context("materialize opaque world gate multiview pipeline")?;
+            if let Some(gate_renderer) = gate_renderer.as_ref() {
+                gate_renderer
+                    .materialize_multiview_renderer(device)
+                    .context("materialize opaque world gate multiview pipeline")?;
+            }
+            if let Some(placed_renderer) = placed_renderer.as_ref() {
+                draw.materialize_placed_multiview_renderer(device, placed_renderer)
+                    .context("materialize embedded-world placed terrain multiview pipelines")?;
+            }
         }
         let renderer_multiview_create_ms = renderer_multiview_required
             .then(|| elapsed_ms(self.services.clock.elapsed_since(multiview_started_at)))
             .unwrap_or(0.0);
-        let renderer_multiview_materialized = draw.multiview_renderer_materialized();
+        let renderer_multiview_materialized = draw.multiview_renderer_materialized()
+            && gate_renderer
+                .as_ref()
+                .is_none_or(OpaqueWorldGateRenderer::multiview_renderer_materialized)
+            && placed_renderer
+                .as_ref()
+                .is_none_or(|renderer| renderer.multiview_renderer_materialized());
+        let placed_renderer_topology_ready = placed_renderer.as_ref().is_some_and(|renderer| {
+            !renderer_multiview_required || renderer.multiview_renderer_materialized()
+        });
         let pump = LocalIntegratedStartupPump::with_mesh_assets(
             local_integrated_scene_options(&scene),
             self.mesh_assets.clone(),
@@ -1353,6 +1376,7 @@ impl McloneSceneHost {
         self.warm_world_standby = Some(WarmWorldStandbyState {
             instance_id,
             seed: request.seed,
+            presentation,
             phase: WarmWorldStandbyPhase::Warming,
             started_at,
             renderer_shell_create_ms,
@@ -1408,7 +1432,27 @@ impl McloneSceneHost {
             destination_endpoint: None,
             failure: None,
         });
-        self.opaque_world_gate_renderer = Some(gate_renderer);
+        self.opaque_world_gate_renderer = gate_renderer;
+        self.embedded_world_preview = match (presentation, placed_renderer) {
+            (WarmWorldPresentationRequest::Diorama { region, placement }, Some(renderer)) => {
+                Some(EmbeddedWorldPreview {
+                    source_world: instance_id,
+                    region,
+                    placement,
+                    asset_epoch,
+                    phase: EmbeddedWorldPreviewPhase::Warming,
+                    renderer,
+                    renderer_topology_ready: placed_renderer_topology_ready,
+                    source_anchor_gpu_resident: false,
+                    source_anchor_traversal_ready: false,
+                    bounded_section_count: 0,
+                    last_draw: TexturedSectionRenderStats::default(),
+                    failure: None,
+                })
+            }
+            (WarmWorldPresentationRequest::OpaqueGate, None) => None,
+            _ => unreachable!("presentation renderer construction stays paired"),
+        };
         log::info!(
             "warm-world standby queued id={} seed={} center=({}, {}) renderer_shell_ms={:.3} multiview_required={} multiview_ms={:.3} atlas={}x{} base_bytes={}",
             instance_id.get(),
@@ -1431,6 +1475,12 @@ impl McloneSceneHost {
             .map(|state| state.snapshot(self.services.clock.now()))
     }
 
+    pub fn embedded_world_preview_snapshot(&self) -> Option<EmbeddedWorldPreviewSnapshot> {
+        self.embedded_world_preview
+            .as_ref()
+            .map(EmbeddedWorldPreview::snapshot)
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn world_gate_snapshot(&self) -> Option<WorldGateSnapshot> {
         self.world_gate.as_ref().map(WorldGate::snapshot)
@@ -1442,6 +1492,13 @@ impl McloneSceneHost {
             self.world_gate = None;
             return;
         };
+        if matches!(
+            state.presentation,
+            WarmWorldPresentationRequest::Diorama { .. }
+        ) {
+            self.world_gate = None;
+            return;
+        }
         let availability = match state.phase {
             WarmWorldStandbyPhase::Switchable if state.readiness.switchable => {
                 WorldGateAvailability::Switchable
@@ -2049,6 +2106,7 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
+        self.embedded_world_preview = None;
         // Drop the concrete slot unconditionally. State normally accompanies
         // it, but teardown and resource-rebuild safety must not depend on that
         // diagnostic invariant: taking the slot joins its runtime/compiler
@@ -2286,7 +2344,33 @@ impl McloneSceneHost {
 
         if retain_slot
             && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
+            && matches!(
+                state.presentation,
+                WarmWorldPresentationRequest::Diorama { .. }
+            )
+        {
+            let WarmWorldPresentationRequest::Diorama { placement, .. } = state.presentation else {
+                unreachable!("diorama presentation checked above");
+            };
+            state.phase = WarmWorldStandbyPhase::CpuReady;
+            state.readiness.cpu_ready = true;
+            state.readiness.entry_section = anchor_render_section(placement.source_anchor());
+            log::info!(
+                "warm-world diorama CPU-ready id={} seed={} elapsed_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={}",
+                state.instance_id.get(),
+                state.seed,
+                elapsed_ms(self.services.clock.elapsed_since(state.started_at)),
+                state.loaded_chunks,
+                state.startup_seed_sections,
+                state.startup_seed_drawable_sections,
+                state.startup_seed_owned_bytes,
+            );
+        }
+
+        if retain_slot
+            && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
             && self.active_world.lifecycle == WorldSlotLifecycle::ActiveReady
+            && matches!(state.presentation, WarmWorldPresentationRequest::OpaqueGate)
         {
             let endpoint_started_at = self.services.clock.now();
             let source_endpoint = self
@@ -2598,6 +2682,39 @@ impl McloneSceneHost {
             }
             slot.lifecycle = WorldSlotLifecycle::StandbySwitchable;
             state.phase = WarmWorldStandbyPhase::Switchable;
+        }
+
+        if let Some(preview) = self.embedded_world_preview.as_mut() {
+            let source_anchor_section = anchor_render_section(preview.placement.source_anchor());
+            let bounded_records = slot.draw.prepare_render_records_for_region(preview.region);
+            preview.bounded_section_count = bounded_records.section_keys().len();
+            preview.source_anchor_gpu_resident =
+                source_anchor_section.is_some_and(|key| slot.draw.contains_section(key));
+            preview.source_anchor_traversal_ready = source_anchor_section
+                .is_some_and(|key| slot.draw.traversal_ready_contains_section(key));
+            let failure = if preview.source_world != slot.id {
+                Some("embedded preview source no longer names the retained slot".to_owned())
+            } else if preview.asset_epoch != slot.asset_epoch
+                || preview.asset_epoch != self.active_world.asset_epoch
+            {
+                Some("embedded preview asset epoch does not match both slots".to_owned())
+            } else if source_anchor_section.is_none_or(|key| !preview.region.contains(key)) {
+                Some("embedded preview source anchor lies outside its bounded region".to_owned())
+            } else {
+                None
+            };
+            if let Some(failure) = failure {
+                preview.phase = EmbeddedWorldPreviewPhase::Failed;
+                preview.failure = Some(failure);
+            } else if state.phase == WarmWorldStandbyPhase::Switchable
+                && preview.renderer_topology_ready
+                && preview.source_anchor_gpu_resident
+                && preview.source_anchor_traversal_ready
+                && preview.bounded_section_count > 0
+            {
+                preview.phase = EmbeddedWorldPreviewPhase::Visible;
+                preview.failure = None;
+            }
         }
 
         self.standby_world = Some(slot);

@@ -1,10 +1,10 @@
 # 175: Live Hosted World Diorama
 
-Status: active 2026-07-13. Slices 0–2 landed: contract/baseline,
-authored-only server/content foundation, and the static placed-terrain
-renderer. Tactical 174's software lifecycle/invalidation closeout is green;
-Slice 3 live local scene composition is next. Capable-device multiview remains
-a shared named validation gap.
+Status: active 2026-07-13. Slices 0–3 landed: contract/baseline,
+authored-only server/content foundation, static placed terrain, and the first
+live local two-host composition. The work is paused at the required Slice 3
+human review checkpoint before mutation, water, or activation. Capable-device
+multiview remains a shared named validation gap.
 
 Topic: `embedded-worlds`
 
@@ -797,6 +797,129 @@ stereo and shared-depth occlusion.
 This is the first required manual review checkpoint. Stop for feedback on
 scale, table placement, source framing, culling, lighting, and XR presence
 before adding mutation, water, or activation.
+
+### Slice 3 completion record — 2026-07-13
+
+The first live composition now runs through two ordinary persistent local
+integrated hosts:
+
+- `McloneSceneHost` owns one optional `EmbeddedWorldPreview` separately from
+  the retained slot. `WarmWorldStandbyRequest` now carries a persistent world
+  root, generation profile, and mutually exclusive `OpaqueGate` or `Diorama`
+  presentation. Gate mode creates no placed renderer; diorama mode creates no
+  blue gate renderer or model.
+- The diorama startup reads B through the ordinary detached local startup pump
+  and SQLite store. It does not replace A or pass through the primary session
+  coordinator. B's first `SetChunkView` stays fixed on the configured source
+  region center, independent of movement around the table.
+- Publication requires the retained source identity, matching A/B asset epoch,
+  eager placed topology, source-anchor GPU residency, source-anchor traversal
+  readiness, a nonempty bounded record set, and an anchor inside the requested
+  region. Cancellation/resource rebuild drops the preview with the retained
+  slot. A failed or warming preview is not submitted.
+- Mono, per-eye stereo, and full-frame multiview now have explicit composition
+  branches. They render A sky/Far LOD, A opaque/cutout, B placed opaque/cutout,
+  actors or the mutually exclusive gate, then A translucent terrain and later
+  overlays. B contributes no sky, Far LOD, actors, interaction, HUD, outlines,
+  audio, or physical-camera authority.
+- The active-only wrappers remain the exact no-preview branch. No placed
+  records, renderer, pipeline, or preview aggregate is created when the launch
+  option is absent. The ownership characterization now locks both explicit
+  branches without introducing an N-world collection.
+
+The launch-only desktop projection is explicit and provisional:
+
+```text
+--world-dir PATH                         persistent active A
+--live-diorama-world-dir PATH           persistent authored fixture B
+--live-diorama-source-region X,Z,R,Y0,Y1
+--live-diorama-source-anchor X,Y,Z
+--live-diorama-composition-anchor X,Y,Z
+--live-diorama-scale SCALE
+--warm-world-standby-cadence H/G/P       optional B-only throttle
+```
+
+Supplying only B's root uses the checked-in fixture facts: region
+`0,0,0,3,5`, source anchor `8.5,65,8.5`, table anchor `8.5,68,8.5`, and scale
+`1/16`. A fixture marker supplies B's seed and stored generation profile.
+Malformed or missing markers fail startup rather than silently opening the
+wrong content. A diorama root and the old gate seed are rejected together.
+The review smoke deliberately uses `1/8`: the first inspected `1/16` image was
+correct but too small for a useful desktop review, and the scale remains a
+checkpoint decision rather than a hidden implementation constant.
+
+The deterministic lane is:
+
+```bash
+pnpm native:live-diorama:smoke
+```
+
+It rebuilds the idempotent A/B fixture roots, captures A alone, front/side/
+behind A+B views, and a synthetic stereo pair, then writes
+`/tmp/mclone-live-diorama-smoke/report.json`. The accepted receipt reports:
+
+- 1,492 A-only versus A+B changed pixels at the front camera;
+- three bounded B section records, two drawn sections, and 5,112 drawn indices;
+- 115,057 differing left/right pixels with B present in both eyes; and
+- the requested B cadence still applied at `5/5/5` after preview drawing.
+
+The individually inspected images and SHA-256 receipts are:
+
+- `a-alone.png`: `2d4e398c...a607044`;
+- `a-plus-b-front.png`: `ce72ebf3...225a136`;
+- `a-plus-b-side.png`: `a4dff52c...8443c3`;
+- `a-plus-b-behind.png`: `0b788186...340548`; and
+- `a-plus-b-stereo.png`: `7f6db613...1c951369`.
+
+The front/side/behind views show the same grass/stone miniature on the brick
+table and exercise shared-depth ordering from opposite sides. The stereo image
+shows ordinary physical parallax without render-to-texture. The Mac adapter
+still lacks `MULTIVIEW`; its eager shader/pipeline path compiles and is wired
+into full-frame composition, but capable-device pixels remain an explicit
+later receipt.
+
+The no-preview release gate was run only after the current release binary had
+finished compiling. A second process check showed no Cargo, Rust, C/C++,
+mclone, emulator, or QEMU work and 72.15% aggregate CPU idle. Five direct
+240-frame runs under `/tmp/mclone-live-diorama-slice3-perf` measured averages
+of 2.927, 2.724, 2.945, 2.714, and 2.718 ms: 2.724 ms median. P95s were 4.611,
+4.145, 4.532, 4.232, and 4.235 ms: 4.235 ms median. Every sample lies within
+9% of its median, so no outlier was discarded; all retained 1,936 sections and
+reported zero over-budget frames and zero accounting violations. Against
+Slice 2's 2.547/4.445 ms medians, average is 7.0% higher and P95 is 4.7% lower,
+both within the 10% no-preview gate. No optimization is claimed.
+
+Focused validation passes 243 app-runtime library tests plus its two live-host
+and four ownership-contract tests, 107 scene tests plus ten ownership tests
+(one GPU characterization ignored), and 157 native-client tests. The browser
+WASM build/check, ordinary desktop-offscreen and XR-emulation pixel smokes,
+native thin-adapter purity, scene-host purity, formatting, and diff whitespace
+checks pass. WASM retains only the three pre-existing server/app-runtime target
+warnings. A strict all-target Clippy attempt remains blocked before reaching
+this slice by existing unrelated lints in `mclone-core`, `mclone-input`, and
+`mclone-diagnostics`; no Clippy-clean claim is made.
+
+For the required interactive review, first build the fixtures, then launch A
+with B at the more visible `1/8` review scale:
+
+```bash
+pnpm native:authored-world-fixtures
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client \
+  --bin mclone-native-client -- \
+  --world-dir /tmp/mclone-live-diorama-fixtures/table-a \
+  --generation-profile authored-only --seed 17501 \
+  --chunk-x 0 --chunk-z 0 --render-distance 2 \
+  --day-time 6000 --freeze-time --debug-passive-showcase false \
+  --lighting false --fullbright true \
+  --live-diorama-world-dir /tmp/mclone-live-diorama-fixtures/island-b \
+  --live-diorama-scale 0.125 --warm-world-standby-cadence 5/5/5
+```
+
+The player begins near `(0.5, 64, 0.5)`; the brick table and composition anchor
+are near `(8.5, 68, 8.5)`. Review the miniature from multiple sides and compare
+`--live-diorama-scale 0.0625`, `0.125`, and `0.25` if useful. Slice 4 must not
+start until scale, placement, framing, lighting, culling, and XR presence have
+received this human check.
 
 ## Slice 4: Live Updates, Bounds, And Background Budgets
 

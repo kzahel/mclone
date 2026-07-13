@@ -19,6 +19,7 @@
     "native:gpu-upload:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mesh_cpu_perf -- --render-distance 10 --gpu-upload --max-seconds 180",
     "native:dedicated:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-dedicated-server --bin mclone-dedicated-server -- --multi-client-smoke",
     "native:authored-world-fixtures": "cargo run --manifest-path native/Cargo.toml -p mclone-server --bin authored_world_fixtures --",
+    "native:live-diorama:smoke": "pnpm native:authored-world-fixtures && cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --live-diorama-smoke /tmp/mclone-live-diorama-smoke --width 960 --height 640 --world-dir /tmp/mclone-live-diorama-fixtures/table-a --generation-profile authored-only --seed 17501 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time --debug-passive-showcase false --lighting false --fullbright true --live-diorama-world-dir /tmp/mclone-live-diorama-fixtures/island-b --live-diorama-scale 0.125 --warm-world-standby-cadence 5/5/5",
     "native:worldgen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:find-biome-seed": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin find_biome_seed --",

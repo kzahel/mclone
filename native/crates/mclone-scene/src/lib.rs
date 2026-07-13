@@ -38,10 +38,13 @@ use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
-    render_full_frame_for_view_with_far_lod_and_opaque_gate,
+    FullFrameGui, FullFrameRenderSummary, PlacedTerrainFrame, PlacedTerrainPrepared,
+    RenderStreamStats, render_full_frame_for_view_with_far_lod_and_opaque_gate,
+    render_full_frame_for_view_with_far_lod_and_placed_terrain,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot,
     render_view_with_underwater_effect,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -471,6 +474,7 @@ pub struct McloneSceneHost {
     active_world: DrawableWorldSlot,
     standby_world: Option<DrawableWorldSlot>,
     warm_world_standby: Option<WarmWorldStandbyState>,
+    embedded_world_preview: Option<EmbeddedWorldPreview>,
     #[cfg(not(target_arch = "wasm32"))]
     world_gate: Option<WorldGate>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -1187,6 +1191,31 @@ impl McloneSceneHost {
                 Default::default(),
             )
         };
+        let preview_stereo_draw = self
+            .embedded_world_preview
+            .as_ref()
+            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+            .and_then(|preview| {
+                self.standby_world
+                    .as_ref()
+                    .filter(|slot| slot.id == preview.source_world)
+                    .map(|slot| {
+                        let records = slot.draw.prepare_render_records_for_region(preview.region);
+                        let preview_time = slot
+                            .runtime
+                            .as_ref()
+                            .map_or(0.0, |runtime| runtime.time_of_day());
+                        let options = self.render_options.with_sky_darken(
+                            mclone_render::light_texture::sky_darken(preview_time),
+                        );
+                        slot.draw.prepare_placed_stereo_draw(
+                            &records,
+                            render_views,
+                            [options; 2],
+                            preview.placement,
+                        )
+                    })
+            });
         let defer_eye_waits = self.defer_eye_waits_enabled;
         let uniform_frame = self.next_per_view_uniform_frame();
         let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
@@ -1197,6 +1226,7 @@ impl McloneSceneHost {
             device,
             queue,
             &prepared_stereo_draw,
+            preview_stereo_draw.as_ref(),
             left_target,
             render_views[0],
             diagnostic_panel,
@@ -1221,6 +1251,7 @@ impl McloneSceneHost {
             device,
             queue,
             &prepared_stereo_draw,
+            preview_stereo_draw.as_ref(),
             right_target,
             render_views[1],
             diagnostic_panel,
@@ -1285,6 +1316,13 @@ impl McloneSceneHost {
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         let first_drawn_section_count = left_eye.summary.drawn_section_count;
+        if let Some(preview) = self.embedded_world_preview.as_mut() {
+            preview.last_draw = TexturedSectionRenderStats {
+                drawn_section_count: left_eye.summary.placed_drawn_section_count,
+                drawn_index_count: left_eye.summary.placed_drawn_index_count,
+                ..TexturedSectionRenderStats::default()
+            };
+        }
         self.record_eye0_summary(left_eye.summary);
         self.record_warm_world_first_destination_frame(first_drawn_section_count, upload);
         Ok(self.frame_summary_with_timing(timing, upload))
@@ -1809,8 +1847,34 @@ impl McloneSceneHost {
             &mclone_render::opaque_world_gate::OpaqueWorldGateRenderer,
             mclone_render::opaque_world_gate::OpaqueWorldGate,
         )> = None;
-        let split_translucent_terrain =
-            (include_actors && !actor_instances.is_empty()) || opaque_world_gate.is_some();
+        let preview_frame = self
+            .embedded_world_preview
+            .as_ref()
+            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+            .and_then(|preview| {
+                self.standby_world
+                    .as_ref()
+                    .filter(|slot| slot.id == preview.source_world)
+                    .map(|slot| {
+                        let records = slot.draw.prepare_render_records_for_region(preview.region);
+                        let preview_time = slot
+                            .runtime
+                            .as_ref()
+                            .map_or(0.0, |runtime| runtime.time_of_day());
+                        let options = self.render_options.with_sky_darken(
+                            mclone_render::light_texture::sky_darken(preview_time),
+                        );
+                        (
+                            preview.source_world,
+                            records,
+                            [options; 2],
+                            preview.placement,
+                        )
+                    })
+            });
+        let split_translucent_terrain = (include_actors && !actor_instances.is_empty())
+            || opaque_world_gate.is_some()
+            || preview_frame.is_some();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -1834,6 +1898,43 @@ impl McloneSceneHost {
             timing.multiview_terrain_ms =
                 elapsed_ms(self.services.clock.elapsed_since(terrain_start));
         }
+        let preview_stats = if let Some((source_world, records, options, placement)) = preview_frame
+        {
+            let preview = self
+                .embedded_world_preview
+                .as_ref()
+                .filter(|preview| preview.source_world == source_world)
+                .context("visible embedded preview lost its presentation state")?;
+            let standby = self
+                .standby_world
+                .as_ref()
+                .filter(|slot| slot.id == source_world)
+                .context("visible embedded preview lost its source world")?;
+            let prepared = standby.draw.prepare_placed_stereo_draw(
+                &records,
+                terrain_views,
+                options,
+                placement,
+            );
+            Some(
+                standby
+                    .draw
+                    .render_placed_prepared_multiview_stereo_draw_with_options(
+                        &preview.renderer,
+                        &prepared,
+                        device,
+                        queue,
+                        &mut encoder,
+                        render_target.with_loaded_color().with_loaded_depth(),
+                        terrain_views,
+                        options,
+                        placement,
+                    )
+                    .context("render embedded world preview multiview")?,
+            )
+        } else {
+            None
+        };
         if let Some((gate_renderer, gate)) = opaque_world_gate {
             gate_renderer
                 .render_multiview(
@@ -1956,6 +2057,11 @@ impl McloneSceneHost {
         self.active_world.render_stats.drawn_section_count = stats[0].drawn_section_count;
         self.active_world.render_stats.drawn_face_count = stats[0].drawn_face_count();
         self.active_world.render_stats.drawn_index_count = stats[0].drawn_index_count;
+        if let (Some(preview), Some(preview_stats)) =
+            (self.embedded_world_preview.as_mut(), preview_stats)
+        {
+            preview.last_draw = preview_stats[0];
+        }
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         self.rendered_frames += 1;
@@ -3020,6 +3126,7 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         prepared_draw: &PreparedTexturedSectionStereoDraw,
+        preview_prepared_draw: Option<&PreparedTexturedSectionStereoDraw>,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         diagnostic_panel: WorldGuiPanel,
@@ -3087,60 +3194,138 @@ impl McloneSceneHost {
             .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
         #[cfg(target_arch = "wasm32")]
         let opaque_world_gate = None;
+        let placed_terrain = preview_prepared_draw.and_then(|prepared| {
+            let preview = self
+                .embedded_world_preview
+                .as_ref()
+                .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
+            let standby = self
+                .standby_world
+                .as_ref()
+                .filter(|slot| slot.id == preview.source_world)?;
+            let preview_time = standby
+                .runtime
+                .as_ref()
+                .map_or(0.0, |runtime| runtime.time_of_day());
+            Some(PlacedTerrainFrame {
+                draw: &standby.draw,
+                renderer: &preview.renderer,
+                prepared: PlacedTerrainPrepared::Stereo(prepared),
+                placement: preview.placement,
+                render_options: self
+                    .render_options
+                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time)),
+            })
+        });
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
-            render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot(
-                frame,
-                target.depth,
-                &self.sky,
-                &mut self.active_world.draw,
-                prepared_draw,
-                opaque_world_gate,
-                Some(&mut self.actors),
-                Some(&mut self.screen_effects),
-                None,
-                render_view,
-                actor_instances,
-                underwater_overlay,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
-                |_| summary_ui_draw,
-                far_lod,
-                far_lod_mesh,
-                &mut render_stats,
-                view_slot,
-            )
+            if let Some(placed_terrain) = placed_terrain {
+                render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot(
+                    frame,
+                    target.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    prepared_draw,
+                    placed_terrain,
+                    Some(&mut self.actors),
+                    Some(&mut self.screen_effects),
+                    None,
+                    render_view,
+                    actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                    |_| summary_ui_draw,
+                    far_lod,
+                    far_lod_mesh,
+                    &mut render_stats,
+                    view_slot,
+                )
+            } else {
+                render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot(
+                    frame,
+                    target.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    prepared_draw,
+                    opaque_world_gate,
+                    Some(&mut self.actors),
+                    Some(&mut self.screen_effects),
+                    None,
+                    render_view,
+                    actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                    |_| summary_ui_draw,
+                    far_lod,
+                    far_lod_mesh,
+                    &mut render_stats,
+                    view_slot,
+                )
+            }
         } else {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
-            render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot(
-                frame,
-                target.depth,
-                &self.sky,
-                &mut self.active_world.draw,
-                prepared_draw,
-                opaque_world_gate,
-                Some(&mut self.actors),
-                Some(&mut self.screen_effects),
-                None,
-                render_view,
-                actor_instances,
-                underwater_overlay,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
-                |_| summary_ui_draw,
-                far_lod,
-                far_lod_mesh,
-                &mut render_stats,
-                view_slot,
-            )
-            .map(|summary| (summary, Default::default()))
+            if let Some(placed_terrain) = placed_terrain {
+                render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot(
+                    frame,
+                    target.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    prepared_draw,
+                    placed_terrain,
+                    Some(&mut self.actors),
+                    Some(&mut self.screen_effects),
+                    None,
+                    render_view,
+                    actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                    |_| summary_ui_draw,
+                    far_lod,
+                    far_lod_mesh,
+                    &mut render_stats,
+                    view_slot,
+                )
+                .map(|summary| (summary, Default::default()))
+            } else {
+                render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot(
+                    frame,
+                    target.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    prepared_draw,
+                    opaque_world_gate,
+                    Some(&mut self.actors),
+                    Some(&mut self.screen_effects),
+                    None,
+                    render_view,
+                    actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                    |_| summary_ui_draw,
+                    far_lod,
+                    far_lod_mesh,
+                    &mut render_stats,
+                    view_slot,
+                )
+                .map(|summary| (summary, Default::default()))
+            }
         }
         .with_context(|| format!("render XR terrain {label} eye"))?;
         let full_frame_ms = full_frame_start.map_or(0.0, |start| {

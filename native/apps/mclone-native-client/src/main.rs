@@ -12,6 +12,7 @@ mod desktop_scene_host;
 mod desktop_xr;
 mod frame_pacing;
 mod headless;
+mod live_diorama_smoke;
 mod lod_settle_probe;
 mod offscreen_flat_client;
 mod offscreen_scene_host;
@@ -42,6 +43,7 @@ use crate::headless::{
     run_headless_screenshot, run_renderer_rebuild_smoke, write_actor_review_sheet,
     write_actor_walk_review, write_headless_dual_view,
 };
+use crate::live_diorama_smoke::run_live_diorama_smoke;
 use crate::lod_settle_probe::run_lod_settle_probe;
 use crate::offscreen_flat_client::run_offscreen_warm_world_swap_smoke;
 use crate::perf::{
@@ -121,6 +123,18 @@ fn main() -> Result<()> {
                 report.far_lod_region_draw_count,
                 report.far_lod_uploaded_bytes,
                 report.underwater
+            );
+            Ok(())
+        }
+        Cli::LiveDioramaSmoke { options } => {
+            let report = run_live_diorama_smoke(&options)?;
+            println!(
+                "live world diorama smoke saved to {} (changed pixels={}, B sections={}, B indices={}, stereo eye differences={})",
+                report.directory.display(),
+                report.active_preview_pixel_difference_count,
+                report.preview_drawn_section_count,
+                report.preview_drawn_index_count,
+                report.stereo_eye_pixel_difference_count,
             );
             Ok(())
         }

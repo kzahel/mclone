@@ -38,6 +38,13 @@ current macOS adapter does not expose `wgpu::Features::MULTIVIEW` and no Quest
 is attached. That execution receipt remains open; it is not replaced by the
 headset-free stereo lane.
 
+The first live-diorama composition uses the same offscreen flat and synthetic
+stereo hosts. `pnpm native:live-diorama:smoke` rebuilds persistent authored A/B
+fixtures, captures A-only plus three shared-depth A+B views and a stereo pair,
+and writes its JSON receipt under `/tmp/mclone-live-diorama-smoke`. The
+interactive desktop lane uses the same shared scene owner and launch options.
+Capable-device multiview execution remains the same named gap.
+
 Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
 2026-07-12. The native client builds and the full-frame offscreen smoke renders
 without X11, Wayland, or a window manager, using either Mesa llvmpipe or a real

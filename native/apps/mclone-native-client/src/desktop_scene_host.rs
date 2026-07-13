@@ -2,6 +2,8 @@
 //! host. Surface drivers select topology and remain responsible for targets
 //! and cadence.
 
+use std::fs;
+
 use anyhow::{Context, Result};
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::prepared_assets::{
@@ -14,6 +16,7 @@ use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_scene::{
     McloneSceneHost, McloneSceneHostOptions, WarmWorldStandbyRequest, XrStartupViewPose,
 };
+use mclone_server::{AuthoredWorldFixtureManifest, authored_world_fixture_marker_path};
 
 use crate::cli::SceneOptions;
 use crate::render_cache::load_asset_source;
@@ -118,7 +121,31 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
         )
     });
     configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
-    if let Some(seed) = scene.warm_world_standby_seed {
+    if let Some(diorama) = scene.live_diorama.as_ref() {
+        let marker_path = authored_world_fixture_marker_path(&diorama.world_dir);
+        let marker = fs::read(&marker_path).with_context(|| {
+            format!(
+                "read live-diorama fixture marker `{}`",
+                marker_path.display()
+            )
+        })?;
+        let manifest: AuthoredWorldFixtureManifest =
+            serde_json::from_slice(&marker).with_context(|| {
+                format!(
+                    "decode live-diorama fixture marker `{}`",
+                    marker_path.display()
+                )
+            })?;
+        let mut request =
+            WarmWorldStandbyRequest::new(manifest.seed, diorama.source_region.center())
+                .with_persistent_world_dir(&diorama.world_dir, manifest.world_generation_profile)
+                .with_embedded_preview(diorama.source_region, diorama.placement);
+        if let Some(cadence) = scene.warm_world_standby_cadence {
+            request = request.with_standby_cadence(cadence);
+        }
+        host.begin_warm_world_standby(device, queue, request)
+            .context("initialize launch-only live world diorama")?;
+    } else if let Some(seed) = scene.warm_world_standby_seed {
         let mut request =
             WarmWorldStandbyRequest::new(seed, ChunkPos::new(scene.chunk_x, scene.chunk_z));
         if let Some(cadence) = scene.warm_world_standby_cadence {

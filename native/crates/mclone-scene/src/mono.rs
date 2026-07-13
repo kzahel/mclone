@@ -1215,30 +1215,93 @@ impl McloneSceneHost {
             .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
         #[cfg(target_arch = "wasm32")]
         let opaque_world_gate = None;
+        let preview_records = self
+            .embedded_world_preview
+            .as_ref()
+            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+            .and_then(|preview| {
+                self.standby_world
+                    .as_ref()
+                    .filter(|slot| slot.id == preview.source_world)
+                    .map(|slot| slot.draw.prepare_render_records_for_region(preview.region))
+            });
         let world_gui = FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
-        let mut summary = render_full_frame_for_view_with_far_lod_and_opaque_gate(
-            RenderFrameContext::new(device, queue, encoder, target),
-            depth,
-            &self.sky,
-            &mut self.active_world.draw,
-            far_lod,
-            far_lod_mesh,
-            opaque_world_gate,
-            Some(&mut self.actors),
-            Some(&mut self.screen_effects),
-            None,
-            render_view,
-            &actor_instances,
-            underwater_overlay,
-            sky_clear_color,
-            time_of_day,
-            sun_angle,
-            render_options,
-            world_gui,
-            |_| GuiDrawList::new(),
-            &mut render_stats,
-        )
+        let mut summary = if let Some(preview_records) = preview_records.as_ref() {
+            let preview = self
+                .embedded_world_preview
+                .as_ref()
+                .expect("visible preview record preparation retains preview state");
+            let standby = self
+                .standby_world
+                .as_ref()
+                .expect("visible preview retains its source slot");
+            let preview_time = standby
+                .runtime
+                .as_ref()
+                .map_or(0.0, |runtime| runtime.time_of_day());
+            let preview_options = self
+                .render_options
+                .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
+            render_full_frame_for_view_with_far_lod_and_placed_terrain(
+                RenderFrameContext::new(device, queue, encoder, target),
+                depth,
+                &self.sky,
+                &mut self.active_world.draw,
+                far_lod,
+                far_lod_mesh,
+                PlacedTerrainFrame {
+                    draw: &standby.draw,
+                    renderer: &preview.renderer,
+                    prepared: PlacedTerrainPrepared::Mono(preview_records),
+                    placement: preview.placement,
+                    render_options: preview_options,
+                },
+                Some(&mut self.actors),
+                Some(&mut self.screen_effects),
+                None,
+                render_view,
+                &actor_instances,
+                underwater_overlay,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                world_gui,
+                |_| GuiDrawList::new(),
+                &mut render_stats,
+            )
+        } else {
+            render_full_frame_for_view_with_far_lod_and_opaque_gate(
+                RenderFrameContext::new(device, queue, encoder, target),
+                depth,
+                &self.sky,
+                &mut self.active_world.draw,
+                far_lod,
+                far_lod_mesh,
+                opaque_world_gate,
+                Some(&mut self.actors),
+                Some(&mut self.screen_effects),
+                None,
+                render_view,
+                &actor_instances,
+                underwater_overlay,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                world_gui,
+                |_| GuiDrawList::new(),
+                &mut render_stats,
+            )
+        }
         .context("render mono scene frame")?;
+        if let Some(preview) = self.embedded_world_preview.as_mut() {
+            preview.last_draw = TexturedSectionRenderStats {
+                drawn_section_count: summary.placed_drawn_section_count,
+                drawn_index_count: summary.placed_drawn_index_count,
+                ..TexturedSectionRenderStats::default()
+            };
+        }
 
         if !full_frame_gui.covers_world {
             let selection_view =

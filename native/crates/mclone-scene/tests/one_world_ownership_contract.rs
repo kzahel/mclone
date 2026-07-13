@@ -82,6 +82,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "active_world",
     "standby_world",
     "warm_world_standby",
+    "embedded_world_preview",
     "world_gate",
     "opaque_world_gate_renderer",
     "warm_world_switch_sequence",
@@ -166,7 +167,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 20);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 75);
+    assert_eq!(host_fields.len(), 76);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -191,15 +192,31 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
 }
 
 #[test]
-fn ordinary_frame_paths_submit_only_the_active_world_draw_store() {
+fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
     let mono_source = read("src/mono.rs");
     let mono = braced_item(&mono_source, "fn render_mono_frame_inner(");
     assert!(mono.contains("&mut self.active_world.draw,"));
+    assert!(mono.contains("if let Some(preview_records) = preview_records.as_ref()"));
+    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_opaque_gate("));
+    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_placed_terrain("));
 
     let xr_source = read("src/lib.rs");
     let stereo = braced_item(&xr_source, "fn render_prepared_frame(");
     assert!(stereo.contains("self.active_world.draw.prepare_render_records_with_stats()"));
     assert!(stereo.contains("self.active_world.draw.prepare_stereo_draw"));
+    assert!(stereo.contains("let preview_stereo_draw = self"));
+    assert!(stereo.contains("preview_stereo_draw.as_ref()"));
+
+    let eye = braced_item(&xr_source, "fn render_eye_target(");
+    assert!(eye.contains("if let Some(placed_terrain) = placed_terrain"));
+    assert!(
+        eye.contains(
+            "render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot("
+        )
+    );
+    assert!(eye.contains(
+        "render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot("
+    ));
 
     let multiview = braced_item(
         &xr_source,
@@ -207,17 +224,14 @@ fn ordinary_frame_paths_submit_only_the_active_world_draw_store() {
     );
     assert!(multiview.contains("self.active_world.draw.prepare_render_records_with_stats()"));
     assert!(multiview.contains(".render_prepared_multiview_stereo_draw_phase_with_options("));
+    assert!(multiview.contains("let preview_frame = self"));
+    assert!(multiview.contains(".render_placed_prepared_multiview_stereo_draw_with_options("));
 
-    for path in [mono, stereo, multiview] {
-        for absent in [
-            "standby_world.draw",
-            "EmbeddedWorldPreview",
-            "WorldPlacement",
-            "composition_anchor",
-        ] {
+    for path in [mono, stereo, eye, multiview] {
+        for absent in ["HashMap<WorldInstanceId", "Vec<DrawableWorldSlot>"] {
             assert!(
                 !path.contains(absent),
-                "active-only frame path unexpectedly contains `{absent}`"
+                "bounded two-branch frame path unexpectedly contains `{absent}`"
             );
         }
     }
@@ -237,6 +251,7 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("active_world,"));
         assert!(constructor.contains("standby_world: None,"));
         assert!(constructor.contains("warm_world_standby: None,"));
+        assert!(constructor.contains("embedded_world_preview: None,"));
         assert!(constructor.contains("world_gate: None,"));
         assert!(constructor.contains("opaque_world_gate_renderer: None,"));
         assert!(constructor.contains("warm_world_switch_sequence: 0,"));
@@ -330,7 +345,8 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
         begin,
         &[
             "scene.world_root = None;",
-            "scene.world_dir = None;",
+            "scene.world_dir = request.world_dir.clone();",
+            "scene.world_generation_profile = request.world_generation_profile;",
             "scene.use_initial_spawn_center = false;",
             "TexturedSectionDrawResources::new(",
             "LocalIntegratedStartupPump::with_mesh_assets(",
@@ -343,8 +359,10 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     );
     assert!(begin.contains("&[],"));
     assert!(!begin.contains("self.active_world.install("));
-    assert!(begin.contains("OpaqueWorldGateRenderer::new("));
-    assert!(begin.contains("self.opaque_world_gate_renderer = Some(gate_renderer);"));
+    assert!(begin.contains("matches!(presentation, WarmWorldPresentationRequest::OpaqueGate)"));
+    assert!(begin.contains("matches!(presentation, WarmWorldPresentationRequest::Diorama"));
+    assert!(begin.contains("self.opaque_world_gate_renderer = gate_renderer;"));
+    assert!(begin.contains("self.embedded_world_preview = match (presentation, placed_renderer)"));
 
     let advance = braced_item(&source, "fn advance_warm_world_standby(");
     assert!(advance.contains("startup.pump.step(camera_position)"));

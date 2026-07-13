@@ -2517,6 +2517,10 @@ impl PlacedTexturedSectionRenderer {
                 .expect("placed multiview renderer initialized above")
         }))
     }
+
+    pub fn multiview_renderer_materialized(&self) -> bool {
+        self.multiview.borrow().is_some()
+    }
 }
 
 struct PlacedTexturedSectionMultiviewRenderer {

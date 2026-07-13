@@ -39,6 +39,37 @@ fn cli_parses_warm_world_swap_smoke_options() {
 }
 
 #[test]
+fn cli_parses_live_diorama_smoke_options() {
+    let cli = Cli::parse([
+        "--live-diorama-smoke".to_owned(),
+        "/tmp/live-diorama".to_owned(),
+        "--world-dir".to_owned(),
+        "/tmp/table-a".to_owned(),
+        "--live-diorama-world-dir".to_owned(),
+        "/tmp/island-b".to_owned(),
+        "--width".to_owned(),
+        "800".to_owned(),
+        "--height".to_owned(),
+        "600".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::LiveDioramaSmoke { options } = cli else {
+        panic!("expected live-diorama smoke CLI");
+    };
+    assert_eq!(options.directory, PathBuf::from("/tmp/live-diorama"));
+    assert_eq!([options.width, options.height], [800, 600]);
+    assert_eq!(
+        options
+            .scene
+            .live_diorama
+            .expect("live diorama config")
+            .world_dir,
+        PathBuf::from("/tmp/island-b")
+    );
+}
+
+#[test]
 fn cli_requires_standby_seed_for_warm_world_swap_smoke() {
     let error = Cli::parse([
         "--warm-world-swap-smoke".to_owned(),

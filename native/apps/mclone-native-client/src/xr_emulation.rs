@@ -7,6 +7,7 @@ use mclone_core::Vec3d;
 use mclone_input::{FlatInputFrame, KeyboardMouseInputAdapter};
 use mclone_render::headless::{HeadlessStereoFrameOptions, write_headless_stereo_frame_png};
 use mclone_render_session::{EngineCameraSnapshot, XrFov, XrView, XrViewPose};
+use mclone_scene::{EmbeddedWorldPreviewPhase, EmbeddedWorldPreviewSnapshot};
 
 use crate::cli::XrEmulationScreenshotOptions;
 use crate::offscreen_scene_host::OffscreenDriver;
@@ -17,7 +18,7 @@ const XR_EMULATION_IPD_BLOCKS: f32 = 0.064;
 const XR_EMULATION_VERTICAL_FOV_RADIANS: f32 = std::f32::consts::FRAC_PI_2;
 const XR_EMULATION_FRAME_TIME: Duration = Duration::from_micros(16_667);
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct XrEmulationScreenshotReport {
     pub(crate) path: PathBuf,
     pub(crate) eye_width: u32,
@@ -30,6 +31,7 @@ pub(crate) struct XrEmulationScreenshotReport {
     pub(crate) drawn_section_count: usize,
     pub(crate) gui_command_count: usize,
     pub(crate) ui_panel_composite_count: u64,
+    pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
 }
 
 pub(crate) fn run_xr_emulation_screenshot(
@@ -41,7 +43,7 @@ pub(crate) fn run_xr_emulation_screenshot(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let input_frames = options.input_frames;
-    let (capture, summary) = write_headless_stereo_frame_png(
+    let (capture, (summary, embedded_preview)) = write_headless_stereo_frame_png(
         HeadlessStereoFrameOptions {
             path: options.path.clone(),
             eye_width: options.eye_width,
@@ -71,6 +73,14 @@ pub(crate) fn run_xr_emulation_screenshot(
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_streamed(device, queue, views)?;
+            drive_embedded_preview_until_visible(
+                &mut driver,
+                device,
+                queue,
+                size,
+                left_view,
+                right_view,
+            )?;
             drive_warm_world_swap_roundtrip_if_requested(
                 &mut driver,
                 device,
@@ -105,16 +115,21 @@ pub(crate) fn run_xr_emulation_screenshot(
                 }
                 views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             }
-            if !driver.stereo_ui_is_active() {
+            if driver.host().embedded_world_preview_snapshot().is_none()
+                && !driver.stereo_ui_is_active()
+            {
                 apply_menu_toggle(&mut driver, views)?;
             }
 
             views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
-            if driver.host().warm_world_standby_snapshot().is_some() {
+            if driver.host().embedded_world_preview_snapshot().is_some() {
+                views = synthetic_stereo_preview_views(&mut driver, size)?;
+            } else if driver.host().warm_world_standby_snapshot().is_some() {
                 views = synthetic_stereo_gate_views(&mut driver, size, 3.0)?;
             }
-            driver.render_stereo(device, queue, views, left_view, right_view)
+            let summary = driver.render_stereo(device, queue, views, left_view, right_view)?;
+            Ok((summary, driver.host().embedded_world_preview_snapshot()))
         },
     )?;
 
@@ -124,7 +139,10 @@ pub(crate) fn run_xr_emulation_screenshot(
     if capture.eye_pixel_difference_count == 0 {
         bail!("XR emulation eyes are pixel-identical; stereo parallax was not preserved");
     }
-    if !summary.ui_active || summary.gui_command_count == 0 || summary.ui_panel.composite_count < 2
+    if embedded_preview.is_none()
+        && (!summary.ui_active
+            || summary.gui_command_count == 0
+            || summary.ui_panel.composite_count < 2)
     {
         bail!(
             "XR emulation capture did not composite the active world UI into both eyes: active={} commands={} composites={}",
@@ -146,7 +164,37 @@ pub(crate) fn run_xr_emulation_screenshot(
         drawn_section_count: summary.drawn_section_count,
         gui_command_count: summary.gui_command_count,
         ui_panel_composite_count: summary.ui_panel.composite_count,
+        embedded_preview,
     })
+}
+
+fn drive_embedded_preview_until_visible(
+    driver: &mut OffscreenDriver,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: [u32; 2],
+    left_view: &wgpu::TextureView,
+    right_view: &wgpu::TextureView,
+) -> Result<()> {
+    if driver.host().embedded_world_preview_snapshot().is_none() {
+        return Ok(());
+    }
+    for _ in 0..240 {
+        let preview = driver
+            .host()
+            .embedded_world_preview_snapshot()
+            .context("embedded preview disappeared during stereo warmup")?;
+        match preview.phase {
+            EmbeddedWorldPreviewPhase::Visible => return Ok(()),
+            EmbeddedWorldPreviewPhase::Failed => {
+                bail!("embedded preview failed during stereo warmup: {preview:?}")
+            }
+            EmbeddedWorldPreviewPhase::Warming => {}
+        }
+        let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+        driver.render_stereo(device, queue, views, left_view, right_view)?;
+    }
+    bail!("embedded preview did not become visible within 240 stereo frames")
 }
 
 fn drive_warm_world_swap_roundtrip_if_requested(
@@ -157,7 +205,9 @@ fn drive_warm_world_swap_roundtrip_if_requested(
     left_view: &wgpu::TextureView,
     right_view: &wgpu::TextureView,
 ) -> Result<()> {
-    if driver.host().warm_world_standby_snapshot().is_none() {
+    if driver.host().warm_world_standby_snapshot().is_none()
+        || driver.host().embedded_world_preview_snapshot().is_some()
+    {
         return Ok(());
     }
     let source_id = driver.host().active_world_instance_id();
@@ -221,6 +271,39 @@ fn drive_warm_world_swap_roundtrip_if_requested(
         second.switch_elapsed_ms,
     );
     Ok(())
+}
+
+fn synthetic_stereo_preview_views(
+    driver: &mut OffscreenDriver,
+    size: [u32; 2],
+) -> Result<[XrView; 2]> {
+    let preview = driver
+        .host()
+        .embedded_world_preview_snapshot()
+        .context("synthetic-stereo embedded preview placement is unavailable")?;
+    let target = preview
+        .placement
+        .composition_anchor()
+        .add(Vec3d::new(0.0, 0.25, 0.0));
+    let eye = target.add(Vec3d::new(0.0, 2.0, -6.0));
+    let forward = target.subtract(eye);
+    let length = (forward.x * forward.x + forward.y * forward.y + forward.z * forward.z).sqrt();
+    if !length.is_finite() || length <= f64::EPSILON {
+        bail!("synthetic-stereo embedded preview camera has no direction");
+    }
+    let forward = forward.scale(1.0 / length);
+    // XR's tracked forward axis is -Z; use the stage-to-world yaw convention
+    // rather than the flat spectator camera's +Z convention.
+    let yaw_radians = (-forward.x).atan2(-forward.z);
+    let pitch_radians = forward.y.clamp(-1.0, 1.0).asin();
+    let speed = driver.host().camera_snapshot().speed_blocks_per_second;
+    driver
+        .host_mut()
+        .set_mono_capture_camera(eye, yaw_radians, pitch_radians, speed);
+    Ok(synthetic_stereo_views(
+        driver.host().camera_snapshot(),
+        size,
+    ))
 }
 
 fn synthetic_stereo_gate_views(

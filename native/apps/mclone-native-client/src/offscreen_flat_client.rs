@@ -10,7 +10,10 @@ use mclone_client::{ActorPresentationId, ClientHost, ClientRuntime};
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos};
 use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
-use mclone_scene::{MonoUiPresentation, MonoWorldActionStatus};
+use mclone_scene::{
+    EmbeddedWorldPreviewSnapshot, MonoUiPresentation, MonoWorldActionStatus,
+    WarmWorldStandbySnapshot,
+};
 use mclone_server::initial_spawn_center_for_seed;
 use mclone_ui::{GameTravelAssistMode, Point};
 
@@ -37,6 +40,8 @@ pub(crate) struct OffscreenFlatClientScreenshotReport {
     pub(crate) remote_actor_walk_animation_distances: Vec<f32>,
     pub(crate) entity_count: usize,
     pub(crate) underwater: bool,
+    pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
+    pub(crate) warm_world_standby: Option<WarmWorldStandbySnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1898,6 +1903,8 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         .collect();
     let entity_count = client.map_or(0, ClientRuntime::entity_count);
     let underwater = host.driver.host().mono_underwater();
+    let embedded_preview = host.driver.host().embedded_world_preview_snapshot();
+    let warm_world_standby = host.driver.host().warm_world_standby_snapshot();
 
     Ok(OffscreenFlatClientScreenshotReport {
         path: options.path.clone(),
@@ -1910,6 +1917,8 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         remote_actor_walk_animation_distances,
         entity_count,
         underwater,
+        embedded_preview,
+        warm_world_standby,
     })
 }
 

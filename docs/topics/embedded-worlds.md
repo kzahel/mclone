@@ -9,11 +9,12 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone and an active
-live-diorama tactical with Slices 0–2 landed.** The renderer can now
-compose two static terrain stores in one physical frame, but `McloneSceneHost`
-does not yet submit the retained live world. `McloneSceneHost`
-now owns one direct active `DrawableWorldSlot`, one optional detached standby,
-and—only for the launch diagnostic—a paired runtime-only `WorldGate`. The two
+live-diorama tactical paused at the completed Slice 3 manual checkpoint.**
+`McloneSceneHost` now submits a bounded region of its retained persistent local
+world as placed opaque/cutout geometry in the active world's mono, per-eye, and
+multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
+optional detached standby, and exactly one mutually exclusive runtime-only
+`WorldGate` or `EmbeddedWorldPreview`. The two
 integrated hosts remain concurrent and independently drawable. The standby
 acknowledges its seed-dependent spawn, resolves a terrain-relative endpoint,
 and incrementally admits its retained CPU seed through the normal upload path.
@@ -26,8 +27,9 @@ atomically exchanges the complete slots before drawing the frame. The previous
 active remains the ready return world. Deterministic walking and synthetic
 stereo A-to-B-to-A smokes prove next-frame drawing with no runtime
 reconstruction, switch-boundary upload, or lazy renderer creation. There is
-still no N-world registry, persistence/product UI for gates, or simultaneous
-world composition. Separately,
+still no N-world registry, product UI, mutation proof, water, activation, or
+remote preview, but simultaneous shared-depth terrain composition is now
+concrete. Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -51,7 +53,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-13
-(Tactical 174 closeout / Tactical 175 Slice 2).
+(Tactical 175 Slice 3).
 
 ## Motivation
 
@@ -281,8 +283,21 @@ were inspected. The current Mac lacks the multiview feature, so capable-device
 execution remains open while the full-frame path and eager materialization
 contract are present. Exact active-only flat/stereo hashes are unchanged, and
 the accepted no-preview batch remains inside the Slice 0 performance gate.
-Slice 3 will connect this renderer to the retained live slot after Tactical
-174's lifecycle/invalidation prerequisites close.
+
+Slice 3 connects that renderer to the retained persistent local slot. One
+optional scene-owned `EmbeddedWorldPreview` publishes only after bounded source
+records, source-anchor GPU/traversal coverage, asset epoch, and eager topology
+are coherent. Mono, per-eye, and multiview composition insert B opaque/cutout
+after A opaque/cutout and before A's actors/translucent phase, while B retains
+no physical authority or second sky/Far-LOD/overlay stack. The launch
+diagnostic exposes B root, region, anchors, scale, and standby cadence without
+allocating preview state in the ordinary path. The deterministic smoke draws
+two B sections / 5,112 indices in three table views and both stereo eyes;
+115,057 pixels differ between eyes, and the requested `5/5/5` standby cadence
+remains applied. The accepted no-preview medians are 2.724 ms average and 4.235
+ms P95, still inside the Slice 0 gate. Human review of the provisional scale,
+placement, framing, lighting, culling, and XR presence is required before
+Slice 4 adds mutation and budget instrumentation.
 
 ### Same-world previews and non-recursive composition
 

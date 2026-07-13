@@ -3,10 +3,10 @@ use mclone_assets::AssetSource;
 use mclone_render::GpuPassId;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
-    DEPTH_FORMAT, PerspectiveRenderPose, PreparedTexturedSectionRecords,
-    PreparedTexturedSectionStereoDraw, TexturedSectionDrawResources, TexturedSectionRenderOptions,
-    TexturedSectionRenderPhase, TexturedSectionRenderStats, TexturedSectionRenderTiming,
-    TexturedSectionUploadReport,
+    DEPTH_FORMAT, PerspectiveRenderPose, PlacedTexturedSectionRenderer,
+    PreparedTexturedSectionRecords, PreparedTexturedSectionStereoDraw,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
+    TexturedSectionRenderStats, TexturedSectionRenderTiming, TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
@@ -16,6 +16,7 @@ use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodRenderer};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
+use mclone_render::placement::WorldPlacement;
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
@@ -127,6 +128,31 @@ pub struct FullFrameRenderSummary {
     pub drawn_actor_count: usize,
     pub far_lod_region_draw_count: usize,
     pub far_lod_uploaded_bytes: usize,
+    pub placed_drawn_section_count: usize,
+    pub placed_drawn_index_count: u32,
+}
+
+#[derive(Clone, Copy)]
+pub enum PlacedTerrainPrepared<'a> {
+    Mono(&'a PreparedTexturedSectionRecords),
+    Stereo(&'a PreparedTexturedSectionStereoDraw),
+}
+
+/// One opt-in placed terrain submission inserted between the active world's
+/// opaque terrain and its actors/translucent phases.
+#[derive(Clone, Copy)]
+pub struct PlacedTerrainFrame<'a> {
+    pub draw: &'a TexturedSectionDrawResources,
+    pub renderer: &'a PlacedTexturedSectionRenderer,
+    pub prepared: PlacedTerrainPrepared<'a>,
+    pub placement: WorldPlacement,
+    pub render_options: TexturedSectionRenderOptions,
+}
+
+#[derive(Clone, Copy)]
+enum OpaqueWorldInsertion<'a> {
+    Gate(&'a OpaqueWorldGateRenderer, OpaqueWorldGate),
+    Placed(PlacedTerrainFrame<'a>),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -1094,7 +1120,64 @@ where
         far_lod_mesh,
         None,
         None,
-        opaque_world_gate,
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        None,
+        render_stats,
+    )
+}
+
+/// Scene-owned composition variant with one placed opaque/cutout terrain
+/// source inserted into the active world's shared color/depth frame.
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    placed_terrain: PlacedTerrainFrame<'_>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        SINGLE_VIEW_SLOT,
+        far_lod,
+        far_lod_mesh,
+        None,
+        None,
+        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
         None,
         render_stats,
     )
@@ -1461,7 +1544,66 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
-        opaque_world_gate,
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        None,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot<
+    BuildGuiDraw,
+>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    placed_terrain: PlacedTerrainFrame<'_>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        far_lod,
+        far_lod_mesh,
+        None,
+        Some(prepared_draw),
+        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
         None,
         render_stats,
     )
@@ -1682,7 +1824,68 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
-        opaque_world_gate,
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot<
+    BuildGuiDraw,
+>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    placed_terrain: PlacedTerrainFrame<'_>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        far_lod,
+        far_lod_mesh,
+        None,
+        Some(prepared_draw),
+        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1712,7 +1915,7 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
-    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
     mut timing: Option<&mut FullFrameRenderTiming>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary>
@@ -1728,6 +1931,7 @@ where
     let mut actor_stats = ActorRenderStats::default();
 
     let mut terrain_stats = TexturedSectionRenderStats::default();
+    let mut placed_terrain_stats = TexturedSectionRenderStats::default();
     if !gui.covers_world {
         let sky_start = timing.is_some().then(std::time::Instant::now);
         let background_clear_color = if fog.enabled {
@@ -1795,7 +1999,8 @@ where
         if far_lod_depth_ready {
             render_target = render_target.with_loaded_depth();
         }
-        let split_translucent_terrain = !actor_instances.is_empty() || opaque_world_gate.is_some();
+        let split_translucent_terrain =
+            !actor_instances.is_empty() || opaque_world_insertion.is_some();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -1822,16 +2027,50 @@ where
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
-        if let Some((gate_renderer, gate)) = opaque_world_gate {
-            gate_renderer.render_in_slot(
-                frame.queue,
-                frame.encoder,
-                frame.target,
-                depth,
-                render_view,
-                Some(gate),
-                view_slot,
-            );
+        match opaque_world_insertion {
+            Some(OpaqueWorldInsertion::Gate(gate_renderer, gate)) => {
+                gate_renderer.render_in_slot(
+                    frame.queue,
+                    frame.encoder,
+                    frame.target,
+                    depth,
+                    render_view,
+                    Some(gate),
+                    view_slot,
+                );
+            }
+            Some(OpaqueWorldInsertion::Placed(placed)) => {
+                let placed_target = render_target.with_loaded_color().with_loaded_depth();
+                placed_terrain_stats = match placed.prepared {
+                    PlacedTerrainPrepared::Mono(records) => {
+                        placed.draw.render_placed_prepared_with_options_in_slot(
+                            placed.renderer,
+                            records,
+                            frame.queue,
+                            frame.encoder,
+                            placed_target,
+                            render_view,
+                            placed.render_options,
+                            placed.placement,
+                            view_slot,
+                        )?
+                    }
+                    PlacedTerrainPrepared::Stereo(prepared_draw) => placed
+                        .draw
+                        .render_placed_prepared_stereo_draw_with_options_in_slot(
+                            placed.renderer,
+                            prepared_draw,
+                            frame.queue,
+                            frame.encoder,
+                            placed_target,
+                            render_view,
+                            placed.render_options,
+                            placed.placement,
+                            view_slot,
+                        )?,
+                };
+            }
+            None => {}
         }
         if !actor_instances.is_empty() {
             let actor_start = timing.is_some().then(std::time::Instant::now);
@@ -1887,6 +2126,12 @@ where
                 timing.screen_effect_ms += start.elapsed().as_secs_f64() * 1000.0;
             }
         }
+        render_stats.drawn_section_count = render_stats
+            .drawn_section_count
+            .saturating_add(placed_terrain_stats.drawn_section_count);
+        render_stats.drawn_index_count = render_stats
+            .drawn_index_count
+            .saturating_add(placed_terrain_stats.drawn_index_count);
     } else {
         render_stats.drawn_section_count = 0;
         render_stats.drawn_face_count = 0;
@@ -1936,6 +2181,8 @@ where
         drawn_actor_count: actor_stats.drawn_actor_count,
         far_lod_region_draw_count: render_stats.far_lod_region_draw_count,
         far_lod_uploaded_bytes: render_stats.far_lod_uploaded_bytes,
+        placed_drawn_section_count: placed_terrain_stats.drawn_section_count,
+        placed_drawn_index_count: placed_terrain_stats.drawn_index_count,
     })
 }
 
