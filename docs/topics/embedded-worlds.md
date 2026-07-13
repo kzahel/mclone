@@ -6,18 +6,21 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design plus a first non-rendering ownership proof.** The engine does
-not yet compose or switch live worlds, but
+Status: **design, a non-rendering dual-host proof, and a Slice 1 architecture
+checkpoint.** The engine does not yet compose or switch live worlds, but
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
-This records the larger vision, the fidelity ladder, concrete engine seams,
-and the warm-world burn-down so future slices do not have to re-derive them.
-The bounded first implementation milestone is
+Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
+current startup/reset/asset-epoch contracts, and records renderer-shell,
+thread/cadence, offscreen, frame-budget, and synthetic-stereo baselines. This
+records the larger vision, the fidelity ladder, concrete engine seams, and the
+warm-world burn-down so future slices do not have to re-derive them. The
+bounded first implementation milestone is
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md): retain
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (warm hot-swap tactical split out).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 1 checkpoint).
 
 ## Motivation
 
@@ -115,6 +118,9 @@ ordinary owned-value drop for independent shutdown.
 This proves instanceability and isolation, not yet product switching. It does
 not include assets, mesh compilers, GPU terrain stores, persistence roots,
 camera reconciliation, or scene lifecycle. Those are the next ownership seams.
+Tactical 174's Slice 1 receipt now identifies the exact scene ownership split
+and pre-refactor evidence for those seams; no production slot extraction has
+landed yet.
 
 The near-term product shape is:
 
@@ -358,11 +364,14 @@ Ship independently valuable increments while keeping the one-world path direct:
 The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
 
-1. Keep the dual-integrated-host ownership smoke green; extend it next through
-   persistent storage-root isolation and explicit shutdown evidence.
-2. Add a host-level active-plus-optional-standby owner without routing the
-   ordinary one-world frame through a generic multi-world loop. Generalize it
-   to an N-world registry only after the bounded hot-swap milestone needs one.
+1. Review Tactical 174's Slice 1 field grouping, especially the decision to
+   retain canonical `McloneSceneHostOptions` whole during the mechanical
+   extraction. Then extract exactly one concrete drawable slot with no standby
+   allocation or new frame branch.
+2. Keep the dual-integrated-host ownership smoke green; extend it through
+   persistent storage-root isolation and explicit shutdown evidence when the
+   detached standby lands. Generalize active-plus-optional-standby to an N-world
+   registry only after the bounded hot-swap milestone needs one.
 3. Prove warm local switching: both worlds reach drawable readiness, switching
    selects an already-built terrain store, and neither runtime is reconstructed.
    Record switch latency and single-world before/after frame accounting.

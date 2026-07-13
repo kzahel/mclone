@@ -1,8 +1,12 @@
 # 174: Warm World Hot Swap
 
-Status: proposed and architecture-review-reconciled 2026-07-13. Slice 0's
-lower-level dual-integrated-host proof landed in commit `a31ac944`; Slices 1–7
-are unimplemented.
+Status: Slice 1 architecture checkpoint ready for review 2026-07-13. Slice 0's
+lower-level dual-integrated-host proof landed in commit `a31ac944`; the Slice 1
+ownership audit, characterization locks, and one-world baselines are recorded
+below. Slices 2–7 are unimplemented. First-multiview-pipeline timing remains a
+named device-evidence gap because the current macOS adapter does not expose
+`wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows lane before Slice
+4 can declare a standby switchable.
 
 Topic: `embedded-worlds`
 
@@ -67,6 +71,249 @@ flattened host fields directly. The eventual slot builder therefore must be a
 target-neutral aggregate rather than an extension of this `cfg(not(wasm32))`
 helper.
 
+## Slice 1 Architecture Checkpoint
+
+This checkpoint changes no production behavior. It adds source-level
+characterization locks for the flattened owner and records the behavioral and
+performance receipts that Slice 2 must preserve.
+
+### Complete Field Ownership Audit
+
+`McloneSceneHost` has 81 mutable fields. The following is the complete primary
+ownership classification; every field appears exactly once. "Shareable" means
+one host-owned renderer may be reused serially by whichever world is selected.
+It does not claim that its internal scratch buffers are immutable.
+
+| Owner | Current fields |
+|---|---|
+| Per-world retained | `scene`, `runtime`, `local_startup`, `external_runtime_startup_pending`, `camera`, `interaction`, `player_model`, `draw`, `traversal_ready_sections`, `section_uploads`, `far_lod`, `render_stats`, `render_admission_policy` |
+| Active-world transient, reset on selection | `underwater_effects`, `last_underwater_update`, `tracking_origin`, `prefetched_live_upload`, `last_locomotion_update`, `first_eye_summary`, `last_ui_panel_stats`, `last_ui_draw_cache_stats`, `rendered_frames` |
+| Physical client/presentation | `services`, `session`, `session_runtime_factory`, `client_experience`, `initial_alignment_mode`, `render_options`, `player_collision_box_visible`, `crosshair_visible`, `travel_assist_mode`, `mono_ui_context`, `diagnostic_panel`, `ui`, `menu_overlay_cache`, `status_overlay`, `head_comfort`, `locomotion_mode`, `turn_policy`, `snap_turn_state`, `blink_teleport`, `mono_blink_debug`, `display_refresh_hz`, `per_view_uniform_frame`, `menu_toggle_down`, `game_ui_toggle_down`, `menu_pointer_down`, `gameplay_interaction_buttons`, `menu_panel_pose`, `menu_panel_anchor`, `menu_panel_recenter_pending`, `latest_controllers`, `seed_reroll` |
+| Shareable GPU/content | `color_format`, `mesh_assets`, `active_assets`, `actors`, `selection_outline`, `world_gui_renderer`, `world_gui_overlay_renderer`, `mono_gui`, `sky`, `screen_effects` |
+| Global content transaction/budget | `asset_replacement`, `asset_replacement_status`, `last_asset_replacement_commit`, `asset_replacement_started_at`, `asset_replacement_assets_ready_at`, `asset_pack_sources`, `asset_pack_preference`, `asset_pack_preference_storage`, `asset_pack_preference_error`, `pending_restored_asset_pack_selection`, `external_asset_pack_preparation`, `pending_external_asset_pack_selection`, `render_split_timing_enabled`, `defer_eye_waits_enabled`, `overlap_runtime_prefetch_enabled`, `render_section_upload_budget`, `render_section_accept_budget`, `render_completed_result_accept_budget` |
+
+The extraction consequences are deliberate:
+
+- `scene` is a mixed canonical startup DTO. For the mechanical one-world
+  extraction, retain it whole with the slot rather than inventing a duplicate
+  schema. Slice 3 copies the common presentation/settings values and varies
+  only world identity, seed/generator, storage, and initial interest. Split the
+  DTO only when two simultaneously retained values prove which fields differ.
+- `interaction` is per-world because it owns inventory and the
+  `ensure_has_sent_carried_item` synchronization fact, not merely a stateless
+  ray cast.
+- `draw` moves whole in Slice 2 even though it combines per-world section maps
+  with a potentially shareable terrain renderer/atlas shell. Immutable shell
+  sharing remains a later measured renderer refactor.
+- `far_lod` is per-world: its GPU region map, visible-tile set, applied
+  revision, and upload statistics are derived from one runtime.
+- `render_admission_policy` is per-world because its adaptive telemetry is fed
+  by that world's queues. The three explicit numerical budgets remain global
+  host policy.
+- actor instances are projected from the selected runtime every frame;
+  `actors` is a host-owned renderer and content-keyed mesh cache. Sky and screen
+  effects similarly consume selected-world inputs without retaining world
+  geometry.
+- the host `session` remains the user-facing start/selection workflow. Each
+  slot gains its own descriptor/lifecycle fact; a standby must not replace the
+  active session UI merely because it is starting.
+- asset epoch/selection is one global transaction for this milestone. A live
+  standby is cancelled before replacement commits, so no slot-local epoch
+  transaction is introduced.
+
+### Startup, Installation, And Replacement Inventory
+
+There are six scene startup/installation shapes plus three resource/lifecycle
+mutations that Slice 2 must preserve:
+
+| Site | Target | Current installation shape |
+|---|---|---|
+| `start_local_async` | native | Builds an empty terrain shell, `runtime: None`, and a `SceneLocalStartup`; completion is deferred. |
+| `with_runtime` | native | Calls `start_scene_runtime`, then installs all four fields from `StartedSceneRuntime`. |
+| `with_scene_runtime` | native + wasm | Installs an already-started neutral runtime inline with an empty draw store and `external_runtime_startup_pending = true`. |
+| `complete_external_session_start` | native + wasm | Replaces `scene`/runtime/camera/draw/stats inline and completes the session coordinator. |
+| `complete_local_startup` | native | Drains the reconciled startup seed, uploads it directly into a new draw store, publishes traversal readiness, then installs fields inline. |
+| `start_replacement_session` | native | Uses a runtime factory returning `StartedSceneRuntime`, then installs its runtime/camera/draw/stats. |
+| `commit_asset_replacement` | native + wasm caller surface | Preserves the runtime/session/camera, replaces the runtime asset epoch and all content-bound renderers, then clears traversal/upload queues. |
+| `rebuild_mono_render_resources` | native | Recreates render resources, clears draw/stream state, and marks all runtime sections dirty for a resource rebuild. |
+| `teardown_world` | native + wasm | Drops startup/runtime ownership, creates an empty terrain store when needed, clears stats, and invokes the mixed transient reset. |
+
+`StartedSceneRuntime` contains only `runtime`, `camera`, `draw`, and
+`render_stats`; it is `cfg(not(target_arch = "wasm32"))`. Only `with_runtime`
+and native replacement use it. The new Slice 2 staged aggregate must therefore
+be target-neutral and must also carry the traversal/upload/Far-LOD/admission
+facts that the four-field helper omits.
+
+Both native startup helpers obtain `startup_sections`, pass the entire slice
+directly to `TexturedSectionDrawResources::new`, then initialize render stats
+from the resulting GPU store. They do not enqueue a
+`RenderSectionCacheUpdate` or drain `RenderSectionUploadCoordinator`. Slice 4
+therefore owns a real zero-compile-grant startup-seed conversion path, not a
+call-site substitution.
+
+### Lifecycle And Read-Site Trace
+
+- `clear_transient_world_state` currently mixes slot-derived state
+  (`underwater_effects`, upload/traversal/admission state) with physical
+  presentation state (tracking origin, locomotion timing, comfort/blink,
+  controller snapshots, eye/UI summaries, and frame count). Slice 2 must split
+  the helper while retaining today's reset order.
+- `flush_persistence` and `on_background` delegate only to the current
+  `runtime`; remote runtime persistence is already a no-op. Multi-world
+  lifecycle must iterate retained local slots explicitly, while normal slot
+  drop continues to own runner/compiler shutdown.
+- camera movement, pending authoritative correction/acknowledgement, pose
+  commit, and interest update all pair `camera` with `runtime`. Neither member
+  can be selected independently.
+- block targeting and carried-item synchronization pair `interaction` with the
+  selected runtime/client replica. Physical input edge latches remain
+  host-owned and are cleared at selection boundaries.
+- actor projection reads the selected client replica and camera, then submits
+  transient `ActorInstance`s through the shared actor renderer. No retained
+  actor instance list needs to move into the slot for this milestone.
+- time, clear color, and sky darkening come from the selected runtime (or its
+  slot's startup fallback); the shared `SkyRenderer` receives those values.
+- underwater queries read the selected replica at the selected camera. Their
+  smoothing accumulators are active-world presentation transients and restart
+  on a handoff rather than leaking water state between seeds.
+- Far LOD producer queues live in the runtime and the uploaded region/tile
+  revision lives in `far_lod`; both are per-world. Diagnostics fold those facts
+  into `render_stats` and the selected-world debug panel.
+- UI/catalog/preferences remain physical product state. Active session labels,
+  loading progress, debug seed/camera, actor counts, render counts, and queue
+  depths must be projected from the selected slot; standby progress uses a
+  separate concise diagnostic and never changes the active screen.
+
+### Empty Terrain Renderer Shell
+
+The explicit ignored GPU characterization test constructs
+`TexturedSectionDrawResources::new(..., &[])` from the real default assets and
+waits for queued device work. Even with zero sections it creates the ordinary
+terrain shader, three render pipelines, per-view uniform storage/bind groups,
+texture layout/sampler/bind group, generates the mip chain on CPU, creates the
+GPU atlas, and issues one `queue.write_texture` per mip. Section vertex/index
+buffers are the only part avoided by an empty slice.
+
+On the 2026-07-13 macOS debug/optimized test lane:
+
+```text
+atlas                         1024 x 2048 RGBA8
+base atlas bytes              8,388,608 (8.00 MiB)
+five uploaded mip bytes       11,173,888 (10.66 MiB)
+empty section count           0
+flat shell + device wait      15.220-103.736 ms (warm/cold samples)
+first multiview materialize   unavailable (adapter lacks MULTIVIEW)
+```
+
+The cache-sensitive timing range is characterization, not a stable budget. It
+proves that a second empty store is startup work rather than background section
+warmup. The test remains runnable as:
+
+```bash
+cargo test --manifest-path native/Cargo.toml -p mclone-scene \
+  --test one_world_ownership_contract \
+  empty_terrain_shell_reports_real_atlas_and_lazy_multiview_cost \
+  -- --ignored --nocapture
+```
+
+Synthetic stereo on this Mac is the two-per-eye path and cannot substitute for
+lazy multiview-pipeline evidence. Run the same first/steady empty multiview
+measurement on a `MULTIVIEW` adapter before Slice 4 readiness; no switch frame
+may be the first materialization.
+
+### Native Runtime And Cadence Cost
+
+One local integrated scene with one render compiler worker owns six named Rust
+threads in addition to the main/wgpu driver threads:
+
+```text
+mclone integrated server
+mclone-worldgen
+mclone-light-status
+mclone-render-compile-dispatch
+mclone-render-compile
+mclone-chunk-drop
+```
+
+With lighting disabled, the light-status thread still exists but remained
+parked and accepted zero jobs. After render distance 2 had settled, worldgen,
+light-status, both compiler threads, and chunk-drop were parked; the integrated
+server continued cadence ticks. A deliberately low 1 Hz render-loop probe with
+scheduled fluid execution frozen sampled the whole debug process at about 7.4%
+CPU for 20/20/60 and 1.1% for 10/10/10. A 60 Hz streaming comparison also
+reduced average app frame work from 4.275 ms to 3.347 ms, but the default run
+contained one unrelated 326.892 ms draw/device outlier.
+
+These are directional single-run observations, not a selected standby policy.
+They establish that `set_simulation_cadence` is an effective sanctioned lever
+and that it does not remove any of the six threads. Slice 4 must select cadence
+from active-frame evidence and restore the normal cadence before authority
+handoff.
+
+### Characterization Locks And Baseline Evidence
+
+`one_world_ownership_contract.rs` now locks:
+
+- the exact 81-field flattened inventory;
+- the direct local startup seed/traversal/stats installation and its current
+  upload-coordinator bypass;
+- external and native replacement installation ordering;
+- the native-only four-field `StartedSceneRuntime` seam;
+- the mixed per-world/physical transient reset;
+- asset replacement's epoch swap, streaming reset, and explicit
+  session/camera/command/update preservation receipts.
+
+Existing behavioral suites remain the stronger runtime receipts:
+
+- `mclone-render-session` proves cached-section accounting, asset-epoch stale
+  result retirement, and upload lifecycle conservation/supersession;
+- `dual_integrated_hosts` proves two isolated local runtime stacks;
+- the Mono and synthetic-stereo asset round trips prove an epoch replacement
+  preserves the live session and camera while restoring drawable pixels.
+
+Pre-refactor one-world samples on 2026-07-13:
+
+```text
+desktop offscreen
+  2560x1600; 64 resident sections; 11 drawn; 2 drawn actors
+timedemo (60 frames)
+  average 2.520 ms; max 6.681 ms; 308.133 average drawn sections
+120 Hz frame-budget smoke (60 frames)
+  average 3.026 ms; p95 4.549 ms; max 5.285 ms
+  0 over-budget frames; 0 accounting conservation violations
+synthetic stereo
+  640x640 per eye; 50 resident sections; 8 drawn
+  249,679 differing eye pixels; UI composited in both eyes
+Mono asset replacement
+  epochs 0 -> 1 -> 2; restored pixel difference 0.393%
+synthetic-stereo asset replacement
+  epochs 0 -> 1 -> 2; replacement commit covered 96 sections
+  249,679 differing eye pixels after restore; UI in both eyes
+```
+
+The desktop, ordinary stereo, Mono baseline/first-party/restored, and restored
+stereo captures under `/tmp` were visually inspected. Terrain and actors were
+drawable, the first-party middle frame visibly changed the material set, the
+restored views returned to vanilla content, and the stereo capture retained
+distinct eyes without a split-world frame.
+
+Checkpoint gates passed:
+
+```text
+mclone-scene                 102 passed; 0 failed; 1 GPU proof ignored
+empty terrain GPU proof      passed explicitly; multiview unavailable
+mclone-render-session        110 passed; 0 failed
+dual_integrated_hosts        1 passed; 0 failed
+native thin-adapter purity   passed
+wasm32 web build             passed (pre-existing warnings only)
+format + diff checks         passed
+```
+
+This is the review stop line. Do not begin Slice 2 until the field grouping and
+the decision to keep `scene` canonical-but-slot-retained have maintainer
+agreement. The first safe implementation after approval is a mechanical
+one-slot extraction with no standby allocation or new frame branch.
+
 ## Scope And Non-Goals
 
 This tactical includes:
@@ -76,6 +323,8 @@ This tactical includes:
 - one shared asset-pack selection and render configuration;
 - a launch-known second seed for the first smoke, allowing duplicate immutable
   renderer/material shells to be created before the first interactive frame;
+- a provisional launch-only diagnostic activation and deterministic paired-gate
+  placement contract;
 - independent transient storage first, then distinct persistent roots as an
   isolation test;
 - background polling, compile acceptance, and GPU upload;
@@ -89,6 +338,8 @@ This tactical does not include:
 - creating a brand-new world after the first presented frame. The first smoke
   receives both seeds at launch; live lobby-driven world creation must first
   account for renderer-shell construction and its measured GPU cost;
+- a world-creation checkbox, persisted portal/block/entity, catalog schema, or
+  product startup preference for the smoke fixture;
 - seeing the destination world through the gate;
 - drawing two worlds in one frame;
 - render-to-texture portals;
@@ -197,6 +448,59 @@ is sticky server state, so one initial `SetChunkView` retains interest without
 synthetic keepalive traffic. The runtime must still be polled to drain ordered
 updates and progress work.
 
+### Provisional Smoke Activation And Gate Fixture
+
+The first interactive proof is opt-in diagnostic behavior, not a property of a
+saved world. Use this provisional activation contract:
+
+- ordinary launch without a standby-seed request creates one world and no gate
+  model, gate renderer, transition check, standby runtime, or extra worker
+  threads;
+- the desktop/offscreen harness accepts
+  `--warm-world-standby-seed <i64>` alongside the ordinary active `--seed`;
+- the platform adapter parses that diagnostic option once and passes a shared
+  one-shot warm-world smoke request to `mclone-scene` before the first presented
+  frame. Gate creation, readiness, placement, and switching policy remain
+  shared; the app owns no duplicate policy;
+- `pnpm native:warm-world-swap-smoke` supplies deterministic active/standby
+  seeds and drives the automated lane;
+- the request cannot add, replace, or recreate a world after presentation has
+  begun.
+
+The paired gate is a runtime scene fixture, not an authored block structure. It
+is never written into either world's chunks or persistence root. Derive each
+endpoint only after that slot has accepted its authoritative safe-surface spawn.
+The provisional placement algorithm is:
+
+1. start from the accepted feet pose and horizontal facing;
+2. prefer a gate center six blocks forward, facing back toward the spawn-side
+   approach;
+3. anchor a three-block-wide, four-block-high opening to a walkable surface and
+   require a clear approach/crossing volume on both sides;
+4. if the preferred footprint is obstructed, search candidate surface columns
+   in a deterministic expanding ring, initially bounded to 16 blocks;
+5. if no candidate is valid, enter an explicit placement-failed state and keep
+   switching disabled. Do not clear terrain, place a platform, or mutate saved
+   blocks merely to make the diagnostic fixture fit.
+
+Those distances are harness tuning constants, not durable portal gameplay
+semantics. Captures and walking validation may adjust them without changing the
+ownership architecture.
+
+Gate availability is also explicit:
+
+- `Disabled`: no smoke request, therefore no gate work at all;
+- `Closed/Warming`: the opaque fixture may show progress, but the shared
+  transition controller rejects locomotion across its volume;
+- `Switchable`: the fixture remains visually opaque, but crossing performs the
+  atomic slot handoff;
+- `Failed/Cancelled`: crossing remains disabled and diagnostics explain why;
+  dropping the standby may then remove the fixture entirely.
+
+A future product may persist a portal link, expose a world-creation option, or
+create destinations from a running lobby. None of those choices are implied by
+this harness contract.
+
 ## Refactor Risk Controls
 
 - Land characterization before extraction and extraction before new behavior.
@@ -297,9 +601,15 @@ cargo test --manifest-path native/Cargo.toml \
   -p mclone-app-runtime --test dual_integrated_hosts
 ```
 
-### Slice 1: Ownership Audit And Characterization
+### Slice 1: Ownership Audit And Characterization — Checkpoint Ready
 
 No production behavior change.
+
+Evidence: `Slice 1 Architecture Checkpoint` above and
+`mclone-scene/tests/one_world_ownership_contract.rs`. All architecture/code
+exit criteria are met for maintainer review. The unavailable hardware
+multiview timing does not block the one-world Slice 2 extraction, but remains a
+hard pre-Slice-4 readiness gate.
 
 Deliverables:
 
@@ -381,6 +691,9 @@ Deliverables:
   and lifecycle state. Keep section/entity keys unqualified inside the slot.
 - Add an `Option<DrawableWorldSlot>` standby owner; do not introduce an N-world
   registry yet.
+- Add the provisional `--warm-world-standby-seed <i64>` harness option and
+  project it once into a shared launch-only smoke request before presentation.
+  With no request, construct neither the standby nor any gate state.
 - For the first smoke, take the second seed from harness configuration at
   launch and create any duplicate immutable draw-resource shell before the
   first interactive frame. Report that extra startup time and memory separately
@@ -389,6 +702,9 @@ Deliverables:
   Drain and acknowledge the resulting safe-surface `PlayerPosition` correction
   into the standby camera during warmup, follow corrected interest, and retain
   the accepted seed-dependent pose as the destination endpoint basis.
+- Resolve and record both endpoint candidates using the provisional
+  surface/clearance search. A placement failure is explicit standby diagnostic
+  state and cannot become switchable; it never edits either world.
 - Send no synthetic standby keepalives: the first local chunk view is sticky.
   Continue polling the standby for ordered updates and startup progress.
 - Start with the same active asset epoch/profile and render settings. For the
@@ -405,7 +721,8 @@ Deliverables:
 
 Exit criteria: two complete scene-owned runtimes coexist and active play
 continues while standby reaches CPU startup readiness, acknowledges its initial
-authoritative pose, and records an entry endpoint. No switch is exposed.
+authoritative pose, and records a valid endpoint pair or explicit placement
+failure. No switch is exposed.
 
 ### Slice 4: Budgeted Standby Compile And GPU Warmup
 
@@ -507,9 +824,10 @@ Deliverables:
 - Implement the gate renderer for ordinary mono/per-eye `render_in_slot` use
   and full-frame multiview, following the established per-view-slot plus lazy
   `RefCell<Option<MultiviewRenderer>>` pattern. A per-eye-only debug renderer is
-  not acceptable. Keep the stateless renderer host-owned and the endpoint/
-  hysteresis state in the shared gate model. Materialize the required gate
-  pipeline before its first measured interactive frame.
+  not acceptable. Keep the stateless renderer host-owned but construct it only
+  for an active smoke request; keep endpoint/hysteresis state in the shared gate
+  model. Materialize the required gate pipeline before its first measured
+  interactive frame.
 - Place the destination endpoint from the standby's accepted pose recorded in
   Slice 3 and the source endpoint from the active slot's already accepted
   startup pose; do not assume unrelated seeds share coordinates or surface
@@ -521,8 +839,9 @@ Deliverables:
   where XR locomotion requires it.
 - Keep the gate visibly closed and non-passable until standby is switchable;
   show concise warm/failure state on the existing status/debug surface.
-- Expose a harness-scoped desktop option for a second seed. Do not add a
-  product startup field or duplicate policy in the desktop app.
+- Instantiate the runtime-only fixture from the endpoint candidates resolved in
+  Slice 3. Follow the provisional dimensions/search contract and create no
+  saved blocks, block entity, catalog record, or product startup preference.
 - Validate desktop interaction first, then offscreen scripted crossing and
   synthetic stereo. Include occlusion cases proving nearer terrain hides the
   gate, the gate hides farther terrain, and both sides remain opaque. Capture
@@ -554,6 +873,10 @@ Deliverables:
   must prove the gate closes, the standby and its queued old-epoch uploads are
   cancelled before the active epoch commits, and no slot or renderer observes
   mixed epochs.
+- Test activation and fixture isolation: no flag means no standby/gate resource
+  or per-frame transition work; the flag deterministically resolves paired
+  endpoints; placement failure stays closed; neither success nor failure
+  changes persisted chunk contents.
 - Confirm the one-world path starts no standby services and remains the default
   on desktop, web, Android, and XR consumers.
 - Run one real headset lane after synthetic stereo is green; retain screenshots,
