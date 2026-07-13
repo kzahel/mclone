@@ -1,9 +1,5 @@
-//! Tactical 174 Slice 1 characterization locks for the flattened one-world
-//! scene owner.
-//!
-//! These tests intentionally describe the pre-extraction installation and
-//! reset seams. Slice 2 may update their source shape only while preserving
-//! the behavioral groups they name.
+//! Tactical 174 characterization locks for the concrete one-world drawable
+//! slot and its installation/reset seams.
 
 use std::path::{Path, PathBuf};
 
@@ -48,8 +44,35 @@ fn assert_in_order(item: &str, markers: &[&str]) {
     }
 }
 
-const FLAT_HOST_FIELDS: &[&str] = &[
+fn field_names(item: &str) -> Vec<&str> {
+    item.lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            let (name, _) = line.split_once(':')?;
+            (!name.contains(' ') && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric()))
+                .then_some(name)
+        })
+        .collect()
+}
+
+const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "scene",
+    "runtime",
+    "local_startup",
+    "external_runtime_startup_pending",
+    "camera",
+    "interaction",
+    "player_model",
+    "draw",
+    "traversal_ready_sections",
+    "section_uploads",
+    "far_lod",
+    "render_stats",
+    "render_admission_policy",
+];
+
+const ONE_WORLD_HOST_FIELDS: &[&str] = &[
+    "active_world",
     "services",
     "color_format",
     "mesh_assets",
@@ -66,25 +89,15 @@ const FLAT_HOST_FIELDS: &[&str] = &[
     "pending_restored_asset_pack_selection",
     "external_asset_pack_preparation",
     "pending_external_asset_pack_selection",
-    "runtime",
-    "local_startup",
-    "external_runtime_startup_pending",
     "session",
     "session_runtime_factory",
     "client_experience",
-    "camera",
-    "interaction",
     "initial_alignment_mode",
     "render_options",
     "player_collision_box_visible",
     "crosshair_visible",
     "travel_assist_mode",
-    "player_model",
-    "draw",
-    "traversal_ready_sections",
-    "section_uploads",
     "actors",
-    "far_lod",
     "selection_outline",
     "world_gui_renderer",
     "world_gui_overlay_renderer",
@@ -99,7 +112,6 @@ const FLAT_HOST_FIELDS: &[&str] = &[
     "underwater_effects",
     "last_underwater_update",
     "head_comfort",
-    "render_stats",
     "tracking_origin",
     "locomotion_mode",
     "turn_policy",
@@ -107,7 +119,6 @@ const FLAT_HOST_FIELDS: &[&str] = &[
     "blink_teleport",
     "mono_blink_debug",
     "display_refresh_hz",
-    "render_admission_policy",
     "render_split_timing_enabled",
     "defer_eye_waits_enabled",
     "overlap_runtime_prefetch_enabled",
@@ -133,21 +144,33 @@ const FLAT_HOST_FIELDS: &[&str] = &[
 ];
 
 #[test]
-fn flattened_host_field_inventory_stays_explicit_until_slot_extraction() {
+fn one_world_host_has_one_exact_concrete_drawable_slot() {
     let source = read("src/lib.rs");
+    let slot = braced_item(&source, "struct DrawableWorldSlot {");
     let host = braced_item(&source, "pub struct McloneSceneHost {");
-    let fields = host
-        .lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            let (name, _) = line.split_once(':')?;
-            (!name.contains(' ') && name.chars().all(|c| c == '_' || c.is_ascii_alphanumeric()))
-                .then_some(name)
-        })
-        .collect::<Vec<_>>();
+    let slot_fields = field_names(slot);
+    let host_fields = field_names(host);
+    assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
+    assert_eq!(slot_fields.len(), 13);
+    assert_eq!(host_fields, ONE_WORLD_HOST_FIELDS);
+    assert_eq!(host_fields.len(), 69);
+    assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
+    assert!(!host.contains("standby"));
+}
 
-    assert_eq!(fields, FLAT_HOST_FIELDS);
-    assert_eq!(fields.len(), 81);
+#[test]
+fn every_initial_host_path_constructs_the_same_drawable_slot() {
+    let source = read("src/session.rs");
+    for marker in [
+        "pub fn start_local_async(",
+        "pub fn with_runtime<S>(",
+        "pub fn with_scene_runtime(",
+    ] {
+        let constructor = braced_item(&source, marker);
+        assert!(constructor.contains("let active_world = DrawableWorldSlot::new("));
+        assert!(constructor.contains("DrawableWorldSlotInstall {"));
+        assert!(constructor.contains("active_world,"));
+    }
 }
 
 #[test]
@@ -165,15 +188,19 @@ fn local_startup_installs_one_coherent_drawable_world() {
         &[
             "let section_count = draw.section_count();",
             "let index_count = draw.index_count();",
-            "self.scene = scene;",
-            "self.mesh_assets = runtime.mesh_assets().clone();",
-            "self.runtime = Some(runtime);",
-            "self.camera = camera;",
-            "self.draw = draw;",
-            "self.render_stats = RenderStreamStats {",
+            "let mesh_assets = runtime.mesh_assets().clone();",
+            "self.active_world.install(DrawableWorldSlotInstall {",
+            "scene,",
+            "runtime: Some(runtime),",
+            "local_startup: None,",
+            "external_runtime_startup_pending: false,",
+            "camera,",
+            "draw,",
+            "render_stats: RenderStreamStats {",
             "section_count,",
             "index_count,",
             "face_count,",
+            "self.mesh_assets = mesh_assets;",
             "self.clear_transient_world_state();",
             "self.session.complete_start(descriptor.clone());",
         ],
@@ -192,12 +219,15 @@ fn external_and_native_replacement_installs_keep_the_same_core_cluster() {
     assert_in_order(
         external,
         &[
-            "self.draw = TexturedSectionDrawResources::new(",
-            "self.scene = pending.scene;",
-            "self.runtime = Some(runtime);",
-            "self.external_runtime_startup_pending = true;",
-            "self.camera = camera;",
-            "self.render_stats = RenderStreamStats::default();",
+            "let draw = TexturedSectionDrawResources::new(",
+            "self.active_world.install(DrawableWorldSlotInstall {",
+            "scene: pending.scene,",
+            "runtime: Some(runtime),",
+            "local_startup: None,",
+            "external_runtime_startup_pending: true,",
+            "camera,",
+            "draw,",
+            "render_stats: RenderStreamStats::default(),",
             "self.clear_transient_world_state();",
             "self.session.complete_start(active.clone());",
         ],
@@ -208,15 +238,33 @@ fn external_and_native_replacement_installs_keep_the_same_core_cluster() {
         replacement,
         &[
             "let started = match factory.start(",
-            "self.scene = scene;",
-            "self.mesh_assets = started.runtime.mesh_assets().clone();",
-            "self.runtime = Some(started.runtime);",
-            "self.camera = started.camera;",
-            "self.draw = started.draw;",
-            "self.render_stats = started.render_stats;",
+            "let mesh_assets = started.runtime.mesh_assets().clone();",
+            "self.active_world.install(DrawableWorldSlotInstall {",
+            "scene,",
+            "runtime: Some(started.runtime),",
+            "local_startup: None,",
+            "external_runtime_startup_pending: false,",
+            "camera: started.camera,",
+            "draw: started.draw,",
+            "render_stats: started.render_stats,",
+            "self.mesh_assets = mesh_assets;",
             "self.clear_transient_world_state();",
         ],
     );
+
+    let slot_source = read("src/lib.rs");
+    let target_neutral = braced_item(&slot_source, "struct DrawableWorldSlotInstall {");
+    for field in [
+        "scene",
+        "runtime",
+        "local_startup",
+        "external_runtime_startup_pending",
+        "camera",
+        "draw",
+        "render_stats",
+    ] {
+        assert!(target_neutral.contains(&format!("{field}:")));
+    }
 
     let staged = braced_item(&source, "pub(crate) struct StartedSceneRuntime {");
     for field in ["runtime", "camera", "draw", "render_stats"] {
@@ -231,21 +279,33 @@ fn external_and_native_replacement_installs_keep_the_same_core_cluster() {
 }
 
 #[test]
-fn current_world_reset_mixes_slot_and_physical_transients() {
+fn world_and_physical_resets_are_explicit_and_keep_one_world_call_order() {
     let source = read("src/session.rs");
+    let slot_source = read("src/lib.rs");
+    let stream = braced_item(&slot_source, "fn clear_stream_state(");
+    let active = braced_item(&source, "fn clear_active_world_transient_state(");
+    let physical = braced_item(&source, "fn clear_physical_presentation_state(");
     let reset = braced_item(&source, "pub(crate) fn clear_transient_world_state(");
 
-    for slot_state in [
-        "underwater_effects",
-        "last_underwater_update",
-        "prefetched_live_upload",
+    for stream_state in [
         "traversal_ready_sections",
         "section_uploads",
         "render_admission_policy",
     ] {
         assert!(
-            reset.contains(slot_state),
-            "missing slot reset `{slot_state}`"
+            stream.contains(stream_state),
+            "missing slot stream reset `{stream_state}`"
+        );
+    }
+    for active_state in [
+        "underwater_effects",
+        "last_underwater_update",
+        "prefetched_live_upload",
+        "active_world.clear_stream_state()",
+    ] {
+        assert!(
+            active.contains(active_state),
+            "missing active-world reset `{active_state}`"
         );
     }
     for physical_state in [
@@ -258,10 +318,17 @@ fn current_world_reset_mixes_slot_and_physical_transients() {
         "rendered_frames",
     ] {
         assert!(
-            reset.contains(physical_state),
+            physical.contains(physical_state),
             "missing physical reset `{physical_state}`"
         );
     }
+    assert_in_order(
+        reset,
+        &[
+            "self.clear_physical_presentation_state();",
+            "self.clear_active_world_transient_state();",
+        ],
+    );
 }
 
 #[test]
@@ -271,7 +338,7 @@ fn asset_epoch_replacement_preserves_world_identity_and_resets_streaming() {
 
     for snapshot in [
         "let session_before = self.session.state().clone();",
-        "let camera_before = self.camera.snapshot();",
+        "let camera_before = self.active_world.camera.snapshot();",
         "let command_count_before = runtime.core().command_count();",
         "let update_count_before = runtime.core().update_count();",
     ] {
@@ -282,10 +349,10 @@ fn asset_epoch_replacement_preserves_world_identity_and_resets_streaming() {
         &[
             "runtime.replace_asset_epoch(",
             "self.mesh_assets = assets.mesh.clone();",
-            "self.draw = draw;",
+            "self.active_world.draw = draw;",
             "self.active_assets = assets;",
-            "self.traversal_ready_sections.clear();",
-            "self.section_uploads.clear();",
+            "self.active_world.traversal_ready_sections.clear();",
+            "self.active_world.section_uploads.clear();",
             "self.prefetched_live_upload = None;",
             "epoch: self.active_assets.epoch,",
             "section_count: sections.sections.len(),",

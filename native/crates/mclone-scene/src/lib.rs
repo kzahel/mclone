@@ -310,8 +310,85 @@ struct SceneHostServices {
     audio: AudioOutputCapability,
 }
 
-pub struct McloneSceneHost {
+/// One complete scene-owned world, including startup/lifecycle state and all
+/// mutable render state derived from its runtime.
+///
+/// Tactical 174 Slice 2 deliberately retains exactly one of these. Keeping the
+/// leaf concrete and directly addressed preserves the ordinary one-world frame
+/// path while making a detached second slot possible in a later slice.
+struct DrawableWorldSlot {
     scene: McloneSceneHostOptions,
+    runtime: Option<SceneSessionRuntime>,
+    local_startup: Option<SceneLocalStartup>,
+    /// A connected runtime may still be waiting for authoritative spawn/view
+    /// admission. Keep gameplay frozen until that slot-local evidence is ready.
+    external_runtime_startup_pending: bool,
+    camera: EngineCameraController,
+    interaction: ClientInteractionController,
+    player_model: GamePlayerModel,
+    draw: TexturedSectionDrawResources,
+    traversal_ready_sections: TraversalReadySectionCache,
+    section_uploads: RenderSectionUploadCoordinator,
+    far_lod: FarTerrainLodRenderer,
+    render_stats: RenderStreamStats,
+    render_admission_policy: RenderAdmissionPolicy,
+}
+
+/// Target-neutral prepared state for constructing or replacing the runtime
+/// half of a drawable slot. Values are fully prepared before installation, so
+/// a host never exposes a runtime paired with the previous camera or draw map.
+struct DrawableWorldSlotInstall {
+    scene: McloneSceneHostOptions,
+    runtime: Option<SceneSessionRuntime>,
+    local_startup: Option<SceneLocalStartup>,
+    external_runtime_startup_pending: bool,
+    camera: EngineCameraController,
+    draw: TexturedSectionDrawResources,
+    render_stats: RenderStreamStats,
+}
+
+impl DrawableWorldSlot {
+    fn new(
+        install: DrawableWorldSlotInstall,
+        far_lod: FarTerrainLodRenderer,
+        render_admission_policy: RenderAdmissionPolicy,
+    ) -> Self {
+        Self {
+            scene: install.scene,
+            runtime: install.runtime,
+            local_startup: install.local_startup,
+            external_runtime_startup_pending: install.external_runtime_startup_pending,
+            camera: install.camera,
+            interaction: ClientInteractionController::new(),
+            player_model: GamePlayerModel::default(),
+            draw: install.draw,
+            traversal_ready_sections: TraversalReadySectionCache::default(),
+            section_uploads: RenderSectionUploadCoordinator::default(),
+            far_lod,
+            render_stats: install.render_stats,
+            render_admission_policy,
+        }
+    }
+
+    fn install(&mut self, install: DrawableWorldSlotInstall) {
+        self.scene = install.scene;
+        self.runtime = install.runtime;
+        self.local_startup = install.local_startup;
+        self.external_runtime_startup_pending = install.external_runtime_startup_pending;
+        self.camera = install.camera;
+        self.draw = install.draw;
+        self.render_stats = install.render_stats;
+    }
+
+    fn clear_stream_state(&mut self) {
+        self.traversal_ready_sections.clear();
+        self.section_uploads.clear();
+        self.render_admission_policy.reset();
+    }
+}
+
+pub struct McloneSceneHost {
+    active_world: DrawableWorldSlot,
     services: SceneHostServices,
     color_format: wgpu::TextureFormat,
     mesh_assets: TexturedMeshAssets,
@@ -328,29 +405,16 @@ pub struct McloneSceneHost {
     pending_restored_asset_pack_selection: Option<AssetPackSelection>,
     external_asset_pack_preparation: bool,
     pending_external_asset_pack_selection: Option<ExternalAssetPackSelection>,
-    runtime: Option<SceneSessionRuntime>,
-    local_startup: Option<SceneLocalStartup>,
-    /// An asynchronously constructed runtime may already be connected while
-    /// its authoritative spawn/view is still streaming. Keep gameplay frozen
-    /// until the shared startup-admission evidence is complete.
-    external_runtime_startup_pending: bool,
     session: GameSessionCoordinator<ScenePendingSessionStart>,
     #[cfg(not(target_arch = "wasm32"))]
     session_runtime_factory: Option<Box<dyn SceneSessionRuntimeFactory>>,
     client_experience: ClientExperienceController,
-    camera: EngineCameraController,
-    interaction: ClientInteractionController,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     player_collision_box_visible: bool,
     crosshair_visible: bool,
     travel_assist_mode: GameTravelAssistMode,
-    player_model: GamePlayerModel,
-    draw: TexturedSectionDrawResources,
-    traversal_ready_sections: TraversalReadySectionCache,
-    section_uploads: RenderSectionUploadCoordinator,
     actors: ActorDrawResources,
-    far_lod: FarTerrainLodRenderer,
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
     world_gui_overlay_renderer: WorldGuiRenderer,
@@ -371,7 +435,6 @@ pub struct McloneSceneHost {
     underwater_effects: XrUnderwaterEffectStates,
     last_underwater_update: Option<MonotonicInstant>,
     head_comfort: XrHeadComfortState,
-    render_stats: RenderStreamStats,
     tracking_origin: Option<XrTrackingOrigin>,
     locomotion_mode: XrLocomotionMode,
     turn_policy: XrTurnPolicy,
@@ -379,7 +442,6 @@ pub struct McloneSceneHost {
     blink_teleport: XrBlinkTeleportState,
     mono_blink_debug: MonoBlinkDebugState,
     display_refresh_hz: Option<f32>,
-    render_admission_policy: RenderAdmissionPolicy,
     render_split_timing_enabled: bool,
     defer_eye_waits_enabled: bool,
     overlap_runtime_prefetch_enabled: bool,
@@ -412,7 +474,7 @@ impl McloneSceneHost {
     /// number of chunks queued for write; a no-op (`Ok(0)`) before a runtime
     /// exists or in remote host modes.
     pub fn flush_persistence(&mut self) -> Result<usize> {
-        match self.runtime.as_mut() {
+        match self.active_world.runtime.as_mut() {
             Some(runtime) => runtime.flush_persistence(),
             None => Ok(0),
         }
@@ -965,7 +1027,7 @@ impl McloneSceneHost {
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(|| self.services.clock.now());
         let (prepared_records, record_cache_prepare) =
-            self.draw.prepare_render_records_with_stats();
+            self.active_world.draw.prepare_render_records_with_stats();
         timing.record_cache_prepare = record_cache_prepare;
         timing.shared_records_ms = records_start.map_or(0.0, |start| {
             elapsed_ms(self.services.clock.elapsed_since(start))
@@ -973,12 +1035,18 @@ impl McloneSceneHost {
         let (terrain_views, terrain_options, _) =
             self.terrain_render_views_and_options(render_views);
         let (prepared_stereo_draw, stereo_draw_timing) = if collect_split_timing {
-            self.draw
-                .prepare_stereo_draw_timed(&prepared_records, terrain_views, terrain_options)
+            self.active_world.draw.prepare_stereo_draw_timed(
+                &prepared_records,
+                terrain_views,
+                terrain_options,
+            )
         } else {
             (
-                self.draw
-                    .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options),
+                self.active_world.draw.prepare_stereo_draw(
+                    &prepared_records,
+                    terrain_views,
+                    terrain_options,
+                ),
                 Default::default(),
             )
         };
@@ -1036,8 +1104,8 @@ impl McloneSceneHost {
         if defer_eye_waits {
             if self.overlap_runtime_prefetch_enabled
                 && matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live)
-                && self.local_startup.is_none()
-                && self.runtime.is_some()
+                && self.active_world.local_startup.is_none()
+                && self.active_world.runtime.is_some()
             {
                 let prefetch_start = self.services.clock.now();
                 let mut prefetch_timing = XrTerrainFrameTiming::default();
@@ -1095,7 +1163,7 @@ impl McloneSceneHost {
             self.prefetched_live_upload = None;
             return Ok(self.frozen_runtime_upload_summary());
         }
-        if self.local_startup.is_some() || self.runtime.is_none() {
+        if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             self.prefetched_live_upload = None;
             return Ok(self.frozen_runtime_upload_summary());
         }
@@ -1112,10 +1180,10 @@ impl McloneSceneHost {
     }
 
     fn advance_external_runtime_startup_admission(&mut self, camera_position: Vec3) {
-        if !self.external_runtime_startup_pending {
+        if !self.active_world.external_runtime_startup_pending {
             return;
         }
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
             return;
         };
         let traversal_ready = runtime
@@ -1126,11 +1194,11 @@ impl McloneSceneHost {
                 mclone_app_runtime::StartupReadinessPolicy::Playable,
                 camera_position,
             ),
-            drawable_section_count: self.draw.section_count().min(traversal_ready),
+            drawable_section_count: self.active_world.draw.section_count().min(traversal_ready),
             presentation_settled: true,
         };
         if evidence.ready() {
-            self.external_runtime_startup_pending = false;
+            self.active_world.external_runtime_startup_pending = false;
         }
     }
 
@@ -1219,10 +1287,12 @@ impl McloneSceneHost {
         } else {
             Vec::new()
         };
-        let prepared_records = self.draw.prepare_render_records();
-        let prepared_stereo_draw =
-            self.draw
-                .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
+        let prepared_records = self.active_world.draw.prepare_render_records();
+        let prepared_stereo_draw = self.active_world.draw.prepare_stereo_draw(
+            &prepared_records,
+            terrain_views,
+            terrain_options,
+        );
         let uniform_frame = self.next_per_view_uniform_frame();
         let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
         let right_view_slot = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
@@ -1253,13 +1323,13 @@ impl McloneSceneHost {
             include_actors,
         )?;
 
-        self.render_stats.drawn_section_count = left.drawn_section_count;
-        self.render_stats.drawn_face_count = left.drawn_face_count();
-        self.render_stats.drawn_index_count = left.drawn_index_count;
+        self.active_world.render_stats.drawn_section_count = left.drawn_section_count;
+        self.active_world.render_stats.drawn_face_count = left.drawn_face_count();
+        self.active_world.render_stats.drawn_index_count = left.drawn_index_count;
         self.rendered_frames += 1;
         Ok(XrTerrainStereoFrameSummary {
             rendered_frames: self.rendered_frames,
-            section_count: self.draw.section_count(),
+            section_count: self.active_world.draw.section_count(),
             left,
             right,
         })
@@ -1312,6 +1382,7 @@ impl McloneSceneHost {
             TexturedSectionRenderPhase::All
         };
         let stats = self
+            .active_world
             .draw
             .render_prepared_stereo_draw_phase_with_options_in_slot(
                 prepared_draw,
@@ -1340,7 +1411,8 @@ impl McloneSceneHost {
                 .context("render XR terrain-only actors")?;
         }
         if split_translucent_terrain {
-            self.draw
+            self.active_world
+                .draw
                 .render_prepared_stereo_draw_phase_with_options_in_slot(
                     prepared_draw,
                     queue,
@@ -1375,12 +1447,13 @@ impl McloneSceneHost {
         let center_position =
             (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
         let mut timing = XrTerrainFrameTiming::default();
-        let upload = if self.local_startup.is_none() && self.runtime.is_some() {
-            let frame_deadline = self.render_compile_frame_deadline();
-            self.poll_runtime_and_upload(device, center_position, frame_deadline, &mut timing)?
-        } else {
-            self.frozen_runtime_upload_summary()
-        };
+        let upload =
+            if self.active_world.local_startup.is_none() && self.active_world.runtime.is_some() {
+                let frame_deadline = self.render_compile_frame_deadline();
+                self.poll_runtime_and_upload(device, center_position, frame_deadline, &mut timing)?
+            } else {
+                self.frozen_runtime_upload_summary()
+            };
 
         self.render_prepared_terrain_multiview_frame_with_upload(
             device,
@@ -1473,16 +1546,16 @@ impl McloneSceneHost {
         } else {
             Vec::new()
         };
-        let far_lod_config = self.scene.far_lod;
-        let far_lod_seed = self.scene.seed;
-        let far_lod_center = self.camera.snapshot().chunk_pos;
+        let far_lod_config = self.active_world.scene.far_lod;
+        let far_lod_seed = self.active_world.scene.seed;
+        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.time_of_day();
         let sun_angle = self.sun_angle();
         let center_position =
             (terrain_views[0].camera_position + terrain_views[1].camera_position) * 0.5;
-        let lod_grant = self.render_admission_policy.lod_grant();
-        let far_lod_frame = if let Some(runtime) = self.runtime.as_mut() {
+        let lod_grant = self.active_world.render_admission_policy.lod_grant();
+        let far_lod_frame = if let Some(runtime) = self.active_world.runtime.as_mut() {
             runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
@@ -1496,7 +1569,7 @@ impl McloneSceneHost {
         };
         let records_start = self.services.clock.now();
         let (prepared_records, record_cache_prepare) =
-            self.draw.prepare_render_records_with_stats();
+            self.active_world.draw.prepare_render_records_with_stats();
         if let Some(timing) = timing.as_deref_mut() {
             timing.shared_records_ms = elapsed_ms(self.services.clock.elapsed_since(records_start));
             timing.record_cache_prepare = record_cache_prepare;
@@ -1532,7 +1605,7 @@ impl McloneSceneHost {
         }
         if include_sky && far_lod_frame.is_some_and(|frame| !frame.is_empty()) {
             let far_lod_start = self.services.clock.now();
-            let far_lod_stats = self.far_lod.render_multiview(
+            let far_lod_stats = self.active_world.far_lod.render_multiview(
                 device,
                 queue,
                 &mut encoder,
@@ -1541,10 +1614,11 @@ impl McloneSceneHost {
                 terrain_views,
                 far_lod_frame,
             );
-            self.render_stats.far_lod_vertex_count = far_lod_stats.vertex_count;
-            self.render_stats.far_lod_index_count = far_lod_stats.index_count;
-            self.render_stats.far_lod_region_draw_count = far_lod_stats.region_draw_count;
-            self.render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
+            self.active_world.render_stats.far_lod_vertex_count = far_lod_stats.vertex_count;
+            self.active_world.render_stats.far_lod_index_count = far_lod_stats.index_count;
+            self.active_world.render_stats.far_lod_region_draw_count =
+                far_lod_stats.region_draw_count;
+            self.active_world.render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_far_lod_ms +=
                     elapsed_ms(self.services.clock.elapsed_since(far_lod_start));
@@ -1552,9 +1626,11 @@ impl McloneSceneHost {
             render_target = render_target.with_loaded_color().with_loaded_depth();
         }
         let terrain_start = self.services.clock.now();
-        let prepared_stereo_draw =
-            self.draw
-                .prepare_stereo_draw(&prepared_records, terrain_views, terrain_options);
+        let prepared_stereo_draw = self.active_world.draw.prepare_stereo_draw(
+            &prepared_records,
+            terrain_views,
+            terrain_options,
+        );
         let split_translucent_terrain = include_actors && !actor_instances.is_empty();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
@@ -1562,6 +1638,7 @@ impl McloneSceneHost {
             TexturedSectionRenderPhase::All
         };
         let stats = self
+            .active_world
             .draw
             .render_prepared_multiview_stereo_draw_phase_with_options(
                 &prepared_stereo_draw,
@@ -1599,7 +1676,8 @@ impl McloneSceneHost {
             }
             if split_translucent_terrain {
                 let translucent_start = self.services.clock.now();
-                self.draw
+                self.active_world
+                    .draw
                     .render_prepared_multiview_stereo_draw_phase_with_options(
                         &prepared_stereo_draw,
                         device,
@@ -1683,15 +1761,15 @@ impl McloneSceneHost {
                 elapsed_ms(self.services.clock.elapsed_since(poll_wait_start));
         }
 
-        self.render_stats.drawn_section_count = stats[0].drawn_section_count;
-        self.render_stats.drawn_face_count = stats[0].drawn_face_count();
-        self.render_stats.drawn_index_count = stats[0].drawn_index_count;
+        self.active_world.render_stats.drawn_section_count = stats[0].drawn_section_count;
+        self.active_world.render_stats.drawn_face_count = stats[0].drawn_face_count();
+        self.active_world.render_stats.drawn_index_count = stats[0].drawn_index_count;
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         self.rendered_frames += 1;
         Ok(XrTerrainMultiviewFrameSummary {
             rendered_frames: self.rendered_frames,
-            section_count: self.draw.section_count(),
+            section_count: self.active_world.draw.section_count(),
             left: stats[0],
             right: stats[1],
             actor_count: actor_instances.len(),
@@ -1724,7 +1802,7 @@ impl McloneSceneHost {
             )
             .context("render XR selection outline multiview")?;
         let mut world_lines = engine_debug_world_lines(
-            &self.camera,
+            &self.active_world.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
         if let Some(gameplay_ray) = self
@@ -1880,19 +1958,21 @@ impl McloneSceneHost {
             timing.runtime_ready_sections_ms =
                 elapsed_ms(self.services.clock.elapsed_since(ready_start));
             let ready_publish_start = self.services.clock.now();
-            self.draw
+            self.active_world
+                .draw
                 .record_traversal_ready_sections_skipped(upload_backpressured);
             timing.runtime_ready_publish_ms =
                 elapsed_ms(self.services.clock.elapsed_since(ready_publish_start));
-            return self.draw.traversal_ready_section_count();
+            return self.active_world.draw.traversal_ready_section_count();
         }
-        let draw_section_generation = self.draw.traversal_ready_source_generation();
+        let draw_section_generation = self.active_world.draw.traversal_ready_source_generation();
         let refresh = {
             let runtime = self
+                .active_world
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before ready refresh");
-            self.traversal_ready_sections.refresh(
+            self.active_world.traversal_ready_sections.refresh(
                 runtime.core(),
                 camera_position,
                 draw_section_generation,
@@ -1902,12 +1982,15 @@ impl McloneSceneHost {
             elapsed_ms(self.services.clock.elapsed_since(ready_start));
         let ready_publish_start = self.services.clock.now();
         if refresh.refreshed {
-            self.draw.set_traversal_ready_sections_with_context(
-                self.traversal_ready_sections.ready_sections(),
-                upload_backpressured,
-            );
+            self.active_world
+                .draw
+                .set_traversal_ready_sections_with_context(
+                    self.active_world.traversal_ready_sections.ready_sections(),
+                    upload_backpressured,
+                );
         } else {
-            self.draw
+            self.active_world
+                .draw
                 .record_traversal_ready_sections_skipped(upload_backpressured);
         }
         timing.runtime_ready_publish_ms =
@@ -1927,7 +2010,7 @@ impl McloneSceneHost {
             pending_compile_jobs_before,
             max_pending_compile_jobs,
             available_compile_slots_before,
-        ) = if let Some(runtime) = self.runtime.as_ref() {
+        ) = if let Some(runtime) = self.active_world.runtime.as_ref() {
             (
                 runtime.pending_render_chunk_count(),
                 runtime.render_compile_pending_job_count(),
@@ -1935,7 +2018,7 @@ impl McloneSceneHost {
                 runtime.render_compile_available_pending_job_slots(),
             )
         } else {
-            let upload_queue = self.section_uploads.stats();
+            let upload_queue = self.active_world.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
                 host_mode: self.runtime_host_mode(),
                 queued_upload_section_count: upload_queue.queued_upload_sections,
@@ -1944,8 +2027,11 @@ impl McloneSceneHost {
                 queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
                 upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
                 upload_held_compile_job_count: upload_queue.held_compile_jobs,
-                traversal_ready_section_count: self.draw.traversal_ready_section_count(),
-                record_cache: self.draw.record_cache_stats(),
+                traversal_ready_section_count: self
+                    .active_world
+                    .draw
+                    .traversal_ready_section_count(),
+                record_cache: self.active_world.draw.record_cache_stats(),
                 ..XrTerrainUploadSummary::default()
             });
         };
@@ -1954,6 +2040,7 @@ impl McloneSceneHost {
         timing.runtime_poll_ms = elapsed_ms(self.services.clock.elapsed_since(poll_start));
         let (poll_summary, has_runtime_render_work) = {
             let runtime = self
+                .active_world
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before poll");
@@ -1966,38 +2053,46 @@ impl McloneSceneHost {
             )
         };
         let far_lod_stats = self
+            .active_world
             .runtime
             .as_ref()
             .expect("runtime presence checked before poll")
             .far_lod_stats();
-        self.render_admission_policy.set_lod_queue_telemetry(
-            far_lod_stats
-                .pending_builds
-                .saturating_add(far_lod_stats.inflight_builds),
-            far_lod_stats.oldest_build_age_ms,
-            far_lod_stats.queued_uploads,
-        );
+        self.active_world
+            .render_admission_policy
+            .set_lod_queue_telemetry(
+                far_lod_stats
+                    .pending_builds
+                    .saturating_add(far_lod_stats.inflight_builds),
+                far_lod_stats.oldest_build_age_ms,
+                far_lod_stats.queued_uploads,
+            );
         let target_period_ms = self.render_admission_target_period_ms();
         let budget_host_mode = match self.runtime_host_mode() {
             XrTerrainHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
             XrTerrainHostMode::RemoteDedicated => BudgetHostMode::RemoteHost,
         };
-        self.render_admission_policy
-            .set_lod_producer_active(self.scene.far_lod.enabled);
-        let render_admission_grant = self.render_admission_policy.decide(
+        self.active_world
+            .render_admission_policy
+            .set_lod_producer_active(self.active_world.scene.far_lod.enabled);
+        let render_admission_grant = self.active_world.render_admission_policy.decide(
             target_period_ms,
             budget_host_mode,
             self.render_section_upload_budget,
         );
-        if !poll_changed && !has_runtime_render_work && !self.section_uploads.has_pending_work() {
+        if !poll_changed
+            && !has_runtime_render_work
+            && !self.active_world.section_uploads.has_pending_work()
+        {
             let traversal_ready_section_count =
                 self.refresh_traversal_ready_sections(camera_position, false, false, timing);
             let runtime = self
+                .active_world
                 .runtime
                 .as_ref()
                 .expect("runtime presence checked before poll");
             let compile_health = runtime.render_compile_queue_health();
-            let upload_queue = self.section_uploads.stats();
+            let upload_queue = self.active_world.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
                 poll_changed,
                 pending_render_chunks_before,
@@ -2024,7 +2119,7 @@ impl McloneSceneHost {
                 upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
                 upload_held_compile_job_count: upload_queue.held_compile_jobs,
                 traversal_ready_section_count,
-                record_cache: self.draw.record_cache_stats(),
+                record_cache: self.active_world.draw.record_cache_stats(),
                 ..poll_summary
             });
         }
@@ -2035,6 +2130,7 @@ impl McloneSceneHost {
         let mut upload_report = TexturedSectionUploadReport::default();
         let mut upload_phase = RenderSectionUploadPhaseReport::default();
         let drained_pending_uploads_before_sync = self
+            .active_world
             .section_uploads
             .should_drain_before_runtime_sync(upload_frame_policy);
         if drained_pending_uploads_before_sync {
@@ -2053,11 +2149,14 @@ impl McloneSceneHost {
             self.release_render_compile_jobs(drained_report.release_compile_jobs);
         }
         let runtime_work_requested = poll_changed || has_runtime_render_work;
-        let upload_frame_decision = self.section_uploads.frame_decision_after_pre_sync_drain(
-            upload_frame_policy,
-            runtime_work_requested,
-            drained_pending_uploads_before_sync,
-        );
+        let upload_frame_decision = self
+            .active_world
+            .section_uploads
+            .frame_decision_after_pre_sync_drain(
+                upload_frame_policy,
+                runtime_work_requested,
+                drained_pending_uploads_before_sync,
+            );
         let should_sync_render_sections = upload_frame_decision.should_sync_render_sections;
         let sync_start = self.services.clock.now();
         let timed_section_update = if should_sync_render_sections {
@@ -2082,7 +2181,8 @@ impl McloneSceneHost {
         } else {
             mclone_app_runtime::TimedRenderSectionCacheUpdate::default()
         };
-        self.render_admission_policy
+        self.active_world
+            .render_admission_policy
             .observe_sync(target_period_ms, &timed_section_update);
         timing.runtime_sync_ms = elapsed_ms(self.services.clock.elapsed_since(sync_start));
         timing.runtime_result_accept_ms = timed_section_update.timing.completed_result_accept_ms;
@@ -2233,6 +2333,7 @@ impl McloneSceneHost {
         let rebuilt_section_count = section_update.rebuilt_section_count();
         let removed_section_count = section_update.removed_section_count();
         let runtime_stats = self
+            .active_world
             .runtime
             .as_ref()
             .expect("runtime presence checked before section sync")
@@ -2266,7 +2367,7 @@ impl McloneSceneHost {
         let queued_completed_compile_result_count = if should_sync_render_sections {
             section_update.queued_completed_compile_result_count
         } else {
-            self.runtime.as_ref().map_or(0, |runtime| {
+            self.active_world.runtime.as_ref().map_or(0, |runtime| {
                 runtime.pending_completed_compile_result_count()
             })
         };
@@ -2275,7 +2376,8 @@ impl McloneSceneHost {
         let mut pending_compile_jobs_after_sync = if should_sync_render_sections {
             section_update.pending_compile_jobs
         } else {
-            self.runtime
+            self.active_world
+                .runtime
                 .as_ref()
                 .map_or(0, |runtime| runtime.render_compile_pending_job_count())
         };
@@ -2298,6 +2400,7 @@ impl McloneSceneHost {
             upload_phase.absorb(section_update_report.phase);
             self.release_render_compile_jobs(section_update_report.release_compile_jobs);
             pending_compile_jobs_after_sync = self
+                .active_world
                 .runtime
                 .as_ref()
                 .map_or(0, |runtime| runtime.render_compile_pending_job_count());
@@ -2316,42 +2419,73 @@ impl McloneSceneHost {
             timing,
         );
         let runtime = self
+            .active_world
             .runtime
             .as_ref()
             .expect("runtime presence checked before section sync");
         let compile_health = runtime.render_compile_queue_health();
-        self.render_stats.section_count = self.draw.section_count();
-        self.render_stats.index_count = self.draw.index_count();
-        self.render_stats.face_count = quad_face_count_from_indices(self.render_stats.index_count);
-        self.render_stats.last_rebuilt_section_count = rebuilt_section_count;
-        self.render_stats.last_removed_section_count = removed_section_count;
-        self.render_stats.last_rebuilt_vertex_count = rebuilt_vertex_count;
-        self.render_stats.last_rebuilt_face_count =
+        self.active_world.render_stats.section_count = self.active_world.draw.section_count();
+        self.active_world.render_stats.index_count = self.active_world.draw.index_count();
+        self.active_world.render_stats.face_count =
+            quad_face_count_from_indices(self.active_world.render_stats.index_count);
+        self.active_world.render_stats.last_rebuilt_section_count = rebuilt_section_count;
+        self.active_world.render_stats.last_removed_section_count = removed_section_count;
+        self.active_world.render_stats.last_rebuilt_vertex_count = rebuilt_vertex_count;
+        self.active_world.render_stats.last_rebuilt_face_count =
             quad_face_count_from_indices(rebuilt_index_count);
-        self.render_stats.last_rebuilt_index_count = rebuilt_index_count;
-        self.render_stats.last_neighbor_ready_section_count = neighbor_ready_section_count;
-        self.render_stats.last_near_exception_section_count = near_exception_section_count;
-        self.render_stats.last_deferred_section_count = deferred_section_count;
-        self.render_stats.last_submitted_compile_section_count = submitted_compile_section_count;
-        self.render_stats.last_completed_compile_section_count = completed_compile_section_count;
-        self.render_stats.last_stale_compile_section_count = stale_compile_section_count;
-        self.render_stats.last_pending_compile_jobs = pending_compile_jobs_after_sync;
-        self.render_stats.last_visibility_graph_build_count = visibility_graph_build_count;
-        self.render_stats.last_visibility_graph_total_ms = visibility_graph_total_ms;
-        self.render_stats.last_visibility_graph_worst_ms = visibility_graph_worst_ms;
+        self.active_world.render_stats.last_rebuilt_index_count = rebuilt_index_count;
+        self.active_world
+            .render_stats
+            .last_neighbor_ready_section_count = neighbor_ready_section_count;
+        self.active_world
+            .render_stats
+            .last_near_exception_section_count = near_exception_section_count;
+        self.active_world.render_stats.last_deferred_section_count = deferred_section_count;
+        self.active_world
+            .render_stats
+            .last_submitted_compile_section_count = submitted_compile_section_count;
+        self.active_world
+            .render_stats
+            .last_completed_compile_section_count = completed_compile_section_count;
+        self.active_world
+            .render_stats
+            .last_stale_compile_section_count = stale_compile_section_count;
+        self.active_world.render_stats.last_pending_compile_jobs = pending_compile_jobs_after_sync;
+        self.active_world
+            .render_stats
+            .last_visibility_graph_build_count = visibility_graph_build_count;
+        self.active_world
+            .render_stats
+            .last_visibility_graph_total_ms = visibility_graph_total_ms;
+        self.active_world
+            .render_stats
+            .last_visibility_graph_worst_ms = visibility_graph_worst_ms;
         if let Some(resident) = resident_mesh_stats {
-            self.render_stats.resident_cpu_mesh_section_count = resident.resident_section_count;
-            self.render_stats.resident_cpu_mesh_vertex_count = resident.resident_vertex_count;
-            self.render_stats.resident_cpu_mesh_face_count = resident.resident_face_count();
-            self.render_stats.resident_cpu_mesh_index_count = resident.resident_index_count;
-            self.render_stats.resident_cpu_mesh_owned_bytes = resident.resident_mesh_owned_bytes;
+            self.active_world
+                .render_stats
+                .resident_cpu_mesh_section_count = resident.resident_section_count;
+            self.active_world
+                .render_stats
+                .resident_cpu_mesh_vertex_count = resident.resident_vertex_count;
+            self.active_world.render_stats.resident_cpu_mesh_face_count =
+                resident.resident_face_count();
+            self.active_world.render_stats.resident_cpu_mesh_index_count =
+                resident.resident_index_count;
+            self.active_world.render_stats.resident_cpu_mesh_owned_bytes =
+                resident.resident_mesh_owned_bytes;
         }
-        self.render_stats.last_uploaded_section_count = upload_report.uploaded_section_count;
-        self.render_stats.last_upload_removed_section_count = upload_report.removed_section_count;
-        self.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
-        self.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
-        self.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
-        let upload_queue = self.section_uploads.stats();
+        self.active_world.render_stats.last_uploaded_section_count =
+            upload_report.uploaded_section_count;
+        self.active_world
+            .render_stats
+            .last_upload_removed_section_count = upload_report.removed_section_count;
+        self.active_world.render_stats.last_uploaded_vertex_count =
+            upload_report.uploaded_vertex_count;
+        self.active_world.render_stats.last_uploaded_face_count =
+            upload_report.uploaded_face_count();
+        self.active_world.render_stats.last_uploaded_index_count =
+            upload_report.uploaded_index_count;
+        let upload_queue = self.active_world.section_uploads.stats();
         Ok(XrTerrainUploadSummary {
             poll_changed,
             pending_render_chunks_before,
@@ -2410,7 +2544,7 @@ impl McloneSceneHost {
             upload_accept_limited: upload_phase.accept_limited,
             upload_backpressured: upload_frame_decision.upload_backpressured,
             traversal_ready_section_count,
-            record_cache: self.draw.record_cache_stats(),
+            record_cache: self.active_world.draw.record_cache_stats(),
             visibility_graph_build_count,
             visibility_graph_total_ms,
             visibility_graph_worst_ms,
@@ -2427,7 +2561,7 @@ impl McloneSceneHost {
     ) -> Result<XrTerrainUploadApplyReport> {
         if self.render_section_upload_budget.is_none()
             && self.render_section_accept_budget.is_none()
-            && !self.section_uploads.has_pending_work()
+            && !self.active_world.section_uploads.has_pending_work()
         {
             let release_compile_jobs =
                 RenderSectionUploadCoordinator::direct_release_count(&section_update);
@@ -2439,6 +2573,7 @@ impl McloneSceneHost {
             );
             let apply_start = self.services.clock.now();
             let report = self
+                .active_world
                 .draw
                 .apply_section_updates_with_context_timed(
                     device,
@@ -2460,11 +2595,14 @@ impl McloneSceneHost {
         }
 
         let enqueue_start = self.services.clock.now();
-        let mut phase = self.section_uploads.enqueue_cache_update(section_update);
+        let mut phase = self
+            .active_world
+            .section_uploads
+            .enqueue_cache_update(section_update);
         timing.runtime_upload_enqueue_ms +=
             elapsed_ms(self.services.clock.elapsed_since(enqueue_start));
         let select_start = self.services.clock.now();
-        let drain = self.section_uploads.drain_budgeted(
+        let drain = self.active_world.section_uploads.drain_budgeted(
             self.render_section_upload_budget,
             self.render_section_accept_budget,
         );
@@ -2480,6 +2618,7 @@ impl McloneSceneHost {
         }
         let apply_start = self.services.clock.now();
         let report = self
+            .active_world
             .draw
             .apply_section_updates_with_context_timed(
                 device,
@@ -2493,9 +2632,13 @@ impl McloneSceneHost {
         report.map(|(upload, upload_timing)| {
             timing.absorb_upload_apply_timing(upload_timing);
             let released_on_apply = self
+                .active_world
                 .section_uploads
                 .complete_applied_lifecycle_items(drain.lifecycle_item_count);
-            phase.record_applied_release(released_on_apply, self.section_uploads.stats());
+            phase.record_applied_release(
+                released_on_apply,
+                self.active_world.section_uploads.stats(),
+            );
             XrTerrainUploadApplyReport {
                 upload,
                 phase,
@@ -2508,32 +2651,37 @@ impl McloneSceneHost {
         if count == 0 {
             return 0;
         }
-        self.runtime
+        self.active_world
+            .runtime
             .as_mut()
             .map_or(0, |runtime| runtime.release_render_compile_jobs(count))
     }
 
     fn frozen_runtime_upload_summary(&self) -> XrTerrainUploadSummary {
         let pending_render_chunks = self
+            .active_world
             .runtime
             .as_ref()
             .map_or(0, |runtime| runtime.pending_render_chunk_count());
         let pending_compile_jobs = self
+            .active_world
             .runtime
             .as_ref()
             .map_or(0, |runtime| runtime.render_compile_pending_job_count());
         let max_pending_compile_jobs = self
+            .active_world
             .runtime
             .as_ref()
             .map_or(0, |runtime| runtime.render_compile_max_pending_job_count());
-        let available_compile_slots = self.runtime.as_ref().map_or(0, |runtime| {
+        let available_compile_slots = self.active_world.runtime.as_ref().map_or(0, |runtime| {
             runtime.render_compile_available_pending_job_slots()
         });
         let compile_health = self
+            .active_world
             .runtime
             .as_ref()
             .map(|runtime| runtime.render_compile_queue_health());
-        let upload_queue = self.section_uploads.stats();
+        let upload_queue = self.active_world.section_uploads.stats();
         XrTerrainUploadSummary {
             host_mode: self.runtime_host_mode(),
             pending_render_chunks_before: pending_render_chunks,
@@ -2559,14 +2707,15 @@ impl McloneSceneHost {
             queued_upload_mesh_owned_bytes: upload_queue.queued_upload_mesh_owned_bytes,
             upload_held_lifecycle_item_count: upload_queue.held_release_lifecycle_items,
             upload_held_compile_job_count: upload_queue.held_compile_jobs,
-            traversal_ready_section_count: self.draw.traversal_ready_section_count(),
-            record_cache: self.draw.record_cache_stats(),
+            traversal_ready_section_count: self.active_world.draw.traversal_ready_section_count(),
+            record_cache: self.active_world.draw.record_cache_stats(),
             ..XrTerrainUploadSummary::default()
         }
     }
 
     pub fn latest_budget_decision_panel(&self) -> BudgetDecisionPanelReport {
         let scheduler = self
+            .active_world
             .runtime
             .as_ref()
             .map(|runtime| {
@@ -2575,11 +2724,12 @@ impl McloneSceneHost {
                     .scheduler_budget_decision_panel
             })
             .unwrap_or_default();
-        merge_budget_decision_panels(scheduler, self.render_admission_policy.panel())
+        merge_budget_decision_panels(scheduler, self.active_world.render_admission_policy.panel())
     }
 
     fn runtime_host_mode(&self) -> XrTerrainHostMode {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .map_or(XrTerrainHostMode::LocalIntegrated, |runtime| {
                 runtime.host_mode().into()
@@ -2587,27 +2737,30 @@ impl McloneSceneHost {
     }
 
     fn current_actor_instances(&self) -> Vec<ActorInstance> {
-        if self.scene.skip_actors {
+        if self.active_world.scene.skip_actors {
             return Vec::new();
         }
-        self.runtime.as_ref().map_or_else(Vec::new, |runtime| {
-            let instances = actor_instances_from_presentations(
-                &runtime.client().actor_presentations(),
-                runtime.client(),
-            );
-            if self.mono_ui_context.is_some() {
-                instances
-                    .into_iter()
-                    .chain(local_player_actor_instance_for_view(
-                        &self.camera,
-                        runtime.client(),
-                        actor_figure_id_for_player_model(self.player_model),
-                    ))
-                    .collect()
-            } else {
-                instances
-            }
-        })
+        self.active_world
+            .runtime
+            .as_ref()
+            .map_or_else(Vec::new, |runtime| {
+                let instances = actor_instances_from_presentations(
+                    &runtime.client().actor_presentations(),
+                    runtime.client(),
+                );
+                if self.mono_ui_context.is_some() {
+                    instances
+                        .into_iter()
+                        .chain(local_player_actor_instance_for_view(
+                            &self.active_world.camera,
+                            runtime.client(),
+                            actor_figure_id_for_player_model(self.active_world.player_model),
+                        ))
+                        .collect()
+                } else {
+                    instances
+                }
+            })
     }
 
     fn underwater_effect_dt_seconds(&mut self) -> f32 {
@@ -2670,12 +2823,12 @@ impl McloneSceneHost {
         let mut summary_ui_draw = panel_draw.panel_draw.clone();
         summary_ui_draw.append(&panel_draw.overlay_draw);
         let selection_outline = self.current_xr_selection_outline();
-        let mut render_stats = self.render_stats;
-        let far_lod_config = self.scene.far_lod;
-        let far_lod_seed = self.scene.seed;
-        let far_lod_center = self.camera.snapshot().chunk_pos;
-        let lod_grant = self.render_admission_policy.lod_grant();
-        let far_lod_mesh = if let Some(runtime) = self.runtime.as_mut() {
+        let mut render_stats = self.active_world.render_stats;
+        let far_lod_config = self.active_world.scene.far_lod;
+        let far_lod_seed = self.active_world.scene.seed;
+        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
+        let lod_grant = self.active_world.render_admission_policy.lod_grant();
+        let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
             runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
@@ -2689,12 +2842,12 @@ impl McloneSceneHost {
         };
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
-            let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
+            let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
             render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
-                &mut self.draw,
+                &mut self.active_world.draw,
                 prepared_draw,
                 Some(&mut self.actors),
                 Some(&mut self.screen_effects),
@@ -2714,12 +2867,12 @@ impl McloneSceneHost {
                 view_slot,
             )
         } else {
-            let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
+            let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
             render_full_frame_for_view_with_prepared_stereo_draw_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
-                &mut self.draw,
+                &mut self.active_world.draw,
                 prepared_draw,
                 Some(&mut self.actors),
                 Some(&mut self.screen_effects),
@@ -2774,7 +2927,7 @@ impl McloneSceneHost {
             elapsed_ms(self.services.clock.elapsed_since(start))
         });
         let mut world_lines = engine_debug_world_lines(
-            &self.camera,
+            &self.active_world.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
         if let Some(gameplay_ray) = self
@@ -2941,7 +3094,7 @@ impl McloneSceneHost {
             (Some(submission), 0.0)
         };
         if label == "left" {
-            self.render_stats = render_stats;
+            self.active_world.render_stats = render_stats;
         }
         let prepare_ms = frame_timing.terrain_prepare_ms;
         Ok(XrRenderedEye {
@@ -2993,7 +3146,8 @@ impl McloneSceneHost {
         camera_position: Vec3,
     ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
-        self.runtime
+        self.active_world
+            .runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
             .sync_render_sections_with_completed_result_acceptance_timed(
@@ -3008,7 +3162,8 @@ impl McloneSceneHost {
         deadline: MonotonicDeadline,
     ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
-        self.runtime
+        self.active_world
+            .runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
             .sync_render_sections_until_deadline_with_completed_result_acceptance_timed(
@@ -3025,7 +3180,7 @@ impl McloneSceneHost {
         max_compile_requests: usize,
     ) -> Result<mclone_app_runtime::TimedRenderSectionCacheUpdate> {
         let completed_result_accept_budget = self.render_completed_result_accept_budget;
-        self.runtime
+        self.active_world.runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
             .sync_render_sections_until_deadline_with_admission_budget_and_completed_result_acceptance_timed(
@@ -3037,7 +3192,8 @@ impl McloneSceneHost {
     }
 
     fn poll(&mut self) -> Result<bool> {
-        self.runtime
+        self.active_world
+            .runtime
             .as_mut()
             .context("XR terrain runtime is not active")?
             .poll()
@@ -3046,13 +3202,13 @@ impl McloneSceneHost {
     fn commit_engine_camera_player_pose_timed(
         &mut self,
     ) -> Result<(bool, EngineCameraCommitTiming)> {
-        let Some(runtime) = self.runtime.as_mut() else {
+        let Some(runtime) = self.active_world.runtime.as_mut() else {
             return Ok((false, EngineCameraCommitTiming::default()));
         };
         let mut timing = EngineCameraCommitTiming::default();
         let changed = mclone_app_runtime::commit_engine_camera_player_pose(
             runtime,
-            &mut self.camera,
+            &mut self.active_world.camera,
             XR_CAMERA_COMMIT_CONTEXT,
             &self.services.clock,
             Some(&mut timing),
@@ -3062,7 +3218,7 @@ impl McloneSceneHost {
     }
 
     fn play_landing_events(&mut self) {
-        let events = self.camera.take_landing_events();
+        let events = self.active_world.camera.take_landing_events();
         for event in events {
             let (sound, gain) = landing_playback_for_impact(event.impact_speed);
             self.services.audio.play(sound, gain);
@@ -3070,22 +3226,22 @@ impl McloneSceneHost {
     }
 
     fn sky_clear_color(&self) -> wgpu::Color {
-        self.runtime.as_ref().map_or_else(
+        self.active_world.runtime.as_ref().map_or_else(
             || overworld_clear_color(self.time_of_day()),
             |runtime| runtime.sky_clear_color(),
         )
     }
 
     fn time_of_day(&self) -> f32 {
-        self.runtime.as_ref().map_or_else(
-            || time::time_of_day(self.scene.day_time_override.unwrap_or(0)),
+        self.active_world.runtime.as_ref().map_or_else(
+            || time::time_of_day(self.active_world.scene.day_time_override.unwrap_or(0)),
             |runtime| runtime.time_of_day(),
         )
     }
 
     fn sun_angle(&self) -> f32 {
-        self.runtime.as_ref().map_or_else(
-            || time::sun_angle(self.scene.day_time_override.unwrap_or(0)),
+        self.active_world.runtime.as_ref().map_or_else(
+            || time::sun_angle(self.active_world.scene.day_time_override.unwrap_or(0)),
             |runtime| runtime.sun_angle(),
         )
     }

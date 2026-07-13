@@ -294,8 +294,10 @@ impl McloneSceneHost {
             bail!("OpenXR runtime returned fewer than two stereo views");
         }
         let tracking_origin = self.tracking_origin_for_views(views)?;
-        let transform =
-            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
+        let transform = XrStageToWorld::from_tracking_origin(
+            tracking_origin,
+            self.active_world.camera.snapshot(),
+        )?;
         Ok([
             xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, XR_FAR)?,
             xr_view_to_chunk_render_view(&views[1], transform, XR_NEAR, XR_FAR)?,
@@ -310,7 +312,7 @@ impl McloneSceneHost {
             return Ok(origin);
         }
         let origin = XrTrackingOrigin::from_initial_views(views, self.initial_alignment_mode)?;
-        let snapshot = self.camera.snapshot();
+        let snapshot = self.active_world.camera.snapshot();
         log::info!(
             "mclone XR terrain player-root alignment: mode={} root_eye=({:.2}, {:.2}, {:.2}) root_yaw_degrees={:.1} stage_center=({:.3}, {:.3}, {:.3}) stage_yaw_degrees={:.1}",
             origin.mode_label(),
@@ -332,19 +334,20 @@ impl McloneSceneHost {
         views: &[XrView],
     ) -> Result<XrStageToWorld> {
         let origin = self.tracking_origin_for_views(views)?;
-        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
         let headset_stage_position = xr_headset_stage_position_from_views(views)?;
         let headset_world_position = transform.transform_position(headset_stage_position);
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
             return Ok(transform);
         };
-        let reconciliation = self.camera.reconcile_room_scale_headset(
+        let reconciliation = self.active_world.camera.reconcile_room_scale_headset(
             runtime.client(),
             vec3d_from_glam(headset_world_position),
         );
         let consumed_world = glam_vec3_from_vec3d(reconciliation.consumed_body_movement);
         let origin = origin.consume_world_movement(consumed_world, transform);
         self.tracking_origin = Some(origin);
-        XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())
+        XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())
     }
 }

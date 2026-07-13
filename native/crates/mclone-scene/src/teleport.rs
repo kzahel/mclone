@@ -271,7 +271,7 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn begin_xr_blink_teleport(&mut self, views: &[XrView], transform: XrStageToWorld) {
-        if self.runtime.is_none() {
+        if self.active_world.runtime.is_none() {
             self.clear_xr_blink_teleport();
             return;
         }
@@ -281,7 +281,7 @@ impl McloneSceneHost {
                 log::warn!(
                     "failed to capture XR Blink headset heading, falling back to body yaw: {error:#}"
                 );
-                self.camera.player().pose().y_rot_degrees
+                self.active_world.camera.player().pose().y_rot_degrees
             }
         };
         self.ensure_xr_blink_teleport_worker();
@@ -319,9 +319,12 @@ impl McloneSceneHost {
         if let Some(preview) = self.blink_teleport.preview.as_mut() {
             preview.target_yaw_degrees = target_yaw_degrees;
         }
-        let Some(intent) =
-            xr_blink_teleport_intent(&self.camera, controllers, transform, target_yaw_degrees)
-        else {
+        let Some(intent) = xr_blink_teleport_intent(
+            &self.active_world.camera,
+            controllers,
+            transform,
+            target_yaw_degrees,
+        ) else {
             return Ok(false);
         };
         if self
@@ -332,7 +335,7 @@ impl McloneSceneHost {
             return Ok(false);
         }
         self.ensure_xr_blink_teleport_worker();
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
             return Ok(false);
         };
         let config = xr_blink_teleport_config();
@@ -418,7 +421,7 @@ impl McloneSceneHost {
             return Ok(());
         };
 
-        let snapshot = self.camera.snapshot();
+        let snapshot = self.active_world.camera.snapshot();
         let landing_yaw_radians = match xr_blink_teleport_landing_yaw_radians(
             snapshot.yaw_radians,
             views,
@@ -433,10 +436,14 @@ impl McloneSceneHost {
                 -preview.target_yaw_degrees.to_radians()
             }
         };
-        self.camera
-            .set_player_feet_pose(target_feet, landing_yaw_radians, snapshot.pitch_radians);
-        if let Some(runtime) = self.runtime.as_ref() {
-            self.camera
+        self.active_world.camera.set_player_feet_pose(
+            target_feet,
+            landing_yaw_radians,
+            snapshot.pitch_radians,
+        );
+        if let Some(runtime) = self.active_world.runtime.as_ref() {
+            self.active_world
+                .camera
                 .probe_ground(runtime.client(), XR_BLINK_TELEPORT_GROUND_PROBE_DISTANCE);
         }
         log::info!(

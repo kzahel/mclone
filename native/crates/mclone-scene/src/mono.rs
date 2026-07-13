@@ -183,7 +183,7 @@ impl McloneSceneHost {
     ) -> Result<()> {
         let frame_metrics_visible = self.diagnostic_panel.frame_metrics_visible();
         let debug_diagnostics_visible = self.diagnostic_panel.debug_diagnostics_visible();
-        self.draw = TexturedSectionDrawResources::new(
+        self.active_world.draw = TexturedSectionDrawResources::new(
             device,
             queue,
             self.color_format,
@@ -199,7 +199,7 @@ impl McloneSceneHost {
             Some(actor_figures),
         )
         .context("rebuild Mono actor draw resources")?;
-        self.far_lod = FarTerrainLodRenderer::new(device, self.color_format);
+        self.active_world.far_lod = FarTerrainLodRenderer::new(device, self.color_format);
         self.selection_outline = SelectionOutlineRenderer::new(device, self.color_format);
         self.world_gui_renderer = WorldGuiRenderer::new(device, self.color_format);
         self.world_gui_overlay_renderer = WorldGuiRenderer::new(device, self.color_format);
@@ -217,17 +217,17 @@ impl McloneSceneHost {
         self.screen_effects =
             ScreenEffectsRenderer::new(device, queue, self.color_format, asset_source)
                 .context("rebuild Mono screen effects")?;
-        self.traversal_ready_sections.clear();
-        self.section_uploads.clear();
-        self.render_stats = RenderStreamStats::default();
-        if let Some(runtime) = &mut self.runtime {
+        self.active_world.traversal_ready_sections.clear();
+        self.active_world.section_uploads.clear();
+        self.active_world.render_stats = RenderStreamStats::default();
+        if let Some(runtime) = &mut self.active_world.runtime {
             runtime.mark_all_render_sections_dirty_for_resource_rebuild();
         }
         Ok(())
     }
 
     pub fn has_runtime(&self) -> bool {
-        self.runtime.is_some()
+        self.active_world.runtime.is_some()
     }
 
     pub fn session_state(&self) -> &GameSessionState {
@@ -235,19 +235,23 @@ impl McloneSceneHost {
     }
 
     pub fn scene_options(&self) -> &McloneSceneHostOptions {
-        &self.scene
+        &self.active_world.scene
     }
 
     pub fn render_stats(&self) -> RenderStreamStats {
-        self.render_stats
+        self.active_world.render_stats
     }
 
     pub fn runtime_stats(&self) -> Option<SingleViewRuntimeStats> {
-        self.runtime.as_ref().map(|runtime| runtime.stats())
+        self.active_world
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.stats())
     }
 
     pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .map(|runtime| runtime.far_lod_stats())
             .unwrap_or_default()
@@ -260,9 +264,10 @@ impl McloneSceneHost {
         &self,
         render_view: ChunkRenderView,
     ) -> Option<FarLodSettleSnapshot> {
-        let runtime = self.runtime.as_ref()?;
+        let runtime = self.active_world.runtime.as_ref()?;
         let render_options = self.effective_render_options(render_view.camera_position);
         let view_sets = self
+            .active_world
             .draw
             .section_view_set_snapshot(render_view, render_options);
         Some(FarLodSettleSnapshot::new(
@@ -275,30 +280,37 @@ impl McloneSceneHost {
     pub fn lod_coverage_counters(
         &self,
     ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .map(|runtime| runtime.lod_coverage_counters())
             .unwrap_or_default()
     }
 
     pub fn runtime_poll_diagnostics(&self) -> Option<RuntimePollDiagnostics> {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .map(|runtime| runtime.last_poll_diagnostics())
     }
 
     pub fn mono_client(&self) -> Option<&mclone_client::ClientRuntime> {
-        self.runtime.as_ref().map(|runtime| runtime.client())
+        self.active_world
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.client())
     }
 
     pub fn mono_highest_non_air_block_y_at_world(&self, world_x: i32, world_z: i32) -> Option<i32> {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()?
             .highest_non_air_block_y_at_world(world_x, world_z)
     }
 
     pub fn mono_view_readiness_overlay(&self) -> Option<LoadingProgressOverlay> {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .and_then(|runtime| runtime.view_readiness_overlay())
     }
@@ -307,18 +319,18 @@ impl McloneSceneHost {
         &self,
         camera_position: Vec3,
     ) -> mclone_app_runtime::TargetRenderWorkStats {
-        self.runtime.as_ref().map_or_else(
+        self.active_world.runtime.as_ref().map_or_else(
             mclone_app_runtime::TargetRenderWorkStats::default,
             |runtime| runtime.target_render_work_stats(camera_position),
         )
     }
 
     pub fn mono_render_vertex_count(&self) -> u32 {
-        self.draw.vertex_count()
+        self.active_world.draw.vertex_count()
     }
 
     pub fn force_mono_day_time(&mut self, day_time: u64) {
-        if let Some(runtime) = &mut self.runtime {
+        if let Some(runtime) = &mut self.active_world.runtime {
             runtime.force_day_time(day_time);
         }
     }
@@ -363,21 +375,21 @@ impl McloneSceneHost {
         speed_blocks_per_second: f64,
         collision_mode: EngineCameraCollisionMode,
     ) {
-        let camera = SceneCameraConfig::from_scene(&self.scene).from_eye_pose(
+        let camera = SceneCameraConfig::from_scene(&self.active_world.scene).from_eye_pose(
             eye,
             yaw_radians,
             pitch_radians,
             speed_blocks_per_second,
             collision_mode,
         );
-        if let Some(startup) = &mut self.local_startup {
+        if let Some(startup) = &mut self.active_world.local_startup {
             startup.replace_camera(camera.clone());
         }
-        self.camera = camera;
+        self.active_world.camera = camera;
     }
 
     pub fn set_mono_camera_view(&mut self, view_mode: EngineCameraViewMode) {
-        self.camera.set_view_mode(view_mode);
+        self.active_world.camera.set_view_mode(view_mode);
     }
 
     pub fn set_mono_ui_screen(&mut self, screen: Option<GameScreen>) {
@@ -416,28 +428,32 @@ impl McloneSceneHost {
     }
 
     pub fn mono_underwater(&self) -> bool {
-        let snapshot = self.camera.snapshot();
-        self.runtime
+        let snapshot = self.active_world.camera.snapshot();
+        self.active_world
+            .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.camera_inside_water(glam_vec3_from_vec3d(snapshot.eye)))
     }
 
     pub fn current_render_distance(&self) -> u32 {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
-            .map_or(self.scene.render_distance, |runtime| {
+            .map_or(self.active_world.scene.render_distance, |runtime| {
                 runtime.render_distance()
             })
     }
 
     pub fn camera_frame_state(&self) -> EngineCameraFrameState {
-        self.camera.frame_state(&self.interaction)
+        self.active_world
+            .camera
+            .frame_state(&self.active_world.interaction)
     }
 
     pub fn mono_render_view(&self, size: [u32; 2]) -> Result<ChunkRenderView> {
         render_pose_from_snapshot_with_view_mode(
-            self.camera.snapshot(),
-            self.camera.view_mode(),
+            self.active_world.camera.snapshot(),
+            self.active_world.camera.view_mode(),
             self.current_render_distance(),
         )
         .render_view(size[0].max(1), size[1].max(1))
@@ -448,12 +464,16 @@ impl McloneSceneHost {
             return false;
         }
         let runtime = self
+            .active_world
             .runtime
             .as_ref()
             .expect("startup completion requires runtime");
         let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
-        let before = self.camera.snapshot();
-        let after = self.camera.apply_movement_input(runtime.client(), input);
+        let before = self.active_world.camera.snapshot();
+        let after = self
+            .active_world
+            .camera
+            .apply_movement_input(runtime.client(), input);
         self.play_landing_events();
         after != before
     }
@@ -462,7 +482,8 @@ impl McloneSceneHost {
         if frame.look_delta.x == 0.0 && frame.look_delta.y == 0.0 {
             return false;
         }
-        self.camera
+        self.active_world
+            .camera
             .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
         true
     }
@@ -471,7 +492,7 @@ impl McloneSceneHost {
         if delta.yaw_radians == 0.0 && delta.pitch_radians == 0.0 {
             return false;
         }
-        self.camera.turn_mouse_delta(
+        self.active_world.camera.turn_mouse_delta(
             -f64::from(delta.yaw_radians) / ENGINE_CAMERA_MOUSE_SENSITIVITY,
             -f64::from(delta.pitch_radians) / ENGINE_CAMERA_MOUSE_SENSITIVITY,
         );
@@ -479,11 +500,13 @@ impl McloneSceneHost {
     }
 
     pub fn clear_mono_camera_input(&mut self) {
-        self.camera.clear_keys();
+        self.active_world.camera.clear_keys();
     }
 
     pub fn begin_mono_blink_debug(&mut self) -> bool {
-        if self.runtime.is_none() || self.travel_assist_mode != GameTravelAssistMode::Blink {
+        if self.active_world.runtime.is_none()
+            || self.travel_assist_mode != GameTravelAssistMode::Blink
+        {
             self.clear_mono_blink_debug();
             return false;
         }
@@ -523,7 +546,7 @@ impl McloneSceneHost {
             self.clear_mono_blink_debug();
             return Ok(MonoBlinkCommitStatus::Inactive);
         }
-        if self.runtime.is_none() {
+        if self.active_world.runtime.is_none() {
             self.clear_mono_blink_debug();
             return Ok(MonoBlinkCommitStatus::NoRuntime);
         }
@@ -539,14 +562,15 @@ impl McloneSceneHost {
                 validity: preview.validity,
             });
         };
-        let pitch_radians = self.camera.snapshot().pitch_radians;
-        self.camera.set_player_feet_pose(
+        let pitch_radians = self.active_world.camera.snapshot().pitch_radians;
+        self.active_world.camera.set_player_feet_pose(
             target_feet,
             -preview.target_yaw_degrees.to_radians(),
             pitch_radians,
         );
-        if let Some(runtime) = self.runtime.as_ref() {
-            self.camera
+        if let Some(runtime) = self.active_world.runtime.as_ref() {
+            self.active_world
+                .camera
                 .probe_ground(runtime.client(), MONO_GROUND_PROBE_DISTANCE);
         }
         let changed = self.commit_mono_player_pose()?;
@@ -567,11 +591,11 @@ impl McloneSceneHost {
     }
 
     fn submit_mono_blink_request(&mut self) -> bool {
-        let intent = mono_blink_intent(&self.camera);
+        let intent = mono_blink_intent(&self.active_world.camera);
         if self.mono_blink_debug.last_submitted_intent == Some(intent) {
             return false;
         }
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
             return false;
         };
         let config = mono_blink_config();
@@ -637,31 +661,32 @@ impl McloneSceneHost {
     }
 
     pub fn toggle_mono_camera_view(&mut self) -> EngineCameraViewMode {
-        self.camera.toggle_view_mode()
+        self.active_world.camera.toggle_view_mode()
     }
 
     pub fn toggle_mono_movement_mode(&mut self) -> EngineCameraMovementMode {
-        self.camera.toggle_movement_mode()
+        self.active_world.camera.toggle_movement_mode()
     }
 
     pub fn adjust_mono_camera_speed(&mut self, amount: f64) {
-        self.camera.adjust_speed(amount);
+        self.active_world.camera.adjust_speed(amount);
     }
 
     pub fn mono_camera_speed_blocks_per_second(&self) -> f64 {
-        self.camera.speed_blocks_per_second()
+        self.active_world.camera.speed_blocks_per_second()
     }
 
     pub fn select_mono_hotbar_slot(&mut self, slot: u8) -> bool {
-        self.interaction.select_hotbar_slot(slot)
+        self.active_world.interaction.select_hotbar_slot(slot)
     }
 
     pub fn selected_mono_hotbar_slot(&self) -> u8 {
-        self.interaction.selected_hotbar_slot()
+        self.active_world.interaction.selected_hotbar_slot()
     }
 
     pub fn selected_mono_hotbar_block_state(&self) -> Option<BlockStateId> {
-        self.interaction.hotbar_items()[usize::from(self.interaction.selected_hotbar_slot())]
+        self.active_world.interaction.hotbar_items()
+            [usize::from(self.active_world.interaction.selected_hotbar_slot())]
     }
 
     pub fn mono_local_world_id_for_ui_id(
@@ -677,9 +702,9 @@ impl McloneSceneHost {
         if step == 0 {
             return false;
         }
-        let selected = i16::from(self.interaction.selected_hotbar_slot());
+        let selected = i16::from(self.active_world.interaction.selected_hotbar_slot());
         let next = (selected + i16::from(step)).rem_euclid(i16::from(FLAT_HOTBAR_SLOT_COUNT)) as u8;
-        self.interaction.select_hotbar_slot(next)
+        self.active_world.interaction.select_hotbar_slot(next)
     }
 
     pub fn open_mono_pause_menu(&mut self) {
@@ -753,7 +778,7 @@ impl McloneSceneHost {
     where
         H: HostEffects,
     {
-        if self.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
+        if self.active_world.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
             return Ok(MonoUiActionOutcome::default());
         }
 
@@ -890,11 +915,12 @@ impl McloneSceneHost {
     }
 
     pub fn shoot_mono_debug_physics_cube(&mut self) -> Result<bool> {
-        if self.runtime.is_none() {
+        if self.active_world.runtime.is_none() {
             return Ok(false);
         }
         self.commit_mono_player_pose()?;
-        self.runtime
+        self.active_world
+            .runtime
             .as_mut()
             .expect("runtime presence checked")
             .send_gameplay_command(mclone_protocol::ClientCommand::ShootDebugPhysicsCube)
@@ -905,12 +931,13 @@ impl McloneSceneHost {
         &mut self,
         action: FlatInputAction,
     ) -> Result<MonoWorldActionStatus> {
-        if self.runtime.is_none() {
+        if self.active_world.runtime.is_none() {
             return Ok(MonoWorldActionStatus::NoRuntime);
         }
         self.commit_mono_player_pose()?;
-        if let Some(command) = self.interaction.ensure_has_sent_carried_item() {
-            self.runtime
+        if let Some(command) = self.active_world.interaction.ensure_has_sent_carried_item() {
+            self.active_world
+                .runtime
                 .as_mut()
                 .expect("runtime presence checked")
                 .send_gameplay_command(command)?;
@@ -919,14 +946,21 @@ impl McloneSceneHost {
             return Ok(MonoWorldActionStatus::NoTarget);
         };
         let command = match action {
-            FlatInputAction::Attack => self.interaction.debug_instant_break_command(target.hit),
-            FlatInputAction::Use => self.interaction.use_item_on_command(target.hit),
+            FlatInputAction::Attack => self
+                .active_world
+                .interaction
+                .debug_instant_break_command(target.hit),
+            FlatInputAction::Use => self
+                .active_world
+                .interaction
+                .use_item_on_command(target.hit),
             _ => None,
         };
         let Some(command) = command else {
             return Ok(MonoWorldActionStatus::NoCommand);
         };
         let changed = self
+            .active_world
             .runtime
             .as_mut()
             .expect("runtime presence checked")
@@ -947,9 +981,10 @@ impl McloneSceneHost {
     }
 
     fn current_mono_block_target(&self) -> Option<BlockInteractionTarget> {
-        let runtime = self.runtime.as_ref()?;
-        self.camera
-            .target_block(runtime.client(), &self.interaction)
+        let runtime = self.active_world.runtime.as_ref()?;
+        self.active_world
+            .camera
+            .target_block(runtime.client(), &self.active_world.interaction)
     }
     /// Render one flat (mono) view — the one-view case of the host's
     /// views-as-data topology. Advances the local startup pump and streams
@@ -1037,16 +1072,16 @@ impl McloneSceneHost {
     /// runtime. Non-blocking; drivers own the drive-to-ready loop (Web posture
     /// rule: blocking convenience loops live in native drivers, not the host).
     pub fn local_startup_complete(&self) -> bool {
-        self.local_startup.is_none()
+        self.active_world.local_startup.is_none()
     }
 
     /// Whether authoritative startup and drawable coverage admit gameplay.
     /// Platform drivers may expose this fact, but movement/pose methods enforce
     /// it internally so a slow host cannot accidentally run gravity early.
     pub fn gameplay_startup_complete(&self) -> bool {
-        self.local_startup.is_none()
-            && !self.external_runtime_startup_pending
-            && self.runtime.is_some()
+        self.active_world.local_startup.is_none()
+            && !self.active_world.external_runtime_startup_pending
+            && self.active_world.runtime.is_some()
     }
 
     /// Ready or in-flight render work relevant to the requested camera plus
@@ -1058,11 +1093,11 @@ impl McloneSceneHost {
         if !self.gameplay_startup_complete() {
             return usize::MAX;
         }
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
             return usize::MAX;
         };
         let target = runtime.target_render_work_stats(camera_position);
-        let upload = self.section_uploads.stats();
+        let upload = self.active_world.section_uploads.stats();
         let far_lod = runtime.far_lod_stats();
         target.inflight_render_sections
             + usize::from(target.ready_render_work_pending)
@@ -1123,16 +1158,16 @@ impl McloneSceneHost {
         }
 
         let render_start = self.services.clock.now();
-        let far_lod_config = self.scene.far_lod;
-        let far_lod_seed = self.scene.seed;
-        let far_lod_center = self.camera.snapshot().chunk_pos;
+        let far_lod_config = self.active_world.scene.far_lod;
+        let far_lod_seed = self.active_world.scene.seed;
+        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
 
-        let mut render_stats = self.render_stats;
+        let mut render_stats = self.active_world.render_stats;
 
         // `runtime`, `far_lod`, `mono_gui`, `sky`, `draw`, `actors`, and
         // `screen_effects` are disjoint fields, so these borrows coexist.
-        let lod_grant = self.render_admission_policy.lod_grant();
-        let far_lod_mesh = if let Some(runtime) = self.runtime.as_mut() {
+        let lod_grant = self.active_world.render_admission_policy.lod_grant();
+        let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
             runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
@@ -1144,13 +1179,13 @@ impl McloneSceneHost {
         } else {
             None
         };
-        let far_lod = far_lod_mesh.map(|_| &mut self.far_lod);
+        let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
         let world_gui = FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
         let mut summary = render_full_frame_for_view_with_far_lod(
             RenderFrameContext::new(device, queue, encoder, target),
             depth,
             &self.sky,
-            &mut self.draw,
+            &mut self.active_world.draw,
             far_lod,
             far_lod_mesh,
             Some(&mut self.actors),
@@ -1186,7 +1221,7 @@ impl McloneSceneHost {
                 SINGLE_VIEW_SLOT,
             );
             let mut world_lines = engine_debug_world_lines(
-                &self.camera,
+                &self.active_world.camera,
                 EngineDebugVisualOptions::new(self.player_collision_box_visible),
             );
             if let Some(preview) = self.mono_blink_debug.preview.as_ref() {
@@ -1230,7 +1265,7 @@ impl McloneSceneHost {
         }
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_start));
 
-        self.render_stats = render_stats;
+        self.active_world.render_stats = render_stats;
         self.rendered_frames = self.rendered_frames.wrapping_add(1);
         Ok(MonoSceneFrameSummary {
             render: summary,
@@ -1316,6 +1351,7 @@ impl McloneSceneHost {
                 if self.diagnostic_panel.debug_diagnostics_visible()
                     && !covers_world
                     && let Some(progress) = self
+                        .active_world
                         .runtime
                         .as_ref()
                         .and_then(|runtime| runtime.view_readiness_overlay())
@@ -1343,16 +1379,16 @@ impl McloneSceneHost {
     }
 
     fn mono_flat_hud(&self, menu_active: bool) -> Option<FlatHud> {
-        let runtime = self.runtime.as_ref()?;
+        let runtime = self.active_world.runtime.as_ref()?;
         let context = self.mono_ui_context.clone().unwrap_or_default();
         let palette_active = self.ui.screen() == Some(GameScreen::BlockPalette);
         let mut hud = FlatHud::new(context.resolved_input);
         hud.world_hud_visible = context.hud_visible && (!menu_active || palette_active);
         hud.crosshair_visible = context.hud_visible && self.crosshair_visible && !menu_active;
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(
-            self.interaction.selected_hotbar_slot(),
+            self.active_world.interaction.selected_hotbar_slot(),
             debug_hotbar_icons(
-                self.interaction.hotbar_items(),
+                self.active_world.interaction.hotbar_items(),
                 &runtime.mesh_assets().catalog,
             ),
         );
@@ -1364,8 +1400,11 @@ impl McloneSceneHost {
             .then(|| self.diagnostic_panel.frame_metrics_overlay())
             .flatten();
         if self.diagnostic_panel.debug_diagnostics_visible() && !menu_active {
-            let camera = self.camera.frame_state(&self.interaction);
-            let snapshot = self.camera.snapshot();
+            let camera = self
+                .active_world
+                .camera
+                .frame_state(&self.active_world.interaction);
+            let snapshot = self.active_world.camera.snapshot();
             let render_options = self.effective_render_options(glam_vec3_from_vec3d(snapshot.eye));
             hud.debug = Some(
                 DebugPaneStats {
@@ -1377,9 +1416,9 @@ impl McloneSceneHost {
                         camera.collision_mode_label()
                     ),
                     on_ground: camera.on_ground,
-                    seed: self.scene.seed,
+                    seed: self.active_world.scene.seed,
                     runtime: runtime.stats(),
-                    render: self.render_stats,
+                    render: self.active_world.render_stats,
                     frame: context.frame_timing,
                     pacing: context.pacing_debug,
                     section_occlusion: render_options.section_occlusion_culling,
@@ -1409,7 +1448,7 @@ impl McloneSceneHost {
         state.fps_cap = context.frame_pacing.fps_cap;
         state.touch_controls_mode = context.touch_controls_mode;
         state.touch_settings = context.touch_settings;
-        state.server_cadence = self.runtime.as_ref().and_then(|runtime| {
+        state.server_cadence = self.active_world.runtime.as_ref().and_then(|runtime| {
             runtime
                 .simulation_cadence()
                 .map(|cadence| GameSimulationCadence {

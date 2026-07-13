@@ -6,8 +6,12 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design, a non-rendering dual-host proof, and a Slice 1 architecture
-checkpoint.** The engine does not yet compose or switch live worlds, but
+Status: **design, a non-rendering dual-host proof, and a Slice 2 one-slot
+ownership checkpoint.** The engine does not yet compose or switch live worlds,
+but `McloneSceneHost` now owns one concrete 13-field `DrawableWorldSlot` through
+the existing direct one-world frame path. All current startup and replacement
+flows publish the same target-neutral slot install aggregate; there is still no
+standby owner, collection, or selection branch. Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -24,7 +28,7 @@ implementation milestone is
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 1 checkpoint).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 2 checkpoint).
 
 ## Motivation
 
@@ -119,12 +123,13 @@ idle/warm, verifies neither replica receives the other's chunks, changes the
 logical active selection without reconstructing either runtime, and relies on
 ordinary owned-value drop for independent shutdown.
 
-This proves instanceability and isolation, not yet product switching. It does
-not include assets, mesh compilers, GPU terrain stores, persistence roots,
-camera reconciliation, or scene lifecycle. Those are the next ownership seams.
-Tactical 174's Slice 1 receipt now identifies the exact scene ownership split
-and pre-refactor evidence for those seams; no production slot extraction has
-landed yet.
+This proves instanceability and isolation, not yet product switching. Slice 2
+now groups the production scene's runtime, camera, interaction/player state,
+GPU terrain store, traversal/upload/Far-LOD state, statistics, admission policy,
+canonical scene options, and startup state in one direct
+`DrawableWorldSlot`. It deliberately retains exactly one slot: persistence-root
+isolation, detached startup, standby readiness, and selection remain later
+slices.
 
 The near-term product shape is:
 
@@ -219,16 +224,15 @@ Confirmed against the renderer (see Seams for file:line):
   readback — not `TEXTURE_BINDING`, so no shader can sample it. A palantir needs
   that flag plus a scene-color-sampling composite pass that does not exist
   today.
-- **Second runtime is instanceable, not a rewrite:** ownership is
-  encapsulated with no globals; `McloneSceneHost` holds `runtime:
-  Option<SceneSessionRuntime>` and one session coordinator
-  (`mclone-scene/src/lib.rs`), and `EngineRenderSession`/`SingleViewRuntime`
-  each cleanly wrap one `ClientRuntime`. Keep those single-world leaf types and
-  put a collection above them. Each future `WorldSlot` must own or reference its
-  runtime, terrain draw store, traversal/readiness cache, upload coordinator,
-  Far LOD state, actor source, placement, lifecycle, authority role, and budget.
-  A plain `Vec<SceneSessionRuntime>` inside today's host is insufficient because
-  the surrounding scene fields are just as world-specific as `runtime`.
+- **Second runtime is instanceable, not a rewrite:** ownership is encapsulated
+  with no globals. `McloneSceneHost` now holds one concrete
+  `active_world: DrawableWorldSlot` and one session coordinator
+  (`mclone-scene/src/lib.rs`), while `EngineRenderSession`/`SingleViewRuntime`
+  each cleanly wrap one `ClientRuntime`. Keep those single-world leaf types.
+  Slice 3 adds only one optional detached standby above the leaf; an N-world
+  collection waits until the bounded milestone proves it is needed. Placement,
+  lifecycle/readiness, authority role, and budget remain explicit additions;
+  a plain `Vec<SceneSessionRuntime>` would still be insufficient.
 - **Visibility is separate from placement:** a general submission needs a
   world-to-composition transform plus an unbounded, half-space, convex-volume,
   or portal-aperture visibility policy. A model matrix cannot implement the
@@ -379,10 +383,10 @@ Ship independently valuable increments while keeping the one-world path direct:
 The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
 
-1. Review Tactical 174's Slice 1 field grouping, especially the decision to
-   retain canonical `McloneSceneHostOptions` whole during the mechanical
-   extraction. Then extract exactly one concrete drawable slot with no standby
-   allocation or new frame branch.
+1. Keep the landed one-slot direct path and its byte-identical desktop/XR plus
+   five-run frame-budget receipts green. Implement Tactical 174 Slice 3 by
+   constructing one optional detached standby without replacing the active
+   slot or exposing selection.
 2. Keep the dual-integrated-host ownership smoke green; extend it through
    persistent storage-root isolation and explicit shutdown evidence when the
    detached standby lands. Generalize active-plus-optional-standby to an N-world

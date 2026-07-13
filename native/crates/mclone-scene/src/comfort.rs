@@ -154,15 +154,15 @@ impl McloneSceneHost {
     ) -> Result<()> {
         let headset_stage_position = xr_headset_stage_position_from_views(views)?;
         let headset_world_position = transform.transform_position(headset_stage_position);
-        let Some(runtime) = self.runtime.as_ref() else {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
             self.head_comfort.reset();
             return Ok(());
         };
         let target = xr_head_comfort_target(
-            self.camera.last_room_scale_reconciliation(),
+            self.active_world.camera.last_room_scale_reconciliation(),
             headset_world_position,
             runtime.client(),
-            self.camera.collision_mode(),
+            self.active_world.camera.collision_mode(),
         );
         self.head_comfort.update(target, dt_seconds);
         Ok(())
@@ -173,7 +173,7 @@ impl McloneSceneHost {
         render_views: [ChunkRenderView; 2],
     ) -> [Option<UnderwaterOverlay>; 2] {
         let dt_seconds = self.underwater_effect_dt_seconds();
-        match self.scene.underwater_detection_mode {
+        match self.active_world.scene.underwater_detection_mode {
             XrUnderwaterDetectionMode::Midpoint => {
                 let center_position =
                     (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
@@ -247,7 +247,7 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn camera_inside_occluding_block(&self, position: Vec3) -> bool {
-        let Some(runtime) = &self.runtime else {
+        let Some(runtime) = &self.active_world.runtime else {
             return false;
         };
         let Some(state_id) = runtime.block_state_at_position(position) else {
@@ -257,7 +257,8 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn camera_inside_water(&self, position: Vec3) -> bool {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.camera_inside_water(position))
     }

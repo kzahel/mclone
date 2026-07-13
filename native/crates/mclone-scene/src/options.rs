@@ -198,7 +198,9 @@ impl McloneSceneHost {
     }
 
     pub fn set_frame_host_kind(&mut self, host_kind: FrameHostKind) {
-        self.render_admission_policy.set_host_kind(host_kind);
+        self.active_world
+            .render_admission_policy
+            .set_host_kind(host_kind);
     }
 
     pub fn set_render_split_timing_enabled(&mut self, enabled: bool) {
@@ -241,7 +243,7 @@ impl McloneSceneHost {
     }
 
     pub fn camera_snapshot(&self) -> EngineCameraSnapshot {
-        self.camera.snapshot()
+        self.active_world.camera.snapshot()
     }
 }
 

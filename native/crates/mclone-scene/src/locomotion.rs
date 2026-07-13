@@ -561,7 +561,7 @@ impl McloneSceneHost {
         let ui_active = self.ui.is_active();
         let gameplay_interaction_edges = self.update_gameplay_interaction_buttons(controllers);
         let suppress_gameplay_interaction = ui_was_active != ui_active;
-        if self.runtime.is_none() {
+        if self.active_world.runtime.is_none() {
             self.head_comfort.reset();
             self.snap_turn_state.reset();
             self.clear_xr_blink_teleport();
@@ -609,14 +609,20 @@ impl McloneSceneHost {
             .context("resolve XR hand-push input")?;
         input.thruster = Some(xr_thruster_input_from_controllers(controllers, transform));
         if thruster_palm_calibration_logging_enabled()
-            && self.camera.movement_mode() == EngineCameraMovementMode::Thruster
+            && self.active_world.camera.movement_mode() == EngineCameraMovementMode::Thruster
         {
             log_thruster_palm_calibration(controllers, transform);
         }
         timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
         let camera_apply_start = self.services.clock.now();
-        let runtime = self.runtime.as_ref().expect("runtime presence checked");
-        self.camera.apply_movement_input(runtime.client(), input);
+        let runtime = self
+            .active_world
+            .runtime
+            .as_ref()
+            .expect("runtime presence checked");
+        self.active_world
+            .camera
+            .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         self.play_landing_events();
         let commit_start = self.services.clock.now();
@@ -642,7 +648,7 @@ impl McloneSceneHost {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
         self.latest_controllers.clear();
-        if self.local_startup.is_some() || self.runtime.is_none() {
+        if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
         }
@@ -661,10 +667,14 @@ impl McloneSceneHost {
             .replace(now)
             .map(|last| now.saturating_duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
-        self.camera.set_movement_mode(EngineCameraMovementMode::Fly);
-        self.camera
+        self.active_world
+            .camera
+            .set_movement_mode(EngineCameraMovementMode::Fly);
+        self.active_world
+            .camera
             .set_collision_mode(EngineCameraCollisionMode::NoClip);
-        self.camera
+        self.active_world
+            .camera
             .set_speed_blocks_per_second(speed_blocks_per_second);
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians(&views)
@@ -672,8 +682,14 @@ impl McloneSceneHost {
         let input = xr_automated_flight_input(dt_seconds, movement_yaw_radians);
         timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
         let camera_apply_start = self.services.clock.now();
-        let runtime = self.runtime.as_ref().expect("runtime presence checked");
-        self.camera.apply_movement_input(runtime.client(), input);
+        let runtime = self
+            .active_world
+            .runtime
+            .as_ref()
+            .expect("runtime presence checked");
+        self.active_world
+            .camera
+            .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         let commit_start = self.services.clock.now();
         let (_, commit_timing) = self
@@ -692,7 +708,7 @@ impl McloneSceneHost {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
         self.latest_controllers.clear();
-        if self.local_startup.is_some() || self.runtime.is_none() {
+        if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
         }
@@ -711,16 +727,26 @@ impl McloneSceneHost {
             .replace(now)
             .map(|last| now.saturating_duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
-        self.camera.set_movement_mode(EngineCameraMovementMode::Fly);
-        self.camera
+        self.active_world
+            .camera
+            .set_movement_mode(EngineCameraMovementMode::Fly);
+        self.active_world
+            .camera
             .set_collision_mode(EngineCameraCollisionMode::NoClip);
-        self.camera
+        self.active_world
+            .camera
             .set_speed_blocks_per_second(speed_blocks_per_second);
         let input = xr_automated_orbit_input(dt_seconds, speed_blocks_per_second, elapsed_seconds);
         timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
         let camera_apply_start = self.services.clock.now();
-        let runtime = self.runtime.as_ref().expect("runtime presence checked");
-        self.camera.apply_movement_input(runtime.client(), input);
+        let runtime = self
+            .active_world
+            .runtime
+            .as_ref()
+            .expect("runtime presence checked");
+        self.active_world
+            .camera
+            .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         let commit_start = self.services.clock.now();
         let (_, commit_timing) = self
@@ -735,11 +761,11 @@ impl McloneSceneHost {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
         self.latest_controllers.clear();
-        if self.local_startup.is_some() || self.runtime.is_none() {
+        if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return timing;
         }
-        if self.scene.debug_ui_screen.is_none() {
+        if self.active_world.scene.debug_ui_screen.is_none() {
             self.ui.close();
             self.ui.clear_input();
             self.menu_pointer_down = false;
@@ -762,10 +788,10 @@ impl McloneSceneHost {
         center_z: i32,
     ) -> Result<XrLocomotionTiming> {
         let mut timing = self.apply_automated_stationary_input();
-        if self.local_startup.is_some() {
+        if self.active_world.local_startup.is_some() {
             return Ok(timing);
         }
-        let Some(runtime) = self.runtime.as_mut() else {
+        let Some(runtime) = self.active_world.runtime.as_mut() else {
             return Ok(timing);
         };
         let center = ChunkPos::new(center_x, center_z);
@@ -810,14 +836,14 @@ impl McloneSceneHost {
         };
         let headset_stage_position = xr_headset_stage_position_from_views(views)?;
         let headset_world_before = before_transform.transform_position(headset_stage_position);
-        self.camera.turn_yaw_delta(yaw_delta_radians);
+        self.active_world.camera.turn_yaw_delta(yaw_delta_radians);
         let origin_after = origin_before.rebase_for_stage_position_world_position(
             headset_stage_position,
             headset_world_before,
-            self.camera.snapshot(),
+            self.active_world.camera.snapshot(),
         )?;
         self.tracking_origin = Some(origin_after);
-        XrStageToWorld::from_tracking_origin(origin_after, self.camera.snapshot())
+        XrStageToWorld::from_tracking_origin(origin_after, self.active_world.camera.snapshot())
     }
 
     pub(crate) fn locomotion_movement_yaw_radians(
@@ -825,8 +851,10 @@ impl McloneSceneHost {
         views: &[XrView],
     ) -> Result<Option<f64>> {
         let tracking_origin = self.tracking_origin_for_views(views)?;
-        let transform =
-            XrStageToWorld::from_tracking_origin(tracking_origin, self.camera.snapshot())?;
+        let transform = XrStageToWorld::from_tracking_origin(
+            tracking_origin,
+            self.active_world.camera.snapshot(),
+        )?;
         self.locomotion_movement_yaw_radians_with_transform(views, transform)
     }
 

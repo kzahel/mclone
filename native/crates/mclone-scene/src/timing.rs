@@ -428,8 +428,8 @@ impl McloneSceneHost {
         mut timing: XrTerrainFrameTiming,
         upload: XrTerrainUploadSummary,
     ) -> XrTerrainFrameSummary {
-        timing.far_lod_region_draw_count = self.render_stats.far_lod_region_draw_count;
-        timing.far_lod_uploaded_bytes = self.render_stats.far_lod_uploaded_bytes;
+        timing.far_lod_region_draw_count = self.active_world.render_stats.far_lod_region_draw_count;
+        timing.far_lod_uploaded_bytes = self.active_world.render_stats.far_lod_uploaded_bytes;
         if let Some(summary) = self.first_eye_summary {
             return XrTerrainFrameSummary {
                 rendered_frames: self.rendered_frames,
@@ -441,7 +441,7 @@ impl McloneSceneHost {
                 ui_panel: self.last_ui_panel_stats,
                 ui_draw_cache: self.last_ui_draw_cache_stats,
                 ui_active: self.ui.is_active(),
-                local_startup_active: self.local_startup.is_some(),
+                local_startup_active: self.active_world.local_startup.is_some(),
                 actor_count: summary.actor_count,
                 drawn_actor_count: summary.drawn_actor_count,
                 head_comfort: self.head_comfort,
@@ -451,17 +451,17 @@ impl McloneSceneHost {
         }
         XrTerrainFrameSummary {
             rendered_frames: self.rendered_frames,
-            section_count: self.render_stats.section_count,
-            drawn_section_count: self.render_stats.drawn_section_count,
-            index_count: self.render_stats.index_count,
-            drawn_index_count: self.render_stats.drawn_index_count,
+            section_count: self.active_world.render_stats.section_count,
+            drawn_section_count: self.active_world.render_stats.drawn_section_count,
+            index_count: self.active_world.render_stats.index_count,
+            drawn_index_count: self.active_world.render_stats.drawn_index_count,
             gui_command_count: 0,
             ui_panel: self.last_ui_panel_stats,
             ui_draw_cache: self.last_ui_draw_cache_stats,
             ui_active: self.ui.is_active(),
-            local_startup_active: self.local_startup.is_some(),
-            actor_count: self.render_stats.actor_count,
-            drawn_actor_count: self.render_stats.drawn_actor_count,
+            local_startup_active: self.active_world.local_startup.is_some(),
+            actor_count: self.active_world.render_stats.actor_count,
+            drawn_actor_count: self.active_world.render_stats.drawn_actor_count,
             head_comfort: self.head_comfort,
             timing,
             upload,
@@ -473,19 +473,19 @@ impl McloneSceneHost {
         summary: XrTerrainMultiviewFrameSummary,
         mut timing: XrTerrainFrameTiming,
     ) -> XrTerrainFrameSummary {
-        timing.far_lod_region_draw_count = self.render_stats.far_lod_region_draw_count;
-        timing.far_lod_uploaded_bytes = self.render_stats.far_lod_uploaded_bytes;
+        timing.far_lod_region_draw_count = self.active_world.render_stats.far_lod_region_draw_count;
+        timing.far_lod_uploaded_bytes = self.active_world.render_stats.far_lod_uploaded_bytes;
         XrTerrainFrameSummary {
             rendered_frames: summary.rendered_frames,
             section_count: summary.section_count,
             drawn_section_count: summary.left.drawn_section_count,
-            index_count: self.render_stats.index_count,
+            index_count: self.active_world.render_stats.index_count,
             drawn_index_count: summary.left.drawn_index_count,
             gui_command_count: 0,
             ui_panel: summary.ui_panel,
             ui_draw_cache: summary.ui_draw_cache,
             ui_active: self.ui.is_active(),
-            local_startup_active: self.local_startup.is_some(),
+            local_startup_active: self.active_world.local_startup.is_some(),
             actor_count: summary.actor_count,
             drawn_actor_count: summary.drawn_actor_count,
             head_comfort: self.head_comfort,

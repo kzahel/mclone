@@ -1,14 +1,15 @@
 # 174: Warm World Hot Swap
 
-Status: Slice 1 architecture checkpoint ready for review 2026-07-13. Slice 0's
-lower-level dual-integrated-host proof landed in commit `a31ac944`; the Slice 1
-ownership audit, characterization locks, and one-world baselines are recorded
-below. A maintainer manual desktop-flat smoke at commit `64505c01` found normal
-single-world behavior. A five-run repeatability audit now accepts the 120 Hz
-frame-budget probe as the flat release timing anchor and marks the timedemo
-timing too variable for regression decisions on this machine. Slices 2–7 are
-unimplemented. First-multiview-pipeline timing remains a named device-evidence
-gap because the current macOS adapter does not expose
+Status: Slice 2 one-slot extraction checkpoint ready for review 2026-07-13.
+Slice 0's lower-level dual-integrated-host proof landed in commit `a31ac944`;
+Slice 1's ownership audit, characterization locks, and one-world baselines are
+recorded below. Slice 2 now groups the audited 13 per-world fields in exactly
+one concrete `DrawableWorldSlot`, routes every current frame/startup/replacement
+path through it, and adds no standby owner or frame branch. Pre/post desktop and
+synthetic-stereo captures are byte-identical, and the accepted five-run flat
+release timing gate remains within 2% of the clean median anchors. Slices 3–7
+are unimplemented. First-multiview-pipeline timing remains a named
+device-evidence gap because the current macOS adapter does not expose
 `wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows lane before Slice
 4 can declare a standby switchable.
 
@@ -55,25 +56,21 @@ disjoint chunk views, waits for both to become warm/idle, proves the replicas
 do not cross-contaminate, changes logical active selection without rebuilding
 either runtime, and shuts both down through ordinary ownership.
 
-The remaining singleton assumption is scene ownership, not server/runtime
-state. `McloneSceneHost` currently flattens one world's state into fields such
-as:
+The lower-level runtime is instanceable; scene ownership is the remaining
+product seam. Slice 2 replaces the 13 flattened per-world fields with exactly
+one concrete `McloneSceneHost::active_world: DrawableWorldSlot`. Runtime,
+camera, interaction/player state, draw/traversal/upload/Far-LOD state, render
+statistics, admission policy, canonical scene options, and startup facts now
+move as that direct aggregate. Physical presentation, shared renderer/content
+resources, and global budgets remain host-owned.
 
-- `runtime: Option<SceneSessionRuntime>`;
-- `camera: EngineCameraController`;
-- `draw: TexturedSectionDrawResources`;
-- `traversal_ready_sections: TraversalReadySectionCache`;
-- `section_uploads: RenderSectionUploadCoordinator`;
-- `far_lod: FarTerrainLodRenderer`;
-- startup/session/admission facts that currently replace the active world.
-
-`StartedSceneRuntime` in `mclone-scene/src/session.rs` is a useful partial seam:
-it already returns runtime, camera, draw resources, and render stats before the
-caller installs them into the host. It is native-only and only some current
-startup/install paths use it. Local and external/web completion still assign
-flattened host fields directly. The eventual slot builder therefore must be a
-target-neutral aggregate rather than an extension of this `cfg(not(wasm32))`
-helper.
+`StartedSceneRuntime` in `mclone-scene/src/session.rs` remains a useful partial
+native seam: it already returns runtime, camera, draw resources, and render
+stats before the caller installs them. Slice 2 adds the separate target-neutral
+`DrawableWorldSlotInstall` aggregate and makes initial local/native,
+provided-runtime, provided-scene-runtime, local completion, external/web
+completion, and native replacement publish the same core cluster. Detached
+standby construction and readiness remain Slice 3 work.
 
 ## Slice 1 Architecture Checkpoint
 
@@ -716,7 +713,7 @@ Deliverables:
 Exit criteria: every field moved in Slice 2 has a written owner and an existing
 behavioral receipt. Ambiguous fields stay outside the slot until classified.
 
-### Slice 2: Extract One Concrete Drawable Slot
+### Slice 2: Extract One Concrete Drawable Slot — Checkpoint Ready
 
 Refactor only; retain exactly one world.
 
@@ -737,6 +734,45 @@ Deliverables:
 - Preserve asset replacement and surface/resource rebuild behavior.
 - Keep `McloneSceneHost` as the shared product owner; add no app-local world
   manager and no `winit`, browser, Android, or OpenXR dependency.
+
+Checkpoint evidence (2026-07-13):
+
+- `McloneSceneHost` now has 69 direct fields, including exactly one
+  `active_world: DrawableWorldSlot`; the slot has exactly the 13 audited
+  per-world fields. There is no standby field, collection, lookup, virtual
+  dispatch, or selection branch.
+- `DrawableWorldSlotInstall` is target-neutral and stages scene, runtime,
+  startup state, external admission, camera, draw resources, and render stats
+  before one coherent install. The native-only `StartedSceneRuntime` remains a
+  leaf startup helper rather than the cross-target ownership boundary.
+- All three initial construction paths and local, external/web, and native
+  replacement completion install the same aggregate. Local startup deliberately
+  retains its direct startup-seed upload; Slice 4 still owns the new budgeted
+  seed-to-cache-update conversion.
+- The old mixed reset is split into explicit physical-presentation and active
+  world operations while preserving its existing physical-then-world call
+  order. Asset replacement still preserves runtime/session/camera identity and
+  clears the active slot's old-epoch stream state.
+- `mclone-scene` passes 97 unit tests plus six ownership-contract tests (one GPU
+  characterization test remains intentionally ignored); `mclone-render-session`
+  passes 110 tests; the dual-integrated-host proof, web build, and native
+  thin-adapter purity gate pass.
+- Pre/post captures are byte-for-byte identical: desktop 2560×1600 with 64
+  resident/11 drawn sections and two drawn actors; synthetic stereo 640×640 per
+  eye with 42 resident/eight drawn sections, 249,679 differing eye pixels, and
+  UI in both eyes. Both post-refactor captures were visually inspected.
+- The release timedemo retains exactly 664 loaded and 307.325 average drawn
+  sections. Its 3.697 ms average remains characterization only because Slice 1
+  proved that timing unstable on this host.
+- Five release frame-budget averages are 2.382, 2.430, 2.366, 2.392, and
+  2.459 ms (median 2.392; 3.9% range). P95 values are 3.975, 4.027, 3.977,
+  3.922, and 3.953 ms (median 3.975; 2.6% range). Those medians are 2.0% and
+  1.5% above the clean 2.346/3.916 ms anchors. Every run retains 1,936 initial
+  sections with zero over-budget frames and zero accounting violations; maxima
+  are 4.331, 4.428, 4.340, 4.374, and 5.182 ms.
+- Before the release batch, three CPU samples were 88.6%, 93.2%, and 94.8%
+  idle. No Cargo, Rust, Clang, linker, CMake, Ninja, or Xcode build was active;
+  the already-built release binary ran directly for all five samples.
 
 Exit criteria:
 

@@ -151,7 +151,7 @@ impl McloneSceneHost {
                     self.client_experience
                         .asset_packs_mut()
                         .begin_preferred_selection(resolution.selection.clone())?;
-                    if self.runtime.is_some() {
+                    if self.active_world.runtime.is_some() {
                         self.request_asset_pack_selection(resolution.selection)?;
                     } else {
                         self.pending_restored_asset_pack_selection = Some(resolution.selection);
@@ -314,7 +314,7 @@ impl McloneSceneHost {
         queue: &wgpu::Queue,
     ) -> Result<()> {
         if self.asset_replacement.is_none()
-            && self.runtime.is_some()
+            && self.active_world.runtime.is_some()
             && let Some(selection) = self.pending_restored_asset_pack_selection.take()
         {
             if let Err(error) = self.request_asset_pack_selection(selection) {
@@ -404,7 +404,7 @@ impl McloneSceneHost {
         if self.asset_replacement.is_some() {
             bail!("an asset replacement is already in progress");
         }
-        if self.runtime.is_none() {
+        if self.active_world.runtime.is_none() {
             bail!("asset replacement requires an active runtime");
         }
         if epoch <= self.active_assets.epoch {
@@ -423,6 +423,7 @@ impl McloneSceneHost {
         std::collections::BTreeSet<RenderSectionKey>,
     )> {
         let runtime = self
+            .active_world
             .runtime
             .as_ref()
             .context("asset replacement requires an active runtime")?;
@@ -453,7 +454,8 @@ impl McloneSceneHost {
     }
 
     fn current_biome_zoom_seed(&self) -> Option<i64> {
-        self.runtime
+        self.active_world
+            .runtime
             .as_ref()
             .and_then(|runtime| runtime.client().biome_zoom_seed())
     }
@@ -494,7 +496,7 @@ impl McloneSceneHost {
         } = replacement;
         let active_asset_bytes = estimated_prepared_asset_bytes(&self.active_assets);
         let candidate_asset_bytes = estimated_prepared_asset_bytes(&assets);
-        let active_section_bytes = self.runtime.as_ref().map_or(0, |runtime| {
+        let active_section_bytes = self.active_world.runtime.as_ref().map_or(0, |runtime| {
             runtime
                 .resident_section_metadata()
                 .into_iter()
@@ -526,11 +528,12 @@ impl McloneSceneHost {
                     .saturating_mul(atlas_upload_copies.saturating_sub(1)),
             );
         let runtime = self
+            .active_world
             .runtime
             .as_mut()
             .context("asset replacement requires an active runtime")?;
         let session_before = self.session.state().clone();
-        let camera_before = self.camera.snapshot();
+        let camera_before = self.active_world.camera.snapshot();
         let command_count_before = runtime.core().command_count();
         let update_count_before = runtime.core().update_count();
 
@@ -586,24 +589,24 @@ impl McloneSceneHost {
         let commit_finished_at = self.services.clock.now();
 
         self.mesh_assets = assets.mesh.clone();
-        self.draw = draw;
+        self.active_world.draw = draw;
         self.actors = actors;
         self.screen_effects = screen_effects;
         self.world_gui_renderer = world_gui_renderer;
         self.world_gui_overlay_renderer = world_gui_overlay_renderer;
         self.mono_gui = mono_gui;
-        self.far_lod = far_lod;
+        self.active_world.far_lod = far_lod;
         self.services.audio = audio;
         self.active_assets = assets;
-        self.traversal_ready_sections.clear();
-        self.section_uploads.clear();
+        self.active_world.traversal_ready_sections.clear();
+        self.active_world.section_uploads.clear();
         self.prefetched_live_upload = None;
 
         let report = AssetReplacementCommitReport {
             epoch: self.active_assets.epoch,
             section_count: sections.sections.len(),
             session_preserved: self.session.state() == &session_before,
-            camera_preserved: self.camera.snapshot() == camera_before,
+            camera_preserved: self.active_world.camera.snapshot() == camera_before,
             command_count_unchanged: runtime.core().command_count() == command_count_before,
             update_count_unchanged: runtime.core().update_count() == update_count_before,
             preparation_ms: assets_ready_at

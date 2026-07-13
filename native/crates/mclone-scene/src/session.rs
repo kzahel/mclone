@@ -292,8 +292,31 @@ impl McloneSceneHost {
         let ui = xr_game_ui_for_session(None, scene.seed);
         let mut session = GameSessionCoordinator::new();
         session.begin_start(request.clone());
+        let active_world = DrawableWorldSlot::new(
+            DrawableWorldSlotInstall {
+                scene: scene.clone(),
+                runtime: None,
+                local_startup: Some(SceneLocalStartup {
+                    request: request.clone(),
+                    descriptor,
+                    scene: scene.clone(),
+                    pump,
+                    camera: camera.clone(),
+                    startup_view_pose,
+                }),
+                external_runtime_startup_pending: false,
+                camera,
+                draw,
+                render_stats: RenderStreamStats::default(),
+            },
+            FarTerrainLodRenderer::new(device, color_format),
+            RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
+        );
         let mut state = Self {
-            scene: scene.clone(),
+            active_world,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -315,23 +338,11 @@ impl McloneSceneHost {
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
-            runtime: None,
-            local_startup: Some(SceneLocalStartup {
-                request: request.clone(),
-                descriptor,
-                scene: scene.clone(),
-                pump,
-                camera: camera.clone(),
-                startup_view_pose,
-            }),
-            external_runtime_startup_pending: false,
             session,
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(
                 xr_native_client_experience_profile(),
             ),
-            camera,
-            interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -341,10 +352,6 @@ impl McloneSceneHost {
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
-            player_model: GamePlayerModel::default(),
-            draw,
-            traversal_ready_sections: TraversalReadySectionCache::default(),
-            section_uploads: RenderSectionUploadCoordinator::default(),
             actors: ActorDrawResources::new(
                 device,
                 queue,
@@ -353,7 +360,6 @@ impl McloneSceneHost {
                 Some(&actor_figures),
             )
             .context("initialize XR terrain actor draw resources")?,
-            far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
@@ -373,7 +379,6 @@ impl McloneSceneHost {
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
-            render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
             turn_policy: XrTurnPolicy::default(),
@@ -381,10 +386,6 @@ impl McloneSceneHost {
             blink_teleport: XrBlinkTeleportState::default(),
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
-            render_admission_policy: RenderAdmissionPolicy::new(
-                FrameHostKind::HeadlessOffscreenPerf,
-                WorkWindow::BeforeRender,
-            ),
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
@@ -468,8 +469,24 @@ impl McloneSceneHost {
         world_gui_renderer
             .upload_texture_atlas(device, queue, mesh_assets.atlas.as_upload())
             .context("upload XR GUI atlas")?;
+        let active_world = DrawableWorldSlot::new(
+            DrawableWorldSlotInstall {
+                scene: scene.clone(),
+                runtime: Some(started.runtime),
+                local_startup: None,
+                external_runtime_startup_pending: false,
+                camera: started.camera,
+                draw: started.draw,
+                render_stats: started.render_stats,
+            },
+            FarTerrainLodRenderer::new(device, color_format),
+            RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
+        );
         let mut state = Self {
-            scene: scene.clone(),
+            active_world,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -491,16 +508,11 @@ impl McloneSceneHost {
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
-            runtime: Some(started.runtime),
-            local_startup: None,
-            external_runtime_startup_pending: false,
             session,
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(
                 xr_native_client_experience_profile(),
             ),
-            camera: started.camera,
-            interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -510,10 +522,6 @@ impl McloneSceneHost {
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
-            player_model: GamePlayerModel::default(),
-            draw: started.draw,
-            traversal_ready_sections: TraversalReadySectionCache::default(),
-            section_uploads: RenderSectionUploadCoordinator::default(),
             actors: ActorDrawResources::new(
                 device,
                 queue,
@@ -522,7 +530,6 @@ impl McloneSceneHost {
                 Some(&actor_figures),
             )
             .context("initialize XR terrain actor draw resources")?,
-            far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
@@ -542,7 +549,6 @@ impl McloneSceneHost {
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
-            render_stats: started.render_stats,
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
             turn_policy: XrTurnPolicy::default(),
@@ -550,10 +556,6 @@ impl McloneSceneHost {
             blink_teleport: XrBlinkTeleportState::default(),
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
-            render_admission_policy: RenderAdmissionPolicy::new(
-                FrameHostKind::HeadlessOffscreenPerf,
-                WorkWindow::BeforeRender,
-            ),
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
@@ -650,8 +652,24 @@ impl McloneSceneHost {
         let ui = xr_game_ui_for_session(Some(&active_session), scene.seed);
         let mut session = GameSessionCoordinator::new();
         session.complete_start(active_session);
+        let active_world = DrawableWorldSlot::new(
+            DrawableWorldSlotInstall {
+                scene: scene.clone(),
+                runtime: Some(runtime),
+                local_startup: None,
+                external_runtime_startup_pending: true,
+                camera,
+                draw,
+                render_stats: RenderStreamStats::default(),
+            },
+            FarTerrainLodRenderer::new(device, color_format),
+            RenderAdmissionPolicy::new(
+                FrameHostKind::HeadlessOffscreenPerf,
+                WorkWindow::BeforeRender,
+            ),
+        );
         let mut state = Self {
-            scene: scene.clone(),
+            active_world,
             services: SceneHostServices {
                 clock,
                 catalog_operations,
@@ -675,15 +693,10 @@ impl McloneSceneHost {
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
-            runtime: Some(runtime),
-            local_startup: None,
-            external_runtime_startup_pending: true,
             session,
             #[cfg(not(target_arch = "wasm32"))]
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(client_experience_profile),
-            camera,
-            interaction: ClientInteractionController::new(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -693,12 +706,7 @@ impl McloneSceneHost {
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
-            player_model: GamePlayerModel::default(),
-            draw,
-            traversal_ready_sections: TraversalReadySectionCache::default(),
-            section_uploads: RenderSectionUploadCoordinator::default(),
             actors,
-            far_lod: FarTerrainLodRenderer::new(device, color_format),
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
@@ -717,7 +725,6 @@ impl McloneSceneHost {
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
-            render_stats: RenderStreamStats::default(),
             tracking_origin: None,
             locomotion_mode: XrLocomotionMode::default(),
             turn_policy: XrTurnPolicy::default(),
@@ -725,10 +732,6 @@ impl McloneSceneHost {
             blink_teleport: XrBlinkTeleportState::default(),
             mono_blink_debug: MonoBlinkDebugState::default(),
             display_refresh_hz: None,
-            render_admission_policy: RenderAdmissionPolicy::new(
-                FrameHostKind::HeadlessOffscreenPerf,
-                WorkWindow::BeforeRender,
-            ),
             render_split_timing_enabled: false,
             defer_eye_waits_enabled: false,
             overlap_runtime_prefetch_enabled: false,
@@ -766,14 +769,17 @@ impl McloneSceneHost {
     }
 
     pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>, revision: u64) {
-        self.render_admission_policy
+        self.active_world
+            .render_admission_policy
             .set_frame_pipeline_report(report.clone());
         self.diagnostic_panel
             .set_frame_pipeline_report(report, revision);
     }
 
     pub fn clear_frame_pipeline_report(&mut self) {
-        self.render_admission_policy.clear_frame_pipeline_report();
+        self.active_world
+            .render_admission_policy
+            .clear_frame_pipeline_report();
         self.diagnostic_panel.clear_frame_pipeline_report();
     }
 
@@ -830,7 +836,7 @@ impl McloneSceneHost {
         let plan = plan_session_start(
             request,
             |options| {
-                let mut scene = self.scene.clone();
+                let mut scene = self.active_world.scene.clone();
                 scene.seed = options.seed;
                 scene.world_dir = None;
                 Ok::<_, anyhow::Error>(scene)
@@ -842,7 +848,7 @@ impl McloneSceneHost {
                     .world_summary(id)
                     .cloned()
                     .context("local world is not present in the catalog view")?;
-                let mut scene = self.scene.clone();
+                let mut scene = self.active_world.scene.clone();
                 scene.seed = summary.seed;
                 scene.world_dir = None;
                 Ok((
@@ -851,7 +857,7 @@ impl McloneSceneHost {
                 ))
             },
             |endpoint| {
-                let mut scene = self.scene.clone();
+                let mut scene = self.active_world.scene.clone();
                 scene.world_dir = None;
                 let _ = endpoint;
                 Ok(scene)
@@ -914,10 +920,10 @@ impl McloneSceneHost {
             );
         }
 
-        let movement_speed_multiplier = self.camera.movement_speed_multiplier();
+        let movement_speed_multiplier = self.active_world.camera.movement_speed_multiplier();
         let camera = SceneCameraConfig::from_scene(&pending.scene)
             .spawn_for_chunk_with_speed(runtime.interest_center(), movement_speed_multiplier);
-        self.draw = TexturedSectionDrawResources::new(
+        let draw = TexturedSectionDrawResources::new(
             device,
             queue,
             self.color_format,
@@ -925,11 +931,15 @@ impl McloneSceneHost {
             self.mesh_assets.atlas.as_upload(),
         )
         .context("reset scene terrain for external session start")?;
-        self.scene = pending.scene;
-        self.runtime = Some(runtime);
-        self.external_runtime_startup_pending = true;
-        self.camera = camera;
-        self.render_stats = RenderStreamStats::default();
+        self.active_world.install(DrawableWorldSlotInstall {
+            scene: pending.scene,
+            runtime: Some(runtime),
+            local_startup: None,
+            external_runtime_startup_pending: true,
+            camera,
+            draw,
+            render_stats: RenderStreamStats::default(),
+        });
         self.clear_transient_world_state();
         self.clear_menu_input_state();
         self.session.complete_start(active.clone());
@@ -986,7 +996,7 @@ impl McloneSceneHost {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn scene_for_storage_intent(&self, intent: SessionStorageIntent) -> McloneSceneHostOptions {
-        let mut scene = self.scene.clone();
+        let mut scene = self.active_world.scene.clone();
         if let Some(seed) = intent.seed() {
             scene.seed = seed;
         }
@@ -994,7 +1004,7 @@ impl McloneSceneHost {
         if intent.suppress_adaptive_chunk_publication_budget() {
             scene.adaptive_chunk_publication_budget = false;
         }
-        if let Some(runtime) = &self.runtime {
+        if let Some(runtime) = &self.active_world.runtime {
             scene.render_distance = runtime.render_distance();
         }
         scene
@@ -1046,6 +1056,7 @@ impl McloneSceneHost {
                     .cloned()
                     .context("local world is not present in the catalog view")?;
                 let world_root = self
+                    .active_world
                     .scene
                     .world_root
                     .as_ref()
@@ -1145,7 +1156,7 @@ impl McloneSceneHost {
         )
         .context("create XR local world startup pump")?;
         let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(scene.center());
-        self.local_startup = Some(SceneLocalStartup {
+        self.active_world.local_startup = Some(SceneLocalStartup {
             request: request.clone(),
             descriptor,
             scene: scene.clone(),
@@ -1174,12 +1185,13 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
-        if self.local_startup.is_none() {
+        if self.active_world.local_startup.is_none() {
             return Ok(false);
         }
 
         let step = {
             let startup = self
+                .active_world
                 .local_startup
                 .as_mut()
                 .expect("startup presence checked");
@@ -1193,6 +1205,7 @@ impl McloneSceneHost {
             Ok(step) => step,
             Err(error) => {
                 let startup = self
+                    .active_world
                     .local_startup
                     .take()
                     .expect("startup must exist after failed pump step");
@@ -1206,6 +1219,7 @@ impl McloneSceneHost {
         }
 
         let startup = self
+            .active_world
             .local_startup
             .take()
             .expect("startup must exist after playable step");
@@ -1311,18 +1325,22 @@ impl McloneSceneHost {
         let section_count = draw.section_count();
         let index_count = draw.index_count();
         let face_count = quad_face_count_from_indices(index_count);
-        self.scene = scene;
-        self.mesh_assets = runtime.mesh_assets().clone();
-        self.runtime = Some(runtime);
-        self.camera = camera;
-        self.draw = draw;
-        self.traversal_ready_sections.clear();
-        self.render_stats = RenderStreamStats {
-            section_count,
-            index_count,
-            face_count,
-            ..RenderStreamStats::default()
-        };
+        let mesh_assets = runtime.mesh_assets().clone();
+        self.active_world.install(DrawableWorldSlotInstall {
+            scene,
+            runtime: Some(runtime),
+            local_startup: None,
+            external_runtime_startup_pending: false,
+            camera,
+            draw,
+            render_stats: RenderStreamStats {
+                section_count,
+                index_count,
+                face_count,
+                ..RenderStreamStats::default()
+            },
+        });
+        self.mesh_assets = mesh_assets;
         self.sync_player_appearance()
             .context("sync XR local startup player appearance")?;
         self.clear_transient_world_state();
@@ -1355,7 +1373,7 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn apply_debug_ui_screen(&mut self) {
-        let Some(screen) = self.scene.debug_ui_screen else {
+        let Some(screen) = self.active_world.scene.debug_ui_screen else {
             return;
         };
         let desired_screen = match screen {
@@ -1402,11 +1420,9 @@ impl McloneSceneHost {
         self.menu_panel_recenter_pending = false;
     }
 
-    pub(crate) fn clear_transient_world_state(&mut self) {
+    fn clear_physical_presentation_state(&mut self) {
         self.tracking_origin = None;
         self.last_locomotion_update = None;
-        self.underwater_effects = XrUnderwaterEffectStates::default();
-        self.last_underwater_update = None;
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
         self.clear_mono_blink_debug();
@@ -1415,10 +1431,18 @@ impl McloneSceneHost {
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
         self.last_ui_draw_cache_stats = UiDrawCacheStats::default();
         self.rendered_frames = 0;
+    }
+
+    fn clear_active_world_transient_state(&mut self) {
+        self.underwater_effects = XrUnderwaterEffectStates::default();
+        self.last_underwater_update = None;
         self.prefetched_live_upload = None;
-        self.traversal_ready_sections.clear();
-        self.section_uploads.clear();
-        self.render_admission_policy.reset();
+        self.active_world.clear_stream_state();
+    }
+
+    pub(crate) fn clear_transient_world_state(&mut self) {
+        self.clear_physical_presentation_state();
+        self.clear_active_world_transient_state();
     }
 
     pub(crate) fn teardown_world(
@@ -1434,10 +1458,10 @@ impl McloneSceneHost {
                 );
             }
         }
-        self.local_startup = None;
-        self.external_runtime_startup_pending = false;
-        if self.runtime.take().is_some() {
-            self.draw = TexturedSectionDrawResources::new(
+        self.active_world.local_startup = None;
+        self.active_world.external_runtime_startup_pending = false;
+        if self.active_world.runtime.take().is_some() {
+            self.active_world.draw = TexturedSectionDrawResources::new(
                 device,
                 queue,
                 self.color_format,
@@ -1446,7 +1470,7 @@ impl McloneSceneHost {
             )
             .context("reset XR terrain draw resources during session teardown")?;
         }
-        self.render_stats = RenderStreamStats::default();
+        self.active_world.render_stats = RenderStreamStats::default();
         self.clear_transient_world_state();
         Ok(())
     }
@@ -1486,12 +1510,17 @@ impl McloneSceneHost {
             }
         };
 
-        self.scene = scene;
-        self.mesh_assets = started.runtime.mesh_assets().clone();
-        self.runtime = Some(started.runtime);
-        self.camera = started.camera;
-        self.draw = started.draw;
-        self.render_stats = started.render_stats;
+        let mesh_assets = started.runtime.mesh_assets().clone();
+        self.active_world.install(DrawableWorldSlotInstall {
+            scene,
+            runtime: Some(started.runtime),
+            local_startup: None,
+            external_runtime_startup_pending: false,
+            camera: started.camera,
+            draw: started.draw,
+            render_stats: started.render_stats,
+        });
+        self.mesh_assets = mesh_assets;
         self.sync_player_appearance()
             .context("sync XR session start player appearance")?;
         self.clear_transient_world_state();
@@ -1513,7 +1542,7 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
-        if self.local_startup.is_some() {
+        if self.active_world.local_startup.is_some() {
             return Ok(false);
         }
         let settings_state = self.client_experience_settings_state();
@@ -1599,7 +1628,7 @@ impl McloneSceneHost {
         for start in effects.session_starts {
             #[cfg(not(target_arch = "wasm32"))]
             let scene = {
-                let Some(world_root) = self.scene.world_root.clone() else {
+                let Some(world_root) = self.active_world.scene.world_root.clone() else {
                     let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
                     log::warn!("XR catalog session start failed: {error}");
                     continue;
@@ -1608,7 +1637,7 @@ impl McloneSceneHost {
             };
             #[cfg(target_arch = "wasm32")]
             let scene = {
-                let mut scene = self.scene.clone();
+                let mut scene = self.active_world.scene.clone();
                 scene.seed = start.summary.seed;
                 scene.world_dir = None;
                 scene
@@ -1675,7 +1704,7 @@ impl McloneSceneHost {
         {
             let mut scene_replaced = false;
             for start in effects.session_starts {
-                let mut scene = self.scene.clone();
+                let mut scene = self.active_world.scene.clone();
                 scene.seed = start.summary.seed;
                 scene.world_dir = None;
                 self.status_overlay = StatusOverlay::hidden();
@@ -1884,18 +1913,19 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     }
 
     fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()> {
-        self.scene.far_lod = self
+        self.active_world.scene.far_lod = self
+            .active_world
             .scene
             .far_lod
             .with_extra_radius_chunks(extra_radius_chunks);
-        self.scene.far_lod.enabled = enabled;
+        self.active_world.scene.far_lod.enabled = enabled;
         log::info!(
             "XR far LOD {}",
             if enabled { "enabled" } else { "disabled" }
         );
         log::info!(
             "XR far LOD range set to {} chunks beyond render distance",
-            self.scene.far_lod.extra_radius_chunks
+            self.active_world.scene.far_lod.extra_radius_chunks
         );
         Ok(())
     }
@@ -1904,13 +1934,13 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         &mut self,
         mode: mclone_app_runtime::far_lod::FarLodDetailMode,
     ) -> Result<()> {
-        self.scene.far_lod = self.scene.far_lod.with_detail_mode(mode);
+        self.active_world.scene.far_lod = self.active_world.scene.far_lod.with_detail_mode(mode);
         log::info!("XR far LOD detail mode set to {mode:?}");
         Ok(())
     }
 
     fn clear_far_lod(&mut self) -> Result<()> {
-        if let Some(runtime) = &mut self.runtime {
+        if let Some(runtime) = &mut self.active_world.runtime {
             runtime.clear_far_lod();
         }
         Ok(())
@@ -1926,7 +1956,9 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     }
 
     fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()> {
-        self.camera.set_first_person_player_visible(visible);
+        self.active_world
+            .camera
+            .set_first_person_player_visible(visible);
         log::info!(
             "XR first-person player body {}",
             if visible { "visible" } else { "hidden" }
@@ -1958,7 +1990,7 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     }
 
     fn set_player_model(&mut self, model: GamePlayerModel) -> Result<()> {
-        self.player_model = model;
+        self.active_world.player_model = model;
         log::info!("XR player model set to {}", model.label());
         Ok(())
     }
@@ -1971,19 +2003,23 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     }
 
     fn set_movement_mode(&mut self, mode: GameMovementMode) -> Result<()> {
-        self.camera.set_movement_mode(engine_movement_mode(mode));
+        self.active_world
+            .camera
+            .set_movement_mode(engine_movement_mode(mode));
         log::info!(
             "XR player movement mode {}",
-            self.camera.movement_mode().label()
+            self.active_world.camera.movement_mode().label()
         );
         Ok(())
     }
 
     fn set_collision_mode(&mut self, mode: GameCollisionMode) -> Result<()> {
-        self.camera.set_collision_mode(engine_collision_mode(mode));
+        self.active_world
+            .camera
+            .set_collision_mode(engine_collision_mode(mode));
         log::info!(
             "XR player collision mode {}",
-            self.camera.collision_mode().label()
+            self.active_world.camera.collision_mode().label()
         );
         Ok(())
     }
@@ -2012,7 +2048,7 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     }
 
     fn set_render_distance(&mut self, render_distance: u32) -> Result<()> {
-        if let Some(runtime) = &mut self.runtime
+        if let Some(runtime) = &mut self.active_world.runtime
             && runtime
                 .set_render_distance(render_distance)
                 .context("set XR render distance from menu")?
@@ -2023,27 +2059,31 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
                 runtime.chunk_tracking_radius()
             );
         }
-        self.scene.render_distance = render_distance;
+        self.active_world.scene.render_distance = render_distance;
         Ok(())
     }
 
     fn set_fly_speed_multiplier(&mut self, multiplier: f32) -> Result<()> {
-        self.camera.set_fly_speed_multiplier(f64::from(multiplier));
+        self.active_world
+            .camera
+            .set_fly_speed_multiplier(f64::from(multiplier));
         log::info!(
             "XR fly speed set to {:.1}x ({:.0} blocks/s)",
-            self.camera.fly_speed_multiplier(),
-            self.camera.speed_blocks_per_second()
+            self.active_world.camera.fly_speed_multiplier(),
+            self.active_world.camera.speed_blocks_per_second()
         );
         Ok(())
     }
 
     fn set_movement_speed_multiplier(&mut self, multiplier: f32) -> Result<()> {
-        self.camera
+        self.active_world
+            .camera
             .set_movement_speed_multiplier(f64::from(multiplier));
-        self.scene.movement_speed_multiplier = self.camera.movement_speed_multiplier() as f32;
+        self.active_world.scene.movement_speed_multiplier =
+            self.active_world.camera.movement_speed_multiplier() as f32;
         log::info!(
             "XR movement speed multiplier set to {:.1}x",
-            self.camera.movement_speed_multiplier()
+            self.active_world.camera.movement_speed_multiplier()
         );
         Ok(())
     }
@@ -2058,10 +2098,10 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
             cadence.gameplay_rate_hz,
             cadence.physics_rate_hz,
         );
-        if let Some(runtime) = &mut self.runtime {
+        if let Some(runtime) = &mut self.active_world.runtime {
             runtime.set_simulation_cadence(cadence)?;
         }
-        self.scene.simulation_cadence = cadence;
+        self.active_world.scene.simulation_cadence = cadence;
         Ok(())
     }
 

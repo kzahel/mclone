@@ -107,6 +107,21 @@ platform input/lifecycle
   -> mclone-render
 ```
 
+The host currently owns exactly one concrete `DrawableWorldSlot`. That direct
+aggregate retains the canonical scene options, runtime/startup state, camera,
+interaction/player model, terrain draw store, traversal readiness, upload
+coordinator, Far LOD state, render statistics, and adaptive admission policy.
+All existing frame methods address `active_world` directly, and all initial,
+local-completion, external/web-completion, and native-replacement paths stage
+the same target-neutral core install aggregate before publication. Shared
+assets/renderers, physical presentation state, UI/session coordination, clocks,
+and numerical budgets remain on `McloneSceneHost`.
+
+This is Tactical 174 Slice 2's one-world ownership boundary, not a product
+multi-world manager: there is no standby, registry, world-id lookup, selection
+branch, or extra runtime work in the default path. The next bounded extension
+may add one detached optional standby while preserving this direct active path.
+
 Shared launch values enter through
 `mclone-app-runtime::startup_args::StartupOptions`. Its nested
 `StartupSceneOptions` is the canonical retained scene/session configuration:

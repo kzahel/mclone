@@ -553,33 +553,35 @@ pub(crate) fn xr_game_ui_panel_height_blocks() -> f32 {
 
 impl McloneSceneHost {
     pub(crate) fn current_ui_render_state(&self) -> GameUiRenderState {
-        let render_distance = self.local_startup.as_ref().map_or_else(
+        let render_distance = self.active_world.local_startup.as_ref().map_or_else(
             || {
-                self.runtime
+                self.active_world
+                    .runtime
                     .as_ref()
-                    .map_or(self.scene.render_distance, |runtime| {
+                    .map_or(self.active_world.scene.render_distance, |runtime| {
                         runtime.render_distance()
                     })
             },
-            |startup| startup.render_distance(self.scene.render_distance),
+            |startup| startup.render_distance(self.active_world.scene.render_distance),
         );
-        let block_palette = self.runtime.as_ref().map_or_else(
+        let block_palette = self.active_world.runtime.as_ref().map_or_else(
             || {
-                self.local_startup
+                self.active_world
+                    .local_startup
                     .as_ref()
                     .as_ref()
                     .and_then(|startup| startup.mesh_catalog())
                     .map_or_else(Default::default, |catalog| {
                         debug_block_palette_overlay(
                             catalog,
-                            self.interaction.selected_hotbar_slot(),
+                            self.active_world.interaction.selected_hotbar_slot(),
                         )
                     })
             },
             |runtime| {
                 debug_block_palette_overlay(
                     &runtime.mesh_assets().catalog,
-                    self.interaction.selected_hotbar_slot(),
+                    self.active_world.interaction.selected_hotbar_slot(),
                 )
             },
         );
@@ -594,28 +596,30 @@ impl McloneSceneHost {
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             force_fullbright: self.render_options.force_fullbright,
-            far_lod_enabled: self.scene.far_lod.enabled,
+            far_lod_enabled: self.active_world.scene.far_lod.enabled,
             far_lod_detail_mode: mclone_app_runtime::client_experience::game_far_lod_detail_mode(
-                self.scene.far_lod.detail_mode,
+                self.active_world.scene.far_lod.detail_mode,
             ),
-            far_lod_range_chunks: self.scene.far_lod.extra_radius_chunks as i32,
+            far_lod_range_chunks: self.active_world.scene.far_lod.extra_radius_chunks as i32,
             min_far_lod_range_chunks: MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             max_far_lod_range_chunks: MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             player_collision_box_visible: self.player_collision_box_visible,
-            first_person_player_visible: self.camera.first_person_player_visible(),
+            first_person_player_visible: self.active_world.camera.first_person_player_visible(),
             crosshair_visible: None,
             frame_pipeline_overlay_visible: self.diagnostic_panel.frame_metrics_visible(),
             debug_diagnostics_visible: self.diagnostic_panel.debug_diagnostics_visible(),
-            player_model: self.player_model,
-            movement_mode: game_movement_mode(self.camera.movement_mode()),
-            collision_mode: Some(game_collision_mode(self.camera.collision_mode())),
+            player_model: self.active_world.player_model,
+            movement_mode: game_movement_mode(self.active_world.camera.movement_mode()),
+            collision_mode: Some(game_collision_mode(
+                self.active_world.camera.collision_mode(),
+            )),
             travel_assist_mode: Some(self.travel_assist_mode),
             turn_mode: Some(self.turn_policy.game_mode().into()),
             xr_turn_mode: Some(self.turn_policy.game_mode()),
-            fly_speed_multiplier: self.camera.fly_speed_multiplier() as f32,
+            fly_speed_multiplier: self.active_world.camera.fly_speed_multiplier() as f32,
             min_fly_speed_multiplier: ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER as f32,
             max_fly_speed_multiplier: ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER as f32,
-            movement_speed_multiplier: self.camera.movement_speed_multiplier() as f32,
+            movement_speed_multiplier: self.active_world.camera.movement_speed_multiplier() as f32,
             min_movement_speed_multiplier: ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER as f32,
             max_movement_speed_multiplier: ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER as f32,
             frame_pacing_mode: GameFramePacingMode::Vsync,
@@ -642,15 +646,22 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn debug_diagnostics_overlay(&self) -> DebugOverlay {
-        let snapshot = self.camera.snapshot();
-        let runtime_stats = self.runtime.as_ref().map(|runtime| runtime.stats());
+        let snapshot = self.active_world.camera.snapshot();
+        let runtime_stats = self
+            .active_world
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.stats());
         let far_lod_stats = self
+            .active_world
             .runtime
             .as_ref()
             .map(|runtime| runtime.far_lod_stats())
             .unwrap_or_default();
-        let render_distance =
-            runtime_stats.map_or(self.scene.render_distance, |stats| stats.render_distance);
+        let render_distance = runtime_stats
+            .map_or(self.active_world.scene.render_distance, |stats| {
+                stats.render_distance
+            });
         let tracking_radius = runtime_stats.map_or(0, |stats| stats.chunk_tracking_radius);
         let interest_center =
             runtime_stats.map_or(snapshot.chunk_pos, |stats| stats.interest_center);
@@ -661,7 +672,7 @@ impl McloneSceneHost {
             .and_then(|stats| stats.server_runner_kind)
             .map(|kind| kind.label().to_ascii_uppercase())
             .unwrap_or_else(|| "REMOTE".to_owned());
-        let actor_indices = self.render_stats.drawn_actor_index_count;
+        let actor_indices = self.active_world.render_stats.drawn_actor_index_count;
         let lines = vec![
             format!(
                 "POS {:.1} {:.1} {:.1}",
@@ -671,13 +682,17 @@ impl McloneSceneHost {
                 "CHUNK {} {} SPEED {:.1}",
                 snapshot.chunk_pos.x,
                 snapshot.chunk_pos.z,
-                self.camera.speed_blocks_per_second()
+                self.active_world.camera.speed_blocks_per_second()
             ),
             format!(
                 "MODE {}/{} GROUND {}",
-                self.camera.movement_mode().label(),
-                self.camera.collision_mode().label(),
-                if self.camera.on_ground() { "Y" } else { "N" }
+                self.active_world.camera.movement_mode().label(),
+                self.active_world.camera.collision_mode().label(),
+                if self.active_world.camera.on_ground() {
+                    "Y"
+                } else {
+                    "N"
+                }
             ),
             format!(
                 "VIEW R{} T{} C{} {}",
@@ -698,28 +713,36 @@ impl McloneSceneHost {
             ),
             format!(
                 "DRAW S {}/{} F {}/{}",
-                self.render_stats.drawn_section_count,
-                self.render_stats.section_count,
-                self.render_stats.drawn_face_count,
-                self.render_stats.face_count
+                self.active_world.render_stats.drawn_section_count,
+                self.active_world.render_stats.section_count,
+                self.active_world.render_stats.drawn_face_count,
+                self.active_world.render_stats.face_count
             ),
             format!(
                 "ACTOR R {}/{} I{}",
-                self.render_stats.drawn_actor_count, self.render_stats.actor_count, actor_indices
+                self.active_world.render_stats.drawn_actor_count,
+                self.active_world.render_stats.actor_count,
+                actor_indices
             ),
             format!(
                 "MESH R{} U{} D{} SQ{} CQ{} X{}",
-                self.render_stats.last_rebuilt_section_count,
-                self.render_stats.last_uploaded_section_count,
-                self.render_stats.last_deferred_section_count,
-                self.render_stats.last_submitted_compile_section_count,
-                self.render_stats.last_completed_compile_section_count,
-                self.render_stats.last_stale_compile_section_count
+                self.active_world.render_stats.last_rebuilt_section_count,
+                self.active_world.render_stats.last_uploaded_section_count,
+                self.active_world.render_stats.last_deferred_section_count,
+                self.active_world
+                    .render_stats
+                    .last_submitted_compile_section_count,
+                self.active_world
+                    .render_stats
+                    .last_completed_compile_section_count,
+                self.active_world
+                    .render_stats
+                    .last_stale_compile_section_count
             ),
             format!(
                 "PENDING R{} C{}",
                 runtime_stats.map_or(0, |stats| stats.pending_render_chunks),
-                self.render_stats.last_pending_compile_jobs
+                self.active_world.render_stats.last_pending_compile_jobs
             ),
             format!(
                 "LOD D{} R{} V{} B{}/{} U{} Q{} BY{}",
@@ -729,8 +752,8 @@ impl McloneSceneHost {
                 far_lod_stats.pending_builds,
                 far_lod_stats.inflight_builds,
                 far_lod_stats.queued_uploads,
-                self.render_stats.far_lod_region_draw_count,
-                self.render_stats.far_lod_uploaded_bytes
+                self.active_world.render_stats.far_lod_region_draw_count,
+                self.active_world.render_stats.far_lod_uploaded_bytes
             ),
             format!(
                 "LOD LEVEL R{}/{}/{} V{}/{}/{} DB{}/{} FLIP{}/{}",
@@ -776,13 +799,16 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
-        self.local_startup
+        self.active_world
+            .local_startup
             .as_ref()
             .and_then(SceneLocalStartup::progress_overlay)
             .or_else(|| {
-                self.external_runtime_startup_pending
+                self.active_world
+                    .external_runtime_startup_pending
                     .then(|| {
-                        self.runtime
+                        self.active_world
+                            .runtime
                             .as_ref()
                             .and_then(|runtime| runtime.startup_progress_overlay())
                     })
@@ -813,7 +839,7 @@ impl McloneSceneHost {
     pub(crate) fn apply_menu_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
         let toggle_down = xr_menu_toggle_pressed(controllers);
         if toggle_down && !self.menu_toggle_down {
-            if self.local_startup.is_some() {
+            if self.active_world.local_startup.is_some() {
                 if !self.ui.is_active() {
                     self.ui.open_pause();
                     self.menu_panel_anchor = XrUiPanelAnchor::Head;
@@ -842,7 +868,7 @@ impl McloneSceneHost {
     pub(crate) fn apply_game_ui_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
         let toggle_down = xr_game_ui_toggle_pressed(controllers);
         if toggle_down && !self.game_ui_toggle_down {
-            if self.local_startup.is_some() || self.runtime.is_none() {
+            if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
                 self.game_ui_toggle_down = toggle_down;
                 return;
             }
@@ -886,9 +912,11 @@ impl McloneSceneHost {
             }
             XrUiPanelAnchor::LeftHand => {
                 let hand_panel = self.tracking_origin.and_then(|origin| {
-                    let transform =
-                        XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())
-                            .ok()?;
+                    let transform = XrStageToWorld::from_tracking_origin(
+                        origin,
+                        self.active_world.camera.snapshot(),
+                    )
+                    .ok()?;
                     xr_game_ui_panel_from_controllers(
                         &self.latest_controllers,
                         transform,
@@ -924,7 +952,8 @@ impl McloneSceneHost {
         let Some(origin) = self.tracking_origin else {
             return Ok(false);
         };
-        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         self.ui.set_scale(gui_scale);
         let hit = xr_menu_pointer_hit_from_controllers(
@@ -970,10 +999,10 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn sync_carried_item(&mut self) -> Result<bool> {
-        let Some(command) = self.interaction.ensure_has_sent_carried_item() else {
+        let Some(command) = self.active_world.interaction.ensure_has_sent_carried_item() else {
             return Ok(false);
         };
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.active_world.runtime else {
             return Ok(false);
         };
         runtime
@@ -982,12 +1011,12 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn sync_player_appearance(&mut self) -> Result<bool> {
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.active_world.runtime else {
             return Ok(false);
         };
         runtime
             .send_gameplay_command(set_player_appearance_command_for_ui_model(
-                self.player_model,
+                self.active_world.player_model,
             ))
             .context("failed to sync XR player appearance to server")
     }
@@ -998,12 +1027,13 @@ impl McloneSceneHost {
         block_state: BlockStateId,
     ) -> Result<bool> {
         let Some(command) = self
+            .active_world
             .interaction
             .set_debug_hotbar_slot(slot, Some(block_state))
         else {
             return Ok(false);
         };
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.active_world.runtime else {
             return Ok(false);
         };
         runtime
@@ -1040,15 +1070,19 @@ impl McloneSceneHost {
         target: &BlockInteractionTarget,
     ) -> Result<()> {
         let command = match action {
-            XrGameplayInteractionAction::Attack => {
-                self.interaction.debug_instant_break_command(target.hit)
-            }
-            XrGameplayInteractionAction::Use => self.interaction.use_item_on_command(target.hit),
+            XrGameplayInteractionAction::Attack => self
+                .active_world
+                .interaction
+                .debug_instant_break_command(target.hit),
+            XrGameplayInteractionAction::Use => self
+                .active_world
+                .interaction
+                .use_item_on_command(target.hit),
         };
         let Some(command) = command else {
             return Ok(());
         };
-        let Some(runtime) = &mut self.runtime else {
+        let Some(runtime) = &mut self.active_world.runtime else {
             return Ok(());
         };
         let changed = runtime
@@ -1073,7 +1107,8 @@ impl McloneSceneHost {
         let Some(origin) = self.tracking_origin else {
             return Ok(Vec::new());
         };
-        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
         Ok(xr_menu_controller_ray_lines_from_controllers(
             &self.latest_controllers,
             transform,
@@ -1088,14 +1123,16 @@ impl McloneSceneHost {
         let Some(origin) = self.tracking_origin else {
             return Ok(None);
         };
-        let transform = XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot())?;
+        let transform =
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
         let Some((ray_origin, ray_direction)) =
             xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)
         else {
             return Ok(None);
         };
-        let hit_distance = self.runtime.as_ref().and_then(|runtime| {
-            self.interaction
+        let hit_distance = self.active_world.runtime.as_ref().and_then(|runtime| {
+            self.active_world
+                .interaction
                 .target_block(
                     runtime.client(),
                     vec3d_from_glam(ray_origin),
@@ -1110,7 +1147,7 @@ impl McloneSceneHost {
             &self.latest_controllers,
             transform,
             hit_distance,
-            self.interaction.pick_range() as f32,
+            self.active_world.interaction.pick_range() as f32,
         ))
     }
 
@@ -1118,13 +1155,14 @@ impl McloneSceneHost {
         if self.ui.is_active() {
             return None;
         }
-        let runtime = self.runtime.as_ref()?;
+        let runtime = self.active_world.runtime.as_ref()?;
         let origin = self.tracking_origin?;
         let transform =
-            XrStageToWorld::from_tracking_origin(origin, self.camera.snapshot()).ok()?;
+            XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())
+                .ok()?;
         let (ray_origin, ray_direction) =
             xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)?;
-        self.interaction.target_block(
+        self.active_world.interaction.target_block(
             runtime.client(),
             vec3d_from_glam(ray_origin),
             vec3d_from_glam(ray_direction),
