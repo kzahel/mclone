@@ -326,8 +326,13 @@ mod tests {
     use std::time::Duration;
 
     use anyhow::Result;
-    use mclone_core::ChunkPos;
-    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+    use mclone_core::{
+        AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkPos, ChunkRevision,
+        ChunkSnapshot, ChunkStatus, chunk_section_index,
+    };
+    use mclone_protocol::{
+        ChunkView, ClientCommand, SectionBlockUpdate, ServerUpdate, encode_server_update,
+    };
     use mclone_server::{
         IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerKind, ServerRunnerResult,
         ServerUpdateEnvelope,
@@ -545,6 +550,107 @@ mod tests {
         assert_eq!(second_report.remaining_queue_depth, 0);
         assert_eq!(core.day_time(), 300);
         assert!(!second_report.stalled);
+    }
+
+    #[test]
+    fn shared_connection_send_never_drains_or_applies_inbound_updates() {
+        let center = ChunkPos::new(0, 0);
+        let mut core = SingleViewRuntime::remote_dedicated(center, 0, 0);
+        let update = ServerUpdate::TimeUpdate { day_time: 900 };
+        let mut connection = ScriptedClientConnection::new(vec![QueuedServerUpdate::single(
+            update,
+            9,
+            Duration::ZERO,
+            true,
+        )]);
+
+        connection
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+
+        assert_eq!(connection.sent_commands.len(), 1);
+        assert_eq!(connection.drain_count, 0);
+        assert_eq!(connection.queued_updates.len(), 1);
+        assert_ne!(core.day_time(), 900);
+        pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::unlimited(),
+        )
+        .unwrap();
+        assert_eq!(core.day_time(), 900);
+    }
+
+    #[test]
+    fn shared_connection_preserves_snapshot_delta_unload_order_across_frames() {
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            pos,
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+        let updates = vec![
+            ServerUpdate::ChunkSnapshot(snapshot),
+            ServerUpdate::SectionBlockUpdates {
+                pos,
+                section_y: 0,
+                updates: vec![SectionBlockUpdate {
+                    local_x: 1,
+                    local_y: 2,
+                    local_z: 3,
+                    block_state: BlockStateId(42),
+                }],
+            },
+            ServerUpdate::ChunkUnload { pos },
+        ];
+        let queued = updates
+            .into_iter()
+            .enumerate()
+            .map(|(index, update)| {
+                let encoded_len = encode_server_update(&update).unwrap().len();
+                QueuedServerUpdate::single(update, encoded_len, Duration::ZERO, index == 2)
+                    .with_remote_metadata(Some((index + 1) as u64), 0.0, 0.0)
+            })
+            .collect();
+        let mut core = SingleViewRuntime::remote_dedicated(pos, 0, 0);
+        let mut connection = ScriptedClientConnection::new(queued);
+
+        let first = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO),
+        )
+        .unwrap();
+        assert_eq!(first.producer_inbound_frame_sequence, Some(1));
+        assert!(core.client().chunk_snapshot(pos).is_some());
+
+        let second = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO),
+        )
+        .unwrap();
+        assert_eq!(second.producer_inbound_frame_sequence, Some(2));
+        let blocks =
+            core.client().chunk_snapshot(pos).unwrap().sections[0].unpack_block_state_ids();
+        assert_eq!(blocks[chunk_section_index(1, 2, 3)], BlockStateId(42));
+
+        let third = pump_client_connection_updates_report(
+            &mut core,
+            &mut connection,
+            RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO),
+        )
+        .unwrap();
+        assert_eq!(third.producer_inbound_frame_sequence, Some(3));
+        assert!(core.client().chunk_snapshot(pos).is_none());
+        assert_eq!(third.remaining_queue_depth, 0);
     }
 
     #[test]

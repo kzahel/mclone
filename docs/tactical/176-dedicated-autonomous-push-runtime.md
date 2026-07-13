@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slices 0-5 completed 2026-07-13. Slice 6 shared conformance,
-pressure, and frame evidence is next.
+Status: active; Slices 0-6 completed 2026-07-13. Slice 7 compatibility and
+documentation closeout is next.
 
 Topic: `multiplayer-networking`
 
@@ -667,7 +667,9 @@ Validation evidence:
   browser max frame gap was 25.1 ms over the full UI/render smoke; focused
   network drain/apply evidence remains Slice 6 work.
 
-### Slice 6: Shared Conformance, Pressure, And Frame Evidence
+### Slice 6: Shared Conformance, Pressure, And Frame Evidence — Complete
+
+Status: completed 2026-07-13.
 
 Promote common tests and diagnostics after every production adapter exists:
 
@@ -684,6 +686,72 @@ Promote common tests and diagnostics after every production adapter exists:
 
 Exit: behavior and pressure are comparable across adapters through one schema;
 no platform is accepted solely because it appears visually functional.
+
+Implemented result:
+
+- The shared `ClientConnection` harness now owns the semantic cases instead of
+  platform copies: send never drains/applies an update, ready-only polling
+  never waits, budget exhaustion preserves order, and snapshot -> delta ->
+  unload remains coherent when each frame admits only one update. Native TCP,
+  dedicated TCP, and direct WebSocket tests add the mechanics-specific proofs
+  for independent writers, unsolicited receipt, idle observation, and clean
+  disconnect/reconnect.
+- Native client ingress is capped at 256 decoded publication batches. Its
+  diagnostics now expose current/max batch and byte depth, oldest queued age,
+  frames and updates received, bytes received, updates and bytes drained,
+  sequence, read/decode time, and overflow disconnects. A held consumer test
+  sends 257 frames, deterministically disconnects at the cap, and verifies
+  the received/drained byte conservation counters.
+- Every dedicated peer has an independent nonblocking outbound queue capped at
+  64 publication frames and 64 MiB of exact encoded bytes. Reservation and
+  release account for the count prefix, every update length prefix, and every
+  protocol payload. Saturation disconnects only that slow peer; a second peer
+  continues to publish. Runtime summary markers expose queue frame/byte
+  high-water marks plus publication and slow-consumer disconnect counts.
+- Browser remote retains the Slice 5 two-stage bound: 64 MiB of worker-owned
+  unacknowledged publication batches and 4096 updates / 64 MiB on the main
+  transferable queue. Socket command buffering remains capped at 8 MiB. The
+  smoke now proves time publications advance with no new command and the
+  production movement probe exercises the worker-owned stream across chunk
+  boundaries.
+- The shared pump continues to expose producer queue depth/bytes, sequence,
+  oldest applied age, deferred/stall counts, producer read/decode time, and
+  per-frame drain/apply category timings. Platform rims consume these facts;
+  no flat, Android, XR, or browser app owns a competing budget or ordering
+  policy.
+
+Validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server -p
+  mclone-net -p mclone-app-runtime -p mclone-dedicated-server
+  --no-fail-fast`: passed 388 server, 18 net, 244 app-runtime, and 29 dedicated
+  tests plus integration/doc tests. This includes the held reader/writer,
+  exact-byte overflow, zero-command time push, idle observer, snapshot/delta/
+  unload ordering, budget deferral, and explicit reconnect cases.
+- `pnpm --silent native:dedicated:smoke` and `pnpm --silent
+  native:remote:smoke`: passed the multi-client authority and two production
+  TCP clients. The idle observer retained the moving remote player, two
+  entities, and three drawn actors without sending scripted interaction. The
+  server marker reported a one-frame / 30-byte outbound high-water mark and
+  zero pressure disconnects. Both 960x540 captures were inspected; terrain,
+  remote actors, and diagnostics render, while the previously named partial
+  terrain/observer-void startup limitation remains visible.
+- `node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs
+  --movement-perf --remote-websocket`: passed production Playwright/browser
+  churn from chunk center `(0,-1)` through three boundaries to `(0,2)`. It
+  applied 100 updates (27 snapshots, three section deltas, nine unloads),
+  finished with zero command/update queue depth and no pump stall, and measured
+  a 10.25 ms browser frame-gap maximum over the movement window. Its
+  780x1688 capture was inspected; the final fast-movement pose mostly sees sky
+  but retains valid terrain geometry, HUD, and controls.
+- `pnpm native:desktop-offscreen:smoke`, `pnpm
+  native:xr-emulation:smoke`, `pnpm native:web:build`, and `pnpm
+  native:thin-adapters:purity`: passed. The inspected 2560x1600 desktop capture
+  contains 64 resident/11 drawn sections and two actors. The inspected
+  1280x640 synthetic-stereo capture has 249,679 differing eye pixels, 50
+  resident/eight drawn sections, and two eye UI composites. Android flat and
+  XR shared-adapter builds plus the AVD frame were already proved in Slice 4;
+  Quest frame accounting remains deferred because no device is available.
 
 ### Slice 7: Compatibility Removal And Documentation Closeout
 

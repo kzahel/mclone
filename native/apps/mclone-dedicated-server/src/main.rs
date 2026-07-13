@@ -14,7 +14,9 @@ use mclone_server::{
     IntegratedServer, SimulationCadence, SimulationCadenceConfig, WorldGenerationProfile,
 };
 
-use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
+use crate::connection::{
+    DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent, DedicatedOutboundQueueMetrics,
+};
 use crate::session::{DedicatedSession, DedicatedSessionDiagnostics};
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
@@ -518,13 +520,20 @@ fn run_server_loop_inner(
             let publish_result = outbound
                 .get(&id)
                 .context("dedicated connection has no outbound writer")
-                .and_then(|connection_outbound| connection_outbound.publish(updates));
+                .and_then(|connection_outbound| {
+                    connection_outbound.publish(updates)?;
+                    Ok(connection_outbound.queue_metrics())
+                });
             match publish_result {
-                Ok(()) => summary.record_publication(update_count),
+                Ok(queue_metrics) => {
+                    summary.record_publication(update_count);
+                    summary.record_outbound_pressure(queue_metrics);
+                }
                 Err(error) => failed_publications.push((id, update_count, error)),
             }
         }
         for (id, update_count, error) in failed_publications {
+            summary.record_publication_disconnect(error.to_string().contains("queue reached"));
             remove_session_player(server, &mut sessions, id);
             outbound.remove(&id);
             let command_count = session_command_counts.remove(&id).unwrap_or_default();
@@ -600,6 +609,10 @@ struct DedicatedServerSummary {
     update_batches: usize,
     updates_sent: usize,
     max_update_batch: usize,
+    max_outbound_queue_frames: usize,
+    max_outbound_queue_bytes: usize,
+    publication_disconnects: usize,
+    slow_consumer_disconnects: usize,
     total_tick_us: u128,
     max_tick_us: u128,
     total_scheduler_tick_us: u128,
@@ -622,6 +635,20 @@ impl DedicatedServerSummary {
         self.update_batches = self.update_batches.saturating_add(1);
         self.updates_sent = self.updates_sent.saturating_add(update_count);
         self.max_update_batch = self.max_update_batch.max(update_count);
+    }
+
+    fn record_outbound_pressure(&mut self, metrics: DedicatedOutboundQueueMetrics) {
+        self.max_outbound_queue_frames = self
+            .max_outbound_queue_frames
+            .max(metrics.max_queued_frames);
+        self.max_outbound_queue_bytes = self.max_outbound_queue_bytes.max(metrics.max_queued_bytes);
+    }
+
+    fn record_publication_disconnect(&mut self, slow_consumer: bool) {
+        self.publication_disconnects = self.publication_disconnects.saturating_add(1);
+        if slow_consumer {
+            self.slow_consumer_disconnects = self.slow_consumer_disconnects.saturating_add(1);
+        }
     }
 
     fn record_tick(&mut self, diagnostics: DedicatedSessionDiagnostics) {
@@ -662,11 +689,15 @@ impl DedicatedServerSummary {
         active_sessions: usize,
     ) -> String {
         format!(
-            "MCLONE_DEDICATED_SERVER_SUMMARY phase={phase} connection={connection_id} connection_commands={connection_command_count} commands={} update_batches={} updates_sent={} max_update_batch={} tick_total_ms={:.3} tick_max_ms={:.3} scheduler_tick_ms={:.3} scheduler_publish_completed_ms={:.3} completed_feature_jobs_drained={} feature_chunks_published={} feature_chunks_skipped={} completed_light_statuses_drained={} light_statuses_published={} light_statuses_skipped={} pending_jobs={} pending_publications={} pending_worldgen_publication_jobs={} pending_worldgen_publication_chunks={} pending_light_publications={} active_sessions={} last_simulation_tick={}",
+            "MCLONE_DEDICATED_SERVER_SUMMARY phase={phase} connection={connection_id} connection_commands={connection_command_count} commands={} update_batches={} updates_sent={} max_update_batch={} max_outbound_queue_frames={} max_outbound_queue_bytes={} publication_disconnects={} slow_consumer_disconnects={} tick_total_ms={:.3} tick_max_ms={:.3} scheduler_tick_ms={:.3} scheduler_publish_completed_ms={:.3} completed_feature_jobs_drained={} feature_chunks_published={} feature_chunks_skipped={} completed_light_statuses_drained={} light_statuses_published={} light_statuses_skipped={} pending_jobs={} pending_publications={} pending_worldgen_publication_jobs={} pending_worldgen_publication_chunks={} pending_light_publications={} active_sessions={} last_simulation_tick={}",
             self.command_count,
             self.update_batches,
             self.updates_sent,
             self.max_update_batch,
+            self.max_outbound_queue_frames,
+            self.max_outbound_queue_bytes,
+            self.publication_disconnects,
+            self.slow_consumer_disconnects,
             micros_to_ms(self.total_tick_us),
             micros_to_ms(self.max_tick_us),
             micros_to_ms(self.total_scheduler_tick_us),
@@ -853,6 +884,12 @@ mod tests {
         let mut summary = DedicatedServerSummary::default();
         summary.record_command();
         summary.record_publication(11);
+        summary.record_outbound_pressure(DedicatedOutboundQueueMetrics {
+            queued_frames: 1,
+            queued_bytes: 256,
+            max_queued_frames: 3,
+            max_queued_bytes: 1_024,
+        });
         summary.record_tick(DedicatedSessionDiagnostics {
             simulation_tick: 7,
             tick_total_us: 2_500,
@@ -881,6 +918,8 @@ mod tests {
         assert!(line.contains("connection=#12"));
         assert!(line.contains("commands=1"));
         assert!(line.contains("updates_sent=11"));
+        assert!(line.contains("max_outbound_queue_frames=3"));
+        assert!(line.contains("max_outbound_queue_bytes=1024"));
         assert!(line.contains("tick_total_ms=2.500"));
         assert!(line.contains("scheduler_tick_ms=1.250"));
         assert!(line.contains("feature_chunks_published=3"));

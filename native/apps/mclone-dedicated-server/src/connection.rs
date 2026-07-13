@@ -1,7 +1,7 @@
 use std::fmt;
 use std::io;
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
@@ -14,6 +14,7 @@ use mclone_net::{
 use mclone_protocol::{ClientCommand, ServerUpdate};
 
 pub(crate) const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
+pub(crate) const DEDICATED_OUTBOUND_QUEUE_BYTE_CAPACITY: usize = 64 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DedicatedConnectionId(u64);
@@ -39,38 +40,221 @@ impl fmt::Display for DedicatedConnectionId {
 
 #[derive(Debug)]
 pub(crate) enum DedicatedOutboundMessage {
-    Updates(Vec<ServerUpdate>),
+    Updates {
+        updates: Vec<ServerUpdate>,
+        reserved_bytes: usize,
+    },
     Close(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct DedicatedOutboundLimits {
+    frames: usize,
+    bytes: usize,
+}
+
+impl Default for DedicatedOutboundLimits {
+    fn default() -> Self {
+        Self {
+            frames: DEDICATED_OUTBOUND_QUEUE_CAPACITY,
+            bytes: DEDICATED_OUTBOUND_QUEUE_BYTE_CAPACITY,
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct DedicatedOutboundPressure {
+    queued_frames: AtomicUsize,
+    queued_bytes: AtomicUsize,
+    max_queued_frames: AtomicUsize,
+    max_queued_bytes: AtomicUsize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct DedicatedOutboundQueueMetrics {
+    pub(crate) queued_frames: usize,
+    pub(crate) queued_bytes: usize,
+    pub(crate) max_queued_frames: usize,
+    pub(crate) max_queued_bytes: usize,
 }
 
 #[derive(Debug)]
 pub(crate) struct DedicatedOutbound {
     frames: SyncSender<DedicatedOutboundMessage>,
+    pressure: Arc<DedicatedOutboundPressure>,
+    limits: DedicatedOutboundLimits,
+}
+
+#[derive(Debug)]
+pub(crate) struct DedicatedOutboundReceiver {
+    frames: Receiver<DedicatedOutboundMessage>,
+    pressure: Arc<DedicatedOutboundPressure>,
 }
 
 impl DedicatedOutbound {
-    pub(crate) fn channel() -> (Self, Receiver<DedicatedOutboundMessage>) {
-        let (frames, receiver) = mpsc::sync_channel(DEDICATED_OUTBOUND_QUEUE_CAPACITY);
-        (Self { frames }, receiver)
+    pub(crate) fn channel() -> (Self, DedicatedOutboundReceiver) {
+        Self::channel_with_limits(DedicatedOutboundLimits::default())
+    }
+
+    fn channel_with_limits(limits: DedicatedOutboundLimits) -> (Self, DedicatedOutboundReceiver) {
+        let (frames, receiver) = mpsc::sync_channel(limits.frames);
+        let pressure = Arc::new(DedicatedOutboundPressure::default());
+        (
+            Self {
+                frames,
+                pressure: Arc::clone(&pressure),
+                limits,
+            },
+            DedicatedOutboundReceiver {
+                frames: receiver,
+                pressure,
+            },
+        )
     }
 
     pub(crate) fn publish(&self, updates: Vec<ServerUpdate>) -> Result<()> {
-        self.try_send(DedicatedOutboundMessage::Updates(updates))
+        let encoded_bytes = encoded_update_batch_len(&updates)?;
+        self.reserve(encoded_bytes)?;
+        self.try_send_reserved(
+            DedicatedOutboundMessage::Updates {
+                updates,
+                reserved_bytes: encoded_bytes,
+            },
+            encoded_bytes,
+        )
     }
 
     pub(crate) fn close(&self, reason: impl Into<String>) -> Result<()> {
-        self.try_send(DedicatedOutboundMessage::Close(reason.into()))
+        self.reserve(0)?;
+        self.try_send_reserved(DedicatedOutboundMessage::Close(reason.into()), 0)
     }
 
-    fn try_send(&self, message: DedicatedOutboundMessage) -> Result<()> {
+    pub(crate) fn queue_metrics(&self) -> DedicatedOutboundQueueMetrics {
+        DedicatedOutboundQueueMetrics {
+            queued_frames: self.pressure.queued_frames.load(Ordering::Acquire),
+            queued_bytes: self.pressure.queued_bytes.load(Ordering::Acquire),
+            max_queued_frames: self.pressure.max_queued_frames.load(Ordering::Acquire),
+            max_queued_bytes: self.pressure.max_queued_bytes.load(Ordering::Acquire),
+        }
+    }
+
+    fn reserve(&self, encoded_bytes: usize) -> Result<()> {
+        reserve_bounded(
+            &self.pressure.queued_frames,
+            1,
+            self.limits.frames,
+            "frames",
+        )?;
+        if let Err(error) = reserve_bounded(
+            &self.pressure.queued_bytes,
+            encoded_bytes,
+            self.limits.bytes,
+            "bytes",
+        ) {
+            self.pressure.queued_frames.fetch_sub(1, Ordering::AcqRel);
+            return Err(error);
+        }
+        atomic_max(
+            &self.pressure.max_queued_frames,
+            self.pressure.queued_frames.load(Ordering::Acquire),
+        );
+        atomic_max(
+            &self.pressure.max_queued_bytes,
+            self.pressure.queued_bytes.load(Ordering::Acquire),
+        );
+        Ok(())
+    }
+
+    fn try_send_reserved(
+        &self,
+        message: DedicatedOutboundMessage,
+        reserved_bytes: usize,
+    ) -> Result<()> {
         match self.frames.try_send(message) {
             Ok(()) => Ok(()),
-            Err(TrySendError::Full(_)) => anyhow::bail!(
-                "dedicated outbound queue reached capacity {DEDICATED_OUTBOUND_QUEUE_CAPACITY}"
-            ),
+            Err(TrySendError::Full(_)) => {
+                self.release(reserved_bytes);
+                anyhow::bail!(
+                    "dedicated outbound queue reached frame capacity {}",
+                    self.limits.frames
+                )
+            }
             Err(TrySendError::Disconnected(_)) => {
+                self.release(reserved_bytes);
                 anyhow::bail!("dedicated outbound writer stopped")
             }
+        }
+    }
+
+    fn release(&self, reserved_bytes: usize) {
+        self.pressure.queued_frames.fetch_sub(1, Ordering::AcqRel);
+        self.pressure
+            .queued_bytes
+            .fetch_sub(reserved_bytes, Ordering::AcqRel);
+    }
+}
+
+impl DedicatedOutboundReceiver {
+    fn recv(&self) -> std::result::Result<DedicatedOutboundMessage, mpsc::RecvError> {
+        self.frames.recv().inspect(|message| self.release(message))
+    }
+
+    pub(crate) fn try_recv(
+        &self,
+    ) -> std::result::Result<DedicatedOutboundMessage, mpsc::TryRecvError> {
+        self.frames
+            .try_recv()
+            .inspect(|message| self.release(message))
+    }
+
+    fn release(&self, message: &DedicatedOutboundMessage) {
+        let reserved_bytes = match message {
+            DedicatedOutboundMessage::Updates { reserved_bytes, .. } => *reserved_bytes,
+            DedicatedOutboundMessage::Close(_) => 0,
+        };
+        self.pressure.queued_frames.fetch_sub(1, Ordering::AcqRel);
+        self.pressure
+            .queued_bytes
+            .fetch_sub(reserved_bytes, Ordering::AcqRel);
+    }
+}
+
+fn encoded_update_batch_len(updates: &[ServerUpdate]) -> Result<usize> {
+    let mut bytes = 4_usize;
+    for update in updates {
+        let update_bytes = mclone_protocol::encode_server_update(update)
+            .context("failed to measure dedicated publication update")?
+            .len();
+        bytes = bytes
+            .checked_add(4)
+            .and_then(|bytes| bytes.checked_add(update_bytes))
+            .context("dedicated publication byte count overflowed")?;
+    }
+    Ok(bytes)
+}
+
+fn reserve_bounded(value: &AtomicUsize, delta: usize, limit: usize, unit: &str) -> Result<()> {
+    let mut current = value.load(Ordering::Acquire);
+    loop {
+        let next = current
+            .checked_add(delta)
+            .context("dedicated outbound pressure counter overflowed")?;
+        if next > limit {
+            anyhow::bail!("dedicated outbound queue reached {unit} capacity {limit}");
+        }
+        match value.compare_exchange(current, next, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return Ok(()),
+            Err(observed) => current = observed,
+        }
+    }
+}
+
+fn atomic_max(value: &AtomicUsize, candidate: usize) {
+    let mut current = value.load(Ordering::Acquire);
+    while candidate > current {
+        match value.compare_exchange(current, candidate, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => break,
+            Err(observed) => current = observed,
         }
     }
 }
@@ -334,12 +518,12 @@ fn connection_loop(
 
 fn connection_writer_loop(
     mut stream: TcpStream,
-    outbound: Receiver<DedicatedOutboundMessage>,
+    outbound: DedicatedOutboundReceiver,
     reason: Arc<Mutex<Option<String>>>,
 ) {
     while let Ok(message) = outbound.recv() {
         match message {
-            DedicatedOutboundMessage::Updates(updates) => {
+            DedicatedOutboundMessage::Updates { updates, .. } => {
                 if let Err(err) = write_server_update_batch(&mut stream, &updates) {
                     if let Ok(mut reason) = reason.lock() {
                         *reason = Some(format!("failed to write server update batch: {err}"));
@@ -500,6 +684,69 @@ mod tests {
             client.drain_update_batch().unwrap().inbound_frame_sequence,
             3
         );
+    }
+
+    #[test]
+    fn dedicated_outbound_pressure_is_bounded_and_nonblocking_per_peer() {
+        let (slow, _held_slow_reader) =
+            DedicatedOutbound::channel_with_limits(DedicatedOutboundLimits {
+                frames: 3,
+                bytes: 64,
+            });
+        let (fast, fast_reader) = DedicatedOutbound::channel_with_limits(DedicatedOutboundLimits {
+            frames: 3,
+            bytes: 64,
+        });
+        let update = vec![ServerUpdate::TimeUpdate { day_time: 1 }];
+        let encoded_bytes = encoded_update_batch_len(&update).unwrap();
+
+        let start = std::time::Instant::now();
+        for _ in 0..3 {
+            slow.publish(update.clone()).unwrap();
+        }
+        let error = slow.publish(update.clone()).unwrap_err();
+        assert!(error.to_string().contains("frames capacity 3"));
+        assert!(start.elapsed() < Duration::from_millis(100));
+        assert_eq!(
+            slow.queue_metrics(),
+            DedicatedOutboundQueueMetrics {
+                queued_frames: 3,
+                queued_bytes: encoded_bytes * 3,
+                max_queued_frames: 3,
+                max_queued_bytes: encoded_bytes * 3,
+            }
+        );
+
+        fast.publish(update.clone()).unwrap();
+        assert!(matches!(
+            fast_reader.try_recv().unwrap(),
+            DedicatedOutboundMessage::Updates { updates, .. } if updates == update
+        ));
+        assert_eq!(fast.queue_metrics().queued_frames, 0);
+        assert_eq!(fast.queue_metrics().queued_bytes, 0);
+    }
+
+    #[test]
+    fn dedicated_outbound_enforces_encoded_byte_capacity() {
+        let update = vec![ServerUpdate::TimeUpdate { day_time: 1 }];
+        let encoded_bytes = encoded_update_batch_len(&update).unwrap();
+        let (outbound, _held_reader) =
+            DedicatedOutbound::channel_with_limits(DedicatedOutboundLimits {
+                frames: 8,
+                bytes: encoded_bytes,
+            });
+
+        outbound.publish(update.clone()).unwrap();
+        let error = outbound.publish(update).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("bytes capacity {encoded_bytes}"))
+        );
+        let metrics = outbound.queue_metrics();
+        assert_eq!(metrics.queued_frames, 1);
+        assert_eq!(metrics.queued_bytes, encoded_bytes);
+        assert_eq!(metrics.max_queued_bytes, encoded_bytes);
     }
 
     #[test]

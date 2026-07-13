@@ -3,9 +3,9 @@
 Topic: multiplayer-networking
 
 Status: implementation active — autonomous dedicated ticking, native TCP and
-WebSocket server push, native consumer convergence, and worker-owned browser
-remote landed 2026-07-13; shared pressure/conformance evidence is next.
-Tactical
+WebSocket server push, native/browser consumer convergence, bounded pressure,
+and cross-adapter conformance evidence landed 2026-07-13; compatibility/doc
+closeout is next. Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
@@ -35,8 +35,23 @@ ordered canonical update buffers cross to the same ready-only runtime pump.
 Dedicated WebSocket peers terminate directly in the shared authoritative
 connection registry rather than looping back through native TCP.
 
-The autonomous native wire now has the correct core shape, but session and
-production-web work remain:
+The production bounds are now explicit and observable. Each dedicated peer
+has an independent 64-frame / 64 MiB exact-encoded-byte outbound queue;
+saturation disconnects only that peer without waiting on its writer. Native
+client ingress is capped at 256 decoded publication batches and reports depth,
+bytes, oldest age, receive/drain conservation, read/decode time, sequence, and
+overflow disconnects. Browser remote caps worker-unacknowledged batches at 64
+MiB, main-thread transferable ingress at 4096 updates / 64 MiB, and socket
+command buffering at 8 MiB. The common frame pump reports ordered apply,
+deferred/stalled work, producer pressure, and per-frame drain/apply timings.
+Sustained browser movement crossed three chunk boundaries with zero residual
+queues and a 10.25 ms movement-window frame-gap maximum; native two-client
+smokes prove an idle observer receives peer movement. Quest evidence remains
+deferred because no device is currently available; shared Android builds, an
+AVD frame, and synthetic stereo cover the available platform seams.
+
+The autonomous wire now has the intended first production shape, but session
+and durability work remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, strict
   `PROTOCOL_VERSION = 19` equality check
@@ -71,26 +86,19 @@ production-web work remain:
 
 ## Structural gaps (the reasons this topic exists)
 
-1. **Pressure/conformance evidence is incomplete.** Production native and web
-   adapters now have the intended topology and bounded queues, but Tactical
-   176 Slice 6 still owns one reusable semantic suite, deliberate saturation,
-   slow-consumer disconnect evidence, sustained churn, and comparable frame
-   accounting. The browser worker fully validates/decode-round-trips updates,
-   then transfers canonical per-update buffers; main-side materialization is
-   charged to the budgeted apply path and must be measured under churn.
-2. **No session layer.** Connection = anonymous player slot; no identity, no
+1. **No session layer.** Connection = anonymous player slot; no identity, no
    join phase beyond a version handshake, no keepalive/timeouts (dead peers
    only detected by IO errors), no rejoin-as-same-player; reconnect wipes the
    whole client replica and re-syncs the view
    (`mclone-app-runtime/src/host_mode.rs:304-338`).
-3. **Persistence gaps that block real multiplayer**: player state (position,
+2. **Persistence gaps that block real multiplayer**: player state (position,
    rotation, inventory) is not persisted at all — `LoadPlayer` is hard-wired
    "reserved" (`mclone-server/src/persistence.rs:1069-1075`, no `SavePlayer`
    variant); the **seed is not stored in the world save** (dedicated server
    takes `--seed` per launch; a mismatch silently forks generation); and
    `day_time` resets to 1000 every process start
    (`mclone-server/src/integrated.rs:146,331`).
-4. **Debug surface baked into the protocol**: `ShootDebugPhysicsCube`,
+3. **Debug surface baked into the protocol**: `ShootDebugPhysicsCube`,
    `SetDebugHotbarSlot`, `PlayerActionKind::DebugInstantBreak`,
    `EntityKind::DebugCube`, `debug_passive_showcase` defaulting on
    (`mclone-protocol/src/lib.rs:57-67`, `mclone-server/src/runner.rs:647`).

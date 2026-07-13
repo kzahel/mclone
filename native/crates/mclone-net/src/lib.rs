@@ -11,6 +11,7 @@ use mclone_protocol::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
+    NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY, NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY,
     NativeClientIoDiagnostics, NativeClientIoSession, NativeClientSession, NativeServerUpdateBatch,
     NativeServerUpdateEnvelope, NativeTransportError, NativeTransportResult,
     complete_client_handshake, complete_client_handshake_with_version, complete_server_handshake,
@@ -346,6 +347,7 @@ impl LocalTransport {
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native_tcp {
+    use std::collections::VecDeque;
     use std::error::Error;
     use std::fmt;
     use std::io::{Read, Write};
@@ -363,8 +365,8 @@ mod native_tcp {
     pub type NativeTransportResult<T> = Result<T, NativeTransportError>;
 
     const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
-    const CLIENT_COMMAND_QUEUE_CAPACITY: usize = 256;
-    const CLIENT_UPDATE_BATCH_QUEUE_CAPACITY: usize = 256;
+    pub const NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY: usize = 256;
+    pub const NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY: usize = 256;
     const HANDSHAKE_MAGIC: &[u8] = b"MCLONE_NATIVE_TCP";
     const SERVER_HANDSHAKE_ACCEPT: u8 = 1;
     const SERVER_HANDSHAKE_REJECT: u8 = 2;
@@ -551,7 +553,14 @@ mod native_tcp {
         pub inbound_update_batches: usize,
         pub inbound_update_depth: usize,
         pub inbound_update_bytes: usize,
+        pub oldest_inbound_update_age_ms: f64,
         pub inbound_frame_sequence: u64,
+        pub inbound_frames_received: u64,
+        pub inbound_updates_received: u64,
+        pub inbound_update_bytes_received: u64,
+        pub inbound_updates_drained: u64,
+        pub inbound_update_bytes_drained: u64,
+        pub inbound_overflow_disconnects: u64,
         pub total_read_ms: f64,
         pub max_read_ms: f64,
         pub total_decode_ms: f64,
@@ -566,7 +575,14 @@ mod native_tcp {
         inbound_update_batches: AtomicUsize,
         inbound_update_depth: AtomicUsize,
         inbound_update_bytes: AtomicUsize,
+        inbound_queued_at: Mutex<VecDeque<Instant>>,
         inbound_frame_sequence: AtomicU64,
+        inbound_frames_received: AtomicU64,
+        inbound_updates_received: AtomicU64,
+        inbound_update_bytes_received: AtomicU64,
+        inbound_updates_drained: AtomicU64,
+        inbound_update_bytes_drained: AtomicU64,
+        inbound_overflow_disconnects: AtomicU64,
         total_read_us: AtomicU64,
         max_read_us: AtomicU64,
         total_decode_us: AtomicU64,
@@ -582,7 +598,14 @@ mod native_tcp {
                 inbound_update_batches: AtomicUsize::new(0),
                 inbound_update_depth: AtomicUsize::new(0),
                 inbound_update_bytes: AtomicUsize::new(0),
+                inbound_queued_at: Mutex::new(VecDeque::new()),
                 inbound_frame_sequence: AtomicU64::new(0),
+                inbound_frames_received: AtomicU64::new(0),
+                inbound_updates_received: AtomicU64::new(0),
+                inbound_update_bytes_received: AtomicU64::new(0),
+                inbound_updates_drained: AtomicU64::new(0),
+                inbound_update_bytes_drained: AtomicU64::new(0),
+                inbound_overflow_disconnects: AtomicU64::new(0),
                 total_read_us: AtomicU64::new(0),
                 max_read_us: AtomicU64::new(0),
                 total_decode_us: AtomicU64::new(0),
@@ -593,12 +616,31 @@ mod native_tcp {
         }
 
         fn snapshot(&self) -> NativeClientIoDiagnostics {
+            let oldest_inbound_update_age_ms = self
+                .inbound_queued_at
+                .lock()
+                .ok()
+                .and_then(|queued| queued.front().copied())
+                .map_or(0.0, |queued_at| elapsed_ms(queued_at.elapsed()));
             NativeClientIoDiagnostics {
                 outbound_command_depth: self.outbound_command_depth.load(Ordering::Acquire),
                 inbound_update_batches: self.inbound_update_batches.load(Ordering::Acquire),
                 inbound_update_depth: self.inbound_update_depth.load(Ordering::Acquire),
                 inbound_update_bytes: self.inbound_update_bytes.load(Ordering::Acquire),
+                oldest_inbound_update_age_ms,
                 inbound_frame_sequence: self.inbound_frame_sequence.load(Ordering::Acquire),
+                inbound_frames_received: self.inbound_frames_received.load(Ordering::Acquire),
+                inbound_updates_received: self.inbound_updates_received.load(Ordering::Acquire),
+                inbound_update_bytes_received: self
+                    .inbound_update_bytes_received
+                    .load(Ordering::Acquire),
+                inbound_updates_drained: self.inbound_updates_drained.load(Ordering::Acquire),
+                inbound_update_bytes_drained: self
+                    .inbound_update_bytes_drained
+                    .load(Ordering::Acquire),
+                inbound_overflow_disconnects: self
+                    .inbound_overflow_disconnects
+                    .load(Ordering::Acquire),
                 total_read_ms: us_to_ms(self.total_read_us.load(Ordering::Acquire)),
                 max_read_ms: us_to_ms(self.max_read_us.load(Ordering::Acquire)),
                 total_decode_ms: us_to_ms(self.total_decode_us.load(Ordering::Acquire)),
@@ -625,8 +667,20 @@ mod native_tcp {
                 .fetch_add(update_count, Ordering::AcqRel);
             self.inbound_update_bytes
                 .fetch_add(encoded_bytes, Ordering::AcqRel);
+            if let Ok(mut queued) = self.inbound_queued_at.lock() {
+                queued.push_back(Instant::now());
+            }
             self.inbound_frame_sequence
                 .store(inbound_frame_sequence, Ordering::Release);
+            self.inbound_frames_received.fetch_add(1, Ordering::AcqRel);
+            self.inbound_updates_received.fetch_add(
+                u64::try_from(update_count).unwrap_or(u64::MAX),
+                Ordering::AcqRel,
+            );
+            self.inbound_update_bytes_received.fetch_add(
+                u64::try_from(encoded_bytes).unwrap_or(u64::MAX),
+                Ordering::AcqRel,
+            );
             let read_us = duration_us(producer_read_ms);
             let decode_us = duration_us(producer_decode_ms);
             self.total_read_us.fetch_add(read_us, Ordering::AcqRel);
@@ -641,6 +695,32 @@ mod native_tcp {
                 .fetch_sub(batch.update_count(), Ordering::AcqRel);
             self.inbound_update_bytes
                 .fetch_sub(batch.encoded_bytes(), Ordering::AcqRel);
+            if let Ok(mut queued) = self.inbound_queued_at.lock() {
+                queued.pop_front();
+            }
+            self.inbound_updates_drained.fetch_add(
+                u64::try_from(batch.update_count()).unwrap_or(u64::MAX),
+                Ordering::AcqRel,
+            );
+            self.inbound_update_bytes_drained.fetch_add(
+                u64::try_from(batch.encoded_bytes()).unwrap_or(u64::MAX),
+                Ordering::AcqRel,
+            );
+        }
+
+        fn record_batch_rejected(&self, batch: &NativeServerUpdateBatch, overflow: bool) {
+            self.inbound_update_batches.fetch_sub(1, Ordering::AcqRel);
+            self.inbound_update_depth
+                .fetch_sub(batch.update_count(), Ordering::AcqRel);
+            self.inbound_update_bytes
+                .fetch_sub(batch.encoded_bytes(), Ordering::AcqRel);
+            if let Ok(mut queued) = self.inbound_queued_at.lock() {
+                queued.pop_back();
+            }
+            if overflow {
+                self.inbound_overflow_disconnects
+                    .fetch_add(1, Ordering::AcqRel);
+            }
         }
 
         fn mark_disconnected(&self, message: impl Into<String>) {
@@ -683,8 +763,9 @@ mod native_tcp {
             complete_client_handshake(&mut stream)?;
             let shutdown_stream = stream.try_clone()?;
             let reader_stream = stream.try_clone()?;
-            let (command_tx, command_rx) = mpsc::sync_channel(CLIENT_COMMAND_QUEUE_CAPACITY);
-            let (update_tx, update_rx) = mpsc::sync_channel(CLIENT_UPDATE_BATCH_QUEUE_CAPACITY);
+            let (command_tx, command_rx) = mpsc::sync_channel(NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY);
+            let (update_tx, update_rx) =
+                mpsc::sync_channel(NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY);
             let diagnostics = Arc::new(NativeClientIoSharedDiagnostics::new());
             let writer_diagnostics = Arc::clone(&diagnostics);
             let writer_join_handle = thread::Builder::new()
@@ -735,7 +816,7 @@ mod native_tcp {
                         .fetch_sub(1, Ordering::AcqRel);
                     Err(NativeTransportError::QueueFull {
                         lane: "outbound command",
-                        capacity: CLIENT_COMMAND_QUEUE_CAPACITY,
+                        capacity: NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY,
                     })
                 }
                 Err(mpsc::TrySendError::Disconnected(_)) => {
@@ -841,15 +922,15 @@ mod native_tcp {
             match update_tx.try_send(batch) {
                 Ok(()) => {}
                 Err(mpsc::TrySendError::Full(batch)) => {
-                    diagnostics.record_batch_drained(&batch);
+                    diagnostics.record_batch_rejected(&batch, true);
                     diagnostics.mark_disconnected(format!(
-                        "inbound update batch queue reached capacity {CLIENT_UPDATE_BATCH_QUEUE_CAPACITY}"
+                        "inbound update batch queue reached capacity {NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY}"
                     ));
                     let _ = stream.shutdown(Shutdown::Both);
                     return;
                 }
                 Err(mpsc::TrySendError::Disconnected(batch)) => {
-                    diagnostics.record_batch_drained(&batch);
+                    diagnostics.record_batch_rejected(&batch, false);
                     diagnostics.mark_disconnected("runtime update receiver closed");
                     let _ = stream.shutdown(Shutdown::Both);
                     return;
@@ -1732,10 +1813,75 @@ mod tests {
         assert_eq!(diagnostics.inbound_update_depth, 0);
         assert_eq!(diagnostics.inbound_update_bytes, 0);
         assert_eq!(diagnostics.inbound_frame_sequence, 2);
+        assert_eq!(diagnostics.inbound_frames_received, 2);
+        assert_eq!(diagnostics.inbound_updates_received, 3);
+        assert_eq!(diagnostics.inbound_updates_drained, 3);
+        assert_eq!(
+            diagnostics.inbound_update_bytes_received,
+            diagnostics.inbound_update_bytes_drained
+        );
+        assert_eq!(diagnostics.inbound_overflow_disconnects, 0);
+        assert_eq!(diagnostics.oldest_inbound_update_age_ms, 0.0);
         assert!(!diagnostics.disconnected);
         assert_eq!(diagnostics.last_error, None);
 
         release_server_tx.send(()).unwrap();
+        server.join().unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_disconnects_at_bounded_inbound_capacity() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+            for sequence in 0..=NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY {
+                if write_server_update_batch(
+                    &mut stream,
+                    &[ServerUpdate::TimeUpdate {
+                        day_time: sequence as u64,
+                    }],
+                )
+                .is_err()
+                {
+                    break;
+                }
+            }
+        });
+
+        let session = NativeClientIoSession::connect(addr).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let diagnostics = loop {
+            let diagnostics = session.diagnostics();
+            if diagnostics.disconnected {
+                break diagnostics;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert_eq!(
+            diagnostics.inbound_update_batches,
+            NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY
+        );
+        assert_eq!(
+            diagnostics.inbound_update_depth,
+            NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY
+        );
+        assert_eq!(
+            diagnostics.inbound_frames_received,
+            (NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY + 1) as u64
+        );
+        assert_eq!(diagnostics.inbound_overflow_disconnects, 1);
+        assert!(diagnostics.inbound_update_bytes > 0);
+        assert!(diagnostics.oldest_inbound_update_age_ms >= 0.0);
+        assert!(
+            diagnostics
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("queue reached capacity 256"))
+        );
         server.join().unwrap();
     }
 

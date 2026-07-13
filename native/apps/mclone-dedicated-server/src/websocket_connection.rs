@@ -2,7 +2,7 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Sender, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
@@ -17,6 +17,7 @@ use tungstenite::{Error as WebSocketError, Message, accept};
 
 use crate::connection::{
     DedicatedConnectionId, DedicatedNetworkEvent, DedicatedOutbound, DedicatedOutboundMessage,
+    DedicatedOutboundReceiver,
 };
 
 pub(crate) fn websocket_accept_loop(
@@ -189,11 +190,11 @@ fn websocket_connection_loop(
 
 fn flush_outbound(
     websocket: &mut tungstenite::WebSocket<TcpStream>,
-    outbound: &Receiver<DedicatedOutboundMessage>,
+    outbound: &DedicatedOutboundReceiver,
 ) -> Result<()> {
     loop {
         match outbound.try_recv() {
-            Ok(DedicatedOutboundMessage::Updates(updates)) => {
+            Ok(DedicatedOutboundMessage::Updates { updates, .. }) => {
                 let frame = encode_websocket_server_update_batch(&updates)
                     .context("failed to encode websocket server update batch")?;
                 websocket

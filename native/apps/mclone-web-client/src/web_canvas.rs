@@ -1,4 +1,4 @@
-use wasm_bindgen::prelude::*;
+use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::HtmlCanvasElement;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -533,6 +533,17 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
             SMOKE_RADIUS_CHUNKS,
         )
         .await?;
+    for _ in 0..500 {
+        runtime.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        if runtime
+            .client()
+            .chunk_snapshot(SMOKE_INITIAL_CENTER)
+            .is_some()
+        {
+            break;
+        }
+        wait_for_remote_worker_turn(10).await?;
+    }
     let center_chunk_loaded = runtime
         .client()
         .chunk_snapshot(SMOKE_INITIAL_CENTER)
@@ -540,6 +551,24 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
     let second = runtime
         .request_chunk_view_async(SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_RADIUS_CHUNKS)
         .await?;
+    for _ in 0..500 {
+        runtime.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        let diagnostics = runtime.runner_diagnostics();
+        if runtime
+            .client()
+            .chunk_snapshot(SMOKE_MOVED_CENTER)
+            .is_some()
+            && runtime
+                .client()
+                .chunk_snapshot(SMOKE_INITIAL_CENTER)
+                .is_none()
+            && diagnostics.command_queue_depth == 0
+            && diagnostics.update_queue_depth == 0
+        {
+            break;
+        }
+        wait_for_remote_worker_turn(10).await?;
+    }
     let moved_chunk_loaded = runtime
         .client()
         .chunk_snapshot(SMOKE_MOVED_CENTER)
@@ -548,12 +577,31 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
         .client()
         .chunk_snapshot(SMOKE_INITIAL_CENTER)
         .is_none();
+    let command_count_before_idle = runtime.command_count();
+    let day_time_before_idle = runtime.client().day_time();
+    let response_frames_before_idle = runtime
+        .runner_diagnostics()
+        .runner_frame_metrics
+        .response_frames;
+    let mut unsolicited_publication = false;
+    for _ in 0..250 {
+        wait_for_remote_worker_turn(10).await?;
+        runtime.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        let idle_diagnostics = runtime.runner_diagnostics();
+        if runtime.command_count() == command_count_before_idle
+            && idle_diagnostics.runner_frame_metrics.response_frames > response_frames_before_idle
+            && runtime.client().day_time() != day_time_before_idle
+        {
+            unsolicited_publication = true;
+            break;
+        }
+    }
     let diagnostics = runtime.runner_diagnostics();
     let metrics = diagnostics.runner_frame_metrics;
     let ok = runtime.client().host() == mclone_client::ClientHost::RemoteDedicated
         && diagnostics.kind == ServerRunnerKind::RemoteWebSocket
         && metrics.transport_kind == mclone_server::WorkerFrameTransportKind::WebSocket
-        && metrics.request_frames >= 3
+        && metrics.request_frames >= 2
         && metrics.response_frames >= 3
         && center_chunk_loaded
         && moved_chunk_loaded
@@ -563,6 +611,7 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
         && diagnostics.command_queue_depth == 0
         && diagnostics.update_queue_depth == 0
         && runtime.command_count() == 2
+        && unsolicited_publication
         && runtime.update_count() > 0;
     runtime.request_shutdown();
 
@@ -575,6 +624,22 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
     set_bool(&object, "centerChunkLoaded", center_chunk_loaded)?;
     set_bool(&object, "movedChunkLoaded", moved_chunk_loaded)?;
     set_bool(&object, "previousChunkUnloaded", previous_chunk_unloaded)?;
+    set_bool(&object, "unsolicitedPublication", unsolicited_publication)?;
+    set_number(
+        &object,
+        "idleCommandCount",
+        command_count_before_idle as f64,
+    )?;
+    set_number(
+        &object,
+        "idleResponseFramesBefore",
+        response_frames_before_idle as f64,
+    )?;
+    set_number(
+        &object,
+        "idleResponseFramesAfter",
+        metrics.response_frames as f64,
+    )?;
     set_bool(&object, "transportDrained", runtime.transport_drained())?;
     set_bool(
         &object,
@@ -612,6 +677,31 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
     )
     .map_err(|error| format!("failed to attach second remote websocket report: {error:?}"))?;
     Ok(object.into())
+}
+
+async fn wait_for_remote_worker_turn(timeout_ms: i32) -> Result<(), String> {
+    let promise = js_sys::Promise::new(&mut |resolve, reject| {
+        let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
+            let _ = resolve.call0(&JsValue::NULL);
+        });
+        let Some(window) = web_sys::window() else {
+            let _ = reject.call1(
+                &JsValue::NULL,
+                &JsValue::from_str("browser window is unavailable"),
+            );
+            return;
+        };
+        if let Err(error) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            callback.unchecked_ref(),
+            timeout_ms,
+        ) {
+            let _ = reject.call1(&JsValue::NULL, &error);
+        }
+    });
+    wasm_bindgen_futures::JsFuture::from(promise)
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("remote worker turn failed: {error:?}"))
 }
 
 fn web_runtime_step_report_to_js(report: super::WebRuntimeStepReport) -> Result<JsValue, String> {
