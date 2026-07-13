@@ -76,7 +76,9 @@ series implements the same concern, normally reuse the document slug in its
   baked→live-local→remote-spectator→joined-warm fidelity ladder, N-world budget,
   runtime/authority/render seams, and the protected single-world fast path. A
   first non-rendering app-runtime smoke retains two isolated integrated hosts;
-  composition and product switching remain unbuilt.
+  composition and product switching remain unbuilt. Tactical
+  [`174`](../tactical/174-warm-world-hot-swap.md) owns the bounded opaque-gate
+  hot-swap milestone.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
   focus/capture, virtual-keyboard text entry, input contexts, render staging,

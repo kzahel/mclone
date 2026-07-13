@@ -12,8 +12,12 @@ not yet compose or switch live worlds, but
 integrated-server runners, connection adapters, and client replicas at once.
 This records the larger vision, the fidelity ladder, concrete engine seams,
 and the warm-world burn-down so future slices do not have to re-derive them.
+The bounded first implementation milestone is
+[`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md): retain
+two drawable local worlds and switch through an opaque gate, with an explicit
+stop before simultaneous rendering.
 
-Last reconciled: 2026-07-12 (opened from an interactive design conversation).
+Last reconciled: 2026-07-13 (warm hot-swap tactical split out).
 
 ## Motivation
 
@@ -116,17 +120,19 @@ The near-term product shape is:
 
 ```text
 McloneSceneHost
-  one physical camera/input/UI presentation
+  one physical input/UI presentation
   one direct single-world render path
-  WarmWorldRegistry
-    primary WorldSlot -> existing renderer
-    warm WorldSlot(s) -> update/prepare under background budgets
+  WarmWorldOwner
+    active DrawableWorldSlot -> existing renderer
+    optional standby DrawableWorldSlot -> prepare under background budgets
+    future N-world registry only after the bounded milestone needs it
 ```
 
 `SceneSessionRuntime` should remain the one-world leaf. A new host-level
-registry should own multiple leaf runtimes; turning `SceneSessionRuntime`
-itself into a bag of worlds would mix connection mechanics with composition and
-selection policy.
+owner should retain the active and optional standby leaf runtimes; a later
+registry can generalize the same slot. Turning `SceneSessionRuntime` itself into
+a bag of worlds would mix connection mechanics with composition and selection
+policy.
 
 Warm switching must define what transfers. A first local proof may preserve
 camera pose and map it into the destination spawn while leaving each world's
@@ -349,10 +355,14 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
+The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
+[`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
+
 1. Keep the dual-integrated-host ownership smoke green; extend it next through
    persistent storage-root isolation and explicit shutdown evidence.
-2. Add a host-level warm-world registry without routing the ordinary one-world
-   frame through a generic multi-world loop.
+2. Add a host-level active-plus-optional-standby owner without routing the
+   ordinary one-world frame through a generic multi-world loop. Generalize it
+   to an N-world registry only after the bounded hot-swap milestone needs one.
 3. Prove warm local switching: both worlds reach drawable readiness, switching
    selects an already-built terrain store, and neither runtime is reconstructed.
    Record switch latency and single-world before/after frame accounting.
