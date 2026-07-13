@@ -692,10 +692,16 @@ async function run() {
       await page.waitForFunction(
         () => {
           const state = globalThis.__mcloneWebApp?.state;
+          const radius = Number(state?.radiusChunks);
+          const expectedLoadedChunkCount = Number.isInteger(radius)
+            ? (radius * 2 + 1) ** 2
+            : 0;
           return state?.ok === true
             && state.loadedCenterX === state.centerX
             && state.loadedCenterZ === state.centerZ
-            && state.pendingCompileJobCount === 0;
+            && state.loadedChunkCount === expectedLoadedChunkCount
+            && state.pendingCompileJobCount === 0
+            && state.renderPendingWork === false;
         },
         undefined,
         { timeout: 60_000 },

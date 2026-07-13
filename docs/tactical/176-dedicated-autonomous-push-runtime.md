@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slices 0-4 completed 2026-07-13. Slice 5 native WebSocket host
-and browser worker convergence is next.
+Status: active; Slices 0-5 completed 2026-07-13. Slice 6 shared conformance,
+pressure, and frame evidence is next.
 
 Topic: `multiplayer-networking`
 
@@ -588,7 +588,9 @@ Validation evidence:
   cannot be device-run because no Quest is available. No platform-local
   semantic exception was introduced for that missing hardware receipt.
 
-### Slice 5: Native WebSocket Host And Web Worker Remote
+### Slice 5: Native WebSocket Host And Web Worker Remote — Complete
+
+Status: completed 2026-07-13.
 
 Bring web to the same production contract:
 
@@ -609,6 +611,61 @@ interface that would block adopting `SharedArrayBuffer` later.
 
 Exit: browser remote receives autonomous updates without a command and
 production receipt/decode is worker-owned.
+
+Implemented result:
+
+- The dedicated WebSocket listener now allocates from the same connection-id
+  registry and emits the same `Connected`, `Command`, and `Disconnected`
+  events as native TCP. Its per-connection adapter consumes the shared bounded
+  `DedicatedOutbound` publication queue directly; the loopback
+  `NativeClientSession` and second TCP connection are gone.
+- The browser production adapter creates
+  `mclone-remote-websocket-worker.js`. That module worker owns WebSocket open,
+  protocol handshake, command validation/canonical encode and send, update
+  receipt, full batch/logical decode validation, and canonical per-update
+  transferable-buffer handoff. No `web_sys::WebSocket` remains in the Rust
+  main-thread adapter.
+- The main Rust runtime receives ordered canonical update buffers through the
+  existing ready-only `ClientConnection`. It materializes one `ServerUpdate`
+  only when the budgeted pump drains that item; it never performs socket IO or
+  waits for a message/response. Worker decode time, batch sequence, queue age,
+  and byte/count facts stay attached to the queued update.
+- Browser response waiters, pending-response counts, sent/received response
+  pairing, and implicit command-error reconnect are gone. Connection startup
+  remains an awaited scene-lifecycle operation; normal command enqueue and
+  update drain are independent.
+- The worker caps browser socket command buffering at 8 MiB and unconsumed
+  update batches at 64 MiB. The main transferable queue independently caps at
+  4096 update frames and 64 MiB. A batch remains charged to worker pressure
+  until the main runtime drains its final ordered update and acknowledges the
+  batch; overflow is a surfaced terminal transport error.
+- Inline browser integrated play remains explicitly the compatibility path.
+  No main-thread remote WebSocket fallback was retained. Source locks reject
+  reintroduction of a main-thread WebSocket or dedicated TCP loopback bridge.
+- The browser remote smoke now waits for actual requested chunk residency and
+  render completion. It no longer treats completion of the chunk-view command
+  as proof that asynchronous worldgen publication is finished.
+
+Validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p
+  mclone-dedicated-server`: passed 27 tests, including a direct WebSocket peer
+  that receives an unsolicited publication before sending a command.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-web-client --test
+  remote_websocket_worker_lock`: passed two production-ownership source
+  locks.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+  --target wasm32-unknown-unknown`: passed.
+- `pnpm native:web:typecheck`: passed the WASM build, bindgen staging, web-glue
+  emit, and TypeScript check.
+- `pnpm native:web:remote-smoke`: passed the production worker plus direct
+  dedicated WebSocket adapter. The remote client reached 49 loaded chunks,
+  191 resident sections, 30 drawn sections, 56 received publication frames,
+  and zero remaining command/update queue depth in the sampled report. Its
+  `/tmp/mclone-native-web-app-canvas.png` capture was inspected and shows
+  valid textured terrain, actors, HUD, and debug diagnostics. The sampled
+  browser max frame gap was 25.1 ms over the full UI/render smoke; focused
+  network drain/apply evidence remains Slice 6 work.
 
 ### Slice 6: Shared Conformance, Pressure, And Frame Evidence
 

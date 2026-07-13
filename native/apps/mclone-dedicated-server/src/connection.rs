@@ -13,10 +13,16 @@ use mclone_net::{
 };
 use mclone_protocol::{ClientCommand, ServerUpdate};
 
-const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
+pub(crate) const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DedicatedConnectionId(u64);
+
+impl DedicatedConnectionId {
+    pub(crate) fn next(counter: &AtomicU64) -> Self {
+        Self(counter.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 #[cfg(test)]
 impl DedicatedConnectionId {
@@ -32,7 +38,7 @@ impl fmt::Display for DedicatedConnectionId {
 }
 
 #[derive(Debug)]
-enum DedicatedOutboundMessage {
+pub(crate) enum DedicatedOutboundMessage {
     Updates(Vec<ServerUpdate>),
     Close(String),
 }
@@ -43,6 +49,11 @@ pub(crate) struct DedicatedOutbound {
 }
 
 impl DedicatedOutbound {
+    pub(crate) fn channel() -> (Self, Receiver<DedicatedOutboundMessage>) {
+        let (frames, receiver) = mpsc::sync_channel(DEDICATED_OUTBOUND_QUEUE_CAPACITY);
+        (Self { frames }, receiver)
+    }
+
     pub(crate) fn publish(&self, updates: Vec<ServerUpdate>) -> Result<()> {
         self.try_send(DedicatedOutboundMessage::Updates(updates))
     }
@@ -91,11 +102,18 @@ pub(crate) enum DedicatedNetworkEvent {
 pub(crate) struct DedicatedNetwork {
     events: Receiver<DedicatedNetworkEvent>,
     running: Arc<AtomicBool>,
-    accept_thread: Option<JoinHandle<()>>,
+    accept_threads: Vec<JoinHandle<()>>,
 }
 
 impl DedicatedNetwork {
     pub(crate) fn start(listener: TcpListener) -> Result<Self> {
+        Self::start_with_websocket(listener, None)
+    }
+
+    pub(crate) fn start_with_websocket(
+        listener: TcpListener,
+        websocket_listener: Option<TcpListener>,
+    ) -> Result<Self> {
         listener
             .set_nonblocking(true)
             .context("failed to set dedicated server listener nonblocking")?;
@@ -104,17 +122,36 @@ impl DedicatedNetwork {
         let accept_running = Arc::clone(&running);
         let next_id = Arc::new(AtomicU64::new(1));
         let accept_next_id = Arc::clone(&next_id);
-        let accept_thread = thread::Builder::new()
+        let tcp_events = events_tx.clone();
+        let tcp_accept_thread = thread::Builder::new()
             .name("mclone-dedicated-accept".to_owned())
             .spawn(move || {
-                accept_loop(listener, events_tx, accept_running, accept_next_id);
+                accept_loop(listener, tcp_events, accept_running, accept_next_id);
             })
             .context("failed to spawn dedicated server accept thread")?;
+        let mut accept_threads = vec![tcp_accept_thread];
+        if let Some(websocket_listener) = websocket_listener {
+            let websocket_events = events_tx.clone();
+            let websocket_running = Arc::clone(&running);
+            let websocket_next_id = Arc::clone(&next_id);
+            let websocket_accept_thread = thread::Builder::new()
+                .name("mclone-dedicated-ws-accept".to_owned())
+                .spawn(move || {
+                    crate::websocket_connection::websocket_accept_loop(
+                        websocket_listener,
+                        websocket_events,
+                        websocket_running,
+                        websocket_next_id,
+                    );
+                })
+                .context("failed to spawn dedicated websocket accept thread")?;
+            accept_threads.push(websocket_accept_thread);
+        }
 
         Ok(Self {
             events,
             running,
-            accept_thread: Some(accept_thread),
+            accept_threads,
         })
     }
 
@@ -139,7 +176,7 @@ impl DedicatedNetwork {
 impl Drop for DedicatedNetwork {
     fn drop(&mut self) {
         self.running.store(false, Ordering::Release);
-        if let Some(accept_thread) = self.accept_thread.take() {
+        for accept_thread in self.accept_threads.drain(..) {
             let _ = accept_thread.join();
         }
     }
@@ -154,7 +191,7 @@ fn accept_loop(
     while running.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, peer_addr)) => {
-                let id = DedicatedConnectionId(next_id.fetch_add(1, Ordering::Relaxed));
+                let id = DedicatedConnectionId::next(&next_id);
                 let connection_events = events.clone();
                 let thread_name = format!("mclone-dedicated-conn-{}", id.0);
                 if let Err(err) = thread::Builder::new().name(thread_name).spawn(move || {
@@ -224,7 +261,7 @@ fn connection_loop(
             return;
         }
     };
-    let (outbound_tx, outbound_rx) = mpsc::sync_channel(DEDICATED_OUTBOUND_QUEUE_CAPACITY);
+    let (outbound, outbound_rx) = DedicatedOutbound::channel();
     let writer_reason = Arc::new(Mutex::new(None));
     let writer_shared_reason = Arc::clone(&writer_reason);
     let writer_thread = match thread::Builder::new()
@@ -247,9 +284,7 @@ fn connection_loop(
         .send(DedicatedNetworkEvent::Connected {
             id,
             peer_addr,
-            outbound: DedicatedOutbound {
-                frames: outbound_tx,
-            },
+            outbound,
         })
         .is_err()
     {

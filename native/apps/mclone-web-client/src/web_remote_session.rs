@@ -3,16 +3,13 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Duration;
 
-use js_sys::{ArrayBuffer, Function, Promise, Uint8Array};
+use js_sys::{Array, ArrayBuffer, Function, Object, Promise, Reflect, Uint8Array};
 use mclone_app_runtime::client_connection::{
     ClientConnectionDrainResult, ClientConnectionQueueMetrics, QueuedServerUpdate,
 };
-use mclone_net::{
-    decode_websocket_client_command, decode_websocket_server_handshake,
-    decode_websocket_server_update_batch, encode_current_websocket_client_handshake,
-    encode_websocket_client_command,
+use mclone_protocol::{
+    ClientCommand, ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
 };
-use mclone_protocol::{ClientCommand, PROTOCOL_VERSION, ServerUpdate, encode_server_update};
 use mclone_server::{
     ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics, WorkerFrameTransportKind,
 };
@@ -20,44 +17,55 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{BinaryType, ErrorEvent, Event, MessageEvent, WebSocket};
+use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
+
+const DEFAULT_REMOTE_WORKER_URL: &str = "./mclone-remote-websocket-worker.js";
+const DEFAULT_BINDGEN_JS_URL: &str = "./pkg/mclone_web_client.js";
+const DEFAULT_BINDGEN_WASM_URL: &str = "./pkg/mclone_web_client_bg.wasm";
+const MAX_MAIN_UPDATE_FRAMES: usize = 4_096;
+const MAX_MAIN_UPDATE_BYTES: usize = 64 * 1024 * 1024;
+
+#[derive(Debug)]
+struct WebSocketWorkerConfig {
+    url: String,
+    worker_url: String,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+}
+
+impl WebSocketWorkerConfig {
+    fn production_defaults(url: impl Into<String>) -> Self {
+        Self {
+            url: url.into(),
+            worker_url: DEFAULT_REMOTE_WORKER_URL.to_owned(),
+            bindgen_js_url: DEFAULT_BINDGEN_JS_URL.to_owned(),
+            bindgen_wasm_url: DEFAULT_BINDGEN_WASM_URL.to_owned(),
+        }
+    }
+}
 
 pub struct WebSocketServerSession {
-    url: String,
-    socket: WebSocket,
-    pending_raw_response: Rc<RefCell<Option<PendingWebSocketResponse>>>,
-    // Current WebSocket transport is still response-paired at the wire level.
-    // Normal frame polling drains decoded `queued_updates` through
-    // `WebRuntimeHost: ClientConnection`; this only tracks outstanding
-    // response bookkeeping.
-    pending_response_batches: Rc<RefCell<usize>>,
-    sent_sequence: Rc<RefCell<u64>>,
-    received_sequence: Rc<RefCell<u64>>,
-    response_waiters: Rc<RefCell<VecDeque<PendingWebSocketWaiter>>>,
+    config: WebSocketWorkerConfig,
+    worker: Worker,
+    running: Rc<RefCell<bool>>,
+    command_queue_depth: Rc<RefCell<usize>>,
     queued_updates: Rc<RefCell<VecDeque<QueuedWebSocketUpdate>>>,
     queued_update_bytes: Rc<RefCell<usize>>,
-    request_start_times: Rc<RefCell<VecDeque<f64>>>,
     frame_metrics: Rc<RefCell<WorkerFrameMetrics>>,
     last_error: Rc<RefCell<Option<String>>>,
     day_time: Rc<RefCell<u64>>,
     message_closure: Closure<dyn FnMut(MessageEvent)>,
     error_closure: Closure<dyn FnMut(ErrorEvent)>,
-    close_closure: Closure<dyn FnMut(Event)>,
+    shutdown_requested: bool,
 }
 
 impl std::fmt::Debug for WebSocketServerSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WebSocketServerSession")
-            .field("url", &self.url)
-            .field("ready_state", &self.socket.ready_state())
-            .field(
-                "pending_raw_response",
-                &self.pending_raw_response.borrow().is_some(),
-            )
-            .field(
-                "pending_response_batches",
-                &self.pending_response_batches.borrow(),
-            )
+            .field("url", &self.config.url)
+            .field("worker_url", &self.config.worker_url)
+            .field("running", &self.running.borrow())
+            .field("command_queue_depth", &self.command_queue_depth.borrow())
             .field("queued_updates", &self.queued_updates.borrow().len())
             .field("queued_update_bytes", &self.queued_update_bytes.borrow())
             .field("frame_metrics", &self.frame_metrics.borrow())
@@ -68,321 +76,231 @@ impl std::fmt::Debug for WebSocketServerSession {
 
 impl WebSocketServerSession {
     pub async fn connect(url: impl Into<String>) -> Result<Self, String> {
-        let url = url.into();
-        let socket = WebSocket::new(&url)
-            .map_err(|error| format!("failed to create websocket {url}: {error:?}"))?;
-        socket.set_binary_type(BinaryType::Arraybuffer);
-        wait_for_websocket_open(&socket)
-            .await
-            .map_err(|error| format!("failed to open websocket {url}: {error}"))?;
+        Self::connect_with_config(WebSocketWorkerConfig::production_defaults(url)).await
+    }
 
-        let pending_raw_response: Rc<RefCell<Option<PendingWebSocketResponse>>> =
-            Rc::new(RefCell::new(None));
-        let pending_response_batches = Rc::new(RefCell::new(0usize));
-        let sent_sequence = Rc::new(RefCell::new(0u64));
-        let received_sequence = Rc::new(RefCell::new(0u64));
-        let response_waiters = Rc::new(RefCell::new(VecDeque::new()));
+    async fn connect_with_config(config: WebSocketWorkerConfig) -> Result<Self, String> {
+        let options = WorkerOptions::new();
+        options.set_type(WorkerType::Module);
+        options.set_name("mclone-remote-websocket");
+        let worker = Worker::new_with_options(&config.worker_url, &options)
+            .map_err(|error| format!("failed to spawn remote websocket worker: {error:?}"))?;
+
+        let running = Rc::new(RefCell::new(false));
+        let command_queue_depth = Rc::new(RefCell::new(0_usize));
         let queued_updates = Rc::new(RefCell::new(VecDeque::new()));
-        let queued_update_bytes = Rc::new(RefCell::new(0usize));
-        let request_start_times = Rc::new(RefCell::new(VecDeque::new()));
+        let queued_update_bytes = Rc::new(RefCell::new(0_usize));
         let frame_metrics = Rc::new(RefCell::new(WorkerFrameMetrics::websocket()));
         let last_error = Rc::new(RefCell::new(None));
-        let day_time = Rc::new(RefCell::new(0u64));
+        let day_time = Rc::new(RefCell::new(0_u64));
+        let pending_ready: Rc<RefCell<Option<PendingWorkerReady>>> = Rc::new(RefCell::new(None));
 
         let message_closure = {
-            let pending_raw_response = Rc::clone(&pending_raw_response);
-            let pending_response_batches = Rc::clone(&pending_response_batches);
-            let received_sequence = Rc::clone(&received_sequence);
-            let response_waiters = Rc::clone(&response_waiters);
+            let worker = worker.clone();
+            let running = Rc::clone(&running);
+            let command_queue_depth = Rc::clone(&command_queue_depth);
             let queued_updates = Rc::clone(&queued_updates);
             let queued_update_bytes = Rc::clone(&queued_update_bytes);
-            let request_start_times = Rc::clone(&request_start_times);
             let frame_metrics = Rc::clone(&frame_metrics);
             let last_error = Rc::clone(&last_error);
-            let day_time = Rc::clone(&day_time);
+            let pending_ready = Rc::clone(&pending_ready);
             Closure::wrap(Box::new(move |event: MessageEvent| {
-                match websocket_message_bytes(event.data()) {
-                    Ok(bytes) => {
-                        if let Some(pending_response) = pending_raw_response.borrow_mut().take() {
-                            let value: JsValue = Uint8Array::from(bytes.as_slice()).into();
-                            let _ = pending_response.resolve.call1(&JsValue::NULL, &value);
-                        } else if let Err(error) = queue_websocket_update_batch(
-                            bytes,
-                            &pending_response_batches,
-                            &received_sequence,
-                            &response_waiters,
-                            &queued_updates,
-                            &queued_update_bytes,
-                            &request_start_times,
-                            &frame_metrics,
-                            &day_time,
-                        ) {
-                            record_websocket_error(&last_error, &response_waiters, error);
-                        }
-                    }
-                    Err(error) => {
-                        if let Some(pending_response) = pending_raw_response.borrow_mut().take() {
-                            let _ = pending_response
-                                .reject
-                                .call1(&JsValue::NULL, &JsValue::from_str(&error));
-                        }
-                        record_websocket_error(&last_error, &response_waiters, error);
-                    }
+                let result = handle_worker_message(
+                    event.data(),
+                    &running,
+                    &command_queue_depth,
+                    &queued_updates,
+                    &queued_update_bytes,
+                    &frame_metrics,
+                    &pending_ready,
+                );
+                if let Err(error) = result {
+                    record_worker_error(&running, &last_error, &pending_ready, error);
+                    worker.terminate();
                 }
             }) as Box<dyn FnMut(_)>)
         };
-        socket.set_onmessage(Some(message_closure.as_ref().unchecked_ref()));
+        worker.set_onmessage(Some(message_closure.as_ref().unchecked_ref()));
 
         let error_closure = {
-            let pending_raw_response = Rc::clone(&pending_raw_response);
-            let response_waiters = Rc::clone(&response_waiters);
+            let running = Rc::clone(&running);
             let last_error = Rc::clone(&last_error);
+            let pending_ready = Rc::clone(&pending_ready);
             Closure::wrap(Box::new(move |event: ErrorEvent| {
                 let message = if event.message().is_empty() {
-                    "websocket transport failed".to_owned()
+                    "remote websocket worker failed".to_owned()
                 } else {
                     event.message()
                 };
-                if let Some(pending_response) = pending_raw_response.borrow_mut().take() {
-                    let _ = pending_response
-                        .reject
-                        .call1(&JsValue::NULL, &JsValue::from_str(&message));
-                }
-                record_websocket_error(&last_error, &response_waiters, message);
+                record_worker_error(&running, &last_error, &pending_ready, message);
             }) as Box<dyn FnMut(_)>)
         };
-        socket.set_onerror(Some(error_closure.as_ref().unchecked_ref()));
+        worker.set_onerror(Some(error_closure.as_ref().unchecked_ref()));
 
-        let close_closure = {
-            let pending_raw_response = Rc::clone(&pending_raw_response);
-            let response_waiters = Rc::clone(&response_waiters);
-            let last_error = Rc::clone(&last_error);
-            Closure::wrap(Box::new(move |_event: Event| {
-                let message = "websocket transport closed".to_owned();
-                if let Some(pending_response) = pending_raw_response.borrow_mut().take() {
-                    let _ = pending_response
-                        .reject
-                        .call1(&JsValue::NULL, &JsValue::from_str(&message));
-                }
-                record_websocket_error(&last_error, &response_waiters, message);
-            }) as Box<dyn FnMut(_)>)
-        };
-        socket.set_onclose(Some(close_closure.as_ref().unchecked_ref()));
+        let ready = Promise::new(&mut {
+            let pending_ready = Rc::clone(&pending_ready);
+            move |resolve: Function, reject: Function| {
+                *pending_ready.borrow_mut() = Some(PendingWorkerReady { resolve, reject });
+            }
+        });
+        let start = Object::new();
+        set_string(&start, "kind", "start")?;
+        set_string(&start, "url", &config.url)?;
+        set_string(&start, "bindgenJsUrl", &config.bindgen_js_url)?;
+        set_string(&start, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
+        if let Err(error) = worker.post_message(&start) {
+            worker.terminate();
+            return Err(format!(
+                "failed to start remote websocket worker: {error:?}"
+            ));
+        }
+        JsFuture::from(ready).await.map_err(|error| {
+            worker.terminate();
+            format!(
+                "remote websocket worker startup failed: {}",
+                js_error_string(&error)
+            )
+        })?;
 
-        let mut session = Self {
-            url,
-            socket,
-            pending_raw_response,
-            pending_response_batches,
-            sent_sequence,
-            received_sequence,
-            response_waiters,
+        Ok(Self {
+            config,
+            worker,
+            running,
+            command_queue_depth,
             queued_updates,
             queued_update_bytes,
-            request_start_times,
             frame_metrics,
             last_error,
             day_time,
             message_closure,
             error_closure,
-            close_closure,
-        };
-        session.complete_protocol_handshake().await?;
-        Ok(session)
+            shutdown_requested: false,
+        })
     }
 
     pub fn queue_command(&mut self, command: ClientCommand) -> Result<bool, String> {
-        let frame = encode_websocket_client_command(&command)
-            .map_err(|error| format!("encode websocket command: {error}"))?;
-        let protocol_codec_roundtrip = decode_websocket_client_command(&frame)
+        if self.shutdown_requested || !*self.running.borrow() {
+            return Err(self
+                .last_error
+                .borrow()
+                .clone()
+                .unwrap_or_else(|| "remote websocket worker is not running".to_owned()));
+        }
+        let frame = encode_client_command(&command)
+            .map_err(|error| format!("encode remote command: {error}"))?;
+        let protocol_codec_roundtrip = decode_client_command(&frame)
             .map(|decoded| decoded == command)
             .unwrap_or(false);
-        self.send_command_frame(frame)?;
-        Ok(protocol_codec_roundtrip)
-    }
-
-    pub async fn send_command_acknowledged(
-        &mut self,
-        command: ClientCommand,
-    ) -> Result<bool, String> {
-        let frame = encode_websocket_client_command(&command)
-            .map_err(|error| format!("encode websocket command: {error}"))?;
-        let protocol_codec_roundtrip = decode_websocket_client_command(&frame)
-            .map(|decoded| decoded == command)
-            .unwrap_or(false);
-        let target_sequence = self.send_command_frame(frame)?;
-        self.wait_for_inbound_frame_sequence(target_sequence)
-            .await?;
+        let bytes = Uint8Array::from(frame.as_slice());
+        let transfer = Array::new();
+        transfer.push(&bytes.buffer());
+        let message = Object::new();
+        set_string(&message, "kind", "command")?;
+        Reflect::set(&message, &JsValue::from_str("frame"), &bytes)
+            .map_err(|error| format!("failed to attach remote command frame: {error:?}"))?;
+        self.worker
+            .post_message_with_transfer(&message, &transfer)
+            .map_err(|error| format!("failed to enqueue remote command: {error:?}"))?;
+        {
+            let mut depth = self.command_queue_depth.borrow_mut();
+            *depth = depth.saturating_add(1);
+            self.frame_metrics
+                .borrow_mut()
+                .observe_pending_frames(*depth);
+        }
+        self.frame_metrics.borrow_mut().record_request(frame.len());
         Ok(protocol_codec_roundtrip)
     }
 
     pub fn drain_next_queued_update(&mut self) -> Result<ClientConnectionDrainResult, String> {
-        let Some(queued_update) = self.queued_updates.borrow_mut().pop_front() else {
-            let pending = *self.pending_response_batches.borrow();
-            if pending == 0 {
-                return Ok(ClientConnectionDrainResult::default());
-            }
-            return Ok(ClientConnectionDrainResult::pending(
-                pending,
-                *self.queued_update_bytes.borrow(),
-            ));
+        let Some(queued) = self.queued_updates.borrow_mut().pop_front() else {
+            return Ok(ClientConnectionDrainResult::default());
         };
         {
-            let mut queued_update_bytes = self.queued_update_bytes.borrow_mut();
-            *queued_update_bytes = queued_update_bytes.saturating_sub(queued_update.encoded_len);
+            let mut bytes = self.queued_update_bytes.borrow_mut();
+            *bytes = bytes.saturating_sub(queued.encoded_len());
         }
-        let remaining_depth =
-            *self.pending_response_batches.borrow() + self.queued_updates.borrow().len();
+        if queued.batch_drained {
+            self.acknowledge_batch(queued.batch_sequence)?;
+        }
+        let remaining_depth = self.queued_updates.borrow().len();
+        let remaining_bytes = *self.queued_update_bytes.borrow();
+        let transport_drained = remaining_depth == 0 && *self.command_queue_depth.borrow() == 0;
+        let queued_age = queued.queued_age();
+        let producer_decode_ms = queued.producer_decode_ms;
+        let inbound_frame_sequence = queued.batch_sequence;
+        let update = match queued.frame {
+            Some(frame) => {
+                let encoded_len = frame.len();
+                let update = decode_server_update(&frame)
+                    .map_err(|error| format!("decode worker remote update: {error}"))?;
+                if let ServerUpdate::TimeUpdate { day_time } = update {
+                    *self.day_time.borrow_mut() = day_time;
+                    QueuedServerUpdate::single(
+                        ServerUpdate::TimeUpdate { day_time },
+                        encoded_len,
+                        queued_age,
+                        transport_drained,
+                    )
+                } else {
+                    QueuedServerUpdate::single(update, encoded_len, queued_age, transport_drained)
+                }
+            }
+            None => QueuedServerUpdate::empty(transport_drained),
+        }
+        .with_remote_metadata(Some(inbound_frame_sequence), 0.0, producer_decode_ms);
         Ok(ClientConnectionDrainResult::with_update(
-            queued_update.into_queued_server_update(),
+            update,
             remaining_depth,
-            *self.queued_update_bytes.borrow(),
+            remaining_bytes,
         ))
     }
 
     pub fn queued_update_metrics(&self) -> ClientConnectionQueueMetrics {
         ClientConnectionQueueMetrics::new(
-            *self.pending_response_batches.borrow() + self.queued_updates.borrow().len(),
+            self.queued_updates.borrow().len(),
             *self.queued_update_bytes.borrow(),
         )
     }
 
-    pub async fn reconnect(&mut self) -> Result<(), String> {
-        let replacement = Self::connect(self.url.clone()).await?;
-        *self = replacement;
-        Ok(())
-    }
-
     pub fn diagnostics(&self) -> ServerRunnerDiagnostics {
-        let mut diagnostics = ServerRunnerDiagnostics::initial(
-            ServerRunnerKind::RemoteWebSocket,
-            0,
-            *self.day_time.borrow(),
-        );
-        diagnostics.running = self.socket.ready_state() == WebSocket::OPEN;
-        diagnostics.command_queue_depth = *self.pending_response_batches.borrow();
+        let day_time = *self.day_time.borrow();
+        let mut diagnostics =
+            ServerRunnerDiagnostics::initial(ServerRunnerKind::RemoteWebSocket, 0, day_time);
+        diagnostics.running = *self.running.borrow();
+        diagnostics.command_queue_depth = *self.command_queue_depth.borrow();
         diagnostics.update_queue_depth = self.queued_updates.borrow().len();
         diagnostics.update_queue_bytes = *self.queued_update_bytes.borrow();
         diagnostics.runner_frame_metrics = *self.frame_metrics.borrow();
-        diagnostics
-            .runner_frame_metrics
-            .observe_pending_frames(diagnostics.command_queue_depth);
+        diagnostics.runner_frame_metrics.observe_pending_frames(
+            diagnostics
+                .command_queue_depth
+                .saturating_add(diagnostics.update_queue_depth),
+        );
         diagnostics.last_error = self.last_error.borrow().clone();
         diagnostics
     }
 
     pub fn request_shutdown(&mut self) {
-        self.socket.set_onmessage(None);
-        self.socket.set_onerror(None);
-        self.socket.set_onclose(None);
-        let _ = self.socket.close();
+        if self.shutdown_requested {
+            return;
+        }
+        self.shutdown_requested = true;
+        let message = Object::new();
+        if set_string(&message, "kind", "shutdown").is_ok() {
+            let _ = self.worker.post_message(&message);
+        }
+        self.worker.terminate();
+        *self.running.borrow_mut() = false;
     }
 
-    async fn complete_protocol_handshake(&mut self) -> Result<(), String> {
-        let request = encode_current_websocket_client_handshake()
-            .map_err(|error| format!("encode websocket handshake: {error}"))?;
-        let response = self.exchange_frame(request).await?;
-        decode_websocket_server_handshake(&response, PROTOCOL_VERSION)
-            .map_err(|error| format!("websocket protocol handshake failed: {error}"))
-    }
-
-    async fn exchange_frame(&mut self, frame: Vec<u8>) -> Result<Vec<u8>, String> {
-        if self.socket.ready_state() != WebSocket::OPEN {
-            return Err(format!(
-                "websocket {} is not open; readyState={}",
-                self.url,
-                self.socket.ready_state()
-            ));
-        }
-        let request_start = js_sys::Date::now();
-        let promise = self.register_pending_raw_response()?;
-        self.socket
-            .send_with_u8_array(&frame)
-            .map_err(|error| format!("failed to send websocket frame: {error:?}"))?;
-        {
-            let mut metrics = self.frame_metrics.borrow_mut();
-            metrics.transport_kind = WorkerFrameTransportKind::WebSocket;
-            metrics.record_request(frame.len());
-            metrics.observe_pending_frames(1);
-        }
-        let response = JsFuture::from(promise)
-            .await
-            .map_err(|error| format!("websocket response failed: {}", js_error_string(&error)))?;
-        let bytes = websocket_message_bytes(response)?;
-        let request_us = ((js_sys::Date::now() - request_start).max(0.0) * 1000.0) as u128;
-        let mut metrics = self.frame_metrics.borrow_mut();
-        metrics.record_response(bytes.len());
-        metrics.record_request_time_us(request_us);
-        metrics.observe_pending_frames(0);
-        Ok(bytes)
-    }
-
-    fn send_command_frame(&mut self, frame: Vec<u8>) -> Result<u64, String> {
-        if self.socket.ready_state() != WebSocket::OPEN {
-            return Err(format!(
-                "websocket {} is not open; readyState={}",
-                self.url,
-                self.socket.ready_state()
-            ));
-        }
-        let request_start = js_sys::Date::now();
-        self.socket
-            .send_with_u8_array(&frame)
-            .map_err(|error| format!("failed to send websocket frame: {error:?}"))?;
-        let target_sequence = {
-            let mut sent_sequence = self.sent_sequence.borrow_mut();
-            *sent_sequence = sent_sequence.saturating_add(1);
-            *sent_sequence
-        };
-        {
-            let mut pending = self.pending_response_batches.borrow_mut();
-            *pending = pending.saturating_add(1);
-        }
-        self.request_start_times
-            .borrow_mut()
-            .push_back(request_start);
-        {
-            let pending = *self.pending_response_batches.borrow();
-            let mut metrics = self.frame_metrics.borrow_mut();
-            metrics.transport_kind = WorkerFrameTransportKind::WebSocket;
-            metrics.record_request(frame.len());
-            metrics.observe_pending_frames(pending);
-        }
-        Ok(target_sequence)
-    }
-
-    async fn wait_for_inbound_frame_sequence(&self, target_sequence: u64) -> Result<(), String> {
-        if *self.received_sequence.borrow() >= target_sequence {
-            return Ok(());
-        }
-        let promise = Promise::new(&mut {
-            let response_waiters = Rc::clone(&self.response_waiters);
-            move |resolve: Function, reject: Function| {
-                response_waiters
-                    .borrow_mut()
-                    .push_back(PendingWebSocketWaiter {
-                        target_sequence,
-                        response: PendingWebSocketResponse { resolve, reject },
-                    });
-            }
-        });
-        JsFuture::from(promise)
-            .await
-            .map(|_| ())
-            .map_err(|error| format!("websocket response failed: {}", js_error_string(&error)))
-    }
-
-    fn register_pending_raw_response(&self) -> Result<Promise, String> {
-        if self.pending_raw_response.borrow().is_some() {
-            return Err("websocket transport already has an in-flight request".to_owned());
-        }
-        let pending_raw_response = Rc::clone(&self.pending_raw_response);
-        Ok(Promise::new(
-            &mut move |resolve: Function, reject: Function| {
-                *pending_raw_response.borrow_mut() =
-                    Some(PendingWebSocketResponse { resolve, reject });
-            },
-        ))
+    fn acknowledge_batch(&self, batch_sequence: u64) -> Result<(), String> {
+        let message = Object::new();
+        set_string(&message, "kind", "updates-drained")?;
+        set_number(&message, "batchSequence", batch_sequence as f64)?;
+        self.worker
+            .post_message(&message)
+            .map_err(|error| format!("failed to acknowledge drained remote batch: {error:?}"))
     }
 }
 
@@ -391,246 +309,183 @@ impl Drop for WebSocketServerSession {
         self.request_shutdown();
         let _ = &self.message_closure;
         let _ = &self.error_closure;
-        let _ = &self.close_closure;
     }
 }
 
-#[derive(Clone)]
-struct PendingWebSocketResponse {
+struct PendingWorkerReady {
     resolve: Function,
     reject: Function,
 }
 
-struct PendingWebSocketWaiter {
-    target_sequence: u64,
-    response: PendingWebSocketResponse,
-}
-
 #[derive(Debug)]
 struct QueuedWebSocketUpdate {
-    update: Option<ServerUpdate>,
-    encoded_len: usize,
+    frame: Option<Vec<u8>>,
     queued_at_ms: f64,
-    transport_drained: bool,
-    inbound_frame_sequence: u64,
+    batch_sequence: u64,
+    batch_drained: bool,
     producer_decode_ms: f64,
 }
 
 impl QueuedWebSocketUpdate {
-    fn single(
-        update: ServerUpdate,
-        encoded_len: usize,
-        transport_drained: bool,
-        inbound_frame_sequence: u64,
-        producer_decode_ms: f64,
-    ) -> Self {
-        Self {
-            update: Some(update),
-            encoded_len,
-            queued_at_ms: js_sys::Date::now(),
-            transport_drained,
-            inbound_frame_sequence,
-            producer_decode_ms,
-        }
-    }
-
-    fn empty(
-        transport_drained: bool,
-        inbound_frame_sequence: u64,
-        producer_decode_ms: f64,
-    ) -> Self {
-        Self {
-            update: None,
-            encoded_len: 0,
-            queued_at_ms: js_sys::Date::now(),
-            transport_drained,
-            inbound_frame_sequence,
-            producer_decode_ms,
-        }
+    fn encoded_len(&self) -> usize {
+        self.frame.as_ref().map_or(0, Vec::len)
     }
 
     fn queued_age(&self) -> Duration {
         let elapsed_ms = (js_sys::Date::now() - self.queued_at_ms).max(0.0);
         if elapsed_ms.is_finite() {
-            Duration::from_secs_f64(elapsed_ms / 1000.0)
+            Duration::from_secs_f64(elapsed_ms / 1_000.0)
         } else {
             Duration::ZERO
         }
     }
+}
 
-    fn into_queued_server_update(self) -> QueuedServerUpdate {
-        let queued_age = self.queued_age();
-        let update = match self.update {
-            Some(update) => QueuedServerUpdate::single(
-                update,
-                self.encoded_len,
-                queued_age,
-                self.transport_drained,
-            ),
-            None => QueuedServerUpdate::empty(self.transport_drained),
-        };
-        update.with_remote_metadata(
-            Some(self.inbound_frame_sequence),
-            0.0,
-            self.producer_decode_ms,
-        )
+fn handle_worker_message(
+    value: JsValue,
+    running: &Rc<RefCell<bool>>,
+    command_queue_depth: &Rc<RefCell<usize>>,
+    queued_updates: &Rc<RefCell<VecDeque<QueuedWebSocketUpdate>>>,
+    queued_update_bytes: &Rc<RefCell<usize>>,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+    pending_ready: &Rc<RefCell<Option<PendingWorkerReady>>>,
+) -> Result<(), String> {
+    match required_string(&value, "kind")?.as_str() {
+        "ready" => {
+            *running.borrow_mut() = true;
+            if let Some(ready) = pending_ready.borrow_mut().take() {
+                let _ = ready.resolve.call0(&JsValue::NULL);
+            }
+            Ok(())
+        }
+        "command-sent" => {
+            let mut depth = command_queue_depth.borrow_mut();
+            *depth = depth.saturating_sub(1);
+            frame_metrics.borrow_mut().observe_pending_frames(*depth);
+            Ok(())
+        }
+        "updates" => {
+            queue_worker_updates(&value, queued_updates, queued_update_bytes, frame_metrics)
+        }
+        "error" | "closed" => Err(required_string(&value, "message")?),
+        kind => Err(format!(
+            "unexpected remote websocket worker message `{kind}`"
+        )),
     }
 }
 
-fn queue_websocket_update_batch(
-    bytes: Vec<u8>,
-    pending_response_batches: &Rc<RefCell<usize>>,
-    received_sequence: &Rc<RefCell<u64>>,
-    response_waiters: &Rc<RefCell<VecDeque<PendingWebSocketWaiter>>>,
+fn queue_worker_updates(
+    value: &JsValue,
     queued_updates: &Rc<RefCell<VecDeque<QueuedWebSocketUpdate>>>,
     queued_update_bytes: &Rc<RefCell<usize>>,
-    request_start_times: &Rc<RefCell<VecDeque<f64>>>,
     frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
-    day_time: &Rc<RefCell<u64>>,
 ) -> Result<(), String> {
-    let decode_start = js_sys::Date::now();
-    let updates = decode_websocket_server_update_batch(&bytes)
-        .map_err(|error| format!("decode websocket server updates: {error}"))?;
-    let producer_decode_ms = (js_sys::Date::now() - decode_start).max(0.0);
-    let inbound_frame_sequence = {
-        let mut received_sequence = received_sequence.borrow_mut();
-        *received_sequence = received_sequence.saturating_add(1);
-        *received_sequence
-    };
-    let pending_after_batch = {
-        let mut pending = pending_response_batches.borrow_mut();
-        *pending = pending.saturating_sub(1);
-        *pending
-    };
-    let request_start = request_start_times.borrow_mut().pop_front();
-    {
-        let mut metrics = frame_metrics.borrow_mut();
-        metrics.record_response(bytes.len());
-        if let Some(request_start) = request_start {
-            let request_us = ((js_sys::Date::now() - request_start).max(0.0) * 1000.0) as u128;
-            metrics.record_request_time_us(request_us);
+    let frames_value = Reflect::get(value, &JsValue::from_str("frames"))
+        .map_err(|error| format!("failed to read remote worker frames: {error:?}"))?;
+    if !Array::is_array(&frames_value) {
+        return Err("remote worker updates did not contain a frame array".to_owned());
+    }
+    let frames = Array::from(&frames_value);
+    let batch_sequence = required_number(value, "batchSequence")? as u64;
+    let received_bytes = required_number(value, "receivedBytes")?.max(0.0) as usize;
+    let decode_ms = required_number(value, "decodeMs")?.max(0.0);
+    let mut decoded_frames = Vec::with_capacity(frames.length() as usize);
+    let mut canonical_bytes = 0_usize;
+    for frame in frames.iter() {
+        if !frame.is_instance_of::<ArrayBuffer>() && !frame.is_instance_of::<Uint8Array>() {
+            return Err("remote worker update frame was not binary".to_owned());
         }
-        metrics.observe_pending_frames(pending_after_batch);
+        let bytes = if frame.is_instance_of::<ArrayBuffer>() {
+            Uint8Array::new(&frame).to_vec()
+        } else {
+            Uint8Array::new(&frame).to_vec()
+        };
+        canonical_bytes = canonical_bytes.saturating_add(bytes.len());
+        decoded_frames.push(bytes);
+    }
+    let next_frames = queued_updates
+        .borrow()
+        .len()
+        .saturating_add(decoded_frames.len().max(1));
+    let next_bytes = queued_update_bytes.borrow().saturating_add(canonical_bytes);
+    if next_frames > MAX_MAIN_UPDATE_FRAMES || next_bytes > MAX_MAIN_UPDATE_BYTES {
+        return Err(format!(
+            "remote main update queue exceeded bounds: {next_frames} frames, {next_bytes} bytes"
+        ));
     }
 
-    let update_count = updates.len();
-    if update_count == 0 {
-        queued_updates
-            .borrow_mut()
-            .push_back(QueuedWebSocketUpdate::empty(
-                pending_after_batch == 0,
-                inbound_frame_sequence,
-                producer_decode_ms,
-            ));
-        resolve_response_waiters(response_waiters, inbound_frame_sequence);
-        return Ok(());
-    }
-
-    for (index, update) in updates.into_iter().enumerate() {
-        if let ServerUpdate::TimeUpdate {
-            day_time: update_day_time,
-        } = &update
-        {
-            *day_time.borrow_mut() = *update_day_time;
+    let queued_at_ms = js_sys::Date::now();
+    let frame_count = decoded_frames.len();
+    let mut queue = queued_updates.borrow_mut();
+    if frame_count == 0 {
+        queue.push_back(QueuedWebSocketUpdate {
+            frame: None,
+            queued_at_ms,
+            batch_sequence,
+            batch_drained: true,
+            producer_decode_ms: decode_ms,
+        });
+    } else {
+        for (index, frame) in decoded_frames.into_iter().enumerate() {
+            queue.push_back(QueuedWebSocketUpdate {
+                frame: Some(frame),
+                queued_at_ms,
+                batch_sequence,
+                batch_drained: index + 1 == frame_count,
+                producer_decode_ms: if index == 0 { decode_ms } else { 0.0 },
+            });
         }
-        let encoded_len = encode_server_update(&update)
-            .map_err(|error| format!("measure websocket server update: {error}"))?
-            .len();
-        {
-            let mut queued_update_bytes = queued_update_bytes.borrow_mut();
-            *queued_update_bytes = queued_update_bytes.saturating_add(encoded_len);
-        }
-        queued_updates
-            .borrow_mut()
-            .push_back(QueuedWebSocketUpdate::single(
-                update,
-                encoded_len,
-                pending_after_batch == 0 && index + 1 == update_count,
-                inbound_frame_sequence,
-                if index == 0 { producer_decode_ms } else { 0.0 },
-            ));
     }
-    resolve_response_waiters(response_waiters, inbound_frame_sequence);
+    *queued_update_bytes.borrow_mut() = next_bytes;
+    let mut metrics = frame_metrics.borrow_mut();
+    metrics.transport_kind = WorkerFrameTransportKind::WebSocket;
+    metrics.record_response(received_bytes);
+    metrics.observe_pending_frames(next_frames);
     Ok(())
 }
 
-fn resolve_response_waiters(
-    response_waiters: &Rc<RefCell<VecDeque<PendingWebSocketWaiter>>>,
-    received_sequence: u64,
-) {
-    let mut ready = Vec::new();
-    {
-        let mut waiters = response_waiters.borrow_mut();
-        while waiters
-            .front()
-            .is_some_and(|waiter| waiter.target_sequence <= received_sequence)
-        {
-            if let Some(waiter) = waiters.pop_front() {
-                ready.push(waiter.response);
-            }
-        }
-    }
-    for waiter in ready {
-        let _ = waiter.resolve.call0(&JsValue::NULL);
-    }
-}
-
-fn record_websocket_error(
+fn record_worker_error(
+    running: &Rc<RefCell<bool>>,
     last_error: &Rc<RefCell<Option<String>>>,
-    response_waiters: &Rc<RefCell<VecDeque<PendingWebSocketWaiter>>>,
+    pending_ready: &Rc<RefCell<Option<PendingWorkerReady>>>,
     error: String,
 ) {
+    *running.borrow_mut() = false;
     *last_error.borrow_mut() = Some(error.clone());
-    let waiters = response_waiters
-        .borrow_mut()
-        .drain(..)
-        .map(|waiter| waiter.response)
-        .collect::<Vec<_>>();
-    for waiter in waiters {
-        let _ = waiter
+    if let Some(ready) = pending_ready.borrow_mut().take() {
+        let _ = ready
             .reject
             .call1(&JsValue::NULL, &JsValue::from_str(&error));
     }
 }
 
-async fn wait_for_websocket_open(socket: &WebSocket) -> Result<(), String> {
-    let promise = Promise::new(&mut |resolve: Function, reject: Function| {
-        let open = Closure::once_into_js(move |_event: Event| {
-            let _ = resolve.call0(&JsValue::NULL);
-        });
-        let error = Closure::once_into_js(move |_event: Event| {
-            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("websocket open failed"));
-        });
-        socket.set_onopen(Some(open.unchecked_ref()));
-        socket.set_onerror(Some(error.unchecked_ref()));
-    });
-    JsFuture::from(promise)
-        .await
-        .map(|_| {
-            socket.set_onopen(None);
-            socket.set_onerror(None);
-        })
-        .map_err(|error| js_error_string(&error))
+fn set_string(object: &Object, name: &str, value: &str) -> Result<(), String> {
+    Reflect::set(object, &JsValue::from_str(name), &JsValue::from_str(value))
+        .map(|_| ())
+        .map_err(|error| format!("failed to set remote worker field {name}: {error:?}"))
 }
 
-fn websocket_message_bytes(value: JsValue) -> Result<Vec<u8>, String> {
-    if value.is_instance_of::<ArrayBuffer>() {
-        return Ok(Uint8Array::new(&value).to_vec());
-    }
-    if value.is_instance_of::<Uint8Array>() {
-        return Ok(Uint8Array::new(&value).to_vec());
-    }
-    Err(format!("websocket message was not binary data: {value:?}"))
+fn set_number(object: &Object, name: &str, value: f64) -> Result<(), String> {
+    Reflect::set(object, &JsValue::from_str(name), &JsValue::from_f64(value))
+        .map(|_| ())
+        .map_err(|error| format!("failed to set remote worker field {name}: {error:?}"))
+}
+
+fn required_string(value: &JsValue, name: &str) -> Result<String, String> {
+    Reflect::get(value, &JsValue::from_str(name))
+        .map_err(|error| format!("failed to read remote worker field {name}: {error:?}"))?
+        .as_string()
+        .ok_or_else(|| format!("remote worker field {name} was not a string"))
+}
+
+fn required_number(value: &JsValue, name: &str) -> Result<f64, String> {
+    Reflect::get(value, &JsValue::from_str(name))
+        .map_err(|error| format!("failed to read remote worker field {name}: {error:?}"))?
+        .as_f64()
+        .filter(|value| value.is_finite())
+        .ok_or_else(|| format!("remote worker field {name} was not a finite number"))
 }
 
 fn js_error_string(value: &JsValue) -> String {
-    if let Some(message) = value.as_string() {
-        return message;
-    }
-    if let Ok(message) = js_sys::Reflect::get(value, &JsValue::from_str("message"))
-        && let Some(message) = message.as_string()
-    {
-        return message;
-    }
-    format!("{value:?}")
+    value.as_string().unwrap_or_else(|| format!("{value:?}"))
 }

@@ -11,7 +11,8 @@ frame-budget stall) and drop the earlier priority-class design; native remote
 plus focused remote inbound queue work completed 2026-07-07 under
 [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md),
 with autonomous dedicated tick, native full-duplex server push, one ready-only
-native consumer, and bounded connection queues landed 2026-07-13 under
+native consumer, direct dedicated WebSocket peers, worker-owned browser remote,
+and bounded connection queues landed 2026-07-13 under
 [`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md)
 
 ## Purpose
@@ -27,10 +28,10 @@ work: high-frequency XR pose sync called a helper that sent a movement command
 and then opportunistically drained/applied all pending integrated-server
 updates. The shared update pump has removed that local and remote client-frame
 coupling. Native TCP and dedicated authority now implement the target
-full-duplex stream. The remaining producer-side gap is web: its callback
-adapter still tracks command responses, its server listener still loops back
-through native TCP, and production browser remote does not yet prove
-worker-owned socket/decode work.
+full-duplex stream. Production web now follows the same model through a module
+worker that owns the socket and update decode validation. The remaining gap is
+cross-adapter pressure and frame evidence, including measurement of the
+main-side materialization of transferred canonical update buffers.
 
 This doc records the desired state so implementation slices do not drift into
 one-off caps or platform-specific network paths.
@@ -149,9 +150,11 @@ boundaries, and per-connection writers consume bounded publication queues for
 every player without waiting for another inbound command.
 
 Web integrated inline/worker play and web remote WebSocket play also implement
-the shared `ClientConnection` path. Browser worker or WebSocket callbacks remain
-web adapter mechanics, but normal-frame Rust runtime polling enqueues commands
-separately from draining already decoded queued updates.
+the shared `ClientConnection` path. Production remote creates a module worker
+that owns the WebSocket, handshake, command send, receipt, and update decode
+validation. It transfers ordered canonical per-update buffers to the Rust
+adapter, where the budgeted ready-only pump materializes and applies them.
+There is no main-thread WebSocket callback path or command-response waiter.
 
 ## Target Topology
 
@@ -200,10 +203,7 @@ The current shared contract lives in `mclone-app-runtime/src/client_connection.r
 ```text
 trait ClientConnection {
   fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
-  fn drain_next_update(
-    &mut self,
-    mode: ConnectionUpdateDrainMode,
-  ) -> Result<ClientConnectionDrainResult>;
+  fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult>;
   fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics>;
 }
 
@@ -211,7 +211,6 @@ pump_client_connection_updates_report(
   core: &mut SingleViewRuntime,
   connection: &mut impl ClientConnection,
   budget: RuntimeUpdatePumpBudget,
-  drain_mode: ConnectionUpdateDrainMode,
 ) -> Result<RuntimeUpdatePumpReport>
 ```
 
@@ -396,8 +395,10 @@ Native dedicated server:
   advances global simulation once, and routes per-player updates;
 - it never waits for worldgen or socket IO, and autosave is cadence/shutdown
   owned rather than command owned; and
-- TCP and WebSocket sessions terminate at the same host/session boundary. The
-  current one-WebSocket-to-one-loopback-TCP bridge is not the target topology.
+- TCP and WebSocket sessions terminate at the same host/session boundary and
+  allocate from one connection-id registry. WebSocket connections consume the
+  same bounded `DedicatedOutbound` publication queues directly; there is no
+  loopback TCP bridge.
 
 Android XR and flat Android should consume the same native bus boundary. The
 Android app crates should own platform lifecycle and launch arguments, not
@@ -417,8 +418,8 @@ mechanics:
 - `SharedArrayBuffer`/atomics can replace transferable-buffer handoff later,
   but the policy remains the same as native: command enqueue and update drain
   are separate operations.
-- Main-thread WebSocket callbacks and inline integrated servers are named
-  compatibility/smoke fallbacks, not production-quality completion evidence.
+- Inline integrated servers are named compatibility/smoke fallbacks. No
+  main-thread remote WebSocket fallback is retained.
 
 This avoids a web-only engine architecture while still allowing browser APIs to
 stay event-driven.
@@ -447,7 +448,7 @@ stay event-driven.
 - Web and native may differ in transport mechanics, not in command/update
   semantics.
 - Native flat/XR/Android lanes use one native remote adapter. Cross-platform
-  semantic parity is proven by one connection conformance suite over
+- Cross-adapter semantic parity is proven by one connection conformance suite over
   integrated, TCP, and web-worker/WebSocket implementations; XR adds frame
   accounting rather than a forked transport contract.
 - Old render output remains visible until replacement compile/upload work is

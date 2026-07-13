@@ -7,9 +7,7 @@ use mclone_app_runtime::client_connection::{
     QueuedServerUpdate, pump_client_connection_updates_report,
 };
 #[cfg(target_arch = "wasm32")]
-use mclone_app_runtime::host_mode::{
-    diagnostics_command_update_queues_drained, prepare_remote_dedicated_resync_command_for_error,
-};
+use mclone_app_runtime::host_mode::diagnostics_command_update_queues_drained;
 use mclone_app_runtime::{
     RuntimeExchange, RuntimeStepReport, RuntimeUpdatePumpBudget, SingleViewRuntime,
 };
@@ -24,6 +22,8 @@ use mclone_render::RenderBackend;
 use mclone_server::IntegratedServer;
 #[cfg(target_arch = "wasm32")]
 use mclone_server::{ServerRunnerDiagnostics, ServerRunnerKind};
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
 
 pub mod web_scene_protocol;
 
@@ -64,6 +64,52 @@ const PROTOCOL_CODEC_ROUNDTRIP_BIT: u32 = 1 << 7;
 const COMMAND_COUNT_SHIFT: u32 = 8;
 const UPDATE_COUNT_SHIFT: u32 = 16;
 const LOADED_CHUNK_COUNT_SHIFT: u32 = 24;
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_remote_handshake_frame() -> Result<js_sys::Uint8Array, JsValue> {
+    let frame = mclone_net::encode_current_websocket_client_handshake()
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(js_sys::Uint8Array::from(frame.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_validate_remote_handshake(frame: js_sys::Uint8Array) -> Result<(), JsValue> {
+    mclone_net::decode_websocket_server_handshake(
+        &frame.to_vec(),
+        mclone_protocol::PROTOCOL_VERSION,
+    )
+    .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_canonicalize_remote_command(
+    frame: js_sys::Uint8Array,
+) -> Result<js_sys::Uint8Array, JsValue> {
+    let command = mclone_net::decode_websocket_client_command(&frame.to_vec())
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let canonical = mclone_net::encode_websocket_client_command(&command)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(js_sys::Uint8Array::from(canonical.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_decode_remote_update_batch(
+    frame: js_sys::Uint8Array,
+) -> Result<js_sys::Array, JsValue> {
+    let updates = mclone_net::decode_websocket_server_update_batch(&frame.to_vec())
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let frames = js_sys::Array::new();
+    for update in updates {
+        let canonical =
+            encode_server_update(&update).map_err(|error| JsValue::from_str(&error.to_string()))?;
+        frames.push(&js_sys::Uint8Array::from(canonical.as_slice()));
+    }
+    Ok(frames)
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WebSmokeReport {
@@ -276,12 +322,6 @@ impl WebRuntime {
         &mut self,
         command: ClientCommand,
     ) -> Result<WebRuntimeStepReport, String> {
-        #[cfg(target_arch = "wasm32")]
-        if matches!(self.host, WebRuntimeHost::RemoteWebSocket(_)) {
-            return self
-                .send_remote_websocket_and_drain_immediately_async(command)
-                .await;
-        }
         self.enqueue_and_drain_immediately_async(command).await
     }
 
@@ -309,48 +349,6 @@ impl WebRuntime {
             command_exchange.protocol_codec_roundtrip,
             drain_report.transport_drained,
         ))
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    async fn send_remote_websocket_and_drain_immediately_async(
-        &mut self,
-        command: ClientCommand,
-    ) -> Result<WebRuntimeStepReport, String> {
-        match self.enqueue_and_drain_immediately_async(command).await {
-            Ok(report) => Ok(report),
-            Err(error) => {
-                self.reconnect_remote_websocket_and_resync_after_error(error)
-                    .await
-            }
-        }
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    async fn reconnect_remote_websocket_and_resync_after_error(
-        &mut self,
-        error: String,
-    ) -> Result<WebRuntimeStepReport, String> {
-        let resync_command =
-            prepare_remote_dedicated_resync_command_for_error(&mut self.core, &error)
-                .map_err(|resync_error| resync_error.to_string())?;
-        let WebRuntimeHost::RemoteWebSocket(host) = &mut self.host else {
-            return Err("remote websocket reconnect called for non-websocket host".to_owned());
-        };
-        host.reconnect().await.map_err(|reconnect_error| {
-            format!(
-                "failed to reconnect websocket after command failure {error}: {reconnect_error}"
-            )
-        })?;
-        let protocol_codec_roundtrip = host.send_command_acknowledged(resync_command).await?;
-        let drain_report =
-            self.drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())?;
-        let command_report = self.apply_exchange(RuntimeExchange::new(
-            Vec::new(),
-            0,
-            protocol_codec_roundtrip,
-            drain_report.transport_drained,
-        ));
-        Ok(combine_step_reports(command_report, drain_report))
     }
 
     pub const fn client(&self) -> &ClientRuntime {
@@ -442,10 +440,9 @@ impl WebRuntimeHost {
                 .await
                 .map(command_deferred_exchange),
             #[cfg(target_arch = "wasm32")]
-            Self::RemoteWebSocket(host) => host
-                .send_command_acknowledged(command)
-                .await
-                .map(command_deferred_exchange),
+            Self::RemoteWebSocket(host) => {
+                host.queue_command(command).map(command_deferred_exchange)
+            }
         }
     }
 

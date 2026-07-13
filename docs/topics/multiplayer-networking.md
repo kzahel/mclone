@@ -2,9 +2,9 @@
 
 Topic: multiplayer-networking
 
-Status: implementation active — autonomous dedicated ticking, native TCP
-server push, and native consumer convergence landed 2026-07-13; production web
-convergence is next.
+Status: implementation active — autonomous dedicated ticking, native TCP and
+WebSocket server push, native consumer convergence, and worker-owned browser
+remote landed 2026-07-13; shared pressure/conformance evidence is next.
 Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
 
@@ -29,9 +29,11 @@ independent, and normal frame polling accepts unsolicited decoded batches.
 Native runtime adapters now expose one ready-only stream with
 transport-neutral frame/queue diagnostics and no pending-response state.
 Desktop flat/XR and Android flat/XR select the same shared adapter under a
-source purity gate. Browser remote still has response-era callback state and a
-TCP loopback bridge; replacing those production mechanics is the tactical's
-next slice.
+source purity gate. Browser remote now creates a module worker that owns its
+WebSocket, handshake, command send, receipt, and full update decode validation;
+ordered canonical update buffers cross to the same ready-only runtime pump.
+Dedicated WebSocket peers terminate directly in the shared authoritative
+connection registry rather than looping back through native TCP.
 
 The autonomous native wire now has the correct core shape, but session and
 production-web work remain:
@@ -45,9 +47,11 @@ production-web work remain:
   trailing bytes. No compression, no varints.
 - **Transports**: in-process mpsc channels (native local integrated,
   `mclone-server/src/runner.rs:830-991`), length-prefixed TCP
-  (`mclone-net/src/lib.rs:347-1146`), WebSocket codec + bridge
-  (`mclone-dedicated-server/src/websocket_bridge.rs`), Web Worker channel for
-  browser singleplayer (`mclone-web-client/src/web_server_worker.rs`). Real
+  (`mclone-net/src/lib.rs:347-1146`), direct dedicated WebSocket adapter
+  (`mclone-dedicated-server/src/websocket_connection.rs`), Web Worker channels
+  for browser singleplayer and remote play
+  (`mclone-web-client/src/web_server_worker.rs` and
+  `www/mclone-remote-websocket-worker.ts`). Real
   cross-machine play works today over TCP (desktop/Android/XR) and WS
   (browser), validated by dedicated-server smokes.
 - **Client ingress is in good shape**: shared `ClientConnection` trait +
@@ -67,29 +71,26 @@ production-web work remain:
 
 ## Structural gaps (the reasons this topic exists)
 
-1. **Web response-era consumer compatibility.** Native TCP and app-runtime are
-   full-duplex/ready-only, but the browser WebSocket adapter still tracks
-   `pending_response_batches` and response waiters. Tactical 176 Slice 5
-   replaces that callback shape with worker-owned WebSocket receipt/decode and
-   the same logical queue contract.
-2. **Production web is not converged yet.** Browser remote still decodes
-   WebSocket frames through main-thread callbacks and the dedicated WebSocket
-   listener remains a one-WebSocket-to-one-native-TCP bridge. Slice 5 moves
-   both sides onto the shared host/connection model with worker-owned browser
-   receipt and decode.
-3. **No session layer.** Connection = anonymous player slot; no identity, no
+1. **Pressure/conformance evidence is incomplete.** Production native and web
+   adapters now have the intended topology and bounded queues, but Tactical
+   176 Slice 6 still owns one reusable semantic suite, deliberate saturation,
+   slow-consumer disconnect evidence, sustained churn, and comparable frame
+   accounting. The browser worker fully validates/decode-round-trips updates,
+   then transfers canonical per-update buffers; main-side materialization is
+   charged to the budgeted apply path and must be measured under churn.
+2. **No session layer.** Connection = anonymous player slot; no identity, no
    join phase beyond a version handshake, no keepalive/timeouts (dead peers
    only detected by IO errors), no rejoin-as-same-player; reconnect wipes the
    whole client replica and re-syncs the view
    (`mclone-app-runtime/src/host_mode.rs:304-338`).
-4. **Persistence gaps that block real multiplayer**: player state (position,
+3. **Persistence gaps that block real multiplayer**: player state (position,
    rotation, inventory) is not persisted at all — `LoadPlayer` is hard-wired
    "reserved" (`mclone-server/src/persistence.rs:1069-1075`, no `SavePlayer`
    variant); the **seed is not stored in the world save** (dedicated server
    takes `--seed` per launch; a mismatch silently forks generation); and
    `day_time` resets to 1000 every process start
    (`mclone-server/src/integrated.rs:146,331`).
-5. **Debug surface baked into the protocol**: `ShootDebugPhysicsCube`,
+4. **Debug surface baked into the protocol**: `ShootDebugPhysicsCube`,
    `SetDebugHotbarSlot`, `PlayerActionKind::DebugInstantBreak`,
    `EntityKind::DebugCube`, `debug_passive_showcase` defaulting on
    (`mclone-protocol/src/lib.rs:57-67`, `mclone-server/src/runner.rs:647`).

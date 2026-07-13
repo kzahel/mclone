@@ -1,13 +1,11 @@
 mod connection;
 mod dedicated_smoke;
 mod session;
-mod websocket_bridge;
+mod websocket_connection;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -18,7 +16,6 @@ use mclone_server::{
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
 use crate::session::{DedicatedSession, DedicatedSessionDiagnostics};
-use crate::websocket_bridge::{WebSocketBridgeMode, run_websocket_bridge};
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
 const DEFAULT_SEED: i64 = 12345;
@@ -195,7 +192,7 @@ fn print_help() {
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
-         The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws enables a WebSocket bridge for browser clients. --serve-once is intended for loopback smokes and exits after the first connection closes."
+         The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
@@ -238,9 +235,8 @@ fn run_server(cli: Cli) -> Result<()> {
         ServerRunMode::Forever
     };
     if let Some(listen_ws) = cli.listen_ws.as_deref() {
-        return run_server_with_websocket_bridge(
+        return run_server_with_websocket(
             listener,
-            local_addr,
             listen_ws,
             cli.seed,
             cli.world_generation_profile,
@@ -274,9 +270,8 @@ fn open_dedicated_server(
     Ok(server)
 }
 
-fn run_server_with_websocket_bridge(
+fn run_server_with_websocket(
     listener: TcpListener,
-    upstream_addr: std::net::SocketAddr,
     listen_ws: &str,
     seed: i64,
     profile: WorldGenerationProfile,
@@ -284,46 +279,12 @@ fn run_server_with_websocket_bridge(
     mode: ServerRunMode,
 ) -> Result<()> {
     let ws_listener = TcpListener::bind(listen_ws)
-        .with_context(|| format!("failed to bind dedicated websocket bridge to {listen_ws}"))?;
+        .with_context(|| format!("failed to bind dedicated websocket listener to {listen_ws}"))?;
     let ws_addr = ws_listener
         .local_addr()
         .context("failed to read websocket listen addr")?;
-    println!("mclone dedicated websocket listening on ws://{ws_addr} upstream={upstream_addr}");
-
-    let (ready_tx, ready_rx) = mpsc::channel();
-    let server_thread = thread::Builder::new()
-        .name("mclone-dedicated-server-loop".to_owned())
-        .spawn(move || {
-            run_server_loop_with_ready(listener, seed, profile, world, mode, Some(ready_tx))
-        })
-        .context("failed to spawn dedicated server loop for websocket bridge")?;
-    match ready_rx.recv() {
-        Ok(Ok(())) => {}
-        Ok(Err(message)) => {
-            let _ = server_thread.join();
-            bail!(message);
-        }
-        Err(_) => {
-            return match server_thread.join() {
-                Ok(Err(error)) => Err(error),
-                Ok(Ok(())) => bail!("dedicated server loop exited during startup"),
-                Err(_) => bail!("dedicated server loop thread panicked during startup"),
-            };
-        }
-    }
-    let bridge_mode = match mode {
-        ServerRunMode::Forever => WebSocketBridgeMode::Forever,
-        ServerRunMode::ServeOnce => WebSocketBridgeMode::ServeOnce,
-        #[cfg(test)]
-        ServerRunMode::UntilDisconnects(_) => WebSocketBridgeMode::ServeOnce,
-    };
-    let bridge_result = run_websocket_bridge(ws_listener, upstream_addr, bridge_mode);
-    if bridge_result.is_ok() && mode == ServerRunMode::ServeOnce {
-        server_thread
-            .join()
-            .map_err(|_| anyhow::anyhow!("dedicated server loop thread panicked"))??;
-    }
-    bridge_result
+    println!("mclone dedicated websocket listening on ws://{ws_addr}");
+    run_server_loop_with_listeners(listener, Some(ws_listener), seed, profile, world, mode)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -357,40 +318,19 @@ fn run_server_loop_with_profile(
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
 ) -> Result<()> {
-    run_server_loop_with_ready(listener, seed, profile, world, mode, None)
+    run_server_loop_with_listeners(listener, None, seed, profile, world, mode)
 }
 
-fn run_server_loop_with_ready(
+fn run_server_loop_with_listeners(
     listener: TcpListener,
+    websocket_listener: Option<TcpListener>,
     seed: i64,
     profile: WorldGenerationProfile,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
-    ready_tx: Option<mpsc::Sender<std::result::Result<(), String>>>,
 ) -> Result<()> {
-    let network = match DedicatedNetwork::start(listener) {
-        Ok(network) => network,
-        Err(error) => {
-            if let Some(ready_tx) = ready_tx {
-                let _ = ready_tx.send(Err(format!("{error:#}")));
-            }
-            return Err(error);
-        }
-    };
-    let mut server = match open_dedicated_server(seed, profile, &world) {
-        Ok(server) => {
-            if let Some(ready_tx) = ready_tx {
-                let _ = ready_tx.send(Ok(()));
-            }
-            server
-        }
-        Err(error) => {
-            if let Some(ready_tx) = ready_tx {
-                let _ = ready_tx.send(Err(format!("{error:#}")));
-            }
-            return Err(error);
-        }
-    };
+    let network = DedicatedNetwork::start_with_websocket(listener, websocket_listener)?;
+    let mut server = open_dedicated_server(seed, profile, &world)?;
     let loop_result = run_server_loop_inner(network, &mut server, mode);
     let shutdown_result = server
         .shutdown_persistence()
