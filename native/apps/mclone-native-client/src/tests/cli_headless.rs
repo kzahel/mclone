@@ -14,6 +14,10 @@ fn cli_parses_warm_world_swap_smoke_options() {
         "12345".to_owned(),
         "--warm-world-standby-seed".to_owned(),
         "67890".to_owned(),
+        "--warm-world-standby-cadence".to_owned(),
+        "5/5/5".to_owned(),
+        "--warm-world-cost-sample-ms".to_owned(),
+        "1000".to_owned(),
     ])
     .unwrap();
 
@@ -27,6 +31,11 @@ fn cli_parses_warm_world_swap_smoke_options() {
     assert_eq!([options.width, options.height], [640, 360]);
     assert_eq!(options.scene.seed, 12345);
     assert_eq!(options.scene.warm_world_standby_seed, Some(67890));
+    assert_eq!(
+        options.scene.warm_world_standby_cadence,
+        Some(mclone_server::SimulationCadenceConfig::new(5, 5, 5))
+    );
+    assert_eq!(options.cost_sample_ms, 1000);
 }
 
 #[test]
@@ -41,6 +50,28 @@ fn cli_requires_standby_seed_for_warm_world_swap_smoke() {
         error
             .to_string()
             .contains("requires --warm-world-standby-seed")
+    );
+}
+
+#[test]
+fn cli_rejects_warm_world_cost_controls_outside_the_gate_smoke() {
+    let cadence_error = Cli::parse([
+        "--warm-world-standby-cadence".to_owned(),
+        "5/5/5".to_owned(),
+    ])
+    .unwrap_err();
+    assert!(
+        cadence_error
+            .to_string()
+            .contains("requires --warm-world-standby-seed")
+    );
+
+    let sample_error =
+        Cli::parse(["--warm-world-cost-sample-ms".to_owned(), "1000".to_owned()]).unwrap_err();
+    assert!(
+        sample_error
+            .to_string()
+            .contains("requires --warm-world-swap-smoke")
     );
 }
 

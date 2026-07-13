@@ -1,6 +1,6 @@
 # 174: Warm World Hot Swap
 
-Status: Slice 6 opaque interactive gate checkpoint ready for review 2026-07-13.
+Status: Slice 7 measurement checkpoint ready for review 2026-07-13.
 Slice 0's lower-level dual-integrated-host proof landed in commit `a31ac944`;
 Slice 1's ownership audit, characterization locks, and one-world baselines are
 recorded below. Slice 2 grouped the audited 13 per-world fields in one concrete
@@ -15,10 +15,13 @@ the old active world ready for return. Slice 6 instantiates the paired
 runtime-only fixture, renders it as an opaque depth-writing surface, and crosses
 it A-to-B-to-A from real flat walking and the synthetic stereo eye midpoint.
 Flat, per-eye stereo, no-request, ownership, web/WASM, and release-performance
-gates pass. Slice 7 lifecycle/background-cost closeout remains. A capable-device
-full-frame multiview receipt remains a named gap because the current macOS
-adapter does not expose `wgpu::Features::MULTIVIEW`; the path materializes both
-terrain and gate multiview pipelines before readiness when that feature exists.
+gates pass. Slice 7 now measures paired one/two-world process cost, exposes an
+optional standby-only simulation cadence, and proves active cadence restoration
+through both gate directions. Lifecycle, invalidation, and device closeout
+remain. A capable-device full-frame multiview receipt remains a named gap
+because the current macOS adapter does not expose
+`wgpu::Features::MULTIVIEW`; the path materializes both terrain and gate
+multiview pipelines before readiness when that feature exists.
 
 Topic: `embedded-worlds`
 
@@ -1334,6 +1337,81 @@ Deliverables:
 - Update `docs/topics/embedded-worlds.md`, `docs/native-engine-architecture.md`,
   and platform parity status with landed evidence and remaining composition
   work.
+
+Measurement checkpoint implementation and evidence (2026-07-13):
+
+- `--warm-world-standby-cadence <idle/active/max>` optionally slows only the
+  detached runtime after it becomes switchable. Selection restores the
+  destination's authored active cadence and applies the standby cadence to the
+  demoted source. The A-to-B and B-to-A smoke reports assert both changes. No
+  cadence option means the pre-checkpoint behavior is unchanged.
+- `--warm-world-cost-sample-ms <milliseconds>` adds best-effort paired native
+  process receipts to the existing offscreen smoke. It waits for the ordinary
+  active world to become idle, samples that one-world process, explicitly
+  starts and warms the standby, then samples the retained two-world process
+  before walking through the gate. Schema-3 `report.json` also records startup
+  CPU/GPU work totals, worst advances, renderer-shell creation, retained seed
+  bytes, estimated GPU terrain bytes, applied cadence, and managed thread roles.
+  The sampler has a one-second unmeasured settling interval before each
+  measured interval.
+- The repeatable wrappers are `pnpm native:warm-world-cost:default` and
+  `pnpm native:warm-world-cost:throttled`. Both use an already-built release
+  binary, three-second one/two-world samples, frozen visual time and scheduled
+  fluids, no actors, and disabled lighting. The throttled wrapper requests
+  `5/5/5` ticks per second while standby; the default retains `20/20/60`.
+- Before accepting the batches, the 14-core M4 Pro was observed at 83-90% CPU
+  idle with no concurrent Cargo/Rust compiler, emulator, or test process. An
+  initial unsettled batch was discarded. Five settled default runs measured a
+  median 15.24% of one CPU core with one world and 21.10% with two. The paired
+  standby increment was 5.63 percentage points (range 3.52-6.92). Five
+  throttled runs measured a median paired increment of -0.15 points (range
+  -0.56 to +0.56), which is measurement noise: the existing cadence control
+  removes the observed idle standby CPU cost on this host.
+- A second integrated world adds six managed threads by role: integrated
+  server tick, worldgen, light-status, render compiler dispatcher, one compiler
+  worker, and chunk drop. Observed whole-process thread counts normally moved
+  from 10 to 16. The roles remain allocated at throttled cadence; throttling
+  changes work frequency, not ownership or residency.
+- Median default retained-process RSS increased by 37,408 KiB (36.5 MiB), with
+  a 35,312-39,168 KiB range. Throttled median RSS increased by 36,496 KiB
+  (35.6 MiB), with one 57,664 KiB outlier associated with an 80-section
+  retained startup. Cadence therefore reduces background CPU, not memory.
+  Readiness timing can retain 48, 64, or 80 startup sections, so this receipt is
+  intentionally a range rather than a deterministic allocation claim.
+- Retained startup terrain occupied 3.80-5.07 MiB in both the CPU seed and the
+  conservative GPU vertex/index estimate. Each duplicate renderer shell also
+  owns at least the 8 MiB base atlas; mip levels, pipelines, allocator overhead,
+  and driver-private storage are not included. The five default runs had a
+  593.9 ms median warm latency, 34.4 ms median shell creation, 1.92 ms total
+  startup-pump CPU, and 3.39 ms total GPU-admission CPU. Worst individual
+  startup/GPU advances were 1.25/0.33 ms. Throttled cadence is applied only
+  after readiness, so it does not change this initial warm work.
+- Ten default atomic switches measured 0.0046-0.0128 ms (0.0072 ms median).
+  Ten cadence-changing switches measured 0.0088-0.0185 ms (0.0118 ms median).
+  Every switch retained zero boundary compile, upload, renderer construction,
+  or runtime reconstruction.
+- Five contemporaneous no-standby candidate runs measured 2.803 ms median
+  average and 4.404 ms median P95. Five clean Slice-6-base runs measured
+  2.702/4.336 ms, after which three strictly interleaved base/candidate pairs
+  measured medians of 2.870/4.506 ms and 2.811/4.355 ms respectively. The
+  strongest paired comparison therefore favors the candidate by 2.1% average
+  and 3.4% P95. All runs retained 1,936 initial sections with zero accounting
+  failures; there is no measured single-world regression.
+- The maintainer manually launched the Slice 6 CLI fixture and confirmed that
+  the opaque gate works interactively in both directions. Slice 7's remaining
+  work is lifecycle/persistence flushing, failure/cancellation/replacement,
+  asset-epoch invalidation, surface/device rebuild, capable-device multiview,
+  and final architecture/platform reconciliation. This checkpoint deliberately
+  stops before changing those policies.
+- Final checkpoint validation passes 106 `mclone-scene` unit tests plus eight
+  ownership contracts, 153 `mclone-native-client` tests, the focused runtime
+  cadence test, both dual-integrated-host persistence/isolation tests,
+  thin-adapter purity, browser/WASM compilation, and a release throttled-cost
+  A-to-B-to-A smoke. The final smoke again added six observed threads, applied
+  `5/5/5` only while standby, restored cadence in both directions, and performed
+  no switch-boundary reconstruction or upload work. The accepted cost numbers
+  above remain the earlier five-run settled batches, not this one-off final
+  functional check.
 
 Exit criteria: the milestone is complete only with measured switch behavior,
 background cost, memory cost, and no significant single-world regression.

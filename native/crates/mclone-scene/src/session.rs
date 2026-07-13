@@ -1265,6 +1265,10 @@ impl McloneSceneHost {
         scene.world_dir = None;
         scene.use_initial_spawn_center = false;
         let scene = scene.validated()?;
+        let standby_cadence = request.standby_cadence.unwrap_or(scene.simulation_cadence);
+        if !standby_cadence.is_valid() {
+            bail!("warm-world standby cadence must be valid");
+        }
         let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
         let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
         let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
@@ -1347,8 +1351,12 @@ impl McloneSceneHost {
             atlas_size: [self.mesh_assets.atlas.width, self.mesh_assets.atlas.height],
             atlas_base_bytes: self.mesh_assets.atlas.byte_len(),
             asset_epoch,
+            standby_cadence,
+            standby_cadence_applied: false,
             poll_count: 0,
             poll_ms: 0.0,
+            startup_advance_count: 0,
+            startup_advance_total_ms: 0.0,
             last_advance_ms: 0.0,
             worst_advance_ms: 0.0,
             worst_startup_step_ms: 0.0,
@@ -1358,6 +1366,7 @@ impl McloneSceneHost {
             gpu_ready_at: None,
             upload_queue_nonempty_since: None,
             last_gpu_advance_ms: 0.0,
+            gpu_advance_total_ms: 0.0,
             worst_gpu_advance_ms: 0.0,
             gpu_advance_count: 0,
             gpu_ready_advance_count: 0,
@@ -1593,6 +1602,7 @@ impl McloneSceneHost {
         }
 
         let renderer_multiview_required = state.renderer_multiview_required;
+        let standby_cadence = state.standby_cadence;
         let source_renderer_ready = !renderer_multiview_required
             || self.active_world.draw.multiview_renderer_materialized();
         let destination_renderer_ready =
@@ -1724,14 +1734,18 @@ impl McloneSceneHost {
             );
         }
 
-        let source_cadence = self.active_world.scene.simulation_cadence;
+        // Demote the old active runtime to the launch-scoped standby cadence;
+        // restore the selected destination to its authored active cadence.
+        // This is the only simulation-rate distinction between the retained
+        // slots and is applied before their ownership exchange.
+        let source_cadence = standby_cadence;
         let source_cadence_changed = self
             .active_world
             .runtime
             .as_mut()
             .expect("active runtime presence checked")
             .set_simulation_cadence(source_cadence)
-            .context("restore source world simulation cadence before demotion")?;
+            .context("apply standby simulation cadence before source demotion")?;
         let destination_cadence_changed = {
             let standby = self
                 .standby_world
@@ -1933,8 +1947,11 @@ impl McloneSceneHost {
         state.renderer_multiview_required = renderer_multiview_required;
         state.renderer_multiview_materialized = renderer_multiview_materialized;
         state.asset_epoch = standby.asset_epoch;
+        state.standby_cadence_applied = true;
         state.poll_count = 0;
         state.poll_ms = 0.0;
+        state.startup_advance_count = 0;
+        state.startup_advance_total_ms = 0.0;
         state.last_advance_ms = 0.0;
         state.worst_advance_ms = 0.0;
         state.worst_startup_step_ms = 0.0;
@@ -1944,6 +1961,7 @@ impl McloneSceneHost {
         state.gpu_ready_at = Some(now);
         state.upload_queue_nonempty_since = (queue.queued_lifecycle_items > 0).then_some(now);
         state.last_gpu_advance_ms = 0.0;
+        state.gpu_advance_total_ms = 0.0;
         state.worst_gpu_advance_ms = 0.0;
         state.gpu_advance_count = 0;
         state.gpu_ready_advance_count = 0;
@@ -2295,6 +2313,8 @@ impl McloneSceneHost {
         }
 
         let advance_ms = elapsed_ms(self.services.clock.elapsed_since(advance_started_at));
+        state.startup_advance_count = state.startup_advance_count.saturating_add(1);
+        state.startup_advance_total_ms += advance_ms;
         state.last_advance_ms = advance_ms;
         state.worst_advance_ms = state.worst_advance_ms.max(advance_ms);
         if !retain_slot {
@@ -2509,9 +2529,26 @@ impl McloneSceneHost {
 
         let advance_ms = elapsed_ms(self.services.clock.elapsed_since(advance_started_at));
         state.last_gpu_advance_ms = advance_ms;
+        state.gpu_advance_total_ms += advance_ms;
         state.worst_gpu_advance_ms = state.worst_gpu_advance_ms.max(advance_ms);
         state.gpu_advance_count = state.gpu_advance_count.saturating_add(1);
         if state.readiness.switchable && state.phase != WarmWorldStandbyPhase::ResolvingEndpoints {
+            if !state.standby_cadence_applied {
+                let cadence_result = slot
+                    .runtime
+                    .as_mut()
+                    .expect("switchable standby owns a runtime")
+                    .set_simulation_cadence(state.standby_cadence);
+                if let Err(error) = cadence_result {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.readiness.switchable = false;
+                    state.failure = Some(format!("apply standby simulation cadence: {error:#}"));
+                    self.standby_world = Some(slot);
+                    self.warm_world_standby = Some(state);
+                    return Ok(());
+                }
+                state.standby_cadence_applied = true;
+            }
             if state.gpu_ready_at.is_none() {
                 state.gpu_ready_at = Some(self.services.clock.now());
                 state.gpu_ready_advance_count = state.gpu_advance_count;

@@ -13,6 +13,7 @@ use mclone_mesh::RenderSectionKey;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::opaque_world_gate::OpaqueWorldGate;
 use mclone_render_session::EngineCameraController;
+use mclone_server::SimulationCadenceConfig;
 
 use crate::McloneSceneHostOptions;
 
@@ -63,11 +64,21 @@ impl WorldInstanceId {
 pub struct WarmWorldStandbyRequest {
     pub seed: i64,
     pub entry_center: ChunkPos,
+    pub standby_cadence: Option<SimulationCadenceConfig>,
 }
 
 impl WarmWorldStandbyRequest {
     pub const fn new(seed: i64, entry_center: ChunkPos) -> Self {
-        Self { seed, entry_center }
+        Self {
+            seed,
+            entry_center,
+            standby_cadence: None,
+        }
+    }
+
+    pub const fn with_standby_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
+        self.standby_cadence = Some(cadence);
+        self
     }
 }
 
@@ -432,14 +443,19 @@ pub struct WarmWorldStandbySnapshot {
     pub atlas_size: [u32; 2],
     pub atlas_base_bytes: usize,
     pub asset_epoch: u64,
+    pub standby_cadence: SimulationCadenceConfig,
+    pub standby_cadence_applied: bool,
     pub poll_count: usize,
     pub poll_ms: f64,
+    pub startup_advance_count: usize,
+    pub startup_advance_total_ms: f64,
     pub last_advance_ms: f64,
     pub worst_advance_ms: f64,
     pub worst_startup_step_ms: f64,
     pub worst_runtime_poll_ms: f64,
     pub endpoint_resolution_ms: f64,
     pub gpu_warm_ms: f64,
+    pub gpu_advance_total_ms: f64,
     pub last_gpu_advance_ms: f64,
     pub worst_gpu_advance_ms: f64,
     pub gpu_advance_count: usize,
@@ -460,6 +476,7 @@ pub struct WarmWorldStandbySnapshot {
     pub gpu_section_count: usize,
     pub gpu_vertex_count: u32,
     pub gpu_index_count: u32,
+    pub estimated_gpu_terrain_bytes: usize,
     pub accepted_compile_result_count: usize,
     pub released_compile_job_count: usize,
     pub readiness: WarmWorldReadiness,
@@ -579,8 +596,12 @@ pub(crate) struct WarmWorldStandbyState {
     pub atlas_size: [u32; 2],
     pub atlas_base_bytes: usize,
     pub asset_epoch: u64,
+    pub standby_cadence: SimulationCadenceConfig,
+    pub standby_cadence_applied: bool,
     pub poll_count: usize,
     pub poll_ms: f64,
+    pub startup_advance_count: usize,
+    pub startup_advance_total_ms: f64,
     pub last_advance_ms: f64,
     pub worst_advance_ms: f64,
     pub worst_startup_step_ms: f64,
@@ -590,6 +611,7 @@ pub(crate) struct WarmWorldStandbyState {
     pub gpu_ready_at: Option<MonotonicInstant>,
     pub upload_queue_nonempty_since: Option<MonotonicInstant>,
     pub last_gpu_advance_ms: f64,
+    pub gpu_advance_total_ms: f64,
     pub worst_gpu_advance_ms: f64,
     pub gpu_advance_count: usize,
     pub gpu_ready_advance_count: usize,
@@ -632,8 +654,12 @@ impl WarmWorldStandbyState {
             atlas_size: self.atlas_size,
             atlas_base_bytes: self.atlas_base_bytes,
             asset_epoch: self.asset_epoch,
+            standby_cadence: self.standby_cadence,
+            standby_cadence_applied: self.standby_cadence_applied,
             poll_count: self.poll_count,
             poll_ms: self.poll_ms,
+            startup_advance_count: self.startup_advance_count,
+            startup_advance_total_ms: self.startup_advance_total_ms,
             last_advance_ms: self.last_advance_ms,
             worst_advance_ms: self.worst_advance_ms,
             worst_startup_step_ms: self.worst_startup_step_ms,
@@ -642,6 +668,7 @@ impl WarmWorldStandbyState {
             gpu_warm_ms: self.gpu_warm_started_at.map_or(0.0, |started_at| {
                 elapsed_between_ms(started_at, self.gpu_ready_at.unwrap_or(now))
             }),
+            gpu_advance_total_ms: self.gpu_advance_total_ms,
             last_gpu_advance_ms: self.last_gpu_advance_ms,
             worst_gpu_advance_ms: self.worst_gpu_advance_ms,
             gpu_advance_count: self.gpu_advance_count,
@@ -667,6 +694,10 @@ impl WarmWorldStandbyState {
             gpu_section_count: self.gpu_section_count,
             gpu_vertex_count: self.gpu_vertex_count,
             gpu_index_count: self.gpu_index_count,
+            estimated_gpu_terrain_bytes: estimated_gpu_terrain_bytes(
+                self.gpu_vertex_count,
+                self.gpu_index_count,
+            ),
             accepted_compile_result_count: self.accepted_compile_result_count,
             released_compile_job_count: self.released_compile_job_count,
             readiness: self.readiness,
@@ -675,6 +706,12 @@ impl WarmWorldStandbyState {
             failure: self.failure.clone(),
         }
     }
+}
+
+fn estimated_gpu_terrain_bytes(vertex_count: u32, index_count: u32) -> usize {
+    (vertex_count as usize)
+        .saturating_mul(std::mem::size_of::<mclone_mesh::TexturedChunkVertex>())
+        .saturating_add((index_count as usize).saturating_mul(std::mem::size_of::<u32>()))
 }
 
 fn elapsed_between_ms(start: MonotonicInstant, end: MonotonicInstant) -> f64 {

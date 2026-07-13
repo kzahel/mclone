@@ -6,7 +6,7 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design plus a Slice 6 scene-owned interactive warm-world gate.** The
+Status: **design plus a measured Slice 7 scene-owned warm-world path.** The
 engine still does not compose two worlds in one frame, but `McloneSceneHost`
 now owns one direct active `DrawableWorldSlot`, one optional detached standby,
 and—only for the launch diagnostic—a paired runtime-only `WorldGate`. The two
@@ -28,19 +28,19 @@ world composition. Separately,
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
 current startup/reset/asset-epoch contracts, and records renderer-shell,
-thread/cadence, offscreen, frame-budget, and synthetic-stereo baselines. A
-maintainer manual desktop-flat smoke found ordinary single-world behavior
-normal. A five-run audit on the current M4 Pro Mac accepts the 240-frame 120 Hz
-frame-budget probe as the flat release timing anchor and marks timedemo frame
-timing too variable for regression decisions on this host. This records the
-larger vision, the fidelity ladder, concrete engine seams, and the warm-world
-burn-down so future slices do not have to re-derive them. The bounded first
-implementation milestone is
+thread/cadence, process-memory, offscreen, frame-budget, and synthetic-stereo
+baselines. An optional standby-only cadence removes the measured idle CPU
+increment on the current M4 Pro while restoring ordinary cadence as each world
+becomes active. A maintainer manually confirmed the interactive gate works in
+both directions. Contemporaneous release A/B runs find no significant
+single-world regression. This records the larger vision, the fidelity ladder,
+concrete engine seams, and the warm-world burn-down so future slices do not
+have to re-derive them. The bounded first implementation milestone is
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md): retain
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 6 checkpoint).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 7 measurement checkpoint).
 
 ## Motivation
 
@@ -172,6 +172,30 @@ no-standby release batch measured 2.525 ms median average / 4.400 ms median P95
 with 6.5%/9.1% within-batch ranges, zero missed budgets, and zero accounting
 violations. Those medians are only 0.8%/1.2% above the accepted Slice 5 batch,
 clearing the single-world performance invariant.
+
+The Slice 7 measurement harness now takes paired same-process samples after the
+active world is idle and again after the detached world is switchable. Five
+settled default-cadence runs measured a median 5.63 percentage-point increment
+of one CPU core, six additional managed threads, and 36.5 MiB additional RSS.
+Retained CPU seed and conservatively estimated GPU terrain storage ranged from
+3.80 to 5.07 MiB as readiness retained 48-80 startup sections; the duplicate
+renderer separately owns at least an 8 MiB base atlas plus mips, pipelines, and
+driver-private storage. Applying the existing runtime cadence at `5/5/5` only
+while standby reduced the five-run median paired CPU increment to measurement
+noise (-0.15 points) without changing thread or memory ownership. Both gate
+directions prove the selected destination returns to its authored active
+cadence and the demoted source receives the standby cadence.
+
+The same checkpoint records a 593.9 ms default median initial warm latency,
+34.4 ms renderer-shell creation, 1.92 ms total startup-pump CPU, 3.39 ms total
+GPU-admission CPU, and worst individual startup/GPU advances of 1.25/0.33 ms.
+Atomic slot exchanges remain 0.0046-0.0185 ms with and without cadence changes
+and do no boundary compile, upload, renderer construction, or runtime creation.
+Five-run candidate/base batches plus three strictly interleaved pairs found no
+single-world release regression; the interleaved candidate medians were 2.1%
+lower in average frame cost and 3.4% lower at P95. These are desktop process
+receipts, not portable hardware budgets. Lifecycle, asset-epoch, device-loss,
+and capable-device multiview closeout remain open.
 
 The near-term product shape is:
 
@@ -425,17 +449,17 @@ Ship independently valuable increments while keeping the one-world path direct:
 The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
 
-1. Keep the landed active-plus-optional-standby path, atomic scripted
-   A-to-B-to-A swap, and desktop/XR/no-request frame-budget receipts green.
-   Implement Tactical 174 Slice 6's shared opaque gate without changing the
-   complete-slot ownership exchange.
+1. Keep the landed active-plus-optional-standby path, opaque A-to-B-to-A gate,
+   optional standby cadence, and desktop/XR/no-request cost receipts green.
+   Finish Tactical 174's lifecycle, persistence, cancellation/replacement,
+   asset-epoch, surface/device rebuild, and fixture-isolation closeout without
+   changing the complete-slot ownership exchange.
 2. Keep the dual-host view and persistent-root isolation smokes green.
    Preserve the materialized mono/per-eye/multiview readiness contract and
-   close its outstanding capable-device receipt on XR/Windows. Generalize to
-   an N-world registry only after the bounded hot-swap milestone needs one.
-3. Extend the frame-advancing script from direct selection to deterministic
-   signed-distance gate crossing, preserving next-frame drawing, no
-   reconstruction, and the old active as the ready return destination.
+   close its outstanding capable-device receipt on XR/Windows.
+3. Generalize to an N-world registry or simultaneous geometry composition only
+   after the bounded hot-swap milestone is closed and a concrete next
+   experience requires it.
 4. Lobby spawn: authoritative world behavior profile + authored room.
 5. T0 baked diorama: placement transform, transformed fog/culling, shared depth,
    and both mono/per-eye/multiview validation.

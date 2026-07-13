@@ -119,12 +119,13 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
     });
     configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
     if let Some(seed) = scene.warm_world_standby_seed {
-        host.begin_warm_world_standby(
-            device,
-            queue,
-            WarmWorldStandbyRequest::new(seed, ChunkPos::new(scene.chunk_x, scene.chunk_z)),
-        )
-        .context("initialize launch-only warm-world standby")?;
+        let mut request =
+            WarmWorldStandbyRequest::new(seed, ChunkPos::new(scene.chunk_x, scene.chunk_z));
+        if let Some(cadence) = scene.warm_world_standby_cadence {
+            request = request.with_standby_cadence(cadence);
+        }
+        host.begin_warm_world_standby(device, queue, request)
+            .context("initialize launch-only warm-world standby")?;
     }
     Ok(host)
 }

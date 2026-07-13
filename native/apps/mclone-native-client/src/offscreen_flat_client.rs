@@ -1,11 +1,13 @@
 use std::path::PathBuf;
+#[cfg(unix)]
+use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::frame_render::FullFrameRenderSummary;
 use mclone_client::{ActorPresentationId, ClientHost, ClientRuntime};
-use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId};
+use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos};
 use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_scene::{MonoUiPresentation, MonoWorldActionStatus};
@@ -245,6 +247,24 @@ pub(crate) struct WarmWorldSwapSmokeReport {
     pub(crate) switches: Vec<mclone_scene::WarmWorldSwitchReport>,
     pub(crate) source_destination_difference_ratio: f64,
     pub(crate) destination_gate_difference_ratio: f64,
+    pub(crate) process_cost: Option<WarmWorldProcessCostReport>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WarmWorldProcessIdleSample {
+    pub(crate) duration_ms: u64,
+    pub(crate) cpu_time_ms: Option<f64>,
+    pub(crate) cpu_percent_of_one_core: Option<f64>,
+    pub(crate) rss_kb: Option<u64>,
+    pub(crate) thread_count: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WarmWorldProcessCostReport {
+    pub(crate) one_world: WarmWorldProcessIdleSample,
+    pub(crate) two_worlds: WarmWorldProcessIdleSample,
+    pub(crate) retained_rss_delta_kb: Option<i64>,
+    pub(crate) observed_thread_delta: Option<i64>,
 }
 
 struct WarmWorldSwapSmokeState {
@@ -256,6 +276,8 @@ struct WarmWorldSwapSmokeState {
         i64,
         usize,
     )>,
+    initial_standby: mclone_scene::WarmWorldStandbySnapshot,
+    process_cost: Option<WarmWorldProcessCostReport>,
 }
 
 pub(crate) struct OffscreenFlatClientHost {
@@ -512,7 +534,7 @@ impl OffscreenFlatClientHost {
                 .driver
                 .drive_until_warm_world_standby_ready(device, queue)?;
             eprintln!(
-                "warm_world_standby id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} multiview_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} initial_uploads={}/{} initial_releases={} gpu_advances={}/{} gpu_ms={:.3} gpu_sections={} gpu_indices={} queue={} queue_bytes={} entry_resident={} topology_ready={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} worst_gpu_ms={:.3} endpoint_ms={:.3} skipped_no_slack={}",
+                "warm_world_standby id={} seed={} phase={} elapsed_ms={:.3} shell_ms={:.3} multiview_ms={:.3} polls={} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} startup_advances={} startup_cpu_ms={:.3} initial_uploads={}/{} initial_releases={} gpu_advances={}/{} gpu_elapsed_ms={:.3} gpu_cpu_ms={:.3} gpu_sections={} gpu_indices={} gpu_bytes={} queue={} queue_bytes={} entry_resident={} topology_ready={} cadence={}/{}/{} cadence_applied={} worst_advance_ms={:.3} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} worst_gpu_ms={:.3} endpoint_ms={:.3} skipped_no_slack={}",
                 standby.instance_id.get(),
                 standby.seed,
                 standby.phase.label(),
@@ -524,19 +546,27 @@ impl OffscreenFlatClientHost {
                 standby.startup_seed_sections,
                 standby.startup_seed_drawable_sections,
                 standby.startup_seed_owned_bytes,
+                standby.startup_advance_count,
+                standby.startup_advance_total_ms,
                 standby.initial_upload_applied_lifecycle_items,
                 standby.initial_upload_lifecycle_items,
                 standby.initial_upload_released_compile_jobs,
                 standby.gpu_advance_count,
                 standby.gpu_ready_advance_count,
                 standby.gpu_warm_ms,
+                standby.gpu_advance_total_ms,
                 standby.gpu_section_count,
                 standby.gpu_index_count,
+                standby.estimated_gpu_terrain_bytes,
                 standby.queued_upload_lifecycle_items,
                 standby.queued_upload_mesh_owned_bytes,
                 standby.readiness.entry_section_gpu_resident
                     && standby.readiness.entry_section_traversal_ready,
                 standby.readiness.renderer_topology_ready,
+                standby.standby_cadence.host_rate_hz,
+                standby.standby_cadence.gameplay_rate_hz,
+                standby.standby_cadence.physics_rate_hz,
+                standby.standby_cadence_applied,
                 standby.worst_advance_ms,
                 standby.worst_startup_step_ms,
                 standby.worst_runtime_poll_ms,
@@ -917,6 +947,107 @@ fn rgba_exact_pixel_ratio(pixels: &[u8], color: [u8; 4]) -> Result<f64> {
     Ok(matches as f64 / (pixels.len() / 4).max(1) as f64)
 }
 
+fn sample_idle_process(duration_ms: u64) -> WarmWorldProcessIdleSample {
+    // Let worker completions and deferred drops triggered by the final
+    // readiness frame drain before opening the measured idle interval.
+    std::thread::sleep(Duration::from_millis(duration_ms.min(1_000)));
+    let cpu_before = process_cpu_time_ms();
+    if duration_ms > 0 {
+        std::thread::sleep(Duration::from_millis(duration_ms));
+    }
+    let cpu_after = process_cpu_time_ms();
+    let cpu_time_ms = cpu_before
+        .zip(cpu_after)
+        .map(|(before, after)| (after - before).max(0.0));
+    WarmWorldProcessIdleSample {
+        duration_ms,
+        cpu_time_ms,
+        cpu_percent_of_one_core: cpu_time_ms
+            .filter(|_| duration_ms > 0)
+            .map(|cpu_ms| cpu_ms / duration_ms as f64 * 100.0),
+        rss_kb: process_rss_kb(),
+        thread_count: process_thread_count(),
+    }
+}
+
+#[cfg(unix)]
+fn process_cpu_time_ms() -> Option<f64> {
+    let mut usage = std::mem::MaybeUninit::<libc::rusage>::zeroed();
+    // SAFETY: getrusage initializes the caller-owned rusage value for
+    // RUSAGE_SELF and does not retain the pointer.
+    if unsafe { libc::getrusage(libc::RUSAGE_SELF, usage.as_mut_ptr()) } != 0 {
+        return None;
+    }
+    // SAFETY: a successful getrusage call initialized the complete value.
+    let usage = unsafe { usage.assume_init() };
+    let timeval_ms =
+        |time: libc::timeval| time.tv_sec as f64 * 1_000.0 + time.tv_usec as f64 / 1_000.0;
+    Some(timeval_ms(usage.ru_utime) + timeval_ms(usage.ru_stime))
+}
+
+#[cfg(not(unix))]
+fn process_cpu_time_ms() -> Option<f64> {
+    None
+}
+
+#[cfg(unix)]
+fn process_rss_kb() -> Option<u64> {
+    let pid = std::process::id().to_string();
+    let output = Command::new("ps")
+        .args(["-o", "rss=", "-p", &pid])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    String::from_utf8(output.stdout).ok()?.trim().parse().ok()
+}
+
+#[cfg(not(unix))]
+fn process_rss_kb() -> Option<u64> {
+    None
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn process_thread_count() -> Option<usize> {
+    std::fs::read_dir("/proc/self/task")
+        .ok()
+        .map(|entries| entries.count())
+}
+
+#[cfg(target_vendor = "apple")]
+fn process_thread_count() -> Option<usize> {
+    let pid = std::process::id().to_string();
+    let output = Command::new("ps")
+        .args(["-M", "-p", &pid])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    let rows = String::from_utf8(output.stdout).ok()?.lines().count();
+    rows.checked_sub(1)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+fn process_thread_count() -> Option<usize> {
+    None
+}
+
+fn process_cost_report(
+    one_world: WarmWorldProcessIdleSample,
+    two_worlds: WarmWorldProcessIdleSample,
+) -> WarmWorldProcessCostReport {
+    WarmWorldProcessCostReport {
+        one_world,
+        two_worlds,
+        retained_rss_delta_kb: one_world
+            .rss_kb
+            .zip(two_worlds.rss_kb)
+            .map(|(one, two)| two as i64 - one as i64),
+        observed_thread_delta: one_world
+            .thread_count
+            .zip(two_worlds.thread_count)
+            .map(|(one, two)| two as i64 - one as i64),
+    }
+}
+
 fn validate_warm_world_switch_report(report: &mclone_scene::WarmWorldSwitchReport) -> Result<()> {
     // One admitted render-compile request is one vertical chunk column in the
     // current 1.17.1 world shape, hence at most 16 submitted sections.
@@ -972,6 +1103,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
     let render_options = options.render_options;
+    let cost_sample_ms = options.cost_sample_ms;
     let startup_camera = screenshot_startup_camera(&scene, StartupWaitPolicy::Idle);
     let script_frame_count = usize::from(WARM_WORLD_GATE_MAX_WALK_FRAMES) * 2 + 5;
     let (loop_report, frame_pixels, state) = run_headless_capture_loop(
@@ -982,24 +1114,65 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
             pace_frame_duration: None,
         },
         move |device, queue, format, size| {
+            // Establish the one-world control inside the same process, with
+            // the same assets/device/active runtime, before adding the
+            // retained slot. This removes process-start and GPU-driver noise
+            // from the RSS/thread delta.
+            let mut active_scene = scene.clone();
+            active_scene.warm_world_standby_seed = None;
+            active_scene.warm_world_standby_cadence = None;
             let mut host = OffscreenFlatClientHost::new(
                 device,
                 queue,
                 format,
                 size,
-                &scene,
+                &active_scene,
                 render_options,
                 &assets,
                 &asset_source,
                 startup_camera,
             )?;
             host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Idle)?;
+            let one_world_process =
+                (cost_sample_ms > 0).then(|| sample_idle_process(cost_sample_ms));
+
+            let mut request = mclone_scene::WarmWorldStandbyRequest::new(
+                destination_seed,
+                ChunkPos::new(scene.chunk_x, scene.chunk_z),
+            );
+            if let Some(cadence) = scene.warm_world_standby_cadence {
+                request = request.with_standby_cadence(cadence);
+            }
+            host.driver
+                .host_mut()
+                .begin_warm_world_standby(device, queue, request)?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Idle)?;
+            let initial_standby = host
+                .driver
+                .host()
+                .warm_world_standby_snapshot()
+                .context("warm-world cost probe lost its initial standby snapshot")?;
+            let expected_standby_cadence = scene
+                .warm_world_standby_cadence
+                .unwrap_or(scene.simulation_cadence);
+            if initial_standby.standby_cadence != expected_standby_cadence
+                || !initial_standby.standby_cadence_applied
+            {
+                bail!(
+                    "warm-world standby cadence was not applied before switchable readiness: expected={expected_standby_cadence:?} snapshot={initial_standby:?}"
+                );
+            }
+            let process_cost = one_world_process.map(|one_world| {
+                process_cost_report(one_world, sample_idle_process(cost_sample_ms))
+            });
             host.frame_warm_world_source_gate_approach()?;
             host.drive_until_streamed_at_output_size(device, queue)?;
             Ok(WarmWorldSwapSmokeState {
                 host,
                 script: OffscreenScriptRunner::new(warm_world_swap_script()),
                 frames: Vec::with_capacity(script_frame_count),
+                initial_standby,
+                process_cost,
             })
         },
         |_index, frame, state| {
@@ -1049,6 +1222,20 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     }
     for report in &state.script.switch_reports {
         validate_warm_world_switch_report(report)?;
+    }
+    if options
+        .scene
+        .warm_world_standby_cadence
+        .is_some_and(|cadence| cadence != options.scene.simulation_cadence)
+        && state
+            .script
+            .switch_reports
+            .iter()
+            .any(|report| !report.source_cadence_changed || !report.destination_cadence_changed)
+    {
+        bail!(
+            "warm-world throttled cadence was not applied on demotion and restored on activation"
+        );
     }
 
     let first = &state.script.switch_reports[0];
@@ -1234,11 +1421,41 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
             "destination_runtime_update_count_after_first_frame": report.destination_runtime_update_count_after_first_frame,
         })
     };
+    let process_sample_json = |sample: WarmWorldProcessIdleSample| {
+        serde_json::json!({
+            "duration_ms": sample.duration_ms,
+            "cpu_time_ms": sample.cpu_time_ms,
+            "cpu_percent_of_one_core": sample.cpu_percent_of_one_core,
+            "rss_kb": sample.rss_kb,
+            "thread_count": sample.thread_count,
+        })
+    };
+    let process_cost_json = state.process_cost.map(|cost| {
+        serde_json::json!({
+            "one_world": process_sample_json(cost.one_world),
+            "two_worlds": process_sample_json(cost.two_worlds),
+            "retained_rss_delta_kb": cost.retained_rss_delta_kb,
+            "observed_thread_delta": cost.observed_thread_delta,
+        })
+    });
+    let compile_workers = options.scene.render_compile_worker_count;
+    let managed_roles_json = |worlds: usize| {
+        serde_json::json!({
+            "integrated_server": worlds,
+            "worldgen": worlds,
+            "light_status": worlds,
+            "render_compile_dispatch": worlds,
+            "render_compile_worker": worlds.saturating_mul(compile_workers),
+            "chunk_drop": worlds,
+            "total": worlds.saturating_mul(5 + compile_workers),
+        })
+    };
+    let standby = &state.initial_standby;
     let report_path = options.directory.join("report.json");
     std::fs::write(
         &report_path,
         serde_json::to_vec_pretty(&serde_json::json!({
-            "schema": 2,
+            "schema": 3,
             "width": loop_report.width,
             "height": loop_report.height,
             "source_seed": options.scene.seed,
@@ -1258,6 +1475,37 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
                 "input_frame_count": state.script.report.input_frame_count,
                 "advance_frame_count": state.script.report.advance_frame_count,
                 "warm_world_swap_count": state.script.report.warm_world_swap_count,
+            },
+            "standby": {
+                "elapsed_ms": standby.elapsed_ms,
+                "renderer_shell_create_ms": standby.renderer_shell_create_ms,
+                "renderer_multiview_create_ms": standby.renderer_multiview_create_ms,
+                "startup_advance_count": standby.startup_advance_count,
+                "startup_advance_total_ms": standby.startup_advance_total_ms,
+                "worst_startup_advance_ms": standby.worst_advance_ms,
+                "startup_poll_ms": standby.poll_ms,
+                "gpu_warm_elapsed_ms": standby.gpu_warm_ms,
+                "gpu_advance_count": standby.gpu_advance_count,
+                "gpu_ready_advance_count": standby.gpu_ready_advance_count,
+                "gpu_advance_total_ms": standby.gpu_advance_total_ms,
+                "worst_gpu_advance_ms": standby.worst_gpu_advance_ms,
+                "startup_seed_owned_bytes": standby.startup_seed_owned_bytes,
+                "estimated_gpu_terrain_bytes": standby.estimated_gpu_terrain_bytes,
+                "atlas_base_bytes": standby.atlas_base_bytes,
+                "gpu_section_count": standby.gpu_section_count,
+                "gpu_vertex_count": standby.gpu_vertex_count,
+                "gpu_index_count": standby.gpu_index_count,
+                "standby_cadence": {
+                    "host_hz": standby.standby_cadence.host_rate_hz,
+                    "gameplay_hz": standby.standby_cadence.gameplay_rate_hz,
+                    "physics_hz": standby.standby_cadence.physics_rate_hz,
+                    "applied": standby.standby_cadence_applied,
+                },
+            },
+            "process_cost": process_cost_json,
+            "managed_threads_by_role": {
+                "one_world": managed_roles_json(1),
+                "two_worlds": managed_roles_json(2),
             },
             "loop_timing_ms": {
                 "setup": loop_report.setup_ms,
@@ -1289,6 +1537,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
         switches: state.script.switch_reports,
         source_destination_difference_ratio,
         destination_gate_difference_ratio,
+        process_cost: state.process_cost,
     })
 }
 
@@ -1972,5 +2221,30 @@ mod tests {
                 checkpoint: OffscreenScriptCheckpoint::SourceReturn,
             }
         ));
+    }
+
+    #[test]
+    fn warm_world_process_cost_uses_paired_residency_deltas() {
+        let one_world = WarmWorldProcessIdleSample {
+            duration_ms: 3_000,
+            cpu_time_ms: Some(450.0),
+            cpu_percent_of_one_core: Some(15.0),
+            rss_kb: Some(160_000),
+            thread_count: Some(10),
+        };
+        let two_worlds = WarmWorldProcessIdleSample {
+            duration_ms: 3_000,
+            cpu_time_ms: Some(630.0),
+            cpu_percent_of_one_core: Some(21.0),
+            rss_kb: Some(197_000),
+            thread_count: Some(16),
+        };
+
+        let report = process_cost_report(one_world, two_worlds);
+
+        assert_eq!(report.one_world, one_world);
+        assert_eq!(report.two_worlds, two_worlds);
+        assert_eq!(report.retained_rss_delta_kb, Some(37_000));
+        assert_eq!(report.observed_thread_delta, Some(6));
     }
 }

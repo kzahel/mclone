@@ -138,6 +138,16 @@ fn main() -> Result<()> {
                 report.source_destination_difference_ratio * 100.0,
                 report.destination_gate_difference_ratio * 100.0,
             );
+            if let Some(cost) = report.process_cost {
+                println!(
+                    "warm-world process cost sample={}ms one_world_cpu={:.3}% two_world_cpu={:.3}% rss_delta_kb={} thread_delta={}",
+                    cost.one_world.duration_ms,
+                    cost.one_world.cpu_percent_of_one_core.unwrap_or(f64::NAN),
+                    cost.two_worlds.cpu_percent_of_one_core.unwrap_or(f64::NAN),
+                    cost.retained_rss_delta_kb.unwrap_or_default(),
+                    cost.observed_thread_delta.unwrap_or_default(),
+                );
+            }
             Ok(())
         }
         Cli::HeadlessDualView { options } => {
