@@ -23,6 +23,18 @@ if rg -n -U "$forbidden" "${native_apps[@]}"; then
   exit 1
 fi
 
+# Native rims may select an endpoint and instantiate the shared remote session,
+# but socket ownership, stream polling, response bookkeeping, and pump policy
+# stay in mclone-net/mclone-app-runtime. The desktop visual-smoke fixture is an
+# intentional in-process protocol server and is excluded from this production
+# adapter lock.
+network_forbidden='NativeClientIoSession|ClientConnection|pump_client_connection_updates_report|pending_response_batches|drain_command_updates|mclone_net|std::net::[^;]*(TcpListener|TcpStream)'
+
+if rg -n -U --glob '!remote_player_visual_smoke.rs' "$network_forbidden" "${native_apps[@]}"; then
+  echo "native client adapter regrew transport or update-stream policy" >&2
+  exit 1
+fi
+
 ./scripts/check-scene-host-purity.sh
 ./scripts/check-xr-frame-driver-purity.sh
 node ./scripts/check-web-scene-host-adoption.mjs

@@ -18,7 +18,7 @@ pub struct QueuedServerUpdate {
     encoded_len: usize,
     queued_age: Duration,
     transport_drained: bool,
-    response_sequence: Option<u64>,
+    inbound_frame_sequence: Option<u64>,
     producer_read_ms: f64,
     producer_decode_ms: f64,
 }
@@ -35,7 +35,7 @@ impl QueuedServerUpdate {
             encoded_len,
             queued_age,
             transport_drained,
-            response_sequence: None,
+            inbound_frame_sequence: None,
             producer_read_ms: 0.0,
             producer_decode_ms: 0.0,
         }
@@ -47,7 +47,7 @@ impl QueuedServerUpdate {
             encoded_len: 0,
             queued_age: Duration::ZERO,
             transport_drained,
-            response_sequence: None,
+            inbound_frame_sequence: None,
             producer_read_ms: 0.0,
             producer_decode_ms: 0.0,
         }
@@ -55,11 +55,11 @@ impl QueuedServerUpdate {
 
     pub fn with_remote_metadata(
         mut self,
-        response_sequence: Option<u64>,
+        inbound_frame_sequence: Option<u64>,
         producer_read_ms: f64,
         producer_decode_ms: f64,
     ) -> Self {
-        self.response_sequence = response_sequence;
+        self.inbound_frame_sequence = inbound_frame_sequence;
         self.producer_read_ms = producer_read_ms;
         self.producer_decode_ms = producer_decode_ms;
         self
@@ -126,18 +126,11 @@ impl ClientConnectionDrainResult {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConnectionUpdateDrainMode {
-    Blocking,
-    ReadyOnly,
-}
-
 pub trait ClientConnection {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
-    fn drain_next_update(
-        &mut self,
-        mode: ConnectionUpdateDrainMode,
-    ) -> Result<ClientConnectionDrainResult>;
+    /// Drain one already-produced update without waiting for transport IO,
+    /// decode, publication, or queue capacity.
+    fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult>;
     fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics>;
 }
 
@@ -198,10 +191,7 @@ impl<R: IntegratedServerRunner> ClientConnection for IntegratedRunnerConnection<
             .context("failed to send local integrated server command")
     }
 
-    fn drain_next_update(
-        &mut self,
-        _mode: ConnectionUpdateDrainMode,
-    ) -> Result<ClientConnectionDrainResult> {
+    fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult> {
         let Some(envelope) = self
             .runner
             .try_recv_update()
@@ -241,7 +231,6 @@ pub fn pump_client_connection_updates_report<C>(
     core: &mut SingleViewRuntime,
     connection: &mut C,
     budget: RuntimeUpdatePumpBudget,
-    drain_mode: ConnectionUpdateDrainMode,
 ) -> Result<RuntimeUpdatePumpReport>
 where
     C: ClientConnection + ?Sized,
@@ -250,7 +239,7 @@ where
     let mut report = RuntimeUpdatePumpReport::default();
     loop {
         let drain_start = pump_timing_start();
-        let drain = connection.drain_next_update(drain_mode)?;
+        let drain = connection.try_drain_next_update()?;
         report.drain_updates_ms += pump_elapsed_ms(drain_start);
         let Some(queued_update) = drain.update else {
             report.remaining_queue_depth = drain.remaining_queue_depth;
@@ -266,14 +255,15 @@ where
         let transport_drained = queued_update.transport_drained;
         let producer_read_ms = queued_update.producer_read_ms;
         let producer_decode_ms = queued_update.producer_decode_ms;
-        let response_sequence = queued_update.response_sequence;
+        let inbound_frame_sequence = queued_update.inbound_frame_sequence;
         let exchange_report =
             core.apply_exchange_report(update_drain_exchange(queued_update.into_updates(), true));
         report.apply_report.accumulate(exchange_report.update_apply);
         report.producer_read_ms += producer_read_ms;
         report.producer_decode_ms += producer_decode_ms;
-        report.producer_response_sequence =
-            report.producer_response_sequence.max(response_sequence);
+        report.producer_inbound_frame_sequence = report
+            .producer_inbound_frame_sequence
+            .max(inbound_frame_sequence);
         report.update_bytes = report.update_bytes.saturating_add(encoded_len);
         report.oldest_applied_update_age_ms = report
             .oldest_applied_update_age_ms
@@ -345,8 +335,7 @@ mod tests {
 
     use super::{
         ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
-        ConnectionUpdateDrainMode, IntegratedRunnerConnection, QueuedServerUpdate,
-        pump_client_connection_updates_report,
+        IntegratedRunnerConnection, QueuedServerUpdate, pump_client_connection_updates_report,
     };
     use crate::{
         RuntimeUpdatePumpBudget, SingleViewRuntime, chunk_tracking_radius_for_render_distance,
@@ -358,7 +347,7 @@ mod tests {
         queued_updates: VecDeque<QueuedServerUpdate>,
         pending_depth: usize,
         pending_bytes: usize,
-        drain_modes: Vec<ConnectionUpdateDrainMode>,
+        drain_count: usize,
     }
 
     impl ScriptedClientConnection {
@@ -368,11 +357,11 @@ mod tests {
                 queued_updates: updates.into(),
                 pending_depth: 0,
                 pending_bytes: 0,
-                drain_modes: Vec::new(),
+                drain_count: 0,
             }
         }
 
-        fn with_pending_response(mut self, pending_depth: usize, pending_bytes: usize) -> Self {
+        fn with_producer_backlog(mut self, pending_depth: usize, pending_bytes: usize) -> Self {
             self.pending_depth = pending_depth;
             self.pending_bytes = pending_bytes;
             self
@@ -385,11 +374,8 @@ mod tests {
             Ok(())
         }
 
-        fn drain_next_update(
-            &mut self,
-            mode: ConnectionUpdateDrainMode,
-        ) -> Result<ClientConnectionDrainResult> {
-            self.drain_modes.push(mode);
+        fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult> {
+            self.drain_count += 1;
             Ok(match self.queued_updates.pop_front() {
                 Some(update) => ClientConnectionDrainResult::with_update(
                     update,
@@ -485,9 +471,7 @@ mod tests {
             1
         );
 
-        let drained = connection
-            .drain_next_update(ConnectionUpdateDrainMode::ReadyOnly)
-            .unwrap();
+        let drained = connection.try_drain_next_update().unwrap();
         assert_eq!(drained.update.unwrap().encoded_len(), 17);
         assert_eq!(
             connection.pending_update_metrics().unwrap().update_depth(),
@@ -531,7 +515,6 @@ mod tests {
             &mut core,
             &mut connection,
             RuntimeUpdatePumpBudget::MaxElapsed(Duration::ZERO),
-            ConnectionUpdateDrainMode::ReadyOnly,
         )
         .unwrap();
 
@@ -539,7 +522,7 @@ mod tests {
         assert_eq!(first_report.update_bytes, 11);
         assert_eq!(first_report.producer_read_ms, 23.0);
         assert_eq!(first_report.producer_decode_ms, 5.0);
-        assert_eq!(first_report.producer_response_sequence, Some(10));
+        assert_eq!(first_report.producer_inbound_frame_sequence, Some(10));
         assert_eq!(first_report.remaining_queue_depth, 2);
         assert!(first_report.remaining_queue_bytes > 0);
         assert!(first_report.oldest_applied_update_age_ms >= 3.0);
@@ -551,7 +534,6 @@ mod tests {
             &mut core,
             &mut connection,
             RuntimeUpdatePumpBudget::unlimited(),
-            ConnectionUpdateDrainMode::ReadyOnly,
         )
         .unwrap();
 
@@ -559,7 +541,7 @@ mod tests {
         assert_eq!(second_report.update_bytes, 30);
         assert_eq!(second_report.producer_read_ms, 4.0);
         assert_eq!(second_report.producer_decode_ms, 1.0);
-        assert_eq!(second_report.producer_response_sequence, Some(12));
+        assert_eq!(second_report.producer_inbound_frame_sequence, Some(12));
         assert_eq!(second_report.remaining_queue_depth, 0);
         assert_eq!(core.day_time(), 300);
         assert!(!second_report.stalled);
@@ -598,7 +580,6 @@ mod tests {
             &mut core,
             &mut connection,
             RuntimeUpdatePumpBudget::unlimited(),
-            ConnectionUpdateDrainMode::ReadyOnly,
         )
         .unwrap();
 
@@ -609,27 +590,23 @@ mod tests {
     }
 
     #[test]
-    fn shared_connection_pump_reports_pending_response_without_blocking_ready_only_drain() {
+    fn shared_connection_pump_reports_producer_backlog_without_blocking() {
         let center = ChunkPos::new(0, 0);
         let mut core = SingleViewRuntime::remote_dedicated(
             center,
             0,
             chunk_tracking_radius_for_render_distance(0),
         );
-        let mut connection = ScriptedClientConnection::new(Vec::new()).with_pending_response(1, 99);
+        let mut connection = ScriptedClientConnection::new(Vec::new()).with_producer_backlog(1, 99);
 
         let report = pump_client_connection_updates_report(
             &mut core,
             &mut connection,
             RuntimeUpdatePumpBudget::unlimited(),
-            ConnectionUpdateDrainMode::ReadyOnly,
         )
         .unwrap();
 
-        assert_eq!(
-            connection.drain_modes,
-            vec![ConnectionUpdateDrainMode::ReadyOnly]
-        );
+        assert_eq!(connection.drain_count, 1);
         assert_eq!(report.apply_report.updates, 0);
         assert_eq!(report.remaining_queue_depth, 1);
         assert_eq!(report.remaining_queue_bytes, 99);

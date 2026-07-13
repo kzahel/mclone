@@ -2216,7 +2216,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
                 drain_updates_ms: pump.drain_updates_ms,
                 producer_read_ms: pump.producer_read_ms,
                 producer_decode_ms: pump.producer_decode_ms,
-                producer_response_sequence: pump.producer_response_sequence,
+                producer_inbound_frame_sequence: pump.producer_inbound_frame_sequence,
                 client_deferred_chunk_drop_items: drop_items,
                 client_deferred_chunk_drop_backlog_items: drop_backlog,
                 update_pump_stalled: pump.stalled,

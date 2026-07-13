@@ -4,7 +4,7 @@ use std::collections::VecDeque;
 
 use mclone_app_runtime::client_connection::{
     ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
-    ConnectionUpdateDrainMode, QueuedServerUpdate, pump_client_connection_updates_report,
+    QueuedServerUpdate, pump_client_connection_updates_report,
 };
 #[cfg(target_arch = "wasm32")]
 use mclone_app_runtime::host_mode::{
@@ -236,13 +236,8 @@ impl WebRuntime {
         &mut self,
         budget: RuntimeUpdatePumpBudget,
     ) -> Result<mclone_app_runtime::RuntimeUpdatePumpReport, String> {
-        pump_client_connection_updates_report(
-            &mut self.core,
-            &mut self.host,
-            budget,
-            ConnectionUpdateDrainMode::ReadyOnly,
-        )
-        .map_err(|error| error.to_string())
+        pump_client_connection_updates_report(&mut self.core, &mut self.host, budget)
+            .map_err(|error| error.to_string())
     }
 
     fn chunk_view_command(
@@ -507,10 +502,7 @@ impl ClientConnection for WebRuntimeHost {
             .map_err(anyhow::Error::msg)
     }
 
-    fn drain_next_update(
-        &mut self,
-        _mode: ConnectionUpdateDrainMode,
-    ) -> anyhow::Result<ClientConnectionDrainResult> {
+    fn try_drain_next_update(&mut self) -> anyhow::Result<ClientConnectionDrainResult> {
         match self {
             Self::Inline(host) => host.drain_next_update().map_err(anyhow::Error::msg),
             #[cfg(target_arch = "wasm32")]

@@ -35,8 +35,7 @@ use mclone_ui::LoadingProgressOverlay;
 use crate::catalog_executor::WorldCatalogOperationService;
 use crate::client_connection::{
     ClientConnection, ClientConnectionDrainResult, ClientConnectionQueueMetrics,
-    ConnectionUpdateDrainMode, IntegratedRunnerConnection, QueuedServerUpdate,
-    pump_client_connection_updates_report,
+    IntegratedRunnerConnection, QueuedServerUpdate, pump_client_connection_updates_report,
 };
 use crate::deferred_drop::{
     DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropBacklog, DeferredDropService,
@@ -46,8 +45,8 @@ use crate::far_lod::{
     FarTerrainLodProducerStats, STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET, StartupLodPrewarmConfig,
 };
 use crate::host_mode::{
-    RemoteCommandUpdateBatch, RemoteDedicatedServerSession, SingleViewHostMode,
-    SingleViewHostOptions, deferred_command_exchange, dispatch_remote_dedicated_command,
+    RemoteDedicatedServerSession, RemoteServerUpdateBatch, RemoteUpdateQueueMetrics,
+    SingleViewHostMode, SingleViewHostOptions, deferred_command_exchange,
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
 };
 use crate::lod_coverage::{LodCoverageCoordinator, LodReplacementCounters, LodTileAvailability};
@@ -426,7 +425,11 @@ impl RemoteDedicatedServerSession for LocalOnlySession {
         match *self {}
     }
 
-    fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+    fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
+        match *self {}
+    }
+
+    fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics {
         match *self {}
     }
 
@@ -1422,7 +1425,6 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                     &mut self.core,
                     &mut self.connection,
                     RuntimeUpdatePumpBudget::unlimited(),
-                    ConnectionUpdateDrainMode::ReadyOnly,
                 )
                 .context("failed to drain local integrated server updates")?;
                 let drain_updates_ms = pump_report.drain_updates_ms;
@@ -1453,12 +1455,8 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
 
     pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
         let poll_start = Instant::now();
-        let pump_report = pump_client_connection_updates_report(
-            &mut self.core,
-            &mut self.connection,
-            budget,
-            ConnectionUpdateDrainMode::ReadyOnly,
-        )?;
+        let pump_report =
+            pump_client_connection_updates_report(&mut self.core, &mut self.connection, budget)?;
         let changed = pump_report.apply_report.changed;
         let deferred_drop_start = Instant::now();
         let client_deferred_chunk_drop_items = self.handoff_deferred_client_chunk_drops();
@@ -1477,7 +1475,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 drain_updates_ms: pump_report.drain_updates_ms,
                 producer_read_ms: pump_report.producer_read_ms,
                 producer_decode_ms: pump_report.producer_decode_ms,
-                producer_response_sequence: pump_report.producer_response_sequence,
+                producer_inbound_frame_sequence: pump_report.producer_inbound_frame_sequence,
                 client_deferred_chunk_drop_ms,
                 client_deferred_chunk_drop_items,
                 client_deferred_chunk_drop_backlog_items,
@@ -2621,11 +2619,6 @@ pub struct RemoteDedicatedSceneRuntime<S> {
 #[derive(Debug)]
 struct RemoteDedicatedConnection<S> {
     session: S,
-    // Current native/WebSocket wire protocols still pair one response batch
-    // with each sent command. This counter tracks those outstanding batches
-    // before their decoded updates are queued for the shared ClientConnection
-    // pump; it is not runtime-thread socket ownership.
-    pending_response_batches: usize,
     queued_updates: VecDeque<QueuedServerUpdate>,
     queued_update_bytes: usize,
 }
@@ -2637,7 +2630,6 @@ where
     fn new(session: S) -> Self {
         Self {
             session,
-            pending_response_batches: 0,
             queued_updates: VecDeque::new(),
             queued_update_bytes: 0,
         }
@@ -2648,23 +2640,28 @@ where
     }
 
     fn clear_pending_updates(&mut self) {
-        self.pending_response_batches = 0;
         self.queued_updates.clear();
         self.queued_update_bytes = 0;
     }
 
-    /// Outstanding response-paired update backlog: response batches awaiting a
-    /// drain plus already-decoded updates still queued for the client pump. The
-    /// shared startup pump waits for this to reach zero so the initial view has
-    /// drained before completion (docs/tactical/167).
-    fn pending_update_depth(&self) -> usize {
-        self.pending_response_batches + self.queued_updates.len()
+    fn queue_metrics(&self) -> ClientConnectionQueueMetrics {
+        let producer = self.session.pending_update_metrics();
+        ClientConnectionQueueMetrics::new(
+            self.queued_updates
+                .len()
+                .saturating_add(producer.update_depth),
+            self.queued_update_bytes
+                .saturating_add(producer.update_bytes),
+        )
     }
 
-    fn push_response_batch(&mut self, batch: RemoteCommandUpdateBatch) -> Result<()> {
-        let transport_drained_after_batch = self.pending_response_batches == 0;
+    fn push_update_batch(
+        &mut self,
+        batch: RemoteServerUpdateBatch,
+        transport_drained_after_batch: bool,
+    ) -> Result<()> {
         let update_count = batch.updates.len();
-        let batch_response_sequence = batch.response_sequence;
+        let batch_inbound_frame_sequence = batch.inbound_frame_sequence;
         let batch_producer_read_ms = batch.producer_read_ms;
         let batch_producer_decode_ms = batch.producer_decode_ms;
         let batch_has_producer_timing =
@@ -2672,7 +2669,7 @@ where
         if update_count == 0 {
             self.queued_updates.push_back(
                 QueuedServerUpdate::empty(transport_drained_after_batch).with_remote_metadata(
-                    batch_response_sequence,
+                    batch_inbound_frame_sequence,
                     batch_producer_read_ms,
                     batch_producer_decode_ms,
                 ),
@@ -2705,7 +2702,9 @@ where
                     transport_drained_after_batch && index + 1 == update_count,
                 )
                 .with_remote_metadata(
-                    update.response_sequence.or(batch_response_sequence),
+                    update
+                        .inbound_frame_sequence
+                        .or(batch_inbound_frame_sequence),
                     producer_read_ms,
                     producer_decode_ms,
                 ),
@@ -2720,73 +2719,58 @@ where
     S: RemoteDedicatedServerSession,
 {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
-        self.session.send_command_only(command)?;
-        self.pending_response_batches = self.pending_response_batches.saturating_add(1);
-        Ok(())
+        self.session.send_command_only(command)
     }
 
-    fn drain_next_update(
-        &mut self,
-        mode: ConnectionUpdateDrainMode,
-    ) -> Result<ClientConnectionDrainResult> {
+    fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult> {
         if let Some(update) = self.queued_updates.pop_front() {
             self.queued_update_bytes = self
                 .queued_update_bytes
                 .saturating_sub(update.encoded_len());
+            let metrics = self.queue_metrics();
             return Ok(ClientConnectionDrainResult::with_update(
                 update,
-                self.pending_response_batches + self.queued_updates.len(),
-                self.queued_update_bytes,
+                metrics.update_depth(),
+                metrics.update_bytes(),
             ));
         }
 
-        if self.pending_response_batches == 0 && mode == ConnectionUpdateDrainMode::Blocking {
-            return Ok(ClientConnectionDrainResult::default());
-        }
-
-        let batch = match mode {
-            ConnectionUpdateDrainMode::Blocking => Some(
-                self.session
-                    .drain_command_update_batch()
-                    .context("failed to drain remote dedicated server updates")?,
-            ),
-            ConnectionUpdateDrainMode::ReadyOnly => {
-                self.session
-                    .try_drain_command_update_batch()
-                    .context("failed to poll remote dedicated server updates")?
-            }
-        };
+        let batch = self
+            .session
+            .try_drain_update_batch()
+            .context("failed to poll remote dedicated server updates")?;
         let Some(batch) = batch else {
+            let metrics = self.queue_metrics();
             return Ok(ClientConnectionDrainResult::pending(
-                self.pending_response_batches,
-                self.queued_update_bytes,
+                metrics.update_depth(),
+                metrics.update_bytes(),
             ));
         };
 
-        self.pending_response_batches = self.pending_response_batches.saturating_sub(1);
-        self.push_response_batch(batch)?;
+        let producer = self.session.pending_update_metrics();
+        let transport_drained_after_batch = producer.frame_depth == 0;
+        self.push_update_batch(batch, transport_drained_after_batch)?;
         if let Some(update) = self.queued_updates.pop_front() {
             self.queued_update_bytes = self
                 .queued_update_bytes
                 .saturating_sub(update.encoded_len());
+            let metrics = self.queue_metrics();
             return Ok(ClientConnectionDrainResult::with_update(
                 update,
-                self.pending_response_batches + self.queued_updates.len(),
-                self.queued_update_bytes,
+                metrics.update_depth(),
+                metrics.update_bytes(),
             ));
         }
 
+        let metrics = self.queue_metrics();
         Ok(ClientConnectionDrainResult::pending(
-            self.pending_response_batches,
-            self.queued_update_bytes,
+            metrics.update_depth(),
+            metrics.update_bytes(),
         ))
     }
 
     fn pending_update_metrics(&mut self) -> Result<ClientConnectionQueueMetrics> {
-        Ok(ClientConnectionQueueMetrics::new(
-            self.pending_response_batches + self.queued_updates.len(),
-            self.queued_update_bytes,
-        ))
+        Ok(self.queue_metrics())
     }
 }
 
@@ -2824,8 +2808,10 @@ where
             options.render_distance,
             options.chunk_tracking_radius,
         ) {
-            dispatch_remote_dedicated_command(&mut core, connection.session_mut(), command)
+            connection
+                .send_command_only(command)
                 .context("failed to initialize remote dedicated scene runtime")?;
+            core.apply_exchange(deferred_command_exchange());
         }
         Ok(Self {
             core,
@@ -2961,18 +2947,11 @@ where
         self.core.client().loaded_chunk_count()
     }
 
-    /// Outstanding response-paired update backlog for the current wire protocol
-    /// (docs/tactical/167). Startup readiness waits for this to drain.
-    fn startup_pending_update_backlog(&self) -> usize {
-        self.connection.pending_update_depth()
-    }
-
-    /// Remote host-mode startup evidence: the active chunk view has produced
-    /// client chunks and the initial response/update backlog has drained. This is
-    /// a host-mode fact, not a platform fact; when server-push broadening lands it
-    /// should wait for a drawable active view, not "the stream is forever idle".
+    /// A push stream has no durable "idle" state. Remote startup becomes ready
+    /// when the active view has produced client-resident terrain; later
+    /// publications continue through the normal frame budget.
     fn startup_host_ready(&self) -> bool {
-        self.loaded_chunk_count() > 0 && self.startup_pending_update_backlog() == 0
+        self.loaded_chunk_count() > 0
     }
 
     pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
@@ -3016,7 +2995,6 @@ where
                 &mut self.core,
                 &mut self.connection,
                 RuntimeUpdatePumpBudget::unlimited(),
-                ConnectionUpdateDrainMode::Blocking,
             )?;
             drain_updates_ms += pump_report.drain_updates_ms;
             changed |= pump_report.apply_report.changed;
@@ -3024,63 +3002,24 @@ where
         }
 
         let send_start = Instant::now();
-        if let Err(error) = self.connection.send_command_only(command) {
-            let resync_command = prepare_remote_dedicated_resync_command(&mut self.core, error)?;
-            self.connection.clear_pending_updates();
-            let changed = reconnect_remote_dedicated_session_and_resync(
-                &mut self.core,
-                self.connection.session_mut(),
-                resync_command,
-            )?;
-            let total_ms = elapsed_ms(total_start.elapsed());
-            return Ok((
-                changed,
-                GameplayCommandTiming {
-                    total_ms,
-                    send_ms: elapsed_ms(send_start.elapsed()),
-                    ..GameplayCommandTiming::default()
-                },
-            ));
-        }
+        self.connection
+            .send_command_only(command)
+            .context("failed to enqueue remote dedicated gameplay command")?;
         let send_ms = elapsed_ms(send_start.elapsed());
+        self.core.apply_exchange(deferred_command_exchange());
 
         match policy {
             GameplayCommandUpdatePolicy::DrainImmediately => {
-                let pump_report = match pump_client_connection_updates_report(
+                let pump_report = pump_client_connection_updates_report(
                     &mut self.core,
                     &mut self.connection,
                     RuntimeUpdatePumpBudget::unlimited(),
-                    ConnectionUpdateDrainMode::Blocking,
-                ) {
-                    Ok(pump_report) => pump_report,
-                    Err(error) => {
-                        let resync_command =
-                            prepare_remote_dedicated_resync_command(&mut self.core, error)?;
-                        self.connection.clear_pending_updates();
-                        let changed = reconnect_remote_dedicated_session_and_resync(
-                            &mut self.core,
-                            self.connection.session_mut(),
-                            resync_command,
-                        )?;
-                        let total_ms = elapsed_ms(total_start.elapsed());
-                        return Ok((
-                            changed,
-                            GameplayCommandTiming {
-                                total_ms,
-                                send_ms,
-                                drain_updates_ms,
-                                ..GameplayCommandTiming::default()
-                            },
-                        ));
-                    }
-                };
+                )?;
                 drain_updates_ms += pump_report.drain_updates_ms;
                 changed |= pump_report.apply_report.changed;
                 apply_report.accumulate(pump_report.apply_report);
             }
-            GameplayCommandUpdatePolicy::SendOnly => {
-                self.core.apply_exchange(deferred_command_exchange());
-            }
+            GameplayCommandUpdatePolicy::SendOnly => {}
         }
 
         Ok((
@@ -3100,39 +3039,38 @@ where
         ))
     }
 
+    /// Reconnect and request the current view from a clean replica/queue state.
+    ///
+    /// Connection establishment may block and therefore belongs to the session
+    /// lifecycle executor, never a drawable/frame callback.
+    pub fn reconnect_and_resync(&mut self) -> Result<()> {
+        let command = prepare_remote_dedicated_resync_command(
+            &mut self.core,
+            anyhow::anyhow!("explicit remote session reconnect"),
+        )?;
+        self.connection.clear_pending_updates();
+        reconnect_remote_dedicated_session_and_resync(
+            &mut self.core,
+            self.connection.session_mut(),
+            command,
+        )?;
+        Ok(())
+    }
+
     pub fn poll(&mut self) -> Result<bool> {
         self.poll_with_update_budget(RuntimeUpdatePumpBudget::default())
     }
 
     pub fn poll_until_idle(&mut self) -> Result<(usize, f64)> {
         let poll_start = Instant::now();
-        let mut polls = 0;
-        while self.connection.pending_update_metrics()?.update_depth() > 0 {
-            self.poll_with_update_budget_and_drain_mode(
-                RuntimeUpdatePumpBudget::unlimited(),
-                ConnectionUpdateDrainMode::Blocking,
-            )?;
-            polls += 1;
-        }
-        Ok((polls, elapsed_ms(poll_start.elapsed())))
+        self.poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())?;
+        Ok((1, elapsed_ms(poll_start.elapsed())))
     }
 
     pub fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {
-        self.poll_with_update_budget_and_drain_mode(budget, ConnectionUpdateDrainMode::ReadyOnly)
-    }
-
-    fn poll_with_update_budget_and_drain_mode(
-        &mut self,
-        budget: RuntimeUpdatePumpBudget,
-        drain_mode: ConnectionUpdateDrainMode,
-    ) -> Result<bool> {
         let poll_start = Instant::now();
-        let pump_report = pump_client_connection_updates_report(
-            &mut self.core,
-            &mut self.connection,
-            budget,
-            drain_mode,
-        )?;
+        let pump_report =
+            pump_client_connection_updates_report(&mut self.core, &mut self.connection, budget)?;
         let changed = pump_report.apply_report.changed;
         self.core.finish_poll_diagnostics(
             RuntimePollTiming {
@@ -3140,7 +3078,7 @@ where
                 drain_updates_ms: pump_report.drain_updates_ms,
                 producer_read_ms: pump_report.producer_read_ms,
                 producer_decode_ms: pump_report.producer_decode_ms,
-                producer_response_sequence: pump_report.producer_response_sequence,
+                producer_inbound_frame_sequence: pump_report.producer_inbound_frame_sequence,
                 update_pump_stalled: pump_report.stalled,
                 update_pump_stall_count: pump_report.stall_count,
                 server_update_queue_depth: pump_report.remaining_queue_depth,
@@ -3718,7 +3656,11 @@ mod tests {
             match *self {}
         }
 
-        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
+        fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
+            match *self {}
+        }
+
+        fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics {
             match *self {}
         }
 
@@ -3779,24 +3721,17 @@ mod tests {
 
     #[derive(Debug)]
     struct PollableRemoteSession {
-        blocking_drains: VecDeque<Result<Vec<ServerUpdate>>>,
         ready_drains: VecDeque<Option<Result<Vec<ServerUpdate>>>>,
         send_count: usize,
-        blocking_drain_count: usize,
         try_drain_count: usize,
         reconnect_count: usize,
     }
 
     impl PollableRemoteSession {
-        fn new(
-            blocking_drains: Vec<Result<Vec<ServerUpdate>>>,
-            ready_drains: Vec<Option<Result<Vec<ServerUpdate>>>>,
-        ) -> Self {
+        fn new(ready_drains: Vec<Option<Result<Vec<ServerUpdate>>>>) -> Self {
             Self {
-                blocking_drains: blocking_drains.into(),
                 ready_drains: ready_drains.into(),
                 send_count: 0,
-                blocking_drain_count: 0,
                 try_drain_count: 0,
                 reconnect_count: 0,
             }
@@ -3809,19 +3744,16 @@ mod tests {
             Ok(())
         }
 
-        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
-            self.blocking_drain_count += 1;
-            self.blocking_drains
-                .pop_front()
-                .unwrap_or_else(|| anyhow::bail!("scripted blocking drain missing response"))
-        }
-
-        fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
+        fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
             self.try_drain_count += 1;
             match self.ready_drains.pop_front().unwrap_or(None) {
-                Some(result) => result.map(Some),
+                Some(result) => result.map(RemoteServerUpdateBatch::from_updates).map(Some),
                 None => Ok(None),
             }
+        }
+
+        fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics {
+            RemoteUpdateQueueMetrics::default()
         }
 
         fn reconnect(&mut self) -> Result<()> {
@@ -4032,20 +3964,17 @@ mod tests {
     }
 
     #[test]
-    fn remote_poll_skips_pending_response_until_ready() {
+    fn remote_poll_checks_stream_without_command_response_state() {
         if !extracted_asset_root().exists() {
             return;
         }
 
         let center = ChunkPos::new(0, 0);
         let mesh_assets = load_textured_mesh_assets().unwrap();
-        let session = PollableRemoteSession::new(
-            vec![Ok(Vec::new())],
-            vec![
-                None,
-                Some(Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])),
-            ],
-        );
+        let session = PollableRemoteSession::new(vec![
+            None,
+            Some(Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])),
+        ]);
         let mut runtime = RemoteDedicatedSceneRuntime::with_mesh_assets(
             SingleViewHostOptions::new(center, 0),
             session,
@@ -4053,8 +3982,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(runtime.connection.pending_response_batches, 0);
-        assert_eq!(runtime.connection.session.blocking_drain_count, 1);
+        assert_eq!(runtime.connection.session.send_count, 1);
+        assert_eq!(runtime.connection.session.try_drain_count, 0);
         assert_eq!(runtime.core().day_time(), 0);
 
         let command = ClientCommand::SetChunkView(crate::chunk_view(
@@ -4071,14 +4000,13 @@ mod tests {
 
         assert_eq!(timing.drain_updates_ms, 0.0);
         assert_eq!(timing.updates, 0);
-        assert_eq!(runtime.connection.pending_response_batches, 1);
+        assert_eq!(runtime.connection.session.send_count, 2);
 
         assert!(!runtime.poll().unwrap());
         let diagnostics = runtime.core().last_poll_diagnostics();
-        assert_eq!(diagnostics.server_update_queue_depth, 1);
+        assert_eq!(diagnostics.server_update_queue_depth, 0);
         assert_eq!(diagnostics.updates, 0);
         assert!(!diagnostics.update_pump_stalled);
-        assert_eq!(runtime.connection.pending_response_batches, 1);
         assert_eq!(runtime.connection.session.try_drain_count, 1);
         assert_eq!(runtime.core().day_time(), 0);
 
@@ -4086,9 +4014,44 @@ mod tests {
         let diagnostics = runtime.core().last_poll_diagnostics();
         assert_eq!(diagnostics.server_update_queue_depth, 0);
         assert_eq!(diagnostics.updates, 1);
-        assert_eq!(runtime.connection.pending_response_batches, 0);
         assert_eq!(runtime.connection.session.try_drain_count, 3);
         assert_eq!(runtime.core().day_time(), 6000);
+    }
+
+    #[test]
+    fn explicit_remote_reconnect_clears_queued_stream_state_before_resync() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let center = ChunkPos::new(0, 0);
+        let mesh_assets = load_textured_mesh_assets().unwrap();
+        let session = PollableRemoteSession::new(Vec::new());
+        let mut runtime = RemoteDedicatedSceneRuntime::with_mesh_assets(
+            SingleViewHostOptions::new(center, 0),
+            session,
+            mesh_assets,
+        )
+        .unwrap();
+        runtime
+            .connection
+            .push_update_batch(
+                RemoteServerUpdateBatch::from_updates(vec![
+                    ServerUpdate::TimeUpdate { day_time: 1 },
+                    ServerUpdate::TimeUpdate { day_time: 2 },
+                ]),
+                false,
+            )
+            .unwrap();
+        assert_eq!(runtime.connection.queued_updates.len(), 2);
+
+        runtime.reconnect_and_resync().unwrap();
+
+        assert!(runtime.connection.queued_updates.is_empty());
+        assert_eq!(runtime.connection.queued_update_bytes, 0);
+        assert_eq!(runtime.connection.session.reconnect_count, 1);
+        assert_eq!(runtime.connection.session.send_count, 2);
+        assert_eq!(runtime.core().command_count(), 2);
     }
 
     #[test]
@@ -4706,18 +4669,14 @@ mod tests {
 
         let center = ChunkPos::new(0, 0);
         let mesh_assets = load_textured_mesh_assets().unwrap();
-        // The initial SetChunkView response is drained once during construction;
-        // startup then reaches ready through the shared pump + seed, never a
-        // poll_until_idle + sync_all blocking loop (docs/tactical/167).
-        let session = PollableRemoteSession::new(
-            vec![Ok(vec![
-                ServerUpdate::WorldInfo {
-                    biome_zoom_seed: 1124,
-                },
-                ServerUpdate::ChunkSnapshot(stone_test_snapshot(center)),
-            ])],
-            Vec::new(),
-        );
+        // The initial SetChunkView publication is received through the same
+        // ready-only frame pump used after startup.
+        let session = PollableRemoteSession::new(vec![Some(Ok(vec![
+            ServerUpdate::WorldInfo {
+                biome_zoom_seed: 1124,
+            },
+            ServerUpdate::ChunkSnapshot(stone_test_snapshot(center)),
+        ]))]);
         let mut pump = NativeSessionStartupPump::remote_dedicated_with_mesh_assets(
             RemoteSessionEndpoint::new("127.0.0.1:25565"),
             SingleViewHostOptions::new(center, 0),
@@ -4748,12 +4707,7 @@ mod tests {
                 assert!(completion.runtime.loaded_chunk_count() > 0);
                 match &*completion.runtime {
                     NativeSceneServices::RemoteDedicated(scene) => {
-                        assert_eq!(
-                            scene.connection.session.blocking_drain_count, 1,
-                            "shared remote startup must not poll_until_idle: only the \
-                             construction-time response is blocking-drained"
-                        );
-                        assert_eq!(scene.startup_pending_update_backlog(), 0);
+                        assert!(scene.connection.session.try_drain_count >= 2);
                     }
                     NativeSceneServices::Local(_) => panic!("expected a remote runtime"),
                 }

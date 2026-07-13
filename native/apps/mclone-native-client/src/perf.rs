@@ -535,7 +535,7 @@ struct StartupStreamingFrameReport {
     poll_client_apply_updates_ms: f64,
     poll_producer_read_ms: f64,
     poll_producer_decode_ms: f64,
-    poll_producer_response_sequence: Option<u64>,
+    poll_producer_inbound_frame_sequence: Option<u64>,
     remesh_ms: f64,
     upload_ms: f64,
     render_ms: f64,
@@ -657,7 +657,7 @@ struct FrameBudgetProbeFrameReport {
     poll_client_apply_updates_ms: f64,
     poll_producer_read_ms: f64,
     poll_producer_decode_ms: f64,
-    poll_producer_response_sequence: Option<u64>,
+    poll_producer_inbound_frame_sequence: Option<u64>,
     update_pump_stalled: bool,
     update_pump_stall_count: usize,
     server_update_queue_depth: usize,
@@ -765,7 +765,7 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_client_apply_updates_ms: 0.0,
             poll_producer_read_ms: 0.0,
             poll_producer_decode_ms: 0.0,
-            poll_producer_response_sequence: None,
+            poll_producer_inbound_frame_sequence: None,
             update_pump_stalled: false,
             update_pump_stall_count: 0,
             server_update_queue_depth: 0,
@@ -1402,11 +1402,11 @@ impl FrameBudgetProbeReport {
                 "      \"poll_producer_decode_ms\": {:.3},",
                 frame.poll_producer_decode_ms
             );
-            match frame.poll_producer_response_sequence {
+            match frame.poll_producer_inbound_frame_sequence {
                 Some(sequence) => {
-                    println!("      \"poll_producer_response_sequence\": {sequence},")
+                    println!("      \"poll_producer_inbound_frame_sequence\": {sequence},")
                 }
-                None => println!("      \"poll_producer_response_sequence\": null,"),
+                None => println!("      \"poll_producer_inbound_frame_sequence\": null,"),
             }
             println!(
                 "      \"update_pump_stalled\": {},",
@@ -1662,10 +1662,10 @@ impl StartupStreamingPerfReport {
             .iter()
             .map(|frame| frame.server_update_oldest_applied_age_ms)
             .fold(0.0, f64::max);
-        let max_poll_producer_response_sequence = self
+        let max_poll_producer_inbound_frame_sequence = self
             .frames
             .iter()
-            .filter_map(|frame| frame.poll_producer_response_sequence)
+            .filter_map(|frame| frame.poll_producer_inbound_frame_sequence)
             .max();
         let max_scheduler_pending_worldgen_publication_chunks = self
             .frames
@@ -2060,9 +2060,11 @@ impl StartupStreamingPerfReport {
             "  \"max_server_update_oldest_applied_age_ms\": {:.3},",
             max_server_update_oldest_applied_age_ms
         );
-        match max_poll_producer_response_sequence {
-            Some(sequence) => println!("  \"max_poll_producer_response_sequence\": {sequence},"),
-            None => println!("  \"max_poll_producer_response_sequence\": null,"),
+        match max_poll_producer_inbound_frame_sequence {
+            Some(sequence) => {
+                println!("  \"max_poll_producer_inbound_frame_sequence\": {sequence},")
+            }
+            None => println!("  \"max_poll_producer_inbound_frame_sequence\": null,"),
         }
         println!(
             "  \"max_scheduler_pending_worldgen_publication_chunks\": {},",
@@ -2267,11 +2269,11 @@ impl StartupStreamingPerfReport {
                 "      \"poll_producer_decode_ms\": {:.3},",
                 frame.poll_producer_decode_ms
             );
-            match frame.poll_producer_response_sequence {
+            match frame.poll_producer_inbound_frame_sequence {
                 Some(sequence) => {
-                    println!("      \"poll_producer_response_sequence\": {sequence},")
+                    println!("      \"poll_producer_inbound_frame_sequence\": {sequence},")
                 }
-                None => println!("      \"poll_producer_response_sequence\": null,"),
+                None => println!("      \"poll_producer_inbound_frame_sequence\": null,"),
             }
             println!(
                 "      \"scheduler_feature_chunks_published\": {},",
@@ -2473,9 +2475,9 @@ impl StartupStreamingPerfReport {
             "    \"poll_producer_decode_ms\": {:.3},",
             final_frame.poll_producer_decode_ms
         );
-        match final_frame.poll_producer_response_sequence {
-            Some(sequence) => println!("    \"poll_producer_response_sequence\": {sequence},"),
-            None => println!("    \"poll_producer_response_sequence\": null,"),
+        match final_frame.poll_producer_inbound_frame_sequence {
+            Some(sequence) => println!("    \"poll_producer_inbound_frame_sequence\": {sequence},"),
+            None => println!("    \"poll_producer_inbound_frame_sequence\": null,"),
         }
         println!(
             "    \"server_update_oldest_applied_age_ms\": {:.3},",
@@ -3809,7 +3811,7 @@ fn fill_startup_streaming_poll_diagnostics(
     report.poll_client_apply_updates_ms = diagnostics.client_apply_updates_ms;
     report.poll_producer_read_ms = diagnostics.producer_read_ms;
     report.poll_producer_decode_ms = diagnostics.producer_decode_ms;
-    report.poll_producer_response_sequence = diagnostics.producer_response_sequence;
+    report.poll_producer_inbound_frame_sequence = diagnostics.producer_inbound_frame_sequence;
     report.update_pump_stalled = diagnostics.update_pump_stalled;
     report.server_update_queue_depth = diagnostics.server_update_queue_depth;
     report.server_update_queue_bytes = diagnostics.server_update_queue_bytes;
@@ -4218,7 +4220,7 @@ fn fill_frame_budget_poll_diagnostics(
     report.poll_client_apply_updates_ms = diagnostics.client_apply_updates_ms;
     report.poll_producer_read_ms = diagnostics.producer_read_ms;
     report.poll_producer_decode_ms = diagnostics.producer_decode_ms;
-    report.poll_producer_response_sequence = diagnostics.producer_response_sequence;
+    report.poll_producer_inbound_frame_sequence = diagnostics.producer_inbound_frame_sequence;
     report.update_pump_stalled = diagnostics.update_pump_stalled;
     report.update_pump_stall_count = diagnostics.update_pump_stall_count;
     report.server_update_queue_depth = diagnostics.server_update_queue_depth;

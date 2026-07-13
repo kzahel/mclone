@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
-use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_protocol::ClientCommand;
 
 use crate::host_mode::{
-    RemoteCommandUpdate, RemoteCommandUpdateBatch, RemoteDedicatedServerSession,
-    SingleViewHostOptions,
+    RemoteDedicatedServerSession, RemoteServerUpdate, RemoteServerUpdateBatch,
+    RemoteUpdateQueueMetrics, SingleViewHostOptions,
 };
 use crate::native_service_assembly::NativeSessionServices;
 use crate::render_asset_data::TexturedMeshAssets;
@@ -67,37 +67,7 @@ impl NativeRemoteServerSession {
         })
     }
 
-    pub fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
-        self.session.drain_command_updates().with_context(|| {
-            format!(
-                "failed to drain updates from {} remote server {}",
-                self.host_label, self.addr
-            )
-        })
-    }
-
-    pub fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
-        self.session.try_drain_command_updates().with_context(|| {
-            format!(
-                "failed to poll updates from {} remote server {}",
-                self.host_label, self.addr
-            )
-        })
-    }
-
-    pub fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
-        self.session
-            .drain_update_batch()
-            .map(remote_batch_from_native)
-            .with_context(|| {
-                format!(
-                    "failed to drain updates from {} remote server {}",
-                    self.host_label, self.addr
-                )
-            })
-    }
-
-    pub fn try_drain_command_update_batch(&mut self) -> Result<Option<RemoteCommandUpdateBatch>> {
+    pub fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
         self.session
             .try_drain_update_batch()
             .map(|batch| batch.map(remote_batch_from_native))
@@ -108,6 +78,15 @@ impl NativeRemoteServerSession {
                 )
             })
     }
+
+    pub fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics {
+        let diagnostics = self.session.diagnostics();
+        RemoteUpdateQueueMetrics {
+            frame_depth: diagnostics.inbound_update_batches,
+            update_depth: diagnostics.inbound_update_depth,
+            update_bytes: diagnostics.inbound_update_bytes,
+        }
+    }
 }
 
 impl RemoteDedicatedServerSession for NativeRemoteServerSession {
@@ -115,20 +94,12 @@ impl RemoteDedicatedServerSession for NativeRemoteServerSession {
         NativeRemoteServerSession::send_command_only(self, command)
     }
 
-    fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
-        NativeRemoteServerSession::drain_command_updates(self)
+    fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
+        NativeRemoteServerSession::try_drain_update_batch(self)
     }
 
-    fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
-        NativeRemoteServerSession::try_drain_command_updates(self)
-    }
-
-    fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
-        NativeRemoteServerSession::drain_command_update_batch(self)
-    }
-
-    fn try_drain_command_update_batch(&mut self) -> Result<Option<RemoteCommandUpdateBatch>> {
-        NativeRemoteServerSession::try_drain_command_update_batch(self)
+    fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics {
+        NativeRemoteServerSession::pending_update_metrics(self)
     }
 
     fn reconnect(&mut self) -> Result<()> {
@@ -136,20 +107,20 @@ impl RemoteDedicatedServerSession for NativeRemoteServerSession {
     }
 }
 
-fn remote_batch_from_native(batch: NativeServerUpdateBatch) -> RemoteCommandUpdateBatch {
+fn remote_batch_from_native(batch: NativeServerUpdateBatch) -> RemoteServerUpdateBatch {
     let queued_age = batch.queued_age();
-    RemoteCommandUpdateBatch {
-        response_sequence: Some(batch.response_sequence),
+    RemoteServerUpdateBatch {
+        inbound_frame_sequence: Some(batch.inbound_frame_sequence),
         producer_read_ms: batch.producer_read_ms,
         producer_decode_ms: batch.producer_decode_ms,
         updates: batch
             .updates
             .into_iter()
-            .map(|update| RemoteCommandUpdate {
+            .map(|update| RemoteServerUpdate {
                 update: update.update,
                 encoded_len: Some(update.encoded_len),
                 queued_age,
-                response_sequence: Some(update.response_sequence),
+                inbound_frame_sequence: Some(update.inbound_frame_sequence),
                 producer_read_ms: update.producer_read_ms,
                 producer_decode_ms: update.producer_decode_ms,
             })
@@ -161,7 +132,7 @@ fn remote_batch_from_native(batch: NativeServerUpdateBatch) -> RemoteCommandUpda
 mod tests {
     use super::*;
     use mclone_core::ChunkPos;
-    use mclone_protocol::ChunkView;
+    use mclone_protocol::{ChunkView, ServerUpdate};
 
     #[test]
     fn remote_server_session_reuses_one_native_tcp_connection() {
@@ -210,12 +181,14 @@ mod tests {
 
         {
             let mut session = NativeRemoteServerSession::connect(addr.to_string(), "test").unwrap();
+            session.send_command_only(first_command).unwrap();
             assert_eq!(
-                session.send_command(first_command).unwrap(),
+                wait_for_update_batch(&mut session).into_updates(),
                 vec![ServerUpdate::TimeUpdate { day_time: 10 }]
             );
+            session.send_command_only(second_command).unwrap();
             assert_eq!(
-                session.send_command(second_command).unwrap(),
+                wait_for_update_batch(&mut session).into_updates(),
                 vec![ServerUpdate::TimeUpdate { day_time: 20 }]
             );
         }
@@ -263,13 +236,43 @@ mod tests {
 
         {
             let mut session = NativeRemoteServerSession::connect(addr.to_string(), "test").unwrap();
-            assert!(session.send_command(first_command).is_err());
+            session.send_command_only(first_command).unwrap();
+            wait_for_disconnect(&mut session);
             session.reconnect().unwrap();
+            session.send_command_only(second_command).unwrap();
             assert_eq!(
-                session.send_command(second_command).unwrap(),
+                wait_for_update_batch(&mut session).into_updates(),
                 vec![ServerUpdate::TimeUpdate { day_time: 30 }]
             );
         }
         server.join().unwrap();
+    }
+
+    fn wait_for_update_batch(session: &mut NativeRemoteServerSession) -> RemoteServerUpdateBatch {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if let Some(batch) = session.try_drain_update_batch().unwrap() {
+                return batch;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for update batch"
+            );
+            std::thread::yield_now();
+        }
+    }
+
+    fn wait_for_disconnect(session: &mut NativeRemoteServerSession) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if session.try_drain_update_batch().is_err() {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for disconnect"
+            );
+            std::thread::yield_now();
+        }
     }
 }

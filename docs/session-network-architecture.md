@@ -10,8 +10,8 @@ frame-budget stall) and drop the earlier priority-class design; native remote
 `SendOnly` and TCP-readiness fixes landed 2026-07-06; shared `ClientConnection`
 plus focused remote inbound queue work completed 2026-07-07 under
 [`tactical/151-remote-inbound-update-pipeline.md`](./tactical/151-remote-inbound-update-pipeline.md),
-with autonomous dedicated tick, full-duplex server push, bounded connection
-queues, and production web-worker transport now planned under
+with autonomous dedicated tick, native full-duplex server push, one ready-only
+native consumer, and bounded connection queues landed 2026-07-13 under
 [`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md)
 
 ## Purpose
@@ -26,9 +26,10 @@ The original performance trigger was the Quest render-distance-7 frame pacing
 work: high-frequency XR pose sync called a helper that sent a movement command
 and then opportunistically drained/applied all pending integrated-server
 updates. The shared update pump has removed that local and remote client-frame
-coupling. The remaining architectural gap is producer-side: remote transports
-still pair one update batch with every command, the dedicated world advances
-once per received command, and production web remote does not yet prove
+coupling. Native TCP and dedicated authority now implement the target
+full-duplex stream. The remaining producer-side gap is web: its callback
+adapter still tracks command responses, its server listener still loops back
+through native TCP, and production browser remote does not yet prove
 worker-owned socket/decode work.
 
 This doc records the desired state so implementation slices do not drift into
@@ -131,19 +132,21 @@ unloading and reloading it.
 
 Native remote dedicated now uses the shared client connection boundary. Desktop,
 Android, and Android XR remote adapters hold `NativeClientIoSession`, whose IO
-actor owns the TCP stream, writes queued commands, blocks on paired responses,
-decodes response batches producer-side, and publishes ordered update batches to
-the runtime-facing queue. The app/runtime thread drains that queue through
-`pump_client_connection_updates_report` under `RuntimeUpdatePumpBudget`. The
-wire protocol is still one response batch per command, so
-`pending_response_batches` remains adapter bookkeeping for response pairing, but
-normal frame polling no longer owns socket reads or ready-batch decode.
+writer owns the ordered bounded command queue and whose independent reader
+continuously receives and decodes publication frames into a bounded inbound
+queue. The app/runtime thread drains that queue through one ready-only
+`ClientConnection::try_drain_next_update` plus
+`pump_client_connection_updates_report` under `RuntimeUpdatePumpBudget`.
+There is no native pending-response counter or blocking drain mode; send,
+startup, and ordinary polling do not imply that a command owns the next frame.
+Reconnect/resync clears the replica and decoded queue before requesting the
+current view, and connection establishment is explicitly a session-lifecycle
+operation rather than a drawable-frame action.
 
-Server-side native dedicated is already threaded: an accept thread spawns a
-connection thread per client, the connection thread reads commands and waits on
-the authoritative server loop for the response, then writes one update batch.
-Server-push broadening is still future work owned by tactical 133; it is not
-required for the current shared client ingress.
+Server-side native dedicated owns an autonomous 20/20/60 cadence. Connection
+readers enqueue commands independently, the authority drains them at host
+boundaries, and per-connection writers consume bounded publication queues for
+every player without waiting for another inbound command.
 
 Web integrated inline/worker play and web remote WebSocket play also implement
 the shared `ClientConnection` path. Browser worker or WebSocket callbacks remain
@@ -378,8 +381,9 @@ Native remote TCP:
 - The app thread enqueues `ClientCommand` frames and drains decoded
   `ServerUpdate`s from queues.
 - The existing TCP update-batch framing may remain initially, but a batch is a
-  publication frame rather than a command response. Empty response batches and
-  response-count bookkeeping disappear.
+  publication frame rather than a command response. Native response-count
+  bookkeeping is gone; temporary empty compatibility frames are removed in
+  Tactical 176's final cleanup.
 - Desktop flat, desktop XR, flat Android, and Android XR instantiate this same
   adapter. Their app crates do not wrap it with private drain or polling
   semantics.

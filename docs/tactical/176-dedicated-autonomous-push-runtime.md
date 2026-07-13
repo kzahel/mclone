@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slices 0-3 completed 2026-07-13. Slice 4 native consumer
-convergence is next.
+Status: active; Slices 0-4 completed 2026-07-13. Slice 5 native WebSocket host
+and browser worker convergence is next.
 
 Topic: `multiplayer-networking`
 
@@ -516,7 +516,9 @@ Validation evidence:
   agreed; native flat/offscreen, AVD, local browser/Playwright, and synthetic
   XR are the available lanes for the remaining slices.
 
-### Slice 4: Native Consumer Convergence And Response Cleanup
+### Slice 4: Native Consumer Convergence And Response Cleanup — Complete
+
+Status: completed 2026-07-13.
 
 After the push cutover is proven:
 
@@ -532,6 +534,59 @@ After the push cutover is proven:
 
 Exit: native platform differences are address/lifecycle/presentation wiring,
 not networking semantics.
+
+Implemented result:
+
+- `ClientConnection` now exposes only `try_drain_next_update`; its blocking vs
+  ready-only mode was removed from the shared contract. The native remote
+  session trait likewise exposes command enqueue, ready-only publication-batch
+  poll, producer queue metrics, and explicit lifecycle reconnect only.
+- Native construction sends initial chunk interest without draining a frame.
+  Gameplay commands increment command accounting at enqueue and may apply only
+  updates already ready; they never wait for a command-owned batch. A push
+  stream's startup gate now waits for resident active-view terrain rather than
+  an impossible forever-idle condition.
+- Native `pending_response_batches` state and normal-path
+  `drain_command_updates` APIs are gone. The synchronous
+  `NativeClientSession` remains clearly quarantined as a low-level protocol
+  smoke/test helper; production uses `NativeClientIoSession` batch polling.
+- Sequence and queue diagnostics are transport-neutral:
+  `inbound_frame_sequence`, `inbound_update_batches`, update depth/bytes, read
+  time, decode time, and oldest apply age. The rename is carried through
+  shared scene diagnostics and flat/XR performance output.
+- Explicit reconnect/resync clears decoded adapter state and the client
+  replica before sending fresh interest. Normal send/poll errors are surfaced;
+  they do not secretly perform connection establishment on a drawable frame.
+- The thin-adapter purity gate now rejects production app-local socket types,
+  `NativeClientIoSession`, `ClientConnection`, response bookkeeping, or update
+  pump policy. Desktop flat/XR, Android flat, and Android XR therefore select
+  `NativeRemoteServerSession` but cannot fork its semantics.
+
+Validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p
+  mclone-net --no-fail-fast`: passed 242 app-runtime and 17 net tests plus
+  integration/doc tests, including ready-only startup, independent send/poll,
+  producer backlog conservation, and clean explicit reconnect.
+- `cargo check --manifest-path native/Cargo.toml -p mclone-net -p
+  mclone-app-runtime -p mclone-scene -p mclone-native-client -p
+  mclone-web-client` and `pnpm --silent native:web:build`: passed. The web
+  build proves the shared API/diagnostic rename remains WASM-compatible before
+  Slice 5 changes the production web mechanics.
+- `pnpm --silent native:thin-adapters:purity`: passed with the new networking
+  policy lock. `pnpm native:android:apk` and `pnpm native:android-xr:apk`
+  passed, proving both Android rims compile the same shared native adapter.
+- `pnpm native:android:avd-smoke -- --skip-build`: passed on the local API 34
+  arm64 AVD. `/tmp/mclone-android-avd-chunk.png` was inspected and shows a
+  valid rendered world/UI frame.
+- `pnpm --silent native:dedicated:smoke` and `pnpm --silent
+  native:remote:smoke` passed. The native two-client capture retained one
+  remote player, two entities, and three drawn actors. Its 14 resident/three
+  drawn terrain sections and observer void remain the named Slice 6 pressure
+  and startup-streaming evidence.
+- Desktop XR compiles through `mclone-native-client`; Android XR builds but
+  cannot be device-run because no Quest is available. No platform-local
+  semantic exception was introduced for that missing hardware receipt.
 
 ### Slice 5: Native WebSocket Host And Web Worker Remote
 

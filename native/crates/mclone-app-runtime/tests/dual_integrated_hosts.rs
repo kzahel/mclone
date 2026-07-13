@@ -4,8 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use mclone_app_runtime::client_connection::{
-    ClientConnection, ConnectionUpdateDrainMode, IntegratedRunnerConnection,
-    pump_client_connection_updates_report,
+    ClientConnection, IntegratedRunnerConnection, pump_client_connection_updates_report,
 };
 use mclone_app_runtime::{RuntimeUpdatePumpBudget, SingleViewRuntime};
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, ChunkPos, Direction, Vec3d, chunk_section_index};
@@ -77,7 +76,6 @@ impl WarmIntegratedHost {
             &mut self.runtime,
             &mut self.connection,
             RuntimeUpdatePumpBudget::unlimited(),
-            ConnectionUpdateDrainMode::ReadyOnly,
         )?;
         Ok(())
     }

@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use mclone_client::ClientRuntime;
 use mclone_core::ChunkPos;
 use mclone_protocol::{ClientCommand, ServerUpdate};
 use mclone_server::ServerRunnerDiagnostics;
@@ -90,53 +89,41 @@ impl SingleViewHostOptions {
     }
 }
 
-/// Runtime-facing remote session adapter over the current response-paired wire
-/// protocol.
+/// Runtime-facing remote session adapter over an ordered server-update stream.
 ///
-/// Implementors may still expose `drain_command_updates` names because native
-/// TCP and WebSocket servers currently emit one update batch per command, but
-/// normal frame polling wraps this trait in `ClientConnection` and drains
-/// queued updates through the shared pump.
+/// Receipt is always ready-only. Socket reads and frame decode belong to the
+/// producer, so a drawable caller can never turn this poll into transport IO.
 pub trait RemoteDedicatedServerSession {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
-    fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>>;
-    fn try_drain_command_updates(&mut self) -> Result<Option<Vec<ServerUpdate>>> {
-        self.drain_command_updates().map(Some)
-    }
-    fn drain_command_update_batch(&mut self) -> Result<RemoteCommandUpdateBatch> {
-        self.drain_command_updates()
-            .map(RemoteCommandUpdateBatch::from_updates)
-    }
-    fn try_drain_command_update_batch(&mut self) -> Result<Option<RemoteCommandUpdateBatch>> {
-        self.try_drain_command_updates()
-            .map(|updates| updates.map(RemoteCommandUpdateBatch::from_updates))
-    }
+    fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>>;
+    fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics;
     fn reconnect(&mut self) -> Result<()>;
+}
 
-    fn send_command(&mut self, command: ClientCommand) -> Result<Vec<ServerUpdate>> {
-        self.send_command_only(command)?;
-        self.drain_command_update_batch()
-            .map(RemoteCommandUpdateBatch::into_updates)
-    }
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RemoteUpdateQueueMetrics {
+    pub frame_depth: usize,
+    pub update_depth: usize,
+    pub update_bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct RemoteCommandUpdate {
+pub struct RemoteServerUpdate {
     pub update: ServerUpdate,
     pub encoded_len: Option<usize>,
     pub queued_age: Duration,
-    pub response_sequence: Option<u64>,
+    pub inbound_frame_sequence: Option<u64>,
     pub producer_read_ms: f64,
     pub producer_decode_ms: f64,
 }
 
-impl RemoteCommandUpdate {
+impl RemoteServerUpdate {
     pub fn legacy(update: ServerUpdate) -> Self {
         Self {
             update,
             encoded_len: None,
             queued_age: Duration::ZERO,
-            response_sequence: None,
+            inbound_frame_sequence: None,
             producer_read_ms: 0.0,
             producer_decode_ms: 0.0,
         }
@@ -144,21 +131,21 @@ impl RemoteCommandUpdate {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct RemoteCommandUpdateBatch {
-    pub updates: Vec<RemoteCommandUpdate>,
-    pub response_sequence: Option<u64>,
+pub struct RemoteServerUpdateBatch {
+    pub updates: Vec<RemoteServerUpdate>,
+    pub inbound_frame_sequence: Option<u64>,
     pub producer_read_ms: f64,
     pub producer_decode_ms: f64,
 }
 
-impl RemoteCommandUpdateBatch {
+impl RemoteServerUpdateBatch {
     pub fn from_updates(updates: Vec<ServerUpdate>) -> Self {
         Self {
             updates: updates
                 .into_iter()
-                .map(RemoteCommandUpdate::legacy)
+                .map(RemoteServerUpdate::legacy)
                 .collect(),
-            response_sequence: None,
+            inbound_frame_sequence: None,
             producer_read_ms: 0.0,
             producer_decode_ms: 0.0,
         }
@@ -170,18 +157,6 @@ impl RemoteCommandUpdateBatch {
             .map(|update| update.update)
             .collect()
     }
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum RemoteDedicatedExchangeReport<E> {
-    Applied {
-        changed: bool,
-        report: RuntimeStepReport,
-    },
-    ReconnectAndResync {
-        command: ClientCommand,
-        error: E,
-    },
 }
 
 pub fn command_exchange(
@@ -213,51 +188,6 @@ pub fn diagnostics_worker_exchange_drained(diagnostics: &ServerRunnerDiagnostics
         && diagnostics.pending_publications == 0
 }
 
-pub fn build_remote_dedicated_client_runtime<S>(
-    options: SingleViewHostOptions,
-    session: &mut S,
-) -> Result<ClientRuntime>
-where
-    S: RemoteDedicatedServerSession + ?Sized,
-{
-    let mut runtime = SingleViewRuntime::remote_dedicated(
-        options.center,
-        options.render_distance,
-        options.chunk_tracking_radius,
-    );
-    let Some(command) = runtime.set_chunk_view_command(
-        options.center,
-        options.render_distance,
-        options.chunk_tracking_radius,
-    ) else {
-        return Ok(runtime.client().clone());
-    };
-    let updates = session
-        .send_command(command)
-        .context("failed to initialize remote dedicated chunk view")?;
-    runtime.client_mut().apply_updates(updates);
-    Ok(runtime.client().clone())
-}
-
-pub fn dispatch_remote_dedicated_command<S>(
-    runtime: &mut SingleViewRuntime,
-    session: &mut S,
-    command: ClientCommand,
-) -> Result<bool>
-where
-    S: RemoteDedicatedServerSession + ?Sized,
-{
-    let result = session
-        .send_command(command)
-        .map(|updates| command_exchange(updates, true, true));
-    match resolve_remote_dedicated_exchange_report(runtime, result)? {
-        RemoteDedicatedExchangeReport::Applied { changed, .. } => Ok(changed),
-        RemoteDedicatedExchangeReport::ReconnectAndResync { command, error: _ } => {
-            reconnect_remote_dedicated_session_and_resync(runtime, session, command)
-        }
-    }
-}
-
 pub fn apply_remote_dedicated_command_updates(
     runtime: &mut SingleViewRuntime,
     updates: Vec<ServerUpdate>,
@@ -279,26 +209,6 @@ pub fn apply_remote_dedicated_command_exchange_report(
     let changed = !exchange.updates.is_empty();
     let report = runtime.apply_exchange(exchange);
     (changed, report)
-}
-
-pub fn resolve_remote_dedicated_exchange_report<E>(
-    runtime: &mut SingleViewRuntime,
-    result: std::result::Result<RuntimeExchange, E>,
-) -> Result<RemoteDedicatedExchangeReport<E>>
-where
-    E: std::fmt::Display,
-{
-    match result {
-        Ok(exchange) => {
-            let (changed, report) =
-                apply_remote_dedicated_command_exchange_report(runtime, exchange);
-            Ok(RemoteDedicatedExchangeReport::Applied { changed, report })
-        }
-        Err(error) => {
-            let command = prepare_remote_dedicated_resync_command_for_error(runtime, &error)?;
-            Ok(RemoteDedicatedExchangeReport::ReconnectAndResync { command, error })
-        }
-    }
 }
 
 pub fn prepare_remote_dedicated_resync_command(
@@ -330,17 +240,16 @@ where
     S: RemoteDedicatedServerSession + ?Sized,
 {
     session.reconnect()?;
-    let updates = session
-        .send_command(command)
+    session
+        .send_command_only(command)
         .context("failed to resync remote dedicated chunk view after reconnect")?;
-    runtime.apply_server_updates(updates);
+    runtime.apply_exchange(deferred_command_exchange());
     Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_client::ClientHost;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkSnapshot, ChunkStatus,
     };
@@ -348,18 +257,24 @@ mod tests {
 
     #[derive(Debug)]
     struct ScriptedRemoteSession {
-        sends: Vec<Result<Vec<ServerUpdate>>>,
+        batches: Vec<Option<Result<RemoteServerUpdateBatch>>>,
         send_only_count: usize,
-        drain_count: usize,
+        poll_count: usize,
         reconnects: usize,
     }
 
     impl ScriptedRemoteSession {
-        fn new(sends: Vec<Result<Vec<ServerUpdate>>>) -> Self {
+        fn new(batches: Vec<Option<Result<Vec<ServerUpdate>>>>) -> Self {
             Self {
-                sends: sends.into_iter().rev().collect(),
+                batches: batches
+                    .into_iter()
+                    .map(|batch| {
+                        batch.map(|result| result.map(RemoteServerUpdateBatch::from_updates))
+                    })
+                    .rev()
+                    .collect(),
                 send_only_count: 0,
-                drain_count: 0,
+                poll_count: 0,
                 reconnects: 0,
             }
         }
@@ -371,11 +286,16 @@ mod tests {
             Ok(())
         }
 
-        fn drain_command_updates(&mut self) -> Result<Vec<ServerUpdate>> {
-            self.drain_count += 1;
-            self.sends
-                .pop()
-                .expect("scripted remote session missing send result")
+        fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
+            self.poll_count += 1;
+            match self.batches.pop().unwrap_or(None) {
+                Some(result) => result.map(Some),
+                None => Ok(None),
+            }
+        }
+
+        fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics {
+            RemoteUpdateQueueMetrics::default()
         }
 
         fn reconnect(&mut self) -> Result<()> {
@@ -385,64 +305,14 @@ mod tests {
     }
 
     #[test]
-    fn remote_dedicated_client_runtime_loads_initial_chunk_view() {
+    fn remote_session_send_and_ready_poll_are_independent() {
         let center = ChunkPos::new(0, 0);
-        let mut session = ScriptedRemoteSession::new(vec![Ok(vec![
-            ServerUpdate::WorldInfo {
-                biome_zoom_seed: 1124,
-            },
-            ServerUpdate::ChunkSnapshot(empty_test_snapshot(center)),
-        ])]);
-
-        let client = build_remote_dedicated_client_runtime(
-            SingleViewHostOptions::new(center, 0),
-            &mut session,
-        )
-        .unwrap();
-
-        assert_eq!(client.host(), ClientHost::RemoteDedicated);
-        assert_eq!(client.biome_zoom_seed(), Some(1124));
-        assert_eq!(
-            client.chunk_view(),
-            Some(&ChunkView {
+        let mut session = ScriptedRemoteSession::new(vec![
+            None,
+            Some(Ok(vec![ServerUpdate::ChunkSnapshot(empty_test_snapshot(
                 center,
-                render_distance: 0,
-                chunk_tracking_radius: 0,
-            })
-        );
-        assert!(client.chunk_snapshot(center).is_some());
-    }
-
-    #[test]
-    fn remote_dedicated_dispatch_applies_updates() {
-        let center = ChunkPos::new(0, 0);
-        let mut runtime = SingleViewRuntime::remote_dedicated(center, 0, 0);
-        let mut session =
-            ScriptedRemoteSession::new(vec![Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])]);
-
-        assert!(
-            dispatch_remote_dedicated_command(
-                &mut runtime,
-                &mut session,
-                ClientCommand::SetChunkView(ChunkView {
-                    center,
-                    render_distance: 0,
-                    chunk_tracking_radius: 0,
-                }),
-            )
-            .unwrap()
-        );
-
-        assert_eq!(runtime.day_time(), 6000);
-        assert_eq!(runtime.command_count(), 1);
-    }
-
-    #[test]
-    fn remote_dedicated_send_only_defers_update_drain_and_apply() {
-        let center = ChunkPos::new(0, 0);
-        let mut runtime = SingleViewRuntime::remote_dedicated(center, 0, 0);
-        let mut session =
-            ScriptedRemoteSession::new(vec![Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])]);
+            ))])),
+        ]);
 
         session
             .send_command_only(ClientCommand::SetChunkView(ChunkView {
@@ -451,18 +321,11 @@ mod tests {
                 chunk_tracking_radius: 0,
             }))
             .unwrap();
-        runtime.apply_exchange(deferred_command_exchange());
-
         assert_eq!(session.send_only_count, 1);
-        assert_eq!(session.drain_count, 0);
-        assert_eq!(runtime.command_count(), 1);
-        assert_eq!(runtime.day_time(), 0);
-
-        let updates = session.drain_command_updates().unwrap();
-        runtime.apply_exchange(update_drain_exchange(updates, true));
-
-        assert_eq!(session.drain_count, 1);
-        assert_eq!(runtime.day_time(), 6000);
+        assert!(session.try_drain_update_batch().unwrap().is_none());
+        let batch = session.try_drain_update_batch().unwrap().unwrap();
+        assert_eq!(batch.updates.len(), 1);
+        assert_eq!(session.poll_count, 2);
     }
 
     #[test]
@@ -495,18 +358,21 @@ mod tests {
         runtime.apply_server_updates(vec![ServerUpdate::ChunkSnapshot(empty_test_snapshot(
             initial_center,
         ))]);
-        let mut session = ScriptedRemoteSession::new(vec![
-            Err(anyhow::anyhow!("dropped connection")),
-            Ok(vec![ServerUpdate::ChunkSnapshot(empty_test_snapshot(
-                moved_center,
-            ))]),
-        ]);
-
-        assert!(dispatch_remote_dedicated_command(&mut runtime, &mut session, command).unwrap());
+        let mut session = ScriptedRemoteSession::new(Vec::new());
+        let resync =
+            prepare_remote_dedicated_resync_command_for_error(&mut runtime, "dropped connection")
+                .unwrap();
+        assert_eq!(resync, command);
+        assert!(
+            reconnect_remote_dedicated_session_and_resync(&mut runtime, &mut session, resync)
+                .unwrap()
+        );
 
         assert_eq!(session.reconnects, 1);
+        assert_eq!(session.send_only_count, 1);
         assert!(runtime.client().chunk_snapshot(initial_center).is_none());
-        assert!(runtime.client().chunk_snapshot(moved_center).is_some());
+        assert!(runtime.client().chunk_snapshot(moved_center).is_none());
+        assert_eq!(runtime.command_count(), 1);
     }
 
     fn empty_test_snapshot(pos: ChunkPos) -> ChunkSnapshot {

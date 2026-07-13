@@ -211,7 +211,8 @@ impl WebSocketServerSession {
             .map(|decoded| decoded == command)
             .unwrap_or(false);
         let target_sequence = self.send_command_frame(frame)?;
-        self.wait_for_response_sequence(target_sequence).await?;
+        self.wait_for_inbound_frame_sequence(target_sequence)
+            .await?;
         Ok(protocol_codec_roundtrip)
     }
 
@@ -350,7 +351,7 @@ impl WebSocketServerSession {
         Ok(target_sequence)
     }
 
-    async fn wait_for_response_sequence(&self, target_sequence: u64) -> Result<(), String> {
+    async fn wait_for_inbound_frame_sequence(&self, target_sequence: u64) -> Result<(), String> {
         if *self.received_sequence.borrow() >= target_sequence {
             return Ok(());
         }
@@ -411,7 +412,7 @@ struct QueuedWebSocketUpdate {
     encoded_len: usize,
     queued_at_ms: f64,
     transport_drained: bool,
-    response_sequence: u64,
+    inbound_frame_sequence: u64,
     producer_decode_ms: f64,
 }
 
@@ -420,7 +421,7 @@ impl QueuedWebSocketUpdate {
         update: ServerUpdate,
         encoded_len: usize,
         transport_drained: bool,
-        response_sequence: u64,
+        inbound_frame_sequence: u64,
         producer_decode_ms: f64,
     ) -> Self {
         Self {
@@ -428,18 +429,22 @@ impl QueuedWebSocketUpdate {
             encoded_len,
             queued_at_ms: js_sys::Date::now(),
             transport_drained,
-            response_sequence,
+            inbound_frame_sequence,
             producer_decode_ms,
         }
     }
 
-    fn empty(transport_drained: bool, response_sequence: u64, producer_decode_ms: f64) -> Self {
+    fn empty(
+        transport_drained: bool,
+        inbound_frame_sequence: u64,
+        producer_decode_ms: f64,
+    ) -> Self {
         Self {
             update: None,
             encoded_len: 0,
             queued_at_ms: js_sys::Date::now(),
             transport_drained,
-            response_sequence,
+            inbound_frame_sequence,
             producer_decode_ms,
         }
     }
@@ -464,7 +469,11 @@ impl QueuedWebSocketUpdate {
             ),
             None => QueuedServerUpdate::empty(self.transport_drained),
         };
-        update.with_remote_metadata(Some(self.response_sequence), 0.0, self.producer_decode_ms)
+        update.with_remote_metadata(
+            Some(self.inbound_frame_sequence),
+            0.0,
+            self.producer_decode_ms,
+        )
     }
 }
 
@@ -483,7 +492,7 @@ fn queue_websocket_update_batch(
     let updates = decode_websocket_server_update_batch(&bytes)
         .map_err(|error| format!("decode websocket server updates: {error}"))?;
     let producer_decode_ms = (js_sys::Date::now() - decode_start).max(0.0);
-    let response_sequence = {
+    let inbound_frame_sequence = {
         let mut received_sequence = received_sequence.borrow_mut();
         *received_sequence = received_sequence.saturating_add(1);
         *received_sequence
@@ -510,10 +519,10 @@ fn queue_websocket_update_batch(
             .borrow_mut()
             .push_back(QueuedWebSocketUpdate::empty(
                 pending_after_batch == 0,
-                response_sequence,
+                inbound_frame_sequence,
                 producer_decode_ms,
             ));
-        resolve_response_waiters(response_waiters, response_sequence);
+        resolve_response_waiters(response_waiters, inbound_frame_sequence);
         return Ok(());
     }
 
@@ -537,11 +546,11 @@ fn queue_websocket_update_batch(
                 update,
                 encoded_len,
                 pending_after_batch == 0 && index + 1 == update_count,
-                response_sequence,
+                inbound_frame_sequence,
                 if index == 0 { producer_decode_ms } else { 0.0 },
             ));
     }
-    resolve_response_waiters(response_waiters, response_sequence);
+    resolve_response_waiters(response_waiters, inbound_frame_sequence);
     Ok(())
 }
 

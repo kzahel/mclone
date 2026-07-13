@@ -5069,12 +5069,14 @@ mod android {
                     .prepared_record_rebuild_loaded_index_max
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} producer_read_ms={:.3} producer_decode_ms={:.3} producer_response_sequence={} deferred_chunk_drop_ms={:.3} deferred_chunk_drop_items={} deferred_chunk_drop_backlog_items={} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} diagnostics_refresh_frames={} diagnostics_refreshed={} diagnostics_cache_age_ms={:.3} server_detail_refreshes={} server_detail_age_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
+                "MCLONE_ANDROID_XR_PERF_RUNTIME_MAX poll_total_ms={:.3} drain_updates_ms={:.3} producer_read_ms={:.3} producer_decode_ms={:.3} producer_inbound_frame_sequence={} deferred_chunk_drop_ms={:.3} deferred_chunk_drop_items={} deferred_chunk_drop_backlog_items={} apply_updates_ms={:.3} dirty_mark_ms={:.3} client_apply_ms={:.3} poll_diagnostics_ms={:.3} diagnostics_refresh_frames={} diagnostics_refreshed={} diagnostics_cache_age_ms={:.3} server_detail_refreshes={} server_detail_age_ms={:.3} server_tick_ms={:.3} scheduler_tick_ms={:.3} updates={} snapshot_updates={} section_updates={} unload_updates={}",
                 self.max_upload.poll_total_ms,
                 self.max_upload.poll_drain_updates_ms,
                 self.max_upload.poll_producer_read_ms,
                 self.max_upload.poll_producer_decode_ms,
-                self.max_upload.poll_producer_response_sequence.unwrap_or(0),
+                self.max_upload
+                    .poll_producer_inbound_frame_sequence
+                    .unwrap_or(0),
                 self.max_upload.poll_client_deferred_chunk_drop_ms,
                 self.max_upload.poll_client_deferred_chunk_drop_items,
                 self.max_upload
@@ -6156,9 +6158,9 @@ mod android {
             poll_drain_updates_ms: a.poll_drain_updates_ms.max(b.poll_drain_updates_ms),
             poll_producer_read_ms: a.poll_producer_read_ms.max(b.poll_producer_read_ms),
             poll_producer_decode_ms: a.poll_producer_decode_ms.max(b.poll_producer_decode_ms),
-            poll_producer_response_sequence: a
-                .poll_producer_response_sequence
-                .max(b.poll_producer_response_sequence),
+            poll_producer_inbound_frame_sequence: a
+                .poll_producer_inbound_frame_sequence
+                .max(b.poll_producer_inbound_frame_sequence),
             poll_client_deferred_chunk_drop_ms: a
                 .poll_client_deferred_chunk_drop_ms
                 .max(b.poll_client_deferred_chunk_drop_ms),

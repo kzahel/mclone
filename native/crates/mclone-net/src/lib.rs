@@ -507,9 +507,9 @@ mod native_tcp {
     pub struct NativeServerUpdateEnvelope {
         pub update: ServerUpdate,
         pub encoded_len: usize,
-        /// Compatibility name for the monotonic inbound publication-frame
-        /// sequence. It no longer implies a paired command response.
-        pub response_sequence: u64,
+        /// Monotonic sequence of the inbound publication frame carrying this
+        /// update.
+        pub inbound_frame_sequence: u64,
         pub producer_read_ms: f64,
         pub producer_decode_ms: f64,
     }
@@ -517,9 +517,8 @@ mod native_tcp {
     #[derive(Clone, Debug, PartialEq)]
     pub struct NativeServerUpdateBatch {
         pub updates: Vec<NativeServerUpdateEnvelope>,
-        /// Compatibility name for the monotonic inbound publication-frame
-        /// sequence. It no longer implies a paired command response.
-        pub response_sequence: u64,
+        /// Monotonic inbound publication-frame sequence.
+        pub inbound_frame_sequence: u64,
         pub producer_read_ms: f64,
         pub producer_decode_ms: f64,
         queued_at: Instant,
@@ -549,10 +548,10 @@ mod native_tcp {
     #[derive(Clone, Debug, Default, PartialEq)]
     pub struct NativeClientIoDiagnostics {
         pub outbound_command_depth: usize,
-        pub inbound_response_batches: usize,
+        pub inbound_update_batches: usize,
         pub inbound_update_depth: usize,
         pub inbound_update_bytes: usize,
-        pub response_sequence: u64,
+        pub inbound_frame_sequence: u64,
         pub total_read_ms: f64,
         pub max_read_ms: f64,
         pub total_decode_ms: f64,
@@ -564,10 +563,10 @@ mod native_tcp {
     #[derive(Debug)]
     struct NativeClientIoSharedDiagnostics {
         outbound_command_depth: AtomicUsize,
-        inbound_response_batches: AtomicUsize,
+        inbound_update_batches: AtomicUsize,
         inbound_update_depth: AtomicUsize,
         inbound_update_bytes: AtomicUsize,
-        response_sequence: AtomicU64,
+        inbound_frame_sequence: AtomicU64,
         total_read_us: AtomicU64,
         max_read_us: AtomicU64,
         total_decode_us: AtomicU64,
@@ -580,10 +579,10 @@ mod native_tcp {
         fn new() -> Self {
             Self {
                 outbound_command_depth: AtomicUsize::new(0),
-                inbound_response_batches: AtomicUsize::new(0),
+                inbound_update_batches: AtomicUsize::new(0),
                 inbound_update_depth: AtomicUsize::new(0),
                 inbound_update_bytes: AtomicUsize::new(0),
-                response_sequence: AtomicU64::new(0),
+                inbound_frame_sequence: AtomicU64::new(0),
                 total_read_us: AtomicU64::new(0),
                 max_read_us: AtomicU64::new(0),
                 total_decode_us: AtomicU64::new(0),
@@ -596,10 +595,10 @@ mod native_tcp {
         fn snapshot(&self) -> NativeClientIoDiagnostics {
             NativeClientIoDiagnostics {
                 outbound_command_depth: self.outbound_command_depth.load(Ordering::Acquire),
-                inbound_response_batches: self.inbound_response_batches.load(Ordering::Acquire),
+                inbound_update_batches: self.inbound_update_batches.load(Ordering::Acquire),
                 inbound_update_depth: self.inbound_update_depth.load(Ordering::Acquire),
                 inbound_update_bytes: self.inbound_update_bytes.load(Ordering::Acquire),
-                response_sequence: self.response_sequence.load(Ordering::Acquire),
+                inbound_frame_sequence: self.inbound_frame_sequence.load(Ordering::Acquire),
                 total_read_ms: us_to_ms(self.total_read_us.load(Ordering::Acquire)),
                 max_read_ms: us_to_ms(self.max_read_us.load(Ordering::Acquire)),
                 total_decode_ms: us_to_ms(self.total_decode_us.load(Ordering::Acquire)),
@@ -621,12 +620,12 @@ mod native_tcp {
             producer_read_ms: f64,
             producer_decode_ms: f64,
         ) {
-            self.inbound_response_batches.fetch_add(1, Ordering::AcqRel);
+            self.inbound_update_batches.fetch_add(1, Ordering::AcqRel);
             self.inbound_update_depth
                 .fetch_add(update_count, Ordering::AcqRel);
             self.inbound_update_bytes
                 .fetch_add(encoded_bytes, Ordering::AcqRel);
-            self.response_sequence
+            self.inbound_frame_sequence
                 .store(inbound_frame_sequence, Ordering::Release);
             let read_us = duration_us(producer_read_ms);
             let decode_us = duration_us(producer_decode_ms);
@@ -637,7 +636,7 @@ mod native_tcp {
         }
 
         fn record_batch_drained(&self, batch: &NativeServerUpdateBatch) {
-            self.inbound_response_batches.fetch_sub(1, Ordering::AcqRel);
+            self.inbound_update_batches.fetch_sub(1, Ordering::AcqRel);
             self.inbound_update_depth
                 .fetch_sub(batch.update_count(), Ordering::AcqRel);
             self.inbound_update_bytes
@@ -773,29 +772,6 @@ mod native_tcp {
             }
         }
 
-        // Compatibility names for the current one-response-per-command wire
-        // protocol. App runtimes call these through the shared remote adapter,
-        // then drain queued updates via `ClientConnection`.
-        pub fn drain_command_updates(&mut self) -> NativeTransportResult<Vec<ServerUpdate>> {
-            self.drain_update_batch()
-                .map(NativeServerUpdateBatch::into_updates)
-        }
-
-        pub fn try_drain_command_updates(
-            &mut self,
-        ) -> NativeTransportResult<Option<Vec<ServerUpdate>>> {
-            self.try_drain_update_batch()
-                .map(|batch| batch.map(NativeServerUpdateBatch::into_updates))
-        }
-
-        pub fn send_command(
-            &mut self,
-            command: ClientCommand,
-        ) -> NativeTransportResult<Vec<ServerUpdate>> {
-            self.send_command_only(command)?;
-            self.drain_command_updates()
-        }
-
         pub fn diagnostics(&self) -> NativeClientIoDiagnostics {
             self.diagnostics.snapshot()
         }
@@ -884,7 +860,7 @@ mod native_tcp {
 
     fn read_server_update_batch_instrumented(
         reader: &mut impl Read,
-        response_sequence: u64,
+        inbound_frame_sequence: u64,
     ) -> NativeTransportResult<NativeServerUpdateBatch> {
         let mut producer_read_ms = 0.0;
         let mut producer_decode_ms = 0.0;
@@ -905,14 +881,14 @@ mod native_tcp {
             updates.push(NativeServerUpdateEnvelope {
                 update,
                 encoded_len,
-                response_sequence,
+                inbound_frame_sequence,
                 producer_read_ms: update_read_ms,
                 producer_decode_ms: update_decode_ms,
             });
         }
         Ok(NativeServerUpdateBatch {
             updates,
-            response_sequence,
+            inbound_frame_sequence,
             producer_read_ms,
             producer_decode_ms,
             queued_at: Instant::now(),
@@ -1638,16 +1614,16 @@ mod tests {
 
         release_first_response_tx.send(()).unwrap();
         let first_batch = session.drain_update_batch().unwrap();
-        assert_eq!(first_batch.response_sequence, 1);
+        assert_eq!(first_batch.inbound_frame_sequence, 1);
         assert_eq!(first_batch.into_updates(), first_updates);
         let second_batch = session.drain_update_batch().unwrap();
-        assert_eq!(second_batch.response_sequence, 2);
+        assert_eq!(second_batch.inbound_frame_sequence, 2);
         assert_eq!(second_batch.into_updates(), second_updates);
 
         let diagnostics = session.diagnostics();
         assert_eq!(diagnostics.outbound_command_depth, 0);
-        assert_eq!(diagnostics.inbound_response_batches, 0);
-        assert_eq!(diagnostics.response_sequence, 2);
+        assert_eq!(diagnostics.inbound_update_batches, 0);
+        assert_eq!(diagnostics.inbound_frame_sequence, 2);
         assert!(!diagnostics.disconnected);
         release_server_tx.send(()).unwrap();
         server.join().unwrap();
@@ -1673,7 +1649,7 @@ mod tests {
 
         let mut session = NativeClientIoSession::connect(addr).unwrap();
         let batch = session.drain_update_batch().unwrap();
-        assert_eq!(batch.response_sequence, 1);
+        assert_eq!(batch.inbound_frame_sequence, 1);
         assert_eq!(batch.into_updates(), expected_updates);
         assert_eq!(session.diagnostics().outbound_command_depth, 0);
         assert!(!session.diagnostics().disconnected);
@@ -1733,7 +1709,7 @@ mod tests {
         session.send_command_only(second_command).unwrap();
 
         let first_batch = session.drain_update_batch().unwrap();
-        assert_eq!(first_batch.response_sequence, 1);
+        assert_eq!(first_batch.inbound_frame_sequence, 1);
         assert_eq!(first_batch.updates.len(), first_updates.len());
         assert_eq!(first_batch.updates[0].update, first_updates[0]);
         assert_eq!(first_batch.updates[1].update, first_updates[1]);
@@ -1747,15 +1723,15 @@ mod tests {
         assert!(first_batch.producer_decode_ms >= 0.0);
 
         let second_batch = session.drain_update_batch().unwrap();
-        assert_eq!(second_batch.response_sequence, 2);
+        assert_eq!(second_batch.inbound_frame_sequence, 2);
         assert_eq!(second_batch.into_updates(), second_updates);
 
         let diagnostics = session.diagnostics();
         assert_eq!(diagnostics.outbound_command_depth, 0);
-        assert_eq!(diagnostics.inbound_response_batches, 0);
+        assert_eq!(diagnostics.inbound_update_batches, 0);
         assert_eq!(diagnostics.inbound_update_depth, 0);
         assert_eq!(diagnostics.inbound_update_bytes, 0);
-        assert_eq!(diagnostics.response_sequence, 2);
+        assert_eq!(diagnostics.inbound_frame_sequence, 2);
         assert!(!diagnostics.disconnected);
         assert_eq!(diagnostics.last_error, None);
 

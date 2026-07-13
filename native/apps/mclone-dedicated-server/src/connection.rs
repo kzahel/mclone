@@ -457,8 +457,14 @@ mod tests {
         outbound
             .publish(vec![ServerUpdate::TimeUpdate { day_time: 3 }])
             .unwrap();
-        assert_eq!(client.drain_update_batch().unwrap().response_sequence, 2);
-        assert_eq!(client.drain_update_batch().unwrap().response_sequence, 3);
+        assert_eq!(
+            client.drain_update_batch().unwrap().inbound_frame_sequence,
+            2
+        );
+        assert_eq!(
+            client.drain_update_batch().unwrap().inbound_frame_sequence,
+            3
+        );
     }
 
     #[test]

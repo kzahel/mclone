@@ -2,8 +2,9 @@
 
 Topic: multiplayer-networking
 
-Status: implementation active — autonomous dedicated ticking and native TCP
-server push landed 2026-07-13; consumer cleanup and web convergence are next.
+Status: implementation active — autonomous dedicated ticking, native TCP
+server push, and native consumer convergence landed 2026-07-13; production web
+convergence is next.
 Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
 
@@ -16,7 +17,7 @@ rates). Movement authority and prediction have their own topic:
 the client-replica topology argument lives in
 [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md).
 
-## Current state (verified 2026-07-10)
+## Current state (verified 2026-07-13)
 
 Tactical 176 implementation began 2026-07-13. The dedicated server now runs
 one 20/20/60 authoritative cadence independently of command traffic, drains
@@ -25,9 +26,12 @@ through independent bounded TCP writers, and autosaves every 6000 gameplay
 ticks. Worldgen completion and periodic time updates reach idle clients
 without polling commands. Native client/server TCP readers and writers are
 independent, and normal frame polling accepts unsolicited decoded batches.
-Response-era counter and API names still remain in the runtime adapters; their
-removal is the tactical's next slice before the equivalent production web
-worker cutover.
+Native runtime adapters now expose one ready-only stream with
+transport-neutral frame/queue diagnostics and no pending-response state.
+Desktop flat/XR and Android flat/XR select the same shared adapter under a
+source purity gate. Browser remote still has response-era callback state and a
+TCP loopback bridge; replacing those production mechanics is the tactical's
+next slice.
 
 The autonomous native wire now has the correct core shape, but session and
 production-web work remain:
@@ -63,12 +67,11 @@ production-web work remain:
 
 ## Structural gaps (the reasons this topic exists)
 
-1. **Response-era consumer compatibility.** Native TCP and dedicated authority
-   are full-duplex/push, but app-runtime/web adapters still expose
-   `pending_response_batches`, `response_sequence`, and
-   `drain_command_updates` names. Native ready-only polling no longer depends
-   on the counter, but the compatibility state obscures the actual stream and
-   queue model until Tactical 176 Slice 4 removes it.
+1. **Web response-era consumer compatibility.** Native TCP and app-runtime are
+   full-duplex/ready-only, but the browser WebSocket adapter still tracks
+   `pending_response_batches` and response waiters. Tactical 176 Slice 5
+   replaces that callback shape with worker-owned WebSocket receipt/decode and
+   the same logical queue contract.
 2. **Production web is not converged yet.** Browser remote still decodes
    WebSocket frames through main-thread callbacks and the dedicated WebSocket
    listener remains a one-WebSocket-to-one-native-TCP bridge. Slice 5 moves
