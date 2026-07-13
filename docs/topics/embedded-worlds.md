@@ -2,9 +2,11 @@
 
 Topic: `embedded-worlds`
 
-Design north-star for showing a *second* world inside the current one: a lobby
-diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
-world, and the shrink-and-fall transition between nested worlds.
+Design north-star for showing another world or another region of the active
+world inside the current one: a lobby diorama, a tabletop seed explorer, a
+live model of a distant or nearby active-world location, a "palantir" window
+into a network-hosted world, and the shrink-and-fall transition between nested
+worlds.
 
 Status: **design plus a measured Slice 7 scene-owned warm-world path and an
 active live-diorama tactical with Slice 0 landed.** The engine still does not
@@ -57,9 +59,10 @@ world — "the nether-portal idea, but better." The signature effect is diving a
 the diorama and continuously shrinking, falling from its sky into the real
 world.
 
-The unifying primitive under all of it is: **render a second world's content
-inside the frame the first world occupies.** Everything else is a flavor of
-that.
+The unifying primitive under all of it is: **render a bounded source region's
+content with a second placement inside the physical frame.** The source may be
+a different world/runtime or the active world itself. Everything else is a
+flavor of that.
 
 ## Two techniques (pick per feature)
 
@@ -241,6 +244,53 @@ path. Fresh flat/stereo captures were inspected, and the accepted five-run
 release batch measured 2.659 ms median average and 4.252 ms median P95 with
 9.1%/5.6% within-batch spread, zero over-budget frames, and zero accounting
 violations. That is the comparison anchor for every later no-preview gate.
+
+### Same-world previews and non-recursive composition
+
+Tactical 175 deliberately proves the harder ownership boundary first: a
+bounded region from independently hosted world B appears inside active world A.
+The placed-terrain contract should later permit A itself as the source without
+requiring a second runtime or drawable slot. A same-world preview may show a
+distant active-world location, the player's nearby settlement, or even the
+exact region containing the physical table. Live mutations then naturally
+appear in both the direct full-scale draw and the placed miniature draw.
+
+Source identity is independent of fidelity tier. A future preview source may
+be expressed provisionally as one of:
+
+```text
+PreviewSource
+  ActiveWorld { source_anchor, bounded_region }
+  StandbyWorld { world_id, source_anchor, bounded_region }
+  BakedSnapshot { snapshot_id, bounded_region }
+```
+
+This does not broaden Tactical 175. Its deterministic A/B fixture, activation
+target, and acceptance gates remain unchanged; active-world sourcing is a
+follow-up reuse of the placed-terrain path after the hosted-world milestone is
+closed.
+
+**Embedded previews are non-recursive.** Physical-frame composition may submit
+one preview, but preview drawing submits terrain leaves directly and must never
+invoke scene composition or discover further `EmbeddedWorldPreview`s. In
+particular, if an active-world source region contains the physical block-built
+table, the miniature may contain that table's ordinary block geometry, but the
+miniature table is empty: it does not contain another live miniature.
+
+The composition-depth invariant is:
+
+```text
+depth 0: direct active world + at most the configured physical-frame preview
+depth 1: placed terrain/liquid leaf submissions only
+depth 2+: prohibited
+```
+
+This prohibition applies even when recursive rendering would be visually
+possible. Recursion is not required for a tabletop model, seed explorer, or
+same-world location preview; it complicates visibility, budgets, translucent
+ordering, and XR cost without advancing those experiences. A future portal
+renderer would require a separate explicit design decision and recursion
+budget rather than weakening this invariant implicitly.
 
 The near-term product shape is:
 
@@ -481,6 +531,8 @@ is a valid first milestone.
 | Lobby spawn room (+ no-destroy) | n/a | authored `WorldStore` + interaction gate |
 | Last-world diorama on a table | embed | T0 baked |
 | Live hosted region on a table | embed | T3 joined, preview-only authority |
+| Distant active-world region on a table | embed, non-recursive | active runtime reuse |
+| Current location on a table | embed, non-recursive | active runtime reuse |
 | Seed explorer / worldgen console | embed | T1 live-local |
 | Palantir into a network world | RTT window (or embed if reach-through) | T2 remote spectator |
 | Warm Nether/sky/alternate generator | direct render after warm selection | T3 joined warm world |
@@ -516,12 +568,14 @@ bounded simultaneous-geometry plan lives in
 5. Lobby spawn: authoritative world behavior profile + authored room.
 6. T0 baked diorama and T1 seed explorer may reuse the same placement path as
    cheaper fidelity alternatives to the live T3 sample.
-7. Add a real remote observer/subscription mode only when previews must stop
+7. After the hosted-world milestone closes, allow a bounded active-world region
+   to source the same non-recursive placed-terrain path without a second slot.
+8. Add a real remote observer/subscription mode only when previews must stop
    consuming ordinary joined-player identities.
-8. Add half-space visibility and boundary-aware meshing for an `x=0` render
+9. Add half-space visibility and boundary-aware meshing for an `x=0` render
    proof before attempting traversal.
-9. Add one-active-authority local handoff, then a traversable seam or portal.
-10. Treat federated remote authority and dynamic shadows as separate later
+10. Add one-active-authority local handoff, then a traversable seam or portal.
+11. Treat federated remote authority and dynamic shadows as separate later
     campaigns.
 
 Keep dynamic shadows as a separate topic when that work opens; it is the biggest
