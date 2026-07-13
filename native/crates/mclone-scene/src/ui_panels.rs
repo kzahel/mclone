@@ -785,7 +785,82 @@ impl McloneSceneHost {
             ),
         ];
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(gate) = self.world_gate_snapshot() {
+        if let Some(preview) = self.embedded_world_preview_snapshot() {
+            let standby = self.warm_world_standby_snapshot();
+            lines.insert(
+                0,
+                format!(
+                    "PREVIEW {:?} W{} {} R({},{})+{} S{:.4}",
+                    preview.phase,
+                    preview.source_world.get(),
+                    preview
+                        .source_host_mode
+                        .map_or("starting", |mode| mode.label()),
+                    preview.region.center().x,
+                    preview.region.center().z,
+                    preview.region.horizontal_radius(),
+                    preview.placement.uniform_scale(),
+                ),
+            );
+            lines.insert(
+                1,
+                format!(
+                    "B POLL {:.3} COMPILE {}/{} UP {} Q{}/{} CAD {}/{}/{}",
+                    preview.preparation.last_runtime_poll_ms,
+                    preview.preparation.last_submitted_compile_section_count,
+                    preview.preparation.last_accepted_compile_result_count,
+                    preview.preparation.last_uploaded_section_count,
+                    preview.preparation.queued_upload_lifecycle_items,
+                    preview.preparation.pending_compile_jobs,
+                    standby
+                        .as_ref()
+                        .map_or(0, |standby| standby.standby_cadence.host_rate_hz),
+                    standby
+                        .as_ref()
+                        .map_or(0, |standby| standby.standby_cadence.gameplay_rate_hz),
+                    standby
+                        .as_ref()
+                        .map_or(0, |standby| standby.standby_cadence.physics_rate_hz),
+                ),
+            );
+            lines.insert(
+                2,
+                format!(
+                    "B DRAW {}/{} CULL {:.3} DRAW {:.3} CPU{} GPU{}",
+                    preview.render.last_drawn_section_count,
+                    preview.render.last_drawn_index_count,
+                    preview.render.last_cull_ms,
+                    preview.render.last_draw_ms,
+                    standby
+                        .as_ref()
+                        .map_or(0, |standby| standby.startup_seed_owned_bytes),
+                    standby
+                        .as_ref()
+                        .map_or(0, |standby| standby.estimated_gpu_terrain_bytes),
+                ),
+            );
+            if let Some(mutation) = preview.last_mutation {
+                lines.insert(
+                    3,
+                    format!(
+                        "B MUT {:?} ({},{},{}) C{}/{} U{}",
+                        mutation.phase,
+                        mutation.block.x,
+                        mutation.block.y,
+                        mutation.block.z,
+                        mutation.submitted_compile_section_count,
+                        mutation.accepted_compile_result_count,
+                        mutation.uploaded_section_count,
+                    ),
+                );
+            }
+            if let Some(warning) = preview.boundary_warning {
+                lines.insert(1, format!("PREVIEW EDGE {warning}"));
+            }
+            if let Some(failure) = preview.failure {
+                lines.insert(1, format!("PREVIEW FAIL {failure}"));
+            }
+        } else if let Some(gate) = self.world_gate_snapshot() {
             lines.insert(
                 0,
                 format!(

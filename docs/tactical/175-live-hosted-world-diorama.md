@@ -1,11 +1,12 @@
 # 175: Live Hosted World Diorama
 
-Status: active 2026-07-13. Slices 0–3 landed: contract/baseline,
-authored-only server/content foundation, static placed terrain, and the first
-live local two-host composition. The required Slice 3 human review has been
-incorporated before mutation, water, or activation: its correction replaced the
-oversized elevated table and coplanar preview. Slice 4 is next; capable-device
-multiview remains a shared named validation gap.
+Status: active 2026-07-13. Slices 0–4 landed: contract/baseline,
+authored-only server/content foundation, static placed terrain, the first live
+local two-host composition, and bounded live mutation/background accounting.
+The required Slice 3 human review replaced the oversized elevated table and
+coplanar preview before live updates. Slice 5 water/cross-world translucent
+ordering is next; capable-device multiview remains a shared named validation
+gap.
 
 Topic: `embedded-worlds`
 
@@ -971,6 +972,74 @@ Exit criteria: a visible server mutation proves end-to-end live hosted terrain,
 region boundaries meet the documented contract, and background work remains
 bounded without stalling A.
 
+### Slice 4 completion record — 2026-07-13
+
+The miniature now proves ordinary live hosted terrain updates rather than only
+retained startup geometry:
+
+- `EmbeddedWorldPreviewSnapshot` publishes B's host mode, fixed interest,
+  preparation and render accounting, last mutation, boundary warning, and
+  failure. Runtime poll, compile sync/submission/acceptance, upload, placed
+  cull, and placed draw have distinct counters or timings in mono, per-eye, and
+  full-frame multiview paths. The debug pane also shows region/scale, cadence,
+  retained CPU/GPU bytes, queues, and mutation state.
+- B's server interest remains the authored source center. Compile priority is
+  the physical camera inverse-mapped through `WorldPlacement` and clamped to
+  `EmbeddedChunkRegion`; A's raw coordinates never become B priorities.
+- Named background caps admit at most a 500-us runtime poll, one upload, one
+  result acceptance, one compile request, and 750 us of preparation per frame.
+  B has its own compiler pool, so the grant isolation applies to render-thread
+  accept/upload work while CPU contention remains OS-level and measurable.
+- The smoke-only mutation command goes only to the retained B session and
+  models asynchronous `CommandSent -> ClientApplied -> GpuApplied` progress,
+  which is required when B runs at 5 Hz. It never changes A's client or
+  authority. Persistence is flushed and B's SQLite store is reopened before
+  the proof accepts the edit.
+- Placed submission counts every record outside the requested region and the
+  accepted lanes require zero. Authored-only fixtures use their void neighbor
+  ring; arbitrary non-authored hard cuts now emit an explicit warning because
+  general preview cap meshes remain follow-up work.
+
+`pnpm native:live-diorama:smoke` now additionally writes
+`mutation-before.png` and `mutation-after.png`. After settling pre-existing
+bounded startup mesh work so mutation attribution is clean, it breaks B block
+`(5,64,8)`. The accepted receipt records one authoritative section-block
+delta, two affected section submissions, one accepted compile result, two GPU
+uploads, 31 changed table pixels, zero out-of-region submissions, unchanged A,
+and durable air after B store reopen. B loads exactly 49 chunks against its
+configured 49-chunk tracking-view limit. The inspected images have SHA-256
+hashes `eb4dd92a...f18e152` and `0b7f8c4b...59cb8a0c`.
+
+The long lane is:
+
+```bash
+pnpm native:live-diorama:soak
+```
+
+It performs the same mutation/persistence proof, restarts the mutated preview,
+then runs a capture-free 10-Hz camera orbit for 600 seconds. Its accepted 6,000
+frames kept B interest at `(0,0)`, changed inverse B priority around the table,
+held bounded records at three, and observed zero pending compile jobs, queued
+upload items/bytes, or out-of-region submissions after settle.
+
+Focused validation passes 243 app-runtime, 159 native-client, 141 render (three
+GPU-only ignored), 108 scene, ten ownership-contract (one GPU-only ignored),
+and 386 server tests. Thin-adapter purity, the browser/WASM build, ordinary
+desktop-offscreen, synthetic-stereo, formatting, and diff whitespace checks
+pass; fresh flat/stereo and mutation pixels were inspected. WASM retains only
+three pre-existing target warnings.
+
+The first five-run no-preview release batch was rejected for 12–14% average
+spread. A retry stabilized average frame time but retained one P95 14.3% above
+its batch median, so it too was not curated into evidence. After a final
+preflight showed 89.78% CPU idle and no compiler, emulator, or mclone process,
+the accepted direct-binary batch measured averages of 2.349, 2.557, 2.424,
+2.306, and 2.388 ms (2.388 median, at most 7.1% deviation) and P95s of 3.746,
+4.142, 3.935, 3.804, and 3.995 ms (3.935 median, at most 5.3% deviation). All
+five used 1,936 sections with zero over-budget frames and zero accounting
+violations. Both medians are lower than Slice 3's 2.724/4.235 ms anchor; no
+single-world regression is observed or optimization claimed.
+
 ## Slice 5: Water And Cross-World Phase Ordering
 
 Upgrade the fixture from a dry opaque island to the intended grass/ocean
@@ -1123,6 +1192,7 @@ Pixel-producing slices add and inspect:
 pnpm native:desktop-offscreen:smoke
 pnpm native:xr-emulation:smoke
 pnpm native:live-diorama:smoke
+pnpm native:live-diorama:soak
 pnpm native:live-diorama:stereo-smoke
 ```
 

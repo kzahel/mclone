@@ -705,6 +705,33 @@ impl OffscreenDriver {
         Ok(snapshot)
     }
 
+    pub(crate) fn drive_until_embedded_preview_idle(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<OffscreenWarmupReport> {
+        let mut stable_frames = 0_usize;
+        self.drive_until(device, queue, move |driver, _| {
+            let idle = driver
+                .host
+                .embedded_world_preview_snapshot()
+                .is_some_and(|preview| {
+                    let preparation = preview.preparation;
+                    preparation.pending_compile_jobs == 0
+                        && preparation.queued_upload_lifecycle_items == 0
+                        && preparation.last_submitted_compile_section_count == 0
+                        && preparation.last_accepted_compile_result_count == 0
+                        && preparation.last_uploaded_section_count == 0
+                });
+            stable_frames = if idle {
+                stable_frames.saturating_add(1)
+            } else {
+                0
+            };
+            stable_frames >= STREAM_STABLE_FRAMES
+        })
+    }
+
     /// Re-run the idle gate at the actual capture size. The normal warmup path
     /// intentionally uses a 1x1 target; probes call this once afterward so the
     /// first full-size frustum cannot reveal one last unit of stream work.

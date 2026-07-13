@@ -51,6 +51,8 @@ fn cli_parses_live_diorama_smoke_options() {
         "800".to_owned(),
         "--height".to_owned(),
         "600".to_owned(),
+        "--live-diorama-soak-seconds".to_owned(),
+        "600".to_owned(),
     ])
     .unwrap();
 
@@ -59,6 +61,7 @@ fn cli_parses_live_diorama_smoke_options() {
     };
     assert_eq!(options.directory, PathBuf::from("/tmp/live-diorama"));
     assert_eq!([options.width, options.height], [800, 600]);
+    assert_eq!(options.soak_seconds, 600);
     assert_eq!(
         options
             .scene
@@ -67,6 +70,13 @@ fn cli_parses_live_diorama_smoke_options() {
             .world_dir,
         PathBuf::from("/tmp/island-b")
     );
+}
+
+#[test]
+fn cli_rejects_live_diorama_soak_without_smoke() {
+    let error =
+        Cli::parse(["--live-diorama-soak-seconds".to_owned(), "600".to_owned()]).unwrap_err();
+    assert!(error.to_string().contains("requires --live-diorama-smoke"));
 }
 
 #[test]

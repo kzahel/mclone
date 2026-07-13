@@ -5,6 +5,17 @@ use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::session::SessionStorageIntent;
 
+#[cfg(not(target_arch = "wasm32"))]
+const STANDBY_RUNTIME_POLL_BUDGET: Duration = Duration::from_micros(500);
+#[cfg(not(target_arch = "wasm32"))]
+const STANDBY_UPLOAD_BUDGET: usize = 1;
+#[cfg(not(target_arch = "wasm32"))]
+const STANDBY_ACCEPT_BUDGET: usize = 1;
+#[cfg(not(target_arch = "wasm32"))]
+const STANDBY_COMPILE_REQUEST_BUDGET: usize = 1;
+#[cfg(not(target_arch = "wasm32"))]
+const STANDBY_PREPARATION_BUDGET: Duration = Duration::from_micros(750);
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SceneCameraConfig {
     movement_speed_multiplier: f64,
@@ -1269,6 +1280,13 @@ impl McloneSceneHost {
             bail!("warm-world standby seed must differ from the active seed");
         }
         let presentation = request.presentation;
+        let preview_boundary_warning = matches!(presentation, WarmWorldPresentationRequest::Diorama { .. })
+            .then(|| request.world_generation_profile.authored_missing_chunk().is_none())
+            .filter(|warn| *warn)
+            .map(|_| {
+                "non-authored preview uses a hard region edge; canonical neighbor-culled faces may be exposed"
+                    .to_owned()
+            });
 
         let started_at = self.services.clock.now();
         let mut scene = self.active_world.scene.clone();
@@ -1447,6 +1465,13 @@ impl McloneSceneHost {
                     source_anchor_traversal_ready: false,
                     bounded_section_count: 0,
                     last_draw: TexturedSectionRenderStats::default(),
+                    source_host_mode: None,
+                    fixed_interest_center: region.center(),
+                    preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
+                    render: EmbeddedWorldPreviewRenderSnapshot::default(),
+                    mutation_sequence: 0,
+                    last_mutation: None,
+                    boundary_warning: preview_boundary_warning,
                     failure: None,
                 })
             }
@@ -1479,6 +1504,115 @@ impl McloneSceneHost {
         self.embedded_world_preview
             .as_ref()
             .map(EmbeddedWorldPreview::snapshot)
+    }
+
+    /// Launch-smoke diagnostic for proving that the retained preview is a live
+    /// authoritative world. The command is sent only to B's ordinary session;
+    /// A never receives the interaction or shares its player authority.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn debug_break_embedded_world_preview_block(
+        &mut self,
+        block: mclone_core::BlockPos,
+    ) -> Result<EmbeddedWorldPreviewMutationSnapshot> {
+        let (source_world, region, phase, in_flight) = self
+            .embedded_world_preview
+            .as_ref()
+            .map(|preview| {
+                (
+                    preview.source_world,
+                    preview.region,
+                    preview.phase,
+                    preview.last_mutation.as_ref().is_some_and(|mutation| {
+                        matches!(
+                            mutation.snapshot.phase,
+                            EmbeddedWorldPreviewMutationPhase::CommandSent
+                                | EmbeddedWorldPreviewMutationPhase::ClientApplied
+                        )
+                    }),
+                )
+            })
+            .context("embedded preview mutation requested without a preview")?;
+        if phase != EmbeddedWorldPreviewPhase::Visible {
+            bail!("embedded preview mutation requires a visible preview");
+        }
+        if in_flight {
+            bail!("embedded preview already has a mutation awaiting GPU application");
+        }
+        let chunk = block.chunk_pos();
+        let section = mclone_mesh::RenderSectionKey::new(
+            chunk.x,
+            mclone_core::block_to_section_coord(block.y),
+            chunk.z,
+        );
+        if !region.contains(section) {
+            bail!(
+                "embedded preview mutation block ({}, {}, {}) lies outside its bounded region",
+                block.x,
+                block.y,
+                block.z,
+            );
+        }
+
+        let (command_changed, command_timing) = {
+            let slot = self
+                .standby_world
+                .as_mut()
+                .filter(|slot| slot.id == source_world)
+                .context("embedded preview mutation lost its retained source slot")?;
+            let runtime = slot
+                .runtime
+                .as_mut()
+                .context("embedded preview mutation source has no runtime")?;
+            if runtime.client().block_state_at_block_pos(block)
+                == Some(mclone_core::AIR_BLOCK_STATE_ID)
+            {
+                bail!("embedded preview mutation target is already air");
+            }
+            runtime.send_gameplay_command_timed(mclone_protocol::ClientCommand::PlayerAction(
+                mclone_protocol::PlayerActionCommand {
+                    pos: block,
+                    direction: mclone_core::Direction::Up,
+                    kind: mclone_protocol::PlayerActionKind::DebugInstantBreak,
+                },
+            ))?
+        };
+        let client_applied = self
+            .standby_world
+            .as_ref()
+            .and_then(|slot| slot.runtime.as_ref())
+            .and_then(|runtime| runtime.client().block_state_at_block_pos(block))
+            == Some(mclone_core::AIR_BLOCK_STATE_ID);
+
+        let preview = self
+            .embedded_world_preview
+            .as_mut()
+            .expect("preview presence checked above");
+        preview.mutation_sequence = preview.mutation_sequence.saturating_add(1);
+        let snapshot = EmbeddedWorldPreviewMutationSnapshot {
+            sequence: preview.mutation_sequence,
+            block,
+            phase: if client_applied {
+                EmbeddedWorldPreviewMutationPhase::ClientApplied
+            } else {
+                EmbeddedWorldPreviewMutationPhase::CommandSent
+            },
+            command_changed,
+            command_update_count: command_timing.updates,
+            command_section_block_update_count: command_timing.section_block_updates,
+            requested_after_rendered_frame: self.rendered_frames,
+            completed_after_rendered_frame: None,
+            submitted_compile_section_count: 0,
+            accepted_compile_result_count: 0,
+            uploaded_section_count: 0,
+            failure: None,
+        };
+        preview.last_mutation = Some(EmbeddedWorldPreviewMutationState {
+            snapshot: snapshot.clone(),
+            submitted_compile_baseline: preview.preparation.submitted_compile_section_count,
+            accepted_compile_baseline: preview.preparation.accepted_compile_result_count,
+            uploaded_section_baseline: preview.preparation.uploaded_section_count,
+        });
+        Ok(snapshot)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -2450,6 +2584,7 @@ impl McloneSceneHost {
     pub(crate) fn advance_warm_world_gpu(
         &mut self,
         device: &wgpu::Device,
+        active_camera_position: Vec3,
         active_frame_deadline: Option<MonotonicDeadline>,
     ) -> Result<()> {
         let Some(mut state) = self.warm_world_standby.take() else {
@@ -2528,15 +2663,29 @@ impl McloneSceneHost {
         let policy = WorldPreparationPolicy {
             clock: self.services.clock.clone(),
             target_period_ms: self.render_admission_target_period_ms(),
-            poll_budget: RuntimeUpdatePumpBudget::MaxElapsed(Duration::from_micros(500)),
-            upload_budget: Some(1),
-            accept_budget: Some(1),
-            completed_result_accept_budget: Some(1),
-            max_compile_requests: Some(1),
-            work_elapsed_budget: Some(Duration::from_micros(750)),
+            poll_budget: RuntimeUpdatePumpBudget::MaxElapsed(STANDBY_RUNTIME_POLL_BUDGET),
+            upload_budget: Some(STANDBY_UPLOAD_BUDGET),
+            accept_budget: Some(STANDBY_ACCEPT_BUDGET),
+            completed_result_accept_budget: Some(STANDBY_ACCEPT_BUDGET),
+            max_compile_requests: Some(STANDBY_COMPILE_REQUEST_BUDGET),
+            work_elapsed_budget: Some(STANDBY_PREPARATION_BUDGET),
             defer_sync_after_pre_drain: true,
         };
-        let camera_position = glam_vec3_from_vec3d(slot.camera.snapshot().eye);
+        let priority_position = match state.presentation {
+            WarmWorldPresentationRequest::Diorama { region, placement } => {
+                bounded_preview_source_priority(
+                    region,
+                    placement,
+                    Vec3d::new(
+                        f64::from(active_camera_position.x),
+                        f64::from(active_camera_position.y),
+                        f64::from(active_camera_position.z),
+                    ),
+                )
+            }
+            WarmWorldPresentationRequest::OpaqueGate => slot.camera.snapshot().eye,
+        };
+        let camera_position = glam_vec3_from_vec3d(priority_position);
         let mut timing = XrTerrainFrameTiming::default();
         let upload = match Self::prepare_world_slot(
             &mut slot,
@@ -2641,6 +2790,105 @@ impl McloneSceneHost {
             && state.readiness.entry_section_traversal_ready
             && state.readiness.renderer_topology_ready;
 
+        if let Some(preview) = self
+            .embedded_world_preview
+            .as_mut()
+            .filter(|preview| preview.source_world == slot.id)
+        {
+            let runtime = slot
+                .runtime
+                .as_ref()
+                .expect("GPU-warming preview owns a runtime");
+            preview.source_host_mode = Some(runtime.host_mode());
+            if runtime.interest_center() != preview.fixed_interest_center {
+                preview.phase = EmbeddedWorldPreviewPhase::Failed;
+                preview.failure = Some(format!(
+                    "embedded preview interest moved from fixed center ({}, {}) to ({}, {})",
+                    preview.fixed_interest_center.x,
+                    preview.fixed_interest_center.z,
+                    runtime.interest_center().x,
+                    runtime.interest_center().z,
+                ));
+            }
+            let preparation = &mut preview.preparation;
+            preparation.frame_count = preparation.frame_count.saturating_add(1);
+            preparation.last_runtime_poll_ms = timing.runtime_poll_ms;
+            preparation.total_runtime_poll_ms += timing.runtime_poll_ms;
+            preparation.last_compile_sync_ms = timing.runtime_sync_ms;
+            preparation.total_compile_sync_ms += timing.runtime_sync_ms;
+            preparation.last_gpu_upload_ms = timing.runtime_gpu_upload_ms;
+            preparation.total_gpu_upload_ms += timing.runtime_gpu_upload_ms;
+            preparation.last_submitted_compile_section_count =
+                upload.submitted_compile_section_count;
+            preparation.submitted_compile_section_count = preparation
+                .submitted_compile_section_count
+                .saturating_add(upload.submitted_compile_section_count);
+            preparation.last_accepted_compile_result_count = upload.accepted_compile_result_count;
+            preparation.accepted_compile_result_count = preparation
+                .accepted_compile_result_count
+                .saturating_add(upload.accepted_compile_result_count);
+            preparation.last_uploaded_section_count = upload.uploaded_section_count;
+            preparation.uploaded_section_count = preparation
+                .uploaded_section_count
+                .saturating_add(upload.uploaded_section_count);
+            preparation.pending_compile_jobs = upload.pending_compile_jobs_after;
+            preparation.max_pending_compile_jobs = preparation
+                .max_pending_compile_jobs
+                .max(upload.pending_compile_jobs_after);
+            preparation.queued_upload_lifecycle_items = upload.queued_upload_lifecycle_item_count;
+            preparation.max_queued_upload_lifecycle_items = preparation
+                .max_queued_upload_lifecycle_items
+                .max(upload.queued_upload_lifecycle_item_count);
+            preparation.queued_upload_mesh_owned_bytes = upload.queued_upload_mesh_owned_bytes;
+            preparation.max_queued_upload_mesh_owned_bytes = preparation
+                .max_queued_upload_mesh_owned_bytes
+                .max(upload.queued_upload_mesh_owned_bytes);
+            preparation.source_priority_position = priority_position;
+
+            if let Some(mutation) = preview.last_mutation.as_mut() {
+                if matches!(
+                    mutation.snapshot.phase,
+                    EmbeddedWorldPreviewMutationPhase::CommandSent
+                        | EmbeddedWorldPreviewMutationPhase::ClientApplied
+                ) {
+                    mutation.snapshot.command_update_count = mutation
+                        .snapshot
+                        .command_update_count
+                        .saturating_add(upload.poll_updates);
+                    mutation.snapshot.command_section_block_update_count = mutation
+                        .snapshot
+                        .command_section_block_update_count
+                        .saturating_add(upload.poll_section_block_updates);
+                }
+                mutation.snapshot.submitted_compile_section_count = preparation
+                    .submitted_compile_section_count
+                    .saturating_sub(mutation.submitted_compile_baseline);
+                mutation.snapshot.accepted_compile_result_count = preparation
+                    .accepted_compile_result_count
+                    .saturating_sub(mutation.accepted_compile_baseline);
+                mutation.snapshot.uploaded_section_count = preparation
+                    .uploaded_section_count
+                    .saturating_sub(mutation.uploaded_section_baseline);
+                let client_applied = runtime
+                    .client()
+                    .block_state_at_block_pos(mutation.snapshot.block)
+                    == Some(mclone_core::AIR_BLOCK_STATE_ID);
+                if mutation.snapshot.phase == EmbeddedWorldPreviewMutationPhase::CommandSent
+                    && client_applied
+                {
+                    mutation.snapshot.phase = EmbeddedWorldPreviewMutationPhase::ClientApplied;
+                }
+                if mutation.snapshot.phase == EmbeddedWorldPreviewMutationPhase::ClientApplied
+                    && client_applied
+                    && mutation.snapshot.accepted_compile_result_count > 0
+                    && mutation.snapshot.uploaded_section_count > 0
+                {
+                    mutation.snapshot.phase = EmbeddedWorldPreviewMutationPhase::GpuApplied;
+                    mutation.snapshot.completed_after_rendered_frame = Some(self.rendered_frames);
+                }
+            }
+        }
+
         let advance_ms = elapsed_ms(self.services.clock.elapsed_since(advance_started_at));
         state.last_gpu_advance_ms = advance_ms;
         state.gpu_advance_total_ms += advance_ms;
@@ -2692,7 +2940,9 @@ impl McloneSceneHost {
                 source_anchor_section.is_some_and(|key| slot.draw.contains_section(key));
             preview.source_anchor_traversal_ready = source_anchor_section
                 .is_some_and(|key| slot.draw.traversal_ready_contains_section(key));
-            let failure = if preview.source_world != slot.id {
+            let failure = if preview.phase == EmbeddedWorldPreviewPhase::Failed {
+                preview.failure.clone()
+            } else if preview.source_world != slot.id {
                 Some("embedded preview source no longer names the retained slot".to_owned())
             } else if preview.asset_epoch != slot.asset_epoch
                 || preview.asset_epoch != self.active_world.asset_epoch

@@ -198,7 +198,7 @@ fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
     assert!(mono.contains("&mut self.active_world.draw,"));
     assert!(mono.contains("if let Some(preview_records) = preview_records.as_ref()"));
     assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_opaque_gate("));
-    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_placed_terrain("));
+    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_placed_terrain_timed("));
 
     let xr_source = read("src/lib.rs");
     let stereo = braced_item(&xr_source, "fn render_prepared_frame(");
@@ -375,17 +375,27 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     assert!(!advance.contains("render_full_frame"));
 
     let gpu = braced_item(&source, "pub(crate) fn advance_warm_world_gpu(");
+    for cap in [
+        "const STANDBY_RUNTIME_POLL_BUDGET: Duration = Duration::from_micros(500);",
+        "const STANDBY_UPLOAD_BUDGET: usize = 1;",
+        "const STANDBY_ACCEPT_BUDGET: usize = 1;",
+        "const STANDBY_COMPILE_REQUEST_BUDGET: usize = 1;",
+        "const STANDBY_PREPARATION_BUDGET: Duration = Duration::from_micros(750);",
+    ] {
+        assert!(source.contains(cap), "missing named standby cap `{cap}`");
+    }
     assert_in_order(
         gpu,
         &[
             "std::mem::take(&mut slot.pending_startup_sections)",
             "RenderSectionCacheUpdate::from_startup_seed(startup_sections)",
             "slot.section_uploads.enqueue_cache_update(update)",
-            "poll_budget: RuntimeUpdatePumpBudget::MaxElapsed(Duration::from_micros(500))",
-            "upload_budget: Some(1)",
-            "accept_budget: Some(1)",
-            "completed_result_accept_budget: Some(1)",
-            "max_compile_requests: Some(1)",
+            "poll_budget: RuntimeUpdatePumpBudget::MaxElapsed(STANDBY_RUNTIME_POLL_BUDGET)",
+            "upload_budget: Some(STANDBY_UPLOAD_BUDGET)",
+            "accept_budget: Some(STANDBY_ACCEPT_BUDGET)",
+            "completed_result_accept_budget: Some(STANDBY_ACCEPT_BUDGET)",
+            "max_compile_requests: Some(STANDBY_COMPILE_REQUEST_BUDGET)",
+            "bounded_preview_source_priority(",
             "Self::prepare_world_slot(",
         ],
     );
@@ -404,7 +414,7 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
         active,
         &[
             "Self::prepare_world_slot(",
-            "self.advance_warm_world_gpu(device, standby_deadline)?;",
+            "self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;",
         ],
     );
 }

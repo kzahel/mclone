@@ -40,7 +40,7 @@ use mclone_app_runtime::frame_pacing::{
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, PlacedTerrainFrame, PlacedTerrainPrepared,
     RenderStreamStats, render_full_frame_for_view_with_far_lod_and_opaque_gate,
-    render_full_frame_for_view_with_far_lod_and_placed_terrain,
+    render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot,
@@ -1208,11 +1208,22 @@ impl McloneSceneHost {
                         let options = self.render_options.with_sky_darken(
                             mclone_render::light_texture::sky_darken(preview_time),
                         );
-                        slot.draw.prepare_placed_stereo_draw(
+                        let bounded_section_count = records.section_keys().len();
+                        let out_of_region_submission_count = records
+                            .section_keys()
+                            .filter(|key| !preview.region.contains(*key))
+                            .count();
+                        let (prepared, timing) = slot.draw.prepare_placed_stereo_draw_timed(
                             &records,
                             render_views,
                             [options; 2],
                             preview.placement,
+                        );
+                        (
+                            prepared,
+                            timing,
+                            bounded_section_count,
+                            out_of_region_submission_count,
                         )
                     })
             });
@@ -1226,7 +1237,7 @@ impl McloneSceneHost {
             device,
             queue,
             &prepared_stereo_draw,
-            preview_stereo_draw.as_ref(),
+            preview_stereo_draw.as_ref().map(|prepared| &prepared.0),
             left_target,
             render_views[0],
             diagnostic_panel,
@@ -1251,7 +1262,7 @@ impl McloneSceneHost {
             device,
             queue,
             &prepared_stereo_draw,
-            preview_stereo_draw.as_ref(),
+            preview_stereo_draw.as_ref().map(|prepared| &prepared.0),
             right_target,
             render_views[1],
             diagnostic_panel,
@@ -1317,11 +1328,24 @@ impl McloneSceneHost {
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         let first_drawn_section_count = left_eye.summary.drawn_section_count;
         if let Some(preview) = self.embedded_world_preview.as_mut() {
-            preview.last_draw = TexturedSectionRenderStats {
+            let stats = TexturedSectionRenderStats {
                 drawn_section_count: left_eye.summary.placed_drawn_section_count,
                 drawn_index_count: left_eye.summary.placed_drawn_index_count,
                 ..TexturedSectionRenderStats::default()
             };
+            let (bounded_section_count, out_of_region_submission_count, cull_ms) =
+                preview_stereo_draw
+                    .as_ref()
+                    .map_or((0, 0, 0.0), |prepared| {
+                        (prepared.2, prepared.3, prepared.1.cull_ms)
+                    });
+            preview.record_render(
+                bounded_section_count,
+                out_of_region_submission_count,
+                cull_ms,
+                left_eye.timing.placed_draw_ms + right_eye.timing.placed_draw_ms,
+                stats,
+            );
         }
         self.record_eye0_summary(left_eye.summary);
         self.record_warm_world_first_destination_frame(first_drawn_section_count, upload);
@@ -1864,11 +1888,18 @@ impl McloneSceneHost {
                         let options = self.render_options.with_sky_darken(
                             mclone_render::light_texture::sky_darken(preview_time),
                         );
+                        let bounded_section_count = records.section_keys().len();
+                        let out_of_region_submission_count = records
+                            .section_keys()
+                            .filter(|key| !preview.region.contains(*key))
+                            .count();
                         (
                             preview.source_world,
                             records,
                             [options; 2],
                             preview.placement,
+                            bounded_section_count,
+                            out_of_region_submission_count,
                         )
                     })
             });
@@ -1898,7 +1929,14 @@ impl McloneSceneHost {
             timing.multiview_terrain_ms =
                 elapsed_ms(self.services.clock.elapsed_since(terrain_start));
         }
-        let preview_stats = if let Some((source_world, records, options, placement)) = preview_frame
+        let preview_stats = if let Some((
+            source_world,
+            records,
+            options,
+            placement,
+            bounded_section_count,
+            out_of_region_submission_count,
+        )) = preview_frame
         {
             let preview = self
                 .embedded_world_preview
@@ -1910,28 +1948,35 @@ impl McloneSceneHost {
                 .as_ref()
                 .filter(|slot| slot.id == source_world)
                 .context("visible embedded preview lost its source world")?;
-            let prepared = standby.draw.prepare_placed_stereo_draw(
+            let (prepared, prepare_timing) = standby.draw.prepare_placed_stereo_draw_timed(
                 &records,
                 terrain_views,
                 options,
                 placement,
             );
-            Some(
-                standby
-                    .draw
-                    .render_placed_prepared_multiview_stereo_draw_with_options(
-                        &preview.renderer,
-                        &prepared,
-                        device,
-                        queue,
-                        &mut encoder,
-                        render_target.with_loaded_color().with_loaded_depth(),
-                        terrain_views,
-                        options,
-                        placement,
-                    )
-                    .context("render embedded world preview multiview")?,
-            )
+            let draw_started_at = self.services.clock.now();
+            let stats = standby
+                .draw
+                .render_placed_prepared_multiview_stereo_draw_with_options(
+                    &preview.renderer,
+                    &prepared,
+                    device,
+                    queue,
+                    &mut encoder,
+                    render_target.with_loaded_color().with_loaded_depth(),
+                    terrain_views,
+                    options,
+                    placement,
+                )
+                .context("render embedded world preview multiview")?;
+            let draw_ms = elapsed_ms(self.services.clock.elapsed_since(draw_started_at));
+            Some((
+                stats,
+                prepare_timing.cull_ms,
+                draw_ms,
+                bounded_section_count,
+                out_of_region_submission_count,
+            ))
         } else {
             None
         };
@@ -2057,10 +2102,10 @@ impl McloneSceneHost {
         self.active_world.render_stats.drawn_section_count = stats[0].drawn_section_count;
         self.active_world.render_stats.drawn_face_count = stats[0].drawn_face_count();
         self.active_world.render_stats.drawn_index_count = stats[0].drawn_index_count;
-        if let (Some(preview), Some(preview_stats)) =
+        if let (Some(preview), Some((preview_stats, cull_ms, draw_ms, bounded, outside))) =
             (self.embedded_world_preview.as_mut(), preview_stats)
         {
-            preview.last_draw = preview_stats[0];
+            preview.record_render(bounded, outside, cull_ms, draw_ms, preview_stats[0]);
         }
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
@@ -2331,7 +2376,7 @@ impl McloneSceneHost {
         )?;
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.advance_warm_world_gpu(device, standby_deadline)?;
+            self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
             self.synchronize_world_gate_state();
         }
         #[cfg(target_arch = "wasm32")]
@@ -3546,6 +3591,8 @@ impl McloneSceneHost {
                 translucent_sort_ms: frame_timing.terrain_translucent_sort_ms,
                 encode_ms: (encode_total_ms - prepare_ms).max(0.0),
                 section_encode_ms: frame_timing.terrain_encode_ms,
+                placed_cull_ms: frame_timing.placed_cull_ms,
+                placed_draw_ms: frame_timing.placed_draw_ms,
                 actor_ms: frame_timing.actor_ms,
                 screen_effect_ms: frame_timing.screen_effect_ms,
                 gui_ms: frame_timing.gui_ms,

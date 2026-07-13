@@ -168,6 +168,8 @@ pub struct FullFrameRenderTiming {
     pub terrain_translucent_sort_ms: f64,
     pub terrain_prepare_ms: f64,
     pub terrain_encode_ms: f64,
+    pub placed_cull_ms: f64,
+    pub placed_draw_ms: f64,
     pub actor_ms: f64,
     pub screen_effect_ms: f64,
     pub gui_ms: f64,
@@ -1184,6 +1186,63 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain_timed<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    placed_terrain: PlacedTerrainFrame<'_>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        SINGLE_VIEW_SLOT,
+        far_lod,
+        far_lod_mesh,
+        None,
+        None,
+        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn render_full_frame_for_view_in_slot<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
@@ -2041,9 +2100,10 @@ where
             }
             Some(OpaqueWorldInsertion::Placed(placed)) => {
                 let placed_target = render_target.with_loaded_color().with_loaded_depth();
-                placed_terrain_stats = match placed.prepared {
-                    PlacedTerrainPrepared::Mono(records) => {
-                        placed.draw.render_placed_prepared_with_options_in_slot(
+                let (stats, placed_timing) = match (timing.is_some(), placed.prepared) {
+                    (true, PlacedTerrainPrepared::Mono(records)) => placed
+                        .draw
+                        .render_placed_prepared_with_options_timed_in_slot(
                             placed.renderer,
                             records,
                             frame.queue,
@@ -2053,11 +2113,10 @@ where
                             placed.render_options,
                             placed.placement,
                             view_slot,
-                        )?
-                    }
-                    PlacedTerrainPrepared::Stereo(prepared_draw) => placed
+                        )?,
+                    (true, PlacedTerrainPrepared::Stereo(prepared_draw)) => placed
                         .draw
-                        .render_placed_prepared_stereo_draw_with_options_in_slot(
+                        .render_placed_prepared_stereo_draw_with_options_timed_in_slot(
                             placed.renderer,
                             prepared_draw,
                             frame.queue,
@@ -2068,7 +2127,43 @@ where
                             placed.placement,
                             view_slot,
                         )?,
+                    (false, PlacedTerrainPrepared::Mono(records)) => (
+                        placed.draw.render_placed_prepared_with_options_in_slot(
+                            placed.renderer,
+                            records,
+                            frame.queue,
+                            frame.encoder,
+                            placed_target,
+                            render_view,
+                            placed.render_options,
+                            placed.placement,
+                            view_slot,
+                        )?,
+                        TexturedSectionRenderTiming::default(),
+                    ),
+                    (false, PlacedTerrainPrepared::Stereo(prepared_draw)) => (
+                        placed
+                            .draw
+                            .render_placed_prepared_stereo_draw_with_options_in_slot(
+                                placed.renderer,
+                                prepared_draw,
+                                frame.queue,
+                                frame.encoder,
+                                placed_target,
+                                render_view,
+                                placed.render_options,
+                                placed.placement,
+                                view_slot,
+                            )?,
+                        TexturedSectionRenderTiming::default(),
+                    ),
                 };
+                placed_terrain_stats = stats;
+                if let Some(timing) = timing.as_deref_mut() {
+                    timing.placed_cull_ms += placed_timing.cull_ms;
+                    timing.placed_draw_ms +=
+                        placed_timing.uniform_write_ms + placed_timing.encode_ms;
+                }
             }
             None => {}
         }

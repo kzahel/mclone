@@ -355,6 +355,14 @@ impl OffscreenFlatClientHost {
         })
     }
 
+    pub(crate) fn scene_host(&self) -> &mclone_scene::McloneSceneHost {
+        self.driver.host()
+    }
+
+    pub(crate) fn scene_host_mut(&mut self) -> &mut mclone_scene::McloneSceneHost {
+        self.driver.host_mut()
+    }
+
     fn enable_asset_pack_ui_smoke(&mut self) {
         self.driver
             .host_mut()
@@ -607,6 +615,14 @@ impl OffscreenFlatClientHost {
     ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
         self.driver
             .drive_until_streamed_at_output_size(device, queue)
+    }
+
+    pub(crate) fn drive_until_embedded_preview_idle(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
+        self.driver.drive_until_embedded_preview_idle(device, queue)
     }
 
     pub(crate) fn far_lod_settle_snapshot(&self) -> Result<mclone_scene::FarLodSettleSnapshot> {

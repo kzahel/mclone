@@ -1,12 +1,11 @@
 use std::path::PathBuf;
 
+use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::monotonic::MonotonicInstant;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::session::ActiveSessionDescriptor;
-#[cfg(not(target_arch = "wasm32"))]
-use mclone_core::BlockPos;
-use mclone_core::{ChunkPos, Vec3d};
+use mclone_core::{BlockPos, ChunkPos, Vec3d};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
@@ -139,7 +138,84 @@ pub struct EmbeddedWorldPreviewSnapshot {
     pub bounded_section_count: usize,
     pub last_drawn_section_count: usize,
     pub last_drawn_index_count: u32,
+    pub source_host_mode: Option<SingleViewHostMode>,
+    pub fixed_interest_center: ChunkPos,
+    pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
+    pub render: EmbeddedWorldPreviewRenderSnapshot,
+    pub last_mutation: Option<EmbeddedWorldPreviewMutationSnapshot>,
+    pub boundary_warning: Option<String>,
     pub failure: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EmbeddedWorldPreviewPreparationSnapshot {
+    pub frame_count: usize,
+    pub last_runtime_poll_ms: f64,
+    pub total_runtime_poll_ms: f64,
+    pub last_compile_sync_ms: f64,
+    pub total_compile_sync_ms: f64,
+    pub last_gpu_upload_ms: f64,
+    pub total_gpu_upload_ms: f64,
+    pub last_submitted_compile_section_count: usize,
+    pub submitted_compile_section_count: usize,
+    pub last_accepted_compile_result_count: usize,
+    pub accepted_compile_result_count: usize,
+    pub last_uploaded_section_count: usize,
+    pub uploaded_section_count: usize,
+    pub pending_compile_jobs: usize,
+    pub max_pending_compile_jobs: usize,
+    pub queued_upload_lifecycle_items: usize,
+    pub max_queued_upload_lifecycle_items: usize,
+    pub queued_upload_mesh_owned_bytes: usize,
+    pub max_queued_upload_mesh_owned_bytes: usize,
+    pub source_priority_position: Vec3d,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct EmbeddedWorldPreviewRenderSnapshot {
+    pub frame_count: usize,
+    pub last_cull_ms: f64,
+    pub total_cull_ms: f64,
+    pub last_draw_ms: f64,
+    pub total_draw_ms: f64,
+    pub last_bounded_section_count: usize,
+    pub last_drawn_section_count: usize,
+    pub last_drawn_index_count: u32,
+    pub out_of_region_submission_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EmbeddedWorldPreviewMutationPhase {
+    CommandSent,
+    ClientApplied,
+    GpuApplied,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmbeddedWorldPreviewMutationSnapshot {
+    pub sequence: u64,
+    pub block: BlockPos,
+    pub phase: EmbeddedWorldPreviewMutationPhase,
+    pub command_changed: bool,
+    pub command_update_count: usize,
+    pub command_section_block_update_count: usize,
+    pub requested_after_rendered_frame: u32,
+    pub completed_after_rendered_frame: Option<u32>,
+    pub submitted_compile_section_count: usize,
+    pub accepted_compile_result_count: usize,
+    pub uploaded_section_count: usize,
+    pub failure: Option<String>,
+}
+
+pub(crate) struct EmbeddedWorldPreviewMutationState {
+    pub snapshot: EmbeddedWorldPreviewMutationSnapshot,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub submitted_compile_baseline: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub accepted_compile_baseline: usize,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub uploaded_section_baseline: usize,
 }
 
 pub(crate) struct EmbeddedWorldPreview {
@@ -154,6 +230,14 @@ pub(crate) struct EmbeddedWorldPreview {
     pub source_anchor_traversal_ready: bool,
     pub bounded_section_count: usize,
     pub last_draw: TexturedSectionRenderStats,
+    pub source_host_mode: Option<SingleViewHostMode>,
+    pub fixed_interest_center: ChunkPos,
+    pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
+    pub render: EmbeddedWorldPreviewRenderSnapshot,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub mutation_sequence: u64,
+    pub last_mutation: Option<EmbeddedWorldPreviewMutationState>,
+    pub boundary_warning: Option<String>,
     pub failure: Option<String>,
 }
 
@@ -171,8 +255,40 @@ impl EmbeddedWorldPreview {
             bounded_section_count: self.bounded_section_count,
             last_drawn_section_count: self.last_draw.drawn_section_count,
             last_drawn_index_count: self.last_draw.drawn_index_count,
+            source_host_mode: self.source_host_mode,
+            fixed_interest_center: self.fixed_interest_center,
+            preparation: self.preparation,
+            render: self.render,
+            last_mutation: self
+                .last_mutation
+                .as_ref()
+                .map(|mutation| mutation.snapshot.clone()),
+            boundary_warning: self.boundary_warning.clone(),
             failure: self.failure.clone(),
         }
+    }
+
+    pub(crate) fn record_render(
+        &mut self,
+        bounded_section_count: usize,
+        out_of_region_submission_count: usize,
+        cull_ms: f64,
+        draw_ms: f64,
+        stats: TexturedSectionRenderStats,
+    ) {
+        self.last_draw = stats;
+        self.render.frame_count = self.render.frame_count.saturating_add(1);
+        self.render.last_cull_ms = cull_ms;
+        self.render.total_cull_ms += cull_ms;
+        self.render.last_draw_ms = draw_ms;
+        self.render.total_draw_ms += draw_ms;
+        self.render.last_bounded_section_count = bounded_section_count;
+        self.render.last_drawn_section_count = stats.drawn_section_count;
+        self.render.last_drawn_index_count = stats.drawn_index_count;
+        self.render.out_of_region_submission_count = self
+            .render
+            .out_of_region_submission_count
+            .saturating_add(out_of_region_submission_count);
     }
 }
 
@@ -993,6 +1109,31 @@ fn cardinal_forward(yaw_radians: f64) -> (i32, i32) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn bounded_preview_source_priority(
+    region: EmbeddedChunkRegion,
+    placement: WorldPlacement,
+    composition_camera: Vec3d,
+) -> Vec3d {
+    let source = placement.composition_to_source(composition_camera);
+    let radius = i64::from(region.horizontal_radius());
+    let min_chunk_x = i64::from(region.center().x) - radius;
+    let max_chunk_x = i64::from(region.center().x) + radius;
+    let min_chunk_z = i64::from(region.center().z) - radius;
+    let max_chunk_z = i64::from(region.center().z) + radius;
+    let min_x = (min_chunk_x * 16) as f64;
+    let max_x = ((max_chunk_x + 1) * 16) as f64 - 0.5;
+    let min_z = (min_chunk_z * 16) as f64;
+    let max_z = ((max_chunk_z + 1) * 16) as f64 - 0.5;
+    let min_y = f64::from(region.min_section_y()) * 16.0;
+    let max_y = f64::from(region.max_section_y() + 1) * 16.0 - 0.5;
+    Vec3d::new(
+        source.x.clamp(min_x, max_x),
+        source.y.clamp(min_y, max_y),
+        source.z.clamp(min_z, max_z),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1049,6 +1190,26 @@ mod tests {
         assert_eq!(
             entry_support_render_section(flat_pose()),
             Some(RenderSectionKey::new(0, 3, 0))
+        );
+    }
+
+    #[test]
+    fn preview_compile_priority_inverse_maps_and_clamps_to_its_region() {
+        let region = EmbeddedChunkRegion::new(ChunkPos::new(2, -3), 1, 3, 5).unwrap();
+        let placement = WorldPlacement::new(
+            Vec3d::new(40.0, 65.0, -40.0),
+            Vec3d::new(8.0, 65.0, 8.0),
+            0.125,
+        )
+        .unwrap();
+
+        assert_eq!(
+            bounded_preview_source_priority(region, placement, Vec3d::new(8.5, 65.5, 7.5)),
+            Vec3d::new(44.0, 69.0, -44.0)
+        );
+        assert_eq!(
+            bounded_preview_source_priority(region, placement, Vec3d::new(100.0, 200.0, -100.0)),
+            Vec3d::new(63.5, 95.5, -64.0)
         );
     }
 

@@ -1,18 +1,36 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
+use glam::Vec3;
 use image::ImageReader;
+use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, chunk_section_index};
+use mclone_render::headless::{
+    HeadlessFrameLoopOptions, run_headless_capture_loop, run_headless_frame_loop, save_rgba_png,
+};
 use mclone_render_session::EngineCameraViewMode;
-use mclone_scene::EmbeddedWorldPreviewPhase;
+use mclone_scene::{
+    EmbeddedWorldPreviewMutationPhase, EmbeddedWorldPreviewMutationSnapshot,
+    EmbeddedWorldPreviewPhase,
+};
+use mclone_server::{
+    AUTHORED_WORLD_FIXTURE_MARKER_FILE, AuthoredWorldFixtureManifest, SqliteWorldStore, WorldStore,
+};
 use serde::Serialize;
 
+use crate::camera::SpectatorCamera;
 use crate::cli::{
     HeadlessScreenshotOptions, HeadlessScreenshotUi, LiveDioramaSmokeOptions, StartupWaitPolicy,
     XrEmulationScreenshotOptions,
 };
 use crate::offscreen_flat_client::{
-    OffscreenFlatClientScreenshotReport, run_offscreen_flat_client_screenshot,
+    OffscreenFlatClientFrameOptions, OffscreenFlatClientHost, OffscreenFlatClientScreenshotReport,
+    run_offscreen_flat_client_screenshot,
+};
+use crate::render_cache::load_asset_source;
+use crate::scene_runtime::{
+    WindowSceneAssets, chunk_tracking_radius_for_render_distance, square_count,
 };
 use crate::xr_emulation::run_xr_emulation_screenshot;
 
@@ -27,13 +45,78 @@ pub(crate) struct LiveDioramaSmokeReport {
     pub(crate) side_path: PathBuf,
     pub(crate) behind_path: PathBuf,
     pub(crate) stereo_path: PathBuf,
+    pub(crate) mutation_before_path: PathBuf,
+    pub(crate) mutation_after_path: PathBuf,
     pub(crate) active_preview_pixel_difference_count: usize,
     pub(crate) preview_bounded_section_count: usize,
     pub(crate) preview_drawn_section_count: usize,
     pub(crate) preview_drawn_index_count: u32,
     pub(crate) stereo_eye_pixel_difference_count: usize,
+    pub(crate) mutation: LiveDioramaMutationSmokeReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) soak: Option<LiveDioramaSoakReport>,
     pub(crate) standby_cadence_hz: [u32; 3],
     pub(crate) standby_cadence_applied: bool,
+    pub(crate) standby_loaded_chunk_count: usize,
+    pub(crate) standby_configured_chunk_limit: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveDioramaMutationSmokeReport {
+    pub(crate) block: [i32; 3],
+    pub(crate) before_after_pixel_difference_count: usize,
+    pub(crate) command_changed: bool,
+    pub(crate) command_update_count: usize,
+    pub(crate) command_section_block_update_count: usize,
+    pub(crate) completed_after_rendered_frame: u32,
+    pub(crate) submitted_compile_section_count: usize,
+    pub(crate) accepted_compile_result_count: usize,
+    pub(crate) uploaded_section_count: usize,
+    pub(crate) max_pending_compile_jobs: usize,
+    pub(crate) max_queued_upload_lifecycle_items: usize,
+    pub(crate) max_queued_upload_mesh_owned_bytes: usize,
+    pub(crate) out_of_region_submission_count: usize,
+    pub(crate) active_world_block_unchanged: bool,
+    pub(crate) persisted_after_restart: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveDioramaSoakReport {
+    pub(crate) duration_seconds: u64,
+    pub(crate) frame_count: usize,
+    pub(crate) fixed_interest_center: [i32; 2],
+    pub(crate) baseline_bounded_section_count: usize,
+    pub(crate) final_bounded_section_count: usize,
+    pub(crate) max_pending_compile_jobs: usize,
+    pub(crate) max_queued_upload_lifecycle_items: usize,
+    pub(crate) max_queued_upload_mesh_owned_bytes: usize,
+    pub(crate) out_of_region_submission_count: usize,
+    pub(crate) camera_orbit_changed_source_priority: bool,
+}
+
+struct LiveDioramaMutationState {
+    host: OffscreenFlatClientHost,
+    block: BlockPos,
+    active_block_before: Option<BlockStateId>,
+    active_block_after: Option<BlockStateId>,
+    mutation: Option<EmbeddedWorldPreviewMutationSnapshot>,
+    completed_frame_index: Option<usize>,
+}
+
+struct LiveDioramaSoakState {
+    host: OffscreenFlatClientHost,
+    target: Vec3,
+    fixed_interest_center: mclone_core::ChunkPos,
+    baseline_bounded_section_count: usize,
+    final_bounded_section_count: usize,
+    initial_source_priority: mclone_core::Vec3d,
+    source_priority_changed: bool,
+    max_pending_compile_jobs: usize,
+    max_queued_upload_lifecycle_items: usize,
+    max_queued_upload_mesh_owned_bytes: usize,
+    out_of_region_submission_count: usize,
 }
 
 pub(crate) fn run_live_diorama_smoke(
@@ -73,6 +156,8 @@ pub(crate) fn run_live_diorama_smoke(
     let side_path = options.directory.join("a-plus-b-side.png");
     let behind_path = options.directory.join("a-plus-b-behind.png");
     let stereo_path = options.directory.join("a-plus-b-stereo.png");
+    let mutation_before_path = options.directory.join("mutation-before.png");
+    let mutation_after_path = options.directory.join("mutation-after.png");
     let report_path = options.directory.join("report.json");
 
     let mut active_scene = options.scene.clone();
@@ -161,7 +246,31 @@ pub(crate) fn run_live_diorama_smoke(
         bail!("A-only and A+B captures are pixel-identical");
     }
 
+    let mutation = run_live_diorama_mutation_smoke(
+        options,
+        Vec3::from_array(front_eye),
+        Vec3::from_array(target),
+        &mutation_before_path,
+        &mutation_after_path,
+    )?;
+    let soak = (options.soak_seconds > 0)
+        .then(|| run_live_diorama_post_mutation_soak(options, Vec3::from_array(target)))
+        .transpose()?;
+
     let cadence = standby.standby_cadence;
+    let render_distance = u32::try_from(options.scene.render_distance)
+        .context("live-diorama render distance must be non-negative")?;
+    let tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
+    let standby_configured_chunk_limit = square_count(
+        i32::try_from(tracking_radius).context("standby tracking radius does not fit i32")?,
+    )?;
+    if standby.loaded_chunks > standby_configured_chunk_limit {
+        bail!(
+            "B subscription exceeded its configured view: loaded={} limit={}",
+            standby.loaded_chunks,
+            standby_configured_chunk_limit
+        );
+    }
     let report = LiveDioramaSmokeReport {
         directory: options.directory.clone(),
         report_path,
@@ -170,17 +279,23 @@ pub(crate) fn run_live_diorama_smoke(
         side_path,
         behind_path,
         stereo_path,
+        mutation_before_path,
+        mutation_after_path,
         active_preview_pixel_difference_count,
         preview_bounded_section_count: preview.bounded_section_count,
         preview_drawn_section_count: preview.last_drawn_section_count,
         preview_drawn_index_count: preview.last_drawn_index_count,
         stereo_eye_pixel_difference_count: stereo.eye_pixel_difference_count,
+        mutation,
+        soak,
         standby_cadence_hz: [
             cadence.host_rate_hz,
             cadence.gameplay_rate_hz,
             cadence.physics_rate_hz,
         ],
         standby_cadence_applied: standby.standby_cadence_applied,
+        standby_loaded_chunk_count: standby.loaded_chunks,
+        standby_configured_chunk_limit,
     };
     let json = serde_json::to_vec_pretty(&report).context("encode live-diorama smoke report")?;
     fs::write(&report.report_path, json).with_context(|| {
@@ -190,6 +305,357 @@ pub(crate) fn run_live_diorama_smoke(
         )
     })?;
     Ok(report)
+}
+
+fn run_live_diorama_post_mutation_soak(
+    options: &LiveDioramaSmokeOptions,
+    target: Vec3,
+) -> Result<LiveDioramaSoakReport> {
+    const SOAK_RATE_HZ: u64 = 10;
+    let frame_count = usize::try_from(
+        options
+            .soak_seconds
+            .checked_mul(SOAK_RATE_HZ)
+            .context("live-diorama soak frame count overflow")?,
+    )
+    .context("live-diorama soak frame count does not fit usize")?;
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let startup_camera = SpectatorCamera::spawn_for_scene(&scene);
+    let (loop_report, state) = run_headless_frame_loop(
+        HeadlessFrameLoopOptions {
+            width: 320,
+            height: 200,
+            frame_count,
+            pace_frame_duration: Some(Duration::from_millis(1_000 / SOAK_RATE_HZ)),
+        },
+        move |device, queue, format, size| {
+            let mut host = OffscreenFlatClientHost::new(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                startup_camera,
+            )?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Playable)?;
+            host.drive_until_embedded_preview_idle(device, queue)?;
+            let preview = host
+                .scene_host()
+                .embedded_world_preview_snapshot()
+                .context("post-mutation soak has no embedded preview")?;
+            Ok(LiveDioramaSoakState {
+                host,
+                target,
+                fixed_interest_center: preview.fixed_interest_center,
+                baseline_bounded_section_count: preview.bounded_section_count,
+                final_bounded_section_count: preview.bounded_section_count,
+                initial_source_priority: preview.preparation.source_priority_position,
+                source_priority_changed: false,
+                max_pending_compile_jobs: 0,
+                max_queued_upload_lifecycle_items: 0,
+                max_queued_upload_mesh_owned_bytes: 0,
+                out_of_region_submission_count: 0,
+            })
+        },
+        |frame_index, frame, state| {
+            // One orbit per minute exercises B's inverse/clamped source
+            // priority while its server interest remains fixed.
+            let orbit_period_frames = SOAK_RATE_HZ as usize * 60;
+            let phase = (frame_index % orbit_period_frames) as f32 / orbit_period_frames as f32
+                * std::f32::consts::TAU;
+            let eye = Vec3::new(
+                state.target.x + phase.sin() * 6.0,
+                state.target.y + 1.75,
+                state.target.z - phase.cos() * 6.0,
+            );
+            state.host.set_camera_look_at(eye, state.target);
+            state.host.commit_camera()?;
+            state
+                .host
+                .render_frame(frame, OffscreenFlatClientFrameOptions { hud: false })?;
+            let preview = state
+                .host
+                .scene_host()
+                .embedded_world_preview_snapshot()
+                .context("post-mutation soak lost its embedded preview")?;
+            if preview.fixed_interest_center != state.fixed_interest_center {
+                bail!(
+                    "post-mutation soak moved B interest from {:?} to {:?}",
+                    state.fixed_interest_center,
+                    preview.fixed_interest_center
+                );
+            }
+            state.final_bounded_section_count = preview.bounded_section_count;
+            state.max_pending_compile_jobs = state
+                .max_pending_compile_jobs
+                .max(preview.preparation.pending_compile_jobs);
+            state.max_queued_upload_lifecycle_items = state
+                .max_queued_upload_lifecycle_items
+                .max(preview.preparation.queued_upload_lifecycle_items);
+            state.max_queued_upload_mesh_owned_bytes = state
+                .max_queued_upload_mesh_owned_bytes
+                .max(preview.preparation.queued_upload_mesh_owned_bytes);
+            state.out_of_region_submission_count = preview.render.out_of_region_submission_count;
+            state.source_priority_changed |=
+                preview.preparation.source_priority_position != state.initial_source_priority;
+            if state.out_of_region_submission_count != 0 {
+                bail!("post-mutation soak submitted preview geometry outside B's region");
+            }
+            Ok(())
+        },
+    )?;
+
+    if state.final_bounded_section_count != state.baseline_bounded_section_count {
+        bail!(
+            "post-mutation soak changed B resident sections from {} to {}",
+            state.baseline_bounded_section_count,
+            state.final_bounded_section_count
+        );
+    }
+    if state.max_pending_compile_jobs > 4
+        || state.max_queued_upload_lifecycle_items > 1
+        || !state.source_priority_changed
+    {
+        bail!(
+            "post-mutation soak violated bounded-work/orbit contract: pending={} upload_queue={} priority_changed={}",
+            state.max_pending_compile_jobs,
+            state.max_queued_upload_lifecycle_items,
+            state.source_priority_changed
+        );
+    }
+    Ok(LiveDioramaSoakReport {
+        duration_seconds: options.soak_seconds,
+        frame_count: loop_report.frame_count,
+        fixed_interest_center: [state.fixed_interest_center.x, state.fixed_interest_center.z],
+        baseline_bounded_section_count: state.baseline_bounded_section_count,
+        final_bounded_section_count: state.final_bounded_section_count,
+        max_pending_compile_jobs: state.max_pending_compile_jobs,
+        max_queued_upload_lifecycle_items: state.max_queued_upload_lifecycle_items,
+        max_queued_upload_mesh_owned_bytes: state.max_queued_upload_mesh_owned_bytes,
+        out_of_region_submission_count: state.out_of_region_submission_count,
+        camera_orbit_changed_source_priority: state.source_priority_changed,
+    })
+}
+
+fn run_live_diorama_mutation_smoke(
+    options: &LiveDioramaSmokeOptions,
+    eye: Vec3,
+    target: Vec3,
+    before_path: &Path,
+    after_path: &Path,
+) -> Result<LiveDioramaMutationSmokeReport> {
+    // B deliberately runs at 5 Hz in the canonical smoke. Leave enough real
+    // time for one server tick plus the separately budgeted compile/accept/
+    // upload frames without coupling the proof to the active frame rate.
+    const MUTATION_FRAME_COUNT: usize = 160;
+    const MAX_AFFECTED_SECTION_COMPILES: usize = 2;
+
+    let diorama = options
+        .scene
+        .live_diorama
+        .as_ref()
+        .context("live-diorama mutation smoke has no configured preview")?;
+    let source_world_dir = diorama.world_dir.clone();
+    let marker_path = source_world_dir.join(AUTHORED_WORLD_FIXTURE_MARKER_FILE);
+    let manifest: AuthoredWorldFixtureManifest =
+        serde_json::from_slice(&fs::read(&marker_path).with_context(|| {
+            format!("read authored fixture marker `{}`", marker_path.display())
+        })?)
+        .with_context(|| format!("decode authored fixture marker `{}`", marker_path.display()))?;
+    let block = BlockPos::new(
+        manifest.mutation_block[0],
+        manifest.mutation_block[1],
+        manifest.mutation_block[2],
+    );
+
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let startup_camera = SpectatorCamera::spawn_for_scene(&scene);
+    let (_, frame_pixels, mut state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: MUTATION_FRAME_COUNT,
+            pace_frame_duration: Some(Duration::from_millis(5)),
+        },
+        move |device, queue, format, size| {
+            let mut host = OffscreenFlatClientHost::new(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                startup_camera,
+            )?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Playable)?;
+            host.set_camera_look_at(eye, target);
+            host.commit_camera()?;
+            host.drive_until_embedded_preview_idle(device, queue)?;
+            let active_block_before = host
+                .scene_host()
+                .mono_client()
+                .and_then(|client| client.block_state_at_block_pos(block));
+            Ok(LiveDioramaMutationState {
+                host,
+                block,
+                active_block_before,
+                active_block_after: None,
+                mutation: None,
+                completed_frame_index: None,
+            })
+        },
+        |frame_index, frame, state| {
+            state
+                .host
+                .render_frame(frame, OffscreenFlatClientFrameOptions { hud: false })?;
+            if frame_index == 0 {
+                state.mutation = Some(
+                    state
+                        .host
+                        .scene_host_mut()
+                        .debug_break_embedded_world_preview_block(state.block)?,
+                );
+            }
+            let preview = state
+                .host
+                .scene_host()
+                .embedded_world_preview_snapshot()
+                .context("mutation smoke lost its embedded preview")?;
+            if preview.render.out_of_region_submission_count != 0 {
+                bail!(
+                    "mutation smoke submitted {} preview sections outside its region",
+                    preview.render.out_of_region_submission_count
+                );
+            }
+            if let Some(mutation) = preview.last_mutation {
+                if mutation.phase == EmbeddedWorldPreviewMutationPhase::GpuApplied
+                    && state.completed_frame_index.is_none()
+                {
+                    state.completed_frame_index = Some(frame_index);
+                }
+                state.mutation = Some(mutation);
+            }
+            state.active_block_after = state
+                .host
+                .scene_host()
+                .mono_client()
+                .and_then(|client| client.block_state_at_block_pos(state.block));
+            Ok(())
+        },
+    )?;
+
+    let mutation = state
+        .mutation
+        .clone()
+        .context("mutation smoke produced no mutation diagnostics")?;
+    state.completed_frame_index.with_context(|| {
+        format!(
+            "mutation smoke did not reach GPU-applied state: mutation={:?} preview={:?}",
+            state.mutation,
+            state.host.scene_host().embedded_world_preview_snapshot()
+        )
+    })?;
+    if mutation.phase != EmbeddedWorldPreviewMutationPhase::GpuApplied
+        || !mutation.command_changed
+        || mutation.command_section_block_update_count != 1
+        || mutation.submitted_compile_section_count == 0
+        || mutation.submitted_compile_section_count > MAX_AFFECTED_SECTION_COMPILES
+        || mutation.accepted_compile_result_count == 0
+        || mutation.uploaded_section_count == 0
+    {
+        bail!("mutation smoke violated its bounded live-update contract: {mutation:?}");
+    }
+    if state.active_block_before.is_none() || state.active_block_before != state.active_block_after
+    {
+        bail!(
+            "B mutation leaked into active A: before={:?} after={:?}",
+            state.active_block_before,
+            state.active_block_after
+        );
+    }
+
+    let after_frame_index = MUTATION_FRAME_COUNT - 1;
+    save_rgba_png(before_path, options.width, options.height, &frame_pixels[0])?;
+    save_rgba_png(
+        after_path,
+        options.width,
+        options.height,
+        &frame_pixels[after_frame_index],
+    )?;
+    let before_after_pixel_difference_count = frame_pixels[0]
+        .chunks_exact(4)
+        .zip(frame_pixels[after_frame_index].chunks_exact(4))
+        .filter(|(before, after)| before != after)
+        .count();
+    if before_after_pixel_difference_count == 0 {
+        bail!("GPU-applied B mutation did not change any preview pixels");
+    }
+
+    let preview = state
+        .host
+        .scene_host()
+        .embedded_world_preview_snapshot()
+        .context("mutation smoke lost final preview diagnostics")?;
+    state.host.scene_host_mut().flush_persistence()?;
+    drop(state);
+
+    let mut store = SqliteWorldStore::open_world_dir(&source_world_dir)?;
+    let record = store
+        .load_chunk(block.chunk_pos())?
+        .with_context(|| format!("persisted fixture lost chunk {:?}", block.chunk_pos()))?;
+    let persisted_after_restart =
+        snapshot_block_state(&record.snapshot, block) == AIR_BLOCK_STATE_ID;
+    store.close()?;
+    if !persisted_after_restart {
+        bail!("B mutation was not durable after reopening its world store");
+    }
+
+    Ok(LiveDioramaMutationSmokeReport {
+        block: [block.x, block.y, block.z],
+        before_after_pixel_difference_count,
+        command_changed: mutation.command_changed,
+        command_update_count: mutation.command_update_count,
+        command_section_block_update_count: mutation.command_section_block_update_count,
+        completed_after_rendered_frame: mutation
+            .completed_after_rendered_frame
+            .context("GPU-applied mutation omitted its completion frame")?,
+        submitted_compile_section_count: mutation.submitted_compile_section_count,
+        accepted_compile_result_count: mutation.accepted_compile_result_count,
+        uploaded_section_count: mutation.uploaded_section_count,
+        max_pending_compile_jobs: preview.preparation.max_pending_compile_jobs,
+        max_queued_upload_lifecycle_items: preview.preparation.max_queued_upload_lifecycle_items,
+        max_queued_upload_mesh_owned_bytes: preview.preparation.max_queued_upload_mesh_owned_bytes,
+        out_of_region_submission_count: preview.render.out_of_region_submission_count,
+        active_world_block_unchanged: true,
+        persisted_after_restart,
+    })
+}
+
+fn snapshot_block_state(snapshot: &mclone_core::ChunkSnapshot, block: BlockPos) -> BlockStateId {
+    let section_y = block.y.div_euclid(16);
+    snapshot
+        .sections
+        .iter()
+        .find(|section| section.section_y == section_y)
+        .map(|section| {
+            section.unpack_block_state_ids()[chunk_section_index(
+                block.x.rem_euclid(16),
+                block.y.rem_euclid(16),
+                block.z.rem_euclid(16),
+            )]
+        })
+        .unwrap_or(AIR_BLOCK_STATE_ID)
 }
 
 fn screenshot_options(

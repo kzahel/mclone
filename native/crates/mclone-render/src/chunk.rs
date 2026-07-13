@@ -3762,6 +3762,64 @@ impl TexturedSectionDrawResources {
         placement: WorldPlacement,
         view_slot: PerViewSlot,
     ) -> Result<TexturedSectionRenderStats> {
+        self.render_placed_prepared_with_options_inner(
+            renderer,
+            records,
+            queue,
+            encoder,
+            target,
+            physical_render_view,
+            options,
+            placement,
+            view_slot,
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_placed_prepared_with_options_timed_in_slot(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: PerViewSlot,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        let mut timing = TexturedSectionRenderTiming::default();
+        let stats = self.render_placed_prepared_with_options_inner(
+            renderer,
+            records,
+            queue,
+            encoder,
+            target,
+            physical_render_view,
+            options,
+            placement,
+            view_slot,
+            Some(&mut timing),
+        )?;
+        Ok((stats, timing))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_placed_prepared_with_options_inner(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: PerViewSlot,
+        mut timing: Option<&mut TexturedSectionRenderTiming>,
+    ) -> Result<TexturedSectionRenderStats> {
+        let cull_start = timing.is_some().then(timing_now);
         let source_render_view = placement.source_render_view(physical_render_view);
         let placed_frustum = PlacedClipFrustum::new(physical_render_view, placement);
         let culling = {
@@ -3774,6 +3832,10 @@ impl TexturedSectionDrawResources {
                 &placed_frustum,
             )
         };
+        if let (Some(timing), Some(start)) = (timing.as_deref_mut(), cull_start) {
+            timing.cull_ms += timing_elapsed_ms(start);
+        }
+        let uniform_start = timing.is_some().then(timing_now);
         let uniform_offset = renderer.uniforms.write_slot(
             queue,
             view_slot,
@@ -3784,6 +3846,10 @@ impl TexturedSectionDrawResources {
                 renderer.color_format,
             ),
         );
+        if let (Some(timing), Some(start)) = (timing.as_deref_mut(), uniform_start) {
+            timing.uniform_write_ms += timing_elapsed_ms(start);
+        }
+        let encode_start = timing.is_some().then(timing_now);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_placed_textured_section_render_pass"),
@@ -3820,6 +3886,9 @@ impl TexturedSectionDrawResources {
                 }
             }
         }
+        if let (Some(timing), Some(start)) = (timing.as_deref_mut(), encode_start) {
+            timing.encode_ms += timing_elapsed_ms(start);
+        }
         Ok(culling.stats)
     }
 
@@ -3850,6 +3919,30 @@ impl TexturedSectionDrawResources {
             draw_masks: culling.draw_masks,
             translucent_keys: Vec::new(),
         }
+    }
+
+    pub fn prepare_placed_stereo_draw_timed(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        physical_render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        placement: WorldPlacement,
+    ) -> (
+        PreparedTexturedSectionStereoDraw,
+        TexturedSectionRenderTiming,
+    ) {
+        let started_at = timing_now();
+        let prepared =
+            self.prepare_placed_stereo_draw(records, physical_render_views, options, placement);
+        let elapsed_ms = timing_elapsed_ms(started_at);
+        (
+            prepared,
+            TexturedSectionRenderTiming {
+                cull_ms: elapsed_ms,
+                prepare_ms: elapsed_ms,
+                ..TexturedSectionRenderTiming::default()
+            },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -3912,6 +4005,40 @@ impl TexturedSectionDrawResources {
             }
         }
         Ok(prepared_draw.stats_for_slot(view_slot))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_placed_prepared_stereo_draw_with_options_timed_in_slot(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: PerViewSlot,
+    ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
+        let started_at = timing_now();
+        let stats = self.render_placed_prepared_stereo_draw_with_options_in_slot(
+            renderer,
+            prepared_draw,
+            queue,
+            encoder,
+            target,
+            physical_render_view,
+            options,
+            placement,
+            view_slot,
+        )?;
+        Ok((
+            stats,
+            TexturedSectionRenderTiming {
+                encode_ms: timing_elapsed_ms(started_at),
+                ..TexturedSectionRenderTiming::default()
+            },
+        ))
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -73,7 +73,9 @@ impl AuthoredWorldFixtureKind {
     pub const fn mutation_block(self) -> [i32; 3] {
         match self {
             Self::Table => [7, 64, 7],
-            Self::Island => [13, 67, 10],
+            // A visible grass block inside the source region and ordinary
+            // debug-creative reach of the fixture's accepted spawn.
+            Self::Island => [5, 64, 8],
         }
     }
 }

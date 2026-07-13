@@ -303,6 +303,27 @@ The fixture now uses a four-block ground-level display and maps the miniature
 Slice 4 can add mutation and budget instrumentation without preserving those
 provisional fixture mistakes.
 
+Slice 4 proves the preview remains live under bounded preparation. B keeps its
+fixed authored interest while compile priority inverse-maps and clamps the
+physical camera into B's source region. Per-preview diagnostics now separate
+runtime poll, compile, acceptance, upload, placed cull, and placed draw, with
+named one-item/one-request background grants and CPU/GPU retained-byte facts.
+A smoke-only authoritative break progresses asynchronously through B at its
+throttled cadence, changes 31 miniature pixels through two affected section
+submissions/one accepted result/two uploads, does not change A, and remains air
+after B's SQLite store is reopened. Non-authored hard boundaries warn that
+canonical neighbor-culled faces may be exposed rather than silently inventing
+preview cap meshes.
+
+The 600-second post-mutation orbit held three bounded records, fixed interest
+`(0,0)`, and zero pending compile jobs, upload items/bytes, or out-of-region
+submissions across 6,000 frames while B-local priority changed around the
+table. The accepted five-run direct single-world release batch is 2.388 ms
+median average and 3.935 ms median P95 with at most 7.1%/5.3% deviation, zero
+over-budget frames, and zero accounting violations. Slice 5 can now add authored
+water and cross-world translucent ordering without reopening live-update or
+background-bounds ownership.
+
 ### Same-world previews and non-recursive composition
 
 Tactical 175 deliberately proves the harder ownership boundary first: a
