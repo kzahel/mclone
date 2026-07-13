@@ -6,8 +6,9 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design plus a measured Slice 7 scene-owned warm-world path.** The
-engine still does not compose two worlds in one frame, but `McloneSceneHost`
+Status: **design plus a measured Slice 7 scene-owned warm-world path and an
+active live-diorama tactical with Slice 0 landed.** The engine still does not
+compose two worlds in one frame, but `McloneSceneHost`
 now owns one direct active `DrawableWorldSlot`, one optional detached standby,
 and—only for the launch diagnostic—a paired runtime-only `WorldGate`. The two
 integrated hosts remain concurrent and independently drawable. The standby
@@ -38,9 +39,12 @@ concrete engine seams, and the warm-world burn-down so future slices do not
 have to re-derive them. The bounded first implementation milestone is
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md): retain
 two drawable local worlds and switch through an opaque gate, with an explicit
-stop before simultaneous rendering.
+stop before simultaneous rendering. The next bounded composition milestone is
+[`175-live-hosted-world-diorama.md`](../tactical/175-live-hosted-world-diorama.md):
+draw one live local or remote hosted region as scaled geometry on a block-built
+table, then use only a simple blink around the already-proven activation.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 7 measurement checkpoint).
+Last reconciled: 2026-07-13 (Tactical 175 Slice 0).
 
 ## Motivation
 
@@ -197,6 +201,47 @@ lower in average frame cost and 3.4% lower at P95. These are desktop process
 receipts, not portable hardware budgets. Lifecycle, asset-epoch, device-loss,
 and capable-device multiview closeout remain open.
 
+### Next bounded milestone: one live hosted diorama
+
+The next proof deliberately drops the staged shrink/fall transition from its
+critical path. While arbitrary world A remains active, a bounded section-aligned
+region from independently hosted world B is rebased around a source anchor,
+scaled provisionally by `1/16`, and submitted into A's physical mono/stereo
+color and depth targets above a block-built table. B may be a local integrated
+runtime or an ordinary joined remote dedicated runtime. It keeps a fixed chunk
+interest center, pumps live updates, and prepares terrain under background
+budgets, but receives no physical camera, movement, interaction, actor, audio,
+Far-LOD, or underwater authority.
+
+The deterministic first fixture uses two persistence-backed authored worlds:
+a grass/table world A and a grass/stone-island world B. A new server-owned
+`AuthoredOnly` generation profile makes true storage misses produce void/air
+through the normal chunk-status/light/publication path instead of silently
+running overworld generation. This is not presented as a partial vanilla
+Superflat port. A general flat generator remains separate and should start from
+Java 1.17.1 `FlatLevelSource` if product world creation later needs it.
+
+Placed terrain gets separate mono/per-eye/multiview shader/pipeline variants so
+the direct one-world shader and draw path remain unchanged. The first manual
+checkpoint is opaque/cutout local B geometry with shared-depth table occlusion.
+Later slices prove a live B block mutation, bounded-region enforcement, water
+and cross-world translucent ordering, simple blink activation/return through
+the existing whole-slot exchange, and a remote dedicated B. There is still
+exactly one active slot and one optional preview; this is not an N-world
+registry. The authored fixture's void ring/table rim closes its edge. Sealed
+cuts through
+arbitrary B terrain still require separate boundary-aware preview meshing.
+
+Slice 0 locks the one-world fast path before that work begins. Ordinary terrain
+still uses 128-byte per-view uniforms and unplaced mono/multiview shaders; mono,
+per-eye, and multiview scene paths submit only the active draw store. Stored
+light-status chunks now have an explicit test proving they publish without a
+worldgen job, while a true miss still enters the default overworld feature
+path. Fresh flat/stereo captures were inspected, and the accepted five-run
+release batch measured 2.659 ms median average and 4.252 ms median P95 with
+9.1%/5.6% within-batch spread, zero over-budget frames, and zero accounting
+violations. That is the comparison anchor for every later no-preview gate.
+
 The near-term product shape is:
 
 ```text
@@ -206,6 +251,7 @@ McloneSceneHost
   WarmWorldOwner
     active DrawableWorldSlot -> existing renderer
     optional standby DrawableWorldSlot -> prepare under background budgets
+      optional EmbeddedWorldPreview -> placed bounded terrain submission
     future N-world registry only after the bounded milestone needs it
 ```
 
@@ -325,11 +371,12 @@ Confirmed against the renderer (see Seams for file:line):
   pump, render session, compiler, and uploads must remain alive too. See
   `docs/session-network-architecture.md` and
   `docs/topics/multiplayer-networking.md`.
-- **Fixed lobby room (no worldgen):** the chunk pipeline is persistence-first,
-  worldgen-only-on-miss, so a custom `WorldStore` returning authored chunks
-  keeps worldgen from firing; alternatively stamp the room with
-  `set_block_at_world` at spawn (precedent: `mclone-server/src/physics_terrain.rs`
-  builds fixed worlds block-by-block).
+- **Fixed lobby/fixture room (no overworld generation):** the chunk pipeline is
+  persistence-first, but current true misses are hardwired into overworld
+  feature jobs. Tactical 175 adds a server-owned `AuthoredOnly` miss policy and
+  a shared fixture builder that writes ordinary `ChunkRecord`s through
+  `WorldStore`; runtime edits still use the authoritative
+  `ChunkScheduler::set_block_at_world` path.
 - **Disable block destruction (lobby mode):** one authoritative choke point —
   gate `handle_player_action_for_target` / `set_block_debug` in
   `mclone-server/src/integrated.rs`. No game-mode system exists yet; this would
@@ -433,6 +480,7 @@ is a valid first milestone.
 |---|---|---|
 | Lobby spawn room (+ no-destroy) | n/a | authored `WorldStore` + interaction gate |
 | Last-world diorama on a table | embed | T0 baked |
+| Live hosted region on a table | embed | T3 joined, preview-only authority |
 | Seed explorer / worldgen console | embed | T1 live-local |
 | Palantir into a network world | RTT window (or embed if reach-through) | T2 remote spectator |
 | Warm Nether/sky/alternate generator | direct render after warm selection | T3 joined warm world |
@@ -446,25 +494,30 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
-The executable Slice 0–7 plan for items 1–3 and the opaque-gate proof lives in
-[`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md).
+The warm-swap and opaque-gate proof lives in
+[`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md); the
+bounded simultaneous-geometry plan lives in
+[`175-live-hosted-world-diorama.md`](../tactical/175-live-hosted-world-diorama.md).
 
 1. Keep the landed active-plus-optional-standby path, opaque A-to-B-to-A gate,
    optional standby cadence, and desktop/XR/no-request cost receipts green.
    Finish Tactical 174's lifecycle, persistence, cancellation/replacement,
    asset-epoch, surface/device rebuild, and fixture-isolation closeout without
    changing the complete-slot ownership exchange.
-2. Keep the dual-host view and persistent-root isolation smokes green.
-   Preserve the materialized mono/per-eye/multiview readiness contract and
-   close its outstanding capable-device receipt on XR/Windows.
-3. Generalize to an N-world registry or simultaneous geometry composition only
-   after the bounded hot-swap milestone is closed and a concrete next
-   experience requires it.
-4. Lobby spawn: authoritative world behavior profile + authored room.
-5. T0 baked diorama: placement transform, transformed fog/culling, shared depth,
-   and both mono/per-eye/multiview validation.
-6. T1 seed explorer on the same geometry-placement path.
-7. Add a real remote observer/subscription mode, then T2.
+2. Execute Tactical 175's authored-only server profile, persistent A/B fixtures,
+   separate placed-terrain pipeline, and scene-owned local opaque/cutout
+   diorama. Stop at its Slice 3 manual table review before broadening behavior.
+3. After that review, prove live mutation, bounded-region enforcement,
+   water/translucent ordering, simple blink activation/return, and a remote
+   hosted source. Keep the dual-host/root-isolation smokes and materialized
+   multiview contract green.
+4. Generalize to an N-world registry only after the bounded live-diorama
+   milestone is closed and a concrete multi-preview experience requires it.
+5. Lobby spawn: authoritative world behavior profile + authored room.
+6. T0 baked diorama and T1 seed explorer may reuse the same placement path as
+   cheaper fidelity alternatives to the live T3 sample.
+7. Add a real remote observer/subscription mode only when previews must stop
+   consuming ordinary joined-player identities.
 8. Add half-space visibility and boundary-aware meshing for an `x=0` render
    proof before attempting traversal.
 9. Add one-active-authority local handoff, then a traversable seam or portal.

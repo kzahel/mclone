@@ -1,6 +1,50 @@
 use super::support::*;
 
 #[test]
+fn stored_light_chunks_satisfy_interest_without_worldgen() {
+    let store = SharedMemoryWorldStore::new();
+    for z in -1..=1 {
+        for x in -1..=1 {
+            let pos = ChunkPos::new(x, z);
+            let snapshot = ChunkSnapshot::from_block_state_ids(
+                pos,
+                ChunkStatus::Light,
+                ChunkRevision(1),
+                0,
+                16,
+                &vec![mclone_core::AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+            )
+            .with_light_sections(true, Vec::new());
+            store
+                .chunks
+                .borrow_mut()
+                .insert(pos, ChunkRecord::from_snapshot(snapshot));
+        }
+    }
+    let mut scheduler = ChunkScheduler::with_world_store(12_345, Box::new(store));
+
+    let events = apply_interest_and_poll(
+        &mut scheduler,
+        ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        },
+    );
+
+    assert_eq!(scheduler.loaded_chunk_count(), 9);
+    assert_eq!(scheduler.job_count(), 0);
+    assert_eq!(scheduler.worldgen_mailbox_pending_count(), 0);
+    assert_eq!(snapshot_ready_count(&events), 1);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        ChunkSchedulerEvent::SnapshotReady(snapshot)
+            if snapshot.pos == ChunkPos::new(0, 0)
+                && snapshot.status == ChunkStatus::Light
+    )));
+}
+
+#[test]
 fn loaded_chunk_record_hydrates_scheduled_fluid_ticks() {
     let store = SharedMemoryWorldStore::new();
     let pos = ChunkPos::new(0, 0);

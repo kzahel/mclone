@@ -4012,6 +4012,38 @@ mod tests {
     }
 
     #[test]
+    fn direct_terrain_uniforms_and_shaders_remain_unplaced() {
+        assert_eq!(UNIFORM_BYTE_LEN, 128);
+        assert_eq!(MULTIVIEW_UNIFORM_BYTE_LEN, 256);
+
+        let mono = include_str!("shaders/chunk_textured.wgsl");
+        assert!(mono.contains(
+            "output.position = uniforms.view_projection * vec4<f32>(input.position, 1.0);"
+        ));
+        assert!(mono.contains("output.world_position = input.position;"));
+
+        let multiview = include_str!("shaders/chunk_textured_multiview.wgsl");
+        assert!(multiview.contains(
+            "output.position = uniforms.view_projection * vec4<f32>(input.position, 1.0);"
+        ));
+        assert!(multiview.contains("output.world_position = input.position;"));
+
+        for source in [mono, multiview] {
+            for placed_uniform in [
+                "source_anchor",
+                "composition_anchor",
+                "uniform_scale",
+                "model_matrix",
+            ] {
+                assert!(
+                    !source.contains(placed_uniform),
+                    "ordinary terrain shader unexpectedly contains `{placed_uniform}`"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn perspective_render_pose_builds_finite_normal_view() {
         let orientation = Quat::IDENTITY;
         let render_view = test_perspective_pose(Vec3::new(0.0, 64.0, 0.0), orientation)

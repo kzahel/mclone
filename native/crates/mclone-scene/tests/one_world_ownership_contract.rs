@@ -191,6 +191,39 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
 }
 
 #[test]
+fn ordinary_frame_paths_submit_only_the_active_world_draw_store() {
+    let mono_source = read("src/mono.rs");
+    let mono = braced_item(&mono_source, "fn render_mono_frame_inner(");
+    assert!(mono.contains("&mut self.active_world.draw,"));
+
+    let xr_source = read("src/lib.rs");
+    let stereo = braced_item(&xr_source, "fn render_prepared_frame(");
+    assert!(stereo.contains("self.active_world.draw.prepare_render_records_with_stats()"));
+    assert!(stereo.contains("self.active_world.draw.prepare_stereo_draw"));
+
+    let multiview = braced_item(
+        &xr_source,
+        "fn render_prepared_terrain_multiview_frame_with_upload_inner(",
+    );
+    assert!(multiview.contains("self.active_world.draw.prepare_render_records_with_stats()"));
+    assert!(multiview.contains(".render_prepared_multiview_stereo_draw_phase_with_options("));
+
+    for path in [mono, stereo, multiview] {
+        for absent in [
+            "standby_world.draw",
+            "EmbeddedWorldPreview",
+            "WorldPlacement",
+            "composition_anchor",
+        ] {
+            assert!(
+                !path.contains(absent),
+                "active-only frame path unexpectedly contains `{absent}`"
+            );
+        }
+    }
+}
+
+#[test]
 fn every_initial_host_path_constructs_the_same_drawable_slot() {
     let source = read("src/session.rs");
     for marker in [
