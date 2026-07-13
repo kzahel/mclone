@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: proposed implementation plan; documentation baseline recorded
-2026-07-13. No runtime slice has started.
+Status: active; Slice 0 characterization baseline completed 2026-07-13. Slice
+1 target-neutral simulation/publication is next.
 
 Topic: `multiplayer-networking`
 
@@ -256,9 +256,9 @@ nonblocking.
 
 ## Implementation Slices
 
-### Slice 0: Documentation And Characterization Baseline
+### Slice 0: Documentation And Characterization Baseline — Complete
 
-Status: documentation plan recorded; implementation characterization pending.
+Status: completed 2026-07-13.
 
 Before the first runtime edit:
 
@@ -272,6 +272,54 @@ Before the first runtime edit:
 
 Exit: the exact compatibility surface and test migration order are recorded;
 no production behavior changes.
+
+Recorded baseline:
+
+- The replaced protocol is version `19`. Native commands are one little-endian
+  `u32` byte length plus one encoded command. A native update batch is a
+  little-endian `u32` update count followed by one length-prefixed encoded
+  update per entry. WebSocket commands use one binary message; WebSocket
+  update batches use the same count plus per-update length/payload shape inside
+  one binary message. No command id exists; batch position is the response
+  pairing contract.
+- `DedicatedNetworkEvent::Command` carries a `sync_channel(0)` sender. Its
+  connection thread reads one command, waits for the authoritative loop to
+  return one batch, writes that batch, and only then reads again.
+- `DedicatedSession::handle_client_command` flushes movement, calls
+  `wait_for_server_jobs`, advances `try_simulation_tick_report_for_player`,
+  and calls `save_dirty_chunks`. The selected-player tick increments global
+  simulation, inserts `TimeUpdate`, and drains only that target's routed queue.
+- `NativeClientIoSession` has one actor that writes one command then blocks on
+  its paired batch. Browser remote mirrors the same dependency through
+  `pending_response_batches` and response-sequence waiters. The WebSocket
+  server is a one-client/one-upstream-TCP lockstep bridge.
+- `SimulationCadence::advance_host_frame` and `advance_elapsed` are already
+  deterministic and directly tested. Live `NativeIntegratedServerRunner`
+  pacing and the dedicated loop use `Instant`/channel waits directly. Slice 3
+  will isolate a small host-step/clock seam instead of putting sleeps in core
+  cadence assertions.
+
+Baseline validation on macOS native flat/browser:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server -p
+  mclone-net -p mclone-app-runtime -p mclone-dedicated-server`: passed (386
+  server, 16 net, 243 app-runtime, 20 dedicated tests plus integration/doc
+  tests).
+- `pnpm --silent native:dedicated:smoke`: passed the two-client command-driven
+  fixture and recorded the expected per-command batches/ticks.
+- `pnpm --silent native:web:remote-smoke`: passed in local Chromium with 49
+  loaded chunks, 600 applied updates, worker worldgen/light mailboxes, and the
+  current diagnostic equality `requestFrames=46`, `responseFrames=46`.
+- `pnpm --silent native:remote:smoke`: both clients connected and rendered 166
+  sections, one remote player, two entities, and three actors, but the wrapper
+  failed after capture because its report parser no longer accepts the current
+  screenshot summary. Both `/tmp` images were inspected and show valid remote
+  terrain/actors. Repair that pre-existing harness drift when Slice 3 adds
+  unsolicited-publication assertions.
+- Quest/device evidence is unavailable for this tactical run. Native flat,
+  offscreen, AVD, local Chromium/Playwright, and synthetic stereo are the
+  accepted implementation lanes; real Quest scheduling/frame evidence remains
+  a named deferred receipt.
 
 ### Slice 1: Target-Neutral Simulation And Per-Player Publication
 
