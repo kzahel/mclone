@@ -181,6 +181,11 @@ impl McloneSceneHost {
         actor_figures: &ActorFigureSet,
         asset_source: &impl AssetSource,
     ) -> Result<()> {
+        // A retained slot owns resources created by the previous device. Until
+        // multi-slot device migration is implemented, cancellation is the
+        // explicit safe policy: drop its runtime/compiler/GPU ownership before
+        // constructing any replacement resources for the active slot.
+        self.cancel_warm_world_standby("render resource rebuild");
         let frame_metrics_visible = self.diagnostic_panel.frame_metrics_visible();
         let debug_diagnostics_visible = self.diagnostic_panel.debug_diagnostics_visible();
         self.active_world.draw = TexturedSectionDrawResources::new(

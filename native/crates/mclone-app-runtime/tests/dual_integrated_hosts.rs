@@ -104,7 +104,7 @@ impl WarmIntegratedHost {
     }
 }
 
-fn first_non_air_block(host: &WarmIntegratedHost) -> Option<BlockPos> {
+fn nth_non_air_block(host: &WarmIntegratedHost, mut wanted: usize) -> Option<BlockPos> {
     let snapshot = host.runtime.client().chunk_snapshot(host.center)?;
     for section in snapshot.sections.iter().rev() {
         let blocks = section.unpack_block_state_ids();
@@ -113,6 +113,10 @@ fn first_non_air_block(host: &WarmIntegratedHost) -> Option<BlockPos> {
                 for local_x in 0..16 {
                     if blocks[chunk_section_index(local_x, local_y, local_z)] != AIR_BLOCK_STATE_ID
                     {
+                        if wanted > 0 {
+                            wanted -= 1;
+                            continue;
+                        }
                         return Some(BlockPos::new(
                             snapshot.pos.min_block_x() + local_x,
                             section.section_y * 16 + local_y,
@@ -124,6 +128,31 @@ fn first_non_air_block(host: &WarmIntegratedHost) -> Option<BlockPos> {
         }
     }
     None
+}
+
+fn first_non_air_block(host: &WarmIntegratedHost) -> Option<BlockPos> {
+    nth_non_air_block(host, 0)
+}
+
+fn break_block(host: &mut WarmIntegratedHost, target: BlockPos) -> Result<()> {
+    host.connection
+        .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            position: Vec3d::new(
+                f64::from(target.x) + 0.5,
+                f64::from(target.y),
+                f64::from(target.z) + 0.5,
+            ),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        }))?;
+    host.connection
+        .send_command_only(ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: target,
+            direction: Direction::Up,
+            kind: PlayerActionKind::DebugInstantBreak,
+        }))?;
+    Ok(())
 }
 
 fn unique_temp_dir(label: &str) -> std::path::PathBuf {
@@ -239,50 +268,78 @@ fn two_live_integrated_hosts_keep_persistent_edits_in_distinct_roots() -> Result
         std::thread::sleep(Duration::from_millis(1));
     }
 
-    let target = first_non_air_block(&hosts[0]).context("generated chunk contains a block")?;
-    let untouched_state = hosts[1]
+    let first_target =
+        first_non_air_block(&hosts[0]).context("generated chunk contains a block")?;
+    let second_target =
+        nth_non_air_block(&hosts[1], 1).context("generated chunk contains a second block")?;
+    let first_untouched_state = hosts[1]
         .runtime
         .client()
-        .block_state_at_block_pos(target)
+        .block_state_at_block_pos(first_target)
         .context("second host has the matching loaded block")?;
-    assert_ne!(untouched_state, AIR_BLOCK_STATE_ID);
-    hosts[0]
-        .connection
-        .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-            position: Vec3d::new(
-                f64::from(target.x) + 0.5,
-                f64::from(target.y),
-                f64::from(target.z) + 0.5,
-            ),
-            y_rot_degrees: 0.0,
-            x_rot_degrees: 0.0,
-            on_ground: true,
-        }))?;
-    hosts[0]
-        .connection
-        .send_command_only(ClientCommand::PlayerAction(PlayerActionCommand {
-            pos: target,
-            direction: Direction::Up,
-            kind: PlayerActionKind::DebugInstantBreak,
-        }))?;
+    let second_untouched_state = hosts[0]
+        .runtime
+        .client()
+        .block_state_at_block_pos(second_target)
+        .context("first host has the second matching loaded block")?;
+    assert_ne!(first_untouched_state, AIR_BLOCK_STATE_ID);
+    assert_ne!(second_untouched_state, AIR_BLOCK_STATE_ID);
+    let edit_deadline = Instant::now() + Duration::from_secs(120);
+    break_block(&mut hosts[0], first_target)?;
     loop {
         for host in &mut hosts {
             host.pump_ready_updates()?;
         }
-        if hosts[0].runtime.client().block_state_at_block_pos(target) == Some(AIR_BLOCK_STATE_ID) {
+        if hosts[0]
+            .runtime
+            .client()
+            .block_state_at_block_pos(first_target)
+            == Some(AIR_BLOCK_STATE_ID)
+        {
             break;
         }
-        if Instant::now() >= deadline {
+        if Instant::now() >= edit_deadline {
             bail!("timed out applying the first host's persistent edit");
         }
         std::thread::sleep(Duration::from_millis(1));
     }
     assert_eq!(
-        hosts[1].runtime.client().block_state_at_block_pos(target),
-        Some(untouched_state),
+        hosts[1]
+            .runtime
+            .client()
+            .block_state_at_block_pos(first_target),
+        Some(first_untouched_state),
         "the live second host must not observe the first root's edit"
     );
-    assert!(hosts[0].connection.flush_persistence()? >= 1);
+    break_block(&mut hosts[1], second_target)?;
+    loop {
+        for host in &mut hosts {
+            host.pump_ready_updates()?;
+        }
+        if hosts[1]
+            .runtime
+            .client()
+            .block_state_at_block_pos(second_target)
+            == Some(AIR_BLOCK_STATE_ID)
+        {
+            break;
+        }
+        if Instant::now() >= edit_deadline {
+            bail!("timed out applying the second host's persistent edit");
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        hosts[0]
+            .runtime
+            .client()
+            .block_state_at_block_pos(second_target),
+        Some(second_untouched_state),
+        "the live first host must not observe the second root's edit"
+    );
+    for host in &mut hosts {
+        assert!(host.connection.flush_persistence()? >= 1);
+    }
     drop(hosts);
 
     let mut reopened = [
@@ -311,15 +368,29 @@ fn two_live_integrated_hosts_keep_persistent_edits_in_distinct_roots() -> Result
         reopened[0]
             .runtime
             .client()
-            .block_state_at_block_pos(target),
+            .block_state_at_block_pos(first_target),
         Some(AIR_BLOCK_STATE_ID),
     );
     assert_eq!(
         reopened[1]
             .runtime
             .client()
-            .block_state_at_block_pos(target),
-        Some(untouched_state),
+            .block_state_at_block_pos(first_target),
+        Some(first_untouched_state),
+    );
+    assert_eq!(
+        reopened[0]
+            .runtime
+            .client()
+            .block_state_at_block_pos(second_target),
+        Some(second_untouched_state),
+    );
+    assert_eq!(
+        reopened[1]
+            .runtime
+            .client()
+            .block_state_at_block_pos(second_target),
+        Some(AIR_BLOCK_STATE_ID),
     );
     drop(reopened);
     let _ = std::fs::remove_dir_all(root);

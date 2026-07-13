@@ -2049,12 +2049,31 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
+        // Drop the concrete slot unconditionally. State normally accompanies
+        // it, but teardown and resource-rebuild safety must not depend on that
+        // diagnostic invariant: taking the slot joins its runtime/compiler
+        // owners and releases its GPU resources before the caller continues.
+        let dropped_slot = self.standby_world.take().is_some();
         let Some(state) = self.warm_world_standby.as_mut() else {
+            if dropped_slot {
+                log::warn!(
+                    "warm-world standby slot cancelled without diagnostic state reason={reason}"
+                );
+            }
             return;
         };
-        self.standby_world = None;
         state.phase = WarmWorldStandbyPhase::Cancelled;
         state.failure = Some(reason.to_owned());
+        state.readiness = WarmWorldReadiness::default();
+        state.upload_queue_nonempty_since = None;
+        state.queued_upload_sections = 0;
+        state.queued_upload_lifecycle_items = 0;
+        state.queued_upload_mesh_owned_bytes = 0;
+        state.gpu_section_count = 0;
+        state.gpu_vertex_count = 0;
+        state.gpu_index_count = 0;
+        state.loaded_chunks = 0;
+        state.renderer_multiview_materialized = false;
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(gate) = self.world_gate.as_mut() {
             gate.set_availability(WorldGateAvailability::Failed);

@@ -8,8 +8,8 @@ live model of a distant or nearby active-world location, a "palantir" window
 into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
-Status: **design plus a measured Slice 7 scene-owned warm-world path and an
-active live-diorama tactical with Slices 0–2 landed.** The renderer can now
+Status: **a closed, measured scene-owned warm-world milestone and an active
+live-diorama tactical with Slices 0–2 landed.** The renderer can now
 compose two static terrain stores in one physical frame, but `McloneSceneHost`
 does not yet submit the retained live world. `McloneSceneHost`
 now owns one direct active `DrawableWorldSlot`, one optional detached standby,
@@ -47,7 +47,11 @@ stop before simultaneous rendering. The next bounded composition milestone is
 draw one live local or remote hosted region as scaled geometry on a block-built
 table, then use only a simple blink around the already-proven activation.
 
-Last reconciled: 2026-07-13 (Tactical 175 Slice 2).
+Tactical 174's available-lane lifecycle closeout now flushes both retained
+worlds, drops a standby before asset-epoch or device-resource replacement, and
+proves both persistent roots survive independent edits. Capable-device
+multiview execution remains a named receipt gap. Last reconciled: 2026-07-13
+(Tactical 174 closeout / Tactical 175 Slice 2).
 
 ## Motivation
 
@@ -202,8 +206,12 @@ and do no boundary compile, upload, renderer construction, or runtime creation.
 Five-run candidate/base batches plus three strictly interleaved pairs found no
 single-world release regression; the interleaved candidate medians were 2.1%
 lower in average frame cost and 3.4% lower at P95. These are desktop process
-receipts, not portable hardware budgets. Lifecycle, asset-epoch, device-loss,
-and capable-device multiview closeout remain open.
+receipts, not portable hardware budgets. Available-lane lifecycle closeout now
+attempts persistence flushes for both slots, cancels and drops old-epoch or
+old-device standby ownership before replacement, and verifies both persistent
+roots reopen with their independent edits. A combined asset replacement smoke
+observed the old standby become non-switchable and its gate close before active
+epochs `0 -> 1 -> 2`. Capable-device multiview execution remains open.
 
 ### Next bounded milestone: one live hosted diorama
 
@@ -583,10 +591,8 @@ bounded simultaneous-geometry plan lives in
 [`175-live-hosted-world-diorama.md`](../tactical/175-live-hosted-world-diorama.md).
 
 1. Keep the landed active-plus-optional-standby path, opaque A-to-B-to-A gate,
-   optional standby cadence, and desktop/XR/no-request cost receipts green.
-   Finish Tactical 174's lifecycle, persistence, cancellation/replacement,
-   asset-epoch, surface/device rebuild, and fixture-isolation closeout without
-   changing the complete-slot ownership exchange.
+   optional standby cadence, lifecycle/invalidation contracts, and
+   desktop/XR/no-request cost receipts green.
 2. With Tactical 175's authored-only server profile and persistent A/B fixtures
    landed, execute the separate placed-terrain pipeline and scene-owned local
    opaque/cutout diorama. Stop at its Slice 3 manual table review before

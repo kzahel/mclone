@@ -550,7 +550,7 @@ fn world_and_physical_resets_are_explicit_and_keep_one_world_call_order() {
 }
 
 #[test]
-fn asset_replacement_cancels_mid_warm_standby_before_preserving_active_identity() {
+fn asset_replacement_during_standby_warm_cancels_without_mixing_epochs() {
     let source = read("src/asset_replacement.rs");
     let commit = braced_item(&source, "fn commit_asset_replacement(");
 
@@ -579,6 +579,55 @@ fn asset_replacement_cancels_mid_warm_standby_before_preserving_active_identity(
             "camera_preserved:",
             "command_count_unchanged:",
             "update_count_unchanged:",
+        ],
+    );
+}
+
+#[test]
+fn retained_world_lifecycle_flushes_both_slots_and_cancels_before_rebuild() {
+    let host_source = read("src/lib.rs");
+    let flush = braced_item(&host_source, "pub fn flush_persistence(");
+    assert_in_order(
+        flush,
+        &[
+            "let active = self.active_world.flush_persistence();",
+            ".standby_world",
+            "DrawableWorldSlot::flush_persistence",
+            "match (active, standby)",
+            "checked_add(standby)",
+        ],
+    );
+
+    let session_source = read("src/session.rs");
+    let cancel = braced_item(&session_source, "pub(crate) fn cancel_warm_world_standby(");
+    assert_in_order(
+        cancel,
+        &[
+            "let dropped_slot = self.standby_world.take().is_some();",
+            "self.warm_world_standby.as_mut()",
+            "state.phase = WarmWorldStandbyPhase::Cancelled;",
+            "gate.set_availability(WorldGateAvailability::Failed);",
+        ],
+    );
+
+    let mono_source = read("src/mono.rs");
+    let rebuild = braced_item(&mono_source, "pub fn rebuild_mono_render_resources(");
+    assert_in_order(
+        rebuild,
+        &[
+            "self.cancel_warm_world_standby(\"render resource rebuild\");",
+            "self.active_world.draw = TexturedSectionDrawResources::new(",
+            "runtime.mark_all_render_sections_dirty_for_resource_rebuild();",
+        ],
+    );
+
+    let teardown = braced_item(&session_source, "pub(crate) fn teardown_world(");
+    assert_in_order(
+        teardown,
+        &[
+            "self.cancel_warm_world_standby(\"active world teardown\");",
+            "self.active_world.local_startup = None;",
+            "self.active_world.runtime.take()",
         ],
     );
 }

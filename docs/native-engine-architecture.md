@@ -141,6 +141,15 @@ renderer. The first selected frame uses a one-request/result/upload preparation
 cap, after which ordinary active budgets resume. Interactive selection waits
 for Tactical 174's opaque-gate slice.
 
+Retained-slot lifecycle follows complete ownership. Backgrounding attempts to
+flush both slot runtimes; a remote runtime remains a no-op because its server
+owns persistence. Cancellation takes and drops the entire standby slot before
+changing diagnostics, synchronously joining its owned native runner/compiler
+and releasing its terrain resources. Asset replacement performs that drop
+before committing a new epoch. A surface/device render-resource rebuild also
+cancels the standby before creating active resources against the replacement
+device; retained-world GPU migration is not implicit.
+
 Shared launch values enter through
 `mclone-app-runtime::startup_args::StartupOptions`. Its nested
 `StartupSceneOptions` is the canonical retained scene/session configuration:

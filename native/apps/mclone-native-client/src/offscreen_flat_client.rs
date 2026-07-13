@@ -305,6 +305,7 @@ struct AssetReplacementSmoke {
     authored: PathBuf,
     fallback: PathBuf,
     restore: Option<mclone_app_runtime::prepared_assets::PreparedSceneAssets>,
+    standby_before: Option<mclone_scene::WarmWorldStandbySnapshot>,
     phase: AssetReplacementSmokePhase,
     first_party_frame: Option<usize>,
 }
@@ -450,6 +451,7 @@ impl OffscreenFlatClientHost {
             authored,
             fallback,
             restore: None,
+            standby_before: self.driver.host().warm_world_standby_snapshot(),
             phase: AssetReplacementSmokePhase::Baseline,
             first_party_frame: None,
         });
@@ -1680,6 +1682,38 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         {
             bail!("asset replacement smoke mutated session/camera/runtime facts");
         }
+        let standby_was_cancelled = if let Some(before) = host
+            .asset_replacement_smoke
+            .as_ref()
+            .and_then(|smoke| smoke.standby_before.as_ref())
+        {
+            let after = host
+                .driver
+                .host()
+                .warm_world_standby_snapshot()
+                .context("asset replacement discarded standby diagnostics")?;
+            if after.instance_id != before.instance_id
+                || after.asset_epoch != before.asset_epoch
+                || after.phase != mclone_scene::WarmWorldStandbyPhase::Cancelled
+                || after.readiness.switchable
+                || after.failure.as_deref() != Some("asset replacement")
+            {
+                bail!(
+                    "asset replacement did not cancel the old-epoch standby before commit: before={before:?} after={after:?}"
+                );
+            }
+            let gate = host
+                .driver
+                .host()
+                .world_gate_snapshot()
+                .context("asset replacement standby lost its gate diagnostics")?;
+            if gate.availability != mclone_scene::WorldGateAvailability::Failed {
+                bail!("asset replacement left the cancelled standby gate open: {gate:?}");
+            }
+            true
+        } else {
+            false
+        };
         let first_party_pixels = frame_pixels
             .get(first_party_frame)
             .context("asset replacement smoke did not retain its first-party frame")?;
@@ -1738,7 +1772,10 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             loop_report.height,
             restored,
         )?;
-        if difference_ratio > 0.02 {
+        // The ordinary replacement smoke returns to an exact vanilla frame.
+        // When it also exercises standby invalidation, the baseline contains
+        // the live blue gate and the restored frame intentionally does not.
+        if !standby_was_cancelled && difference_ratio > 0.02 {
             bail!(
                 "restored vanilla frame differs from baseline in {:.3}% of pixels",
                 difference_ratio * 100.0

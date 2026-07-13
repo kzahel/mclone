@@ -2,8 +2,9 @@
 
 Status: active 2026-07-13. Slices 0–2 landed: contract/baseline,
 authored-only server/content foundation, and the static placed-terrain
-renderer. Slice 3 live scene composition is next, after Tactical 174's
-lifecycle/invalidation closeout is green.
+renderer. Tactical 174's software lifecycle/invalidation closeout is green;
+Slice 3 live local scene composition is next. Capable-device multiview remains
+a shared named validation gap.
 
 Topic: `embedded-worlds`
 
@@ -409,6 +410,22 @@ Server generation-profile and fixture work can begin immediately. Before Slice
 The capable-device full-frame multiview receipt may be shared with this
 tactical if both retained-world terrain and placed-terrain pipelines can be
 validated in one device session.
+
+Prerequisite closeout record — 2026-07-13:
+
+- app background flushes both retained slot runtimes, while remote persistence
+  remains a service-owned no-op;
+- cancellation takes and drops the complete standby before updating
+  diagnostics, so its runner/compiler/GPU store cannot outlive the slot;
+- asset replacement cancels the old-epoch standby and closes its gate before
+  committing a new active epoch, proven by a combined rendered smoke;
+- render-resource/device rebuild cancels the standby before constructing
+  replacement-device resources; live migration is not implied;
+- the persistent dual-host test now edits, flushes, reopens, and isolates both
+  roots; and
+- the no-request one-world performance and pixel receipts remain those already
+  accepted in Slices 0–2. The Mac's missing `MULTIVIEW` feature is a device
+  receipt gap, not an unresolved lifetime policy.
 
 ## Slice 0: Contract Locks And Baselines
 

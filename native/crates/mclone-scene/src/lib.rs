@@ -439,6 +439,13 @@ impl DrawableWorldSlot {
         self.render_admission_policy.reset();
     }
 
+    fn flush_persistence(&mut self) -> Result<usize> {
+        match self.runtime.as_mut() {
+            Some(runtime) => runtime.flush_persistence(),
+            None => Ok(0),
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn complete_detached_local_startup(
         &mut self,
@@ -553,19 +560,35 @@ impl McloneSceneHost {
     /// down the session. Backs the lifecycle save point so Quest world edits
     /// survive an activity Pause -> OS kill, which previously only saved on the
     /// Drop-driven `shutdown_persistence` (tactical 168 Slice 0). Returns the
-    /// number of chunks queued for write; a no-op (`Ok(0)`) before a runtime
-    /// exists or in remote host modes.
+    /// total number of chunks queued for write across the active and retained
+    /// standby worlds; a no-op (`Ok(0)`) before either runtime exists or when
+    /// both host modes are remote.
     pub fn flush_persistence(&mut self) -> Result<usize> {
-        match self.active_world.runtime.as_mut() {
-            Some(runtime) => runtime.flush_persistence(),
-            None => Ok(0),
+        // Attempt both slots even if one flush fails. Backgrounding is a
+        // lifecycle save point, so an active-world failure must not prevent an
+        // independently persisted retained world from committing its edits.
+        let active = self.active_world.flush_persistence();
+        let standby = self
+            .standby_world
+            .as_mut()
+            .map_or(Ok(0), DrawableWorldSlot::flush_persistence);
+        match (active, standby) {
+            (Ok(active), Ok(standby)) => active
+                .checked_add(standby)
+                .context("sum active and standby persistence flush counts"),
+            (Err(active), Ok(_)) => Err(active).context("flush active world persistence"),
+            (Ok(_), Err(standby)) => Err(standby).context("flush standby world persistence"),
+            (Err(active), Err(standby)) => Err(anyhow!(
+                "flush active and standby world persistence: active={active:#}; standby={standby:#}"
+            )),
         }
     }
 
     /// Shared lifecycle policy for a host entering the background. Native local
-    /// worlds synchronously commit durable edits; remote sessions are a no-op
-    /// because persistence belongs to the dedicated server. Platform drivers
-    /// report lifecycle transitions but do not choose the save policy.
+    /// worlds synchronously commit durable edits in both retained slots;
+    /// remote sessions are a no-op because persistence belongs to the
+    /// dedicated server. Platform drivers report lifecycle transitions but do
+    /// not choose the save policy.
     pub fn on_background(&mut self) -> Result<usize> {
         self.flush_persistence()
     }

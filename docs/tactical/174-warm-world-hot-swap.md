@@ -1,6 +1,6 @@
 # 174: Warm World Hot Swap
 
-Status: Slice 7 measurement checkpoint ready for review 2026-07-13.
+Status: complete on available lanes 2026-07-13.
 Slice 0's lower-level dual-integrated-host proof landed in commit `a31ac944`;
 Slice 1's ownership audit, characterization locks, and one-world baselines are
 recorded below. Slice 2 grouped the audited 13 per-world fields in one concrete
@@ -15,10 +15,12 @@ the old active world ready for return. Slice 6 instantiates the paired
 runtime-only fixture, renders it as an opaque depth-writing surface, and crosses
 it A-to-B-to-A from real flat walking and the synthetic stereo eye midpoint.
 Flat, per-eye stereo, no-request, ownership, web/WASM, and release-performance
-gates pass. Slice 7 now measures paired one/two-world process cost, exposes an
+gates pass. Slice 7 measures paired one/two-world process cost, exposes an
 optional standby-only simulation cadence, and proves active cadence restoration
-through both gate directions. Lifecycle, invalidation, and device closeout
-remain. A capable-device full-frame multiview receipt remains a named gap
+through both gate directions. The final closeout flushes both retained slots,
+drops a standby before asset or render-resource replacement, and proves
+independent persistence roots reopen with both edits. A capable-device
+full-frame multiview receipt remains a named device-validation gap
 because the current macOS adapter does not expose
 `wgpu::Features::MULTIVIEW`; the path materializes both terrain and gate
 multiview pipelines before readiness when that feature exists.
@@ -1412,6 +1414,40 @@ Measurement checkpoint implementation and evidence (2026-07-13):
   no switch-boundary reconstruction or upload work. The accepted cost numbers
   above remain the earlier five-run settled batches, not this one-off final
   functional check.
+
+Lifecycle/invalidation closeout (2026-07-13):
+
+- `McloneSceneHost::on_background` now attempts persistence flushes for both
+  complete retained slots and sums their queued chunk counts. A failure in one
+  slot does not prevent the other slot's flush attempt. Remote services retain
+  their existing no-op because persistence is server-owned.
+- The persistent dual-host integration test now mutates a different block in
+  each root, flushes both live hosts, reopens both roots, and proves both edits
+  survived without crossing roots. Ordinary owned-value drop still
+  synchronously joins each integrated runner and render compiler.
+- Standby cancellation unconditionally takes and drops the concrete
+  `DrawableWorldSlot` before updating diagnostic state. Cancellation clears
+  current readiness, queue, resident-terrain, and loaded-chunk facts, closes
+  the gate, and retains only historical timings/identity plus its reason.
+  Teardown, session replacement, and app exit therefore cannot leave the
+  standby runner/compiler or GPU store outside its owner.
+- Asset replacement continues to cancel before `replace_asset_epoch`. The
+  named offscreen asset-replacement-plus-standby smoke exercised epochs
+  `0 -> 1 -> 2`, observed the old epoch-0 standby become non-switchable
+  `Cancelled`, verified its gate was `Failed`, and rendered the final active
+  world at `/tmp/mclone-t174-asset-standby-cancel.png`. The ordinary exact
+  restored-pixel check remains active when no standby exists; this combined
+  lane expects a visual delta because cancellation deliberately removes the
+  blue gate.
+- Mono surface/device resource rebuild now cancels and drops the retained slot
+  before creating active resources against the replacement device. Live
+  standby migration across a lost device is intentionally not attempted.
+  Source contracts lock this ordering for rebuild and teardown.
+- Focused ownership, dual-persistence, native-client compilation, and the
+  combined rendered invalidation smoke pass. The current Mac still does not
+  expose `wgpu::Features::MULTIVIEW`, and no Quest is attached; capable-device
+  execution remains an explicit future receipt rather than blocking the
+  software ownership milestone or Tactical 175's first mono/per-eye slice.
 
 Exit criteria: the milestone is complete only with measured switch behavior,
 background cost, memory cost, and no significant single-world regression.
