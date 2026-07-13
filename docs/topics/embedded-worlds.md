@@ -12,10 +12,13 @@ checkpoint.** The engine does not yet compose or switch live worlds, but
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
 current startup/reset/asset-epoch contracts, and records renderer-shell,
-thread/cadence, offscreen, frame-budget, and synthetic-stereo baselines. This
-records the larger vision, the fidelity ladder, concrete engine seams, and the
-warm-world burn-down so future slices do not have to re-derive them. The
-bounded first implementation milestone is
+thread/cadence, offscreen, frame-budget, and synthetic-stereo baselines. A
+maintainer manual desktop-flat smoke found ordinary single-world behavior
+normal, and clean commit `64505c01` anchors repeatable 240-frame release
+timedemo and frame-budget comparisons on the current M4 Pro Mac. This records
+the larger vision, the fidelity ladder, concrete engine seams, and the
+warm-world burn-down so future slices do not have to re-derive them. The bounded
+first implementation milestone is
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md): retain
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
@@ -325,6 +328,15 @@ warm or visible. In particular:
   keeping per-world dirty/cache state isolated;
 - retain before/after frame-accounting and offscreen/XR performance evidence
   for every extraction that touches the existing hot path.
+
+Tactical 174 fixes the first release comparison anchor at clean commit
+`64505c01`: 2.603 ms average in the 240-frame timedemo and 2.329 ms average /
+3.884 ms p95 in the 240-frame 120 Hz frame-budget probe, with no over-budget
+frames or accounting violations. Ownership and frame-path checkpoints rerun
+both release lanes on the same machine. A greater-than-10% average or p95
+slowdown triggers repeated median comparison rather than a conclusion from one
+sample; new accounting violations or repeatable over-budget behavior fail the
+checkpoint.
 
 The first ownership proof adds only an integration test and no production-frame
 collection, branch, namespace lookup, shader uniform, or render pass.

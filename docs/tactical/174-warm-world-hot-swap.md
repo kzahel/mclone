@@ -3,10 +3,12 @@
 Status: Slice 1 architecture checkpoint ready for review 2026-07-13. Slice 0's
 lower-level dual-integrated-host proof landed in commit `a31ac944`; the Slice 1
 ownership audit, characterization locks, and one-world baselines are recorded
-below. Slices 2–7 are unimplemented. First-multiview-pipeline timing remains a
-named device-evidence gap because the current macOS adapter does not expose
-`wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows lane before Slice
-4 can declare a standby switchable.
+below. A maintainer manual desktop-flat smoke at commit `64505c01` found normal
+single-world behavior, and that clean checkpoint now has 240-frame release
+performance anchors. Slices 2–7 are unimplemented. First-multiview-pipeline
+timing remains a named device-evidence gap because the current macOS adapter
+does not expose `wgpu::Features::MULTIVIEW`; close it on a capable XR/Windows
+lane before Slice 4 can declare a standby switchable.
 
 Topic: `embedded-worlds`
 
@@ -291,11 +293,40 @@ synthetic-stereo asset replacement
   249,679 differing eye pixels after restore; UI in both eyes
 ```
 
+The clean `64505c01` checkpoint also has a desktop-flat release comparison
+anchor from the same date. It was recorded on an Apple M4 Pro MacBook Pro
+(`Mac16,7`, 14 CPU cores, 48 GiB memory) running macOS 26.5.1. These are
+headless engine measurements rather than window-present FPS:
+
+```text
+native:timedemo:perf (240 frames, release, 1280x720)
+  scene build 2437.385 ms; render setup 2481.107 ms
+  average 2.603 ms; max 5.482 ms
+  664 loaded sections; 307.325 average drawn sections
+native:frame-budget:perf (240 frames, release, 1280x720, 120 Hz)
+  runtime setup 2477.601 ms
+  average 2.329 ms; p95 3.884 ms; p99 4.076 ms; max 4.378 ms
+  0 over-budget frames; 0 accounting conservation violations
+```
+
+For every Slice 2-or-later change that touches scene ownership, frame polling,
+upload, culling, or drawing, run both release commands on the same machine
+before accepting the checkpoint. Compare timedemo average frame time and drawn
+section counts, plus frame-budget average/p95, over-budget frames, and
+accounting conservation. A greater-than-10% average or p95 slowdown is an
+investigation trigger, not an automatic conclusion from one noisy sample:
+repeat the candidate three times and compare medians against an equivalently
+repeated clean anchor. Max-frame time remains diagnostic because host scheduling
+can dominate one sample. Any new accounting violation or repeatable over-budget
+behavior is a failure regardless of the average.
+
 The desktop, ordinary stereo, Mono baseline/first-party/restored, and restored
 stereo captures under `/tmp` were visually inspected. Terrain and actors were
 drawable, the first-party middle frame visibly changed the material set, the
 restored views returned to vanilla content, and the stereo capture retained
-distinct eyes without a split-world frame.
+distinct eyes without a split-world frame. A maintainer also launched ordinary
+desktop-flat play at `64505c01` and reported that basic single-world behavior
+looked normal.
 
 Checkpoint gates passed:
 
@@ -909,6 +940,19 @@ pnpm native:frame-budget:smoke
 pnpm native:xr-emulation:smoke
 pnpm native:web:build
 ```
+
+At each review checkpoint that touches the existing one-world hot path, also
+run the release comparison pair and record deltas against the clean Slice 1
+anchor above:
+
+```bash
+pnpm native:timedemo:perf
+pnpm native:frame-budget:perf
+```
+
+Use the investigation/repetition rule in `Characterization Locks And Baseline
+Evidence`; do not compare a release candidate against the shorter debug smoke
+numbers.
 
 Slice 5 must add a dedicated `pnpm native:warm-world-swap-smoke` wrapper and its
 CLI hook over the extended frame-advancing `OffscreenScript` harness. Slice 6
