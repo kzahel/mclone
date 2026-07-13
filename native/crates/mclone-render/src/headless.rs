@@ -1272,9 +1272,13 @@ fn elapsed_ms(duration: std::time::Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::placement::{EmbeddedChunkRegion, WorldPlacement};
     use crate::uniform::{
         LEFT_EYE_VIEW_SLOT, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT,
     };
+    use glam::Vec3;
+    use mclone_core::{ChunkPos, Vec3d};
+    use mclone_mesh::{TexturedChunkVertex, VisibilitySet};
 
     #[test]
     fn row_padding_uses_wgpu_copy_alignment() {
@@ -1415,6 +1419,235 @@ fn fs_main() -> @location(0) vec4<f32> {
     }
 
     #[test]
+    #[ignore = "GPU visual proof for live-diorama Slice 2; run on hosts with a wgpu adapter"]
+    fn placed_terrain_composes_with_shared_depth_and_stereo() -> Result<()> {
+        const WIDTH: u32 = 960;
+        const HEIGHT: u32 = 640;
+        let (device, queue) = create_headless_device()?;
+        let atlas_rgba = [255, 255, 255, 255];
+        let atlas = ChunkTextureAtlas {
+            width: 1,
+            height: 1,
+            rgba: &atlas_rgba,
+        };
+        let active_sections = [fixture_active_section()];
+        let preview_sections = [fixture_preview_section()];
+        let active = TexturedSectionDrawResources::new(
+            &device,
+            &queue,
+            HEADLESS_FORMAT,
+            &active_sections,
+            atlas,
+        )?;
+        let preview = TexturedSectionDrawResources::new(
+            &device,
+            &queue,
+            HEADLESS_FORMAT,
+            &preview_sections,
+            atlas,
+        )?;
+        let placed_renderer = preview.create_placed_renderer(&device);
+        let placement =
+            WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::new(0.0, 0.5, 0.0), 0.2)?;
+        let region = EmbeddedChunkRegion::new(ChunkPos::new(0, 0), 0, 0, 0)?;
+        let preview_records = preview.prepare_render_records_for_region(region);
+        let mut render_options = TexturedSectionRenderOptions::default();
+        render_options.force_fullbright = true;
+        render_options.section_occlusion_culling = false;
+        let view = fixture_camera(0.0).render_view(WIDTH, HEIGHT);
+
+        let active_only = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let active_only_depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        render_placed_fixture_view(
+            &device,
+            &queue,
+            &active_only,
+            &active_only_depth,
+            &active,
+            &preview,
+            &placed_renderer,
+            &preview_records,
+            view,
+            render_options,
+            placement,
+            LEFT_EYE_VIEW_SLOT,
+            true,
+            false,
+        )?;
+        let preview_only = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let preview_only_depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        render_placed_fixture_view(
+            &device,
+            &queue,
+            &preview_only,
+            &preview_only_depth,
+            &active,
+            &preview,
+            &placed_renderer,
+            &preview_records,
+            view,
+            render_options,
+            placement,
+            LEFT_EYE_VIEW_SLOT,
+            false,
+            true,
+        )?;
+        let composed = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let composed_depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        let composed_stats = render_placed_fixture_view(
+            &device,
+            &queue,
+            &composed,
+            &composed_depth,
+            &active,
+            &preview,
+            &placed_renderer,
+            &preview_records,
+            view,
+            render_options,
+            placement,
+            LEFT_EYE_VIEW_SLOT,
+            true,
+            true,
+        )?;
+        let active_pixels = read_rgba8(&device, &queue, &active_only.texture, WIDTH, HEIGHT)?;
+        let preview_pixels = read_rgba8(&device, &queue, &preview_only.texture, WIDTH, HEIGHT)?;
+        let composed_pixels = read_rgba8(&device, &queue, &composed.texture, WIDTH, HEIGHT)?;
+        let active_over_preview = pixel_transition_count(
+            &active_pixels,
+            &preview_pixels,
+            &composed_pixels,
+            is_brown,
+            is_green,
+            is_brown,
+        );
+        let preview_over_active = pixel_transition_count(
+            &active_pixels,
+            &preview_pixels,
+            &composed_pixels,
+            is_blue,
+            is_green,
+            is_green,
+        );
+        assert!(
+            active_over_preview > 100,
+            "table did not occlude preview: {active_over_preview}"
+        );
+        assert!(
+            preview_over_active > 100,
+            "preview did not occlude far active wall: {preview_over_active}"
+        );
+        assert_eq!(composed_stats.drawn_section_count, 1);
+        save_rgba_png(
+            Path::new("/tmp/mclone-live-diorama-slice2-mono.png"),
+            WIDTH,
+            HEIGHT,
+            &composed_pixels,
+        )?;
+
+        let left = OffscreenTarget::new(&device, 640, 640, HEADLESS_FORMAT);
+        let right = OffscreenTarget::new(&device, 640, 640, HEADLESS_FORMAT);
+        let left_depth = ChunkDepthTarget::new(&device, 640, 640);
+        let right_depth = ChunkDepthTarget::new(&device, 640, 640);
+        let stereo_views = [
+            fixture_camera(-0.12).render_view(640, 640),
+            fixture_camera(0.12).render_view(640, 640),
+        ];
+        let prepared_stereo = preview.prepare_placed_stereo_draw(
+            &preview_records,
+            stereo_views,
+            [render_options; 2],
+            placement,
+        );
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_placed_fixture_stereo_encoder"),
+        });
+        for (target, depth, render_view, view_slot) in [
+            (&left, &left_depth, stereo_views[0], LEFT_EYE_VIEW_SLOT),
+            (&right, &right_depth, stereo_views[1], RIGHT_EYE_VIEW_SLOT),
+        ] {
+            active.render_with_options_in_slot(
+                &queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &target.view,
+                    &depth.view,
+                    target.size,
+                    fixture_clear_color(),
+                ),
+                render_view,
+                render_options,
+                view_slot,
+            )?;
+            preview.render_placed_prepared_stereo_draw_with_options_in_slot(
+                &placed_renderer,
+                &prepared_stereo,
+                &queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &target.view,
+                    &depth.view,
+                    target.size,
+                    fixture_clear_color(),
+                )
+                .with_loaded_color()
+                .with_loaded_depth(),
+                render_view,
+                render_options,
+                placement,
+                view_slot,
+            )?;
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+        let left_pixels = read_rgba8(&device, &queue, &left.texture, 640, 640)?;
+        let right_pixels = read_rgba8(&device, &queue, &right.texture, 640, 640)?;
+        let left_green = color_pixel_centroid_x(&left_pixels, 640, is_green);
+        let right_green = color_pixel_centroid_x(&right_pixels, 640, is_green);
+        assert!(left_green.1 > 100 && right_green.1 > 100);
+        assert!(
+            (left_green.0 - right_green.0).abs() > 0.5,
+            "missing stereo parallax"
+        );
+        let eye_difference_count = left_pixels
+            .chunks_exact(4)
+            .zip(right_pixels.chunks_exact(4))
+            .filter(|(left, right)| left != right)
+            .count();
+        assert!(eye_difference_count > 1_000);
+        let stereo_pixels = stitch_rgba8_side_by_side(640, 640, &left_pixels, &right_pixels)?;
+        save_rgba_png(
+            Path::new("/tmp/mclone-live-diorama-slice2-stereo.png"),
+            1280,
+            640,
+            &stereo_pixels,
+        )?;
+
+        if device.features().contains(wgpu::Features::MULTIVIEW) {
+            preview.materialize_placed_multiview_renderer(&device, &placed_renderer)?;
+            render_placed_fixture_multiview(
+                &device,
+                &queue,
+                &preview,
+                &placed_renderer,
+                &prepared_stereo,
+                stereo_views,
+                render_options,
+                placement,
+            )?;
+        } else {
+            eprintln!("placed terrain multiview device proof unavailable: adapter lacks MULTIVIEW");
+        }
+
+        eprintln!(
+            "placed terrain proof: active-over-preview={active_over_preview} \
+             preview-over-active={preview_over_active} eye-differences={eye_difference_count} \
+             green-centroids=({:.2},{:.2})",
+            left_green.0, right_green.0,
+        );
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "GPU validation proof for 107 Slice E; run on hosts with wgpu MULTIVIEW support"]
     fn multiview_renders_distinct_view_index_layers() -> Result<()> {
         const SHADER: &str = r#"
@@ -1535,6 +1768,329 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         assert_eq!(left_pixels.get(0..4), Some(&[255, 0, 0, 255][..]));
         assert_eq!(right_pixels.get(0..4), Some(&[0, 255, 0, 255][..]));
         Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_placed_fixture_view(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        target: &OffscreenTarget,
+        depth: &ChunkDepthTarget,
+        active: &TexturedSectionDrawResources,
+        preview: &TexturedSectionDrawResources,
+        placed_renderer: &crate::chunk::PlacedTexturedSectionRenderer,
+        preview_records: &crate::chunk::PreparedTexturedSectionRecords,
+        render_view: crate::chunk::ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: crate::uniform::PerViewSlot,
+        draw_active: bool,
+        draw_preview: bool,
+    ) -> Result<crate::chunk::TexturedSectionRenderStats> {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_placed_fixture_view_encoder"),
+        });
+        if draw_active {
+            active.render_with_options_in_slot(
+                queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &target.view,
+                    &depth.view,
+                    target.size,
+                    fixture_clear_color(),
+                ),
+                render_view,
+                render_options,
+                view_slot,
+            )?;
+        }
+        let stats = if draw_preview {
+            let mut render_target = ChunkRenderTarget::new(
+                &target.view,
+                &depth.view,
+                target.size,
+                fixture_clear_color(),
+            );
+            if draw_active {
+                render_target = render_target.with_loaded_color().with_loaded_depth();
+            }
+            preview.render_placed_prepared_with_options_in_slot(
+                placed_renderer,
+                preview_records,
+                queue,
+                &mut encoder,
+                render_target,
+                render_view,
+                render_options,
+                placement,
+                view_slot,
+            )?
+        } else {
+            crate::chunk::TexturedSectionRenderStats::default()
+        };
+        queue.submit(std::iter::once(encoder.finish()));
+        Ok(stats)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_placed_fixture_multiview(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        preview: &TexturedSectionDrawResources,
+        placed_renderer: &crate::chunk::PlacedTexturedSectionRenderer,
+        prepared_stereo: &crate::chunk::PreparedTexturedSectionStereoDraw,
+        render_views: [crate::chunk::ChunkRenderView; 2],
+        render_options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+    ) -> Result<()> {
+        let color = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_placed_fixture_multiview_color"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HEADLESS_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mclone_placed_fixture_multiview_color_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            array_layer_count: Some(2),
+            ..Default::default()
+        });
+        let depth = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_placed_fixture_multiview_depth"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 2,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::chunk::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let depth_view = depth.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("mclone_placed_fixture_multiview_depth_view"),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            array_layer_count: Some(2),
+            aspect: wgpu::TextureAspect::DepthOnly,
+            ..Default::default()
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_placed_fixture_multiview_encoder"),
+        });
+        preview.render_placed_prepared_multiview_stereo_draw_with_options(
+            placed_renderer,
+            prepared_stereo,
+            device,
+            queue,
+            &mut encoder,
+            crate::chunk::ChunkMultiviewRenderTarget::new(
+                &color_view,
+                &depth_view,
+                [64, 64],
+                fixture_clear_color(),
+            ),
+            render_views,
+            [render_options; 2],
+            placement,
+        )?;
+        queue.submit(std::iter::once(encoder.finish()));
+        let left = read_rgba8_layer(device, queue, &color, 64, 64, 0)?;
+        let right = read_rgba8_layer(device, queue, &color, 64, 64, 1)?;
+        assert!(left.chunks_exact(4).any(is_green));
+        assert!(right.chunks_exact(4).any(is_green));
+        Ok(())
+    }
+
+    fn fixture_camera(eye_offset: f32) -> ChunkCamera {
+        ChunkCamera {
+            eye: [eye_offset, 5.0, 12.0],
+            target: [eye_offset, 1.25, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 58.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 100.0,
+        }
+    }
+
+    fn fixture_active_section() -> TexturedRenderSectionMesh {
+        let mut mesh = TexturedVisibleChunkMesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            solid_index_count: 0,
+            opaque_index_count: 0,
+        };
+        append_fixture_cube(
+            &mut mesh,
+            Vec3::new(-4.0, 0.0, -3.0),
+            Vec3::new(4.0, 0.5, 3.0),
+            [0.65, 0.25, 0.06, 1.0],
+        );
+        append_fixture_cube(
+            &mut mesh,
+            Vec3::new(-5.0, 0.0, -5.0),
+            Vec3::new(5.0, 6.0, -4.5),
+            [0.08, 0.18, 0.85, 1.0],
+        );
+        mesh.solid_index_count = mesh.indices.len() as u32;
+        mesh.opaque_index_count = mesh.solid_index_count;
+        TexturedRenderSectionMesh {
+            key: RenderSectionKey::new(0, 0, 0),
+            mesh,
+            visibility: VisibilitySet::all_visible(),
+        }
+    }
+
+    fn fixture_preview_section() -> TexturedRenderSectionMesh {
+        let mut mesh = TexturedVisibleChunkMesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+            solid_index_count: 0,
+            opaque_index_count: 0,
+        };
+        append_fixture_cube(
+            &mut mesh,
+            Vec3::new(0.0, -4.0, 0.0),
+            Vec3::new(16.0, 12.0, 16.0),
+            [0.06, 0.85, 0.12, 1.0],
+        );
+        mesh.solid_index_count = mesh.indices.len() as u32;
+        mesh.opaque_index_count = mesh.solid_index_count;
+        TexturedRenderSectionMesh {
+            key: RenderSectionKey::new(0, 0, 0),
+            mesh,
+            visibility: VisibilitySet::all_visible(),
+        }
+    }
+
+    fn append_fixture_cube(
+        mesh: &mut TexturedVisibleChunkMesh,
+        min: Vec3,
+        max: Vec3,
+        color: [f32; 4],
+    ) {
+        let faces = [
+            [
+                [min.x, min.y, max.z],
+                [max.x, min.y, max.z],
+                [max.x, max.y, max.z],
+                [min.x, max.y, max.z],
+            ],
+            [
+                [max.x, min.y, min.z],
+                [min.x, min.y, min.z],
+                [min.x, max.y, min.z],
+                [max.x, max.y, min.z],
+            ],
+            [
+                [max.x, min.y, max.z],
+                [max.x, min.y, min.z],
+                [max.x, max.y, min.z],
+                [max.x, max.y, max.z],
+            ],
+            [
+                [min.x, min.y, min.z],
+                [min.x, min.y, max.z],
+                [min.x, max.y, max.z],
+                [min.x, max.y, min.z],
+            ],
+            [
+                [min.x, max.y, max.z],
+                [max.x, max.y, max.z],
+                [max.x, max.y, min.z],
+                [min.x, max.y, min.z],
+            ],
+            [
+                [min.x, min.y, min.z],
+                [max.x, min.y, min.z],
+                [max.x, min.y, max.z],
+                [min.x, min.y, max.z],
+            ],
+        ];
+        for face in faces {
+            let base = mesh.vertices.len() as u32;
+            mesh.vertices
+                .extend(face.map(|position| TexturedChunkVertex {
+                    position,
+                    uv: [0.5, 0.5],
+                    color,
+                    packed_light: 15_728_880,
+                }));
+            mesh.indices
+                .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+
+    fn fixture_clear_color() -> wgpu::Color {
+        wgpu::Color {
+            r: 0.02,
+            g: 0.025,
+            b: 0.03,
+            a: 1.0,
+        }
+    }
+
+    fn pixel_transition_count(
+        active: &[u8],
+        preview: &[u8],
+        composed: &[u8],
+        active_predicate: fn(&[u8]) -> bool,
+        preview_predicate: fn(&[u8]) -> bool,
+        composed_predicate: fn(&[u8]) -> bool,
+    ) -> usize {
+        active
+            .chunks_exact(4)
+            .zip(preview.chunks_exact(4))
+            .zip(composed.chunks_exact(4))
+            .filter(|((active, preview), composed)| {
+                active_predicate(active)
+                    && preview_predicate(preview)
+                    && composed_predicate(composed)
+            })
+            .count()
+    }
+
+    fn color_pixel_centroid_x(
+        pixels: &[u8],
+        width: u32,
+        predicate: fn(&[u8]) -> bool,
+    ) -> (f64, usize) {
+        let mut x_sum = 0_u64;
+        let mut count = 0_usize;
+        for (index, pixel) in pixels.chunks_exact(4).enumerate() {
+            if predicate(pixel) {
+                x_sum += index as u64 % u64::from(width);
+                count += 1;
+            }
+        }
+        let centroid = if count == 0 {
+            0.0
+        } else {
+            x_sum as f64 / count as f64
+        };
+        (centroid, count)
+    }
+
+    fn is_brown(pixel: &[u8]) -> bool {
+        pixel[0] > 100 && pixel[0] > pixel[1] * 2 && pixel[1] > pixel[2]
+    }
+
+    fn is_blue(pixel: &[u8]) -> bool {
+        pixel[2] > 100 && pixel[2] > pixel[0] * 2 && pixel[2] > pixel[1] * 2
+    }
+
+    fn is_green(pixel: &[u8]) -> bool {
+        pixel[1] > 100 && pixel[1] > pixel[0] * 2 && pixel[1] > pixel[2] * 2
     }
 
     fn color_bytes(color: [f32; 4]) -> [u8; 16] {

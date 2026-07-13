@@ -24,6 +24,7 @@ use wgpu::util::DeviceExt;
 use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
+use crate::placement::{EmbeddedChunkRegion, WorldPlacement};
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
 use crate::uniform::{
@@ -66,6 +67,12 @@ const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferA
 const MULTIVIEW_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN * 2;
 const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
     MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const PLACED_UNIFORM_BYTE_LEN: usize = 160;
+const PLACED_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    PLACED_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const PLACED_MULTIVIEW_UNIFORM_BYTE_LEN: usize = PLACED_UNIFORM_BYTE_LEN * 2;
+const PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    PLACED_MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 // Matches the default Java 1.17.1 video option: Options.mipmapLevels = 4.
 // TextureUtil.prepareImage allocates levels 0..=4 for the block atlas.
 const CHUNK_ATLAS_MAX_MIP_LEVEL: u32 = 4;
@@ -704,6 +711,35 @@ pub struct PreparedTexturedSectionRecords {
     loaded_index_count: u32,
 }
 
+impl PreparedTexturedSectionRecords {
+    /// Build the stable, bounded record set consumed by an embedded terrain
+    /// presentation. The source store remains untouched and may continue to
+    /// retain neighboring sections for lighting or later interest changes.
+    pub fn for_embedded_region(&self, region: EmbeddedChunkRegion) -> Self {
+        let records = self
+            .records
+            .iter()
+            .filter(|(key, _)| region.contains(**key))
+            .map(|(key, record)| (*key, *record))
+            .collect::<BTreeMap<_, _>>();
+        let loaded_section_count = records.values().filter(|record| record.drawable).count();
+        let loaded_index_count = records
+            .values()
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum();
+        Self {
+            records,
+            loaded_section_count,
+            loaded_index_count,
+        }
+    }
+
+    pub fn section_keys(&self) -> impl ExactSizeIterator<Item = RenderSectionKey> + '_ {
+        self.records.keys().copied()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TexturedSectionRecordCacheStats {
     pub ready_set_calls: u64,
@@ -1051,8 +1087,18 @@ fn cull_textured_sections(
     options: TexturedSectionRenderOptions,
     scratch: &mut CullScratch,
 ) -> TexturedSectionCullingResult {
-    let records = &prepared.records;
     let frustum = ClipFrustum::from_render_view(render_view);
+    cull_textured_sections_with_frustum(prepared, render_view, options, scratch, &frustum)
+}
+
+fn cull_textured_sections_with_frustum(
+    prepared: &PreparedTexturedSectionRecords,
+    render_view: ChunkRenderView,
+    options: TexturedSectionRenderOptions,
+    scratch: &mut CullScratch,
+    frustum: &impl RenderSectionFrustum,
+) -> TexturedSectionCullingResult {
+    let records = &prepared.records;
     let mut stats = TexturedSectionRenderStats {
         section_occlusion_culling: options.section_occlusion_culling,
         force_fullbright: options.force_fullbright,
@@ -1187,8 +1233,24 @@ fn cull_textured_sections_stereo_union(
     options: [TexturedSectionRenderOptions; 2],
     scratch: &mut CullScratch,
 ) -> TexturedSectionStereoCullingResult {
-    let records = &prepared.records;
     let frustums = render_views.map(ClipFrustum::from_render_view);
+    cull_textured_sections_stereo_union_with_frustums(
+        prepared,
+        render_views,
+        options,
+        scratch,
+        &frustums,
+    )
+}
+
+fn cull_textured_sections_stereo_union_with_frustums(
+    prepared: &PreparedTexturedSectionRecords,
+    render_views: [ChunkRenderView; 2],
+    options: [TexturedSectionRenderOptions; 2],
+    scratch: &mut CullScratch,
+    frustums: &[impl RenderSectionFrustum; 2],
+) -> TexturedSectionStereoCullingResult {
+    let records = &prepared.records;
     let section_occlusion_culling =
         options[0].section_occlusion_culling && options[1].section_occlusion_culling;
     let force_fullbright = options[0].force_fullbright || options[1].force_fullbright;
@@ -1536,6 +1598,10 @@ struct ClipFrustum {
     view_projection: Mat4,
 }
 
+trait RenderSectionFrustum {
+    fn is_render_section_visible(&self, key: RenderSectionKey) -> bool;
+}
+
 impl ClipFrustum {
     fn from_render_view(render_view: ChunkRenderView) -> Self {
         Self {
@@ -1543,6 +1609,14 @@ impl ClipFrustum {
         }
     }
 
+    fn is_aabb_visible(&self, min: Vec3, max: Vec3) -> bool {
+        clip_aabb_visible(min, max, |corner| {
+            self.view_projection * Vec4::new(corner.x, corner.y, corner.z, 1.0)
+        })
+    }
+}
+
+impl RenderSectionFrustum for ClipFrustum {
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
         let min = Vec3::new(
             chunk_min_block_coord(key.chunk_x) as f32,
@@ -1557,42 +1631,95 @@ impl ClipFrustum {
             );
         self.is_aabb_visible(min, max)
     }
+}
 
-    fn is_aabb_visible(&self, min: Vec3, max: Vec3) -> bool {
-        let corners = [
-            Vec3::new(min.x, min.y, min.z),
-            Vec3::new(max.x, min.y, min.z),
-            Vec3::new(min.x, max.y, min.z),
-            Vec3::new(max.x, max.y, min.z),
-            Vec3::new(min.x, min.y, max.z),
-            Vec3::new(max.x, min.y, max.z),
-            Vec3::new(min.x, max.y, max.z),
-            Vec3::new(max.x, max.y, max.z),
-        ];
-        let mut outside_left = true;
-        let mut outside_right = true;
-        let mut outside_bottom = true;
-        let mut outside_top = true;
-        let mut outside_near = true;
-        let mut outside_far = true;
+#[derive(Clone, Copy, Debug)]
+struct PlacedClipFrustum {
+    physical_view_projection: Mat4,
+    source_anchor_scale: [f32; 4],
+    composition_anchor: [f32; 4],
+}
 
-        for corner in corners {
-            let clip = self.view_projection * Vec4::new(corner.x, corner.y, corner.z, 1.0);
-            outside_left &= clip.x < -clip.w;
-            outside_right &= clip.x > clip.w;
-            outside_bottom &= clip.y < -clip.w;
-            outside_top &= clip.y > clip.w;
-            outside_near &= clip.z < -clip.w;
-            outside_far &= clip.z > clip.w;
+impl PlacedClipFrustum {
+    fn new(physical_render_view: ChunkRenderView, placement: WorldPlacement) -> Self {
+        let (source_anchor_scale, composition_anchor) = placement.shader_values();
+        Self {
+            physical_view_projection: physical_render_view.view_projection,
+            source_anchor_scale,
+            composition_anchor,
         }
-
-        !(outside_left
-            || outside_right
-            || outside_bottom
-            || outside_top
-            || outside_near
-            || outside_far)
     }
+
+    fn source_to_composition(self, source: Vec3) -> Vec3 {
+        let source_anchor = Vec3::from_array([
+            self.source_anchor_scale[0],
+            self.source_anchor_scale[1],
+            self.source_anchor_scale[2],
+        ]);
+        let composition_anchor = Vec3::from_array([
+            self.composition_anchor[0],
+            self.composition_anchor[1],
+            self.composition_anchor[2],
+        ]);
+        composition_anchor + (source - source_anchor) * self.source_anchor_scale[3]
+    }
+}
+
+impl RenderSectionFrustum for PlacedClipFrustum {
+    fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
+        let min = Vec3::new(
+            chunk_min_block_coord(key.chunk_x) as f32,
+            key.min_y() as f32,
+            chunk_min_block_coord(key.chunk_z) as f32,
+        );
+        let max = min
+            + Vec3::new(
+                MESH_CHUNK_WIDTH as f32,
+                RENDER_SECTION_HEIGHT as f32,
+                MESH_CHUNK_WIDTH as f32,
+            );
+        clip_aabb_visible(min, max, |source_corner| {
+            let composition_corner = self.source_to_composition(source_corner);
+            self.physical_view_projection
+                * Vec4::new(
+                    composition_corner.x,
+                    composition_corner.y,
+                    composition_corner.z,
+                    1.0,
+                )
+        })
+    }
+}
+
+fn clip_aabb_visible(min: Vec3, max: Vec3, mut clip_position: impl FnMut(Vec3) -> Vec4) -> bool {
+    let corners = [
+        Vec3::new(min.x, min.y, min.z),
+        Vec3::new(max.x, min.y, min.z),
+        Vec3::new(min.x, max.y, min.z),
+        Vec3::new(max.x, max.y, min.z),
+        Vec3::new(min.x, min.y, max.z),
+        Vec3::new(max.x, min.y, max.z),
+        Vec3::new(min.x, max.y, max.z),
+        Vec3::new(max.x, max.y, max.z),
+    ];
+    let mut outside_left = true;
+    let mut outside_right = true;
+    let mut outside_bottom = true;
+    let mut outside_top = true;
+    let mut outside_near = true;
+    let mut outside_far = true;
+
+    for corner in corners {
+        let clip = clip_position(corner);
+        outside_left &= clip.x < -clip.w;
+        outside_right &= clip.x > clip.w;
+        outside_bottom &= clip.y < -clip.w;
+        outside_top &= clip.y > clip.w;
+        outside_near &= clip.z < -clip.w;
+        outside_far &= clip.z > clip.w;
+    }
+
+    !(outside_left || outside_right || outside_bottom || outside_top || outside_near || outside_far)
 }
 
 pub struct GpuChunkMesh {
@@ -2291,6 +2418,205 @@ impl TexturedChunkMultiviewRenderer {
     }
 }
 
+/// Opt-in terrain renderer for a uniformly scaled/translated world. This is
+/// intentionally separate from `TexturedChunkRenderer`: constructing an
+/// ordinary world does not allocate placed uniforms or compile placed
+/// pipelines.
+pub struct PlacedTexturedSectionRenderer {
+    solid_pipeline: wgpu::RenderPipeline,
+    cutout_pipeline: wgpu::RenderPipeline,
+    uniforms: PerViewUniformBuffer,
+    bind_group: wgpu::BindGroup,
+    color_format: wgpu::TextureFormat,
+    multiview: RefCell<Option<PlacedTexturedSectionMultiviewRenderer>>,
+}
+
+impl PlacedTexturedSectionRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_placed_textured_chunk_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/chunk_textured_placed.wgsl").into(),
+            ),
+        });
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_placed_textured_chunk_uniforms",
+            PLACED_UNIFORM_BYTE_SIZE,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
+        );
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_placed_textured_chunk_uniform_bind_group_layout"),
+                entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
+            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_placed_textured_chunk_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[uniforms.bind_group_entry(0)],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_placed_textured_chunk_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let solid_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_placed_textured_chunk_solid_pipeline",
+            "fs_main_solid",
+            None,
+            true,
+            None,
+        );
+        let cutout_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_placed_textured_chunk_cutout_pipeline",
+            "fs_main_cutout",
+            None,
+            true,
+            None,
+        );
+        Self {
+            solid_pipeline,
+            cutout_pipeline,
+            uniforms,
+            bind_group,
+            color_format,
+            multiview: RefCell::new(None),
+        }
+    }
+
+    fn multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Result<std::cell::Ref<'_, PlacedTexturedSectionMultiviewRenderer>> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("placed textured terrain multiview render requires wgpu MULTIVIEW");
+        }
+        if self.multiview.borrow().is_none() {
+            *self.multiview.borrow_mut() = Some(PlacedTexturedSectionMultiviewRenderer::new(
+                device,
+                self.color_format,
+                texture_bind_group_layout,
+            ));
+        }
+        Ok(std::cell::Ref::map(self.multiview.borrow(), |renderer| {
+            renderer
+                .as_ref()
+                .expect("placed multiview renderer initialized above")
+        }))
+    }
+}
+
+struct PlacedTexturedSectionMultiviewRenderer {
+    solid_pipeline: wgpu::RenderPipeline,
+    cutout_pipeline: wgpu::RenderPipeline,
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl PlacedTexturedSectionMultiviewRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_placed_textured_chunk_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/chunk_textured_placed_multiview.wgsl").into(),
+            ),
+        });
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_placed_textured_chunk_multiview_uniforms"),
+            size: PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_placed_textured_chunk_multiview_uniform_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE),
+                    },
+                    count: None,
+                }],
+            });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_placed_textured_chunk_multiview_uniform_bind_group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_placed_textured_chunk_multiview_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let solid_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_placed_textured_chunk_multiview_solid_pipeline",
+            "fs_main_solid",
+            None,
+            true,
+            NonZeroU32::new(2),
+        );
+        let cutout_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_placed_textured_chunk_multiview_cutout_pipeline",
+            "fs_main_cutout",
+            None,
+            true,
+            NonZeroU32::new(2),
+        );
+        Self {
+            solid_pipeline,
+            cutout_pipeline,
+            uniform_buffer,
+            bind_group,
+        }
+    }
+
+    fn write_uniforms(
+        &self,
+        queue: &wgpu::Queue,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        placement: WorldPlacement,
+        color_format: wgpu::TextureFormat,
+    ) {
+        queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            &placed_multiview_uniform_bytes(render_views, options, placement, color_format),
+        );
+    }
+}
+
 fn create_textured_chunk_pipeline(
     device: &wgpu::Device,
     pipeline_layout: &wgpu::PipelineLayout,
@@ -2683,6 +3009,36 @@ impl TexturedSectionDrawResources {
         };
         let _ = resources.update_sections(device, sections)?;
         Ok(resources)
+    }
+
+    /// Allocate the opt-in placed pipeline shell for this draw store. Nothing
+    /// in `new` calls this, preserving the ordinary single-world allocation
+    /// and shader-compilation path.
+    pub fn create_placed_renderer(&self, device: &wgpu::Device) -> PlacedTexturedSectionRenderer {
+        PlacedTexturedSectionRenderer::new(
+            device,
+            self.renderer.color_format,
+            &self.renderer.texture_bind_group_layout,
+        )
+    }
+
+    /// Eagerly materialize the placed full-frame multiview pipelines. Preview
+    /// readiness calls this before publication on adapters that expose
+    /// `MULTIVIEW`; it is never reached by the no-preview branch.
+    pub fn materialize_placed_multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+        renderer: &PlacedTexturedSectionRenderer,
+    ) -> Result<()> {
+        drop(renderer.multiview_renderer(device, &self.renderer.texture_bind_group_layout)?);
+        Ok(())
+    }
+
+    pub fn prepare_render_records_for_region(
+        &self,
+        region: EmbeddedChunkRegion,
+    ) -> PreparedTexturedSectionRecords {
+        self.prepare_render_records().for_embedded_region(region)
     }
 
     pub fn update_sections(
@@ -3389,6 +3745,232 @@ impl TexturedSectionDrawResources {
         Ok((stats, timing))
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_placed_prepared_with_options_in_slot(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        records: &PreparedTexturedSectionRecords,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: PerViewSlot,
+    ) -> Result<TexturedSectionRenderStats> {
+        let source_render_view = placement.source_render_view(physical_render_view);
+        let placed_frustum = PlacedClipFrustum::new(physical_render_view, placement);
+        let culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections_with_frustum(
+                records,
+                source_render_view,
+                options,
+                &mut scratch,
+                &placed_frustum,
+            )
+        };
+        let uniform_offset = renderer.uniforms.write_slot(
+            queue,
+            view_slot,
+            &placed_uniform_bytes(
+                physical_render_view,
+                options,
+                placement,
+                renderer.color_format,
+            ),
+        );
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_placed_textured_section_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: target.color_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: target.depth_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &renderer.bind_group, &[uniform_offset]);
+            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_pipeline(&renderer.solid_pipeline);
+            for (key, mesh) in &self.sections {
+                if culling.drawn_keys.contains(key) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                }
+            }
+            pass.set_pipeline(&renderer.cutout_pipeline);
+            for (key, mesh) in &self.sections {
+                if culling.drawn_keys.contains(key) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                }
+            }
+        }
+        Ok(culling.stats)
+    }
+
+    pub fn prepare_placed_stereo_draw(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        physical_render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        placement: WorldPlacement,
+    ) -> PreparedTexturedSectionStereoDraw {
+        let source_render_views =
+            physical_render_views.map(|view| placement.source_render_view(view));
+        let frustums = physical_render_views.map(|view| PlacedClipFrustum::new(view, placement));
+        let culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections_stereo_union_with_frustums(
+                records,
+                source_render_views,
+                options,
+                &mut scratch,
+                &frustums,
+            )
+        };
+        PreparedTexturedSectionStereoDraw {
+            union_stats: stereo_union_stats_for_options(culling.stats, options),
+            eye_stats: culling.eye_stats,
+            drawn_keys: culling.drawn_keys,
+            draw_masks: culling.draw_masks,
+            translucent_keys: Vec::new(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_placed_prepared_stereo_draw_with_options_in_slot(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: PerViewSlot,
+    ) -> Result<TexturedSectionRenderStats> {
+        let uniform_offset = renderer.uniforms.write_slot(
+            queue,
+            view_slot,
+            &placed_uniform_bytes(
+                physical_render_view,
+                options,
+                placement,
+                renderer.color_format,
+            ),
+        );
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_placed_textured_section_stereo_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: target.color_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: target.depth_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &renderer.bind_group, &[uniform_offset]);
+            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_pipeline(&renderer.solid_pipeline);
+            for (key, mesh) in &self.sections {
+                if prepared_draw.draws_in_slot(*key, view_slot) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                }
+            }
+            pass.set_pipeline(&renderer.cutout_pipeline);
+            for (key, mesh) in &self.sections {
+                if prepared_draw.draws_in_slot(*key, view_slot) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                }
+            }
+        }
+        Ok(prepared_draw.stats_for_slot(view_slot))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_placed_prepared_multiview_stereo_draw_with_options(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        prepared_draw: &PreparedTexturedSectionStereoDraw,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkMultiviewRenderTarget<'_>,
+        physical_render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        placement: WorldPlacement,
+    ) -> Result<[TexturedSectionRenderStats; 2]> {
+        let multiview =
+            renderer.multiview_renderer(device, &self.renderer.texture_bind_group_layout)?;
+        multiview.write_uniforms(
+            queue,
+            physical_render_views,
+            options,
+            placement,
+            renderer.color_format,
+        );
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_placed_textured_section_multiview_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target.color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: target.color_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: target.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: target.depth_load_op(),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_bind_group(0, &multiview.bind_group, &[]);
+            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_pipeline(&multiview.solid_pipeline);
+            for (key, mesh) in &self.sections {
+                if prepared_draw.drawn_keys.contains(key) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                }
+            }
+            pass.set_pipeline(&multiview.cutout_pipeline);
+            for (key, mesh) in &self.sections {
+                if prepared_draw.drawn_keys.contains(key) {
+                    draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                }
+            }
+        }
+        Ok(prepared_draw.stats())
+    }
+
     pub fn render_prepared_multiview_with_options(
         &self,
         records: &PreparedTexturedSectionRecords,
@@ -3987,9 +4569,52 @@ fn multiview_uniform_bytes(
     bytes
 }
 
+fn placed_uniform_bytes(
+    render_view: ChunkRenderView,
+    options: TexturedSectionRenderOptions,
+    placement: WorldPlacement,
+    color_format: wgpu::TextureFormat,
+) -> [u8; PLACED_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0; PLACED_UNIFORM_BYTE_LEN];
+    bytes[..UNIFORM_BYTE_LEN].copy_from_slice(&uniform_bytes(render_view, options, color_format));
+    let (source_anchor_scale, composition_anchor) = placement.shader_values();
+    for (index, value) in source_anchor_scale.into_iter().enumerate() {
+        let start = UNIFORM_BYTE_LEN + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    for (index, value) in composition_anchor.into_iter().enumerate() {
+        let start = UNIFORM_BYTE_LEN + 16 + index * 4;
+        bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
+fn placed_multiview_uniform_bytes(
+    render_views: [ChunkRenderView; 2],
+    options: [TexturedSectionRenderOptions; 2],
+    placement: WorldPlacement,
+    color_format: wgpu::TextureFormat,
+) -> [u8; PLACED_MULTIVIEW_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0u8; PLACED_MULTIVIEW_UNIFORM_BYTE_LEN];
+    bytes[..PLACED_UNIFORM_BYTE_LEN].copy_from_slice(&placed_uniform_bytes(
+        render_views[0],
+        options[0],
+        placement,
+        color_format,
+    ));
+    bytes[PLACED_UNIFORM_BYTE_LEN..].copy_from_slice(&placed_uniform_bytes(
+        render_views[1],
+        options[1],
+        placement,
+        color_format,
+    ));
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_core::{ChunkPos, Vec3d};
     use mclone_mesh::{
         ChunkMeshInput, TexturedChunkVertex, TexturedVisibleChunkMesh, build_visible_chunk_mesh,
     };
@@ -4041,6 +4666,180 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn placed_uniforms_rebase_source_and_keep_distinct_eye_facts() {
+        let left = ChunkCamera {
+            eye: [-0.032, 8.0, 20.0],
+            target: [-0.032, 8.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 65.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        }
+        .render_view(640, 640);
+        let right = ChunkCamera {
+            eye: [0.032, 8.0, 20.0],
+            target: [0.032, 8.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 65.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        }
+        .render_view(640, 640);
+        let placement = WorldPlacement::new(
+            Vec3d::new(1_000_008.0, 64.0, -999_992.0),
+            Vec3d::new(0.0, 2.0, 0.0),
+            1.0 / 16.0,
+        )
+        .unwrap();
+        let options = TexturedSectionRenderOptions::default();
+        let left_bytes =
+            placed_uniform_bytes(left, options, placement, wgpu::TextureFormat::Rgba8Unorm);
+        let right_bytes =
+            placed_uniform_bytes(right, options, placement, wgpu::TextureFormat::Rgba8Unorm);
+
+        assert_eq!(left_bytes.len(), PLACED_UNIFORM_BYTE_LEN);
+        assert_ne!(
+            &left_bytes[..UNIFORM_BYTE_LEN],
+            &right_bytes[..UNIFORM_BYTE_LEN]
+        );
+        assert_eq!(
+            &left_bytes[UNIFORM_BYTE_LEN..],
+            &right_bytes[UNIFORM_BYTE_LEN..]
+        );
+        assert_eq!(
+            placed_multiview_uniform_bytes(
+                [left, right],
+                [options; 2],
+                placement,
+                wgpu::TextureFormat::Rgba8Unorm,
+            )
+            .len(),
+            PLACED_MULTIVIEW_UNIFORM_BYTE_LEN
+        );
+
+        let mono = include_str!("shaders/chunk_textured_placed.wgsl");
+        let multiview = include_str!("shaders/chunk_textured_placed_multiview.wgsl");
+        for source in [mono, multiview] {
+            assert!(source.contains("input.position - uniforms.source_anchor_scale.xyz"));
+            assert!(source.contains("output.composition_position = composition_position;"));
+            assert!(source.contains("uniforms.camera_position.xyz"));
+        }
+    }
+
+    #[test]
+    fn identity_placed_uniform_retains_direct_view_bytes() {
+        let view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        let options = TexturedSectionRenderOptions::default();
+        let ordinary = uniform_bytes(view, options, wgpu::TextureFormat::Rgba8Unorm);
+        let placed = placed_uniform_bytes(
+            view,
+            options,
+            WorldPlacement::identity(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+
+        assert_eq!(&placed[..UNIFORM_BYTE_LEN], &ordinary);
+        assert_eq!(
+            f32::from_ne_bytes(placed[140..144].try_into().unwrap()),
+            1.0
+        );
+        assert!(placed[128..140].iter().all(|byte| *byte == 0));
+        assert!(placed[144..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn placed_local_view_culls_in_source_coordinates_at_miniature_scale() {
+        let physical = ChunkCamera {
+            eye: [0.0, 8.0, 20.0],
+            target: [0.0, 8.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 60.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        }
+        .render_view(800, 600);
+        let placement =
+            WorldPlacement::new(Vec3d::new(1_000.0, 0.0, 1_000.0), Vec3d::ZERO, 0.5).unwrap();
+        let source_view = placement.source_render_view(physical);
+        let frustum = PlacedClipFrustum::new(physical, placement);
+
+        assert_eq!(
+            source_view.camera_position,
+            Vec3::new(1_000.0, 16.0, 1_040.0)
+        );
+        assert!(frustum.is_render_section_visible(RenderSectionKey::new(62, 0, 62)));
+        assert!(!frustum.is_render_section_visible(RenderSectionKey::new(62, 0, 80)));
+    }
+
+    #[test]
+    fn placed_frustum_uses_shader_rebase_order_at_far_source_coordinates() {
+        let physical = ChunkCamera {
+            eye: [0.0, 8.0, 20.0],
+            target: [0.0, 8.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 60.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 200.0,
+        }
+        .render_view(800, 600);
+        let placement = WorldPlacement::new(
+            Vec3d::new(30_000_000.0, 0.0, -30_000_000.0),
+            Vec3d::ZERO,
+            1.0 / 16.0,
+        )
+        .unwrap();
+        let frustum = PlacedClipFrustum::new(physical, placement);
+        let source = Vec3::new(30_000_016.0, 16.0, -30_000_016.0);
+        let composition = frustum.source_to_composition(source);
+
+        assert_eq!(composition, Vec3::new(1.0, 1.0, -1.0));
+        let expected_clip = physical.view_projection * composition.extend(1.0);
+        let recomputed_clip =
+            physical.view_projection * frustum.source_to_composition(source).extend(1.0);
+        assert_eq!(recomputed_clip, expected_clip);
+    }
+
+    #[test]
+    fn embedded_record_filter_is_bounded_and_stably_ordered() {
+        let sections = [
+            fake_section(
+                RenderSectionKey::new(-2, 3, -1),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(-1, 4, -1),
+                12,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(-1, 2, 0),
+                18,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(0, 3, -1),
+                24,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let records = prepared_records_for_sections(&sections);
+        let region = EmbeddedChunkRegion::new(ChunkPos::new(-1, -1), 1, 3, 4).unwrap();
+        let bounded = records.for_embedded_region(region);
+
+        assert_eq!(
+            bounded.section_keys().collect::<Vec<_>>(),
+            vec![
+                RenderSectionKey::new(-2, 3, -1),
+                RenderSectionKey::new(-1, 4, -1),
+                RenderSectionKey::new(0, 3, -1),
+            ]
+        );
+        assert_eq!(bounded.loaded_section_count, 3);
+        assert_eq!(bounded.loaded_index_count, 42);
     }
 
     #[test]

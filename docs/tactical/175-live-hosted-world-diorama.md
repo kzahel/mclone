@@ -1,9 +1,9 @@
 # 175: Live Hosted World Diorama
 
-Status: active 2026-07-13. Slice 0 contract/baseline and Slice 1 authored-only
-server/content foundation landed; Slice 2 placed terrain is next. Do not make
-the retained standby visible until Tactical 174's lifecycle/invalidation
-closeout is green.
+Status: active 2026-07-13. Slices 0–2 landed: contract/baseline,
+authored-only server/content foundation, and the static placed-terrain
+renderer. Slice 3 live scene composition is next, after Tactical 174's
+lifecycle/invalidation closeout is green.
 
 Topic: `embedded-worlds`
 
@@ -670,6 +670,74 @@ geometry with correct depth and stereo, while active-only pixels and release
 timing remain within the Slice 0 gate.
 
 No live runtime is composed yet.
+
+### Slice 2 completion record — 2026-07-13
+
+The static geometry-composition seam is now real while the active path remains
+unchanged:
+
+- `mclone-render::placement` owns validated `WorldPlacement` and
+  `EmbeddedChunkRegion` contracts. Placement accepts only finite anchors and a
+  finite positive uniform scale, keeps mapping/inverse math in `f64`, and
+  exposes the inverse source-local camera facts used by traversal. Region
+  bounds are inclusive, section-aligned, overflow-safe around negative chunk
+  coordinates, and filter prepared records through their existing stable
+  `BTreeMap` order.
+- Placed culling applies the same rebased `f32` operation order as the shader:
+  `composition_anchor + (source - source_anchor) * scale`. It does not rely on
+  one large absolute model translation, including at 30-million-block source
+  anchors. The physical projection and each eye's camera facts remain
+  composition-local.
+- `PlacedTexturedSectionRenderer` is an opt-in shell created from a particular
+  terrain store. Ordinary `TexturedSectionDrawResources::new` allocates no
+  placed renderer, uniforms, or pipelines. The direct terrain uniforms remain
+  exactly 128 bytes per view / 256 bytes multiview and both ordinary shaders
+  remain byte-for-byte on their unplaced vertex transform.
+- Placed mono/per-eye records are 160 bytes and placed full-frame multiview is
+  320 bytes. Separate solid and cutout pipelines transform clip and fog
+  positions into composition space while keeping source packed-light facts.
+  Per-eye slots retain distinct physical matrices/camera positions. The
+  full-frame shader and pipeline path landed with an explicit eager
+  materialization method for preview readiness; translucent placement remains
+  reserved for Slice 5.
+- The renderer-only GPU fixture builds independent A and B terrain stores,
+  bounds B to one source chunk/section, and draws A followed by placed B into
+  one reversed-Z depth target. It compares A-only, B-only, and composed pixels:
+  6,004 pixels prove the table hides B below its surface, while 13,340 pixels
+  prove B hides the farther A wall. The placed draw reports exactly one source
+  section.
+- The same fixture submits both eyes through distinct live uniform slots.
+  Both eyes contain the same green B region; 10,383 pixels differ and the B
+  centroids move from x=325.77 to x=313.24. The current Mac adapter does not
+  expose `wgpu::Features::MULTIVIEW`, so capable-device execution remains a
+  named receipt gap rather than a missing code path.
+
+The first placed-terrain images were visually inspected:
+
+- `/tmp/mclone-live-diorama-slice2-mono.png`: 960x640, SHA-256
+  `d9cf8664ee4eb3484a55b9d147a38c759f038ae30a924be02aa502a3c558b80b`;
+- `/tmp/mclone-live-diorama-slice2-stereo.png`: 1280x640 side-by-side,
+  SHA-256
+  `08b7a8ea2af086875d92bd5fa3773e99dcba2c450f7d74ad09757db8b87f0ae0`.
+
+Active-only flat and synthetic-stereo smokes still produce the exact Slice 0
+hashes `cdffd673...e7e9` and `8061f255...06650d`; the new placed state is not
+constructed by either path. A preliminary performance batch was rejected when
+its first two averages already spanned 2.650–3.167 ms. Before retry, `top`
+reported 98.10% CPU idle and no Cargo, compiler, mclone, emulator, or QEMU
+process. The accepted five-run direct-binary batch measured averages 2.548,
+2.663, 2.547, 2.546, and 2.465 ms: 2.547 ms median and 7.8% range. P95s were
+4.501, 4.445, 4.467, 4.380, and 4.180 ms: 4.445 ms median and 7.2% range. All
+five retained 1,936 sections with zero over-budget frames and zero accounting
+violations. Against Slice 0's 2.659/4.252 ms medians, average is 4.2% lower and
+P95 is 4.5% higher; both remain within the 10% gate and no optimization is
+claimed.
+
+The full native workspace test/doc-test suite passes, including 136 ordinary
+render tests plus the ignored-on-CI placed GPU proof. Browser WASM build,
+TypeScript typecheck, thin-adapter and scene-host purity, formatting, and diff
+whitespace checks pass; only pre-existing target-specific WASM warnings remain.
+No live second slot is drawn yet, so this slice requires no manual review.
 
 ## Slice 3: Scene-Owned Live Local Diorama — First Review Checkpoint
 

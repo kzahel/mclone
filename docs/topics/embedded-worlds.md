@@ -9,8 +9,9 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **design plus a measured Slice 7 scene-owned warm-world path and an
-active live-diorama tactical with Slices 0–1 landed.** The engine still does not
-compose two worlds in one frame, but `McloneSceneHost`
+active live-diorama tactical with Slices 0–2 landed.** The renderer can now
+compose two static terrain stores in one physical frame, but `McloneSceneHost`
+does not yet submit the retained live world. `McloneSceneHost`
 now owns one direct active `DrawableWorldSlot`, one optional detached standby,
 and—only for the launch diagnostic—a paired runtime-only `WorldGate`. The two
 integrated hosts remain concurrent and independently drawable. The standby
@@ -46,7 +47,7 @@ stop before simultaneous rendering. The next bounded composition milestone is
 draw one live local or remote hosted region as scaled geometry on a block-built
 table, then use only a simple blink around the already-proven activation.
 
-Last reconciled: 2026-07-13 (Tactical 175 Slice 1).
+Last reconciled: 2026-07-13 (Tactical 175 Slice 2).
 
 ## Motivation
 
@@ -258,8 +259,22 @@ mutation/restart, missing-void, and zero-worldgen contracts. Independent table
 and island pixels were inspected. The accepted no-preview release batch is
 2.510 ms median average and 4.331 ms median P95, respectively 5.6% lower and
 1.9% higher than Slice 0, with stable spread and no budget/accounting failure.
-No simultaneous-world pixel exists yet; Slice 2 is the static placed-terrain
-renderer proof.
+Slice 2 lands that static placed-terrain proof. A validated `f64`
+`WorldPlacement` rebases source coordinates around an anchor before a positive
+uniform scale, and `EmbeddedChunkRegion` filters stable prepared records by
+inclusive chunk/section bounds. Opt-in solid/cutout mono, per-eye, and
+full-frame multiview pipelines transform both clip and fog positions into
+composition space without changing the direct 128-byte terrain uniforms or
+ordinary shaders. Placed culling uses the shader's explicit rebase order even
+at 30-million-block source anchors. A renderer-only shared-depth fixture proves
+both occlusion directions (6,004 A-over-B pixels and 13,340 B-over-A pixels)
+and stereo parallax (10,383 differing pixels); its mono and side-by-side images
+were inspected. The current Mac lacks the multiview feature, so capable-device
+execution remains open while the full-frame path and eager materialization
+contract are present. Exact active-only flat/stereo hashes are unchanged, and
+the accepted no-preview batch remains inside the Slice 0 performance gate.
+Slice 3 will connect this renderer to the retained live slot after Tactical
+174's lifecycle/invalidation prerequisites close.
 
 ### Same-world previews and non-recursive composition
 
