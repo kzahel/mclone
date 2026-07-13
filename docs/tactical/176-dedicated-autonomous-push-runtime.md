@@ -1,7 +1,8 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slices 0-6 completed 2026-07-13. Slice 7 compatibility and
-documentation closeout is next.
+Status: complete 2026-07-13. The characterization baseline and all seven
+implementation slices, including compatibility/documentation closeout, are
+recorded below.
 
 Topic: `multiplayer-networking`
 
@@ -547,9 +548,10 @@ Implemented result:
   stream's startup gate now waits for resident active-view terrain rather than
   an impossible forever-idle condition.
 - Native `pending_response_batches` state and normal-path
-  `drain_command_updates` APIs are gone. The synchronous
-  `NativeClientSession` remains clearly quarantined as a low-level protocol
-  smoke/test helper; production uses `NativeClientIoSession` batch polling.
+  `drain_command_updates` APIs are gone. At this slice boundary the synchronous
+  `NativeClientSession` remained quarantined as a low-level smoke/test helper;
+  Slice 7 later removed it. Production uses `NativeClientIoSession` batch
+  polling.
 - Sequence and queue diagnostics are transport-neutral:
   `inbound_frame_sequence`, `inbound_update_batches`, update depth/bytes, read
   time, decode time, and oldest apply age. The rename is carried through
@@ -753,7 +755,9 @@ Validation evidence:
   XR shared-adapter builds plus the AVD frame were already proved in Slice 4;
   Quest frame accounting remains deferred because no device is available.
 
-### Slice 7: Compatibility Removal And Documentation Closeout
+### Slice 7: Compatibility Removal And Documentation Closeout — Complete
+
+Status: completed 2026-07-13.
 
 - remove the retired response frame terminology and unused compatibility
   helpers from protocol/net/app-runtime/web/dedicated code;
@@ -767,6 +771,73 @@ Validation evidence:
 
 Exit: source and docs have one current push model; a future session lifecycle
 slice can add profile/login/keepalive without first removing RPC scaffolding.
+
+Implemented result:
+
+- Removed `mclone-net::NativeClientSession`, `request_server_updates`, and the
+  redundant synchronous drain test. Protocol, dedicated, and visual-smoke
+  fixtures now use `NativeClientIoSession`; the dedicated observer fixture no
+  longer sends a fake polling command to collect already-routed updates.
+- The production dedicated loop no longer emits an empty publication frame
+  merely because a command was handled. Commands and nonempty publications are
+  independent ordered streams.
+- Renamed multiplayer producer/accounting fields from response-frame language
+  to inbound-frame/publication facts across native diagnostics and browser
+  reports. Genuine worker-job, HTTP, catalog, and handshake responses retain
+  their accurate request/response names.
+- Bumped the strict wire version from `19` to `20`, preventing an old
+  command-paired binary from silently joining the autonomous stream.
+- Updated the protocol, hosting, platform, session architecture, multiplayer
+  topic, and Tactical 133 records. Tactical 133 is complete; its remaining
+  terrain dirty-to-drawable lifecycle work is explicitly routed to Tactical
+  128.
+
+Final validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml --workspace --no-fail-fast`:
+  passed the complete workspace, including 388 server, 244 app-runtime, 29
+  dedicated, and 17 net unit tests plus all integration and doc tests.
+- `pnpm native:web:typecheck`, `pnpm native:web:remote-smoke`, `pnpm --silent
+  native:remote:smoke`, `pnpm --silent native:dedicated:smoke`, and `pnpm
+  native:thin-adapters:purity`: passed on the final protocol-20 source. The
+  browser run received 51 publication frames after only 41 commands, reached
+  zero command/update queue depth, and rendered through the worker-owned remote
+  adapter. Its `/tmp/mclone-native-web-app-canvas.png` capture was inspected
+  and shows valid terrain, actors, HUD, and diagnostics.
+- `cargo fmt --manifest-path native/Cargo.toml --all -- --check` and `git diff
+  --check`: passed.
+- Earlier slice receipts also include native offscreen, local AVD, Android
+  flat/XR builds, synthetic stereo, browser movement churn, exact-pressure,
+  slow-consumer, and two-client idle-observer evidence. No Quest was available,
+  so real-device OpenXR frame accounting remains explicitly deferred; no
+  platform-specific network exception was needed.
+
+Final fixed bounds and known limitations:
+
+- Dedicated outbound: 64 publication frames and 64 MiB exact encoded bytes
+  per peer; slow consumers disconnect without blocking authority.
+- Native inbound: 256 decoded publication batches. Browser remote: 64 MiB
+  worker-unacknowledged batches, 4096 updates / 64 MiB main transferable
+  ingress, and 8 MiB WebSocket command buffering.
+- Native remote's short startup smoke still exposes partial terrain and an
+  observer-side void even though autonomous actor/world publication is correct.
+  The browser movement window measured a 10.25 ms maximum frame gap; the broad
+  browser UI/render smoke measured about 25 ms. Session identity/login,
+  keepalive/timeouts, explicit disconnect messages, persisted world metadata
+  and player state, compression, prediction, and transform coalescing remain
+  later work.
+
+Implementation commit ledger:
+
+- plan and ownership record: `2a06ac50`;
+- Slice 0 baseline: `2266fe66`;
+- Slice 1 global simulation/publication separation: `d7bd885a`;
+- Slice 2 native full-duplex transport: `9e64bfe2`;
+- Slice 3 autonomous dedicated authority: `ed4a0258`;
+- Slice 4 native ready-only convergence: `0955002e`;
+- Slice 5 direct WebSocket/browser worker transport: `50b2e71d`;
+- Slice 6 bounded cross-adapter conformance: `3ddf17fe`; and
+- Slice 7 compatibility and living-doc cleanup: `e1a65902`.
 
 ## Validation Matrix
 
