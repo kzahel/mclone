@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use glam::{Quat, Vec3};
+use mclone_core::Vec3d;
 use mclone_input::{FlatInputFrame, KeyboardMouseInputAdapter};
 use mclone_render::headless::{HeadlessStereoFrameOptions, write_headless_stereo_frame_png};
 use mclone_render_session::{EngineCameraSnapshot, XrFov, XrView, XrViewPose};
@@ -110,6 +111,9 @@ pub(crate) fn run_xr_emulation_screenshot(
 
             views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+            if driver.host().warm_world_standby_snapshot().is_some() {
+                views = synthetic_stereo_gate_views(&mut driver, size, 3.0)?;
+            }
             driver.render_stereo(device, queue, views, left_view, right_view)
         },
     )?;
@@ -157,36 +161,49 @@ fn drive_warm_world_swap_roundtrip_if_requested(
         return Ok(());
     }
     let source_id = driver.host().active_world_instance_id();
-    let first = driver.host_mut().apply_warm_world_selection_command(
-        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
-    )?;
+    let initial_crossing_count = driver
+        .host()
+        .world_gate_snapshot()
+        .context("synthetic-stereo warm world has no paired gate")?
+        .crossing_count;
+
+    // Exercise the same visual-midpoint rule used on headset. The first live
+    // stereo frame approaches and arms the gate; the second places both eyes'
+    // midpoint just beyond the plane and must perform the ownership exchange
+    // before drawing either eye.
+    let views = synthetic_stereo_gate_views(driver, size, 1.0)?;
+    driver.render_stereo(device, queue, views, left_view, right_view)?;
+    let views = synthetic_stereo_gate_views(driver, size, -0.3)?;
+    let destination = driver.render_stereo(device, queue, views, left_view, right_view)?;
     let destination_id = driver.host().active_world_instance_id();
     if destination_id == source_id {
-        bail!("synthetic-stereo warm-world selection retained the source identity");
+        bail!("synthetic-stereo gate crossing retained the source identity");
     }
-    let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
-    driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
-    let destination = driver.render_stereo(device, queue, views, left_view, right_view)?;
     let first = driver
         .host()
         .last_warm_world_switch_report()
-        .unwrap_or(first);
+        .context("synthetic-stereo gate crossing produced no switch report")?;
     validate_stereo_warm_world_switch(&first, destination.drawn_section_count)?;
 
-    let second = driver.host_mut().apply_warm_world_selection_command(
-        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
-    )?;
-    if driver.host().active_world_instance_id() != source_id {
-        bail!("synthetic-stereo warm-world round trip lost the source identity");
-    }
-    let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
-    driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+    let views = synthetic_stereo_gate_views(driver, size, 1.0)?;
+    driver.render_stereo(device, queue, views, left_view, right_view)?;
+    let views = synthetic_stereo_gate_views(driver, size, -0.3)?;
     let source = driver.render_stereo(device, queue, views, left_view, right_view)?;
+    if driver.host().active_world_instance_id() != source_id {
+        bail!("synthetic-stereo gate round trip lost the source identity");
+    }
     let second = driver
         .host()
         .last_warm_world_switch_report()
-        .unwrap_or(second);
+        .context("synthetic-stereo return crossing produced no switch report")?;
     validate_stereo_warm_world_switch(&second, source.drawn_section_count)?;
+    let gate = driver
+        .host()
+        .world_gate_snapshot()
+        .context("synthetic-stereo round trip lost its gate")?;
+    if gate.crossing_count != initial_crossing_count + 2 || gate.armed {
+        bail!("synthetic-stereo gate round trip retained invalid hysteresis state: {gate:?}");
+    }
     if first.source_instance_id != source_id
         || first.destination_instance_id != destination_id
         || second.source_instance_id != destination_id
@@ -195,7 +212,7 @@ fn drive_warm_world_swap_roundtrip_if_requested(
         bail!("synthetic-stereo warm-world switch reports lost A-to-B-to-A identity");
     }
     eprintln!(
-        "warm_world_swap_stereo A={} B={} first_drawn={} return_drawn={} first_ms={:.3} return_ms={:.3}",
+        "warm_world_gate_stereo A={} B={} crossings=2 first_drawn={} return_drawn={} first_ms={:.3} return_ms={:.3}",
         first.source_seed,
         first.destination_seed,
         destination.drawn_section_count,
@@ -204,6 +221,46 @@ fn drive_warm_world_swap_roundtrip_if_requested(
         second.switch_elapsed_ms,
     );
     Ok(())
+}
+
+fn synthetic_stereo_gate_views(
+    driver: &mut OffscreenDriver,
+    size: [u32; 2],
+    oriented_distance: f64,
+) -> Result<[XrView; 2]> {
+    let gate = driver
+        .host()
+        .world_gate_snapshot()
+        .context("synthetic-stereo gate placement is unavailable")?;
+    let approach_sign = match gate.direction {
+        mclone_scene::WorldGateSwitchDirection::PositiveToNegative => 1.0,
+        mclone_scene::WorldGateSwitchDirection::NegativeToPositive => -1.0,
+    };
+    let offset = gate
+        .active_endpoint
+        .normal
+        .scale(approach_sign * oriented_distance);
+    let eye = gate
+        .active_endpoint
+        .feet_position
+        .add(offset)
+        .add(Vec3d::new(
+            0.0,
+            mclone_client::LOCAL_PLAYER_STANDING_EYE_HEIGHT,
+            0.0,
+        ));
+    let forward = gate.active_endpoint.normal.scale(-approach_sign);
+    // XR's tracked forward axis is -Z, so use the same yaw convention as
+    // XrTrackingOrigin rather than the flat-camera movement convention.
+    let yaw_radians = (-forward.x).atan2(-forward.z);
+    let speed = driver.host().camera_snapshot().speed_blocks_per_second;
+    driver
+        .host_mut()
+        .set_mono_player_camera(eye, yaw_radians, 0.0, speed);
+    Ok(synthetic_stereo_views(
+        driver.host().camera_snapshot(),
+        size,
+    ))
 }
 
 fn validate_stereo_warm_world_switch(

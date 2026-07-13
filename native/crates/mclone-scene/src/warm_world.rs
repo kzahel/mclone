@@ -10,6 +10,8 @@ use mclone_core::{ChunkPos, Vec3d};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render::opaque_world_gate::OpaqueWorldGate;
 use mclone_render_session::EngineCameraController;
 
 use crate::McloneSceneHostOptions;
@@ -28,6 +30,16 @@ const PROVISIONAL_GATE_APPROACH_DEPTH_BLOCKS: i32 = 2;
 const PROVISIONAL_GATE_HEIGHT_BLOCKS: i32 = 4;
 #[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_SURFACE_SEARCH_BLOCKS: i32 = 12;
+#[cfg(not(target_arch = "wasm32"))]
+const WORLD_GATE_WIDTH_BLOCKS: f64 = 3.0;
+#[cfg(not(target_arch = "wasm32"))]
+const WORLD_GATE_HEIGHT_BLOCKS: f64 = 4.0;
+#[cfg(not(target_arch = "wasm32"))]
+const WORLD_GATE_ENTER_MARGIN_BLOCKS: f64 = 0.35;
+#[cfg(not(target_arch = "wasm32"))]
+const WORLD_GATE_EXIT_MARGIN_BLOCKS: f64 = 0.15;
+#[cfg(not(target_arch = "wasm32"))]
+const WORLD_GATE_OBSERVATION_DEPTH_BLOCKS: f64 = 2.0;
 
 /// Stable client-side identity for one retained world instance.
 ///
@@ -85,13 +97,279 @@ impl WorldEntryPose {
     }
 }
 
-/// Provisional runtime-only gate endpoint. Slice 3 records these candidates but
-/// does not instantiate, render, or cross a gate.
+/// Provisional runtime-only gate endpoint resolved from a slot's authoritative
+/// accepted spawn pose and consumed by the Slice 6 paired-gate fixture.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorldGateEndpointCandidate {
     pub feet_position: Vec3d,
     pub center: Vec3d,
     pub normal: Vec3d,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldGateAvailability {
+    Warming,
+    Switchable,
+    Failed,
+}
+
+impl WorldGateAvailability {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Warming => "warming",
+            Self::Switchable => "switchable",
+            Self::Failed => "failed",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldGateSwitchDirection {
+    PositiveToNegative,
+    NegativeToPositive,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldGateSwitchDirection {
+    const fn approach_sign(self) -> f64 {
+        match self {
+            Self::PositiveToNegative => 1.0,
+            Self::NegativeToPositive => -1.0,
+        }
+    }
+
+    const fn destination_side_sign(self) -> f64 {
+        -self.approach_sign()
+    }
+
+    const fn reversed(self) -> Self {
+        match self {
+            Self::PositiveToNegative => Self::NegativeToPositive,
+            Self::NegativeToPositive => Self::PositiveToNegative,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldGateObservation {
+    None,
+    Armed,
+    Blocked,
+    Crossed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldGateSnapshot {
+    pub active_world_id: WorldInstanceId,
+    pub destination_world_id: WorldInstanceId,
+    pub active_endpoint: WorldGateEndpointCandidate,
+    pub destination_endpoint: WorldGateEndpointCandidate,
+    pub availability: WorldGateAvailability,
+    pub direction: WorldGateSwitchDirection,
+    pub armed: bool,
+    pub last_oriented_distance: Option<f64>,
+    pub crossing_count: u64,
+}
+
+/// Runtime-only paired gate and its shared visual-midpoint hysteresis.
+///
+/// Endpoint placement remains tied to each world's authoritative safe-surface
+/// spawn. The model owns transition policy but no GPU resources or saved blocks.
+#[derive(Clone, Debug, PartialEq)]
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct WorldGate {
+    active_world_id: WorldInstanceId,
+    destination_world_id: WorldInstanceId,
+    active_endpoint: WorldGateEndpointCandidate,
+    destination_endpoint: WorldGateEndpointCandidate,
+    availability: WorldGateAvailability,
+    direction: WorldGateSwitchDirection,
+    armed: bool,
+    last_oriented_distance: Option<f64>,
+    crossing_count: u64,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldGate {
+    pub(crate) fn new(
+        active_world_id: WorldInstanceId,
+        destination_world_id: WorldInstanceId,
+        active_endpoint: WorldGateEndpointCandidate,
+        destination_endpoint: WorldGateEndpointCandidate,
+    ) -> Self {
+        Self {
+            active_world_id,
+            destination_world_id,
+            active_endpoint,
+            destination_endpoint,
+            availability: WorldGateAvailability::Warming,
+            direction: WorldGateSwitchDirection::PositiveToNegative,
+            armed: false,
+            last_oriented_distance: None,
+            crossing_count: 0,
+        }
+    }
+
+    pub(crate) fn snapshot(&self) -> WorldGateSnapshot {
+        WorldGateSnapshot {
+            active_world_id: self.active_world_id,
+            destination_world_id: self.destination_world_id,
+            active_endpoint: self.active_endpoint,
+            destination_endpoint: self.destination_endpoint,
+            availability: self.availability,
+            direction: self.direction,
+            armed: self.armed,
+            last_oriented_distance: self.last_oriented_distance,
+            crossing_count: self.crossing_count,
+        }
+    }
+
+    pub(crate) fn set_availability(&mut self, availability: WorldGateAvailability) {
+        self.availability = availability;
+    }
+
+    pub(crate) fn synchronize(
+        &mut self,
+        active_world_id: WorldInstanceId,
+        destination_world_id: WorldInstanceId,
+        active_endpoint: WorldGateEndpointCandidate,
+        destination_endpoint: WorldGateEndpointCandidate,
+        availability: WorldGateAvailability,
+    ) {
+        let placement_changed = self.active_world_id != active_world_id
+            || self.destination_world_id != destination_world_id
+            || self.active_endpoint != active_endpoint
+            || self.destination_endpoint != destination_endpoint;
+        self.active_world_id = active_world_id;
+        self.destination_world_id = destination_world_id;
+        self.active_endpoint = active_endpoint;
+        self.destination_endpoint = destination_endpoint;
+        self.availability = availability;
+        if placement_changed {
+            self.armed = false;
+            self.last_oriented_distance = None;
+        }
+    }
+
+    pub(crate) fn render_gate(&self) -> OpaqueWorldGate {
+        let color = match self.availability {
+            WorldGateAvailability::Warming => [0.95, 0.34, 0.06, 1.0],
+            WorldGateAvailability::Switchable => [0.18, 0.24, 0.95, 1.0],
+            WorldGateAvailability::Failed => [0.75, 0.04, 0.08, 1.0],
+        };
+        OpaqueWorldGate::new(
+            glam_vec3_from_vec3d(self.active_endpoint.center),
+            glam_vec3_from_vec3d(self.active_endpoint.normal),
+            WORLD_GATE_WIDTH_BLOCKS as f32,
+            WORLD_GATE_HEIGHT_BLOCKS as f32,
+            color,
+        )
+    }
+
+    pub(crate) fn observe_visual_midpoint(&mut self, point: Vec3d) -> WorldGateObservation {
+        if !point.is_finite() {
+            self.armed = false;
+            self.last_oriented_distance = None;
+            return WorldGateObservation::None;
+        }
+        let delta = point.add(self.active_endpoint.center.scale(-1.0));
+        let signed_distance = dot(delta, self.active_endpoint.normal);
+        let tangent = Vec3d::new(
+            -self.active_endpoint.normal.z,
+            0.0,
+            self.active_endpoint.normal.x,
+        );
+        let lateral_distance = dot(delta, tangent).abs();
+        let inside_aperture = lateral_distance <= WORLD_GATE_WIDTH_BLOCKS * 0.5
+            && point.y >= self.active_endpoint.feet_position.y
+            && point.y <= self.active_endpoint.feet_position.y + WORLD_GATE_HEIGHT_BLOCKS;
+        let inside_observation_depth = signed_distance.abs() <= WORLD_GATE_OBSERVATION_DEPTH_BLOCKS;
+        if !inside_aperture || !inside_observation_depth {
+            self.armed = false;
+            self.last_oriented_distance = None;
+            return WorldGateObservation::None;
+        }
+
+        let oriented_distance = signed_distance * self.direction.approach_sign();
+        let previous = self.last_oriented_distance.replace(oriented_distance);
+        if oriented_distance >= WORLD_GATE_ENTER_MARGIN_BLOCKS {
+            self.armed = true;
+            return WorldGateObservation::Armed;
+        }
+        let crossed = self.armed
+            && previous.is_some_and(|previous| previous > -WORLD_GATE_EXIT_MARGIN_BLOCKS)
+            && oriented_distance <= -WORLD_GATE_EXIT_MARGIN_BLOCKS;
+        if !crossed {
+            return WorldGateObservation::None;
+        }
+        self.armed = false;
+        match self.availability {
+            WorldGateAvailability::Switchable => WorldGateObservation::Crossed,
+            WorldGateAvailability::Warming | WorldGateAvailability::Failed => {
+                // Keep a closed gate armed at its approach margin so a
+                // controller that cannot immediately resolve its physical
+                // body (notably room-scale XR) is rejected again next frame.
+                self.armed = true;
+                self.last_oriented_distance = Some(WORLD_GATE_ENTER_MARGIN_BLOCKS);
+                WorldGateObservation::Blocked
+            }
+        }
+    }
+
+    pub(crate) fn blocked_feet_position(&self, current: Vec3d) -> Vec3d {
+        if !current.is_finite() {
+            return self.active_endpoint.feet_position.add(
+                self.active_endpoint
+                    .normal
+                    .scale(self.direction.approach_sign() * WORLD_GATE_ENTER_MARGIN_BLOCKS),
+            );
+        }
+        let signed_distance = dot(
+            current.add(self.active_endpoint.center.scale(-1.0)),
+            self.active_endpoint.normal,
+        );
+        let target_signed_distance =
+            self.direction.approach_sign() * WORLD_GATE_ENTER_MARGIN_BLOCKS;
+        current.add(
+            self.active_endpoint
+                .normal
+                .scale(target_signed_distance - signed_distance),
+        )
+    }
+
+    pub(crate) fn destination_entry_pose(&self) -> WorldEntryPose {
+        world_gate_entry_pose_on_side(
+            self.destination_endpoint,
+            self.direction.destination_side_sign(),
+        )
+    }
+
+    pub(crate) fn return_entry_pose_after_switch(&self) -> WorldEntryPose {
+        let return_direction = self.direction.reversed();
+        world_gate_entry_pose_on_side(
+            self.active_endpoint,
+            return_direction.destination_side_sign(),
+        )
+    }
+
+    pub(crate) fn complete_switch(&mut self) {
+        std::mem::swap(&mut self.active_world_id, &mut self.destination_world_id);
+        std::mem::swap(&mut self.active_endpoint, &mut self.destination_endpoint);
+        self.direction = self.direction.reversed();
+        self.armed = false;
+        self.last_oriented_distance = None;
+        self.crossing_count = self.crossing_count.saturating_add(1);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn dot(left: Vec3d, right: Vec3d) -> f64 {
+    left.x * right.x + left.y * right.y + left.z * right.z
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
+    glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -425,7 +703,15 @@ pub(crate) fn entry_support_render_section(pose: WorldEntryPose) -> Option<Rende
 pub(crate) fn world_gate_destination_entry_pose(
     endpoint: WorldGateEndpointCandidate,
 ) -> WorldEntryPose {
-    let forward = endpoint.normal.scale(-1.0);
+    world_gate_entry_pose_on_side(endpoint, -1.0)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn world_gate_entry_pose_on_side(
+    endpoint: WorldGateEndpointCandidate,
+    side_sign: f64,
+) -> WorldEntryPose {
+    let forward = endpoint.normal.scale(side_sign);
     WorldEntryPose {
         feet_position: endpoint
             .feet_position
@@ -630,5 +916,99 @@ mod tests {
 
         assert_eq!(pose.feet_position, Vec3d::new(0.5, 64.0, 7.75));
         assert_eq!(pose.yaw_radians, 0.0);
+    }
+
+    fn paired_gate() -> WorldGate {
+        WorldGate::new(
+            WorldInstanceId::new(1),
+            WorldInstanceId::new(2),
+            WorldGateEndpointCandidate {
+                feet_position: Vec3d::new(0.5, 64.0, 6.5),
+                center: Vec3d::new(0.5, 66.0, 6.5),
+                normal: Vec3d::new(0.0, 0.0, -1.0),
+            },
+            WorldGateEndpointCandidate {
+                feet_position: Vec3d::new(10.5, 72.0, 20.5),
+                center: Vec3d::new(10.5, 74.0, 20.5),
+                normal: Vec3d::new(1.0, 0.0, 0.0),
+            },
+        )
+    }
+
+    #[test]
+    fn gate_hysteresis_requires_approach_then_exit_margin() {
+        let mut gate = paired_gate();
+        gate.set_availability(WorldGateAvailability::Switchable);
+
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.0)),
+            WorldGateObservation::Armed
+        );
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.45)),
+            WorldGateObservation::None
+        );
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.55)),
+            WorldGateObservation::None
+        );
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.7)),
+            WorldGateObservation::Crossed
+        );
+    }
+
+    #[test]
+    fn closed_gate_reports_blocked_instead_of_crossed() {
+        let mut gate = paired_gate();
+
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.0)),
+            WorldGateObservation::Armed
+        );
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.7)),
+            WorldGateObservation::Blocked
+        );
+        assert!(gate.snapshot().armed);
+        assert_eq!(
+            gate.observe_visual_midpoint(Vec3d::new(0.5, 66.0, 6.8)),
+            WorldGateObservation::Blocked
+        );
+        assert_eq!(
+            gate.blocked_feet_position(Vec3d::new(0.5, 64.0, 6.8)),
+            Vec3d::new(0.5, 64.0, 6.15),
+        );
+        assert_eq!(gate.snapshot().crossing_count, 0);
+    }
+
+    #[test]
+    fn paired_gate_reverses_direction_and_arrival_side_each_switch() {
+        let mut gate = paired_gate();
+        gate.set_availability(WorldGateAvailability::Switchable);
+
+        assert_eq!(
+            gate.destination_entry_pose().feet_position,
+            Vec3d::new(9.25, 72.0, 20.5)
+        );
+        assert_eq!(
+            gate.return_entry_pose_after_switch().feet_position,
+            Vec3d::new(0.5, 64.0, 5.25)
+        );
+
+        gate.complete_switch();
+
+        let snapshot = gate.snapshot();
+        assert_eq!(snapshot.active_world_id, WorldInstanceId::new(2));
+        assert_eq!(snapshot.destination_world_id, WorldInstanceId::new(1));
+        assert_eq!(
+            snapshot.direction,
+            WorldGateSwitchDirection::NegativeToPositive
+        );
+        assert_eq!(snapshot.crossing_count, 1);
+        assert_eq!(
+            gate.destination_entry_pose().feet_position,
+            Vec3d::new(0.5, 64.0, 5.25)
+        );
     }
 }

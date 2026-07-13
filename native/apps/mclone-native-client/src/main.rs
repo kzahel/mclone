@@ -127,7 +127,7 @@ fn main() -> Result<()> {
         Cli::WarmWorldSwapSmoke { options } => {
             let report = run_offscreen_warm_world_swap_smoke(&options)?;
             println!(
-                "warm-world swap smoke saved to {} ({}x{}, A={} B={}, frames={}, switches={}, A/B differing pixels={:.3}%, B steady delta={:.3}%)",
+                "warm-world gate smoke saved to {} ({}x{}, A={} B={}, captures={}, crossings={}, A/B differing pixels={:.3}%, B/gate delta={:.3}%)",
                 report.directory.display(),
                 report.width,
                 report.height,
@@ -136,7 +136,7 @@ fn main() -> Result<()> {
                 report.frames.len(),
                 report.switches.len(),
                 report.source_destination_difference_ratio * 100.0,
-                report.destination_steady_difference_ratio * 100.0,
+                report.destination_gate_difference_ratio * 100.0,
             );
             Ok(())
         }

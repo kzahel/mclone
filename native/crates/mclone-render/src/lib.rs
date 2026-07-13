@@ -14,6 +14,7 @@ pub mod fog;
 pub mod gpu_timestamps;
 pub mod gui;
 pub mod light_texture;
+pub mod opaque_world_gate;
 pub mod screen_effect;
 pub mod selection_outline;
 pub mod sky;

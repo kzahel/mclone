@@ -673,7 +673,8 @@ impl McloneSceneHost {
             .map(|kind| kind.label().to_ascii_uppercase())
             .unwrap_or_else(|| "REMOTE".to_owned());
         let actor_indices = self.active_world.render_stats.drawn_actor_index_count;
-        let lines = vec![
+        #[allow(unused_mut)]
+        let mut lines = vec![
             format!(
                 "POS {:.1} {:.1} {:.1}",
                 snapshot.eye.x, snapshot.eye.y, snapshot.eye.z
@@ -783,6 +784,27 @@ impl McloneSceneHost {
                 self.render_options.color_profile.label()
             ),
         ];
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(gate) = self.world_gate_snapshot() {
+            lines.insert(
+                0,
+                format!(
+                    "GATE {} W{}>W{} X{}",
+                    gate.availability.label().to_ascii_uppercase(),
+                    gate.active_world_id.get(),
+                    gate.destination_world_id.get(),
+                    gate.crossing_count,
+                ),
+            );
+        } else if let Some(standby) = self.warm_world_standby_snapshot() {
+            lines.insert(
+                0,
+                format!("GATE {}", standby.phase.label().to_ascii_uppercase()),
+            );
+            if let Some(failure) = standby.failure {
+                lines.insert(1, format!("GATE FAIL {failure}"));
+            }
+        }
         DebugOverlay::new("XR DEBUG", lines)
     }
 

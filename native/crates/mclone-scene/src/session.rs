@@ -326,6 +326,10 @@ impl McloneSceneHost {
             standby_world: None,
             warm_world_standby: None,
             #[cfg(not(target_arch = "wasm32"))]
+            world_gate: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            opaque_world_gate_renderer: None,
+            #[cfg(not(target_arch = "wasm32"))]
             warm_world_switch_sequence: 0,
             last_warm_world_switch: None,
             services: SceneHostServices {
@@ -507,6 +511,10 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            world_gate: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            opaque_world_gate_renderer: None,
             #[cfg(not(target_arch = "wasm32"))]
             warm_world_switch_sequence: 0,
             last_warm_world_switch: None,
@@ -701,6 +709,10 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            world_gate: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            opaque_world_gate_renderer: None,
             #[cfg(not(target_arch = "wasm32"))]
             warm_world_switch_sequence: 0,
             last_warm_world_switch: None,
@@ -1269,6 +1281,7 @@ impl McloneSceneHost {
         let renderer_shell_create_ms =
             elapsed_ms(self.services.clock.elapsed_since(shell_started_at));
         let renderer_multiview_required = device.features().contains(wgpu::Features::MULTIVIEW);
+        let gate_renderer = OpaqueWorldGateRenderer::new(device, self.color_format);
         let multiview_started_at = self.services.clock.now();
         if renderer_multiview_required {
             self.active_world
@@ -1277,6 +1290,9 @@ impl McloneSceneHost {
                 .context("materialize active multiview terrain pipelines for return standby")?;
             draw.materialize_multiview_renderer(device)
                 .context("materialize detached standby multiview terrain pipelines")?;
+            gate_renderer
+                .materialize_multiview_renderer(device)
+                .context("materialize opaque world gate multiview pipeline")?;
         }
         let renderer_multiview_create_ms = renderer_multiview_required
             .then(|| elapsed_ms(self.services.clock.elapsed_since(multiview_started_at)))
@@ -1372,6 +1388,7 @@ impl McloneSceneHost {
             destination_endpoint: None,
             failure: None,
         });
+        self.opaque_world_gate_renderer = Some(gate_renderer);
         log::info!(
             "warm-world standby queued id={} seed={} center=({}, {}) renderer_shell_ms={:.3} multiview_required={} multiview_ms={:.3} atlas={}x{} base_bytes={}",
             instance_id.get(),
@@ -1392,6 +1409,56 @@ impl McloneSceneHost {
         self.warm_world_standby
             .as_ref()
             .map(|state| state.snapshot(self.services.clock.now()))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn world_gate_snapshot(&self) -> Option<WorldGateSnapshot> {
+        self.world_gate.as_ref().map(WorldGate::snapshot)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn synchronize_world_gate_state(&mut self) {
+        let Some(state) = self.warm_world_standby.as_ref() else {
+            self.world_gate = None;
+            return;
+        };
+        let availability = match state.phase {
+            WarmWorldStandbyPhase::Switchable if state.readiness.switchable => {
+                WorldGateAvailability::Switchable
+            }
+            WarmWorldStandbyPhase::PlacementFailed
+            | WarmWorldStandbyPhase::Failed
+            | WarmWorldStandbyPhase::Cancelled => WorldGateAvailability::Failed,
+            _ => WorldGateAvailability::Warming,
+        };
+        let (Some(active_endpoint), Some(destination_endpoint), Some(standby)) = (
+            state.source_endpoint,
+            state.destination_endpoint,
+            self.standby_world.as_ref(),
+        ) else {
+            if let Some(gate) = self.world_gate.as_mut() {
+                gate.set_availability(availability);
+            }
+            return;
+        };
+        if let Some(gate) = self.world_gate.as_mut() {
+            gate.synchronize(
+                self.active_world.id,
+                standby.id,
+                active_endpoint,
+                destination_endpoint,
+                availability,
+            );
+        } else {
+            let mut gate = WorldGate::new(
+                self.active_world.id,
+                standby.id,
+                active_endpoint,
+                destination_endpoint,
+            );
+            gate.set_availability(availability);
+            self.world_gate = Some(gate);
+        }
     }
 
     pub fn active_world_instance_id(&self) -> WorldInstanceId {
@@ -1415,12 +1482,78 @@ impl McloneSceneHost {
         command: WarmWorldSelectionCommand,
     ) -> Result<WarmWorldSwitchReport> {
         match command {
-            WarmWorldSelectionCommand::SwapWithStandby => self.swap_with_switchable_warm_world(),
+            WarmWorldSelectionCommand::SwapWithStandby if self.world_gate.is_some() => {
+                self.swap_through_world_gate()
+            }
+            WarmWorldSelectionCommand::SwapWithStandby => {
+                self.swap_with_switchable_warm_world_using_poses(None)
+            }
         }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn swap_with_switchable_warm_world(&mut self) -> Result<WarmWorldSwitchReport> {
+    fn swap_through_world_gate(&mut self) -> Result<WarmWorldSwitchReport> {
+        let (destination_entry_pose, return_entry_pose) = {
+            let gate = self
+                .world_gate
+                .as_ref()
+                .context("world-gate selection requested without a gate model")?;
+            (
+                gate.destination_entry_pose(),
+                gate.return_entry_pose_after_switch(),
+            )
+        };
+        let report = self.swap_with_switchable_warm_world_using_poses(Some((
+            destination_entry_pose,
+            return_entry_pose,
+        )))?;
+        self.world_gate
+            .as_mut()
+            .expect("successful world-gate selection retains its gate model")
+            .complete_switch();
+        Ok(report)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn apply_world_gate_visual_midpoint(&mut self, point: Vec3d) -> Result<bool> {
+        let Some(observation) = self
+            .world_gate
+            .as_mut()
+            .map(|gate| gate.observe_visual_midpoint(point))
+        else {
+            return Ok(false);
+        };
+        match observation {
+            WorldGateObservation::Crossed => {
+                self.swap_through_world_gate()?;
+                Ok(true)
+            }
+            WorldGateObservation::Blocked => {
+                log::debug!("closed world gate rejected visual midpoint crossing");
+                let snapshot = self.active_world.camera.snapshot();
+                let feet = self.active_world.camera.feet_position();
+                let clamped_feet = self
+                    .world_gate
+                    .as_ref()
+                    .expect("blocked observation retains its gate")
+                    .blocked_feet_position(feet);
+                self.active_world.camera.set_player_feet_pose(
+                    clamped_feet,
+                    snapshot.yaw_radians,
+                    snapshot.pitch_radians,
+                );
+                let (changed, _) = self.commit_engine_camera_player_pose_timed()?;
+                Ok(changed)
+            }
+            WorldGateObservation::None | WorldGateObservation::Armed => Ok(false),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn swap_with_switchable_warm_world_using_poses(
+        &mut self,
+        gate_entry_poses: Option<(WorldEntryPose, WorldEntryPose)>,
+    ) -> Result<WarmWorldSwitchReport> {
         let state = self
             .warm_world_standby
             .as_ref()
@@ -1471,8 +1604,9 @@ impl McloneSceneHost {
                 destination_renderer_ready,
             );
         }
-        let destination_entry_pose =
-            world_gate_destination_entry_pose(selected_destination_endpoint);
+        let destination_entry_pose = gate_entry_poses
+            .map(|(destination, _)| destination)
+            .unwrap_or_else(|| world_gate_destination_entry_pose(selected_destination_endpoint));
         let destination_entry_section = entry_support_render_section(destination_entry_pose)
             .context("mapped warm-world destination pose has no entry section")?;
         if !standby.draw.contains_section(destination_entry_section)
@@ -1485,7 +1619,9 @@ impl McloneSceneHost {
                 destination_entry_section,
             );
         }
-        let return_entry_pose = world_gate_destination_entry_pose(selected_source_endpoint);
+        let return_entry_pose = gate_entry_poses
+            .map(|(_, return_pose)| return_pose)
+            .unwrap_or_else(|| world_gate_destination_entry_pose(selected_source_endpoint));
         let return_entry_section = entry_support_render_section(return_entry_pose)
             .context("mapped warm-world return pose has no entry section")?;
         if !self
@@ -1641,6 +1777,7 @@ impl McloneSceneHost {
             renderer_multiview_required,
             Some(selected_destination_endpoint),
             Some(selected_source_endpoint),
+            return_entry_pose,
         )?;
 
         self.warm_world_switch_sequence = self.warm_world_switch_sequence.saturating_add(1);
@@ -1754,14 +1891,12 @@ impl McloneSceneHost {
         renderer_multiview_required: bool,
         source_endpoint: Option<WorldGateEndpointCandidate>,
         destination_endpoint: Option<WorldGateEndpointCandidate>,
+        entry_pose: WorldEntryPose,
     ) -> Result<()> {
         let standby = self
             .standby_world
             .as_ref()
             .context("ownership exchange lost its return standby")?;
-        let entry_pose = destination_endpoint
-            .map(world_gate_destination_entry_pose)
-            .context("return standby lost its mapped destination endpoint")?;
         let entry_section = entry_support_render_section(entry_pose)
             .context("return standby departure pose has no entry section")?;
         let entry_section_gpu_resident = standby.draw.contains_section(entry_section);
@@ -1891,6 +2026,10 @@ impl McloneSceneHost {
         self.standby_world = None;
         state.phase = WarmWorldStandbyPhase::Cancelled;
         state.failure = Some(reason.to_owned());
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(gate) = self.world_gate.as_mut() {
+            gate.set_availability(WorldGateAvailability::Failed);
+        }
         log::info!(
             "warm-world standby cancelled id={} seed={} reason={reason}",
             state.instance_id.get(),

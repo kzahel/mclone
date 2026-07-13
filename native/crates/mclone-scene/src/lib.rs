@@ -39,9 +39,9 @@ use mclone_app_runtime::frame_pacing::{
 };
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
-    render_full_frame_for_view_with_far_lod,
-    render_full_frame_for_view_with_prepared_stereo_draw_in_slot,
-    render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot,
+    render_full_frame_for_view_with_far_lod_and_opaque_gate,
+    render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
     render_view_with_underwater_effect,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -113,6 +113,8 @@ use mclone_render::gui::{
     GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
     WorldGuiRenderer,
 };
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render::opaque_world_gate::OpaqueWorldGateRenderer;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render::screen_effect::{
@@ -460,6 +462,10 @@ pub struct McloneSceneHost {
     active_world: DrawableWorldSlot,
     standby_world: Option<DrawableWorldSlot>,
     warm_world_standby: Option<WarmWorldStandbyState>,
+    #[cfg(not(target_arch = "wasm32"))]
+    world_gate: Option<WorldGate>,
+    #[cfg(not(target_arch = "wasm32"))]
+    opaque_world_gate_renderer: Option<OpaqueWorldGateRenderer>,
     #[cfg(not(target_arch = "wasm32"))]
     warm_world_switch_sequence: u64,
     last_warm_world_switch: Option<WarmWorldSwitchReport>,
@@ -978,6 +984,22 @@ impl McloneSceneHost {
                 elapsed_ms(self.services.clock.elapsed_since(render_views_start));
             self.update_menu_panel_pose(render_views);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.world_gate.is_some() && matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
+            let midpoint =
+                (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+            if self.apply_world_gate_visual_midpoint(Vec3d::new(
+                f64::from(midpoint.x),
+                f64::from(midpoint.y),
+                f64::from(midpoint.z),
+            ))? {
+                let render_views_start = self.services.clock.now();
+                render_views = self.render_views(&views)?;
+                timing.render_views_ms +=
+                    elapsed_ms(self.services.clock.elapsed_since(render_views_start));
+                self.update_menu_panel_pose(render_views);
+            }
+        }
         self.render_prepared_frame(
             device,
             queue,
@@ -1024,6 +1046,22 @@ impl McloneSceneHost {
             timing.render_views_ms +=
                 elapsed_ms(self.services.clock.elapsed_since(render_views_start));
             self.update_menu_panel_pose(render_views);
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.world_gate.is_some() && matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
+            let midpoint =
+                (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+            if self.apply_world_gate_visual_midpoint(Vec3d::new(
+                f64::from(midpoint.x),
+                f64::from(midpoint.y),
+                f64::from(midpoint.z),
+            ))? {
+                let render_views_start = self.services.clock.now();
+                render_views = self.render_views(&views)?;
+                timing.render_views_ms +=
+                    elapsed_ms(self.services.clock.elapsed_since(render_views_start));
+                self.update_menu_panel_pose(render_views);
+            }
         }
         self.render_prepared_frame_multiview(
             device,
@@ -1458,7 +1496,18 @@ impl McloneSceneHost {
             );
             render_target = render_target.with_loaded_color();
         }
-        let split_translucent_terrain = include_actors && !actor_instances.is_empty();
+        #[cfg(not(target_arch = "wasm32"))]
+        let opaque_world_gate = self
+            .opaque_world_gate_renderer
+            .as_ref()
+            .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
+        #[cfg(target_arch = "wasm32")]
+        let opaque_world_gate: Option<(
+            &mclone_render::opaque_world_gate::OpaqueWorldGateRenderer,
+            mclone_render::opaque_world_gate::OpaqueWorldGate,
+        )> = None;
+        let split_translucent_terrain =
+            (include_actors && !actor_instances.is_empty()) || opaque_world_gate.is_some();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -1478,6 +1527,17 @@ impl McloneSceneHost {
                 terrain_phase,
             )
             .context("render XR terrain-only chunks")?;
+        if let Some((gate_renderer, gate)) = opaque_world_gate {
+            gate_renderer.render_in_slot(
+                queue,
+                &mut encoder,
+                RenderFrameTarget::color(target.color_view, target.size),
+                target.depth,
+                render_view,
+                Some(gate),
+                view_slot,
+            );
+        }
         if include_actors {
             self.actors
                 .render_in_slot(
@@ -1714,7 +1774,18 @@ impl McloneSceneHost {
             terrain_views,
             terrain_options,
         );
-        let split_translucent_terrain = include_actors && !actor_instances.is_empty();
+        #[cfg(not(target_arch = "wasm32"))]
+        let opaque_world_gate = self
+            .opaque_world_gate_renderer
+            .as_ref()
+            .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
+        #[cfg(target_arch = "wasm32")]
+        let opaque_world_gate: Option<(
+            &mclone_render::opaque_world_gate::OpaqueWorldGateRenderer,
+            mclone_render::opaque_world_gate::OpaqueWorldGate,
+        )> = None;
+        let split_translucent_terrain =
+            (include_actors && !actor_instances.is_empty()) || opaque_world_gate.is_some();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -1738,6 +1809,19 @@ impl McloneSceneHost {
             timing.multiview_terrain_ms =
                 elapsed_ms(self.services.clock.elapsed_since(terrain_start));
         }
+        if let Some((gate_renderer, gate)) = opaque_world_gate {
+            gate_renderer
+                .render_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size),
+                    target.depth,
+                    terrain_views,
+                    Some(gate),
+                )
+                .context("render opaque world gate multiview")?;
+        }
         let actor_stats = if include_actors {
             let actor_start = self.services.clock.now();
             let actor_stats = self
@@ -1757,30 +1841,30 @@ impl McloneSceneHost {
                 timing.multiview_actor_ms =
                     elapsed_ms(self.services.clock.elapsed_since(actor_start));
             }
-            if split_translucent_terrain {
-                let translucent_start = self.services.clock.now();
-                self.active_world
-                    .draw
-                    .render_prepared_multiview_stereo_draw_phase_with_options(
-                        &prepared_stereo_draw,
-                        device,
-                        queue,
-                        &mut encoder,
-                        render_target.with_loaded_color().with_loaded_depth(),
-                        terrain_views,
-                        terrain_options,
-                        TexturedSectionRenderPhase::Translucent,
-                    )
-                    .context("render XR terrain multiview translucent chunks")?;
-                if let Some(timing) = timing.as_deref_mut() {
-                    timing.multiview_terrain_ms +=
-                        elapsed_ms(self.services.clock.elapsed_since(translucent_start));
-                }
-            }
             actor_stats
         } else {
             ActorRenderStats::default()
         };
+        if split_translucent_terrain {
+            let translucent_start = self.services.clock.now();
+            self.active_world
+                .draw
+                .render_prepared_multiview_stereo_draw_phase_with_options(
+                    &prepared_stereo_draw,
+                    device,
+                    queue,
+                    &mut encoder,
+                    render_target.with_loaded_color().with_loaded_depth(),
+                    terrain_views,
+                    terrain_options,
+                    TexturedSectionRenderPhase::Translucent,
+                )
+                .context("render XR terrain multiview translucent chunks")?;
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_terrain_ms +=
+                    elapsed_ms(self.services.clock.elapsed_since(translucent_start));
+            }
+        }
         let mut ui_panel_stats = WorldGuiPanelRenderStats::default();
         let mut ui_draw_cache_stats = UiDrawCacheStats::default();
         if include_overlays {
@@ -2115,7 +2199,10 @@ impl McloneSceneHost {
             timing,
         )?;
         #[cfg(not(target_arch = "wasm32"))]
-        self.advance_warm_world_gpu(device, standby_deadline)?;
+        {
+            self.advance_warm_world_gpu(device, standby_deadline)?;
+            self.synchronize_world_gate_state();
+        }
         #[cfg(target_arch = "wasm32")]
         let _ = standby_deadline;
         Ok(upload)
@@ -2968,15 +3055,23 @@ impl McloneSceneHost {
         } else {
             None
         };
+        #[cfg(not(target_arch = "wasm32"))]
+        let opaque_world_gate = self
+            .opaque_world_gate_renderer
+            .as_ref()
+            .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
+        #[cfg(target_arch = "wasm32")]
+        let opaque_world_gate = None;
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
-            render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot(
+            render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
                 &mut self.active_world.draw,
                 prepared_draw,
+                opaque_world_gate,
                 Some(&mut self.actors),
                 Some(&mut self.screen_effects),
                 None,
@@ -2996,12 +3091,13 @@ impl McloneSceneHost {
             )
         } else {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
-            render_full_frame_for_view_with_prepared_stereo_draw_in_slot(
+            render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot(
                 frame,
                 target.depth,
                 &self.sky,
                 &mut self.active_world.draw,
                 prepared_draw,
+                opaque_world_gate,
                 Some(&mut self.actors),
                 Some(&mut self.screen_effects),
                 None,

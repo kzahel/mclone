@@ -6,26 +6,24 @@ Design north-star for showing a *second* world inside the current one: a lobby
 diorama, a tabletop seed explorer, a "palantir" window into a network-hosted
 world, and the shrink-and-fall transition between nested worlds.
 
-Status: **design plus a Slice 5 scene-owned scripted warm-world hot swap.** The
-engine does not yet compose live worlds or expose an interactive gate, but
-`McloneSceneHost` now
-owns one direct active `DrawableWorldSlot` and one optional detached standby.
-The launch-only harness runs two complete integrated hosts concurrently,
-acknowledges the standby's seed-dependent spawn pose, resolves paired
-terrain-relative endpoint candidates, and incrementally admits its retained
-CPU seed through the ordinary terrain upload lifecycle. The standby reaches an
-explicit `Switchable` state only after its mapped gate-exit terrain is
-GPU-resident and traversal-ready and its required renderer topology is
-materialized. Active terrain preparation remains first and the standby has
-hard poll, compile, result-acceptance, upload, and elapsed-work caps. It is
-still neither drawn nor
-simultaneously composed, but a shared selection command now maps the camera
-through paired endpoints and atomically swaps the complete active/standby
-slots. The previous active remains the ready return slot. A deterministic flat
-and synthetic-stereo A-to-B-to-A smoke proves next-frame drawing with no
-runtime reconstruction, switch-boundary upload, or lazy renderer creation.
-There is still no world registry or gate model/renderer.
-Separately,
+Status: **design plus a Slice 6 scene-owned interactive warm-world gate.** The
+engine still does not compose two worlds in one frame, but `McloneSceneHost`
+now owns one direct active `DrawableWorldSlot`, one optional detached standby,
+and—only for the launch diagnostic—a paired runtime-only `WorldGate`. The two
+integrated hosts remain concurrent and independently drawable. The standby
+acknowledges its seed-dependent spawn, resolves a terrain-relative endpoint,
+and incrementally admits its retained CPU seed through the normal upload path.
+It becomes `Switchable` only after mapped exit terrain and renderer topology
+are ready. A host-scoped `OpaqueWorldGateRenderer` draws the active endpoint as
+a two-sided, no-blend, reversed-Z depth-writing surface in mono, per-eye stereo,
+and full-frame multiview. Signed hysteresis uses the mono eye or stereo eye
+midpoint; warming/failed gates clamp locomotion, and a successful crossing
+atomically exchanges the complete slots before drawing the frame. The previous
+active remains the ready return world. Deterministic walking and synthetic
+stereo A-to-B-to-A smokes prove next-frame drawing with no runtime
+reconstruction, switch-boundary upload, or lazy renderer creation. There is
+still no N-world registry, persistence/product UI for gates, or simultaneous
+world composition. Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -42,7 +40,7 @@ implementation milestone is
 two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering.
 
-Last reconciled: 2026-07-13 (Tactical 174 Slice 5 checkpoint).
+Last reconciled: 2026-07-13 (Tactical 174 Slice 6 checkpoint).
 
 ## Motivation
 
@@ -137,13 +135,13 @@ idle/warm, verifies neither replica receives the other's chunks, changes the
 logical active selection without reconstructing either runtime, and relies on
 ordinary owned-value drop for independent shutdown.
 
-This proves instanceability and isolation below the scene owner. Slice 5
-keeps the production scene's direct active `DrawableWorldSlot` plus one
+This proves instanceability and isolation below the scene owner. Slice 6 keeps
+the production scene's direct active `DrawableWorldSlot` plus one
 optional detached slot with independent runtime, camera, lifecycle, storage,
 terrain draw/upload state, and provisional endpoint. Persistent-root isolation,
 authoritative pose acknowledgement, budgeted standby GPU admission, and exact
 entry/topology readiness are proven. The scene command now swaps both complete
-slots, while gate interaction remains a later slice.
+slots, and the paired gate invokes that command from visual-midpoint crossing.
 
 The representative launch smoke (`12345` active, `67890` standby, render
 distance 2) reaches GPU `Switchable` readiness in about 0.69 seconds flat and
@@ -162,17 +160,18 @@ from the older clean anchors. These are desktop-host receipts. A
 `MULTIVIEW`-capable device will materialize the lazy standby renderer before
 readiness, but the current Mac cannot supply that final device receipt.
 
-The Slice 5 scripted smoke maps to each seed's paired surface-relative exit and
+The Slice 6 walking smoke maps to each seed's paired surface-relative exit and
 preserves the sequence `1/12345 -> 2/67890 -> 1/12345`. Both atomic exchanges
-measured about 0.008 ms, did no renderer construction, compile submission,
-result acceptance, or GPU upload, and drew the destination on selected-world
-frame 1. Flat captures drew 27/4/6/27 sections across A-before, B-first,
-B-steady, and A-return; A/B differed in 86.896% of pixels and B's two frames
-were identical. Synthetic stereo likewise completed the round trip with both
-eyes on the same selected world. The final guarded no-standby release batch
-measured 2.504 ms median average / 4.346 ms median P95 with 1.1%/2.5% ranges,
-zero missed budgets, and zero accounting violations, clearing the single-world
-performance invariant. Interactive selection still waits for the opaque gate.
+do no renderer construction or switch-boundary compile/upload work and draw the
+destination on selected-world frame 1. `a-gate.png`, `b-first.png`,
+`b-gate.png`, and `a-return.png` are retained under `/tmp`; the two endpoint
+captures each contain 96.6% exact opaque-gate pixels plus occluding surrounding
+world pixels, and A/B differ in 98.5% of pixels. Synthetic stereo crosses from
+the eye midpoint and keeps both eyes on the same selected world. The Slice 6
+no-standby release batch measured 2.525 ms median average / 4.400 ms median P95
+with 6.5%/9.1% within-batch ranges, zero missed budgets, and zero accounting
+violations. Those medians are only 0.8%/1.2% above the accepted Slice 5 batch,
+clearing the single-world performance invariant.
 
 The near-term product shape is:
 

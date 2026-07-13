@@ -78,14 +78,17 @@ pub(crate) enum OffscreenScriptStep {
     AdvanceFrame {
         checkpoint: OffscreenScriptCheckpoint,
     },
-    SwapWarmWorldStandby,
+    FaceActiveWorldGate,
+    WalkForwardUntilWorldSwitch {
+        max_frames: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum OffscreenScriptCheckpoint {
     SourceBefore,
     DestinationFirst,
-    DestinationSteady,
+    DestinationGate,
     SourceReturn,
 }
 
@@ -104,6 +107,20 @@ struct OffscreenScriptRunner {
     cursor: usize,
     report: OffscreenScriptReport,
     switch_reports: Vec<mclone_scene::WarmWorldSwitchReport>,
+    walking: Option<OffscreenScriptWalkState>,
+    last_observed_switch_sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct OffscreenScriptWalkState {
+    source_world: mclone_scene::WorldInstanceId,
+    frame_count: u16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OffscreenScriptFrameDirective {
+    Advance(Option<OffscreenScriptCheckpoint>),
+    Complete,
 }
 
 impl OffscreenScriptRunner {
@@ -113,6 +130,8 @@ impl OffscreenScriptRunner {
             cursor: 0,
             report: OffscreenScriptReport::default(),
             switch_reports: Vec::new(),
+            walking: None,
+            last_observed_switch_sequence: 0,
         }
     }
 
@@ -121,22 +140,55 @@ impl OffscreenScriptRunner {
         host: &mut OffscreenFlatClientHost,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-    ) -> Result<Option<OffscreenScriptCheckpoint>> {
+    ) -> Result<OffscreenScriptFrameDirective> {
         while let Some(step) = self.script.steps.get(self.cursor).copied() {
-            self.cursor += 1;
             match step {
                 OffscreenScriptStep::AdvanceFrame { checkpoint } => {
+                    self.cursor += 1;
                     self.report.advance_frame_count += 1;
-                    return Ok(Some(checkpoint));
+                    return Ok(OffscreenScriptFrameDirective::Advance(Some(checkpoint)));
                 }
-                OffscreenScriptStep::SwapWarmWorldStandby => {
-                    self.report.warm_world_swap_count += 1;
-                    let report = host.driver.host_mut().apply_warm_world_selection_command(
-                        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
+                OffscreenScriptStep::FaceActiveWorldGate => {
+                    self.cursor += 1;
+                    host.face_active_world_gate()?;
+                }
+                OffscreenScriptStep::WalkForwardUntilWorldSwitch { max_frames } => {
+                    let walking = self.walking.get_or_insert(OffscreenScriptWalkState {
+                        source_world: host.driver.host().active_world_instance_id(),
+                        frame_count: 0,
+                    });
+                    if host.driver.host().active_world_instance_id() != walking.source_world {
+                        self.cursor += 1;
+                        self.walking = None;
+                        continue;
+                    }
+                    if walking.frame_count >= max_frames {
+                        let camera = host.driver.host().camera_snapshot();
+                        let gate = host.driver.host().world_gate_snapshot();
+                        bail!(
+                            "offscreen script did not cross the world gate within {max_frames} walking frames: eye={:?} gate={gate:?}",
+                            camera.eye,
+                        );
+                    }
+                    walking.frame_count += 1;
+                    let step_report = host.run_script(
+                        &OffscreenScript::from_steps([OffscreenScriptStep::InputFrame {
+                            frame: FlatInputFrame {
+                                forward: true,
+                                ..FlatInputFrame::default()
+                            },
+                            require_changed_action: None,
+                        }]),
+                        device,
+                        queue,
                     )?;
-                    self.switch_reports.push(report);
+                    self.report.input_frame_count += step_report.input_frame_count;
+                    self.report.world_action_count += step_report.world_action_count;
+                    self.report.advance_frame_count += 1;
+                    return Ok(OffscreenScriptFrameDirective::Advance(None));
                 }
                 immediate => {
+                    self.cursor += 1;
                     let step_report =
                         host.run_script(&OffscreenScript::from_steps([immediate]), device, queue)?;
                     self.report.input_frame_count += step_report.input_frame_count;
@@ -146,17 +198,20 @@ impl OffscreenScriptRunner {
                 }
             }
         }
-        Ok(None)
+        Ok(OffscreenScriptFrameDirective::Complete)
     }
 
     fn observe_rendered_frame(&mut self, host: &OffscreenFlatClientHost) {
-        let Some(pending) = self.switch_reports.last_mut() else {
+        let Some(updated) = host.driver.host().last_warm_world_switch_report() else {
             return;
         };
-        if pending.first_drawable_destination_frame.is_some() {
+        if updated.sequence > self.last_observed_switch_sequence {
+            self.last_observed_switch_sequence = updated.sequence;
+            self.report.warm_world_swap_count += 1;
+            self.switch_reports.push(updated);
             return;
         }
-        let Some(updated) = host.driver.host().last_warm_world_switch_report() else {
+        let Some(pending) = self.switch_reports.last_mut() else {
             return;
         };
         if updated.sequence == pending.sequence {
@@ -189,14 +244,14 @@ pub(crate) struct WarmWorldSwapSmokeReport {
     pub(crate) frames: Vec<WarmWorldSwapSmokeFrameReport>,
     pub(crate) switches: Vec<mclone_scene::WarmWorldSwitchReport>,
     pub(crate) source_destination_difference_ratio: f64,
-    pub(crate) destination_steady_difference_ratio: f64,
+    pub(crate) destination_gate_difference_ratio: f64,
 }
 
 struct WarmWorldSwapSmokeState {
     host: OffscreenFlatClientHost,
     script: OffscreenScriptRunner,
     frames: Vec<(
-        OffscreenScriptCheckpoint,
+        Option<OffscreenScriptCheckpoint>,
         mclone_scene::WorldInstanceId,
         i64,
         usize,
@@ -639,16 +694,14 @@ impl OffscreenFlatClientHost {
                         );
                     }
                 }
-                OffscreenScriptStep::SwapWarmWorldStandby => {
-                    report.warm_world_swap_count += 1;
-                    self.driver.host_mut().apply_warm_world_selection_command(
-                        mclone_scene::WarmWorldSelectionCommand::SwapWithStandby,
-                    )?;
-                }
                 OffscreenScriptStep::AdvanceFrame { checkpoint } => {
                     bail!(
                         "offscreen script checkpoint {checkpoint:?} requires the frame-advancing runner"
                     );
+                }
+                OffscreenScriptStep::FaceActiveWorldGate
+                | OffscreenScriptStep::WalkForwardUntilWorldSwitch { .. } => {
+                    bail!("offscreen world-gate walking requires the frame-advancing runner");
                 }
             }
         }
@@ -776,21 +829,49 @@ impl OffscreenFlatClientHost {
         self.commit_camera()?;
         Ok(())
     }
+
+    fn face_active_world_gate(&mut self) -> Result<()> {
+        let endpoint = self
+            .driver
+            .host()
+            .world_gate_snapshot()
+            .map(|snapshot| snapshot.active_endpoint)
+            .context("active world gate is unavailable for scripted facing")?;
+        let eye = self.driver.host().camera_snapshot().eye;
+        self.set_camera_look_at(
+            Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+            Vec3::new(
+                endpoint.center.x as f32,
+                endpoint.center.y as f32,
+                endpoint.center.z as f32,
+            ),
+        );
+        self.commit_camera()?;
+        Ok(())
+    }
 }
+
+// Walking locomotion advances at the player's collision-resolved pace rather
+// than the free-camera speed. Leave enough deterministic frames to clear the
+// 1.25-block approach offset on both terrain shapes without turning this into
+// an unbounded readiness wait.
+const WARM_WORLD_GATE_MAX_WALK_FRAMES: u16 = 32;
 
 fn warm_world_swap_script() -> OffscreenScript {
     OffscreenScript::from_steps([
         OffscreenScriptStep::AdvanceFrame {
             checkpoint: OffscreenScriptCheckpoint::SourceBefore,
         },
-        OffscreenScriptStep::SwapWarmWorldStandby,
-        OffscreenScriptStep::AdvanceFrame {
-            checkpoint: OffscreenScriptCheckpoint::DestinationFirst,
+        OffscreenScriptStep::WalkForwardUntilWorldSwitch {
+            max_frames: WARM_WORLD_GATE_MAX_WALK_FRAMES,
         },
+        OffscreenScriptStep::FaceActiveWorldGate,
         OffscreenScriptStep::AdvanceFrame {
-            checkpoint: OffscreenScriptCheckpoint::DestinationSteady,
+            checkpoint: OffscreenScriptCheckpoint::DestinationGate,
         },
-        OffscreenScriptStep::SwapWarmWorldStandby,
+        OffscreenScriptStep::WalkForwardUntilWorldSwitch {
+            max_frames: WARM_WORLD_GATE_MAX_WALK_FRAMES,
+        },
         OffscreenScriptStep::AdvanceFrame {
             checkpoint: OffscreenScriptCheckpoint::SourceReturn,
         },
@@ -799,9 +880,9 @@ fn warm_world_swap_script() -> OffscreenScript {
 
 fn warm_world_checkpoint_label(checkpoint: OffscreenScriptCheckpoint) -> &'static str {
     match checkpoint {
-        OffscreenScriptCheckpoint::SourceBefore => "a-before",
+        OffscreenScriptCheckpoint::SourceBefore => "a-gate",
         OffscreenScriptCheckpoint::DestinationFirst => "b-first",
-        OffscreenScriptCheckpoint::DestinationSteady => "b-steady",
+        OffscreenScriptCheckpoint::DestinationGate => "b-gate",
         OffscreenScriptCheckpoint::SourceReturn => "a-return",
     }
 }
@@ -820,6 +901,20 @@ fn rgba_pixel_difference_ratio(left: &[u8], right: &[u8]) -> Result<f64> {
         .filter(|(left, right)| left[..3] != right[..3])
         .count();
     Ok(differing as f64 / (left.len() / 4).max(1) as f64)
+}
+
+fn rgba_exact_pixel_ratio(pixels: &[u8], color: [u8; 4]) -> Result<f64> {
+    if pixels.len() % 4 != 0 {
+        bail!(
+            "cannot inspect non-RGBA capture with {} bytes",
+            pixels.len()
+        );
+    }
+    let matches = pixels
+        .chunks_exact(4)
+        .filter(|pixel| **pixel == color)
+        .count();
+    Ok(matches as f64 / (pixels.len() / 4).max(1) as f64)
 }
 
 fn validate_warm_world_switch_report(report: &mclone_scene::WarmWorldSwitchReport) -> Result<()> {
@@ -878,11 +973,12 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let startup_camera = screenshot_startup_camera(&scene, StartupWaitPolicy::Idle);
+    let script_frame_count = usize::from(WARM_WORLD_GATE_MAX_WALK_FRAMES) * 2 + 5;
     let (loop_report, frame_pixels, state) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
             width: options.width,
             height: options.height,
-            frame_count: 4,
+            frame_count: script_frame_count,
             pace_frame_duration: None,
         },
         move |device, queue, format, size| {
@@ -903,14 +999,18 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
             Ok(WarmWorldSwapSmokeState {
                 host,
                 script: OffscreenScriptRunner::new(warm_world_swap_script()),
-                frames: Vec::with_capacity(4),
+                frames: Vec::with_capacity(script_frame_count),
             })
         },
-        |index, frame, state| {
-            let checkpoint = state
-                .script
-                .prepare_next_frame(&mut state.host, frame.device, frame.queue)?
-                .with_context(|| format!("warm-world script ended before capture frame {index}"))?;
+        |_index, frame, state| {
+            let checkpoint =
+                match state
+                    .script
+                    .prepare_next_frame(&mut state.host, frame.device, frame.queue)?
+                {
+                    OffscreenScriptFrameDirective::Advance(checkpoint) => checkpoint,
+                    OffscreenScriptFrameDirective::Complete => None,
+                };
             let summary = state
                 .host
                 .render_frame(frame, OffscreenFlatClientFrameOptions::default())?;
@@ -925,28 +1025,23 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
         },
     )?;
 
-    if !state.script.complete()
-        || state.script.report.advance_frame_count != 4
-        || state.script.report.warm_world_swap_count != 2
-    {
+    if !state.script.complete() || state.script.report.warm_world_swap_count != 2 {
         bail!(
-            "warm-world script did not complete its 4-frame/2-switch sequence: {:#?}",
+            "warm-world script did not complete its two-crossing sequence: {:#?}",
             state.script.report
         );
     }
     let expected_checkpoints = [
         OffscreenScriptCheckpoint::SourceBefore,
-        OffscreenScriptCheckpoint::DestinationFirst,
-        OffscreenScriptCheckpoint::DestinationSteady,
+        OffscreenScriptCheckpoint::DestinationGate,
         OffscreenScriptCheckpoint::SourceReturn,
     ];
-    if state.frames.len() != expected_checkpoints.len()
-        || !state
-            .frames
-            .iter()
-            .zip(expected_checkpoints)
-            .all(|((checkpoint, _, _, _), expected)| *checkpoint == expected)
-    {
+    let actual_checkpoints = state
+        .frames
+        .iter()
+        .filter_map(|(checkpoint, _, _, _)| *checkpoint)
+        .collect::<Vec<_>>();
+    if actual_checkpoints != expected_checkpoints {
         bail!("warm-world script captured an unexpected checkpoint sequence");
     }
     if state.script.switch_reports.len() != 2 {
@@ -958,11 +1053,51 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
 
     let first = &state.script.switch_reports[0];
     let second = &state.script.switch_reports[1];
-    let source_id = state.frames[0].1;
-    let destination_id = state.frames[1].1;
+    let source_gate_index = state
+        .frames
+        .iter()
+        .position(|(checkpoint, _, _, _)| {
+            *checkpoint == Some(OffscreenScriptCheckpoint::SourceBefore)
+        })
+        .context("warm-world gate smoke did not capture the source gate")?;
+    let source_id = state.frames[source_gate_index].1;
+    let destination_first_index = state
+        .frames
+        .iter()
+        .enumerate()
+        .skip(source_gate_index + 1)
+        .find_map(|(index, (_, id, _, _))| (*id != source_id).then_some(index))
+        .context("warm-world walking never selected the destination")?;
+    let destination_id = state.frames[destination_first_index].1;
+    let destination_gate_index = state
+        .frames
+        .iter()
+        .position(|(checkpoint, _, _, _)| {
+            *checkpoint == Some(OffscreenScriptCheckpoint::DestinationGate)
+        })
+        .context("warm-world gate smoke did not capture the destination gate")?;
+    let source_return_index = state
+        .frames
+        .iter()
+        .enumerate()
+        .skip(destination_gate_index + 1)
+        .find_map(|(index, (_, id, _, _))| (*id == source_id).then_some(index))
+        .context("warm-world walking never returned to the source")?;
+    let selected_frames = [
+        (OffscreenScriptCheckpoint::SourceBefore, source_gate_index),
+        (
+            OffscreenScriptCheckpoint::DestinationFirst,
+            destination_first_index,
+        ),
+        (
+            OffscreenScriptCheckpoint::DestinationGate,
+            destination_gate_index,
+        ),
+        (OffscreenScriptCheckpoint::SourceReturn, source_return_index),
+    ];
     if source_id == destination_id
-        || state.frames[2].1 != destination_id
-        || state.frames[3].1 != source_id
+        || state.frames[destination_gate_index].1 != destination_id
+        || state.frames[source_return_index].1 != source_id
         || first.source_instance_id != source_id
         || first.destination_instance_id != destination_id
         || second.source_instance_id != destination_id
@@ -970,10 +1105,10 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     {
         bail!("warm-world A-to-B-to-A instance identity was not conserved");
     }
-    if state.frames[0].2 != options.scene.seed
-        || state.frames[1].2 != destination_seed
-        || state.frames[2].2 != destination_seed
-        || state.frames[3].2 != options.scene.seed
+    if state.frames[source_gate_index].2 != options.scene.seed
+        || state.frames[destination_first_index].2 != destination_seed
+        || state.frames[destination_gate_index].2 != destination_seed
+        || state.frames[source_return_index].2 != options.scene.seed
     {
         bail!("warm-world A-to-B-to-A seed selection was not conserved");
     }
@@ -987,11 +1122,48 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     {
         bail!("warm-world runtime counters regressed across the round trip");
     }
+    let gate = state
+        .host
+        .driver
+        .host()
+        .world_gate_snapshot()
+        .context("warm-world walking lost its gate model")?;
+    if gate.crossing_count != 2
+        || gate.active_world_id != source_id
+        || gate.destination_world_id != destination_id
+        || gate.direction != mclone_scene::WorldGateSwitchDirection::PositiveToNegative
+    {
+        bail!("warm-world gate did not retain its paired A-to-B return state: {gate:#?}");
+    }
 
-    let source_destination_difference_ratio =
-        rgba_pixel_difference_ratio(&frame_pixels[0], &frame_pixels[1])?;
-    let destination_steady_difference_ratio =
-        rgba_pixel_difference_ratio(&frame_pixels[1], &frame_pixels[2])?;
+    let source_destination_difference_ratio = rgba_pixel_difference_ratio(
+        &frame_pixels[source_gate_index],
+        &frame_pixels[destination_first_index],
+    )?;
+    let destination_gate_difference_ratio = rgba_pixel_difference_ratio(
+        &frame_pixels[destination_first_index],
+        &frame_pixels[destination_gate_index],
+    )?;
+    // The switchable diagnostic surface is written as exact opaque RGBA8.
+    // Require substantial coverage on both endpoints while retaining some
+    // surrounding terrain/sky pixels; the rendered captures are still
+    // inspected for the concrete nearer-terrain occlusion arrangement.
+    const SWITCHABLE_GATE_RGBA: [u8; 4] = [46, 61, 242, 255];
+    let source_gate_pixel_ratio =
+        rgba_exact_pixel_ratio(&frame_pixels[source_gate_index], SWITCHABLE_GATE_RGBA)?;
+    let destination_gate_pixel_ratio =
+        rgba_exact_pixel_ratio(&frame_pixels[destination_gate_index], SWITCHABLE_GATE_RGBA)?;
+    for (label, ratio) in [
+        ("source", source_gate_pixel_ratio),
+        ("destination", destination_gate_pixel_ratio),
+    ] {
+        if !(0.2..0.995).contains(&ratio) {
+            bail!(
+                "warm-world {label} gate did not retain opaque partial-frame coverage: {:.3}%",
+                ratio * 100.0,
+            );
+        }
+    }
     if source_destination_difference_ratio < 0.02 {
         bail!(
             "warm-world destination is not visually distinct from source: {:.3}% differing pixels",
@@ -1000,9 +1172,9 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     }
 
     let mut frames = Vec::with_capacity(4);
-    for ((checkpoint, instance_id, seed, drawn_section_count), pixels) in
-        state.frames.iter().copied().zip(&frame_pixels)
-    {
+    for (checkpoint, index) in selected_frames {
+        let (_, instance_id, seed, drawn_section_count) = state.frames[index];
+        let pixels = &frame_pixels[index];
         if drawn_section_count == 0 {
             bail!("warm-world checkpoint {checkpoint:?} rendered a blank terrain frame");
         }
@@ -1066,13 +1238,27 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     std::fs::write(
         &report_path,
         serde_json::to_vec_pretty(&serde_json::json!({
-            "schema": 1,
+            "schema": 2,
             "width": loop_report.width,
             "height": loop_report.height,
             "source_seed": options.scene.seed,
             "destination_seed": destination_seed,
             "source_destination_difference_ratio": source_destination_difference_ratio,
-            "destination_steady_difference_ratio": destination_steady_difference_ratio,
+            "destination_gate_difference_ratio": destination_gate_difference_ratio,
+            "source_gate_pixel_ratio": source_gate_pixel_ratio,
+            "destination_gate_pixel_ratio": destination_gate_pixel_ratio,
+            "gate": {
+                "crossing_count": gate.crossing_count,
+                "availability": gate.availability.label(),
+                "direction": format!("{:?}", gate.direction),
+                "active_world_id": gate.active_world_id.get(),
+                "destination_world_id": gate.destination_world_id.get(),
+            },
+            "script": {
+                "input_frame_count": state.script.report.input_frame_count,
+                "advance_frame_count": state.script.report.advance_frame_count,
+                "warm_world_swap_count": state.script.report.warm_world_swap_count,
+            },
             "loop_timing_ms": {
                 "setup": loop_report.setup_ms,
                 "total": loop_report.total_frame_ms,
@@ -1102,7 +1288,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
         frames,
         switches: state.script.switch_reports,
         source_destination_difference_ratio,
-        destination_steady_difference_ratio,
+        destination_gate_difference_ratio,
     })
 }
 
@@ -1755,7 +1941,7 @@ mod tests {
     }
 
     #[test]
-    fn warm_world_swap_script_advances_a_to_b_to_a_at_frame_boundaries() {
+    fn warm_world_swap_script_walks_through_both_gate_directions() {
         let script = warm_world_swap_script();
 
         assert_eq!(script.steps().len(), 6);
@@ -1769,10 +1955,17 @@ mod tests {
             script
                 .steps()
                 .iter()
-                .filter(|step| matches!(step, OffscreenScriptStep::SwapWarmWorldStandby))
+                .filter(|step| matches!(
+                    step,
+                    OffscreenScriptStep::WalkForwardUntilWorldSwitch { .. }
+                ))
                 .count(),
             2
         );
+        assert!(matches!(
+            script.steps()[2],
+            OffscreenScriptStep::FaceActiveWorldGate
+        ));
         assert!(matches!(
             script.steps()[5],
             OffscreenScriptStep::AdvanceFrame {

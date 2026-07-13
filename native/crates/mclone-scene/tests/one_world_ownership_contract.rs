@@ -82,6 +82,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "active_world",
     "standby_world",
     "warm_world_standby",
+    "world_gate",
+    "opaque_world_gate_renderer",
     "warm_world_switch_sequence",
     "last_warm_world_switch",
     "services",
@@ -164,7 +166,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 20);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 73);
+    assert_eq!(host_fields.len(), 75);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -202,6 +204,8 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("active_world,"));
         assert!(constructor.contains("standby_world: None,"));
         assert!(constructor.contains("warm_world_standby: None,"));
+        assert!(constructor.contains("world_gate: None,"));
+        assert!(constructor.contains("opaque_world_gate_renderer: None,"));
         assert!(constructor.contains("warm_world_switch_sequence: 0,"));
         assert!(constructor.contains("last_warm_world_switch: None,"));
     }
@@ -210,7 +214,7 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
 #[test]
 fn warm_world_selection_exchanges_complete_slots_without_reconstruction() {
     let source = read("src/session.rs");
-    let select = braced_item(&source, "fn swap_with_switchable_warm_world(");
+    let select = braced_item(&source, "fn swap_with_switchable_warm_world_using_poses(");
     assert_in_order(
         select,
         &[
@@ -306,6 +310,8 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     );
     assert!(begin.contains("&[],"));
     assert!(!begin.contains("self.active_world.install("));
+    assert!(begin.contains("OpaqueWorldGateRenderer::new("));
+    assert!(begin.contains("self.opaque_world_gate_renderer = Some(gate_renderer);"));
 
     let advance = braced_item(&source, "fn advance_warm_world_standby(");
     assert!(advance.contains("startup.pump.step(camera_position)"));

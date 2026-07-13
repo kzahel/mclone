@@ -15,6 +15,7 @@ use mclone_render::entity::{
 use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodRenderer};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
+use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
@@ -468,6 +469,7 @@ impl FlatRenderResources {
             SINGLE_VIEW_SLOT,
             Some(&mut self.far_lod),
             far_lod_mesh,
+            None,
             None,
             None,
             None,
@@ -1035,6 +1037,65 @@ where
         None,
         None,
         None,
+        None,
+        render_stats,
+    )
+}
+
+/// Scene-owned variant of [`render_full_frame_for_view_with_far_lod`] with one
+/// optional opaque gate inserted after opaque terrain and before actors and
+/// translucent terrain. All resources still share the caller's depth target.
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_far_lod_and_opaque_gate<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        SINGLE_VIEW_SLOT,
+        far_lod,
+        far_lod_mesh,
+        None,
+        None,
+        opaque_world_gate,
+        None,
         render_stats,
     )
 }
@@ -1082,6 +1143,7 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
         None,
         None,
         None,
@@ -1180,6 +1242,7 @@ where
         gui,
         build_gui_draw,
         view_slot,
+        None,
         None,
         None,
         None,
@@ -1286,6 +1349,7 @@ where
         Some(prepared_records),
         None,
         None,
+        None,
         render_stats,
     )
 }
@@ -1340,6 +1404,64 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
+        None,
+        None,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        far_lod,
+        far_lod_mesh,
+        None,
+        Some(prepared_draw),
+        opaque_world_gate,
         None,
         render_stats,
     )
@@ -1441,6 +1563,7 @@ where
         None,
         Some(prepared_records),
         None,
+        None,
         Some(&mut timing),
         render_stats,
     )?;
@@ -1498,6 +1621,68 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
+        None,
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot<
+    BuildGuiDraw,
+>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        far_lod,
+        far_lod_mesh,
+        None,
+        Some(prepared_draw),
+        opaque_world_gate,
         Some(&mut timing),
         render_stats,
     )?;
@@ -1527,6 +1712,7 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
     mut timing: Option<&mut FullFrameRenderTiming>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary>
@@ -1609,7 +1795,7 @@ where
         if far_lod_depth_ready {
             render_target = render_target.with_loaded_depth();
         }
-        let split_translucent_terrain = !actor_instances.is_empty();
+        let split_translucent_terrain = !actor_instances.is_empty() || opaque_world_gate.is_some();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -1636,6 +1822,17 @@ where
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
+        if let Some((gate_renderer, gate)) = opaque_world_gate {
+            gate_renderer.render_in_slot(
+                frame.queue,
+                frame.encoder,
+                frame.target,
+                depth,
+                render_view,
+                Some(gate),
+                view_slot,
+            );
+        }
         if !actor_instances.is_empty() {
             let actor_start = timing.is_some().then(std::time::Instant::now);
             actor_stats = actors

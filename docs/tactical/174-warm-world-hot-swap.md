@@ -1,6 +1,6 @@
 # 174: Warm World Hot Swap
 
-Status: Slice 4 GPU-warm standby checkpoint ready for review 2026-07-13.
+Status: Slice 6 opaque interactive gate checkpoint ready for review 2026-07-13.
 Slice 0's lower-level dual-integrated-host proof landed in commit `a31ac944`;
 Slice 1's ownership audit, characterization locks, and one-world baselines are
 recorded below. Slice 2 grouped the audited 13 per-world fields in one concrete
@@ -10,13 +10,15 @@ acknowledgement, CPU seed retention, endpoint resolution, and explicit failure
 diagnostics. Slice 4 converts that seed into conserved incremental upload work,
 uses the active preparation path under hard standby caps, publishes exact
 GPU/topology readiness, and reaches `Switchable` without drawing or selecting
-the second world. Flat and synthetic-stereo two-host smokes pass. A
-contemporaneous untouched-Slice-3 control clears the no-request performance
-comparison after both binaries drifted above the older clean timing anchor.
-Slices 5–7 are unimplemented. First-multiview-pipeline device timing remains a
-named evidence gap because the current macOS adapter does not expose
-`wgpu::Features::MULTIVIEW`; the capable-device path now materializes that
-renderer before readiness, but still needs an XR/Windows receipt.
+the second world. Slice 5 exchanges the two complete slots atomically and keeps
+the old active world ready for return. Slice 6 instantiates the paired
+runtime-only fixture, renders it as an opaque depth-writing surface, and crosses
+it A-to-B-to-A from real flat walking and the synthetic stereo eye midpoint.
+Flat, per-eye stereo, no-request, ownership, web/WASM, and release-performance
+gates pass. Slice 7 lifecycle/background-cost closeout remains. A capable-device
+full-frame multiview receipt remains a named gap because the current macOS
+adapter does not expose `wgpu::Features::MULTIVIEW`; the path materializes both
+terrain and gate multiview pipelines before readiness when that feature exists.
 
 Topic: `embedded-worlds`
 
@@ -73,9 +75,10 @@ Slice 3 now retains one `standby_world: Option<DrawableWorldSlot>` beside the
 direct active slot. `--warm-world-standby-seed` constructs a second local
 startup pump and empty terrain shell before presentation, advances it once per
 scene frame, accepts its authoritative safe-surface pose into its own camera,
-and retains its startup meshes as CPU data. It continues polling ordered
-updates, but does not upload or draw standby terrain. A public diagnostic
-snapshot reports phase, timing, memory, pose/endpoints, and failure state.
+retains its startup meshes as CPU data, then incrementally admits them into its
+own GPU draw store. It continues polling ordered updates without drawing the
+standby. A public diagnostic snapshot reports phase, timing, memory,
+pose/endpoints, readiness, and failure state.
 
 `StartedSceneRuntime` in `mclone-scene/src/session.rs` remains a useful partial
 native seam: it already returns runtime, camera, draw resources, and render
@@ -84,8 +87,17 @@ stats before the caller installs them. Slice 2 adds the separate target-neutral
 provided-runtime, provided-scene-runtime, local completion, external/web
 completion, and native replacement publish the same core cluster. Detached
 standby GPU admission now reuses the same extracted preparation path as the
-active slot. It remains deliberately invisible and unselectable until Slice 5
-adds the atomic selection command.
+active slot. Slice 5 added the atomic whole-slot selection command, and Slice 6
+now drives it through the shared paired-gate controller rather than an
+app-owned direct selection step.
+
+The launch-only request owns a `WorldGate` and host-scoped
+`OpaqueWorldGateRenderer` only when a standby was requested. Endpoint placement
+still derives from each slot's accepted seed-dependent surface pose. The gate
+is a three-by-four-block runtime quad with no saved blocks or catalog record;
+warming/failed gates reject and clamp locomotion, while a switchable gate uses
+signed enter/exit hysteresis. Mono uses the visual eye and XR uses the stereo
+midpoint so both eyes exchange worlds before either is rendered.
 
 ## Slice 1 Architecture Checkpoint
 
@@ -95,8 +107,9 @@ performance receipts that Slice 2 must preserve.
 
 ### Complete Field Ownership Audit
 
-`McloneSceneHost` has 81 mutable fields. The following is the complete primary
-ownership classification; every field appears exactly once. "Shareable" means
+At Slice 1, `McloneSceneHost` had 81 mutable fields. The following is that
+checkpoint's complete primary ownership classification; every then-current
+field appears exactly once. "Shareable" means
 one host-owned renderer may be reused serially by whichever world is selected.
 It does not claim that its internal scratch buffers are immutable.
 
@@ -1160,7 +1173,7 @@ constructing/uploading a world at the atomic boundary. Interactive crossing,
 the opaque gate model/renderer, occlusion fixtures, and a capable-device
 multiview receipt remain Slice 6/7 work.
 
-### Slice 6: Shared Opaque World Gate
+### Slice 6: Shared Opaque World Gate — Checkpoint Ready
 
 Turn scripted selection into the interactive milestone.
 
@@ -1203,8 +1216,90 @@ Deliverables:
   and inspect the first drawable gate frame and both post-switch worlds under
   `/tmp`.
 
+Implementation and evidence (2026-07-13):
+
+- `WorldGate` owns the two world ids/endpoints, active switch direction,
+  `Warming`/`Switchable`/`Failed` availability, enter/exit hysteresis, last
+  signed distance, armed state, and crossing count. Its three-by-four surface
+  remains a runtime scene fixture. It creates no block, block entity, catalog
+  row, or persistence record.
+- `OpaqueWorldGateRenderer` is a shared renderer with no blend, `DEPTH_FORMAT`,
+  reversed-Z `GreaterEqual`, depth writes enabled, and `cull_mode: None`. It is
+  submitted after opaque terrain and before actors/translucency. Ordinary
+  mono/per-eye rendering uses separate per-view uniform/vertex slots; the lazy
+  full-frame multiview variant uploads two distinct view-projection matrices.
+  A requested multiview topology materializes the gate and terrain pipelines
+  before readiness. The current Mac still cannot supply the final
+  `MULTIVIEW`-capable device receipt.
+- The host allocates neither model nor renderer without
+  `--warm-world-standby-seed`. Mono camera commits return directly when no gate
+  exists, and live stereo/multiview frames skip signed-distance work. With the
+  request, both endpoints derive from their slot's authoritative accepted
+  surface pose. Flat and XR debug overlays expose concise readiness/failure and
+  crossing facts.
+- Visual crossing uses the mono eye or the midpoint of the two transformed XR
+  render views. A 0.35-block enter margin arms the gate and a 0.15-block exit
+  margin crosses it. Closed gates remain armed and clamp the physical feet pose
+  back to the approach margin, so continued locomotion is rejected rather than
+  slipping through on the following frame. A successful crossing exchanges
+  ownership before render views are recomputed, preventing split-eye worlds.
+- The frame-advancing offscreen script now faces and walks through the actual
+  gate in both directions; there is no direct selection step. The accepted run
+  needed three walking frames per direction and retained
+  `1/12345 -> 2/67890 -> 1/12345`. Its two commands measured 0.009/0.007 ms,
+  materialized no renderer, and performed zero switch-boundary upload, compile
+  submission, or result acceptance. Destination frames 1 drew 3 and 17
+  sections; the return's first ordinary preparation applied one bounded upload
+  and neither first frame submitted or accepted compile work.
+- `/tmp/mclone-warm-world-swap` contains `a-gate.png`, `b-first.png`,
+  `b-gate.png`, `a-return.png`, and schema-2 `report.json`. A/B differed in
+  98.509% of pixels. Both gate captures contained 96.625% exact opaque gate
+  pixels plus visible sky/terrain/foliage occlusion. All four were inspected:
+  nearer world geometry hides gate edges, the solid gate hides farther world
+  pixels, and both post-crossing seeds are drawable without a blank frame.
+- The synthetic-stereo smoke arms and crosses through the transformed eye
+  midpoint rather than calling selection directly. It completed both
+  directions, drew four sections on first B and 33 on first returned A, and the
+  final 640x640-per-eye capture visibly retained the opaque gate, surrounding
+  terrain, 234,238 differing eye pixels, 33 drawn sections, and UI composition
+  in both eyes. The ordinary no-standby stereo lane remains 42 resident/eight
+  drawn sections with 249,679 differing eye pixels. Both captures were
+  inspected.
+- Before the no-standby release batch, load average was 2.68/2.41/2.13 on the
+  14-core M4 Pro and the busiest observed process used 3.7% CPU; no compiler,
+  emulator, or high-CPU test was active. Five already-built release averages
+  were 2.617, 2.453, 2.525, 2.505, and 2.571 ms (median 2.525; 6.5% range).
+  P95 values were 4.596, 4.194, 4.409, 4.400, and 4.318 ms (median 4.400;
+  9.1% range). Every run retained 1,936 initial sections with zero over-budget
+  frames and zero accounting violations. The median average/P95 are only
+  0.8%/1.2% above Slice 5's accepted 2.504/4.346 ms batch.
+- `mclone-render` gate tests (3), `mclone-scene` (106 unit + 8 ownership),
+  `mclone-native-client` (151), `mclone-app-runtime` (240 unit plus ownership
+  integrations), dual-integrated-host persistence/isolation (2), thin-adapter
+  purity, desktop offscreen, timedemo, frame-budget, ordinary stereo, walking
+  gate, synthetic-stereo gate, and web/WASM gates pass. The ordinary desktop
+  capture remains 64 resident/11 drawn sections with two actors and was
+  inspected.
+
+Manual desktop verification uses the ordinary window path:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client \
+  --bin mclone-native-client -- --seed 12345 \
+  --warm-world-standby-seed 67890 --render-distance 2 --lighting false
+```
+
+The runtime-only gate appears near the accepted starting surface. Toggle the
+debug pane with tilde to watch it reach `SWITCHABLE`, then use mouse look and
+WASD to walk through the blue opaque surface and back.
+
 Exit criteria: a user can walk through the opaque gate A→B→A with no visible
 blank frame, stereo split, reconstruction, or switch-frame upload burst.
+
+Exit result: Slice 6 meets the flat/offscreen and synthetic per-eye stereo
+milestone. Full-frame multiview execution on a capable XR adapter, retained
+runtime background/memory accounting, and lifecycle/device-loss closeout remain
+explicit Slice 7 work.
 
 ### Slice 7: Performance And Lifecycle Closeout
 

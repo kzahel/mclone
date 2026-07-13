@@ -203,6 +203,16 @@ impl McloneSceneHost {
         self.selection_outline = SelectionOutlineRenderer::new(device, self.color_format);
         self.world_gui_renderer = WorldGuiRenderer::new(device, self.color_format);
         self.world_gui_overlay_renderer = WorldGuiRenderer::new(device, self.color_format);
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.opaque_world_gate_renderer.is_some() {
+            let renderer = OpaqueWorldGateRenderer::new(device, self.color_format);
+            if device.features().contains(wgpu::Features::MULTIVIEW) {
+                renderer
+                    .materialize_multiview_renderer(device)
+                    .context("rebuild opaque world gate multiview pipeline")?;
+            }
+            self.opaque_world_gate_renderer = Some(renderer);
+        }
         self.mono_gui = None;
         self.diagnostic_panel = XrDiagnosticPanel::new(device, self.color_format);
         self.diagnostic_panel
@@ -656,8 +666,21 @@ impl McloneSceneHost {
         if !self.gameplay_startup_complete() {
             return Ok(false);
         }
-        self.commit_engine_camera_player_pose_timed()
-            .map(|(changed, _)| changed)
+        let (changed, _) = self.commit_engine_camera_player_pose_timed()?;
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if self.world_gate.is_none() {
+                return Ok(changed);
+            }
+            let midpoint = self.active_world.camera.snapshot().eye;
+            // Crossing observation is an independent side effect. Do not put
+            // it behind `changed || ...`: ordinary locomotion changes the
+            // camera every frame and would otherwise short-circuit the gate.
+            let crossed = self.apply_world_gate_visual_midpoint(midpoint)?;
+            return Ok(changed || crossed);
+        }
+        #[cfg(target_arch = "wasm32")]
+        Ok(changed)
     }
 
     pub fn toggle_mono_camera_view(&mut self) -> EngineCameraViewMode {
@@ -1180,14 +1203,22 @@ impl McloneSceneHost {
             None
         };
         let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
+        #[cfg(not(target_arch = "wasm32"))]
+        let opaque_world_gate = self
+            .opaque_world_gate_renderer
+            .as_ref()
+            .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
+        #[cfg(target_arch = "wasm32")]
+        let opaque_world_gate = None;
         let world_gui = FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
-        let mut summary = render_full_frame_for_view_with_far_lod(
+        let mut summary = render_full_frame_for_view_with_far_lod_and_opaque_gate(
             RenderFrameContext::new(device, queue, encoder, target),
             depth,
             &self.sky,
             &mut self.active_world.draw,
             far_lod,
             far_lod_mesh,
+            opaque_world_gate,
             Some(&mut self.actors),
             Some(&mut self.screen_effects),
             None,
