@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slice 0 characterization baseline completed 2026-07-13. Slice
-1 target-neutral simulation/publication is next.
+Status: active; Slices 0-1 completed 2026-07-13. Slice 2 native duplex
+transport is next.
 
 Topic: `multiplayer-networking`
 
@@ -321,7 +321,9 @@ Baseline validation on macOS native flat/browser:
   accepted implementation lanes; real Quest scheduling/frame evidence remains
   a named deferred receipt.
 
-### Slice 1: Target-Neutral Simulation And Per-Player Publication
+### Slice 1: Target-Neutral Simulation And Per-Player Publication — Complete
+
+Status: completed 2026-07-13.
 
 Refactor `mclone-server` without changing the live wire:
 
@@ -344,6 +346,33 @@ runner tests remain green.
 
 Exit: simulation advancement is not structurally parameterized by the player
 whose updates happen to be returned.
+
+Implemented result:
+
+- `IntegratedServer` now exposes global scheduler and gameplay advances that
+  route publications without draining a selected player. The local integrated
+  and dedicated-player compatibility methods are adapters that drain only
+  after the shared advance.
+- Worldgen, block/fluid, entity, remote-player, initial-spawn, and physics
+  results remain in ordered per-player queues. A command-enqueue entry point
+  preserves command-result ordering for the autonomous host cutover.
+- Dedicated joins receive the current time, and live time publication is a
+  routed broadcast on tick 1 and each 20-tick boundary instead of an update
+  attached to every selected-player simulation call.
+- Ready-only local and dedicated drains do not poll jobs or advance scheduler,
+  gameplay, physics, or day time.
+
+Validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server`: passed 388
+  server tests, including two-player single-tick routing, independent drains,
+  repeated side-effect-free drains, and 20-tick time publication.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime -p
+  mclone-dedicated-server`: app-runtime passed 243 unit tests plus integration
+  locks; dedicated passed 20 tests after updating the response-era time
+  assertion to the new publication period.
+- The protocol remains version `19` and the live dedicated connection remains
+  command/response shaped; Slice 2 changes only that transport foundation.
 
 ### Slice 2: Native Duplex Transport Foundation
 

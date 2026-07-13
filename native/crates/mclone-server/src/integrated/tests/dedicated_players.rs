@@ -1,5 +1,84 @@
 use super::*;
 
+fn time_update(updates: &[ServerUpdate]) -> Option<u64> {
+    updates.iter().rev().find_map(|update| match update {
+        ServerUpdate::TimeUpdate { day_time } => Some(*day_time),
+        _ => None,
+    })
+}
+
+#[test]
+fn global_simulation_tick_routes_without_draining_player_streams() {
+    let mut server = IntegratedServer::new(0);
+    let player_a = server.add_dedicated_player();
+    let player_b = server.add_dedicated_player();
+    server
+        .try_drain_updates_for_player(player_a)
+        .expect("drain player a join updates");
+    server
+        .try_drain_updates_for_player(player_b)
+        .expect("drain player b join updates");
+
+    let start_day_time = server.day_time();
+    let report = server
+        .try_simulation_tick_report_global()
+        .expect("global simulation tick");
+
+    assert_eq!(report.simulation_tick, 1);
+    assert_eq!(server.simulation_tick(), 1);
+    assert_eq!(server.day_time(), start_day_time + 1);
+    assert!(report.updates.is_empty());
+
+    let updates_a = server
+        .try_drain_updates_for_player(player_a)
+        .expect("drain player a");
+    assert_eq!(time_update(&updates_a), Some(start_day_time + 1));
+
+    // Draining A neither consumes B nor performs another simulation step.
+    assert_eq!(server.simulation_tick(), 1);
+    assert_eq!(server.day_time(), start_day_time + 1);
+    let updates_b = server
+        .try_drain_updates_for_player(player_b)
+        .expect("drain player b");
+    assert_eq!(time_update(&updates_b), Some(start_day_time + 1));
+    assert!(
+        server
+            .try_drain_updates_for_player(player_a)
+            .expect("repeat drain player a")
+            .is_empty()
+    );
+    assert_eq!(server.simulation_tick(), 1);
+    assert_eq!(server.day_time(), start_day_time + 1);
+}
+
+#[test]
+fn time_publication_broadcasts_at_twenty_tick_period() {
+    let mut server = IntegratedServer::new(0);
+    let player_a = server.add_dedicated_player();
+    let player_b = server.add_dedicated_player();
+    server
+        .try_drain_updates_for_player(player_a)
+        .expect("drain player a join updates");
+    server
+        .try_drain_updates_for_player(player_b)
+        .expect("drain player b join updates");
+
+    for tick in 1..=20 {
+        server
+            .try_simulation_tick_report_global()
+            .expect("global simulation tick");
+        let updates_a = server
+            .try_drain_updates_for_player(player_a)
+            .expect("drain player a");
+        let updates_b = server
+            .try_drain_updates_for_player(player_b)
+            .expect("drain player b");
+        let expected = (tick == 1 || tick == 20).then_some(server.day_time());
+        assert_eq!(time_update(&updates_a), expected, "player a tick {tick}");
+        assert_eq!(time_update(&updates_b), expected, "player b tick {tick}");
+    }
+}
+
 #[test]
 fn dedicated_player_receives_world_info_before_chunk_view_snapshots() {
     let mut server = IntegratedServer::new(1124);

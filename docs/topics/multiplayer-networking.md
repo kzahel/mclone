@@ -2,9 +2,8 @@
 
 Topic: multiplayer-networking
 
-Status: planning — research pass completed 2026-07-10; autonomous dedicated
-tick plus full-duplex server-push selected 2026-07-13 as the next coordinated
-milestone under Tactical
+Status: implementation active — research completed and autonomous dedicated
+tick plus full-duplex server-push selected 2026-07-13. Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md).
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
@@ -17,6 +16,12 @@ the client-replica topology argument lives in
 [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md).
 
 ## Current state (verified 2026-07-10)
+
+Tactical 176 implementation began 2026-07-13. Its first runtime slice now
+separates one global simulation advance from independent ordered per-player
+publication drains and broadcasts time at the vanilla 20-tick period. The live
+wire remains command/response shaped until the tactical's duplex transport and
+autonomous-host slices land.
 
 What exists is better than "debug-only", but the wire model is scaffolding:
 

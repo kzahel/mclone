@@ -511,10 +511,7 @@ mod tests {
                 .iter()
                 .any(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
         );
-        assert!(matches!(
-            second.as_slice(),
-            [ServerUpdate::TimeUpdate { .. }]
-        ));
+        assert!(second.is_empty());
     }
 
     fn has_snapshot(updates: &[ServerUpdate], pos: ChunkPos) -> bool {

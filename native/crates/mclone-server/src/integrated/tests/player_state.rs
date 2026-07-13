@@ -5,10 +5,19 @@ fn frozen_day_time_holds_a_forced_value() {
     let mut server = IntegratedServer::new(0);
     server.set_day_time(23000);
     server.set_day_time_frozen(true);
-    for _ in 0..5 {
+    for tick in 1..=5 {
         let report = server.try_simulation_tick_report().expect("tick");
         assert_eq!(server.day_time(), 23000);
-        assert_eq!(last_time_update(&report), 23000);
+        if tick == 1 {
+            assert_eq!(last_time_update(&report), 23000);
+        } else {
+            assert!(
+                report
+                    .updates
+                    .iter()
+                    .all(|update| !matches!(update, ServerUpdate::TimeUpdate { .. }))
+            );
+        }
     }
 }
 

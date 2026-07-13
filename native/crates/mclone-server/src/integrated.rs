@@ -472,9 +472,14 @@ impl IntegratedServer {
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
         let player_id = self.dedicated_players.add();
         let world_info = self.world_info_update();
+        let time_update = ServerUpdate::TimeUpdate {
+            day_time: self.day_time,
+        };
         self.chunk_tracking.add_player(player_id);
         self.chunk_tracking
             .queue_update_for_player(player_id, world_info);
+        self.chunk_tracking
+            .queue_update_for_player(player_id, time_update);
         self.remote_players.add_player(player_id);
         player_id
     }
@@ -563,6 +568,26 @@ impl IntegratedServer {
         self.try_handle_command_for_target(CommandTarget::Dedicated(player_id), command)
     }
 
+    /// Applies one dedicated-player command and appends all resulting updates
+    /// to that player's ordered publication stream.
+    ///
+    /// The response-shaped dedicated server keeps using
+    /// [`Self::try_handle_command_for_player`] until its transport cutover.
+    /// Autonomous hosts use this method so command results and later tick
+    /// publications share one ordered per-player queue.
+    pub fn try_enqueue_command_for_player(
+        &mut self,
+        player_id: ServerPlayerId,
+        command: ClientCommand,
+    ) -> ChunkStoreResult<()> {
+        let updates = self.try_handle_command_for_player(player_id, command)?;
+        for update in updates {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, update);
+        }
+        Ok(())
+    }
+
     fn try_handle_command_for_target(
         &mut self,
         target: CommandTarget,
@@ -621,6 +646,21 @@ impl IntegratedServer {
         self.apply_scheduler_events_for_target(target, events)
     }
 
+    /// Drains already-routed local updates without polling workers or
+    /// advancing global simulation.
+    pub fn try_drain_updates(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.drain_chunk_updates_for_target(CommandTarget::Local)
+    }
+
+    /// Drains already-routed updates for one dedicated player without polling
+    /// workers or advancing global simulation.
+    pub fn try_drain_updates_for_player(
+        &mut self,
+        player_id: ServerPlayerId,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.drain_chunk_updates_for_target(CommandTarget::Dedicated(player_id))
+    }
+
     pub fn tick(&mut self) -> Vec<ServerUpdate> {
         self.try_tick().expect("integrated server tick failed")
     }
@@ -643,6 +683,14 @@ impl IntegratedServer {
         target: CommandTarget,
     ) -> ChunkStoreResult<ServerTickReport> {
         self.ensure_target_exists(target)?;
+        let mut report = self.try_tick_report_global()?;
+        report.updates = self.drain_chunk_updates_for_target(target)?;
+        Ok(report)
+    }
+
+    /// Advances scheduler-owned global work once and routes its publications
+    /// to every eligible player without draining any player's stream.
+    pub fn try_tick_report_global(&mut self) -> ChunkStoreResult<ServerTickReport> {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
         let simulation_tick = self.simulation_tick;
@@ -663,7 +711,8 @@ impl IntegratedServer {
         let scheduler_report_us = simulation_timing_elapsed_us(scheduler_start);
         let scheduler_event_count = report.events.len();
         let scheduler_apply_start = simulation_timing_start();
-        let updates = self.apply_scheduler_events_for_target(target, report.events)?;
+        self.route_scheduler_events(report.events)?;
+        self.prepare_publications_for_all_player_observers()?;
         let scheduler_apply_events_us = simulation_timing_elapsed_us(scheduler_apply_start);
         let chunk_tracking = self.chunk_tracking_diagnostics();
         let scheduler_timing = report.timing;
@@ -675,7 +724,7 @@ impl IntegratedServer {
             scheduler_event_count,
             scheduler_publication: report.publication,
             chunk_tracking,
-            updates,
+            updates: Vec::new(),
             timing: ServerTickTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
                 scheduler_report_us,
@@ -745,9 +794,34 @@ impl IntegratedServer {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.ensure_target_exists(target)?;
+        let mut report = self.try_simulation_tick_report_global_with_physics_steps(
+            physics_steps,
+            physics_step_dt_seconds,
+        )?;
+        report.updates = self.drain_chunk_updates_for_target(target)?;
+        Ok(report)
+    }
+
+    /// Advances global gameplay simulation once and routes publications to
+    /// per-player queues without draining any player's ordered stream.
+    pub fn try_simulation_tick_report_global(
+        &mut self,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_global_with_physics_steps(
+            DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK,
+            DEFAULT_PHYSICS_STEP_DT_SECONDS,
+        )
+    }
+
+    pub(crate) fn try_simulation_tick_report_global_with_physics_steps(
+        &mut self,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
-        let tick_report = self.try_tick_report_for_target(target)?;
+        let tick_report = self.try_tick_report_global()?;
         let scheduler_tick_us = simulation_timing_elapsed_us(scheduler_start);
         let tick_timing = tick_report.timing;
 
@@ -838,14 +912,14 @@ impl IntegratedServer {
         self.mark_entity_chunk_index_changes(entity_chunks_before_tick, entity_chunks_after_tick);
         self.mark_entity_updates_dirty(&entity_updates);
 
-        let mut updates = tick_report.updates;
-        updates.push(ServerUpdate::TimeUpdate {
-            day_time: self.day_time,
-        });
+        if simulation_tick == 1 || simulation_tick.is_multiple_of(20) {
+            self.queue_update_for_all_players(ServerUpdate::TimeUpdate {
+                day_time: self.day_time,
+            });
+        }
         let fluid_event_apply_start = simulation_timing_start();
         self.route_scheduler_events(fluid_events)?;
         self.reconcile_entity_subjects(entity_updates, true);
-        updates.extend(self.drain_chunk_updates_for_target(target)?);
         let fluid_event_apply_us = simulation_timing_elapsed_us(fluid_event_apply_start);
         let chunk_tracking = self.chunk_tracking_diagnostics();
 
@@ -867,7 +941,7 @@ impl IntegratedServer {
             scheduler_event_count: tick_report.scheduler_event_count,
             scheduler_publication: tick_report.scheduler_publication,
             chunk_tracking,
-            updates,
+            updates: Vec::new(),
             timing: ServerSimulationTickTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
                 scheduler_tick_us,
@@ -903,20 +977,17 @@ impl IntegratedServer {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
-        self.try_physics_step_report_for_target(
-            CommandTarget::Local,
-            physics_steps,
-            physics_step_dt_seconds,
-        )
+        let mut report = self
+            .try_physics_step_report_global_with_step_dt(physics_steps, physics_step_dt_seconds)?;
+        report.updates = self.drain_chunk_updates_for_target(CommandTarget::Local)?;
+        Ok(report)
     }
 
-    fn try_physics_step_report_for_target(
+    pub(crate) fn try_physics_step_report_global_with_step_dt(
         &mut self,
-        target: CommandTarget,
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
-        self.ensure_target_exists(target)?;
         let total_start = simulation_timing_start();
 
         let physics_tick_start = simulation_timing_start();
@@ -935,7 +1006,6 @@ impl IntegratedServer {
                 self.reconcile_entity_subjects(std::iter::once(entity), true);
             }
         }
-        let updates = self.drain_chunk_updates_for_target(target)?;
         let physics_event_apply_us = simulation_timing_elapsed_us(physics_event_apply_start);
         let chunk_tracking = self.chunk_tracking_diagnostics();
 
@@ -944,7 +1014,7 @@ impl IntegratedServer {
             physics_steps,
             physics,
             chunk_tracking,
-            updates,
+            updates: Vec::new(),
             timing: ServerPhysicsStepTiming {
                 total_us: simulation_timing_elapsed_us(total_start),
                 physics_tick_us,
@@ -1760,6 +1830,38 @@ impl IntegratedServer {
                     .map(|(player_id, _)| player_id),
             )
             .collect()
+    }
+
+    fn player_targets(&self) -> Vec<CommandTarget> {
+        std::iter::once(CommandTarget::Local)
+            .chain(
+                self.dedicated_players
+                    .iter()
+                    .map(|(player_id, _)| CommandTarget::Dedicated(player_id)),
+            )
+            .collect()
+    }
+
+    fn prepare_publications_for_all_player_observers(&mut self) -> ChunkStoreResult<()> {
+        for target in self.player_targets() {
+            self.reconcile_remote_players_for_target_observer(target);
+            let initial_spawn_update = self.initial_spawn_update_for_target(target)?;
+            self.reconcile_entities_for_target_observer(target);
+            if let Some(update) = initial_spawn_update {
+                self.chunk_tracking.queue_update_for_player(
+                    target.player_id(),
+                    ServerUpdate::PlayerPosition(update),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    fn queue_update_for_all_players(&mut self, update: ServerUpdate) {
+        for player_id in self.player_observers() {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, update.clone());
+        }
     }
 
     fn drain_chunk_updates_for_target(
