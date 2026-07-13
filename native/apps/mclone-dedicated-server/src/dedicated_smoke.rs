@@ -290,7 +290,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
     )?;
     let selected_slot_diagnostics = smoke_server.process_commands(CLIENT_COUNT)?;
     let selected_slot_reports = wait_for_client_reports(&result_rx)?;
-    assert_tracking_phase(&selected_slot_diagnostics, &selected_slot_reports, 1)
+    assert_tracking_phase_with_outbound(&selected_slot_diagnostics, &selected_slot_reports, 1, 1)
         .context("per_player_selected_slots phase failed")?;
     phases.push(PhaseReport {
         name: "per_player_selected_slots",
@@ -381,17 +381,20 @@ struct SmokeServer {
     network: DedicatedNetwork,
     server: IntegratedServer,
     sessions: BTreeMap<DedicatedConnectionId, DedicatedSession>,
+    outbound: BTreeMap<DedicatedConnectionId, crate::connection::DedicatedOutbound>,
     disconnected_connections: usize,
 }
 
 impl SmokeServer {
     fn new(seed: i64, network: DedicatedNetwork) -> Self {
         let mut server = IntegratedServer::new(seed);
+        server.disable_local_player();
         server.set_lighting_enabled(false);
         Self {
             network,
             server,
             sessions: BTreeMap::new(),
+            outbound: BTreeMap::new(),
             disconnected_connections: 0,
         }
     }
@@ -431,28 +434,26 @@ impl SmokeServer {
         allow_disconnect: bool,
     ) -> Result<Option<PlayerChunkTrackingDiagnostics>> {
         match event {
-            DedicatedNetworkEvent::Connected { id, .. } => {
+            DedicatedNetworkEvent::Connected { id, outbound, .. } => {
                 let player_id = self.server.add_dedicated_player();
                 self.sessions.insert(id, DedicatedSession::new(player_id));
+                self.outbound.insert(id, outbound);
                 Ok(None)
             }
-            DedicatedNetworkEvent::Command {
-                id,
-                command,
-                response,
-                ..
-            } => {
+            DedicatedNetworkEvent::Command { id, command, .. } => {
                 let Some(session) = self.sessions.get_mut(&id) else {
                     let message = format!("received smoke command for disconnected client {id}");
-                    let _ = response.send(Err(message.clone()));
+                    self.outbound.remove(&id);
                     bail!(message);
                 };
                 let updates = session
                     .handle_client_command(&mut self.server, command)
                     .context("failed to apply dedicated smoke client command")?;
-                response.send(Ok(updates)).map_err(|_| {
-                    anyhow::anyhow!("smoke client {id} disconnected before response")
-                })?;
+                self.outbound
+                    .get(&id)
+                    .context("smoke client has no outbound writer")?
+                    .publish(updates)
+                    .with_context(|| format!("smoke client {id} outbound publication failed"))?;
                 Ok(Some(self.server.chunk_tracking_diagnostics()))
             }
             DedicatedNetworkEvent::Disconnected {
@@ -461,6 +462,7 @@ impl SmokeServer {
                 command_count,
                 reason,
             } => {
+                self.outbound.remove(&id);
                 if let Some(session) = self.sessions.remove(&id) {
                     self.server.remove_dedicated_player(session.player_id());
                 }
@@ -742,14 +744,6 @@ fn assert_overlapping_block_delta_phase(
     Ok(())
 }
 
-fn assert_tracking_phase(
-    diagnostics: &PlayerChunkTrackingDiagnostics,
-    reports: &[SmokeClientReport],
-    expected_aggregate_chunks: usize,
-) -> Result<()> {
-    assert_tracking_phase_with_outbound(diagnostics, reports, expected_aggregate_chunks, 0)
-}
-
 fn assert_tracking_phase_with_outbound(
     diagnostics: &PlayerChunkTrackingDiagnostics,
     _reports: &[SmokeClientReport],
@@ -847,8 +841,9 @@ fn assert_tracking_diagnostics_with_outbound(
     )?;
     if diagnostics.total_outbound_queue_depth != expected_outbound_queue_depth {
         bail!(
-            "expected total outbound queue depth {expected_outbound_queue_depth}, got {}",
-            diagnostics.total_outbound_queue_depth
+            "expected total outbound queue depth {expected_outbound_queue_depth}, got {}: {:?}",
+            diagnostics.total_outbound_queue_depth,
+            diagnostics.players
         );
     }
     Ok(())

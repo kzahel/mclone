@@ -1,7 +1,7 @@
 # 176: Dedicated Autonomous Push Runtime
 
-Status: active; Slices 0-1 completed 2026-07-13. Slice 2 native duplex
-transport is next.
+Status: active; Slices 0-2 completed 2026-07-13. Slice 3 autonomous dedicated
+host cutover is next.
 
 Topic: `multiplayer-networking`
 
@@ -374,7 +374,9 @@ Validation evidence:
 - The protocol remains version `19` and the live dedicated connection remains
   command/response shaped; Slice 2 changes only that transport foundation.
 
-### Slice 2: Native Duplex Transport Foundation
+### Slice 2: Native Duplex Transport Foundation — Complete
+
+Status: completed 2026-07-13.
 
 Make TCP capable of push before switching authority:
 
@@ -394,6 +396,43 @@ this slice; first prove the new producer mechanics with the existing smokes.
 
 Exit: native client and server can send in both directions independently, even
 though the authoritative loop is not autonomous yet.
+
+Implemented result:
+
+- `NativeClientIoSession` now owns independent TCP writer and continuous
+  reader threads over bounded ordered command and update-batch queues. Command
+  enqueue uses a nonblocking bounded send, and inbound batches retain encoded
+  lengths, queue age, read/decode time, and a monotonic publication-frame
+  sequence under the temporary `response_sequence` compatibility name.
+- Each dedicated connection now owns an independent reader and writer plus a
+  bounded outbound publication sender. `DedicatedNetworkEvent::Command` no
+  longer carries a zero-capacity response channel; the command-driven host
+  enqueues its compatibility batch through the connection writer.
+- Dedicated hosts explicitly disable the integrated local-player slot. This
+  removes a ghost observer and prevents autonomous broadcasts from
+  accumulating in an update queue that no client can drain.
+- The shared app-runtime pump and the protocol version/bytes remain unchanged.
+
+Validation evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-net`: passed 17
+  tests. Held-publication coverage proves a second command reaches the server;
+  unsolicited-publication coverage proves an idle client reader receives a
+  frame without sending a command.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-dedicated-server`:
+  passed 21 tests, including a dedicated connection that accepts two commands
+  before any paired publication and pushes an update before any command.
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server -p
+  mclone-app-runtime`: passed 388 server and 243 app-runtime unit tests plus
+  their integration/doc tests.
+- `pnpm --silent native:dedicated:smoke`: passed the two-client fixture over
+  the duplex transport. One response-era outbound-depth receipt now records a
+  periodic cross-player publication waiting for the Slice 3 all-player drain.
+- `pnpm --silent native:remote:smoke`: both native clients connected and
+  rendered 166 sections, one remote player, two entities, and three actors.
+  Both `/tmp` captures were inspected and are valid; the wrapper still exits
+  after capture on the pre-existing screenshot-summary parser drift recorded
+  in Slice 0.
 
 ### Slice 3: Autonomous Dedicated Host Cutover
 

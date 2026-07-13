@@ -1,9 +1,9 @@
 use std::fmt;
 use std::io;
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender, TrySendError};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -12,6 +12,8 @@ use mclone_net::{
     complete_server_handshake, try_read_client_command_frame, write_server_update_batch,
 };
 use mclone_protocol::{ClientCommand, ServerUpdate};
+
+const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DedicatedConnectionId(u64);
@@ -29,19 +31,50 @@ impl fmt::Display for DedicatedConnectionId {
     }
 }
 
-pub(crate) type CommandResponse = std::result::Result<Vec<ServerUpdate>, String>;
+#[derive(Debug)]
+enum DedicatedOutboundMessage {
+    Updates(Vec<ServerUpdate>),
+    Close(String),
+}
+
+#[derive(Debug)]
+pub(crate) struct DedicatedOutbound {
+    frames: SyncSender<DedicatedOutboundMessage>,
+}
+
+impl DedicatedOutbound {
+    pub(crate) fn publish(&self, updates: Vec<ServerUpdate>) -> Result<()> {
+        self.try_send(DedicatedOutboundMessage::Updates(updates))
+    }
+
+    pub(crate) fn close(&self, reason: impl Into<String>) -> Result<()> {
+        self.try_send(DedicatedOutboundMessage::Close(reason.into()))
+    }
+
+    fn try_send(&self, message: DedicatedOutboundMessage) -> Result<()> {
+        match self.frames.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => anyhow::bail!(
+                "dedicated outbound queue reached capacity {DEDICATED_OUTBOUND_QUEUE_CAPACITY}"
+            ),
+            Err(TrySendError::Disconnected(_)) => {
+                anyhow::bail!("dedicated outbound writer stopped")
+            }
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum DedicatedNetworkEvent {
     Connected {
         id: DedicatedConnectionId,
         peer_addr: SocketAddr,
+        outbound: DedicatedOutbound,
     },
     Command {
         id: DedicatedConnectionId,
         peer_addr: SocketAddr,
         command: ClientCommand,
-        response: SyncSender<CommandResponse>,
     },
     Disconnected {
         id: DedicatedConnectionId,
@@ -178,10 +211,48 @@ fn connection_loop(
         });
         return;
     }
+    let writer_stream = match stream.try_clone() {
+        Ok(stream) => stream,
+        Err(err) => {
+            let _ = events.send(DedicatedNetworkEvent::Disconnected {
+                id,
+                peer_addr,
+                command_count: 0,
+                reason: Some(format!("failed to clone dedicated connection: {err}")),
+            });
+            return;
+        }
+    };
+    let (outbound_tx, outbound_rx) = mpsc::sync_channel(DEDICATED_OUTBOUND_QUEUE_CAPACITY);
+    let writer_reason = Arc::new(Mutex::new(None));
+    let writer_shared_reason = Arc::clone(&writer_reason);
+    let writer_thread = match thread::Builder::new()
+        .name(format!("mclone-dedicated-writer-{}", id.0))
+        .spawn(move || {
+            connection_writer_loop(writer_stream, outbound_rx, writer_shared_reason);
+        }) {
+        Ok(thread) => thread,
+        Err(err) => {
+            let _ = events.send(DedicatedNetworkEvent::Disconnected {
+                id,
+                peer_addr,
+                command_count: 0,
+                reason: Some(format!("failed to spawn dedicated writer: {err}")),
+            });
+            return;
+        }
+    };
     if events
-        .send(DedicatedNetworkEvent::Connected { id, peer_addr })
+        .send(DedicatedNetworkEvent::Connected {
+            id,
+            peer_addr,
+            outbound: DedicatedOutbound {
+                frames: outbound_tx,
+            },
+        })
         .is_err()
     {
+        let _ = writer_thread.join();
         return;
     }
 
@@ -198,35 +269,22 @@ fn connection_loop(
         };
 
         command_count += 1;
-        let (response_tx, response_rx) = mpsc::sync_channel(0);
         if events
             .send(DedicatedNetworkEvent::Command {
                 id,
                 peer_addr,
                 command,
-                response: response_tx,
             })
             .is_err()
         {
             break;
         }
+    }
 
-        match response_rx.recv() {
-            Ok(Ok(updates)) => {
-                if let Err(err) = write_server_update_batch(&mut stream, &updates) {
-                    reason = Some(format!("failed to write server update batch: {err}"));
-                    break;
-                }
-            }
-            Ok(Err(err)) => {
-                reason = Some(err);
-                break;
-            }
-            Err(err) => {
-                reason = Some(format!("server command response channel closed: {err}"));
-                break;
-            }
-        }
+    if let Ok(writer_reason) = writer_reason.lock()
+        && writer_reason.is_some()
+    {
+        reason = writer_reason.clone();
     }
 
     let _ = events.send(DedicatedNetworkEvent::Disconnected {
@@ -235,6 +293,33 @@ fn connection_loop(
         command_count,
         reason,
     });
+    let _ = writer_thread.join();
+}
+
+fn connection_writer_loop(
+    mut stream: TcpStream,
+    outbound: Receiver<DedicatedOutboundMessage>,
+    reason: Arc<Mutex<Option<String>>>,
+) {
+    while let Ok(message) = outbound.recv() {
+        match message {
+            DedicatedOutboundMessage::Updates(updates) => {
+                if let Err(err) = write_server_update_batch(&mut stream, &updates) {
+                    if let Ok(mut reason) = reason.lock() {
+                        *reason = Some(format!("failed to write server update batch: {err}"));
+                    }
+                    break;
+                }
+            }
+            DedicatedOutboundMessage::Close(message) => {
+                if let Ok(mut reason) = reason.lock() {
+                    *reason = Some(message);
+                }
+                break;
+            }
+        }
+    }
+    let _ = stream.shutdown(Shutdown::Both);
 }
 
 #[cfg(test)]
@@ -242,7 +327,8 @@ mod tests {
     use super::*;
     use mclone_core::ChunkPos;
     use mclone_net::{
-        NativeClientSession, NativeTransportError, complete_client_handshake_with_version,
+        NativeClientIoSession, NativeClientSession, NativeTransportError,
+        complete_client_handshake_with_version,
     };
     use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
 
@@ -271,20 +357,28 @@ mod tests {
             .collect::<Vec<_>>();
 
         let mut command_events = Vec::new();
+        let mut outbound = std::collections::BTreeMap::new();
         while command_events.len() < CLIENT_COUNT {
-            if let DedicatedNetworkEvent::Command {
-                id,
-                command,
-                response,
-                ..
-            } = network.recv().unwrap()
-            {
-                command_events.push((id, command));
-                response
-                    .send(Ok(vec![ServerUpdate::TimeUpdate {
-                        day_time: command_events.len() as u64,
-                    }]))
-                    .unwrap()
+            match network.recv().unwrap() {
+                DedicatedNetworkEvent::Connected {
+                    id,
+                    outbound: connection_outbound,
+                    ..
+                } => {
+                    outbound.insert(id, connection_outbound);
+                }
+                DedicatedNetworkEvent::Command { id, command, .. } => {
+                    command_events.push((id, command));
+                    outbound[&id]
+                        .publish(vec![ServerUpdate::TimeUpdate {
+                            day_time: command_events.len() as u64,
+                        }])
+                        .unwrap();
+                }
+                DedicatedNetworkEvent::Disconnected { id, .. } => {
+                    outbound.remove(&id);
+                }
+                event => panic!("unexpected dedicated network event: {event:?}"),
             }
         }
 
@@ -301,6 +395,69 @@ mod tests {
                 .iter()
                 .all(|(_, command)| matches!(command, ClientCommand::SetChunkView(_)))
         );
+    }
+
+    #[test]
+    fn dedicated_connection_reads_and_writes_independent_frames() {
+        let _guard = crate::DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let network = DedicatedNetwork::start(listener).unwrap();
+        let mut client = NativeClientIoSession::connect(addr).unwrap();
+
+        let DedicatedNetworkEvent::Connected { id, outbound, .. } = network.recv().unwrap() else {
+            panic!("expected connected event");
+        };
+        outbound
+            .publish(vec![ServerUpdate::TimeUpdate { day_time: 1 }])
+            .unwrap();
+        assert_eq!(
+            client.drain_update_batch().unwrap().into_updates(),
+            vec![ServerUpdate::TimeUpdate { day_time: 1 }]
+        );
+
+        let first = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        let second = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(1, 0),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        });
+        client.send_command_only(first.clone()).unwrap();
+        client.send_command_only(second.clone()).unwrap();
+
+        let DedicatedNetworkEvent::Command {
+            id: first_id,
+            command: first_received,
+            ..
+        } = network.recv().unwrap()
+        else {
+            panic!("expected first command event");
+        };
+        let DedicatedNetworkEvent::Command {
+            id: second_id,
+            command: second_received,
+            ..
+        } = network.recv().unwrap()
+        else {
+            panic!("expected second command event");
+        };
+        assert_eq!(first_id, id);
+        assert_eq!(second_id, id);
+        assert_eq!(first_received, first);
+        assert_eq!(second_received, second);
+
+        outbound
+            .publish(vec![ServerUpdate::TimeUpdate { day_time: 2 }])
+            .unwrap();
+        outbound
+            .publish(vec![ServerUpdate::TimeUpdate { day_time: 3 }])
+            .unwrap();
+        assert_eq!(client.drain_update_batch().unwrap().response_sequence, 2);
+        assert_eq!(client.drain_update_batch().unwrap().response_sequence, 3);
     }
 
     #[test]

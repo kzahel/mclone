@@ -265,6 +265,7 @@ fn open_dedicated_server(
                 .with_context(|| format!("failed to open dedicated world at {}", dir.display()))
         }
     }?;
+    server.disable_local_player();
     server.set_world_generation_profile(profile)?;
     Ok(server)
 }
@@ -408,6 +409,7 @@ fn run_server_loop_inner(
     mode: ServerRunMode,
 ) -> Result<()> {
     let mut sessions = BTreeMap::<DedicatedConnectionId, DedicatedSession>::new();
+    let mut outbound = BTreeMap::<DedicatedConnectionId, connection::DedicatedOutbound>::new();
     let mut session_command_counts = BTreeMap::<DedicatedConnectionId, usize>::new();
     let mut summary = DedicatedServerSummary::default();
     #[cfg(test)]
@@ -415,9 +417,14 @@ fn run_server_loop_inner(
 
     loop {
         match network.recv()? {
-            DedicatedNetworkEvent::Connected { id, peer_addr } => {
+            DedicatedNetworkEvent::Connected {
+                id,
+                peer_addr,
+                outbound: connection_outbound,
+            } => {
                 let player_id = server.add_dedicated_player();
                 sessions.insert(id, DedicatedSession::new(player_id));
+                outbound.insert(id, connection_outbound);
                 session_command_counts.insert(id, 0);
                 log::info!("accepted dedicated client {id} from {peer_addr}");
             }
@@ -425,11 +432,12 @@ fn run_server_loop_inner(
                 id,
                 peer_addr,
                 command,
-                response,
             } => {
                 let Some(session) = sessions.get_mut(&id) else {
                     let message = format!("received command for disconnected client {id}");
-                    let _ = response.send(Err(message.clone()));
+                    if let Some(connection_outbound) = outbound.remove(&id) {
+                        let _ = connection_outbound.close(message.clone());
+                    }
                     log::warn!("{message}");
                     continue;
                 };
@@ -438,8 +446,13 @@ fn run_server_loop_inner(
                 match result {
                     Ok(updates) => {
                         let update_count = updates.len();
-                        if response.send(Ok(updates)).is_err() {
+                        let publish_result = outbound
+                            .get(&id)
+                            .context("dedicated connection has no outbound writer")
+                            .and_then(|connection_outbound| connection_outbound.publish(updates));
+                        if let Err(error) = publish_result {
                             remove_session_player(server, &mut sessions, id);
+                            outbound.remove(&id);
                             let command_count =
                                 session_command_counts.remove(&id).unwrap_or_default();
                             println!(
@@ -447,7 +460,7 @@ fn run_server_loop_inner(
                                 summary.marker_line("final", id, command_count, sessions.len())
                             );
                             log::warn!(
-                                "dedicated client {id} {peer_addr} disconnected before receiving {update_count} updates"
+                                "dedicated client {id} {peer_addr} could not queue {update_count} updates: {error:#}"
                             );
                         } else {
                             summary.record_command(diagnostics, update_count);
@@ -472,7 +485,9 @@ fn run_server_loop_inner(
                     }
                     Err(err) => {
                         let message = format!("{err:#}");
-                        let _ = response.send(Err(message.clone()));
+                        if let Some(connection_outbound) = outbound.remove(&id) {
+                            let _ = connection_outbound.close(message.clone());
+                        }
                         remove_session_player(server, &mut sessions, id);
                         session_command_counts.remove(&id);
                         if mode == ServerRunMode::ServeOnce {
@@ -489,6 +504,7 @@ fn run_server_loop_inner(
                 command_count,
                 reason,
             } => {
+                outbound.remove(&id);
                 remove_session_player(server, &mut sessions, id);
                 let connection_command_count =
                     session_command_counts.remove(&id).unwrap_or(command_count);

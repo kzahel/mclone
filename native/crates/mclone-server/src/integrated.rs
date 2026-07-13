@@ -96,6 +96,7 @@ pub struct IntegratedServer {
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
     initial_spawn_center: Option<ChunkPos>,
+    local_player_active: bool,
     player: ServerPlayerState,
     inventory: ServerInventory,
     dedicated_players: ServerPlayerList,
@@ -335,6 +336,7 @@ impl IntegratedServer {
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
             initial_spawn_center: None,
+            local_player_active: true,
             player: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
             dedicated_players: ServerPlayerList::default(),
@@ -484,6 +486,18 @@ impl IntegratedServer {
         player_id
     }
 
+    /// Removes the integrated local-player slot when this server is owned by a
+    /// dedicated host. Dedicated authority must not retain a ghost observer or
+    /// accumulate publications for a client that cannot drain them.
+    pub fn disable_local_player(&mut self) {
+        if !self.local_player_active {
+            return;
+        }
+        self.local_player_active = false;
+        self.entity_tracking.remove_observer(ServerPlayerId::LOCAL);
+        self.remove_player_chunk_tracking(ServerPlayerId::LOCAL);
+    }
+
     pub fn remove_dedicated_player(&mut self, player_id: ServerPlayerId) -> bool {
         if self.dedicated_players.remove(player_id).is_none() {
             return false;
@@ -505,7 +519,9 @@ impl IntegratedServer {
 
     fn mob_player_targets(&self) -> Vec<MobPlayerTarget> {
         let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
-        targets.push(MobPlayerTarget::from_position(self.player.position()));
+        if self.local_player_active {
+            targets.push(MobPlayerTarget::from_position(self.player.position()));
+        }
         targets.extend(
             self.dedicated_players
                 .iter()
@@ -516,7 +532,7 @@ impl IntegratedServer {
 
     fn natural_spawn_player_positions(&self) -> Vec<Vec3d> {
         let mut positions = Vec::with_capacity(self.dedicated_players.len() + 1);
-        if self.player.has_accepted_position() {
+        if self.local_player_active && self.player.has_accepted_position() {
             positions.push(self.player.position());
         }
         positions.extend(
@@ -530,7 +546,7 @@ impl IntegratedServer {
 
     fn item_pickup_targets(&self) -> Vec<ItemPickupTarget> {
         let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
-        if self.player.has_accepted_position() {
+        if self.local_player_active && self.player.has_accepted_position() {
             targets.push(ItemPickupTarget {
                 player_id: ServerPlayerId::LOCAL,
                 position: self.player.position(),
@@ -1823,7 +1839,9 @@ impl IntegratedServer {
     }
 
     fn player_observers(&self) -> Vec<ServerPlayerId> {
-        std::iter::once(ServerPlayerId::LOCAL)
+        self.local_player_active
+            .then_some(ServerPlayerId::LOCAL)
+            .into_iter()
             .chain(
                 self.dedicated_players
                     .iter()
@@ -1833,7 +1851,9 @@ impl IntegratedServer {
     }
 
     fn player_targets(&self) -> Vec<CommandTarget> {
-        std::iter::once(CommandTarget::Local)
+        self.local_player_active
+            .then_some(CommandTarget::Local)
+            .into_iter()
             .chain(
                 self.dedicated_players
                     .iter()
@@ -2020,7 +2040,9 @@ impl IntegratedServer {
     }
 
     fn mark_player_tick_boundaries(&mut self) {
-        self.player.mark_tick_boundary();
+        if self.local_player_active {
+            self.player.mark_tick_boundary();
+        }
         for player in self.dedicated_players.values_mut() {
             player.state.mark_tick_boundary();
         }

@@ -19,9 +19,10 @@ the client-replica topology argument lives in
 
 Tactical 176 implementation began 2026-07-13. Its first runtime slice now
 separates one global simulation advance from independent ordered per-player
-publication drains and broadcasts time at the vanilla 20-tick period. The live
-wire remains command/response shaped until the tactical's duplex transport and
-autonomous-host slices land.
+publication drains and broadcasts time at the vanilla 20-tick period. Native
+TCP now has independent bounded client/server readers and writers, while the
+authority loop remains command-clocked until the tactical's autonomous-host
+cutover lands.
 
 What exists is better than "debug-only", but the wire model is scaffolding:
 
