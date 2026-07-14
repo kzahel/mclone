@@ -121,6 +121,19 @@ pub struct MonoUiActionOutcome {
     pub clear_gameplay_input: bool,
 }
 
+/// Shared result of applying one platform-neutral mono input/cadence frame.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MonoInputFrameOutcome {
+    pub camera_changed: bool,
+    pub pose_sync_changed: bool,
+}
+
+impl MonoInputFrameOutcome {
+    pub const fn changed(self) -> bool {
+        self.camera_changed || self.pose_sync_changed
+    }
+}
+
 /// How the mono view topology presents UI.
 ///
 /// The stereo path draws UI as a world-space quad (`WorldGuiRenderer`). The mono
@@ -474,7 +487,30 @@ impl McloneSceneHost {
         .render_view(size[0].max(1), size[1].max(1))
     }
 
-    pub fn apply_mono_movement_frame(&mut self, frame: FlatInputFrame, dt_seconds: f64) -> bool {
+    /// Apply flat input and advance local-player publication from one shared
+    /// scene boundary. Platform adapters call this every presentation frame,
+    /// including idle and menu frames; the scene owns gameplay gating and the
+    /// vanilla-rate pose publication deadline.
+    pub fn advance_mono_input_frame(
+        &mut self,
+        frame: FlatInputFrame,
+        dt_seconds: f64,
+    ) -> Result<MonoInputFrameOutcome> {
+        if !self.gameplay_startup_complete() {
+            return Ok(MonoInputFrameOutcome::default());
+        }
+        let mut camera_changed = false;
+        if !self.mono_ui_is_active() {
+            camera_changed |= self.apply_mono_movement_frame(frame, dt_seconds);
+        }
+        let pose_sync_changed = self.publish_mono_player_pose_if_due()?;
+        Ok(MonoInputFrameOutcome {
+            camera_changed,
+            pose_sync_changed,
+        })
+    }
+
+    fn apply_mono_movement_frame(&mut self, frame: FlatInputFrame, dt_seconds: f64) -> bool {
         if !self.gameplay_startup_complete() {
             return false;
         }
@@ -588,7 +624,7 @@ impl McloneSceneHost {
                 .camera
                 .probe_ground(runtime.client(), MONO_GROUND_PROBE_DISTANCE);
         }
-        let changed = self.commit_mono_player_pose()?;
+        let changed = self.commit_mono_player_pose_now()?;
         Ok(MonoBlinkCommitStatus::Committed {
             target_feet,
             changed,
@@ -667,11 +703,32 @@ impl McloneSceneHost {
         true
     }
 
-    pub fn commit_mono_player_pose(&mut self) -> Result<bool> {
+    fn publish_mono_player_pose_if_due(&mut self) -> Result<bool> {
+        if !self.gameplay_startup_complete() {
+            return Ok(false);
+        }
+        let changed = self
+            .commit_engine_camera_player_pose_if_due_timed()?
+            .is_some_and(|(changed, _)| changed);
+        self.reconcile_mono_world_gate(changed)
+    }
+
+    fn commit_mono_player_pose_now(&mut self) -> Result<bool> {
         if !self.gameplay_startup_complete() {
             return Ok(false);
         }
         let (changed, _) = self.commit_engine_camera_player_pose_timed()?;
+        self.reconcile_mono_world_gate(changed)
+    }
+
+    /// Immediate pose reconciliation for deterministic offscreen diagnostics.
+    /// Interactive platform adapters must use [`Self::advance_mono_input_frame`]
+    /// so their command cadence cannot diverge.
+    pub fn force_mono_player_pose_reconcile_for_diagnostics(&mut self) -> Result<bool> {
+        self.commit_mono_player_pose_now()
+    }
+
+    fn reconcile_mono_world_gate(&mut self, changed: bool) -> Result<bool> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             if self.world_gate.is_none() {
@@ -946,7 +1003,7 @@ impl McloneSceneHost {
         if self.active_world.runtime.is_none() {
             return Ok(false);
         }
-        self.commit_mono_player_pose()?;
+        self.commit_mono_player_pose_now()?;
         self.active_world
             .runtime
             .as_mut()
@@ -962,7 +1019,7 @@ impl McloneSceneHost {
         if self.active_world.runtime.is_none() {
             return Ok(MonoWorldActionStatus::NoRuntime);
         }
-        self.commit_mono_player_pose()?;
+        self.commit_mono_player_pose_now()?;
         if let Some(command) = self.active_world.interaction.ensure_has_sent_carried_item() {
             self.active_world
                 .runtime

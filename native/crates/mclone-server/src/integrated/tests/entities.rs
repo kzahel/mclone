@@ -52,6 +52,25 @@ fn dedicated_players_publish_remote_state_when_visible() {
     assert_eq!(moved_a.x_rot_degrees, -15.0);
     assert!(moved_a.on_ground);
 
+    server
+        .try_handle_command_for_player(
+            player_a,
+            ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+                y_rot_degrees: 135.0,
+                x_rot_degrees: 20.0,
+                on_ground: true,
+            }),
+        )
+        .expect("rotate stationary player a");
+
+    let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
+    let rotated_a = remote_player_update(&updates_b, player_a)
+        .expect("player b should receive player a rotation-only update");
+    assert_eq!(rotated_a.position, moved);
+    assert_eq!(rotated_a.y_rot_degrees, 135.0);
+    assert_eq!(rotated_a.x_rot_degrees, 20.0);
+    assert!(rotated_a.on_ground);
+
     let bear_appearance = PlayerAppearance {
         model: PlayerModelKind::UprightBear,
     };

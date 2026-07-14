@@ -68,6 +68,9 @@ Shared engine crates own:
 - renderer resources and frame drawing from explicit view/target facts
 - the shared cross-platform scene/session/UI/orchestration host
   (`mclone-scene`)
+- shared flat/XR input application and vanilla-rate local-player pose
+  publication (`mclone-scene`), above platform raw-input translation and below
+  the client movement-command selector
 - one shared create/open/join session-start planner (`mclone-app-runtime`),
   producing typed local/remote runtime plans and active-session descriptors
 - one label-parameterized native TCP remote-session adapter
@@ -195,10 +198,11 @@ The live desktop flat path now reaches this boundary through the app-local
 `WinitFrameDriver`: winit owns redraw cadence, surface acquisition,
 keyboard/mouse translation, mouse lock, and final presentation, while
 `mclone-scene` owns session startup/replacement, runtime polling, camera/input
-application, render admission/sync/upload, traversal, actors, world overlays,
-HUD/menu/status assembly, and frame-accounting feedback. Offscreen/perf drive
-the same host through `OffscreenDriver`, which owns Mono or synthetic Stereo
-targets but no scene policy. Flat Android reaches it
+application, the at-most-20-Hz player-pose publication deadline, render
+admission/sync/upload, traversal, actors, world overlays, HUD/menu/status
+assembly, and frame-accounting feedback. Offscreen/perf drive the same host
+through `OffscreenDriver`, which owns Mono or synthetic Stereo targets but no
+scene policy. Flat Android reaches it
 through `AndroidSurfaceDriver`: the app retains `NativeActivity` lifecycle,
 Vulkan surface targets, raw input translation, startup properties, and fixed
 FIFO cadence facts; the host owns the same session/runtime/render/UI policy as
@@ -226,6 +230,20 @@ The shared `mclone-xr-host::OpenXrFrameDriver` owns OpenXR
 poll/wait/begin/skip/end ordering and timing facts;
 platform handlers own event pumping, target acquisition/render callbacks, and
 presentation of outcomes.
+
+Mono adapters call `advance_mono_input_frame` every presentation frame. XR
+adapters call the single `apply_frame_locomotion` entry. Both paths reach the
+same scene-owned pose-publication deadline and enqueue through the shared
+`SendOnly` camera reconcile path; app crates cannot sequence movement-command
+selection or publication themselves. Raw mouse/touch look may update the
+local camera immediately, but command selection remains on the shared cadence.
+
+Publication cadence and XR pose derivation are intentionally separate. The
+current protocol carries one combined player yaw/pitch pose, while XR
+locomotion can already reference headset yaw or player yaw. If tracked head
+pose later differs from body/movement heading, add that distinction to shared
+input, scene, replica, and protocol contracts rather than forking XR command
+scheduling.
 
 Neutral tracked-controller snapshots and hand identity belong to
 `mclone-input`. Neutral view pose/FOV/projection contracts belong to

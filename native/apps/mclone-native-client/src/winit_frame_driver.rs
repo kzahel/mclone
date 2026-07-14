@@ -429,8 +429,15 @@ impl WinitFrameDriver {
         self.host.open_mono_block_palette();
     }
 
-    pub(crate) fn apply_movement_frame(&mut self, frame: FlatInputFrame, dt_seconds: f64) -> bool {
-        self.host.apply_mono_movement_frame(frame, dt_seconds)
+    pub(crate) fn advance_input_frame(
+        &mut self,
+        frame: FlatInputFrame,
+        dt_seconds: f64,
+    ) -> Result<bool> {
+        Ok(self
+            .host
+            .advance_mono_input_frame(frame, dt_seconds)?
+            .changed())
     }
 
     pub(crate) fn apply_look_frame(&mut self, frame: FlatInputFrame) -> bool {
@@ -455,10 +462,6 @@ impl WinitFrameDriver {
 
     pub(crate) fn commit_blink_debug(&mut self) -> Result<MonoBlinkCommitStatus> {
         self.host.commit_mono_blink_debug()
-    }
-
-    pub(crate) fn commit_player_pose(&mut self) -> Result<bool> {
-        self.host.commit_mono_player_pose()
     }
 
     pub(crate) fn toggle_camera_view(&mut self) -> EngineCameraViewMode {

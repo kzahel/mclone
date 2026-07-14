@@ -2,7 +2,8 @@
 
 Topic: multiplayer-networking
 
-Status: first production push milestone complete 2026-07-13. Tactical
+Status: first production push milestone complete 2026-07-13; shared client
+pose-publication follow-up complete 2026-07-14. Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md) delivered
 autonomous dedicated ticking, native TCP/direct WebSocket push,
 native/browser consumer convergence, bounded pressure, conformance evidence,
@@ -18,7 +19,7 @@ rates). Movement authority and prediction have their own topic:
 the client-replica topology argument lives in
 [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md).
 
-## Current state (verified 2026-07-13)
+## Current state (verified 2026-07-14)
 
 Tactical 176 completed 2026-07-13. The dedicated server now runs
 one 20/20/60 authoritative cadence independently of command traffic, drains
@@ -50,6 +51,24 @@ queues and a 10.25 ms movement-window frame-gap maximum; native two-client
 smokes prove an idle observer receives peer movement. Quest evidence remains
 deferred because no device is currently available; shared Android builds, an
 AVD frame, and synthetic stereo cover the available platform seams.
+
+Client pose publication now has the same ownership discipline as inbound
+push. `McloneSceneHost` owns one wall-clock-slipping, at-most-20-Hz
+publication deadline for Mono and XR. Desktop, browser, flat Android, and XR
+adapters advance their shared scene entry every presentation frame; they no
+longer decide whether movement deserves a command. Stationary mouse look now
+reaches `LocalPlayerMoveSync` and emits the existing vanilla-shaped `Rot`
+variant, while the 20-publication-attempt position reminder corresponds to
+about one second at the default rate. Immediate interaction, teleport, and
+offscreen-diagnostic reconciles remain explicit scene-owned operations. The
+wire stays at protocol version 20 because `Rot` and remote rotation fanout
+already existed.
+
+This cadence controls when a pose is selected and enqueued; it does not define
+what XR pose means. Current XR behavior still publishes the existing combined
+player camera/body yaw and pitch, while locomotion may reference headset yaw
+or player yaw. A future independent head pose should extend the shared pose
+and protocol model rather than restore XR-specific publication scheduling.
 
 The autonomous wire now has the intended first production shape, but session
 and durability work remain:
@@ -159,7 +178,8 @@ networking policies. Shared owners are:
   queue diagnostics, and the budgeted ordered update pump;
 - `mclone-client`: authoritative update application to the client replica;
 - `mclone-scene`: the frame-owned pump point and handoff into the existing
-  terrain dirty/compile/upload lifecycle.
+  terrain dirty/compile/upload lifecycle, plus shared flat/XR player-pose
+  publication cadence.
 
 Desktop flat, desktop XR, flat Android, and Android XR must instantiate the
 same native remote connection implementation. Platform apps select and wire a

@@ -142,6 +142,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "render_completed_result_accept_budget",
     "per_view_uniform_frame",
     "last_locomotion_update",
+    "player_pose_sync",
     "menu_toggle_down",
     "game_ui_toggle_down",
     "menu_pointer_down",
@@ -167,7 +168,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 20);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 76);
+    assert_eq!(host_fields.len(), 77);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")

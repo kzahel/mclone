@@ -280,11 +280,10 @@ impl WebSceneHost {
             sprint,
             ..FlatInputFrame::default()
         };
-        self.movement_input_applied |= host.apply_mono_look_frame(input);
-        self.movement_input_applied |= host.apply_mono_movement_frame(input, delta_seconds);
-        if forward || backward || left || right || analog_active || jump || descend || sneak {
-            let _ = host.commit_mono_player_pose().map_err(js_error)?;
-        }
+        self.movement_input_applied |= host
+            .advance_mono_input_frame(input, delta_seconds)
+            .map_err(js_error)?
+            .camera_changed;
 
         let surface_texture = match self.context.surface.get_current_texture() {
             Ok(frame) => frame,

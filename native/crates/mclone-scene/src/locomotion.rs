@@ -511,7 +511,7 @@ impl McloneSceneHost {
         views: [XrView; 2],
         automation: Option<XrFrameLocomotionAutomation>,
     ) -> Result<XrFrameLocomotionOutcome> {
-        let (timing, frozen_render) = match automation {
+        let (mut timing, frozen_render) = match automation {
             Some(XrFrameLocomotionAutomation::Flight {
                 speed_blocks_per_second,
             }) => (
@@ -534,13 +534,21 @@ impl McloneSceneHost {
             ),
             None => (self.apply_locomotion_input(controllers, views)?, false),
         };
+        let commit_start = self.services.clock.now();
+        if let Some((_, commit_timing)) = self
+            .commit_engine_camera_player_pose_if_due_timed()
+            .context("publish scheduled XR player pose")?
+        {
+            timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
+            timing.record_commit_timing(commit_timing);
+        }
         Ok(XrFrameLocomotionOutcome {
             timing,
             frozen_render,
         })
     }
 
-    pub fn apply_locomotion_input(
+    fn apply_locomotion_input(
         &mut self,
         controllers: &[XrControllerSnapshot],
         views: [XrView; 2],
@@ -577,12 +585,6 @@ impl McloneSceneHost {
             self.snap_turn_state.reset();
             self.clear_xr_blink_teleport();
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
-            let commit_start = self.services.clock.now();
-            let (_, commit_timing) = self
-                .commit_engine_camera_player_pose_timed()
-                .context("sync XR room-scale player pose")?;
-            timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
-            timing.record_commit_timing(commit_timing);
             return Ok(timing);
         }
         if let Some(yaw_delta_radians) = self.snap_turn_delta_from_controllers(controllers) {
@@ -625,13 +627,15 @@ impl McloneSceneHost {
             .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         self.play_landing_events();
-        let commit_start = self.services.clock.now();
-        let (_, commit_timing) = self
-            .commit_engine_camera_player_pose_timed()
-            .context("sync XR locomotion player pose")?;
-        timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
-        timing.record_commit_timing(commit_timing);
         if !suppress_gameplay_interaction {
+            if gameplay_interaction_edges.any() {
+                let commit_start = self.services.clock.now();
+                let (_, commit_timing) = self
+                    .commit_engine_camera_player_pose_timed()
+                    .context("publish XR player pose before interaction")?;
+                timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
+                timing.record_commit_timing(commit_timing);
+            }
             let interaction_start = self.services.clock.now();
             self.apply_xr_gameplay_interaction_edges(gameplay_interaction_edges)?;
             timing.gameplay_interaction_ms =
@@ -640,7 +644,7 @@ impl McloneSceneHost {
         Ok(timing)
     }
 
-    pub fn apply_automated_flight_input(
+    fn apply_automated_flight_input(
         &mut self,
         views: [XrView; 2],
         speed_blocks_per_second: f64,
@@ -691,16 +695,10 @@ impl McloneSceneHost {
             .camera
             .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
-        let commit_start = self.services.clock.now();
-        let (_, commit_timing) = self
-            .commit_engine_camera_player_pose_timed()
-            .context("sync XR automated flight player pose")?;
-        timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
-        timing.record_commit_timing(commit_timing);
         Ok(timing)
     }
 
-    pub fn apply_automated_orbit_input(
+    fn apply_automated_orbit_input(
         &mut self,
         speed_blocks_per_second: f64,
         elapsed_seconds: f64,
@@ -748,16 +746,10 @@ impl McloneSceneHost {
             .camera
             .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
-        let commit_start = self.services.clock.now();
-        let (_, commit_timing) = self
-            .commit_engine_camera_player_pose_timed()
-            .context("sync XR automated orbit player pose")?;
-        timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
-        timing.record_commit_timing(commit_timing);
         Ok(timing)
     }
 
-    pub fn apply_automated_stationary_input(&mut self) -> XrLocomotionTiming {
+    fn apply_automated_stationary_input(&mut self) -> XrLocomotionTiming {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
         self.latest_controllers.clear();
@@ -782,7 +774,7 @@ impl McloneSceneHost {
         timing
     }
 
-    pub fn apply_automated_chunk_view_churn(
+    fn apply_automated_chunk_view_churn(
         &mut self,
         center_x: i32,
         center_z: i32,

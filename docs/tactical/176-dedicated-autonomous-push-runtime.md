@@ -839,6 +839,59 @@ Implementation commit ledger:
 - Slice 6 bounded cross-adapter conformance: `3ddf17fe`; and
 - Slice 7 compatibility and living-doc cleanup: `e1a65902`.
 
+## Post-completion Client Pose Publication Follow-up
+
+Status: completed 2026-07-14.
+
+Interactive validation after the push milestone exposed one remaining
+client-side ownership leak: desktop mouse look changed the local camera but
+did not publish a movement command until translation input happened. The
+protocol, `LocalPlayerMoveSync`, server rotation application, and remote-player
+fanout already supported vanilla-shaped rotation-only updates. Platform apps
+were independently deciding when to call those shared pieces.
+
+The follow-up moved that decision into `McloneSceneHost`:
+
+- one monotonic, wall-clock-slipping deadline attempts pose publication at no
+  more than 20 Hz for both Mono and XR;
+- `advance_mono_input_frame` atomically owns flat look/movement application,
+  UI gating, and scheduled publication, while `apply_frame_locomotion` is the
+  only XR publication entry;
+- desktop, browser, flat Android, desktop XR, Android XR, and offscreen paths
+  compile through those entries instead of selecting/committing movement
+  packets in app code;
+- immediate scene interactions/teleports and deterministic offscreen camera
+  setup retain narrowly named force paths;
+- source-purity gates reject app-local movement selection or pose-publication
+  calls; and
+- focused tests prove 50 ms gating without catch-up bursts, exact stationary
+  `Rot` selection, the existing 20-attempt position reminder, and observer
+  receipt of rotation-only updates at an unchanged position.
+
+This does not conflate future XR head and body semantics. Current behavior
+still publishes the existing combined player yaw/pitch pose, and locomotion
+may independently reference headset or player yaw. A future tracked head/body
+split belongs in the shared pose and protocol model, not in another
+platform-owned scheduler. No protocol bump was needed for this follow-up.
+
+Validation evidence captured on 2026-07-14:
+
+- `cargo test --workspace --no-fail-fast`, `cargo fmt --all -- --check`,
+  `pnpm native:thin-adapters:purity`, and `git diff --check` passed;
+- desktop offscreen, movement, two-native-client remote, and synthetic XR
+  emulation smokes passed. Their `/tmp` captures were inspected, including
+  the remote player actor and distinct stereo views;
+- `pnpm native:web:typecheck`, `native:web:build`, `native:web:app-smoke`, and
+  `native:web:remote-smoke` passed. The local and remote Playwright runs kept
+  their final-frame maximum gap near 10.3 ms with no queued updates, and the
+  canvas capture was inspected;
+- `pnpm native:android:apk` and the flat `native:android:avd-smoke` passed. The
+  AVD capture showed the live world and touch HUD; and
+- `pnpm native:android-xr:apk` passed, while an in-headset Quest run remains
+  unavailable because no Quest device is currently present. The shared
+  synthetic XR smoke covers frame/input integration without claiming device
+  runtime validation.
+
 ## Validation Matrix
 
 Focused native gates evolve with the implementation but should include:

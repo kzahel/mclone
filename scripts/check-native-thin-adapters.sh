@@ -23,6 +23,36 @@ if rg -n -U "$forbidden" "${native_apps[@]}"; then
   exit 1
 fi
 
+# Player-pose selection lives below the scene and its publication cadence lives
+# in the scene. Interactive rims may apply raw look immediately for local
+# responsiveness, but they must advance the shared frame entry instead of
+# sequencing movement selection and publication themselves. The offscreen host
+# retains one explicitly named force path for deterministic capture scripts.
+pose_publication_forbidden='apply_mono_movement_frame|commit_mono_player_pose|force_mono_player_pose_reconcile_for_diagnostics'
+
+if rg -n -U --glob '!offscreen_scene_host.rs' \
+  "$pose_publication_forbidden" "${native_apps[@]}"; then
+  echo "native client adapter regrew player-pose publication policy" >&2
+  exit 1
+fi
+
+required_pose_entries=(
+  'native/apps/mclone-native-client/src/winit_frame_driver.rs:advance_mono_input_frame'
+  'native/apps/mclone-native-client/src/offscreen_scene_host.rs:advance_mono_input_frame'
+  'native/apps/mclone-native-client/src/desktop_xr.rs:apply_frame_locomotion'
+  'native/apps/mclone-android-client/src/surface_driver.rs:advance_mono_input_frame'
+  'native/apps/mclone-android-xr-client/src/lib.rs:apply_frame_locomotion'
+)
+
+for requirement in "${required_pose_entries[@]}"; do
+  path="${requirement%%:*}"
+  entry="${requirement#*:}"
+  if ! rg -q "$entry" "$path"; then
+    echo "$path stopped advancing shared player-pose publication" >&2
+    exit 1
+  fi
+done
+
 # Native rims may select an endpoint and instantiate the shared remote session,
 # but socket ownership, stream polling, response bookkeeping, and pump policy
 # stay in mclone-net/mclone-app-runtime. The desktop visual-smoke fixture is an

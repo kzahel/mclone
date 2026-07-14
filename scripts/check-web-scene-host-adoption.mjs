@@ -75,6 +75,20 @@ const patterns = [
     destination: "McloneSceneHost",
   },
   {
+    id: "pose-publication-selection",
+    source: "rust",
+    needle: ".apply_mono_movement_frame(",
+    baseline: 1,
+    destination: "McloneSceneHost::advance_mono_input_frame",
+  },
+  {
+    id: "pose-publication-cadence",
+    source: "rust",
+    needle: ".commit_mono_player_pose(",
+    baseline: 1,
+    destination: "McloneSceneHost::advance_mono_input_frame",
+  },
+  {
     id: "render-admission",
     source: "rust",
     needle: ".sync_render_sections_with_budget(",
@@ -159,6 +173,10 @@ if (enforce) {
     for (const item of remaining) {
       console.error(`  ${item.path}: ${item.id} (${item.count} x ${JSON.stringify(item.needle)})`);
     }
+    process.exitCode = 1;
+  }
+  if (!sources.rust.text.includes(".advance_mono_input_frame(")) {
+    console.error("browser driver stopped advancing shared player-pose publication");
     process.exitCode = 1;
   }
 } else {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::pose_sync::PlayerPoseSyncCadence;
 
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
@@ -422,6 +423,7 @@ impl McloneSceneHost {
             render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
+            player_pose_sync: PlayerPoseSyncCadence::default(),
             menu_toggle_down: false,
             game_ui_toggle_down: false,
             menu_pointer_down: false,
@@ -609,6 +611,7 @@ impl McloneSceneHost {
             render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
+            player_pose_sync: PlayerPoseSyncCadence::default(),
             menu_toggle_down: false,
             game_ui_toggle_down: false,
             menu_pointer_down: false,
@@ -801,6 +804,7 @@ impl McloneSceneHost {
             render_completed_result_accept_budget: None,
             per_view_uniform_frame: 0,
             last_locomotion_update: None,
+            player_pose_sync: PlayerPoseSyncCadence::default(),
             menu_toggle_down: false,
             game_ui_toggle_down: false,
             menu_pointer_down: false,
@@ -3171,6 +3175,7 @@ impl McloneSceneHost {
     fn clear_physical_presentation_state(&mut self) {
         self.tracking_origin = None;
         self.last_locomotion_update = None;
+        self.player_pose_sync.reset();
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
         self.clear_mono_blink_debug();
@@ -3198,6 +3203,7 @@ impl McloneSceneHost {
         self.tracking_origin = None;
         self.prefetched_live_upload = None;
         self.last_locomotion_update = None;
+        self.player_pose_sync.reset();
         self.first_eye_summary = None;
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
         self.last_ui_draw_cache_stats = UiDrawCacheStats::default();

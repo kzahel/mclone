@@ -14,16 +14,24 @@ later. The wire/session/tick plan lives in
 [`vanilla/networking.md`](vanilla/networking.md)
 (movement send, validation walkthrough, teleport/ack, interpolation).
 
-## Current state (verified 2026-07-10)
+## Current state (verified 2026-07-14)
 
 - **Local movement is client-simulated and client-authoritative**, matching
   vanilla's model. The client runs its own physics
   (`mclone-client/src/player.rs:864-1078`) and emits vanilla-shaped
   `MovePlayer` variants with vanilla's exact thresholds: position when
-  squared delta > `9.0e-4`, rotation on change, reminder every 20 calls,
-  `StatusOnly` on ground flip
+  squared delta > `9.0e-4`, rotation on change, reminder every 20 publication
+  attempts, `StatusOnly` on ground flip
   (`LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR`/`..._REMINDER_INTERVAL`,
   `mclone-client/src/player.rs:65-66,909-964`).
+- **Pose publication is scene-owned across platforms.** Mono and XR frame
+  entry points advance one `mclone-scene` deadline at no more than 20 Hz,
+  with wall-clock slip instead of catch-up bursts. Look-only changes reach the
+  selector and produce `MovePlayerCommand::Rot`; idle calls make the
+  20-attempt position reminder approximately one second. Desktop, browser,
+  Android, and XR adapters cannot select or commit movement packets directly.
+  Publication uses `SendOnly`, so it enqueues outbound work without draining
+  inbound updates or waiting for an acknowledgement.
 - **The server accepts reported positions with clamps only**: finiteness
   checks and vanilla coordinate clamps, plus the pending-teleport gate
   (`mclone-server/src/player.rs:63-95`). There is **no collision replay, no
@@ -115,14 +123,20 @@ Decisions to make **now** so Stage 2 stays cheap:
   application across variable frame dt in ways that can't be replayed.
 - **Keep server movement application in shared code** (`mclone-server` +
   shared physics), never app-local, so the replay simulation has one home.
+- **Keep view pose, body heading, and locomotion reference conceptually
+  separate.** They currently collapse to one network pose, including XR, but
+  a future tracked head may rotate independently of the movement/body heading.
+  Extend the shared pose/protocol contract when that distinction becomes
+  observable; do not encode it as an XR-only send cadence.
 - **Corrections must stay id-gated** (already true) — replay reconciliation
   is an extension of the teleport-ack loop, not a replacement.
 
 ## Variable-tick interplay
 
-- The 20-tick move reminder and any future validation windows should be
-  expressed in time (1 s at 20 Hz) once the join handshake carries tick
-  rates, so a 60 Hz server doesn't triple the movement chatter.
+- The current scene deadline makes the 20-attempt move reminder one second at
+  its fixed 20 Hz vanilla baseline. It should become handshake-rate-aware when
+  variable publication rates land, so a 60 Hz server does not triple movement
+  chatter.
 - Vanilla's per-tick thresholds ("too quickly" per packet-burst) assume the
   server tick as the accounting window; when the tick rate is configurable,
   the burst window follows the gameplay/publication lane, not wall-clock

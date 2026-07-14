@@ -162,8 +162,9 @@ The client-facing shape should be a bus, not a request/response session:
 
 ```text
 client app/render/runtime thread
-  - samples input and XR/flat poses
-  - enqueues outbound commands
+  - samples platform-neutral input and XR/flat pose facts
+  - advances shared scene input and pose-publication cadence
+  - nonblocking-enqueues selected outbound commands
   - drains inbound updates in receive order under a frame budget
   - applies client replica updates
   - marks render dirty incrementally
@@ -188,6 +189,22 @@ render compile/upload actors
   - compile, accept, upload, and publish drawable terrain under their own
     budgets
 ```
+
+Local-player pose publication follows the same shared boundary. Every
+interactive platform advances a `McloneSceneHost` frame entry even when the
+player is stationary or a menu is open. The scene samples its monotonic clock
+and attempts pose selection at no more than 20 Hz, matching vanilla's 50 ms
+client tick without issuing catch-up bursts after a late frame. The shared
+`mclone-client` selector then chooses `PosRot`, `Pos`, `Rot`, `StatusOnly`, or
+no command. A stationary view change therefore publishes `Rot`; twenty idle
+selection attempts trigger the vanilla one-second position reminder.
+
+The drawable thread only performs the bounded selector work and a `SendOnly`
+enqueue. It does not drain updates, wait for acknowledgement or queue capacity,
+or perform socket IO. Native TCP hands the command to its writer lane and web
+hands it to the worker-owned transport. Platform adapters may translate raw
+input and immediately update a local look pose for responsiveness, but they do
+not own movement-command selection or publication cadence.
 
 Native uses independent blocking reader and writer ownership rather than
 forcing async through the engine. Production web uses a Web Worker to own the
@@ -337,6 +354,9 @@ Outbound commands stay ordered command records, with care:
 
 - Java-like movement packets are ordered command records; the vanilla movement
   path must never flush inbound updates.
+- Player-pose selection is attempted from one shared scene deadline, not only
+  when a platform adapter happens to observe translation input. Rotation-only
+  and idle-reminder records therefore behave consistently across Mono and XR.
 - Future FPS-style predicted movement may require preserving every fixed-step
   command for replay. Do not blindly collapse that lane into "latest input."
 - Some presentation or view-center commands can be latest-wins if the command's
@@ -446,10 +466,10 @@ stay event-driven.
   application path.
 - Web and native may differ in transport mechanics, not in command/update
   semantics.
-- Native flat/XR/Android lanes use one native remote adapter. Cross-platform
-- Cross-adapter semantic parity is proven by one connection conformance suite over
-  integrated, TCP, and web-worker/WebSocket implementations; XR adds frame
-  accounting rather than a forked transport contract.
+- Native flat/XR/Android lanes use one native remote adapter.
+- Cross-adapter semantic parity is proven by one connection conformance suite
+  over integrated, TCP, and web-worker/WebSocket implementations; XR adds
+  frame accounting rather than a forked transport contract.
 - Old render output remains visible until replacement compile/upload work is
   complete; network pacing feeds, not bypasses, the terrain lifecycle.
 

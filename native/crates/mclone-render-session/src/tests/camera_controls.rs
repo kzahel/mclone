@@ -857,6 +857,9 @@ fn engine_camera_controller_fly_no_clip_passes_through_blocks() {
 fn engine_camera_controller_reports_pose_sync_command() {
     let mut camera =
         EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);
+    camera
+        .next_pose_sync_command()
+        .expect("initial pose should establish the movement baseline");
     camera.turn_mouse_delta(5.0, 0.0);
 
     let report = camera
@@ -864,7 +867,22 @@ fn engine_camera_controller_reports_pose_sync_command() {
         .expect("rotation should produce pose sync");
 
     assert_eq!(report.kind, EnginePoseSyncCommandKind::Movement);
-    assert!(matches!(report.command, ClientCommand::MovePlayer(_)));
+    let ClientCommand::MovePlayer(mclone_protocol::MovePlayerCommand::Rot {
+        y_rot_degrees,
+        x_rot_degrees,
+        ..
+    }) = report.command
+    else {
+        panic!("stationary mouse look must publish a rotation-only command");
+    };
+    assert_eq!(
+        y_rot_degrees,
+        -report.camera.yaw_radians.to_degrees() as f32
+    );
+    assert_eq!(
+        x_rot_degrees,
+        -report.camera.pitch_radians.to_degrees() as f32
+    );
     assert_eq!(report.camera, camera.snapshot());
     assert!(camera.next_pose_sync_command().is_none());
 }

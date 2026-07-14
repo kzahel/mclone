@@ -83,6 +83,11 @@ burn-down.
 > XR: browser query configuration stays behind an opaque Rust handle, camera
 > startup/replacement uses one scene-owned factory, and the shared movement-mode
 > launch canary reaches every lane without platform DTOs or setters.
+> Refreshed on 2026-07-14 after the Tactical 176 pose-publication follow-up
+> moved the at-most-20-Hz publication deadline and input/publication ordering
+> into `McloneSceneHost`. Desktop, offscreen, web, flat Android, desktop XR,
+> and Android XR now enter through shared Mono/XR frame methods; source-purity
+> gates reject app-local packet-selection and publication policy.
 > Gamepad input is retained as a dated shared contract;
 > no native adapter advertises it until a real platform event source and device
 > validation land.
@@ -264,9 +269,12 @@ Concretely:
   [`168`](../tactical/168-unified-native-scene-host.md) records the migration;
   [`105`](../tactical/105-offscreen-flat-client-host.md) remains the original
   product target.
-- Flat and XR camera commits now share pose-sync, pending-correction, and chunk
-  interest policy in `app-runtime::camera_reconcile`. Optional neutral timing
-  keeps XR's existing locomotion attribution without a scene-local policy fork.
+- Flat and XR camera commits now share pose-sync, pending-correction, chunk
+  interest, and one scene-owned at-most-20-Hz publication cadence. Mono hosts
+  enter through `advance_mono_input_frame`; XR hosts enter through
+  `apply_frame_locomotion`. Optional neutral timing keeps XR's existing
+  locomotion attribution without a platform-local policy fork, while the pose
+  model retains a seam for future tracked-head versus body-heading semantics.
 - The XR scene-driver fork is closed:
   `McloneSceneHost<S>` composes `NativeSingleViewSessionRuntime<S>` around
   the shared native scene runtime, desktop XR passes the desktop TCP

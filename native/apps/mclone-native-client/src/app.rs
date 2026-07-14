@@ -678,15 +678,11 @@ impl ChunkApp {
         let Some(driver) = self.scene_driver.as_mut() else {
             return Ok(());
         };
-        if driver.ui_is_active() {
-            return Ok(());
-        }
-
         let frame = self.flat_input.held_frame();
-        if driver.apply_movement_frame(frame, f64::from(movement_dt)) {
-            driver.commit_player_pose()?;
+        driver.advance_input_frame(frame, f64::from(movement_dt))?;
+        if !driver.ui_is_active() {
+            driver.update_blink_debug();
         }
-        driver.update_blink_debug();
         Ok(())
     }
 

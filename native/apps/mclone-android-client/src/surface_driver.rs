@@ -655,20 +655,17 @@ impl AndroidGpuState {
     }
 
     fn drive_held_input(&mut self, dt_seconds: f64) -> Result<()> {
-        if self.host.mono_ui_is_active() {
-            return Ok(());
-        }
         let mut frame = self.keyboard_mouse.held_frame().unwrap_or_default();
         if let Some(touch) = self.touch.held_frame() {
             frame.merge_from(touch);
         }
-        if self.host.apply_mono_movement_frame(
+        self.host.advance_mono_input_frame(
             frame,
             dt_seconds.clamp(0.0, TOUCH_MOVEMENT_MAX_FRAME_SECONDS),
-        ) {
-            self.host.commit_mono_player_pose()?;
+        )?;
+        if !self.host.mono_ui_is_active() {
+            self.host.update_mono_blink_debug();
         }
-        self.host.update_mono_blink_debug();
         Ok(())
     }
 
@@ -720,9 +717,7 @@ impl AndroidGpuState {
                 );
             }
         }
-        if self.host.apply_mono_look_frame(frame) {
-            self.host.commit_mono_player_pose()?;
-        }
+        self.host.apply_mono_look_frame(frame);
         outcome.handled = frame != FlatInputFrame::default();
         Ok(outcome)
     }
@@ -733,9 +728,7 @@ impl AndroidGpuState {
             exit: false,
         };
         if let Some(delta) = event.look_delta {
-            if self.host.apply_mono_touch_look(delta) {
-                self.host.commit_mono_player_pose()?;
-            }
+            self.host.apply_mono_touch_look(delta);
             log::info!(
                 "Mclone Android touch look moved: yaw={:.4} pitch={:.4}",
                 delta.yaw_radians,

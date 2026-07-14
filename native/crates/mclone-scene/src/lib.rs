@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod far_lod_settle;
+mod pose_sync;
 
 pub use far_lod_settle::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
 
@@ -546,6 +547,7 @@ pub struct McloneSceneHost {
     render_completed_result_accept_budget: Option<usize>,
     per_view_uniform_frame: u32,
     last_locomotion_update: Option<MonotonicInstant>,
+    player_pose_sync: pose_sync::PlayerPoseSyncCadence,
     menu_toggle_down: bool,
     game_ui_toggle_down: bool,
     menu_pointer_down: bool,
@@ -3879,6 +3881,8 @@ impl McloneSceneHost {
         let Some(runtime) = self.active_world.runtime.as_mut() else {
             return Ok((false, EngineCameraCommitTiming::default()));
         };
+        self.player_pose_sync
+            .record_attempt(self.services.clock.now());
         let mut timing = EngineCameraCommitTiming::default();
         let changed = mclone_app_runtime::commit_engine_camera_player_pose(
             runtime,
@@ -3889,6 +3893,15 @@ impl McloneSceneHost {
         )
         .context("sync XR terrain player pose")?;
         Ok((changed, timing))
+    }
+
+    fn commit_engine_camera_player_pose_if_due_timed(
+        &mut self,
+    ) -> Result<Option<(bool, EngineCameraCommitTiming)>> {
+        if !self.player_pose_sync.is_due(self.services.clock.now()) {
+            return Ok(None);
+        }
+        self.commit_engine_camera_player_pose_timed().map(Some)
     }
 
     fn play_landing_events(&mut self) {

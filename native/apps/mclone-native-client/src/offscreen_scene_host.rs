@@ -307,7 +307,7 @@ impl OffscreenDriver {
     }
 
     pub(crate) fn commit_camera(&mut self) -> Result<bool> {
-        self.host.commit_mono_player_pose()
+        self.host.force_mono_player_pose_reconcile_for_diagnostics()
     }
 
     pub(crate) fn render(
@@ -900,6 +900,8 @@ impl OffscreenDriver {
             self.host.clear_mono_camera_input();
             return Ok(Vec::new());
         }
+        self.host
+            .advance_mono_input_frame(frame, self.clock.frame_ms / 1_000.0)?;
         if self.host.mono_ui_is_active() {
             return Ok(Vec::new());
         }
@@ -908,12 +910,6 @@ impl OffscreenDriver {
         }
         if frame.hotbar_step != 0 {
             self.host.step_mono_hotbar_slot(frame.hotbar_step);
-        }
-        if self
-            .host
-            .apply_mono_movement_frame(frame, self.clock.frame_ms / 1_000.0)
-        {
-            self.host.commit_mono_player_pose()?;
         }
         let mut statuses = Vec::new();
         if frame.attack {
