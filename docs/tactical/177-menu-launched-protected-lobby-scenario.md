@@ -1,7 +1,9 @@
 # 177: Menu-Launched Protected Lobby Scenario
 
-Status: active 2026-07-14. Slice 0 characterization and comparison evidence is
-landed; Slice 1's CLI-first scenario execution seam is next. This is the
+Status: active 2026-07-14. Slices 0-1 are landed; versioned managed scenario
+provisioning is next. The CLI now projects into the same scene-owned scenario
+operation intended for the product menu, and renderer-shell preparation is
+independent from retained-runtime attachment. This is the
 immediate productization milestone after Tactical 175 Slice 6. It deliberately
 precedes Tactical 175's remote preview slice so the current local proof is
 first expressed as one shared scenario contract rather than accumulating a
@@ -490,6 +492,36 @@ Deliverables:
 Exit criteria: `pnpm native:live-diorama:activation-smoke` still produces the
 same logical report and representative pixels through the new common seam; no
 menu behavior exists yet.
+
+#### Slice 1 completion record — 2026-07-14
+
+Shared `mclone-app-runtime` now owns the serialized, path-free
+`BuiltInScenarioId::LobbyPreview` and `ScenarioLaunchIntent`. The prepared
+native leaf remains explicitly separate: `PreparedEmbeddedWorldScenario`
+carries the storage-resolved retained-world request only after an executor has
+resolved content. `SessionStartRequest` remains the unchanged single-world
+leaf, and no menu action exists yet.
+
+`McloneSceneHost` now exposes one embedded-world scenario executor used by the
+diagnostic diorama projection. It splits duplicate terrain/atlas, placed
+renderer, far-LOD, opaque-gate, and required multiview topology creation into
+`prepare_*_shell`, then attaches storage/runtime startup through a distinct
+`begin_prepared_*` operation. The compatibility warm-world leaf calls those
+same two phases. A prepared shell is scene-owned, can exist before a standby
+runtime, and is released by the established cancellation/resource-rebuild
+path. The desktop CLI retains marker/path projection but no longer expands or
+calls detached-world orchestration directly.
+
+Focused app-runtime serialization, scene ownership/lifecycle, native-client
+source-lock, and native-web compilation pass. The refactor activation smoke
+retains the exact five comparison hashes from Slice 0: `8ffd99d4...e8a9`,
+`1818d75d...a56e`, `f8d22803...73a7`, `1818d75d...a56e`, and
+`f1bb5636...afc3`. Its flat/stereo A-to-B-to-A report remains switchable with
+two destination sections, 8,826 destination indices, covered black frames,
+different stereo eyes, and no boundary construction/upload work. Empty shell
+creation measured 13.907-14.454 ms in this run and still happens before the
+interactive loop for the CLI path. Slice 2 can therefore introduce managed
+content without reopening renderer/runtime ownership.
 
 ### Slice 2: Versioned Managed Scenario Provisioning
 

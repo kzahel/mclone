@@ -9,12 +9,14 @@ use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::prepared_assets::{
     AssetPackSourceRegistry, reference_asset_pack_selection,
 };
+use mclone_app_runtime::scenario::BuiltInScenarioId;
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::startup_args::StartupSceneOptions;
 use mclone_core::ChunkPos;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_scene::{
-    McloneSceneHost, McloneSceneHostOptions, WarmWorldStandbyRequest, XrStartupViewPose,
+    McloneSceneHost, McloneSceneHostOptions, PreparedEmbeddedWorldScenario,
+    WarmWorldStandbyRequest, XrStartupViewPose,
 };
 use mclone_server::{AuthoredWorldFixtureManifest, authored_world_fixture_marker_path};
 
@@ -147,8 +149,9 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
         if let Some(cadence) = scene.warm_world_standby_cadence {
             request = request.with_standby_cadence(cadence);
         }
-        host.begin_warm_world_standby(device, queue, request)
-            .context("initialize launch-only live world diorama")?;
+        let scenario = PreparedEmbeddedWorldScenario::new(BuiltInScenarioId::LobbyPreview, request);
+        host.begin_embedded_world_scenario(device, queue, scenario)
+            .context("initialize live world diorama scenario")?;
     } else if let Some(seed) = scene.warm_world_standby_seed {
         let mut request =
             WarmWorldStandbyRequest::new(seed, ChunkPos::new(scene.chunk_x, scene.chunk_z));

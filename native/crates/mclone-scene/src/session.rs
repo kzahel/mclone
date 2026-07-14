@@ -337,6 +337,8 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            prepared_warm_world_shell: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
@@ -527,6 +529,8 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            prepared_warm_world_shell: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
@@ -729,6 +733,8 @@ impl McloneSceneHost {
             active_world,
             standby_world: None,
             warm_world_standby: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            prepared_warm_world_shell: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
@@ -1266,19 +1272,20 @@ impl McloneSceneHost {
         Ok(())
     }
 
-    /// Construct Tactical 174's one detached local standby without replacing
-    /// the active slot. The empty renderer shell is deliberately created here,
-    /// before the interactive frame loop begins. Section meshes are admitted
-    /// later through the ordinary budgeted preparation path.
+    /// Prepare the duplicate renderer shell while a loading cover still owns
+    /// presentation. This performs no destination storage or runtime work.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn begin_warm_world_standby(
+    pub fn prepare_warm_world_standby_shell(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        request: WarmWorldStandbyRequest,
+        presentation: WarmWorldPresentationRequest,
     ) -> Result<()> {
-        if self.warm_world_standby.is_some() || self.standby_world.is_some() {
-            bail!("a warm-world standby request already exists");
+        if self.prepared_warm_world_shell.is_some()
+            || self.warm_world_standby.is_some()
+            || self.standby_world.is_some()
+        {
+            bail!("a warm-world standby request or prepared shell already exists");
         }
         if matches!(
             self.active_world.descriptor,
@@ -1286,36 +1293,6 @@ impl McloneSceneHost {
         ) {
             bail!("warm-world standby currently requires an active local world");
         }
-        if self.active_world.scene.seed == request.seed {
-            bail!("warm-world standby seed must differ from the active seed");
-        }
-        let presentation = request.presentation;
-        let preview_boundary_warning = matches!(presentation, WarmWorldPresentationRequest::Diorama { .. })
-            .then(|| request.world_generation_profile.authored_missing_chunk().is_none())
-            .filter(|warn| *warn)
-            .map(|_| {
-                "non-authored preview uses a hard region edge; canonical neighbor-culled faces may be exposed"
-                    .to_owned()
-            });
-
-        let started_at = self.services.clock.now();
-        let mut scene = self.active_world.scene.clone();
-        scene.seed = request.seed;
-        scene.chunk_x = request.entry_center.x;
-        scene.chunk_z = request.entry_center.z;
-        scene.remote_addr = None;
-        scene.world_root = None;
-        scene.world_dir = request.world_dir.clone();
-        scene.world_generation_profile = request.world_generation_profile;
-        scene.use_initial_spawn_center = false;
-        let scene = scene.validated()?;
-        let standby_cadence = request.standby_cadence.unwrap_or(scene.simulation_cadence);
-        if !standby_cadence.is_valid() {
-            bail!("warm-world standby cadence must be valid");
-        }
-        let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
-        let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
-        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
 
         let shell_started_at = self.services.clock.now();
         let draw = TexturedSectionDrawResources::new(
@@ -1364,11 +1341,164 @@ impl McloneSceneHost {
         let placed_renderer_topology_ready = placed_renderer.as_ref().is_some_and(|renderer| {
             !renderer_multiview_required || renderer.multiview_renderer_materialized()
         });
+        self.prepared_warm_world_shell = Some(PreparedWarmWorldRendererShell {
+            presentation,
+            draw,
+            far_lod: FarTerrainLodRenderer::new(device, self.color_format),
+            gate_renderer,
+            placed_renderer,
+            renderer_shell_create_ms,
+            renderer_multiview_create_ms,
+            renderer_multiview_required,
+            renderer_multiview_materialized,
+            placed_renderer_topology_ready,
+        });
+        Ok(())
+    }
+
+    /// Compatibility convenience for callers that already have a prepared
+    /// local leaf and want shell preparation plus runtime startup together.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_warm_world_standby(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        request: WarmWorldStandbyRequest,
+    ) -> Result<()> {
+        self.prepare_warm_world_standby_shell(device, queue, request.presentation)?;
+        if let Err(error) = self.begin_prepared_warm_world_standby(request) {
+            self.prepared_warm_world_shell = None;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    /// Execute the one scene-owned embedded-world scenario seam.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_embedded_world_scenario(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scenario: PreparedEmbeddedWorldScenario,
+    ) -> Result<()> {
+        self.prepare_embedded_world_scenario_shell(device, queue, &scenario)?;
+        if let Err(error) = self.begin_prepared_embedded_world_scenario(scenario) {
+            self.prepared_warm_world_shell = None;
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn prepare_embedded_world_scenario_shell(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scenario: &PreparedEmbeddedWorldScenario,
+    ) -> Result<()> {
+        match scenario.id {
+            mclone_app_runtime::scenario::BuiltInScenarioId::LobbyPreview => {}
+        }
+        if !matches!(
+            scenario.destination.presentation,
+            WarmWorldPresentationRequest::Diorama { .. }
+        ) {
+            bail!("embedded-world scenario requires a diorama presentation");
+        }
+        self.prepare_warm_world_standby_shell(device, queue, scenario.destination.presentation)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_prepared_embedded_world_scenario(
+        &mut self,
+        scenario: PreparedEmbeddedWorldScenario,
+    ) -> Result<()> {
+        match scenario.id {
+            mclone_app_runtime::scenario::BuiltInScenarioId::LobbyPreview => {}
+        }
+        if !matches!(
+            scenario.destination.presentation,
+            WarmWorldPresentationRequest::Diorama { .. }
+        ) {
+            bail!("embedded-world scenario requires a diorama presentation");
+        }
+        self.begin_prepared_warm_world_standby(scenario.destination)
+    }
+
+    /// Attach destination startup to an already-created renderer shell.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_prepared_warm_world_standby(
+        &mut self,
+        request: WarmWorldStandbyRequest,
+    ) -> Result<()> {
+        if self.warm_world_standby.is_some() || self.standby_world.is_some() {
+            bail!("a warm-world standby request already exists");
+        }
+        let prepared_presentation = self
+            .prepared_warm_world_shell
+            .as_ref()
+            .map(|shell| shell.presentation)
+            .ok_or_else(|| anyhow!("warm-world renderer shell was not prepared"))?;
+        if prepared_presentation != request.presentation {
+            bail!("prepared warm-world renderer presentation does not match request");
+        }
+        if matches!(
+            self.active_world.descriptor,
+            Some(ActiveSessionDescriptor::Remote { .. })
+        ) {
+            bail!("warm-world standby currently requires an active local world");
+        }
+        if self.active_world.scene.seed == request.seed {
+            bail!("warm-world standby seed must differ from the active seed");
+        }
+        let presentation = request.presentation;
+        let preview_boundary_warning = matches!(presentation, WarmWorldPresentationRequest::Diorama { .. })
+            .then(|| request.world_generation_profile.authored_missing_chunk().is_none())
+            .filter(|warn| *warn)
+            .map(|_| {
+                "non-authored preview uses a hard region edge; canonical neighbor-culled faces may be exposed"
+                    .to_owned()
+            });
+
+        let started_at = self.services.clock.now();
+        let mut scene = self.active_world.scene.clone();
+        scene.seed = request.seed;
+        scene.chunk_x = request.entry_center.x;
+        scene.chunk_z = request.entry_center.z;
+        scene.remote_addr = None;
+        scene.world_root = None;
+        scene.world_dir = request.world_dir.clone();
+        scene.world_generation_profile = request.world_generation_profile;
+        scene.use_initial_spawn_center = false;
+        let scene = scene.validated()?;
+        let standby_cadence = request.standby_cadence.unwrap_or(scene.simulation_cadence);
+        if !standby_cadence.is_valid() {
+            bail!("warm-world standby cadence must be valid");
+        }
+        let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
+        let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
+        let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
+
         let pump = LocalIntegratedStartupPump::with_mesh_assets(
             local_integrated_scene_options(&scene),
             self.mesh_assets.clone(),
         )
         .context("create detached standby local startup pump")?;
+        let PreparedWarmWorldRendererShell {
+            presentation: _,
+            draw,
+            far_lod,
+            gate_renderer,
+            placed_renderer,
+            renderer_shell_create_ms,
+            renderer_multiview_create_ms,
+            renderer_multiview_required,
+            renderer_multiview_materialized,
+            placed_renderer_topology_ready,
+        } = self
+            .prepared_warm_world_shell
+            .take()
+            .expect("prepared shell presence checked before fallible startup work");
         let instance_id = WorldInstanceId::new(2);
         let asset_epoch = self.active_assets.epoch;
 
@@ -1395,7 +1525,7 @@ impl McloneSceneHost {
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
             },
-            FarTerrainLodRenderer::new(device, self.color_format),
+            far_lod,
             RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
                 WorkWindow::BeforeRender,
@@ -2582,6 +2712,10 @@ impl McloneSceneHost {
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
         self.embedded_world_preview = None;
         self.embedded_world_activation = EmbeddedWorldActivationState::default();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.prepared_warm_world_shell = None;
+        }
         // Drop the concrete slot unconditionally. State normally accompanies
         // it, but teardown and resource-rebuild safety must not depend on that
         // diagnostic invariant: taking the slot joins its runtime/compiler

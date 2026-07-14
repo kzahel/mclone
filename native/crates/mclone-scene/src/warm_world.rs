@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::monotonic::MonotonicInstant;
+use mclone_app_runtime::scenario::BuiltInScenarioId;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::session::ActiveSessionDescriptor;
@@ -9,9 +10,13 @@ use mclone_core::{BlockPos, ChunkPos, Vec3d};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_render::opaque_world_gate::OpaqueWorldGate;
+use mclone_render::far_lod::FarTerrainLodRenderer;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraController;
 use mclone_server::{SimulationCadenceConfig, WorldGenerationProfile};
@@ -67,7 +72,7 @@ impl WorldInstanceId {
     }
 }
 
-/// Launch-only request for Tactical 174's detached local standby smoke.
+/// Prepared local leaf for a detached retained-world startup.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WarmWorldStandbyRequest {
     pub seed: i64,
@@ -128,6 +133,36 @@ pub enum WarmWorldPresentationRequest {
         placement: WorldPlacement,
         return_placement: WorldPlacement,
     },
+}
+
+/// Storage-resolved scene request for one built-in embedded-world scenario.
+///
+/// The shared product intent remains path-free. A native content executor may
+/// attach a persistent path while resolving this prepared scene boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedEmbeddedWorldScenario {
+    pub id: BuiltInScenarioId,
+    pub destination: WarmWorldStandbyRequest,
+}
+
+impl PreparedEmbeddedWorldScenario {
+    pub const fn new(id: BuiltInScenarioId, destination: WarmWorldStandbyRequest) -> Self {
+        Self { id, destination }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) struct PreparedWarmWorldRendererShell {
+    pub presentation: WarmWorldPresentationRequest,
+    pub draw: TexturedSectionDrawResources,
+    pub far_lod: FarTerrainLodRenderer,
+    pub gate_renderer: Option<OpaqueWorldGateRenderer>,
+    pub placed_renderer: Option<PlacedTexturedSectionRenderer>,
+    pub renderer_shell_create_ms: f64,
+    pub renderer_multiview_create_ms: f64,
+    pub renderer_multiview_required: bool,
+    pub renderer_multiview_materialized: bool,
+    pub placed_renderer_topology_ready: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

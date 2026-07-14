@@ -82,6 +82,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "active_world",
     "standby_world",
     "warm_world_standby",
+    "prepared_warm_world_shell",
     "embedded_world_preview",
     "embedded_world_activation",
     "embedded_world_activation_sequence",
@@ -170,7 +171,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 20);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 79);
+    assert_eq!(host_fields.len(), 80);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -264,6 +265,7 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("active_world,"));
         assert!(constructor.contains("standby_world: None,"));
         assert!(constructor.contains("warm_world_standby: None,"));
+        assert!(constructor.contains("prepared_warm_world_shell: None,"));
         assert!(constructor.contains("embedded_world_preview: None,"));
         assert!(
             constructor
@@ -362,12 +364,28 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     assert_in_order(
         begin,
         &[
+            "self.prepare_warm_world_standby_shell(device, queue, request.presentation)?;",
+            "self.begin_prepared_warm_world_standby(request)",
+        ],
+    );
+    let prepare = braced_item(&source, "pub fn prepare_warm_world_standby_shell(");
+    assert!(prepare.contains("TexturedSectionDrawResources::new("));
+    assert!(prepare.contains("&[],"));
+    assert!(prepare.contains("self.prepared_warm_world_shell = Some("));
+    assert!(prepare.contains("FarTerrainLodRenderer::new(device, self.color_format)"));
+    assert!(prepare.contains("matches!(presentation, WarmWorldPresentationRequest::OpaqueGate)"));
+    assert!(prepare.contains("matches!(presentation, WarmWorldPresentationRequest::Diorama"));
+
+    let attach = braced_item(&source, "pub fn begin_prepared_warm_world_standby(");
+    assert_in_order(
+        attach,
+        &[
             "scene.world_root = None;",
             "scene.world_dir = request.world_dir.clone();",
             "scene.world_generation_profile = request.world_generation_profile;",
             "scene.use_initial_spawn_center = false;",
-            "TexturedSectionDrawResources::new(",
             "LocalIntegratedStartupPump::with_mesh_assets(",
+            ".prepared_warm_world_shell",
             "id: instance_id,",
             "lifecycle: WorldSlotLifecycle::Starting,",
             "runtime: None,",
@@ -375,12 +393,10 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
             "self.warm_world_standby = Some(WarmWorldStandbyState {",
         ],
     );
-    assert!(begin.contains("&[],"));
-    assert!(!begin.contains("self.active_world.install("));
-    assert!(begin.contains("matches!(presentation, WarmWorldPresentationRequest::OpaqueGate)"));
-    assert!(begin.contains("matches!(presentation, WarmWorldPresentationRequest::Diorama"));
-    assert!(begin.contains("self.opaque_world_gate_renderer = gate_renderer;"));
-    assert!(begin.contains("self.embedded_world_preview = match (presentation, placed_renderer)"));
+    assert!(!attach.contains("TexturedSectionDrawResources::new("));
+    assert!(!attach.contains("self.active_world.install("));
+    assert!(attach.contains("self.opaque_world_gate_renderer = gate_renderer;"));
+    assert!(attach.contains("self.embedded_world_preview = match (presentation, placed_renderer)"));
 
     let advance = braced_item(&source, "fn advance_warm_world_standby(");
     assert!(advance.contains("startup.pump.step(camera_position)"));

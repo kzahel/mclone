@@ -51,9 +51,10 @@ fn desktop_cli_flags_are_classified_as_shared_or_desktop_local() {
 }
 
 #[test]
-fn live_diorama_productization_boundary_is_explicit_before_refactor() {
+fn live_diorama_productization_uses_one_scene_scenario_executor() {
     let desktop = include_str!("../desktop_scene_host.rs");
     let scene = include_str!("../../../../crates/mclone-scene/src/session.rs");
+    let scenario = include_str!("../../../../crates/mclone-app-runtime/src/scenario.rs");
     let session = include_str!("../../../../crates/mclone-app-runtime/src/session.rs");
     let ui = include_str!("../../../../crates/mclone-ui/src/v2.rs");
 
@@ -62,25 +63,49 @@ fn live_diorama_productization_boundary_is_explicit_before_refactor() {
             .matches("if let Some(diorama) = scene.live_diorama.as_ref()")
             .count(),
         1,
-        "Slice 0 expects exactly one desktop launch projection to extract"
+        "the CLI retains exactly one diagnostic content projection"
     );
+    let diorama_start = desktop
+        .find("if let Some(diorama) = scene.live_diorama.as_ref()")
+        .expect("live-diorama projection");
+    let diorama_end = desktop[diorama_start..]
+        .find("} else if let Some(seed) = scene.warm_world_standby_seed")
+        .map(|offset| diorama_start + offset)
+        .expect("live-diorama projection end");
+    let diorama_projection = &desktop[diorama_start..diorama_end];
     for marker in [
         "authored_world_fixture_marker_path(&diorama.world_dir)",
         "WarmWorldStandbyRequest::new(",
         ".with_persistent_world_dir(",
         ".with_embedded_preview(",
-        "host.begin_warm_world_standby(device, queue, request)",
+        "PreparedEmbeddedWorldScenario::new(BuiltInScenarioId::LobbyPreview, request)",
+        "host.begin_embedded_world_scenario(device, queue, scenario)",
     ] {
         assert!(
             desktop.contains(marker),
-            "desktop live-diorama assembly lost `{marker}` before extraction"
+            "desktop live-diorama projection lost `{marker}`"
         );
     }
+    assert!(!diorama_projection.contains("host.begin_warm_world_standby(device, queue, request)"));
     assert_eq!(
         scene.matches("pub fn begin_warm_world_standby(").count(),
         1,
-        "scene host remains the sole detached-world execution owner"
+        "scene host keeps one compatibility leaf operation"
     );
+    for marker in [
+        "pub fn begin_embedded_world_scenario(",
+        "pub fn prepare_embedded_world_scenario_shell(",
+        "pub fn begin_prepared_embedded_world_scenario(",
+        "pub fn prepare_warm_world_standby_shell(",
+        "pub fn begin_prepared_warm_world_standby(",
+    ] {
+        assert!(
+            scene.contains(marker),
+            "missing scene scenario seam `{marker}`"
+        );
+    }
+    assert!(scenario.contains("pub enum BuiltInScenarioId"));
+    assert!(scenario.contains("pub struct ScenarioLaunchIntent"));
     assert!(session.contains("pub enum SessionStartRequest"));
     for variant in [
         "CreateLocalWorld { options: LocalWorldCreateOptions }",

@@ -477,6 +477,8 @@ pub struct McloneSceneHost {
     active_world: DrawableWorldSlot,
     standby_world: Option<DrawableWorldSlot>,
     warm_world_standby: Option<WarmWorldStandbyState>,
+    #[cfg(not(target_arch = "wasm32"))]
+    prepared_warm_world_shell: Option<PreparedWarmWorldRendererShell>,
     embedded_world_preview: Option<EmbeddedWorldPreview>,
     embedded_world_activation: EmbeddedWorldActivationState,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
