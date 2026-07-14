@@ -1093,8 +1093,6 @@ fn touch_control_at(scale: GuiScale, point: Point) -> TouchControl {
     let buttons = touch_action_button_rects(scale);
     for (rect, control) in [
         (buttons.jump, TouchControl::JumpButton),
-        (buttons.sprint, TouchControl::SprintButton),
-        (buttons.sneak, TouchControl::SneakButton),
         (buttons.descend, TouchControl::DescendButton),
         (buttons.attack, TouchControl::AttackButton),
         (buttons.use_item, TouchControl::UseButton),

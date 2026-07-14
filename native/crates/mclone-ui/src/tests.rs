@@ -666,7 +666,6 @@ fn touch_control_hit_rects_stay_inside_gui_space() {
     }));
     for rect in [
         actions.jump,
-        actions.sprint,
         actions.descend,
         actions.attack,
         actions.use_item,
@@ -676,6 +675,10 @@ fn touch_control_hit_rects_stay_inside_gui_space() {
         assert!(rect.right() <= scale.width);
         assert!(rect.bottom() <= scale.height);
     }
+    assert_eq!(actions.attack.y, actions.jump.y);
+    assert_eq!(actions.use_item.y, actions.descend.y);
+    assert!(actions.attack.x < actions.jump.x);
+    assert!(actions.use_item.x < actions.descend.x);
     assert_eq!(hotbar.len(), 9);
     for rect in hotbar {
         assert!(rect.x >= 0.0);

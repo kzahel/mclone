@@ -29,7 +29,8 @@ export interface TouchOverlayState {
   movementThumbX: number;
   movementThumbY: number;
   jumpPressed: boolean;
-  sprintPressed: boolean;
+  attackPressed: boolean;
+  usePressed: boolean;
   descendPressed: boolean;
   menuPressed: boolean;
 }
@@ -44,6 +45,7 @@ export interface TouchControlApp {
   setTouchKeys(keys: Record<string, boolean>): void;
   setTouchMovementImpulse(left: number, forward: number, active: boolean): void;
   queueMouseDelta(dx: number, dy: number): void;
+  interactBlock(action: string): Promise<any>;
   currentMovementImpulse(): TouchMovementImpulse;
   handleNativeUiPointerMove(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
   handleNativeUiPointerDown(clientX: number, clientY: number, pointerType?: string): Record<string, any> | null;
@@ -73,7 +75,7 @@ export interface TouchControlSnapshot {
   movementImpulse: TouchMovementImpulse;
 }
 
-type TouchButtonKey = "jump" | "sprint" | "descend";
+type TouchButtonKey = "jump" | "attack" | "use" | "descend";
 
 export class TouchControls {
   private readonly app: TouchControlApp;
@@ -298,7 +300,13 @@ export class TouchControls {
   private startButton(event: PointerEvent, key: TouchButtonKey): void {
     trySetPointerCapture(this.canvas, event.pointerId);
     this.buttonPointers.set(event.pointerId, key);
-    this.app.setTouchKey(key, true);
+    if (key === "attack") {
+      void this.app.interactBlock("break");
+    } else if (key === "use") {
+      void this.app.interactBlock("place");
+    } else {
+      this.app.setTouchKey(key, true);
+    }
     this.updateRuntimeState();
   }
 
@@ -308,7 +316,9 @@ export class TouchControls {
       return;
     }
     this.buttonPointers.delete(pointerId);
-    this.app.setTouchKey(key, false);
+    if (key === "jump" || key === "descend") {
+      this.app.setTouchKey(key, false);
+    }
     this.updateRuntimeState();
   }
 
@@ -384,7 +394,8 @@ export class TouchControls {
       movementThumbX: this.movementThumbX,
       movementThumbY: this.movementThumbY,
       jumpPressed: this.isButtonPressed("jump"),
-      sprintPressed: this.isButtonPressed("sprint"),
+      attackPressed: this.isButtonPressed("attack"),
+      usePressed: this.isButtonPressed("use"),
       descendPressed: this.isButtonPressed("descend"),
       menuPressed: this.menuPointerId !== null,
     };
@@ -412,8 +423,11 @@ export class TouchControls {
     if (rects.jump.contains(point)) {
       return "jump";
     }
-    if (rects.sprint.contains(point)) {
-      return "sprint";
+    if (rects.attack.contains(point)) {
+      return "attack";
+    }
+    if (rects.use.contains(point)) {
+      return "use";
     }
     if (rects.descend.contains(point)) {
       return "descend";
@@ -454,7 +468,12 @@ function touchMenuRect(): Rect {
   return rect(TOUCH_MENU_LEFT, TOUCH_MENU_TOP, TOUCH_MENU_SIZE, TOUCH_MENU_SIZE);
 }
 
-function touchButtonRects(canvas: HTMLCanvasElement): { jump: Rect, sprint: Rect, descend: Rect } {
+function touchButtonRects(canvas: HTMLCanvasElement): {
+  jump: Rect,
+  attack: Rect,
+  use: Rect,
+  descend: Rect,
+} {
   const bounds = canvas.getBoundingClientRect();
   const x1 = Math.max(0, bounds.width - TOUCH_BUTTON_RIGHT - TOUCH_BUTTON_SIZE);
   const x0 = Math.max(0, x1 - TOUCH_BUTTON_GAP - TOUCH_BUTTON_SIZE);
@@ -462,7 +481,8 @@ function touchButtonRects(canvas: HTMLCanvasElement): { jump: Rect, sprint: Rect
   const y0 = Math.max(0, y1 - TOUCH_BUTTON_GAP - TOUCH_BUTTON_SIZE);
   return {
     jump: rect(x1, y0, TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE),
-    sprint: rect(x0, y1, TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE),
+    attack: rect(x0, y0, TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE),
+    use: rect(x0, y1, TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE),
     descend: rect(x1, y1, TOUCH_BUTTON_SIZE, TOUCH_BUTTON_SIZE),
   };
 }

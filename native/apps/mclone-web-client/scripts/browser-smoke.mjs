@@ -2811,6 +2811,18 @@ async function exerciseMobileTouchControls(page, canvas) {
   }, lookStart);
 
   const buttonProbe = await exerciseTouchButton(page, "jump", 41);
+  const primaryActionProbe = await exerciseTouchInteractionButton(
+    page,
+    "attack",
+    "break",
+    42,
+  );
+  const secondaryActionProbe = await exerciseTouchInteractionButton(
+    page,
+    "use",
+    "place",
+    43,
+  );
   await canvas.evaluate((element) => element.focus());
 
   // The native-rendered hamburger is only a platform shortcut for the native pause UI.
@@ -2871,6 +2883,8 @@ async function exerciseMobileTouchControls(page, canvas) {
       && movementProbe.ok
       && lookProbe.ok
       && buttonProbe.ok
+      && primaryActionProbe.ok
+      && secondaryActionProbe.ok
       && openedNativeMenu.uiActive === true
       && openedNativeMenu.nativeUiScreen === "pause"
       && nativeOptionsProbe.ok
@@ -2883,6 +2897,8 @@ async function exerciseMobileTouchControls(page, canvas) {
     movement: movementProbe,
     look: lookProbe,
     button: buttonProbe,
+    primaryAction: primaryActionProbe,
+    secondaryAction: secondaryActionProbe,
     menu: {
       opened: openedNativeMenu,
       closed: closedNativeMenu,
@@ -3066,6 +3082,47 @@ async function exerciseTouchButton(page, key, pointerId) {
   };
 }
 
+/**
+ * @param {Page} page
+ * @param {"attack" | "use"} key
+ * @param {"break" | "place"} action
+ * @param {number} pointerId
+ */
+async function exerciseTouchInteractionButton(page, key, action, pointerId) {
+  const startInteractionCount = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.state?.interactionCount ?? 0,
+  );
+  await dispatchTouchButtonPointerEvent(page, key, "pointerdown", { pointerId, buttons: 1 });
+  await page.waitForFunction(
+    ({ action, startInteractionCount }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.touchButtonActiveCount > 0
+        && (state?.interactionCount ?? 0) > startInteractionCount
+        && state?.lastInteraction?.action === action;
+    },
+    { action, startInteractionCount },
+    { timeout: 10_000 },
+  );
+  const down = await page.evaluate(() => ({
+    activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
+    interactionCount: globalThis.__mcloneWebApp.state.interactionCount,
+    action: globalThis.__mcloneWebApp.state.lastInteraction?.action,
+  }));
+  await dispatchTouchButtonPointerEvent(page, key, "pointerup", { pointerId, buttons: 0 });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.touchButtonActiveCount === 0,
+    undefined,
+    { timeout: 10_000 },
+  );
+  return {
+    ok: down.activeCount > 0
+      && down.interactionCount > startInteractionCount
+      && down.action === action,
+    startInteractionCount,
+    down,
+  };
+}
+
 /** @param {Page} page */
 async function readNativeUiState(page) {
   return page.evaluate(() => {
@@ -3243,7 +3300,9 @@ async function dispatchTouchButtonPointerEvent(page, key, type, options) {
       let center = null;
       if (key === "jump") {
         center = { x: x1 + size * 0.5, y: y0 + size * 0.5 };
-      } else if (key === "sprint") {
+      } else if (key === "attack") {
+        center = { x: x0 + size * 0.5, y: y0 + size * 0.5 };
+      } else if (key === "use") {
         center = { x: x0 + size * 0.5, y: y1 + size * 0.5 };
       } else if (key === "descend") {
         center = { x: x1 + size * 0.5, y: y1 + size * 0.5 };

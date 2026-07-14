@@ -1215,7 +1215,8 @@ class WebFrameDriver {
       thumb.x,
       thumb.y,
       overlay.jumpPressed,
-      overlay.sprintPressed,
+      overlay.attackPressed,
+      overlay.usePressed,
       overlay.descendPressed,
       overlay.menuPressed,
     );

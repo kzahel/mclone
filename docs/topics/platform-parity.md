@@ -88,6 +88,11 @@ burn-down.
 > into `McloneSceneHost`. Desktop, offscreen, web, flat Android, desktop XR,
 > and Android XR now enter through shared Mono/XR frame methods; source-purity
 > gates reject app-local packet-selection and publication policy.
+> Refreshed again after the compact touchscreen action cluster replaced its
+> lower-priority sprint and sneak slots with primary attack/break and secondary
+> use/place. Native touch now routes those slots through the same shared actions
+> as left and right mouse, and web touch invokes the corresponding existing
+> block-interaction path; jump and descend retain the other two slots.
 > Gamepad input is retained as a dated shared contract;
 > no native adapter advertises it until a real platform event source and device
 > validation land.
