@@ -29,15 +29,40 @@ const WEB_APP: &str = include_str!(concat!(
     "/www/mclone-web-app.ts"
 ));
 
+use mclone_app_runtime::scenario_content::{
+    ManagedScenarioManifest, ManagedScenarioWorldRole, managed_scenario_payload_fingerprint,
+    managed_scenario_world_payload,
+};
+
+#[test]
+fn web_adapter_consumes_the_shared_manifest_and_fixture_receipts() {
+    let manifest = ManagedScenarioManifest::lobby_preview_v1();
+    manifest.validate().unwrap();
+    let primary =
+        managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Primary).unwrap();
+    let destination =
+        managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination).unwrap();
+    assert_eq!(
+        managed_scenario_payload_fingerprint(&primary),
+        8_001_097_006_086_081_343
+    );
+    assert_eq!(
+        managed_scenario_payload_fingerprint(&destination),
+        8_764_019_107_988_679_539
+    );
+}
+
 #[test]
 fn pre_refactor_browser_scenario_debt_is_explicit_and_bounded() {
-    assert!(APP_RUNTIME_LIB.contains(
+    assert!(APP_RUNTIME_LIB.contains("pub mod scenario_content;"));
+    assert!(!APP_RUNTIME_LIB.contains(
         "#[cfg(not(target_arch = \"wasm32\"))]\n\
          pub mod scenario_content;"
     ));
-    assert!(CLIENT_EXPERIENCE.contains(
-        "ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)"
-    ));
+    assert!(
+        CLIENT_EXPERIENCE
+            .contains("ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)")
+    );
     assert!(SCENE_SESSION.contains("#[cfg(target_arch = \"wasm32\")]"));
     assert!(SCENE_SESSION.contains("pub(crate) fn apply_managed_scenario_effect("));
     assert!(SCENE_SESSION.contains("Ok(false)"));
@@ -61,9 +86,9 @@ fn primary_and_destination_provisioning_are_independent() {
     assert!(SCENE_SESSION.contains("let mut primary_operations ="));
     assert!(SCENE_SESSION.contains("let mut destination_operations ="));
     assert!(SCENE_SESSION.contains("let primary_token = primary_operations.submit(intent);"));
-    assert!(SCENE_SESSION.contains(
-        "let destination_token = destination_operations.submit(intent);"
-    ));
+    assert!(
+        SCENE_SESSION.contains("let destination_token = destination_operations.submit(intent);")
+    );
     assert!(!SCENE_SESSION.contains("CombinedScenarioContentCompletion"));
 }
 

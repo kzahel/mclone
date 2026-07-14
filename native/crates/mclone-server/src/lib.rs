@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-#[cfg(not(target_arch = "wasm32"))]
 mod authored_fixture;
 #[cfg(test)]
 mod block_light_bridge;
@@ -51,12 +50,14 @@ use mclone_core::{
 use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use authored_fixture::{
     AUTHORED_WORLD_FIXTURE_CENTER, AUTHORED_WORLD_FIXTURE_MARKER_FILE,
     AUTHORED_WORLD_FIXTURE_SCHEMA_VERSION, AUTHORED_WORLD_FIXTURE_VOID_PADDING_RADIUS,
-    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, authored_world_fixture_marker_path,
-    authored_world_fixture_records, write_authored_world_fixture_dir,
+    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, authored_world_fixture_records,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use authored_fixture::{
+    authored_world_fixture_marker_path, write_authored_world_fixture_dir,
     write_authored_world_fixture_to_store,
 };
 pub use cadence::{

@@ -1,11 +1,10 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slice 0 locked the current ownership debt, fresh
-native/browser performance controls, native visual comparison, and disabled
-browser transition. Slice 1 is next. This tactical closes the browser exception
-left by Tacticals 174, 175, and 177 by refactoring their native-shaped startup
-seams into shared contracts. It does not authorize a second browser scenario
-implementation.
+Status: active 2026-07-14. Slices 0-1 locked the baseline and extracted the
+storage-neutral manifest, validation, keys, and authored payloads. Slice 2 is
+next. This tactical closes the browser exception left by Tacticals 174, 175,
+and 177 by refactoring their native-shaped startup seams into shared contracts.
+It does not authorize a second browser scenario implementation.
 
 Topic: `embedded-worlds`
 
@@ -588,6 +587,44 @@ Deliverables:
 
 Exit criteria: portable schema tests compile for WASM, native scenario tests
 pass unchanged, and all filesystem types stay inside the native executor.
+
+#### Slice 1 completion record — 2026-07-14
+
+`mclone-app-runtime::scenario_content` now compiles on every target. It owns the
+one lobby manifest, primary/destination roles, stable storage-neutral
+`ManagedWorldKey`, logical validation errors, and shared provisioning payload.
+The keys are `managed.lobby-preview-v1.lobby-v1` and
+`managed.lobby-preview-v1.demo-island-v1`; neither is a live
+`WorldInstanceId`, path, slot, or active/standby label.
+
+The authored fixture record producer was made portable in `mclone-server`.
+Both adapters therefore receive ordinary `ChunkRecord`s encoded by the shared
+server persistence codec. The browser-facing ownership test consumes the same
+Rust payload API and pins the same deterministic primary/destination receipts
+as the app-runtime test: `8001097006086081343` and
+`8764019107988679539`. No fixture id, block recipe, or serialization codec was
+added to TypeScript.
+
+The previous native module moved intact under `scenario_content::native` and
+is re-exported only on non-WASM targets. All `fs`, `Path`, `PathBuf`, SQLite,
+staging, rename, and background-thread types remain inside that executor. Its
+versioned directory, JSON manifest shape, atomic publication, concurrent-winner
+handling, corruption refusal, catalog exclusion, destination edit reuse, and
+token cancellation tests remain green. The native lobby smoke still completes
+five captures and two A-to-B-to-A switches. Ordinary construction still does
+not call the payload generator or native executor.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-server
+cargo test -p mclone-app-runtime
+cargo test -p mclone-web-client --test scenario_parity_ownership_lock
+cargo check -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:build
+pnpm native:lobby-scenario:smoke
+pnpm native:thin-adapters:purity
+```
 
 Estimated effort: 0.5-1.5 days.
 

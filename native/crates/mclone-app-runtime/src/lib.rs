@@ -29,7 +29,6 @@ pub mod render_asset_data;
 pub mod render_assets;
 pub mod render_compile_capacity;
 pub mod scenario;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod scenario_content;
 pub mod scene_session_runtime;
 pub mod seed_reroll;

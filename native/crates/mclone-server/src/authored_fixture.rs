@@ -1,5 +1,7 @@
 use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkStatus};
@@ -7,12 +9,15 @@ use mclone_worldgen::block::{BRICKS, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ChunkStoreError;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
-use crate::persistence::{ChunkRecord, SqliteWorldStore, WorldStore};
+use crate::persistence::ChunkRecord;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::persistence::{SqliteWorldStore, WorldStore};
 use crate::{
-    AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, ChunkStoreError, ChunkStoreResult,
-    WorldGenerationProfile,
+    AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, ChunkStoreResult, WorldGenerationProfile,
 };
 
 pub const AUTHORED_WORLD_FIXTURE_MARKER_FILE: &str = "mclone-authored-fixture.json";
@@ -202,6 +207,7 @@ pub fn authored_world_fixture_records(
     Ok((manifest, records))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_authored_world_fixture_to_store(
     store: &mut dyn WorldStore,
     kind: AuthoredWorldFixtureKind,
@@ -214,6 +220,7 @@ pub fn write_authored_world_fixture_to_store(
     Ok(manifest)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn write_authored_world_fixture_dir(
     root: impl AsRef<Path>,
     kind: AuthoredWorldFixtureKind,
@@ -234,10 +241,12 @@ pub fn write_authored_world_fixture_dir(
     Ok(manifest)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn authored_world_fixture_marker_path(root: impl AsRef<Path>) -> PathBuf {
     root.as_ref().join(AUTHORED_WORLD_FIXTURE_MARKER_FILE)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn validate_fixture_root_for_rebuild(
     root: &Path,
     expected: &AuthoredWorldFixtureManifest,
@@ -287,6 +296,7 @@ fn validate_fixture_root_for_rebuild(
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn remove_existing_fixture_database(root: &Path) -> ChunkStoreResult<()> {
     let database = SqliteWorldStore::database_path_for_world_dir(root);
     for path in [

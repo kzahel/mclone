@@ -11,8 +11,8 @@ worlds.
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and a shared web-parity refactor
-with its ownership/performance baseline locked and shared manifest extraction
-next.**
+with its baseline and storage-neutral shared manifest/payload extraction
+landed. Immutable second-slot renderer sharing is next.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
