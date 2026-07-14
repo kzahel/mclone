@@ -90,6 +90,7 @@ pub enum MonoWorldActionStatus {
     NoRuntime,
     NoTarget,
     NoCommand,
+    DeniedByWorldBehavior,
     EmbeddedWorldActivationRequested,
     Sent {
         target: BlockInteractionTarget,
@@ -1034,6 +1035,12 @@ impl McloneSceneHost {
                 return Ok(MonoWorldActionStatus::EmbeddedWorldActivationRequested);
             }
         }
+        let behavior = self.active_world.scene.world_behavior_profile;
+        if (action == FlatInputAction::Attack && !behavior.allows_player_break())
+            || (action == FlatInputAction::Use && !behavior.allows_player_place())
+        {
+            return Ok(MonoWorldActionStatus::DeniedByWorldBehavior);
+        }
         self.commit_mono_player_pose_now()?;
         if let Some(command) = self.active_world.interaction.ensure_has_sent_carried_item() {
             self.active_world
@@ -1070,6 +1077,10 @@ impl McloneSceneHost {
 
     pub fn mono_block_target(&self) -> Option<BlockInteractionTarget> {
         self.current_mono_block_target()
+    }
+
+    pub const fn active_world_behavior_profile(&self) -> mclone_server::WorldBehaviorProfile {
+        self.active_world.scene.world_behavior_profile
     }
 
     pub fn mono_time_of_day(&self) -> f32 {

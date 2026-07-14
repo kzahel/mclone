@@ -204,3 +204,29 @@ fn block_delta_routing_sends_only_to_players_tracking_changed_chunk() {
     assert!(has_section_block_updates(&updates_a));
     assert!(!has_section_block_updates(&updates_b));
 }
+
+#[test]
+fn protected_lobby_rejects_forged_dedicated_player_break() {
+    let mut server = IntegratedServer::new(12_345);
+    server.set_lighting_enabled(false);
+    server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
+    let player = server.add_dedicated_player();
+    set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
+    let pos = BlockPos::new(8, 80, 8);
+    assert!(server.scheduler_mut().set_block_at_world(pos, DIRT));
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    let updates = server
+        .try_handle_command_for_player(
+            player,
+            ClientCommand::PlayerAction(PlayerActionCommand {
+                pos,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }),
+        )
+        .expect("forged dedicated protected break");
+
+    assert_eq!(server.scheduler().block_at_world(pos), Some(DIRT));
+    assert!(!has_section_block_updates(&updates));
+}

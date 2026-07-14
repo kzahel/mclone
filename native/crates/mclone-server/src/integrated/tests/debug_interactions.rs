@@ -29,6 +29,44 @@ fn debug_break_command_mutates_block_and_returns_section_delta() {
 }
 
 #[test]
+fn protected_lobby_rejects_forged_break_and_place_commands() {
+    let mut server = IntegratedServer::new(0);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
+    sync_carried_slot(&mut server, 1);
+    let clicked = BlockPos::new(8, 80, 8);
+    let target = clicked.relative(Direction::Up);
+    assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
+    server.scheduler_mut().drain_pending_block_delta_events();
+    server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
+
+    let break_updates = server
+        .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: clicked,
+            direction: Direction::Up,
+            kind: PlayerActionKind::DebugInstantBreak,
+        }))
+        .expect("forged protected break command");
+    let place_updates = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 81.0, 8.5),
+            Direction::Up,
+            clicked,
+            false,
+        )))
+        .expect("forged protected place command");
+
+    assert_eq!(
+        server.world_behavior_profile(),
+        WorldBehaviorProfile::ProtectedLobby
+    );
+    assert_eq!(server.scheduler().block_at_world(clicked), Some(STONE));
+    assert_eq!(server.scheduler().block_at_world(target), Some(AIR));
+    assert!(break_updates.is_empty());
+    assert!(place_updates.is_empty());
+}
+
+#[test]
 fn debug_break_command_refreshes_lighting_after_opacity_change() {
     let mut server = IntegratedServer::new(0);
     load_chunk_view_with_lighting(&mut server, ChunkPos::new(0, 0), true);

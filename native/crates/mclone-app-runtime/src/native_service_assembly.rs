@@ -27,7 +27,7 @@ use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueH
 use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
     NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
-    ServerRunnerDiagnostics, SimulationCadenceConfig, WorldGenerationProfile,
+    ServerRunnerDiagnostics, SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile,
     host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
 };
 use mclone_ui::LoadingProgressOverlay;
@@ -100,6 +100,7 @@ pub fn native_managed_scenario_content_operations(
 pub struct LocalIntegratedSceneOptions {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub world_behavior_profile: WorldBehaviorProfile,
     pub center: ChunkPos,
     pub render_distance: u32,
     pub cadence: SimulationCadenceConfig,
@@ -169,6 +170,7 @@ impl LocalIntegratedSceneOptions {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::Overworld,
+            world_behavior_profile: WorldBehaviorProfile::Mutable,
             center,
             render_distance,
             cadence: SimulationCadenceConfig::new(20, 20, 60),
@@ -194,6 +196,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
+        self.world_behavior_profile = profile;
         self
     }
 
@@ -3342,6 +3349,7 @@ fn native_runner_config(
 ) -> NativeIntegratedServerRunnerConfig {
     NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_world_generation_profile(options.world_generation_profile)
+        .with_world_behavior_profile(options.world_behavior_profile)
         .with_lighting_enabled(options.lighting_enabled)
         .with_light_status_batch_size(options.light_status_batch_size)
         .with_debug_passive_showcase(options.debug_passive_showcase)

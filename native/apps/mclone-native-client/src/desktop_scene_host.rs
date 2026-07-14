@@ -193,6 +193,7 @@ pub(crate) fn scene_host_options_from_desktop(
         startup,
         render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
         simulation_cadence: scene.simulation_cadence,
+        world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
         first_person_player_visible: scene.first_person_player_visible,
         use_initial_spawn_center: false,
         freeze_scheduled_fluid_ticks: false,

@@ -40,6 +40,7 @@ mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
 mod wasm_job_worker;
+mod world_behavior_profile;
 mod world_generation_profile;
 mod worldgen_mailbox;
 
@@ -111,6 +112,7 @@ pub use types::{
     LightStatusMailboxKind, MAX_CHUNK_DISTANCE, PLAYER_TICKET_LEVEL, ServerMode,
     UNLOADED_CHUNK_LEVEL, WorldBlockPos, WorldgenMailboxKind,
 };
+pub use world_behavior_profile::WorldBehaviorProfile;
 pub use world_generation_profile::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredMissingChunk, WorldGenerationProfile,
 };

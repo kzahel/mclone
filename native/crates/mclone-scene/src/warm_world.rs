@@ -19,7 +19,7 @@ use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraController;
-use mclone_server::{SimulationCadenceConfig, WorldGenerationProfile};
+use mclone_server::{SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile};
 
 use crate::McloneSceneHostOptions;
 
@@ -79,6 +79,7 @@ pub struct WarmWorldStandbyRequest {
     pub entry_center: ChunkPos,
     pub standby_cadence: Option<SimulationCadenceConfig>,
     pub world_dir: Option<PathBuf>,
+    pub world_behavior_profile: WorldBehaviorProfile,
     pub world_generation_profile: WorldGenerationProfile,
     pub presentation: WarmWorldPresentationRequest,
 }
@@ -90,6 +91,7 @@ impl WarmWorldStandbyRequest {
             entry_center,
             standby_cadence: None,
             world_dir: None,
+            world_behavior_profile: WorldBehaviorProfile::Mutable,
             world_generation_profile: WorldGenerationProfile::Overworld,
             presentation: WarmWorldPresentationRequest::OpaqueGate,
         }
@@ -107,6 +109,11 @@ impl WarmWorldStandbyRequest {
     ) -> Self {
         self.world_dir = Some(world_dir.into());
         self.world_generation_profile = world_generation_profile;
+        self
+    }
+
+    pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
+        self.world_behavior_profile = profile;
         self
     }
 

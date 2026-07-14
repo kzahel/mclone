@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 use anyhow::{Context, Result, anyhow, bail};
 use mclone_server::{
     AUTHORED_WORLD_FIXTURE_MARKER_FILE, AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest,
-    SqliteWorldStore, write_authored_world_fixture_dir,
+    SqliteWorldStore, WorldBehaviorProfile, write_authored_world_fixture_dir,
 };
 use serde::{Deserialize, Serialize};
 
@@ -41,6 +41,7 @@ pub struct ManagedScenarioWorldManifest {
     pub content_id: String,
     pub content_version: u32,
     pub directory: String,
+    pub behavior_profile: WorldBehaviorProfile,
     pub fixture: AuthoredWorldFixtureManifest,
 }
 
@@ -64,12 +65,14 @@ impl ManagedScenarioManifest {
                 content_id: "lobby-v1".to_owned(),
                 content_version: 1,
                 directory: MANAGED_SCENARIO_LOBBY_DIRECTORY.to_owned(),
+                behavior_profile: WorldBehaviorProfile::ProtectedLobby,
                 fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::Table),
             },
             destination: ManagedScenarioWorldManifest {
                 content_id: "demo-island-v1".to_owned(),
                 content_version: 1,
                 directory: MANAGED_SCENARIO_ISLAND_DIRECTORY.to_owned(),
+                behavior_profile: WorldBehaviorProfile::Mutable,
                 fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::Island),
             },
         }
@@ -446,6 +449,14 @@ mod tests {
         assert_eq!(first.root, managed_root.join(LOBBY_PREVIEW_DIRECTORY));
         assert_eq!(first.primary.root, first.root.join("lobby"));
         assert_eq!(first.destination.root, first.root.join("demo-island"));
+        assert_eq!(
+            first.primary.manifest.behavior_profile,
+            WorldBehaviorProfile::ProtectedLobby
+        );
+        assert_eq!(
+            first.destination.manifest.behavior_profile,
+            WorldBehaviorProfile::Mutable
+        );
 
         let mutation = first.destination.manifest.fixture.mutation_block;
         let chunk = ChunkPos::from_block_coords(mutation[0], mutation[2]);

@@ -66,8 +66,8 @@ use crate::{
     ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind, FluidTickList,
     NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
     ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
-    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBlockPos,
-    WorldGenerationProfile, WorldStore,
+    ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBehaviorProfile,
+    WorldBlockPos, WorldGenerationProfile, WorldStore,
 };
 
 #[cfg(feature = "physics-engine")]
@@ -95,6 +95,7 @@ pub struct IntegratedServer {
     scheduled_fluid_ticks_frozen: bool,
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
+    world_behavior_profile: WorldBehaviorProfile,
     initial_spawn_center: Option<ChunkPos>,
     local_player_active: bool,
     player: ServerPlayerState,
@@ -335,6 +336,7 @@ impl IntegratedServer {
             scheduled_fluid_ticks_frozen: false,
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
+            world_behavior_profile: WorldBehaviorProfile::default(),
             initial_spawn_center: None,
             local_player_active: true,
             player: ServerPlayerState::default(),
@@ -389,6 +391,14 @@ impl IntegratedServer {
 
     pub fn set_volatile_natural_spawning_enabled(&mut self, enabled: bool) {
         self.volatile_natural_spawning_enabled = enabled;
+    }
+
+    pub const fn world_behavior_profile(&self) -> WorldBehaviorProfile {
+        self.world_behavior_profile
+    }
+
+    pub fn set_world_behavior_profile(&mut self, profile: WorldBehaviorProfile) {
+        self.world_behavior_profile = profile;
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -1397,7 +1407,9 @@ impl IntegratedServer {
         target: CommandTarget,
         command: PlayerActionCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        if command.kind == PlayerActionKind::DebugInstantBreak {
+        if command.kind == PlayerActionKind::DebugInstantBreak
+            && self.world_behavior_profile.allows_player_break()
+        {
             let player_position = self.player_for_target(target)?.position();
             let context = ServerInteractionContext::debug_creative(player_position);
             if context.may_break_block(command.pos) {
@@ -1412,10 +1424,14 @@ impl IntegratedServer {
         target: CommandTarget,
         command: UseItemOnCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        if let Some((target, block_state)) =
-            self.held_item_place_target_for_target(target, command)?
-        {
-            self.set_block_debug(target, block_state);
+        if self.world_behavior_profile.allows_player_place() {
+            if let Some((target, block_state)) =
+                self.held_item_place_target_for_target(target, command)?
+            {
+                self.set_block_debug(target, block_state);
+            }
+        } else {
+            self.ensure_target_exists(target)?;
         }
         self.drain_pending_block_delta_updates_for_target(target)
     }

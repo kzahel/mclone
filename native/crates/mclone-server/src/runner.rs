@@ -28,7 +28,7 @@ use crate::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::WorldGenerationProfile;
+use crate::{WorldBehaviorProfile, WorldGenerationProfile};
 
 pub type ServerRunnerResult<T> = Result<T, ServerRunnerError>;
 
@@ -625,6 +625,7 @@ mod native {
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
         pub world_generation_profile: WorldGenerationProfile,
+        pub world_behavior_profile: WorldBehaviorProfile,
         pub lighting_enabled: bool,
         pub light_status_batch_size: usize,
         pub day_time: Option<u64>,
@@ -643,6 +644,7 @@ mod native {
             Self {
                 seed,
                 world_generation_profile: WorldGenerationProfile::default(),
+                world_behavior_profile: WorldBehaviorProfile::default(),
                 lighting_enabled: true,
                 light_status_batch_size: crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 day_time: None,
@@ -664,6 +666,11 @@ mod native {
 
         pub fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
             self.world_generation_profile = profile;
+            self
+        }
+
+        pub fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
+            self.world_behavior_profile = profile;
             self
         }
 
@@ -1078,6 +1085,7 @@ mod native {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
         }
+        server.set_world_behavior_profile(config.world_behavior_profile);
         server.set_lighting_enabled(config.lighting_enabled);
         server.set_light_status_batch_size(config.light_status_batch_size);
         server.set_publication_budget_config(if config.publication_budget.enabled {
@@ -1648,6 +1656,22 @@ mod native {
         }
 
         #[test]
+        fn native_runner_behavior_defaults_mutable_and_can_protect_a_lobby() {
+            let default = NativeIntegratedServerRunnerConfig::new(0);
+            let protected = NativeIntegratedServerRunnerConfig::new(0)
+                .with_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
+
+            assert_eq!(
+                default.world_behavior_profile,
+                WorldBehaviorProfile::Mutable
+            );
+            assert_eq!(
+                protected.world_behavior_profile,
+                WorldBehaviorProfile::ProtectedLobby
+            );
+        }
+
+        #[test]
         fn native_runner_config_can_use_local_integrated_chunk_tracking_policy() {
             let center = ChunkPos::new(0, 0);
             let requested = ChunkView {
@@ -1885,6 +1909,40 @@ mod native {
             let (snapshot, _updates) = load_chunk_snapshot(&mut runner, target.chunk_pos());
             assert_eq!(snapshot_block_state(&snapshot, target), AIR_BLOCK_STATE_ID);
             runner.join_shutdown().unwrap();
+            let _ = fs::remove_dir_all(root);
+        }
+
+        #[test]
+        fn native_runner_protected_profile_rejects_forged_break() {
+            let root = unique_temp_dir("native-runner-protected-lobby");
+            let seed = 12_345;
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(seed)
+                    .with_persistent_world_dir(root.clone())
+                    .with_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby),
+            )
+            .unwrap();
+            let (snapshot, mut updates) = load_chunk_snapshot(&mut runner, ChunkPos::new(0, 0));
+            acknowledge_initial_teleport(&mut runner, &updates);
+            let target = first_non_air_block(&snapshot).expect("generated chunk contains blocks");
+            let before = snapshot_block_state(&snapshot, target);
+            move_player_near_block(&mut runner, target);
+            break_block(&mut runner, target);
+            drain_runner_until_idle(&mut runner, &mut updates);
+            assert!(!has_block_delta_for_block(
+                &updates,
+                target,
+                AIR_BLOCK_STATE_ID
+            ));
+            runner.join_shutdown().unwrap();
+
+            let mut verifier = NativeIntegratedServerRunner::new(
+                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+            )
+            .unwrap();
+            let (snapshot, _) = load_chunk_snapshot(&mut verifier, target.chunk_pos());
+            assert_eq!(snapshot_block_state(&snapshot, target), before);
+            verifier.join_shutdown().unwrap();
             let _ = fs::remove_dir_all(root);
         }
 

@@ -1062,6 +1062,9 @@ impl ChunkApp {
             MonoWorldActionStatus::NoRuntime
             | MonoWorldActionStatus::NoTarget
             | MonoWorldActionStatus::NoCommand => {}
+            MonoWorldActionStatus::DeniedByWorldBehavior => {
+                log::info!("gameplay interaction denied by active world behavior");
+            }
         }
         Ok(())
     }

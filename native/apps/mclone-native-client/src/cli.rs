@@ -2035,6 +2035,7 @@ pub(crate) fn default_native_world_root() -> PathBuf {
         .join("worlds")
 }
 
+#[allow(dead_code)] // Wired into the menu executor by Tactical 177 Slice 4.
 pub(crate) fn default_native_scenario_root() -> PathBuf {
     mclone_app_runtime::scenario_content::native_managed_scenario_root_from_world_root(
         &default_native_world_root(),

@@ -47,7 +47,10 @@ independent from destination runtime attachment. The existing CLI diorama uses
 that executor and retains exact activation pixels. A native background content
 executor now also resolves that intent into versioned, atomically published
 lobby/island roots under app-private `scenarios` storage, preserving island
-edits while keeping both managed worlds outside the user catalog.
+edits while keeping both managed worlds outside the user catalog. A separate
+server-owned world behavior profile now travels with each slot: the managed
+lobby authoritatively denies player break/place while the island remains
+mutable, including after complete-slot exchanges.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -76,7 +79,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 177 Slice 2 after Tactical 175 Slice 6).
+(Tactical 177 Slice 3 after Tactical 175 Slice 6).
 
 ## Motivation
 

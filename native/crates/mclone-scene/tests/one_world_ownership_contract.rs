@@ -252,6 +252,26 @@ fn embedded_preview_cannot_drive_underwater_authority() {
 }
 
 #[test]
+fn world_behavior_is_slot_scoped_and_both_input_paths_project_it() {
+    let host = read("src/lib.rs");
+    let options = read("src/options.rs");
+    let session = read("src/session.rs");
+    let mono = read("src/mono.rs");
+    let xr = read("src/ui_panels.rs");
+
+    assert!(options.contains("pub world_behavior_profile: mclone_server::WorldBehaviorProfile"));
+    assert!(
+        !braced_item(&host, "pub struct McloneSceneHost {").contains("world_behavior_profile:")
+    );
+    assert!(session.contains("scene.world_behavior_profile = request.world_behavior_profile;"));
+    assert!(session.contains(".with_world_behavior_profile(scene.world_behavior_profile)"));
+    assert!(mono.contains("behavior.allows_player_break()"));
+    assert!(mono.contains("behavior.allows_player_place()"));
+    assert!(xr.contains("edges.attack &= behavior.allows_player_break();"));
+    assert!(xr.contains("edges.use_item &= behavior.allows_player_place();"));
+}
+
+#[test]
 fn every_initial_host_path_constructs_the_same_drawable_slot() {
     let source = read("src/session.rs");
     for marker in [

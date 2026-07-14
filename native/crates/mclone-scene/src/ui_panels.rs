@@ -1166,6 +1166,20 @@ impl McloneSceneHost {
         if !edges.any() {
             return Ok(());
         }
+        let behavior = self.active_world.scene.world_behavior_profile;
+        let denied_attack = edges.attack && !behavior.allows_player_break();
+        let denied_use = edges.use_item && !behavior.allows_player_place();
+        edges.attack &= behavior.allows_player_break();
+        edges.use_item &= behavior.allows_player_place();
+        if denied_attack || denied_use {
+            log::info!(
+                "XR gameplay interaction denied by active world behavior profile {:?}",
+                behavior
+            );
+        }
+        if !edges.any() {
+            return Ok(());
+        }
         self.sync_carried_item()?;
         let Some(target) = self.current_xr_block_interaction_target() else {
             return Ok(());

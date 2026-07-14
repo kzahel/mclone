@@ -1,7 +1,7 @@
 # 177: Menu-Launched Protected Lobby Scenario
 
-Status: active 2026-07-14. Slices 0-2 are landed; authoritative lobby
-protection is next. The CLI now projects into the same scene-owned scenario
+Status: active 2026-07-14. Slices 0-3 are landed; shared menu launch and
+asynchronous lobby-first startup are next. The CLI now projects into the same scene-owned scenario
 operation intended for the product menu, and renderer-shell preparation is
 independent from retained-runtime attachment. A tokened native managed-content
 executor now resolves the path-free intent into versioned, atomically
@@ -603,6 +603,38 @@ Deliverables:
 Exit criteria: lobby blocks cannot be destroyed or placed over before or after
 a round trip; island edits work and persist; no client-only suppression is
 claimed as protection.
+
+#### Slice 3 completion record — 2026-07-14
+
+`mclone-server` now owns `WorldBehaviorProfile` independently from terrain
+generation. `Mutable` is the serialization and construction default;
+`ProtectedLobby` denies player break and held-item placement. The profile is a
+field of each `IntegratedServer`, flows through
+`NativeIntegratedServerRunnerConfig`, `LocalIntegratedSceneOptions`, and
+`McloneSceneHostOptions`, and is copied into a retained destination scene from
+its prepared request. Because the complete scene/options travel inside each
+`DrawableWorldSlot`, selection exchanges carry protection with the lobby
+rather than consulting or swapping a host global.
+
+The actual denial occurs in the two authoritative integrated-server command
+handlers. Direct local forged break/place commands and a dedicated-player
+forged break leave the block store unchanged and publish no block delta. A
+native-runner persistence test starts a protected threaded host, attacks a real
+generated block, closes it, reopens the same store through an ordinary mutable
+runner, and observes the original block. Existing mutable interaction tests
+remain the default coverage, and no client protocol field lets a remote client
+select server behavior.
+
+Managed scenario manifests now bind `lobby-v1` to `ProtectedLobby` and
+`demo-island-v1` to `Mutable`. Flat and XR scene input paths read the active
+slot's profile after giving diorama activation first refusal: flat returns an
+explicit `DeniedByWorldBehavior` status and XR filters/logs the denied edge.
+This is presentation guidance only; server tests remain the security proof.
+An ownership tripwire rejects a host-global profile and locks both input
+projections plus local/retained runtime propagation. Focused server,
+app-runtime, scene, native-client, and native-web validation pass. The ordinary
+CLI diorama remains mutable on both sides and its activation smoke is retained
+as the Slice 3 regression gate.
 
 ### Slice 4: Shared Menu Action And Asynchronous Lobby Startup
 

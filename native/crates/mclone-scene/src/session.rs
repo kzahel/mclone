@@ -1468,6 +1468,7 @@ impl McloneSceneHost {
         scene.remote_addr = None;
         scene.world_root = None;
         scene.world_dir = request.world_dir.clone();
+        scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
         scene.use_initial_spawn_center = false;
         let scene = scene.validated()?;
@@ -4548,6 +4549,7 @@ pub fn local_integrated_scene_options(
     }
     options
         .with_world_generation_profile(scene.world_generation_profile)
+        .with_world_behavior_profile(scene.world_behavior_profile)
         .with_freeze_scheduled_fluid_ticks(scene.freeze_scheduled_fluid_ticks)
         .with_day_time(scene.day_time_override)
         .with_freeze_time(scene.freeze_time)
@@ -4652,5 +4654,21 @@ mod camera_config_tests {
         let options = local_integrated_scene_options(&scene);
 
         assert_eq!(options.center, ChunkPos::new(3, -2));
+    }
+
+    #[test]
+    fn local_startup_carries_world_behavior_without_global_state() {
+        let mut lobby = McloneSceneHostOptions::default();
+        lobby.world_behavior_profile = mclone_server::WorldBehaviorProfile::ProtectedLobby;
+        let island = McloneSceneHostOptions::default();
+
+        assert_eq!(
+            local_integrated_scene_options(&lobby).world_behavior_profile,
+            mclone_server::WorldBehaviorProfile::ProtectedLobby
+        );
+        assert_eq!(
+            local_integrated_scene_options(&island).world_behavior_profile,
+            mclone_server::WorldBehaviorProfile::Mutable
+        );
     }
 }

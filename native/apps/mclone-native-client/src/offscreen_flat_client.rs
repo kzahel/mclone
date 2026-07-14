@@ -2204,6 +2204,9 @@ fn require_world_action_changed(
         MonoWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
         MonoWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
         MonoWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
+        MonoWorldActionStatus::DeniedByWorldBehavior => {
+            bail!("{label} was denied by the active world behavior")
+        }
         MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
             bail!("{label} activated an embedded world instead of changing a block")
         }
