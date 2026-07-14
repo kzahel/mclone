@@ -5,10 +5,10 @@ authored-only server/content foundation, static and live local two-host
 composition, bounded mutation/background accounting, composition-space
 water/translucent ordering, and scene-owned blink activation/return. The
 required Slice 3 human review replaced the oversized elevated table and
-coplanar preview before live updates. Tactical 177 now productizes this local
-proof through one shared menu-launched protected-lobby scenario before this
-tactical resumes remote Slice 7. Capable-device multiview remains a shared
-named validation gap.
+coplanar preview before live updates. Tactical 177 has now completed the local
+productization checkpoint through one shared menu-launched protected-lobby
+scenario; this tactical may resume remote Slice 7. Capable-device multiview
+remains a shared named validation gap.
 
 Topic: `embedded-worlds`
 

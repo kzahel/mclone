@@ -9,8 +9,8 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
-tactical through completed local Slice 6, and a menu-launched protected lobby
-productization tactical through Slice 4.**
+tactical through completed local Slice 6, and a completed menu-launched
+protected lobby productization milestone.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -43,11 +43,13 @@ outside the user catalog, and separate tokened primary/destination operations
 make the protected lobby playable before the fixed island is ready. The
 destination renderer shell is prepared under startup cover, then the island
 appears through the existing exact readiness gate. The same flat and
-synthetic-stereo menu path completes A-to-B-to-A activation. Web renders the
-shared action unavailable with an explicit IndexedDB provisioning reason. A
-server-owned behavior profile travels with each slot: the managed lobby
-authoritatively denies player break/place while the island remains mutable,
-including after complete-slot exchanges.
+synthetic-stereo menu path completes A-to-B-to-A activation. Flat lifecycle
+proof also cancels a pending launch, quits, reuses the same managed content,
+and reaches a second live preview. Web renders the shared action unavailable
+with an explicit IndexedDB provisioning reason. A server-owned behavior
+profile travels with each slot: the managed lobby authoritatively denies
+player break/place while the island remains mutable, including after
+complete-slot exchanges.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -67,16 +69,18 @@ stop before simultaneous rendering. The next bounded composition milestone is
 [`175-live-hosted-world-diorama.md`](../tactical/175-live-hosted-world-diorama.md):
 draw one live local or remote hosted region as scaled geometry on a block-built
 table, then use only a simple blink around the already-proven activation. The
-immediate productization plan is
+completed first productization milestone is
 [`177-menu-launched-protected-lobby-scenario.md`](../tactical/177-menu-launched-protected-lobby-scenario.md):
 enter the fixed local scenario from the shared title menu before broadening the
-destination source.
+destination source. Its no-scenario closeout remains faster than its pre-change
+baseline, while scenario-on renderer, CPU, memory, and thread costs remain
+separately recorded.
 
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 177 Slice 4 after Tactical 175 Slice 6).
+(Tactical 177 complete after Tactical 175 Slice 6).
 
 ## Motivation
 
@@ -684,14 +688,15 @@ bounded simultaneous-geometry plan lives in
 2. Keep Tactical 175's landed authored-only fixtures, separate placed-terrain
    pipeline, live mutation, water/translucent ordering, and local blink
    activation/return green without taxing the one-world path.
-3. Close Tactical 177's lifecycle, platform, and performance evidence for the
-   landed shared title launch, protected lobby, and asynchronous fixed island.
+3. Keep Tactical 177's completed shared title launch, protected lobby,
+   asynchronous fixed island, lifecycle, and no-scenario performance gates
+   green.
 4. Bind the proven lobby to the most recently *actively played* compatible
    local world. A background preview open must not itself update catalog
    recency.
-5. Prove the same bounded preview and activation behavior with a remote hosted
-   source. Keep the dual-host/root-isolation smokes and materialized multiview
-   contract green.
+5. Next, prove the same bounded preview and activation behavior with a remote
+   hosted source. Keep the dual-host/root-isolation smokes and materialized
+   multiview contract green.
 6. Generalize to an N-world registry only after the bounded live-diorama
    milestone is closed and a concrete multi-preview experience requires it.
 7. T0 baked diorama and T1 seed explorer may reuse the same placement path as

@@ -610,6 +610,41 @@ mod tests {
     }
 
     #[test]
+    fn failed_managed_content_resolution_can_retry_after_the_blocker_is_removed() {
+        let root = unique_test_root("failure-retry");
+        let managed_root = root.join("scenarios");
+        let published = managed_root.join(LOBBY_PREVIEW_DIRECTORY);
+        fs::create_dir_all(&published).unwrap();
+        fs::write(published.join("unrelated.txt"), b"do not overwrite").unwrap();
+        let service = NativeManagedScenarioContentService::new(&managed_root);
+
+        let failure = service
+            .resolve(ScenarioLaunchIntent::lobby_preview())
+            .unwrap_err();
+        assert!(
+            failure
+                .to_string()
+                .contains("read managed scenario manifest")
+        );
+        assert_eq!(
+            fs::read(published.join("unrelated.txt")).unwrap(),
+            b"do not overwrite"
+        );
+
+        fs::remove_dir_all(&published).unwrap();
+        let resolved = service
+            .resolve(ScenarioLaunchIntent::lobby_preview())
+            .unwrap();
+        let reopened = service
+            .resolve(ScenarioLaunchIntent::lobby_preview())
+            .unwrap();
+        assert_eq!(resolved, reopened);
+        assert!(resolved.primary.root.exists());
+        assert!(resolved.destination.root.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn tokened_content_operations_reject_cancelled_and_duplicate_completions() {
         let (mut operations, handle) = NativeManagedScenarioContentOperationService::deferred();
         let intent = ScenarioLaunchIntent::lobby_preview();

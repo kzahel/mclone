@@ -286,6 +286,7 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("active_world,"));
         assert!(constructor.contains("standby_world: None,"));
         assert!(constructor.contains("warm_world_standby: None,"));
+        assert!(constructor.contains("managed_scenario_launch: None,"));
         assert!(constructor.contains("prepared_warm_world_shell: None,"));
         assert!(constructor.contains("embedded_world_preview: None,"));
         assert!(
@@ -713,6 +714,37 @@ fn retained_world_lifecycle_flushes_both_slots_and_cancels_before_rebuild() {
             "self.active_world.runtime.take()",
         ],
     );
+}
+
+#[test]
+fn managed_scenario_lifecycle_cancels_tokens_and_admits_a_clean_retry() {
+    let source = read("src/session.rs");
+    let cancel = braced_item(&source, "pub(crate) fn cancel_warm_world_standby(");
+    assert_in_order(
+        cancel,
+        &[
+            "self.managed_scenario_launch.take()",
+            "operations.begin_epoch()",
+            "self.prepared_warm_world_shell = None;",
+            "self.standby_world.take()",
+        ],
+    );
+
+    let begin = braced_item(&source, "fn begin_managed_scenario_launch(");
+    assert_in_order(
+        begin,
+        &[
+            "self.standby_world.is_none()",
+            "WarmWorldStandbyPhase::Failed | WarmWorldStandbyPhase::Cancelled",
+            "self.warm_world_standby = None;",
+            "a retained-world scenario is already active",
+        ],
+    );
+
+    let poll = braced_item(&source, "fn poll_managed_scenario_launch(");
+    assert!(poll.contains("launch.destination_failure = Some"));
+    assert!(poll.contains("Lobby startup failed:"));
+    assert!(poll.contains("self.session.request_start("));
 }
 
 #[test]

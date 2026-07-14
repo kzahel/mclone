@@ -45,6 +45,14 @@ and writes its JSON receipt under `/tmp/mclone-live-diorama-smoke`. The
 interactive desktop lane uses the same shared scene owner and launch options.
 Capable-device multiview execution remains the same named gap.
 
+The first shared product scenario is available from the native title menu as
+`Enter Lobby`: desktop flat/XR and Android flat/XR profiles all route the same
+path-free action into `McloneSceneHost`, which launches a protected managed
+lobby and asynchronously warms its live island diorama. Flat and synthetic
+stereo lifecycle smokes pass, as do both Android APK builds. Web renders the
+same row disabled with a reason-bearing IndexedDB managed-content gap; it does
+not synthesize support in TypeScript.
+
 Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
 2026-07-12. The native client builds and the full-frame offscreen smoke renders
 without X11, Wayland, or a window manager, using either Mesa llvmpipe or a real

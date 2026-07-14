@@ -2190,11 +2190,14 @@ pub(crate) struct LobbyScenarioSmokeReport {
     pub(crate) directory: PathBuf,
     pub(crate) capture_count: usize,
     pub(crate) switch_count: u64,
+    pub(crate) cancelled_launch_count: u64,
+    pub(crate) relaunch_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum LobbyScenarioSmokePhase {
     Title,
+    TitleAfterCancellation,
     WaitingForLobby,
     LobbyEmptyTable,
     WaitingForPreview,
@@ -2202,6 +2205,8 @@ enum LobbyScenarioSmokePhase {
     IslandPreview,
     ActivatingReturn,
     ReturnedLobby,
+    WaitingForRelaunchTitle,
+    WaitingForRelaunchPreview,
     Complete,
 }
 
@@ -2293,6 +2298,39 @@ pub(crate) fn run_lobby_scenario_smoke(
                     state.host.run_script(
                         &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
                             point,
+                            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
+                                mclone_ui::GameScenarioId::LobbyPreview,
+                            )),
+                        }]),
+                        device,
+                        queue,
+                    )?;
+                    state.host.apply_ui_action(
+                        mclone_ui::GameUiAction::BackToTitle,
+                        device,
+                        queue,
+                    )?;
+                    state.phase = LobbyScenarioSmokePhase::TitleAfterCancellation;
+                }
+                LobbyScenarioSmokePhase::TitleAfterCancellation => {
+                    if state.host.scene_host().active_world_seed() != options.scene.seed {
+                        bail!("cancelled lobby launch replaced the active world");
+                    }
+                    let widget = state
+                        .host
+                        .scene_host_mut()
+                        .mono_ui_debug_snapshot()
+                        .context("cancelled lobby launch did not return to the title")?
+                        .widgets
+                        .into_iter()
+                        .find(|widget| widget.label == "Enter Lobby")
+                        .context("cancelled lobby title has no Enter Lobby widget")?;
+                    state.host.run_script(
+                        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
+                            point: Point {
+                                x: widget.rect.center_x(),
+                                y: widget.rect.y + widget.rect.height * 0.5,
+                            },
                             require_action: Some(mclone_ui::GameUiAction::EnterScenario(
                                 mclone_ui::GameScenarioId::LobbyPreview,
                             )),
@@ -2420,6 +2458,57 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .is_some_and(|preview| preview.last_drawn_section_count > 0)
                     {
                         state.captures.push(("returned-lobby", frame_index));
+                        state.host.apply_ui_action(
+                            mclone_ui::GameUiAction::QuitToTitle,
+                            device,
+                            queue,
+                        )?;
+                        state.phase = LobbyScenarioSmokePhase::WaitingForRelaunchTitle;
+                    }
+                }
+                LobbyScenarioSmokePhase::WaitingForRelaunchTitle => {
+                    let widget = state
+                        .host
+                        .scene_host_mut()
+                        .mono_ui_debug_snapshot()
+                        .context("quit-to-title did not present the title")?
+                        .widgets
+                        .into_iter()
+                        .find(|widget| widget.label == "Enter Lobby")
+                        .context("relaunch title has no Enter Lobby widget")?;
+                    state.host.run_script(
+                        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
+                            point: Point {
+                                x: widget.rect.center_x(),
+                                y: widget.rect.y + widget.rect.height * 0.5,
+                            },
+                            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
+                                mclone_ui::GameScenarioId::LobbyPreview,
+                            )),
+                        }]),
+                        device,
+                        queue,
+                    )?;
+                    state.phase = LobbyScenarioSmokePhase::WaitingForRelaunchPreview;
+                }
+                LobbyScenarioSmokePhase::WaitingForRelaunchPreview => {
+                    if state.host.scene_host().active_world_seed()
+                        == mclone_server::AuthoredWorldFixtureKind::Table.seed()
+                        && state.host.scene_host().local_startup_complete()
+                        && state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .is_some_and(|preview| {
+                                preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
+                                    && preview.last_drawn_section_count > 0
+                            })
+                    {
+                        if state.host.scene_host().active_world_behavior_profile()
+                            != mclone_server::WorldBehaviorProfile::ProtectedLobby
+                        {
+                            bail!("reopened lobby did not retain protected authority");
+                        }
                         state.phase = LobbyScenarioSmokePhase::Complete;
                     }
                 }
@@ -2456,15 +2545,37 @@ pub(crate) fn run_lobby_scenario_smoke(
     if switch_count != 2 {
         bail!("lobby scenario smoke expected two slot exchanges, got {switch_count}");
     }
+    let scenario_cost = state
+        .host
+        .scene_host()
+        .warm_world_standby_snapshot()
+        .context("reopened lobby has no retained destination cost snapshot")?;
+    if scenario_cost.phase != mclone_scene::WarmWorldStandbyPhase::Switchable {
+        bail!("reopened lobby destination is not switchable: {scenario_cost:?}");
+    }
     let receipt = serde_json::json!({
         "schema": 1,
         "captures": state.captures.iter().map(|(label, frame)| {
             serde_json::json!({ "label": label, "frame": frame })
         }).collect::<Vec<_>>(),
         "switchCount": switch_count,
+        "cancelledLaunchCount": 1,
+        "relaunchCount": 1,
         "managedRoot": options.scene.world_root.as_ref().map(|root| root.parent().unwrap_or(root).join("scenarios")),
         "lobbyBehavior": "protectedLobby",
         "islandBehavior": "mutable",
+        "scenarioCost": {
+            "rendererShellCreateMs": scenario_cost.renderer_shell_create_ms,
+            "rendererMultiviewCreateMs": scenario_cost.renderer_multiview_create_ms,
+            "rendererMultiviewRequired": scenario_cost.renderer_multiview_required,
+            "destinationElapsedMs": scenario_cost.elapsed_ms,
+            "destinationPollMs": scenario_cost.poll_ms,
+            "destinationGpuWarmMs": scenario_cost.gpu_warm_ms,
+            "destinationStartupSeedBytes": scenario_cost.startup_seed_owned_bytes,
+            "destinationEstimatedGpuTerrainBytes": scenario_cost.estimated_gpu_terrain_bytes,
+            "destinationLoadedChunks": scenario_cost.loaded_chunks,
+            "destinationGpuSections": scenario_cost.gpu_section_count,
+        },
     });
     std::fs::write(
         options.directory.join("report.json"),
@@ -2474,6 +2585,8 @@ pub(crate) fn run_lobby_scenario_smoke(
         directory: options.directory.clone(),
         capture_count: state.captures.len(),
         switch_count,
+        cancelled_launch_count: 1,
+        relaunch_count: 1,
     })
 }
 

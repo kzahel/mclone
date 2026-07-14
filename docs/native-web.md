@@ -19,10 +19,15 @@ deferred-drop, and platform-operation contracts. Local worker, persistent
 IndexedDB local-world, and remote WebSocket modes all install services into
 that one host.
 
-The web feature profile remains intentionally honest: travel assist,
+The web settings-feature profile remains intentionally honest: travel assist,
 frame-pipeline overlay, debug diagnostics, and server simulation cadence are
-the exact remaining reason-bearing gaps in `mclone-app-runtime`. Far LOD is
-supported through the production shared resident compiler/cache/render path.
+its exact remaining reason-bearing gaps in `mclone-app-runtime`. The shared
+`Enter Lobby` product-scenario row is also visibly unavailable with the
+separate reason "Lobby scenarios need IndexedDB managed-content provisioning";
+it cannot emit a silent no-op. Native scenario policy remains shared, and a
+future browser implementation should supply only the missing IndexedDB content
+executor. Far LOD is supported through the production shared resident
+compiler/cache/render path.
 That path now uses 4/8/16 rings with two-chunk hysteresis and
 replacement-before-suppress transitions. Browser audio and teleport preview
 remain explicit absent service capabilities.

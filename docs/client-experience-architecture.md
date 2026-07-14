@@ -801,6 +801,7 @@ Decided in this revision (2026-07-05):
 | Variant | Classification | Owner / notes |
 |---|---|---|
 | `StartWorld` | projection-specific | UI projection closes the start/title surface; adapters may pair pointer focus. |
+| `EnterScenario` | host-effect action | Shared scenario controller emits a path-free launch intent; native scene policy executes it, while unsupported profiles suppress projection with a reason-bearing capability result. |
 | `OpenWorldList` | core action | Catalog controller. |
 | `OpenWorldCreate` | core action | Catalog controller; adapter supplies the seed fact. |
 | `SelectWorld` | core action | Catalog controller. |

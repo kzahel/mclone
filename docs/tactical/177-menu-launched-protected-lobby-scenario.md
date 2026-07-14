@@ -1,14 +1,12 @@
 # 177: Menu-Launched Protected Lobby Scenario
 
-Status: active 2026-07-14. Slices 0-4 are landed; lifecycle, parity, and
-performance closeout is next. The shared title menu now launches the protected
-lobby through independently cancellable primary and destination operations,
-then attaches the live island preview without blocking lobby entry. Flat and
-synthetic-stereo product smokes prove A-to-B-to-A activation through that menu
-path. This is the immediate productization milestone after Tactical 175 Slice
-6. It deliberately precedes Tactical 175's remote preview slice so the current
-local proof is first expressed as one shared scenario contract rather than
-accumulating a second menu-only implementation.
+Status: complete 2026-07-14. Slices 0-5 landed. The shared title menu launches
+the protected lobby through independently cancellable primary and destination
+operations, then attaches the live island preview without blocking lobby
+entry. Flat and synthetic-stereo product smokes prove cancellation, launch,
+A-to-B-to-A activation, quit, and warm relaunch through that menu path. The
+local proof is now one shared scenario contract rather than parallel
+CLI-versus-product implementations; Tactical 175 may resume remote Slice 7.
 
 Topic: `embedded-worlds`
 
@@ -747,6 +745,70 @@ Deliverables:
 Exit criteria: menu-launched local lobby is a stable shared native product
 scenario, the diagnostic CLI is merely another projection, protection is
 authoritative, and ordinary play retains its direct behavior/performance path.
+
+#### Slice 5 completion record — 2026-07-14
+
+The lifecycle product smoke now begins with a real title action, cancels it
+through `Back` before startup commitment, launches again, completes the flat
+A-to-B-to-A proof, quits to title, and launches the same managed scenario a
+third time. The first closeout run found one genuine bug: teardown retained a
+slot-less `Cancelled` diagnostic record for observability, and fresh launch
+admission mistook it for an owned runtime. Explicit scenario launch now clears
+only terminal `Failed`/`Cancelled` diagnostics when no prepared shell or
+standby slot exists. Active and partially owned retained worlds remain a hard
+conflict. The smoke now reaches a second protected lobby and visible,
+switchable island preview before its host is dropped, proving app-exit cleanup
+with both runtimes live.
+
+The closeout receipt records one cancelled launch and one warm relaunch in
+addition to the two slot exchanges. Its reviewed comparison captures now land
+at frames 0, 19, 58, 77, and 96. Managed-content tests continue to edit and
+reopen the island byte-for-byte, keep both roots outside the catalog, reject
+unrelated/corrupt publication, and now prove a failed resolution can retry
+after its external blocker is removed. The shared operation ledger proves
+stale cancellation and exact failed-request retry identity. Scene ownership
+locks require both primary and destination operation epochs to cancel before
+shell/slot drop, require destination preparation failure to remain nonfatal,
+and permit a clean launch only after terminal ownership is gone. Existing
+asset-replacement, renderer-resource-rebuild, active teardown, and persistence
+flush ordering remains green. True injected device loss and real-headset
+execution were unavailable on this Mac; the shared resource-rebuild teardown
+contract and synthetic stereo lane are the available evidence.
+
+Scenario-on cost remains separate in
+`/tmp/mclone-lobby-scenario-smoke/report.json`. The final warm relaunch created
+the duplicate shell in 22.582 ms, reached destination readiness in 974.246 ms,
+spent 0.280 ms polling and 312.254 ms in budgeted GPU warm elapsed time, and
+retained 270,664 bytes for both the startup seed and estimated terrain GPU
+storage across 49 loaded chunks and two drawable sections. The same exact
+active-plus-retained topology is already process-sampled by Tactical 174 Slice
+7: default cadence adds six managed threads, 36.5 MiB median RSS, and 5.63
+percentage points of one CPU core on this host; the sanctioned 5 Hz standby
+cadence removes that measured idle CPU increment. Product launch adds no third
+runtime or alternate background scheduler.
+
+The no-scenario release preflight observed 98.29% CPU idle with no active
+compiler or emulator; the postflight was again 98.29% idle. Five retained
+240-frame/120 Hz samples measured average frame times of 2.553, 2.525, 2.489,
+2.574, and 2.502 ms (2.525 ms median; 3.4% range) and P95s of 4.332, 4.417,
+4.195, 4.350, and 4.355 ms (4.350 ms median; 5.1% range). Every run retained
+1,936 sections with zero budget overruns and zero accounting violations; no
+sample was rejected. The candidate is 5.1% faster in median average and 4.5%
+faster in median P95 than Slice 0's accepted 2.660/4.554 ms baseline, so there
+is no ordinary-path regression. Reports are
+`/tmp/mclone-lobby-slice5-perf-{1..5}.json`. Constructor ownership tests also
+require scenario, provisioning, standby, and placed-preview state to remain
+absent until an explicit request.
+
+The full server/app-runtime/scene/UI/native-client suites pass, including
+ordinary catalog CRUD, Join Remote policy, dual-host persistence, and protected
+forged-command tests. `native:desktop-offscreen:smoke`, both product scenario
+smokes, the diagnostic `native:live-diorama:activation-smoke`, native web
+compilation, and both adapter/scene-host purity gates pass. Repository-driven
+`native:android:apk` and `native:android-xr:apk` builds both succeed. The current
+Mac exposes no capable-device full-frame multiview or real XR session, so those
+receipts remain honestly delegated to the already implemented device lanes
+rather than being inferred from per-eye stereo.
 
 ## Validation Matrix
 

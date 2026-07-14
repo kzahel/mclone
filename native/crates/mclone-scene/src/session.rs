@@ -1315,6 +1315,19 @@ impl McloneSceneHost {
             log::info!("ignoring repeated managed lobby scenario launch");
             return Ok(false);
         }
+        if self.prepared_warm_world_shell.is_none()
+            && self.standby_world.is_none()
+            && self.warm_world_standby.as_ref().is_some_and(|state| {
+                matches!(
+                    state.phase,
+                    WarmWorldStandbyPhase::Failed | WarmWorldStandbyPhase::Cancelled
+                )
+            })
+        {
+            self.warm_world_standby = None;
+            self.world_gate = None;
+            log::info!("cleared terminal retained-world diagnostics for scenario relaunch");
+        }
         if self.prepared_warm_world_shell.is_some()
             || self.warm_world_standby.is_some()
             || self.standby_world.is_some()
