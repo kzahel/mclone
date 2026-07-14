@@ -39,7 +39,8 @@ use mclone_app_runtime::frame_pacing::{
 };
 use mclone_app_runtime::frame_render::{
     FullFrameGui, FullFrameRenderSummary, PlacedTerrainFrame, PlacedTerrainPrepared,
-    RenderStreamStats, render_full_frame_for_view_with_far_lod_and_opaque_gate,
+    RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
+    TerrainTranslucentSubmission, render_full_frame_for_view_with_far_lod_and_opaque_gate,
     render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
@@ -98,7 +99,7 @@ use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, InputPromptKind, ResolvedFlatInput,
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
-use mclone_mesh::{TexturedRenderSectionMesh, quad_face_count_from_indices};
+use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -107,7 +108,8 @@ use mclone_render::chunk::{
     ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
     TexturedSectionDrawResources, TexturedSectionRecordCacheStats,
     TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
-    TexturedSectionRenderStats, TexturedSectionUploadReport, TexturedSectionUploadTiming,
+    TexturedSectionRenderStats, TexturedSectionTranslucentRecord, TexturedSectionUploadReport,
+    TexturedSectionUploadTiming,
 };
 use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
 use mclone_render::far_lod::FarTerrainLodRenderer;
@@ -557,6 +559,167 @@ pub struct McloneSceneHost {
     last_ui_draw_cache_stats: UiDrawCacheStats,
     rendered_frames: u32,
     seed_reroll: NewWorldSeedReroll,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct QualifiedTerrainTranslucentSubmission {
+    world: WorldInstanceId,
+    source: TerrainCompositionSource,
+    section: RenderSectionKey,
+    composition_center: Vec3,
+}
+
+/// Merge per-store translucent records at the scene boundary, where durable
+/// world identity is available. Stereo and multiview callers pass both eyes;
+/// their midpoint and averaged forward vector produce one immutable order for
+/// the whole frame.
+fn compose_translucent_terrain_order(
+    active_world: WorldInstanceId,
+    active_records: Vec<TexturedSectionTranslucentRecord>,
+    placed_world: WorldInstanceId,
+    placed_records: Vec<TexturedSectionTranslucentRecord>,
+    render_views: &[ChunkRenderView],
+) -> Vec<TerrainTranslucentSubmission> {
+    debug_assert!(!render_views.is_empty());
+    let view_count = render_views.len() as f32;
+    let camera_position = render_views
+        .iter()
+        .fold(Vec3::ZERO, |sum, view| sum + view.camera_position)
+        / view_count;
+    let averaged_forward = render_views
+        .iter()
+        .fold(Vec3::ZERO, |sum, view| sum + view.camera_forward)
+        .normalize_or_zero();
+    let camera_forward = if averaged_forward.length_squared() > 0.0 {
+        averaged_forward
+    } else {
+        render_views[0].camera_forward
+    };
+    let mut qualified = active_records
+        .into_iter()
+        .map(|record| QualifiedTerrainTranslucentSubmission {
+            world: active_world,
+            source: TerrainCompositionSource::Active,
+            section: record.key,
+            composition_center: record.composition_center,
+        })
+        .chain(
+            placed_records
+                .into_iter()
+                .map(|record| QualifiedTerrainTranslucentSubmission {
+                    world: placed_world,
+                    source: TerrainCompositionSource::Placed,
+                    section: record.key,
+                    composition_center: record.composition_center,
+                }),
+        )
+        .collect::<Vec<_>>();
+    qualified.sort_by(|left, right| {
+        let left_depth = (left.composition_center - camera_position).dot(camera_forward);
+        let right_depth = (right.composition_center - camera_position).dot(camera_forward);
+        right_depth
+            .partial_cmp(&left_depth)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.world.cmp(&left.world))
+            .then_with(|| right.section.cmp(&left.section))
+    });
+    qualified
+        .into_iter()
+        .map(|submission| TerrainTranslucentSubmission {
+            source: submission.source,
+            section: submission.section,
+        })
+        .collect()
+}
+
+fn embedded_translucent_order_snapshot(
+    active_world: WorldInstanceId,
+    preview_world: WorldInstanceId,
+    order: &[TerrainTranslucentSubmission],
+) -> EmbeddedWorldPreviewTranslucentOrderSnapshot {
+    let qualified = |submission: TerrainTranslucentSubmission| {
+        EmbeddedWorldPreviewTranslucentSubmissionSnapshot {
+            world: match submission.source {
+                TerrainCompositionSource::Active => active_world,
+                TerrainCompositionSource::Placed => preview_world,
+            },
+            section: submission.section,
+        }
+    };
+    EmbeddedWorldPreviewTranslucentOrderSnapshot {
+        section_count: order.len(),
+        active_section_count: order
+            .iter()
+            .filter(|submission| submission.source == TerrainCompositionSource::Active)
+            .count(),
+        preview_section_count: order
+            .iter()
+            .filter(|submission| submission.source == TerrainCompositionSource::Placed)
+            .count(),
+        source_switch_count: order
+            .windows(2)
+            .filter(|pair| pair[0].source != pair[1].source)
+            .count(),
+        first: order.first().copied().map(qualified),
+        last: order.last().copied().map(qualified),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_composed_translucent_terrain_multiview(
+    active_draw: &TexturedSectionDrawResources,
+    placed_draw: &TexturedSectionDrawResources,
+    placed_renderer: &mclone_render::chunk::PlacedTexturedSectionRenderer,
+    order: &[TerrainTranslucentSubmission],
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    target: ChunkMultiviewRenderTarget<'_>,
+    render_views: [ChunkRenderView; 2],
+    active_options: [TexturedSectionRenderOptions; 2],
+    placed_options: [TexturedSectionRenderOptions; 2],
+    placement: mclone_render::placement::WorldPlacement,
+) -> Result<()> {
+    let mut start = 0;
+    while start < order.len() {
+        let source = order[start].source;
+        let mut end = start + 1;
+        while end < order.len() && order[end].source == source {
+            end += 1;
+        }
+        let keys = order[start..end]
+            .iter()
+            .map(|submission| submission.section)
+            .collect::<Vec<_>>();
+        match source {
+            TerrainCompositionSource::Active => {
+                active_draw.render_ordered_translucent_sections_multiview(
+                    &keys,
+                    device,
+                    queue,
+                    encoder,
+                    target,
+                    render_views,
+                    active_options,
+                )?;
+            }
+            TerrainCompositionSource::Placed => {
+                placed_draw.render_ordered_placed_translucent_sections_multiview(
+                    placed_renderer,
+                    &keys,
+                    device,
+                    queue,
+                    encoder,
+                    target,
+                    render_views,
+                    placed_options,
+                    placement,
+                )?;
+            }
+        }
+        start = end;
+    }
+    Ok(())
 }
 
 impl McloneSceneHost {
@@ -1227,6 +1390,21 @@ impl McloneSceneHost {
                         )
                     })
             });
+        let preview_translucent_order = self
+            .embedded_world_preview
+            .as_ref()
+            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+            .zip(preview_stereo_draw.as_ref())
+            .map(|(preview, prepared)| {
+                compose_translucent_terrain_order(
+                    self.active_world.id,
+                    prepared_stereo_draw
+                        .translucent_records(mclone_render::placement::WorldPlacement::identity()),
+                    preview.source_world,
+                    prepared.0.translucent_records(preview.placement),
+                    &terrain_views,
+                )
+            });
         let defer_eye_waits = self.defer_eye_waits_enabled;
         let uniform_frame = self.next_per_view_uniform_frame();
         let left_view_slot = LEFT_EYE_VIEW_SLOT.in_uniform_frame(uniform_frame);
@@ -1238,6 +1416,7 @@ impl McloneSceneHost {
             queue,
             &prepared_stereo_draw,
             preview_stereo_draw.as_ref().map(|prepared| &prepared.0),
+            preview_translucent_order.as_deref(),
             left_target,
             render_views[0],
             diagnostic_panel,
@@ -1263,6 +1442,7 @@ impl McloneSceneHost {
             queue,
             &prepared_stereo_draw,
             preview_stereo_draw.as_ref().map(|prepared| &prepared.0),
+            preview_translucent_order.as_deref(),
             right_target,
             render_views[1],
             diagnostic_panel,
@@ -1327,6 +1507,7 @@ impl McloneSceneHost {
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         let first_drawn_section_count = left_eye.summary.drawn_section_count;
+        let active_world_id = self.active_world.id;
         if let Some(preview) = self.embedded_world_preview.as_mut() {
             let stats = TexturedSectionRenderStats {
                 drawn_section_count: left_eye.summary.placed_drawn_section_count,
@@ -1345,6 +1526,16 @@ impl McloneSceneHost {
                 cull_ms,
                 left_eye.timing.placed_draw_ms + right_eye.timing.placed_draw_ms,
                 stats,
+                preview_translucent_order.as_deref().map_or_else(
+                    EmbeddedWorldPreviewTranslucentOrderSnapshot::default,
+                    |order| {
+                        embedded_translucent_order_snapshot(
+                            active_world_id,
+                            preview.source_world,
+                            order,
+                        )
+                    },
+                ),
             );
         }
         self.record_eye0_summary(left_eye.summary);
@@ -1929,6 +2120,7 @@ impl McloneSceneHost {
             timing.multiview_terrain_ms =
                 elapsed_ms(self.services.clock.elapsed_since(terrain_start));
         }
+        let mut preview_translucent_frame = None;
         let preview_stats = if let Some((
             source_world,
             records,
@@ -1970,6 +2162,7 @@ impl McloneSceneHost {
                 )
                 .context("render embedded world preview multiview")?;
             let draw_ms = elapsed_ms(self.services.clock.elapsed_since(draw_started_at));
+            preview_translucent_frame = Some((source_world, prepared, options, placement));
             Some((
                 stats,
                 prepare_timing.cull_ms,
@@ -2016,21 +2209,66 @@ impl McloneSceneHost {
         } else {
             ActorRenderStats::default()
         };
+        let mut preview_translucent_order_snapshot =
+            EmbeddedWorldPreviewTranslucentOrderSnapshot::default();
         if split_translucent_terrain {
             let translucent_start = self.services.clock.now();
-            self.active_world
-                .draw
-                .render_prepared_multiview_stereo_draw_phase_with_options(
-                    &prepared_stereo_draw,
+            if let Some((source_world, prepared, options, placement)) =
+                preview_translucent_frame.as_ref()
+            {
+                let preview = self
+                    .embedded_world_preview
+                    .as_ref()
+                    .filter(|preview| preview.source_world == *source_world)
+                    .context("visible embedded preview lost before translucent multiview")?;
+                let standby = self
+                    .standby_world
+                    .as_ref()
+                    .filter(|slot| slot.id == *source_world)
+                    .context("embedded source world lost before translucent multiview")?;
+                let order = compose_translucent_terrain_order(
+                    self.active_world.id,
+                    prepared_stereo_draw
+                        .translucent_records(mclone_render::placement::WorldPlacement::identity()),
+                    *source_world,
+                    prepared.translucent_records(*placement),
+                    &terrain_views,
+                );
+                preview_translucent_order_snapshot = embedded_translucent_order_snapshot(
+                    self.active_world.id,
+                    *source_world,
+                    &order,
+                );
+                render_composed_translucent_terrain_multiview(
+                    &self.active_world.draw,
+                    &standby.draw,
+                    &preview.renderer,
+                    &order,
                     device,
                     queue,
                     &mut encoder,
                     render_target.with_loaded_color().with_loaded_depth(),
                     terrain_views,
                     terrain_options,
-                    TexturedSectionRenderPhase::Translucent,
+                    *options,
+                    *placement,
                 )
-                .context("render XR terrain multiview translucent chunks")?;
+                .context("render XR composed terrain multiview translucent chunks")?;
+            } else {
+                self.active_world
+                    .draw
+                    .render_prepared_multiview_stereo_draw_phase_with_options(
+                        &prepared_stereo_draw,
+                        device,
+                        queue,
+                        &mut encoder,
+                        render_target.with_loaded_color().with_loaded_depth(),
+                        terrain_views,
+                        terrain_options,
+                        TexturedSectionRenderPhase::Translucent,
+                    )
+                    .context("render XR terrain multiview translucent chunks")?;
+            }
             if let Some(timing) = timing.as_deref_mut() {
                 timing.multiview_terrain_ms +=
                     elapsed_ms(self.services.clock.elapsed_since(translucent_start));
@@ -2105,7 +2343,14 @@ impl McloneSceneHost {
         if let (Some(preview), Some((preview_stats, cull_ms, draw_ms, bounded, outside))) =
             (self.embedded_world_preview.as_mut(), preview_stats)
         {
-            preview.record_render(bounded, outside, cull_ms, draw_ms, preview_stats[0]);
+            preview.record_render(
+                bounded,
+                outside,
+                cull_ms,
+                draw_ms,
+                preview_stats[0],
+                preview_translucent_order_snapshot,
+            );
         }
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
@@ -3172,6 +3417,7 @@ impl McloneSceneHost {
         queue: &wgpu::Queue,
         prepared_draw: &PreparedTexturedSectionStereoDraw,
         preview_prepared_draw: Option<&PreparedTexturedSectionStereoDraw>,
+        preview_translucent_order: Option<&[TerrainTranslucentSubmission]>,
         target: XrTerrainEyeTarget<'_>,
         render_view: ChunkRenderView,
         diagnostic_panel: WorldGuiPanel,
@@ -3239,40 +3485,45 @@ impl McloneSceneHost {
             .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
         #[cfg(target_arch = "wasm32")]
         let opaque_world_gate = None;
-        let placed_terrain = preview_prepared_draw.and_then(|prepared| {
-            let preview = self
-                .embedded_world_preview
-                .as_ref()
-                .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
-            let standby = self
-                .standby_world
-                .as_ref()
-                .filter(|slot| slot.id == preview.source_world)?;
-            let preview_time = standby
-                .runtime
-                .as_ref()
-                .map_or(0.0, |runtime| runtime.time_of_day());
-            Some(PlacedTerrainFrame {
-                draw: &standby.draw,
-                renderer: &preview.renderer,
-                prepared: PlacedTerrainPrepared::Stereo(prepared),
-                placement: preview.placement,
-                render_options: self
-                    .render_options
-                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time)),
-            })
-        });
+        let terrain_composition = preview_prepared_draw
+            .zip(preview_translucent_order)
+            .and_then(|(prepared, translucent_order)| {
+                let preview = self
+                    .embedded_world_preview
+                    .as_ref()
+                    .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
+                let standby = self
+                    .standby_world
+                    .as_ref()
+                    .filter(|slot| slot.id == preview.source_world)?;
+                let preview_time = standby
+                    .runtime
+                    .as_ref()
+                    .map_or(0.0, |runtime| runtime.time_of_day());
+                Some(TerrainCompositionFrame {
+                    placed: PlacedTerrainFrame {
+                        draw: &standby.draw,
+                        renderer: &preview.renderer,
+                        prepared: PlacedTerrainPrepared::Stereo(prepared),
+                        placement: preview.placement,
+                        render_options: self.render_options.with_sky_darken(
+                            mclone_render::light_texture::sky_darken(preview_time),
+                        ),
+                    },
+                    translucent_order,
+                })
+            });
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
-            if let Some(placed_terrain) = placed_terrain {
+            if let Some(terrain_composition) = terrain_composition {
                 render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot(
                     frame,
                     target.depth,
                     &self.sky,
                     &mut self.active_world.draw,
                     prepared_draw,
-                    placed_terrain,
+                    terrain_composition,
                     Some(&mut self.actors),
                     Some(&mut self.screen_effects),
                     None,
@@ -3318,14 +3569,14 @@ impl McloneSceneHost {
             }
         } else {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
-            if let Some(placed_terrain) = placed_terrain {
+            if let Some(terrain_composition) = terrain_composition {
                 render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot(
                     frame,
                     target.depth,
                     &self.sky,
                     &mut self.active_world.draw,
                     prepared_draw,
-                    placed_terrain,
+                    terrain_composition,
                     Some(&mut self.actors),
                     Some(&mut self.screen_effects),
                     None,
@@ -3689,6 +3940,61 @@ mod tests {
     use mclone_render_session::{
         ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     };
+
+    #[test]
+    fn translucent_composition_qualifies_worlds_and_reverses_with_view() {
+        let active_world = WorldInstanceId::new(11);
+        let preview_world = WorldInstanceId::new(22);
+        let active = vec![
+            TexturedSectionTranslucentRecord {
+                key: RenderSectionKey::new(0, 4, -1),
+                composition_center: Vec3::new(0.0, 65.0, -1.0),
+            },
+            TexturedSectionTranslucentRecord {
+                key: RenderSectionKey::new(0, 4, 1),
+                composition_center: Vec3::new(0.0, 65.0, 17.0),
+            },
+        ];
+        let placed = vec![TexturedSectionTranslucentRecord {
+            key: RenderSectionKey::new(0, 4, 0),
+            composition_center: Vec3::new(0.0, 65.0, 8.0),
+        }];
+        let mut front =
+            mclone_render::chunk::ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        front.camera_position = Vec3::new(0.0, 67.0, -6.0);
+        front.camera_forward = Vec3::Z;
+        let mut behind = front;
+        behind.camera_position = Vec3::new(0.0, 67.0, 22.0);
+        behind.camera_forward = Vec3::NEG_Z;
+
+        let front_order = compose_translucent_terrain_order(
+            active_world,
+            active.clone(),
+            preview_world,
+            placed.clone(),
+            &[front, front],
+        );
+        let behind_order = compose_translucent_terrain_order(
+            active_world,
+            active,
+            preview_world,
+            placed,
+            &[behind, behind],
+        );
+        let front_snapshot =
+            embedded_translucent_order_snapshot(active_world, preview_world, &front_order);
+        let behind_snapshot =
+            embedded_translucent_order_snapshot(active_world, preview_world, &behind_order);
+
+        assert_eq!(front_snapshot.section_count, 3);
+        assert_eq!(front_snapshot.active_section_count, 2);
+        assert_eq!(front_snapshot.preview_section_count, 1);
+        assert_eq!(front_snapshot.source_switch_count, 2);
+        assert_eq!(front_snapshot.first.unwrap().section.chunk_z, 1);
+        assert_eq!(front_snapshot.last.unwrap().section.chunk_z, -1);
+        assert_eq!(behind_snapshot.first.unwrap().section.chunk_z, -1);
+        assert_eq!(behind_snapshot.last.unwrap().section.chunk_z, 1);
+    }
 
     fn point_in(rect: Rect) -> Point {
         Point {

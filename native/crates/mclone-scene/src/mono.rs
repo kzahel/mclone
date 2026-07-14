@@ -1226,7 +1226,7 @@ impl McloneSceneHost {
                     .map(|slot| slot.draw.prepare_render_records_for_region(preview.region))
             });
         let world_gui = FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
-        let (mut summary, preview_render_timing) =
+        let (mut summary, preview_render_timing, preview_translucent_order) =
             if let Some(preview_records) = preview_records.as_ref() {
                 let preview = self
                     .embedded_world_preview
@@ -1243,6 +1243,33 @@ impl McloneSceneHost {
                 let preview_options = self
                     .render_options
                     .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
+                let terrain_view =
+                    render_view_with_underwater_effect(render_view, underwater_overlay);
+                let active_records = self.active_world.draw.prepare_render_records();
+                let active_translucent = self.active_world.draw.prepare_placed_translucent_records(
+                    &active_records,
+                    terrain_view,
+                    render_options,
+                    mclone_render::placement::WorldPlacement::identity(),
+                );
+                let placed_translucent = standby.draw.prepare_placed_translucent_records(
+                    preview_records,
+                    terrain_view,
+                    preview_options,
+                    preview.placement,
+                );
+                let translucent_order = compose_translucent_terrain_order(
+                    self.active_world.id,
+                    active_translucent,
+                    preview.source_world,
+                    placed_translucent,
+                    std::slice::from_ref(&terrain_view),
+                );
+                let translucent_order_snapshot = embedded_translucent_order_snapshot(
+                    self.active_world.id,
+                    preview.source_world,
+                    &translucent_order,
+                );
                 let rendered = render_full_frame_for_view_with_far_lod_and_placed_terrain_timed(
                     RenderFrameContext::new(device, queue, encoder, target),
                     depth,
@@ -1250,12 +1277,15 @@ impl McloneSceneHost {
                     &mut self.active_world.draw,
                     far_lod,
                     far_lod_mesh,
-                    PlacedTerrainFrame {
-                        draw: &standby.draw,
-                        renderer: &preview.renderer,
-                        prepared: PlacedTerrainPrepared::Mono(preview_records),
-                        placement: preview.placement,
-                        render_options: preview_options,
+                    TerrainCompositionFrame {
+                        placed: PlacedTerrainFrame {
+                            draw: &standby.draw,
+                            renderer: &preview.renderer,
+                            prepared: PlacedTerrainPrepared::Mono(preview_records),
+                            placement: preview.placement,
+                            render_options: preview_options,
+                        },
+                        translucent_order: &translucent_order,
                     },
                     Some(&mut self.actors),
                     Some(&mut self.screen_effects),
@@ -1271,7 +1301,8 @@ impl McloneSceneHost {
                     |_| GuiDrawList::new(),
                     &mut render_stats,
                 );
-                rendered.map(|(summary, timing)| (summary, Some(timing)))
+                rendered
+                    .map(|(summary, timing)| (summary, Some(timing), translucent_order_snapshot))
             } else {
                 render_full_frame_for_view_with_far_lod_and_opaque_gate(
                     RenderFrameContext::new(device, queue, encoder, target),
@@ -1295,7 +1326,13 @@ impl McloneSceneHost {
                     |_| GuiDrawList::new(),
                     &mut render_stats,
                 )
-                .map(|summary| (summary, None))
+                .map(|summary| {
+                    (
+                        summary,
+                        None,
+                        EmbeddedWorldPreviewTranslucentOrderSnapshot::default(),
+                    )
+                })
             }
             .context("render mono scene frame")?;
         if let Some(preview) = self.embedded_world_preview.as_mut() {
@@ -1320,6 +1357,7 @@ impl McloneSceneHost {
                 timing.placed_cull_ms,
                 timing.placed_draw_ms,
                 stats,
+                preview_translucent_order,
             );
         }
 

@@ -10,7 +10,8 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Quat, Vec3, Vec4};
 use mclone_core::{
-    block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord, chunk_min_block_coord,
+    Vec3d, block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord,
+    chunk_min_block_coord,
 };
 use mclone_diagnostics::GpuPassId;
 use mclone_mesh::{
@@ -1019,6 +1020,32 @@ impl PreparedTexturedSectionStereoDraw {
             .get(&key)
             .is_some_and(|mask| mask.contains(StereoDrawMask::for_slot(view_slot)))
     }
+
+    /// Visible translucent sections from the stereo union, expressed in the
+    /// physical composition coordinate system. Scene composition qualifies
+    /// these neutral records with its own world-instance identity before
+    /// sorting multiple draw stores together.
+    pub fn translucent_records(
+        &self,
+        placement: WorldPlacement,
+    ) -> Vec<TexturedSectionTranslucentRecord> {
+        self.translucent_keys
+            .iter()
+            .copied()
+            .map(|key| textured_section_translucent_record(key, placement))
+            .collect()
+    }
+}
+
+/// Renderer-neutral input for scene-level translucent composition.
+///
+/// The renderer owns only the plain per-store section key and its physical
+/// center. World identity and source selection stay at the scene/app-runtime
+/// boundary rather than turning a draw store into a world registry.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TexturedSectionTranslucentRecord {
+    pub key: RenderSectionKey,
+    pub composition_center: Vec3,
 }
 
 // Slice G (docs/tactical/106): the per-eye cull previously allocated three
@@ -2425,6 +2452,7 @@ impl TexturedChunkMultiviewRenderer {
 pub struct PlacedTexturedSectionRenderer {
     solid_pipeline: wgpu::RenderPipeline,
     cutout_pipeline: wgpu::RenderPipeline,
+    translucent_pipeline: wgpu::RenderPipeline,
     uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     color_format: wgpu::TextureFormat,
@@ -2486,9 +2514,21 @@ impl PlacedTexturedSectionRenderer {
             true,
             None,
         );
+        let translucent_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_placed_textured_chunk_translucent_pipeline",
+            "fs_main_cutout",
+            Some(translucent_blend_state()),
+            false,
+            None,
+        );
         Self {
             solid_pipeline,
             cutout_pipeline,
+            translucent_pipeline,
             uniforms,
             bind_group,
             color_format,
@@ -2526,6 +2566,7 @@ impl PlacedTexturedSectionRenderer {
 struct PlacedTexturedSectionMultiviewRenderer {
     solid_pipeline: wgpu::RenderPipeline,
     cutout_pipeline: wgpu::RenderPipeline,
+    translucent_pipeline: wgpu::RenderPipeline,
     uniform_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
 }
@@ -2597,9 +2638,21 @@ impl PlacedTexturedSectionMultiviewRenderer {
             true,
             NonZeroU32::new(2),
         );
+        let translucent_pipeline = create_textured_chunk_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_placed_textured_chunk_multiview_translucent_pipeline",
+            "fs_main_cutout",
+            Some(translucent_blend_state()),
+            false,
+            NonZeroU32::new(2),
+        );
         Self {
             solid_pipeline,
             cutout_pipeline,
+            translucent_pipeline,
             uniform_buffer,
             bind_group,
         }
@@ -3912,13 +3965,56 @@ impl TexturedSectionDrawResources {
                 &frustums,
             )
         };
+        let sort_view = stereo_translucent_sort_view(physical_render_views);
+        let mut translucent_keys = self
+            .sections
+            .iter()
+            .filter(|(key, mesh)| {
+                culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
+            })
+            .map(|(key, _)| *key)
+            .collect::<Vec<_>>();
+        translucent_keys.sort_by(|left, right| {
+            compare_placed_translucent_sections(*left, *right, sort_view, placement)
+        });
         PreparedTexturedSectionStereoDraw {
             union_stats: stereo_union_stats_for_options(culling.stats, options),
             eye_stats: culling.eye_stats,
             drawn_keys: culling.drawn_keys,
             draw_masks: culling.draw_masks,
-            translucent_keys: Vec::new(),
+            translucent_keys,
         }
+    }
+
+    /// Cull one placed source for a mono composition view and return only its
+    /// visible translucent sections. The ordinary direct path never calls this;
+    /// it exists for opt-in cross-world composition.
+    pub fn prepare_placed_translucent_records(
+        &self,
+        records: &PreparedTexturedSectionRecords,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+    ) -> Vec<TexturedSectionTranslucentRecord> {
+        let source_render_view = placement.source_render_view(physical_render_view);
+        let placed_frustum = PlacedClipFrustum::new(physical_render_view, placement);
+        let culling = {
+            let mut scratch = self.cull_scratch.borrow_mut();
+            cull_textured_sections_with_frustum(
+                records,
+                source_render_view,
+                options,
+                &mut scratch,
+                &placed_frustum,
+            )
+        };
+        self.sections
+            .iter()
+            .filter(|(key, mesh)| {
+                culling.drawn_keys.contains(key) && !mesh.translucent_index_range().is_empty()
+            })
+            .map(|(key, _)| textured_section_translucent_record(*key, placement))
+            .collect()
     }
 
     pub fn prepare_placed_stereo_draw_timed(
@@ -4100,6 +4196,228 @@ impl TexturedSectionDrawResources {
             }
         }
         Ok(prepared_draw.stats())
+    }
+
+    /// Draw an already composition-sorted run of direct-world translucent
+    /// sections. Callers may pass a stereo preparation to suppress sections
+    /// outside the current eye while preserving one midpoint-derived order for
+    /// both eyes.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_ordered_translucent_sections_in_slot(
+        &self,
+        keys: &[RenderSectionKey],
+        prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        view_slot: PerViewSlot,
+    ) {
+        if keys.is_empty() {
+            return;
+        }
+        let uniform_offset = self.renderer.uniforms.write_slot(
+            queue,
+            view_slot,
+            &uniform_bytes(render_view, options, self.renderer.color_format),
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_ordered_translucent_section_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: target.color_load_op(),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: target.depth_load_op(),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_pipeline(&self.renderer.translucent_pipeline);
+        for key in keys {
+            if prepared_stereo_draw.is_some_and(|prepared| !prepared.draws_in_slot(*key, view_slot))
+            {
+                continue;
+            }
+            if let Some(mesh) = self.sections.get(key) {
+                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            }
+        }
+    }
+
+    /// Draw an already composition-sorted run of placed translucent sections.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_ordered_placed_translucent_sections_in_slot(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        keys: &[RenderSectionKey],
+        prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkRenderTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        options: TexturedSectionRenderOptions,
+        placement: WorldPlacement,
+        view_slot: PerViewSlot,
+    ) {
+        if keys.is_empty() {
+            return;
+        }
+        let uniform_offset = renderer.uniforms.write_slot(
+            queue,
+            view_slot,
+            &placed_uniform_bytes(
+                physical_render_view,
+                options,
+                placement,
+                renderer.color_format,
+            ),
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_ordered_placed_translucent_section_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: target.color_load_op(),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: target.depth_load_op(),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_bind_group(0, &renderer.bind_group, &[uniform_offset]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_pipeline(&renderer.translucent_pipeline);
+        for key in keys {
+            if prepared_stereo_draw.is_some_and(|prepared| !prepared.draws_in_slot(*key, view_slot))
+            {
+                continue;
+            }
+            if let Some(mesh) = self.sections.get(key) {
+                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            }
+        }
+    }
+
+    pub fn render_ordered_translucent_sections_multiview(
+        &self,
+        keys: &[RenderSectionKey],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkMultiviewRenderTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+    ) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let renderer = self.renderer.multiview_renderer(device)?;
+        renderer.write_uniforms(queue, render_views, options, self.renderer.color_format);
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_ordered_translucent_section_multiview_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: target.color_load_op(),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: target.depth_load_op(),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_bind_group(0, &renderer.bind_group, &[]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_pipeline(&renderer.translucent_pipeline);
+        for key in keys {
+            if let Some(mesh) = self.sections.get(key) {
+                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_ordered_placed_translucent_sections_multiview(
+        &self,
+        renderer: &PlacedTexturedSectionRenderer,
+        keys: &[RenderSectionKey],
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: ChunkMultiviewRenderTarget<'_>,
+        physical_render_views: [ChunkRenderView; 2],
+        options: [TexturedSectionRenderOptions; 2],
+        placement: WorldPlacement,
+    ) -> Result<()> {
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let multiview =
+            renderer.multiview_renderer(device, &self.renderer.texture_bind_group_layout)?;
+        multiview.write_uniforms(
+            queue,
+            physical_render_views,
+            options,
+            placement,
+            renderer.color_format,
+        );
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_ordered_placed_translucent_multiview_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: target.color_load_op(),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: target.depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: target.depth_load_op(),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_bind_group(0, &multiview.bind_group, &[]);
+        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_pipeline(&multiview.translucent_pipeline);
+        for key in keys {
+            if let Some(mesh) = self.sections.get(key) {
+                draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+            }
+        }
+        Ok(())
     }
 
     pub fn render_prepared_multiview_with_options(
@@ -4570,13 +4888,56 @@ fn compare_translucent_sections(
         .then_with(|| right.cmp(&left))
 }
 
+fn compare_placed_translucent_sections(
+    left: RenderSectionKey,
+    right: RenderSectionKey,
+    physical_render_view: ChunkRenderView,
+    placement: WorldPlacement,
+) -> Ordering {
+    let left_depth = placed_section_depth_along_view(left, physical_render_view, placement);
+    let right_depth = placed_section_depth_along_view(right, physical_render_view, placement);
+    right_depth
+        .partial_cmp(&left_depth)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| right.cmp(&left))
+}
+
 fn section_depth_along_view(key: RenderSectionKey, render_view: ChunkRenderView) -> f32 {
-    let center = Vec3::new(
+    let center = section_center(key);
+    (center - render_view.camera_position).dot(render_view.camera_forward)
+}
+
+fn placed_section_depth_along_view(
+    key: RenderSectionKey,
+    render_view: ChunkRenderView,
+    placement: WorldPlacement,
+) -> f32 {
+    let center = textured_section_translucent_record(key, placement).composition_center;
+    (center - render_view.camera_position).dot(render_view.camera_forward)
+}
+
+fn textured_section_translucent_record(
+    key: RenderSectionKey,
+    placement: WorldPlacement,
+) -> TexturedSectionTranslucentRecord {
+    let center = section_center(key);
+    let center = placement.source_to_composition(Vec3d::new(
+        f64::from(center.x),
+        f64::from(center.y),
+        f64::from(center.z),
+    ));
+    TexturedSectionTranslucentRecord {
+        key,
+        composition_center: Vec3::new(center.x as f32, center.y as f32, center.z as f32),
+    }
+}
+
+fn section_center(key: RenderSectionKey) -> Vec3 {
+    Vec3::new(
         chunk_min_block_coord(key.chunk_x) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
         key.min_y() as f32 + RENDER_SECTION_HEIGHT as f32 * 0.5,
         chunk_min_block_coord(key.chunk_z) as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
-    );
-    (center - render_view.camera_position).dot(render_view.camera_forward)
+    )
 }
 
 fn vertex_bytes(mesh: &VisibleChunkMesh) -> Vec<u8> {
@@ -4879,6 +5240,20 @@ mod tests {
         );
         assert!(placed[128..140].iter().all(|byte| *byte == 0));
         assert!(placed[144..].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn translucent_record_center_uses_physical_world_placement() {
+        let placement = WorldPlacement::new(
+            Vec3d::new(8.0, 65.0, 8.0),
+            Vec3d::new(20.0, 70.0, -4.0),
+            0.125,
+        )
+        .unwrap();
+        let record = textured_section_translucent_record(RenderSectionKey::new(0, 4, 0), placement);
+
+        assert_eq!(record.key, RenderSectionKey::new(0, 4, 0));
+        assert_eq!(record.composition_center, Vec3::new(20.0, 70.875, -4.0));
     }
 
     #[test]

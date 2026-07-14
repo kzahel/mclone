@@ -12,7 +12,7 @@ use mclone_render::headless::{
 use mclone_render_session::EngineCameraViewMode;
 use mclone_scene::{
     EmbeddedWorldPreviewMutationPhase, EmbeddedWorldPreviewMutationSnapshot,
-    EmbeddedWorldPreviewPhase,
+    EmbeddedWorldPreviewPhase, EmbeddedWorldPreviewTranslucentOrderSnapshot,
 };
 use mclone_server::{
     AUTHORED_WORLD_FIXTURE_MARKER_FILE, AuthoredWorldFixtureManifest, SqliteWorldStore, WorldStore,
@@ -52,6 +52,9 @@ pub(crate) struct LiveDioramaSmokeReport {
     pub(crate) preview_drawn_section_count: usize,
     pub(crate) preview_drawn_index_count: u32,
     pub(crate) stereo_eye_pixel_difference_count: usize,
+    pub(crate) front_translucent_order: LiveDioramaTranslucentOrderReport,
+    pub(crate) behind_translucent_order: LiveDioramaTranslucentOrderReport,
+    pub(crate) stereo_translucent_order: LiveDioramaTranslucentOrderReport,
     pub(crate) mutation: LiveDioramaMutationSmokeReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) soak: Option<LiveDioramaSoakReport>,
@@ -59,6 +62,19 @@ pub(crate) struct LiveDioramaSmokeReport {
     pub(crate) standby_cadence_applied: bool,
     pub(crate) standby_loaded_chunk_count: usize,
     pub(crate) standby_configured_chunk_limit: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveDioramaTranslucentOrderReport {
+    pub(crate) section_count: usize,
+    pub(crate) active_section_count: usize,
+    pub(crate) preview_section_count: usize,
+    pub(crate) source_switch_count: usize,
+    pub(crate) first_world: Option<u64>,
+    pub(crate) first_section: Option<[i32; 3]>,
+    pub(crate) last_world: Option<u64>,
+    pub(crate) last_section: Option<[i32; 3]>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -138,7 +154,7 @@ pub(crate) fn run_live_diorama_smoke(
     let front_eye = [
         anchor.x as f32,
         anchor.y as f32 + 2.0,
-        anchor.z as f32 - 6.0,
+        anchor.z as f32 - 14.0,
     ];
     let side_eye = [
         anchor.x as f32 - 6.0,
@@ -148,7 +164,7 @@ pub(crate) fn run_live_diorama_smoke(
     let behind_eye = [
         anchor.x as f32,
         anchor.y as f32 + 2.0,
-        anchor.z as f32 + 6.0,
+        anchor.z as f32 + 14.0,
     ];
 
     let active_only_path = options.directory.join("a-alone.png");
@@ -239,6 +255,21 @@ pub(crate) fn run_live_diorama_smoke(
     {
         bail!("synthetic-stereo capture did not draw the embedded preview: {stereo_preview:?}");
     }
+    let front_translucent_order = translucent_order_report(preview.render.last_translucent_order);
+    let behind_preview = behind
+        .embedded_preview
+        .as_ref()
+        .context("behind capture lost embedded preview diagnostics")?;
+    let behind_translucent_order =
+        translucent_order_report(behind_preview.render.last_translucent_order);
+    let stereo_translucent_order =
+        translucent_order_report(stereo_preview.render.last_translucent_order);
+    validate_reversible_translucent_fixture_orders(
+        preview.source_world.get(),
+        &front_translucent_order,
+        &behind_translucent_order,
+        &stereo_translucent_order,
+    )?;
 
     let active_preview_pixel_difference_count =
         differing_pixel_count(&active_only_path, &front_path)?;
@@ -286,6 +317,9 @@ pub(crate) fn run_live_diorama_smoke(
         preview_drawn_section_count: preview.last_drawn_section_count,
         preview_drawn_index_count: preview.last_drawn_index_count,
         stereo_eye_pixel_difference_count: stereo.eye_pixel_difference_count,
+        front_translucent_order,
+        behind_translucent_order,
+        stereo_translucent_order,
         mutation,
         soak,
         standby_cadence_hz: [
@@ -703,6 +737,63 @@ fn validate_visible_preview(
         || preview.last_drawn_index_count == 0
     {
         bail!("{label} capture did not reach drawable preview readiness: {preview:?}");
+    }
+    Ok(())
+}
+
+fn translucent_order_report(
+    snapshot: EmbeddedWorldPreviewTranslucentOrderSnapshot,
+) -> LiveDioramaTranslucentOrderReport {
+    let section = |submission: mclone_scene::EmbeddedWorldPreviewTranslucentSubmissionSnapshot| {
+        [
+            submission.section.chunk_x,
+            submission.section.section_y,
+            submission.section.chunk_z,
+        ]
+    };
+    LiveDioramaTranslucentOrderReport {
+        section_count: snapshot.section_count,
+        active_section_count: snapshot.active_section_count,
+        preview_section_count: snapshot.preview_section_count,
+        source_switch_count: snapshot.source_switch_count,
+        first_world: snapshot.first.map(|submission| submission.world.get()),
+        first_section: snapshot.first.map(section),
+        last_world: snapshot.last.map(|submission| submission.world.get()),
+        last_section: snapshot.last.map(section),
+    }
+}
+
+fn validate_reversible_translucent_fixture_orders(
+    preview_world: u64,
+    front: &LiveDioramaTranslucentOrderReport,
+    behind: &LiveDioramaTranslucentOrderReport,
+    stereo: &LiveDioramaTranslucentOrderReport,
+) -> Result<()> {
+    for (label, order) in [("front", front), ("behind", behind)] {
+        if order.active_section_count < 2
+            || order.preview_section_count == 0
+            || order.source_switch_count < 2
+            || order.first_world == Some(preview_world)
+            || order.last_world == Some(preview_world)
+        {
+            bail!(
+                "{label} translucent order does not bracket B with distinct A sections: {order:?}"
+            );
+        }
+    }
+    if front.first_section != behind.last_section
+        || front.last_section != behind.first_section
+        || front.first_section == front.last_section
+    {
+        bail!(
+            "front/behind translucent orders did not reverse A section endpoints: front={front:?} behind={behind:?}"
+        );
+    }
+    if stereo.active_section_count == 0
+        || stereo.preview_section_count == 0
+        || stereo.source_switch_count == 0
+    {
+        bail!("stereo midpoint translucent order is incomplete: {stereo:?}");
     }
     Ok(())
 }

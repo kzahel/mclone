@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mclone_core::{ChunkPos, ChunkRevision, ChunkStatus};
-use mclone_worldgen::block::{BRICKS, DIRT, GRASS_BLOCK, STONE};
+use mclone_worldgen::block::{BRICKS, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 use serde::{Deserialize, Serialize};
 
@@ -56,7 +56,7 @@ impl AuthoredWorldFixtureKind {
     pub const fn expected_spawn(self) -> [f64; 3] {
         match self {
             Self::Table => [0.5, 64.0, 0.5],
-            Self::Island => [1.5, 64.0, 8.5],
+            Self::Island => [1.5, 65.0, 8.5],
         }
     }
 
@@ -75,7 +75,7 @@ impl AuthoredWorldFixtureKind {
             Self::Table => [7, 64, 7],
             // A visible grass block inside the source region and ordinary
             // debug-creative reach of the fixture's accepted spawn.
-            Self::Island => [5, 64, 8],
+            Self::Island => [5, 65, 8],
         }
     }
 }
@@ -137,11 +137,21 @@ pub fn authored_world_fixture_records(
                 AUTHORED_WORLD_MIN_Y,
                 AUTHORED_WORLD_HEIGHT,
             );
-            if pos == AUTHORED_WORLD_FIXTURE_CENTER {
-                match kind {
-                    AuthoredWorldFixtureKind::Table => author_table_chunk(&mut buffer),
-                    AuthoredWorldFixtureKind::Island => author_island_chunk(&mut buffer),
+            match kind {
+                AuthoredWorldFixtureKind::Table => {
+                    author_flat_grass_chunk(&mut buffer);
+                    if pos == AUTHORED_WORLD_FIXTURE_CENTER {
+                        author_table_display(&mut buffer);
+                    } else if pos == ChunkPos::new(0, -1) {
+                        author_table_comparison_pool(&mut buffer, 14..=15);
+                    } else if pos == ChunkPos::new(0, 1) {
+                        author_table_comparison_pool(&mut buffer, 0..=1);
+                    }
                 }
+                AuthoredWorldFixtureKind::Island if pos == AUTHORED_WORLD_FIXTURE_CENTER => {
+                    author_island_chunk(&mut buffer);
+                }
+                AuthoredWorldFixtureKind::Island => {}
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
         }
@@ -282,7 +292,7 @@ fn remove_existing_fixture_database(root: &Path) -> ChunkStoreResult<()> {
     Ok(())
 }
 
-fn author_table_chunk(chunk: &mut MutableChunkBlockBuffer) {
+fn author_flat_grass_chunk(chunk: &mut MutableChunkBlockBuffer) {
     for z in 0..16 {
         for x in 0..16 {
             chunk.set_block_at_y(x, 60, z, STONE);
@@ -291,7 +301,9 @@ fn author_table_chunk(chunk: &mut MutableChunkBlockBuffer) {
             chunk.set_block_at_y(x, 63, z, GRASS_BLOCK);
         }
     }
+}
 
+fn author_table_display(chunk: &mut MutableChunkBlockBuffer) {
     // Four blocks on the grass make a player-scale display plinth. The live
     // miniature is placed just above its y=65 top surface.
     for z in 7..=8 {
@@ -301,16 +313,41 @@ fn author_table_chunk(chunk: &mut MutableChunkBlockBuffer) {
     }
 }
 
+fn author_table_comparison_pool(
+    chunk: &mut MutableChunkBlockBuffer,
+    local_z: std::ops::RangeInclusive<i32>,
+) {
+    // The two pools occupy distinct A chunk/section keys around the z=8 table,
+    // allowing B's placed water section to sort between them. Their y=65
+    // surfaces remain 1/32 block below the preview baseline.
+    for z in local_z {
+        for x in 6..=9 {
+            chunk.set_block_at_y(x, 63, z, DIRT);
+            chunk.set_block_at_y(x, 64, z, WATER);
+        }
+    }
+}
+
 fn author_island_chunk(chunk: &mut MutableChunkBlockBuffer) {
     for z in 0..16 {
         for x in 0..16 {
+            // A persisted two-block-deep ocean surrounds the island. This is
+            // ordinary authored world data, so the normal client mesh and live
+            // mutation paths own it exactly like generated terrain.
+            for y in 58..62 {
+                chunk.set_block_at_y(x, y, z, STONE);
+            }
+            chunk.set_block_at_y(x, 62, z, SAND);
+            chunk.set_block_at_y(x, 63, z, WATER);
+            chunk.set_block_at_y(x, 64, z, WATER);
+
             let dx = x - 8;
             let dz = z - 8;
             let distance_squared = dx * dx + dz * dz;
             if distance_squared > 49 {
                 continue;
             }
-            let surface_y = if distance_squared <= 25 { 64 } else { 63 };
+            let surface_y = if distance_squared <= 25 { 65 } else { 64 };
             for y in 58..surface_y - 1 {
                 chunk.set_block_at_y(x, y, z, STONE);
             }
@@ -364,11 +401,19 @@ mod tests {
                 assert_eq!(record.snapshot.min_y, AUTHORED_WORLD_MIN_Y);
                 assert_eq!(record.snapshot.height, AUTHORED_WORLD_HEIGHT);
             }
-            for record in records
-                .iter()
-                .filter(|record| record.pos() != AUTHORED_WORLD_FIXTURE_CENTER)
-            {
-                assert!(snapshot_is_all_air(&record.snapshot));
+            if kind == AuthoredWorldFixtureKind::Island {
+                for record in records
+                    .iter()
+                    .filter(|record| record.pos() != AUTHORED_WORLD_FIXTURE_CENTER)
+                {
+                    assert!(snapshot_is_all_air(&record.snapshot));
+                }
+            } else {
+                assert!(
+                    records
+                        .iter()
+                        .all(|record| !snapshot_is_all_air(&record.snapshot))
+                );
             }
             let center = records
                 .iter()
@@ -413,6 +458,61 @@ mod tests {
         assert_eq!(manifest.preview_anchor, [8.0, 65.03125, 8.0]);
         assert!(manifest.preview_anchor[1] > 65.0);
         assert!(manifest.preview_anchor[1] < 65.1);
+
+        let water = generated_block_state_id(WATER);
+        let water_positions = (0..16)
+            .flat_map(|z| (0..16).map(move |x| [x, 64, z]))
+            .filter(|[x, y, z]| {
+                snapshot_block_state(&center.snapshot, BlockPos::new(*x, *y, *z)) == water
+            })
+            .collect::<Vec<_>>();
+        assert!(water_positions.is_empty());
+
+        let front = records
+            .iter()
+            .find(|record| record.pos() == ChunkPos::new(0, -1))
+            .unwrap();
+        let back = records
+            .iter()
+            .find(|record| record.pos() == ChunkPos::new(0, 1))
+            .unwrap();
+        assert_eq!(
+            snapshot_block_state(&front.snapshot, BlockPos::new(7, 64, -1)),
+            water
+        );
+        assert_eq!(
+            snapshot_block_state(&back.snapshot, BlockPos::new(7, 64, 16)),
+            water
+        );
+    }
+
+    #[test]
+    fn island_fixture_contains_persisted_ocean_and_dry_mutation_block() {
+        let (manifest, records) =
+            authored_world_fixture_records(AuthoredWorldFixtureKind::Island).unwrap();
+        let center = records
+            .iter()
+            .find(|record| record.pos() == AUTHORED_WORLD_FIXTURE_CENTER)
+            .unwrap();
+        let water = generated_block_state_id(WATER);
+        let grass = generated_block_state_id(GRASS_BLOCK);
+
+        assert_eq!(
+            snapshot_block_state(&center.snapshot, BlockPos::new(0, 64, 0)),
+            water
+        );
+        assert_eq!(
+            snapshot_block_state(&center.snapshot, BlockPos::new(8, 65, 8)),
+            grass
+        );
+        let mutation = manifest.mutation_block;
+        assert_eq!(
+            snapshot_block_state(
+                &center.snapshot,
+                BlockPos::new(mutation[0], mutation[1], mutation[2])
+            ),
+            grass
+        );
     }
 
     #[test]

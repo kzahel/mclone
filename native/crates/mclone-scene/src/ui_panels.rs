@@ -826,9 +826,12 @@ impl McloneSceneHost {
             lines.insert(
                 2,
                 format!(
-                    "B DRAW {}/{} CULL {:.3} DRAW {:.3} CPU{} GPU{}",
+                    "B DRAW {}/{} T{}/{}/{} CULL {:.3} DRAW {:.3} CPU{} GPU{}",
                     preview.render.last_drawn_section_count,
                     preview.render.last_drawn_index_count,
+                    preview.render.last_translucent_order.active_section_count,
+                    preview.render.last_translucent_order.preview_section_count,
+                    preview.render.last_translucent_order.source_switch_count,
                     preview.render.last_cull_ms,
                     preview.render.last_draw_ms,
                     standby

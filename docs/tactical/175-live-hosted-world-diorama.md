@@ -1,12 +1,12 @@
 # 175: Live Hosted World Diorama
 
-Status: active 2026-07-13. Slices 0–4 landed: contract/baseline,
+Status: active 2026-07-14. Slices 0–5 landed: contract/baseline,
 authored-only server/content foundation, static placed terrain, the first live
-local two-host composition, and bounded live mutation/background accounting.
-The required Slice 3 human review replaced the oversized elevated table and
-coplanar preview before live updates. Slice 5 water/cross-world translucent
-ordering is next; capable-device multiview remains a shared named validation
-gap.
+local two-host composition, bounded live mutation/background accounting, and
+composition-space water/translucent ordering. The required Slice 3 human review
+replaced the oversized elevated table and coplanar preview before live updates.
+Slice 6 blink activation/return is next; capable-device multiview remains a
+shared named validation gap.
 
 Topic: `embedded-worlds`
 
@@ -100,8 +100,8 @@ The first checked-in fixture is intentionally small and deterministic:
 - **World A:** a persistence-backed authored grass platform with a two-by-two,
   four-block brick display plinth resting directly on the ground near its
   accepted safe spawn.
-- **World B:** a separate persistence-backed authored grass/stone island. Slice
-  5 adds the water/ocean presentation after opaque composition is correct.
+- **World B:** a separate persistence-backed authored grass/stone island in a
+  two-block-deep ocean.
 - **Missing chunks:** deterministic void/air through an `AuthoredOnly` world
   generation profile. Storage misses must not invoke overworld generation.
 - **Preview region:** one center chunk plus a small section-aligned horizontal
@@ -1069,6 +1069,70 @@ Deliverables:
 
 Exit criteria: the small island/ocean miniature renders with stable water and
 no known ordering defect in the accepted fixture matrix.
+
+### Slice 5 completion record — 2026-07-14
+
+The preview now composes persistent water rather than relying on a dry or
+renderer-only fixture:
+
+- The authored island record has a two-block-deep ocean over sand and stone,
+  with its grass island rising through the surface. World A's bounded
+  radius-three authored records now form one flat grass pad so the ground-level
+  four-block display can be inspected without nearby void-edge artifacts.
+  Separate front/back A water pools live in distinct sections and provide
+  deterministic translucent-order witnesses.
+- `mclone-render` exposes neutral section keys and physical composition centers
+  for direct and placed terrain. `mclone-scene` qualifies those records with
+  `WorldInstanceId`, sorts them back-to-front in physical composition space,
+  and projects only a compact active/placed ordinal into
+  `mclone-app-runtime`. Neither draw store becomes a world registry.
+- The preview branch draws all A and B opaque/cutout terrain, then active A
+  actors, then adjacent runs from one globally ordered A/B translucent list.
+  Color and reversed-Z depth remain loaded across every run. The ordinary
+  no-preview branch retains its existing direct terrain call and creates no
+  composition list, placed renderer, or extra pass.
+- Mono sorts from the physical eye. Per-eye stereo builds one immutable order
+  from the eye midpoint and uses it for both eyes. The full-frame multiview
+  path consumes the same order and its placed translucent pipelines are
+  materialized with the existing preview topology; the current Mac still lacks
+  a `MULTIVIEW` adapter for capable-device execution.
+- Underwater detection and the overlay remain active-world-only. A source lock
+  and scene tests prevent preview B's ocean from gaining camera or screen-effect
+  authority.
+
+The accepted live smoke draws two translucent A records and two B records in
+its front witness. Its order is `A(0,4,1) -> B -> B -> A(0,4,-1)`; moving the
+camera behind the table reverses the exact A endpoints. Both captures contain
+two A/B source switches. The synthetic stereo witness contains both sources,
+one switch, and 159,119 differing eye pixels. The ordinary side view shows the
+island/ocean on the four-block ground-level display with no top-surface depth
+fighting. Adding B changes 50,508 composition pixels. The small live B mutation
+changes five expected miniature pixels, reaches one command, one section
+submission, one accepted result, and one upload, remains absent from A, and
+survives store reopen.
+
+Section-level sorting is sufficient for the accepted non-intersecting fixture.
+Arbitrary intersecting or coplanar translucent geometry from two worlds is
+deliberately unsupported: it would require finer draw splitting or order-
+independent transparency. The fixture keeps the A/B surfaces distinct and
+retains the `1/32`-block placement clearance.
+
+The full native workspace, 244 app-runtime tests, and the 11 active
+one-world-ownership locks pass. Thin-adapter and scene-host purity, browser/WASM
+build, ordinary desktop offscreen, synthetic stereo, formatting, and whitespace
+checks pass; the new front, back, side, stereo, mutation, desktop, and XR-
+emulation pixels were inspected. The 600-second live soak completes with zero
+pending compile/upload work, zero out-of-region submissions, persistent B
+state, and the same nonzero mutation receipt.
+
+Performance was compared against an isolated clean worktree at the exact
+pre-slice `HEAD`, because nine unrelated runtime/network commits made the older
+Slice 4 files an invalid direct control. After idle preflights, five clean-HEAD
+runs measured 2.507 ms median average / 4.373 ms median P95; five Slice 5 runs
+measured 2.508 / 4.363 ms. Their within-batch spreads were 5.3%/6.7% and
+2.9%/4.0%, respectively, with zero over-budget frames and zero accounting
+violations. The +0.04% average and -0.23% P95 differences show no measurable
+single-world regression and claim no optimization.
 
 ## Slice 6: Blink Activation And Return
 

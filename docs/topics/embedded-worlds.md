@@ -9,8 +9,8 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone and an active
-live-diorama tactical whose completed Slice 3 has incorporated its first manual
-table review.**
+live-diorama tactical with live persistent terrain, water, and cross-world
+translucent ordering through completed Slice 5.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -27,8 +27,10 @@ midpoint; warming/failed gates clamp locomotion, and a successful crossing
 atomically exchanges the complete slots before drawing the frame. The previous
 active remains the ready return world. Deterministic walking and synthetic
 stereo A-to-B-to-A smokes prove next-frame drawing with no runtime
-reconstruction, switch-boundary upload, or lazy renderer creation. There is
-still no N-world registry, product UI, mutation proof, water, activation, or
+reconstruction, switch-boundary upload, or lazy renderer creation. The retained
+preview now also proves a bounded authoritative mutation through persistence
+and globally orders its ocean with active-world water in physical composition
+space. There is still no N-world registry, product UI, blink activation, or
 remote preview, but simultaneous shared-depth terrain composition is now
 concrete. Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
@@ -53,8 +55,8 @@ table, then use only a simple blink around the already-proven activation.
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
-multiview execution remains a named receipt gap. Last reconciled: 2026-07-13
-(Tactical 175 Slice 3).
+multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
+(Tactical 175 Slice 5).
 
 ## Motivation
 
@@ -323,6 +325,30 @@ median average and 3.935 ms median P95 with at most 7.1%/5.3% deviation, zero
 over-budget frames, and zero accounting violations. Slice 5 can now add authored
 water and cross-world translucent ordering without reopening live-update or
 background-bounds ownership.
+
+Slice 5 adds that authored ocean and closes the first composition-order gap.
+World A uses a bounded flat grass pad with separate front/back water-pool
+sections; World B persists a two-block-deep ocean around its island. The scene
+qualifies neutral direct/placed section records with world identity, sorts one
+back-to-front list in physical composition space, and projects compact source
+ordinals into the renderer. Frames now draw all A/B opaque and cutout terrain,
+active A actors, then globally ordered translucent runs while retaining the
+ordinary no-preview call path. Mono uses its physical eye, stereo shares one
+eye-midpoint order between both eyes, and multiview consumes the same ordering
+contract. Underwater state remains strictly active-world-owned.
+
+Front/behind witnesses contain two A and two B records with two source switches
+and reverse the exact A endpoint section keys when the camera crosses the
+table. Synthetic stereo contains both sources and 159,119 differing eye pixels;
+adding B changes 50,508 composition pixels, while the small live mutation
+changes five miniature pixels and survives store reopen. A fresh 600-second
+soak finishes with drained bounded queues. Five no-preview Slice 5 runs are
+effectively identical to an isolated clean worktree at the exact pre-slice
+`HEAD`: 2.508/4.363 ms median average/P95 versus 2.507/4.373 ms, with zero
+over-budget or accounting failures. Intersecting or coplanar translucent
+surfaces across worlds remain explicitly unsupported; section-level sorting is
+the bounded contract for this non-intersecting fixture. Slice 6 can now add the
+simple blink activation and return interaction.
 
 ### Same-world previews and non-recursive composition
 

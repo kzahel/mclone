@@ -182,6 +182,23 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
     pub last_drawn_section_count: usize,
     pub last_drawn_index_count: u32,
     pub out_of_region_submission_count: usize,
+    pub last_translucent_order: EmbeddedWorldPreviewTranslucentOrderSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EmbeddedWorldPreviewTranslucentSubmissionSnapshot {
+    pub world: WorldInstanceId,
+    pub section: RenderSectionKey,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct EmbeddedWorldPreviewTranslucentOrderSnapshot {
+    pub section_count: usize,
+    pub active_section_count: usize,
+    pub preview_section_count: usize,
+    pub source_switch_count: usize,
+    pub first: Option<EmbeddedWorldPreviewTranslucentSubmissionSnapshot>,
+    pub last: Option<EmbeddedWorldPreviewTranslucentSubmissionSnapshot>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -275,6 +292,7 @@ impl EmbeddedWorldPreview {
         cull_ms: f64,
         draw_ms: f64,
         stats: TexturedSectionRenderStats,
+        translucent_order: EmbeddedWorldPreviewTranslucentOrderSnapshot,
     ) {
         self.last_draw = stats;
         self.render.frame_count = self.render.frame_count.saturating_add(1);
@@ -285,6 +303,7 @@ impl EmbeddedWorldPreview {
         self.render.last_bounded_section_count = bounded_section_count;
         self.render.last_drawn_section_count = stats.drawn_section_count;
         self.render.last_drawn_index_count = stats.drawn_index_count;
+        self.render.last_translucent_order = translucent_order;
         self.render.out_of_region_submission_count = self
             .render
             .out_of_region_submission_count

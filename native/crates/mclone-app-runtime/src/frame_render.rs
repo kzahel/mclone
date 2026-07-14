@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, ensure};
 use mclone_assets::AssetSource;
+use mclone_mesh::RenderSectionKey;
 use mclone_render::GpuPassId;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
@@ -149,10 +150,35 @@ pub struct PlacedTerrainFrame<'a> {
     pub render_options: TexturedSectionRenderOptions,
 }
 
+/// Draw-store selector for one globally ordered translucent section.
+///
+/// This ordinal is intentionally composition-local. Durable world identity is
+/// applied and checked by `mclone-scene`; shared rendering does not learn scene
+/// ownership types or turn either draw store into a registry.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TerrainCompositionSource {
+    Active,
+    Placed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerrainTranslucentSubmission {
+    pub source: TerrainCompositionSource,
+    pub section: RenderSectionKey,
+}
+
+/// One active world plus one placed source sharing opaque and globally ordered
+/// translucent terrain phases in a single physical frame.
+#[derive(Clone, Copy)]
+pub struct TerrainCompositionFrame<'a> {
+    pub placed: PlacedTerrainFrame<'a>,
+    pub translucent_order: &'a [TerrainTranslucentSubmission],
+}
+
 #[derive(Clone, Copy)]
 enum OpaqueWorldInsertion<'a> {
     Gate(&'a OpaqueWorldGateRenderer, OpaqueWorldGate),
-    Placed(PlacedTerrainFrame<'a>),
+    Composition(TerrainCompositionFrame<'a>),
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -922,6 +948,74 @@ fn render_terrain_phase(
 }
 
 #[allow(clippy::too_many_arguments)]
+fn render_composed_translucent_terrain(
+    active_draw: &TexturedSectionDrawResources,
+    composition: TerrainCompositionFrame<'_>,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    target: ChunkRenderTarget<'_>,
+    render_view: ChunkRenderView,
+    active_options: TexturedSectionRenderOptions,
+    view_slot: PerViewSlot,
+    active_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+) -> f64 {
+    let placed_stereo_draw = match composition.placed.prepared {
+        PlacedTerrainPrepared::Mono(_) => None,
+        PlacedTerrainPrepared::Stereo(prepared) => Some(prepared),
+    };
+    let mut placed_draw_ms = 0.0;
+    let mut start = 0;
+    while start < composition.translucent_order.len() {
+        let source = composition.translucent_order[start].source;
+        let mut end = start + 1;
+        while end < composition.translucent_order.len()
+            && composition.translucent_order[end].source == source
+        {
+            end += 1;
+        }
+        let keys = composition.translucent_order[start..end]
+            .iter()
+            .map(|submission| submission.section)
+            .collect::<Vec<_>>();
+        match source {
+            TerrainCompositionSource::Active => {
+                active_draw.render_ordered_translucent_sections_in_slot(
+                    &keys,
+                    active_stereo_draw,
+                    queue,
+                    encoder,
+                    target,
+                    render_view,
+                    active_options,
+                    view_slot,
+                );
+            }
+            TerrainCompositionSource::Placed => {
+                let placed_started_at = std::time::Instant::now();
+                composition
+                    .placed
+                    .draw
+                    .render_ordered_placed_translucent_sections_in_slot(
+                        composition.placed.renderer,
+                        &keys,
+                        placed_stereo_draw,
+                        queue,
+                        encoder,
+                        target,
+                        render_view,
+                        composition.placed.render_options,
+                        composition.placed.placement,
+                        view_slot,
+                    );
+                placed_draw_ms += placed_started_at.elapsed().as_secs_f64() * 1000.0;
+            }
+        }
+        start = end;
+    }
+    placed_draw_ms
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn render_full_frame<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
@@ -1138,7 +1232,7 @@ pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain<BuildGuiDraw>(
     draw: &mut TexturedSectionDrawResources,
     far_lod: Option<&mut FarTerrainLodRenderer>,
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
-    placed_terrain: PlacedTerrainFrame<'_>,
+    terrain_composition: TerrainCompositionFrame<'_>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
     gui_renderer: Option<&mut GuiRenderer>,
@@ -1179,7 +1273,7 @@ where
         far_lod_mesh,
         None,
         None,
-        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
+        Some(OpaqueWorldInsertion::Composition(terrain_composition)),
         None,
         render_stats,
     )
@@ -1193,7 +1287,7 @@ pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain_timed<BuildGui
     draw: &mut TexturedSectionDrawResources,
     far_lod: Option<&mut FarTerrainLodRenderer>,
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
-    placed_terrain: PlacedTerrainFrame<'_>,
+    terrain_composition: TerrainCompositionFrame<'_>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
     gui_renderer: Option<&mut GuiRenderer>,
@@ -1235,7 +1329,7 @@ where
         far_lod_mesh,
         None,
         None,
-        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
+        Some(OpaqueWorldInsertion::Composition(terrain_composition)),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1618,7 +1712,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_i
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
     prepared_draw: &PreparedTexturedSectionStereoDraw,
-    placed_terrain: PlacedTerrainFrame<'_>,
+    terrain_composition: TerrainCompositionFrame<'_>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
     gui_renderer: Option<&mut GuiRenderer>,
@@ -1662,7 +1756,7 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
-        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
+        Some(OpaqueWorldInsertion::Composition(terrain_composition)),
         None,
         render_stats,
     )
@@ -1899,7 +1993,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_t
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
     prepared_draw: &PreparedTexturedSectionStereoDraw,
-    placed_terrain: PlacedTerrainFrame<'_>,
+    terrain_composition: TerrainCompositionFrame<'_>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
     gui_renderer: Option<&mut GuiRenderer>,
@@ -1944,7 +2038,7 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
-        Some(OpaqueWorldInsertion::Placed(placed_terrain)),
+        Some(OpaqueWorldInsertion::Composition(terrain_composition)),
         Some(&mut timing),
         render_stats,
     )?;
@@ -2098,7 +2192,8 @@ where
                     view_slot,
                 );
             }
-            Some(OpaqueWorldInsertion::Placed(placed)) => {
+            Some(OpaqueWorldInsertion::Composition(composition)) => {
+                let placed = composition.placed;
                 let placed_target = render_target.with_loaded_color().with_loaded_depth();
                 let (stats, placed_timing) = match (timing.is_some(), placed.prepared) {
                     (true, PlacedTerrainPrepared::Mono(records)) => placed
@@ -2188,19 +2283,36 @@ where
         if split_translucent_terrain {
             let translucent_target = render_target.with_loaded_color().with_loaded_depth();
             let translucent_start = timing.is_some().then(std::time::Instant::now);
-            let _ = render_terrain_phase(
-                draw,
-                frame.queue,
-                frame.encoder,
-                translucent_target,
-                render_view,
-                render_options,
-                view_slot,
-                prepared_records,
-                prepared_stereo_draw,
-                TexturedSectionRenderPhase::Translucent,
-                timing.as_deref_mut(),
-            )?;
+            if let Some(OpaqueWorldInsertion::Composition(composition)) = opaque_world_insertion {
+                let placed_draw_ms = render_composed_translucent_terrain(
+                    draw,
+                    composition,
+                    frame.queue,
+                    frame.encoder,
+                    translucent_target,
+                    render_view,
+                    render_options,
+                    view_slot,
+                    prepared_stereo_draw,
+                );
+                if let Some(timing) = timing.as_deref_mut() {
+                    timing.placed_draw_ms += placed_draw_ms;
+                }
+            } else {
+                let _ = render_terrain_phase(
+                    draw,
+                    frame.queue,
+                    frame.encoder,
+                    translucent_target,
+                    render_view,
+                    render_options,
+                    view_slot,
+                    prepared_records,
+                    prepared_stereo_draw,
+                    TexturedSectionRenderPhase::Translucent,
+                    timing.as_deref_mut(),
+                )?;
+            }
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), translucent_start) {
                 timing.terrain_translucent_ms += start.elapsed().as_secs_f64() * 1000.0;
             }

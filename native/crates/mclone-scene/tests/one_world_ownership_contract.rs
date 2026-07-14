@@ -208,7 +208,7 @@ fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
     assert!(stereo.contains("preview_stereo_draw.as_ref()"));
 
     let eye = braced_item(&xr_source, "fn render_eye_target(");
-    assert!(eye.contains("if let Some(placed_terrain) = placed_terrain"));
+    assert!(eye.contains("if let Some(terrain_composition) = terrain_composition"));
     assert!(
         eye.contains(
             "render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot("
@@ -235,6 +235,16 @@ fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
             );
         }
     }
+}
+
+#[test]
+fn embedded_preview_cannot_drive_underwater_authority() {
+    let source = read("src/comfort.rs");
+    let camera_inside_water = braced_item(&source, "pub(crate) fn camera_inside_water(");
+    assert!(camera_inside_water.contains("self.active_world"));
+    assert!(camera_inside_water.contains(".runtime"));
+    assert!(!camera_inside_water.contains("standby_world"));
+    assert!(!camera_inside_water.contains("embedded_world_preview"));
 }
 
 #[test]
