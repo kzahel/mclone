@@ -50,8 +50,11 @@ The first shared product scenario is available from the native title menu as
 path-free action into `McloneSceneHost`, which launches a protected managed
 lobby and asynchronously warms its live island diorama. Flat and synthetic
 stereo lifecycle smokes pass, as do both Android APK builds. Web renders the
-same row disabled with a reason-bearing IndexedDB managed-content gap; it does
-not synthesize support in TypeScript.
+same row disabled. The browser gap includes IndexedDB managed content,
+slot-targeted standby startup, and dual-Worker/compiler ownership; Tactical
+[`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
+owns the shared-first parity refactor. Web does not synthesize support in
+TypeScript.
 
 Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
 2026-07-12. The native client builds and the full-frame offscreen smoke renders

@@ -9,8 +9,9 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
-tactical through completed local Slice 6, and a completed menu-launched
-protected lobby productization milestone.**
+tactical through completed local Slice 6, a completed native menu-launched
+protected lobby productization milestone, and a proposed shared web-parity
+refactor.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -74,13 +75,18 @@ completed first productization milestone is
 enter the fixed local scenario from the shared title menu before broadening the
 destination source. Its no-scenario closeout remains faster than its pre-change
 baseline, while scenario-on renderer, CPU, memory, and thread costs remain
-separately recorded.
+separately recorded. The immediate parity follow-up is
+[`178-shared-web-lobby-scenario-parity.md`](../tactical/178-shared-web-lobby-scenario-parity.md):
+replace native-shaped managed-content and slot-start ownership with portable
+contracts, add only IndexedDB/Worker adapters, share compatible immutable
+renderer resources, and make the same scenario actionable on web without
+regressing the one-world path.
 
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 177 complete after Tactical 175 Slice 6).
+(Tactical 178 parity plan opened after the Tactical 177 audit).
 
 ## Motivation
 

@@ -17,6 +17,14 @@ Convergence And Parity Closeout Milestone D subsequently promoted Far LOD
 through the same production host and worker/compiler seams without reopening
 this adoption series.
 
+Post-closeout feature follow-up (2026-07-14): Tactical
+[`178-shared-web-lobby-scenario-parity.md`](../tactical/178-shared-web-lobby-scenario-parity.md)
+owns the menu-lobby exception left by Tacticals 174-177. Structural scene-host
+adoption remains closed; the follow-up generalizes native-shaped managed-world
+and standby-start seams behind this same host, adds only unavoidable
+IndexedDB/Worker adapters, and protects the ordinary browser single-world path
+with explicit performance gates.
+
 Post-closeout correction (2026-07-11): browser worker/socket construction had
 been treated as gameplay-ready even though the authoritative underfoot chunk
 could still be streaming. The shared scene host now keeps externally supplied

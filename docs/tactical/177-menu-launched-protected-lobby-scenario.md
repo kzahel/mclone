@@ -7,6 +7,9 @@ entry. Flat and synthetic-stereo product smokes prove cancellation, launch,
 A-to-B-to-A activation, quit, and warm relaunch through that menu path. The
 local proof is now one shared scenario contract rather than parallel
 CLI-versus-product implementations; Tactical 175 may resume remote Slice 7.
+Tactical 178 owns the browser parity refactor; the web gap is larger than the
+IndexedDB executor alone because slot-targeted startup and dual-Worker/compiler
+ownership also remain native-shaped.
 
 Topic: `embedded-worlds`
 

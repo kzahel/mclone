@@ -25,9 +25,12 @@ its exact remaining reason-bearing gaps in `mclone-app-runtime`. The shared
 `Enter Lobby` product-scenario row is also visibly unavailable with the
 separate reason "Lobby scenarios need IndexedDB managed-content provisioning";
 it cannot emit a silent no-op. Native scenario policy remains shared, and a
-future browser implementation should supply only the missing IndexedDB content
-executor. Far LOD is supported through the production shared resident
-compiler/cache/render path.
+browser implementation must supply an IndexedDB content executor, generalize
+the shared slot-targeted startup/lifecycle seams, and own two browser runtimes
+without recreating scenario policy in TypeScript. Tactical
+[`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
+tracks that parity refactor and its feature-off performance gate. Far LOD is
+supported through the production shared resident compiler/cache/render path.
 That path now uses 4/8/16 rings with two-chunk hysteresis and
 replacement-before-suppress transitions. Browser audio and teleport preview
 remain explicit absent service capabilities.

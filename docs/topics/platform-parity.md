@@ -96,6 +96,11 @@ burn-down.
 > Gamepad input is retained as a dated shared contract;
 > no native adapter advertises it until a real platform event source and device
 > validation land.
+> Refreshed on 2026-07-14 after the lobby parity audit found that Tactical
+> 177's web gap is not only an IndexedDB executor: managed scenario ownership,
+> slot-targeted standby startup, dual-Worker/compiler identity, and WASM
+> lifecycle adoption remain. Tactical 178 owns a shared-first refactor and
+> forbids a TypeScript scenario implementation.
 > Refreshed on 2026-07-11 after Tactical 170 — Web Scene-Host Adoption moved
 > local-worker, IndexedDB, and remote-WebSocket browser modes onto
 > `McloneSceneHost`, deleted the old web orchestrator, and made browser adapter
@@ -182,6 +187,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✅ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✅ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ◐ (screenshot scenarios; no real input host) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
+| Built-in protected lobby scenario | ✅ | ✅ (scripted menu/activation) | ✅ (shared capability; real-device menu smoke pending) | ✅ (shared capability/APK; AVD scenario smoke pending) | ✅ (shared capability/APK; device scenario smoke pending) | ✗ (Tactical 178) |
 | Connect / world-select UI | ✗ | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (persistent world catalog + New World smoke; connect text/smoke pending) | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (world catalog UI wired; connect-screen text/smoke pending) |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ◐ TCP screenshot/settle, no long-lived offscreen host | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ◐ (filesystem/SQLite catalog + chunk/entity records; remaining metadata) | ◐ (persistent-world probes; not a full interactive host) | ◐ (shared native catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (IndexedDB catalog + chunk/entity records; player/world metadata pending) |
