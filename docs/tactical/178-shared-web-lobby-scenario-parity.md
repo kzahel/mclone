@@ -1,14 +1,16 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-5 locked the baseline, extracted portable
+Status: active 2026-07-14. Slices 0-6 locked the baseline, extracted portable
 scenario content, removed the duplicate second-slot terrain shell, and moved
 managed provisioning, slot-targeted startup, readiness, activation, and swap
 policy into shared Rust. Catalog-excluded, Worker-backed IndexedDB provisioning
 and dual browser runtime ownership through one namespaced compiler broker are
-also complete. First production browser menu/preview pixels are next. This tactical closes
-the browser exception left by Tacticals 174,
-175, and 177 by refactoring their native-shaped startup seams into shared
-contracts. It does not authorize a second browser scenario implementation.
+also complete. The production desktop and mobile browser title now enters the
+protected lobby and renders its live island preview. Activation and adversarial
+lifecycle parity are next. This tactical closes the browser exception left by
+Tacticals 174, 175, and 177 by refactoring their native-shaped startup seams
+into shared contracts. It does not authorize a second browser scenario
+implementation.
 
 Topic: `embedded-worlds`
 
@@ -1003,6 +1005,71 @@ Interactive and captured validation:
 Exit criteria: desktop and mobile browser show the same live scenario preview
 as native through shared scene/render code, the agent records an unambiguous
 visual/startup acceptance receipt, and no stop condition requires human input.
+
+#### Slice 6 completion record — 2026-07-14
+
+The production browser adapter now installs the complete managed provision,
+role-targeted start, and completion boundary before it promotes the shared web
+capability profile. Until that atomic assembly completes, the same profile
+still reports the reason-bearing unsupported state. TypeScript does not choose
+scenario ids, fixture coordinates, behavior, readiness, placement, or render
+policy; the first title row dispatches the existing shared `Enter Lobby`
+effect.
+
+Both desktop and CPU-throttled mobile production smokes reach the protected
+lobby while the destination is still warming, then render the fixed island at
+shared 1:8 placement. The inspected sequence shows the real five-row title,
+playable lobby, four-block brick warming table, and live grass/water island.
+Shared depth correctly orders the table, island, water, lobby terrain, and a
+foreground cow. There is no giant table, grass z-fighting, stale foreign
+geometry, near-black frame, or transparent interior frame. Five consecutive
+desktop preview captures were pixel-identical; desktop and mobile sequences
+reported zero transparent interior pixels.
+
+The accepted desktop receipt reached the lobby in 335 ms and the live preview
+1,266 ms later. Its measured rAF maximum/P95 were 9.31/9.30 ms. The 2x
+CPU-throttled mobile receipt reached the lobby in 337 ms and the preview 1,581
+ms later with 9.31/9.22 ms maximum/P95. Both held two active integrated-server
+Workers, one compiler Worker with one WASM/asset initialization and two live
+world sessions, and no active provisioning Worker. Shutdown left zero active
+scenario, server, or compiler Workers.
+
+The destination retained 81 chunks and submitted two of three bounded sections
+for 8,826 indices with zero out-of-region submissions. Its estimated mutable
+GPU terrain was 270,664 bytes. Both slots referenced one 8,388,608-byte base
+atlas owner with an owner count of two and zero duplicated atlas bytes. Direct
+break and place attempts in the lobby hit terrain but were denied by the
+authoritative world behavior without sending a mutation command.
+
+Executing the composed frame with timing enabled exposed remaining native-only
+`Instant` sites in the shared full-frame renderer. They now use the existing
+target-aware timing clock. The WebGPU smoke also explicitly pauses the rAF loop
+and renders one complete diagnostic frame before capture; this prevents a
+screenshot from sampling the canvas between presentation states without
+changing the product frame loop.
+
+The five retained feature-off movement runs reported compile averages of 13.5,
+13.5, 13.6, 13.6, and 14.3 ms, with average maximum-frame-gap observations of
+8.3, 8.8, 8.3, 8.3, and 8.6 ms. Their 13.6 ms compile median was 4.6% above the
+historical Slice 0 median and triggered the required investigation. An untouched
+Slice 5 bundle was built separately and interleaved with the candidate. Candidate
+averages were 13.9/14.1 ms versus control 14.0/13.7 ms: a 1.1% candidate mean
+difference under the same drift, with effectively identical 8.4-8.6 ms frame
+gaps. No sample was discarded. Source locks continue to prove the ordinary
+path provisions no scenario and owns no standby resource.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-app-runtime \
+  lobby_scenario_is_a_shared_effect_and_requires_complete_web_services
+cargo test -p mclone-web-client --test scenario_parity_ownership_lock
+pnpm native:web:typecheck
+pnpm native:thin-adapters:purity
+pnpm native:web:lobby-scenario-smoke
+pnpm native:web:lobby-scenario-mobile-smoke
+pnpm native:lobby-scenario:smoke
+```
 
 Estimated effort: 1-2 days.
 

@@ -11,11 +11,11 @@ worlds.
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and a shared web-parity refactor
-with its baseline, portable scenario content, and immutable second-slot terrain
-resource sharing landed. Portable slot-targeted startup, readiness, activation,
-and swap ownership are also landed. Browser managed content is now provisioned
-transactionally by a short-lived Worker into catalog-excluded IndexedDB records;
-dual browser runtime ownership is next.**
+through production desktop/mobile menu and live-preview pixels. Portable
+scenario content, shared immutable second-slot terrain resources, slot-targeted
+startup/readiness/activation/swap policy, catalog-excluded IndexedDB
+provisioning, one compiler broker, and dual browser runtime ownership are
+landed. Browser activation and adversarial lifecycle parity are next.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -53,14 +53,18 @@ proof also cancels a pending launch, quits, reuses the same managed content,
 and reaches a second live preview. Shared Rust now issues independent tokened,
 storage-neutral provisioning and role-aware slot-start operations, and owns
 external-runtime readiness and complete-slot activation without WASM policy
-stubs. The browser still renders the action unavailable while IndexedDB and
-runtime Worker adapters remain unconnected. Managed storage itself now reuses
-the existing chunk/entity stores, adds one metadata store, and delegates all
-fixture generation and validation to shared Rust in a short-lived provisioning
-Worker after a direct 22-40 ms main-thread measurement rejected inline work. A server-owned behavior
-profile travels with each slot: the managed lobby authoritatively denies
-player break/place while the island remains mutable, including after
-complete-slot exchanges.
+stubs. The production browser now exposes the same title action only after its
+complete managed-service boundary is installed. It makes the protected lobby
+playable while the destination warms, then submits the bounded island at 1:8
+scale through the shared full-frame composition path on desktop and mobile.
+Managed storage reuses the existing chunk/entity stores, adds one metadata
+store, and delegates all fixture generation and validation to shared Rust in a
+short-lived provisioning Worker after a direct 22-40 ms main-thread
+measurement rejected inline work. One host compiler Worker serves both live
+world sessions, and both draw stores share the compatible atlas/pipeline owner.
+A server-owned behavior profile travels with each slot: the managed lobby
+authoritatively denies player break/place while the island remains mutable,
+including after complete-slot exchanges.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -704,8 +708,10 @@ The accepted receipt observed nine otherwise-colliding local ids without a
 cross-world result, one compiler/asset load, two live server Workers, corrected
 cameras for both worlds, and zero Workers after explicit shutdown. Browser
 standby cadence remains an explicit typed operation gap, not an ad-hoc message.
-Production menu enablement and live-preview pixel acceptance are Tactical 178
-Slice 6.
+Tactical 178 Slice 6 now drives that ownership from the production desktop and
+mobile browser title into a playable protected lobby and live shared-depth
+island preview. The next bounded work is browser Use activation, return,
+persistence, cancellation, and invalidation parity in Slice 7.
 
 The warm-swap and opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md); the

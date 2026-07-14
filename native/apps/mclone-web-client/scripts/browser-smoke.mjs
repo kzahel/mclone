@@ -45,12 +45,15 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
-const lobbyUnavailableProbe = process.argv.includes("--lobby-unavailable-probe")
-  || process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE === "1";
 const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-storage-probe")
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
 const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-runtime-probe")
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE === "1";
+const lobbyScenarioProbe = process.argv.includes("--lobby-scenario-probe")
+  || process.argv.includes("--lobby-scenario-mobile-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE === "1";
+const lobbyScenarioMobileProbe = process.argv.includes("--lobby-scenario-mobile-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_PROBE === "1";
 const farLodProbe = process.argv.includes("--far-lod-probe")
   || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
 const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
@@ -62,9 +65,9 @@ const appLoop = movementPerf
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
-  || lobbyUnavailableProbe
   || managedScenarioStorageProbe
   || managedScenarioRuntimeProbe
+  || lobbyScenarioProbe
   || farLodProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
@@ -72,7 +75,7 @@ const appLoop = movementPerf
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
 const mobileAppLoop = process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_MOBILE_APP_LOOP === "1";
-const mobileViewport = mobileAppLoop || movementPerf;
+const mobileViewport = mobileAppLoop || movementPerf || lobbyScenarioMobileProbe;
 const serveOnly = process.argv.includes("--serve")
   || process.env.MCLONE_NATIVE_WEB_SERVE === "1";
 const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
@@ -86,10 +89,10 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
-    : lobbyUnavailableProbe
-    ? "/tmp/mclone-native-web-lobby-unavailable-probe.png"
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
+    : lobbyScenarioProbe
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
@@ -106,10 +109,10 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
-    : lobbyUnavailableProbe
-    ? "/tmp/mclone-native-web-lobby-unavailable-probe-canvas.png"
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
+    : lobbyScenarioProbe
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
@@ -137,14 +140,20 @@ const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_
   ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
 const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
-const lobbyUnavailableProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE_REPORT
-  ?? "/tmp/mclone-native-web-lobby-unavailable-probe.json";
 const managedScenarioStorageProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-storage-probe.json";
 const managedScenarioRuntimeProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-runtime-probe.json";
+const lobbyScenarioProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE_REPORT
+  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}.json`;
+const lobbyScenarioTitleScreenshotPath =
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-title.png`;
+const lobbyScenarioPlayableScreenshotPath =
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-playable.png`;
+const lobbyScenarioWarmingScreenshotPath =
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-warming.png`;
 const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
 const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
@@ -228,7 +237,7 @@ async function run() {
         };
       });
     }
-    if (managedScenarioRuntimeProbe) {
+    if (managedScenarioRuntimeProbe || lobbyScenarioProbe) {
       await page.addInitScript(() => {
         const root = /** @type {any} */ (globalThis);
         const NativeWorker = root.Worker;
@@ -271,7 +280,7 @@ async function run() {
         console.error(`browser console: ${message.text()}`);
       }
     });
-    if (mobileAppLoop) {
+    if (mobileAppLoop || lobbyScenarioMobileProbe) {
       const cdp = await page.context().newCDPSession(page);
       await cdp.send("Emulation.setCPUThrottlingRate", { rate: 2 });
     }
@@ -379,6 +388,55 @@ async function run() {
         if (!managedScenarioStorageProbeResult?.ok || pageErrors.length > 0) {
           throw new Error(
             `managed scenario storage probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (lobbyScenarioProbe) {
+        const lobbyScenarioProbeResult = await runLobbyScenarioProbe(
+          page,
+          canvas,
+          lobbyScenarioMobileProbe,
+        );
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const shutdownResult = await page.evaluate(
+          () => globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const workerStatsAfterShutdown = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          lobbyScenarioProbeReportPath,
+          lobbyScenarioProbeResult,
+          shutdownResult,
+          workerStatsAfterShutdown,
+          result,
+          pageErrors,
+        };
+        await writeFile(
+          lobbyScenarioProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          !lobbyScenarioProbeResult.ok
+          || shutdownResult?.shutdownComplete !== true
+          || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-managed-content"]) !== 0
+          || pageErrors.length > 0
+        ) {
+          throw new Error(
+            `browser lobby scenario probe failed:\n${JSON.stringify(report, null, 2)}`,
           );
         }
         console.log(JSON.stringify(report, null, 2));
@@ -565,40 +623,6 @@ async function run() {
           || canvasPixels.nonClearInteriorPixelCount <= 128
         ) {
           throw new Error(`asset-pack UI probe failed:\n${JSON.stringify(report, null, 2)}`);
-        }
-        console.log(JSON.stringify(report, null, 2));
-        return;
-      }
-      if (lobbyUnavailableProbe) {
-        const lobbyUnavailableProbeResult = await runLobbyUnavailableProbe(page, canvas);
-        const result = await compactNativeUiState(page);
-        const pageScreenshotCaptured = await page.screenshot({
-          path: screenshotPath,
-          fullPage: false,
-          timeout: 60_000,
-        }).then(() => true, () => false);
-        const canvasPng = await canvas.screenshot({
-          path: canvasScreenshotPath,
-          timeout: 60_000,
-        });
-        const canvasPixels = analyzePng(canvasPng);
-        const report = {
-          url: appUrl,
-          screenshotPath,
-          pageScreenshotCaptured,
-          canvasScreenshotPath,
-          lobbyUnavailableProbeReportPath,
-          lobbyUnavailableProbeResult,
-          canvasPixels,
-          result,
-        };
-        await writeFile(lobbyUnavailableProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
-        if (
-          !lobbyUnavailableProbeResult.ok
-          || pageErrors.length > 0
-          || canvasPixels.nonClearInteriorPixelCount <= 128
-        ) {
-          throw new Error(`disabled lobby probe failed:\n${JSON.stringify(report, null, 2)}`);
         }
         console.log(JSON.stringify(report, null, 2));
         return;
@@ -988,6 +1012,271 @@ function waitForStopSignal() {
       process.once(signal, stop);
     }
   });
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {boolean} mobile
+ */
+async function runLobbyScenarioProbe(page, canvas, mobile) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativeTitleUi?.());
+  await waitForNativeUiScreen(page, "title");
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  const titlePng = await canvas.screenshot({
+    path: lobbyScenarioTitleScreenshotPath,
+    timeout: 60_000,
+  });
+  const titlePixels = analyzePng(titlePng);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  const before = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const timing = {
+      startMs: performance.now(),
+      lastMs: performance.now(),
+      gaps: /** @type {number[]} */ ([]),
+      running: true,
+    };
+    /** @param {number} now */
+    const observe = (now) => {
+      if (!timing.running) return;
+      timing.gaps.push(Math.max(0, now - timing.lastMs));
+      timing.lastMs = now;
+      requestAnimationFrame(observe);
+    };
+    const root = /** @type {any} */ (globalThis);
+    root.__mcloneLobbyTiming = timing;
+    requestAnimationFrame(observe);
+    return {
+      startMs: timing.startMs,
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldSeedText: state.activeWorldSeedText,
+      sessionKind: state.sessionKind,
+      frameCount: state.frameCount,
+      maxFrameGapMs: state.maxFrameGapMs,
+    };
+  });
+
+  const clickReport = await clickNativeMenuButton(canvas, "title", 0);
+  await page.waitForFunction(
+    (priorWorld) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.activeWorldInstanceId !== priorWorld
+        && state?.activeWorldBehaviorProfile === "protected-lobby"
+        && state?.startupReady === true
+        && state?.uiActive === false;
+    },
+    before.activeWorldInstanceId,
+    { timeout: 45_000 },
+  );
+  const lobbyPlayable = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      atMs: performance.now(),
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      activeWorldSeedText: state.activeWorldSeedText,
+      startupReady: state.startupReady,
+      embeddedPreviewPhase: state.embeddedPreviewPhase ?? null,
+      embeddedPreviewDrawnSectionCount: Number(state.embeddedPreviewDrawnSectionCount) || 0,
+    };
+  });
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  const playablePng = await canvas.screenshot({
+    path: lobbyScenarioPlayableScreenshotPath,
+    timeout: 60_000,
+  });
+  const playablePixels = analyzePng(playablePng);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.currentTarget?.hit === true,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const protectedInteractions = await page.evaluate(async () => {
+    const app = globalThis.__mcloneWebApp;
+    return {
+      break: await app.interactBlock?.("break") ?? null,
+      place: await app.interactBlock?.("place") ?? null,
+    };
+  });
+
+  await page.waitForFunction(
+    () => String(globalThis.__mcloneWebApp?.state?.embeddedPreviewPhase ?? "").length > 0,
+    undefined,
+    { timeout: 45_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  const warmingState = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      phase: state.embeddedPreviewPhase ?? null,
+      drawnSectionCount: Number(state.embeddedPreviewDrawnSectionCount) || 0,
+    };
+  });
+  let warmingPixels = null;
+  if (warmingState.phase === "warming") {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+    const stableWarmingPhase = await page.evaluate(
+      () => globalThis.__mcloneWebApp?.state?.embeddedPreviewPhase ?? null,
+    );
+    if (stableWarmingPhase === "warming") {
+      const warmingPng = await canvas.screenshot({
+        path: lobbyScenarioWarmingScreenshotPath,
+        timeout: 60_000,
+      });
+      warmingPixels = analyzePng(warmingPng);
+    }
+    await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  }
+
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.embeddedPreviewPhase === "visible"
+        && Number(state?.embeddedPreviewDrawnSectionCount) > 0
+        && state?.standbySwitchable === true;
+    },
+    undefined,
+    { timeout: 45_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
+  const previewFramePixels = [];
+  for (let frameIndex = 0; frameIndex < 5; frameIndex += 1) {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+    const framePath = frameIndex === 4
+      ? canvasScreenshotPath
+      : canvasScreenshotPath.replace(/\.png$/, `-frame-${frameIndex + 1}.png`);
+    const framePng = await canvas.screenshot({
+      path: framePath,
+      timeout: 60_000,
+    });
+    previewFramePixels.push(analyzePng(framePng));
+  }
+  const previewPixels = previewFramePixels[previewFramePixels.length - 1];
+  const after = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    const root = /** @type {any} */ (globalThis);
+    const timing = root.__mcloneLobbyTiming;
+    timing.running = false;
+    const gaps = timing.gaps.slice();
+    const sorted = gaps.slice().sort(
+      /** @param {number} left @param {number} right */
+      (left, right) => left - right,
+    );
+    /** @param {number} fraction */
+    const percentile = (fraction) => sorted.length === 0
+      ? 0
+      : sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
+    return {
+      atMs: performance.now(),
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      activeWorldSeedText: state.activeWorldSeedText,
+      standbyWorldInstanceId: state.standbyWorldInstanceId,
+      standbyWorldSeedText: state.standbyWorldSeedText,
+      standbyLoadedChunkCount: state.standbyLoadedChunkCount,
+      standbySwitchable: state.standbySwitchable,
+      standbyQueuedUploadLifecycleItems: state.standbyQueuedUploadLifecycleItems,
+      standbyEstimatedGpuTerrainBytes: state.standbyEstimatedGpuTerrainBytes,
+      standbyAtlasBaseBytes: state.standbyAtlasBaseBytes,
+      standbyDuplicatedAtlasBaseBytes: state.standbyDuplicatedAtlasBaseBytes,
+      standbySharedTerrainResourceOwnerCount: state.standbySharedTerrainResourceOwnerCount,
+      embeddedPreviewWorldInstanceId: state.embeddedPreviewWorldInstanceId,
+      embeddedPreviewPhase: state.embeddedPreviewPhase,
+      embeddedPreviewScale: state.embeddedPreviewScale,
+      embeddedPreviewBoundedSectionCount: state.embeddedPreviewBoundedSectionCount,
+      embeddedPreviewDrawnSectionCount: state.embeddedPreviewDrawnSectionCount,
+      embeddedPreviewDrawnIndexCount: state.embeddedPreviewDrawnIndexCount,
+      embeddedPreviewPendingCompileJobs: state.embeddedPreviewPendingCompileJobs,
+      embeddedPreviewQueuedUploadLifecycleItems:
+        state.embeddedPreviewQueuedUploadLifecycleItems,
+      embeddedPreviewOutOfRegionSubmissionCount:
+        state.embeddedPreviewOutOfRegionSubmissionCount,
+      frameCount: state.frameCount,
+      frameGaps: {
+        count: gaps.length,
+        maxMs: gaps.length === 0 ? 0 : Math.max(...gaps),
+        p95Ms: percentile(0.95),
+      },
+      workers: root.__mcloneWorkerStats,
+      compiler: state.lastCompileReport
+        ? {
+            workerInitCount: state.lastCompileReport.workerInitCount,
+            workerAssetLoadCount: state.lastCompileReport.workerAssetLoadCount,
+            compilerWorldSessionCount: state.lastCompileReport.compilerWorldSessionCount,
+            qualifiedWorldCount: state.lastCompileReport.qualifiedWorldCount,
+          }
+        : null,
+    };
+  });
+  const clickToLobbyPlayableMs = lobbyPlayable.atMs - before.startMs;
+  const lobbyPlayableToPreviewMs = after.atMs - lobbyPlayable.atMs;
+  const maxAllowedFrameGapMs = mobile ? 750 : 500;
+  return {
+    ok: titlePixels.nonClearInteriorPixelCount > 128
+      && playablePixels.nonClearInteriorPixelCount > 128
+      && previewFramePixels.every((pixels) => (
+        pixels.nonClearInteriorPixelCount > 128
+        && pixels.nearBlackInteriorPixelCount < pixels.width * pixels.height * 0.02
+        && pixels.transparentInteriorPixelCount < pixels.width * pixels.height * 0.02
+      ))
+      && lobbyPlayable.activeWorldBehaviorProfile === "protected-lobby"
+      && protectedInteractions.break?.deniedByWorldBehavior === true
+      && protectedInteractions.place?.deniedByWorldBehavior === true
+      && after.activeWorldBehaviorProfile === "protected-lobby"
+      && after.activeWorldInstanceId !== before.activeWorldInstanceId
+      && after.standbyWorldInstanceId !== after.activeWorldInstanceId
+      && after.embeddedPreviewWorldInstanceId === after.standbyWorldInstanceId
+      && after.embeddedPreviewPhase === "visible"
+      && Number(after.embeddedPreviewScale) > 0
+      && Number(after.embeddedPreviewScale) < 1
+      && Number(after.embeddedPreviewBoundedSectionCount) > 0
+      && Number(after.embeddedPreviewDrawnSectionCount) > 0
+      && Number(after.embeddedPreviewOutOfRegionSubmissionCount) === 0
+      && Number(after.standbyDuplicatedAtlasBaseBytes) === 0
+      && Number(after.standbySharedTerrainResourceOwnerCount) === 2
+      && Number(after.compiler?.workerInitCount) === 1
+      && Number(after.compiler?.workerAssetLoadCount) === 1
+      && Number(after.workers?.active?.["mclone-integrated-server"]) === 2
+      && Number(after.workers?.active?.["mclone-render-compiler-app"]) === 1
+      && Number(after.workers?.active?.["mclone-managed-content"]) === 0
+      && after.frameGaps.maxMs < maxAllowedFrameGapMs,
+    mobile,
+    before,
+    clickReport,
+    lobbyPlayable,
+    protectedInteractions,
+    warmingObserved: warmingPixels !== null,
+    warmingState,
+    after,
+    timing: {
+      clickToLobbyPlayableMs,
+      lobbyPlayableToPreviewMs,
+      maxAllowedFrameGapMs,
+    },
+    screenshots: {
+      title: lobbyScenarioTitleScreenshotPath,
+      playable: lobbyScenarioPlayableScreenshotPath,
+      warming: warmingPixels ? lobbyScenarioWarmingScreenshotPath : null,
+      preview: canvasScreenshotPath,
+    },
+    pixels: {
+      title: titlePixels,
+      playable: playablePixels,
+      warming: warmingPixels,
+      preview: previewPixels,
+      previewFrames: previewFramePixels,
+    },
+  };
 }
 
 /** @param {Page} page */
@@ -3211,34 +3500,6 @@ async function runManagedScenarioStorageProbe(page) {
  * @param {Page} page
  * @param {Locator} canvas
  */
-async function runLobbyUnavailableProbe(page, canvas) {
-  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativeTitleUi?.());
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.nativeUiScreen === "title",
-    undefined,
-    { timeout: 10_000 },
-  );
-  const before = await readNativeUiState(page);
-  await clickNativeMenuButton(canvas, "title", 0);
-  await page.waitForTimeout(100);
-  const after = await readNativeUiState(page);
-  return {
-    ok: before.nativeUiScreen === "title"
-      && after.nativeUiScreen === "title"
-      && JSON.stringify(after.lastUiAction) === JSON.stringify(before.lastUiAction)
-      && after.sessionState === before.sessionState
-      && after.sessionKind === before.sessionKind
-      && after.sessionSeed === before.sessionSeed
-      && after.sessionRemoteEndpoint === before.sessionRemoteEndpoint,
-    before,
-    after,
-  };
-}
-
-/**
- * @param {Page} page
- * @param {Locator} canvas
- */
 async function exerciseMobileTouchControls(page, canvas) {
   const initial = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
@@ -5370,6 +5631,7 @@ function analyzePng(bytes) {
   let nonClearInteriorPixelCount = 0;
   let skyLikePixelCount = 0;
   let nearBlackInteriorPixelCount = 0;
+  let transparentInteriorPixelCount = 0;
   const inset = 4;
   for (let y = 0; y < png.height; y += 1) {
     for (let x = 0; x < png.width; x += 1) {
@@ -5377,6 +5639,7 @@ function analyzePng(bytes) {
       const r = png.rgba[offset];
       const g = png.rgba[offset + 1];
       const b = png.rgba[offset + 2];
+      const a = png.rgba[offset + 3];
       colors.add(`${r},${g},${b}`);
       const isClear =
         Math.abs(r - expected.r) <= 3
@@ -5393,6 +5656,9 @@ function analyzePng(bytes) {
         if (r <= 3 && g <= 3 && b <= 3) {
           nearBlackInteriorPixelCount += 1;
         }
+        if (a < 250) {
+          transparentInteriorPixelCount += 1;
+        }
         if (!isClear) {
           nonClearInteriorPixelCount += 1;
         }
@@ -5408,6 +5674,7 @@ function analyzePng(bytes) {
     nonClearInteriorPixelCount,
     skyLikePixelCount,
     nearBlackInteriorPixelCount,
+    transparentInteriorPixelCount,
     expectedClearColor: expected,
   };
 }

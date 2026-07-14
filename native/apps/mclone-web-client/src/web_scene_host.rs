@@ -10,7 +10,9 @@ use std::collections::HashMap;
 use anyhow::Result;
 use glam::Vec3;
 use mclone_app_runtime::chunk_tracking_radius_for_render_distance;
-use mclone_app_runtime::client_experience::web_client_experience_profile;
+use mclone_app_runtime::client_experience::{
+    web_client_experience_profile, web_client_experience_profile_without_managed_scenarios,
+};
 use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, PlatformOperationToken};
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
@@ -266,10 +268,20 @@ pub struct WebSceneHost {
     render_color_profile: String,
     last_runner_kind: String,
     startup_camera_reconciled: bool,
+    startup_camera_world_instance: Option<u64>,
 }
 
 #[wasm_bindgen]
 impl WebSceneHost {
+    /// Promote the lobby capability only after the browser adapter has verified
+    /// the complete managed provision/start/completion operation boundary.
+    #[wasm_bindgen(js_name = installManagedScenarioServices)]
+    pub fn install_managed_scenario_services(&mut self) -> Result<JsValue, JsValue> {
+        self.host_mut()?
+            .set_client_experience_profile(web_client_experience_profile());
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(
         &mut self,
@@ -314,6 +326,11 @@ impl WebSceneHost {
                 .report(None, false, delta_seconds, first_after_resume)
                 .map_err(JsValue::from);
         };
+        let active_world_instance = host.active_world_instance_id().get();
+        if self.startup_camera_world_instance != Some(active_world_instance) {
+            self.startup_camera_world_instance = Some(active_world_instance);
+            self.startup_camera_reconciled = false;
+        }
         let gameplay_ready = host.gameplay_startup_complete();
         if gameplay_ready && !self.startup_camera_reconciled {
             if let Some(target) = find_interaction_surface(host) {
@@ -478,6 +495,34 @@ impl WebSceneHost {
         self.block_target_report().map_err(JsValue::from)
     }
 
+    /// Smoke/receipt camera helper: frame the shared preview placement without
+    /// exporting fixture coordinates to the platform adapter.
+    #[wasm_bindgen(js_name = frameEmbeddedPreview)]
+    pub fn frame_embedded_preview(&mut self) -> Result<JsValue, JsValue> {
+        let host = self.host_mut()?;
+        let Some(preview) = host.embedded_world_preview_snapshot() else {
+            let object = js_sys::Object::new();
+            report_set_bool(&object, "ok", true).map_err(JsValue::from)?;
+            report_set_bool(&object, "available", false).map_err(JsValue::from)?;
+            return Ok(object.into());
+        };
+        let anchor = preview.placement.composition_anchor();
+        let target = Vec3::new(anchor.x as f32, anchor.y as f32 + 0.25, anchor.z as f32);
+        set_host_camera_look_at(host, target + Vec3::new(-4.0, 2.25, -6.0), target);
+        self.report(None, false, 0.0, false).map_err(JsValue::from)
+    }
+
+    /// Aim at a loaded nearby surface for browser interaction receipts without
+    /// exporting authored-world coordinates to the platform adapter.
+    #[wasm_bindgen(js_name = frameInteractionSurface)]
+    pub fn frame_interaction_surface(&mut self) -> Result<JsValue, JsValue> {
+        let target = find_interaction_surface(self.host_ref()?);
+        if let Some(target) = target {
+            aim_player_host_at_block(self.host_mut()?, target);
+        }
+        self.report(None, false, 0.0, false).map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = interactBlock)]
     pub fn interact_block(&mut self, action: &str) -> Result<JsValue, JsValue> {
         let action = match action {
@@ -559,8 +604,15 @@ impl WebSceneHost {
                 report_set_number(&object, "updateCountDelta", if changed { 1.0 } else { 0.0 })
                     .map_err(JsValue::from)?;
             }
+            MonoWorldActionStatus::DeniedByWorldBehavior => {
+                report_set_bool(&object, "hit", before_target.is_some()).map_err(JsValue::from)?;
+                report_set_bool(&object, "deniedByWorldBehavior", true).map_err(JsValue::from)?;
+                report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
+                report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
+            }
             _ => {
                 report_set_bool(&object, "hit", false).map_err(JsValue::from)?;
+                report_set_bool(&object, "deniedByWorldBehavior", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
             }
@@ -1510,7 +1562,7 @@ async fn create_scene_host(
         runtime,
         render_options,
         active_assets,
-        web_client_experience_profile(),
+        web_client_experience_profile_without_managed_scenarios(),
         Some(catalog_operations),
         None,
     )
@@ -1577,6 +1629,7 @@ async fn create_scene_host(
         render_color_profile,
         last_runner_kind: "none".to_owned(),
         startup_camera_reconciled: false,
+        startup_camera_world_instance: None,
     })
 }
 
@@ -2058,6 +2111,32 @@ impl WebSceneHost {
                     "standbyCameraReconciled",
                     standby.camera_reconciled,
                 )?;
+                report_set_number(
+                    &object,
+                    "standbyQueuedUploadLifecycleItems",
+                    standby.queued_upload_lifecycle_items as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbyEstimatedGpuTerrainBytes",
+                    standby.estimated_gpu_terrain_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbyAtlasBaseBytes",
+                    standby.atlas_base_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbyDuplicatedAtlasBaseBytes",
+                    standby.duplicated_atlas_base_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbySharedTerrainResourceOwnerCount",
+                    standby.shared_terrain_resource_owner_count as f64,
+                )?;
+                report_set_bool(&object, "standbySwitchable", standby.readiness.switchable)?;
                 report_set_string(&object, "standbyWorldSeedText", &standby.seed.to_string())?;
             } else {
                 report_set_bool(&object, "standbyWorldPresent", false)?;
@@ -2076,6 +2155,45 @@ impl WebSceneHost {
                         mclone_scene::EmbeddedWorldPreviewPhase::Visible => "visible",
                         mclone_scene::EmbeddedWorldPreviewPhase::Failed => "failed",
                     },
+                )?;
+                let anchor = preview.placement.composition_anchor();
+                report_set_number(&object, "embeddedPreviewAnchorX", anchor.x)?;
+                report_set_number(&object, "embeddedPreviewAnchorY", anchor.y)?;
+                report_set_number(&object, "embeddedPreviewAnchorZ", anchor.z)?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewScale",
+                    preview.placement.uniform_scale(),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewBoundedSectionCount",
+                    preview.bounded_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewDrawnSectionCount",
+                    preview.last_drawn_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewDrawnIndexCount",
+                    f64::from(preview.last_drawn_index_count),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewPendingCompileJobs",
+                    preview.preparation.pending_compile_jobs as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewQueuedUploadLifecycleItems",
+                    preview.preparation.queued_upload_lifecycle_items as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewOutOfRegionSubmissionCount",
+                    preview.render.out_of_region_submission_count as f64,
                 )?;
             }
             let active_selection = host.active_asset_pack_selection();

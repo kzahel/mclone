@@ -223,6 +223,12 @@ pub(crate) enum SceneSessionStartOutcome {
 }
 
 impl McloneSceneHost {
+    /// Replace only the platform capability profile while preserving catalog,
+    /// asset-pack, and settings controller state.
+    pub fn set_client_experience_profile(&mut self, profile: ClientExperienceProfile) {
+        self.client_experience.set_profile(profile);
+    }
+
     fn allocate_world_instance_id(&mut self) -> WorldInstanceId {
         let id = WorldInstanceId::new(self.next_world_instance_id);
         self.next_world_instance_id = self

@@ -45,6 +45,10 @@ const WEB_RENDER_COMPILER_WORKER: &str = include_str!(concat!(
     "/www/mclone-render-compiler-worker.ts"
 ));
 const WEB_CANVAS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/web_canvas.rs"));
+const WEB_SCENE_HOST: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_scene_host.rs"
+));
 
 use mclone_app_runtime::scenario_content::{
     ManagedScenarioManifest, ManagedScenarioWorldRole, managed_scenario_payload_fingerprint,
@@ -76,10 +80,11 @@ fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
         "#[cfg(not(target_arch = \"wasm32\"))]\n\
          pub mod scenario_content;"
     ));
-    assert!(
-        CLIENT_EXPERIENCE
-            .contains("ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)")
-    );
+    assert!(CLIENT_EXPERIENCE.contains("web_client_experience_profile_with_managed_scenarios"));
+    assert!(CLIENT_EXPERIENCE.contains("web_client_experience_profile_without_managed_scenarios"));
+    assert!(CLIENT_EXPERIENCE.contains("ClientExperienceCapabilityStatus::Supported"));
+    assert!(WEB_SCENE_HOST.contains("installManagedScenarioServices"));
+    assert!(WEB_APP.contains("this.session.installManagedScenarioServices()"));
     assert!(SCENE_SESSION.contains("pub(crate) fn apply_managed_scenario_effect("));
     let effect = SCENE_SESSION
         .split("pub(crate) fn apply_managed_scenario_effect(")

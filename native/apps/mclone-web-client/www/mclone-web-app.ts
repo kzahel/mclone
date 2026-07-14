@@ -87,6 +87,10 @@ interface AppRuntime {
   adjustCameraSpeed?: (amount: number) => WasmReport | null;
   previewBlockTarget?: () => WasmReport | null;
   blockStateAt?: (x: number, y: number, z: number) => WasmReport | null;
+  interactBlock?: (action: string) => Promise<WasmReport | null>;
+  frameEmbeddedPreview?: () => WasmReport | null;
+  frameInteractionSurface?: () => WasmReport | null;
+  renderOneFrameForSmoke?: () => Promise<WasmReport | null>;
   openNativeTitleUi?: () => WasmReport | null;
   openNativePauseUi?: () => WasmReport | null;
   pauseRendering?: () => void;
@@ -267,6 +271,10 @@ async function boot(): Promise<WasmReport> {
   runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.blockStateAt = (x: number, y: number, z: number) => app.blockStateAt(x, y, z);
+  runtime.interactBlock = (action: string) => app.interactBlock(action);
+  runtime.frameEmbeddedPreview = () => app.frameEmbeddedPreview();
+  runtime.frameInteractionSurface = () => app.frameInteractionSurface();
+  runtime.renderOneFrameForSmoke = () => app.renderOneFrameForSmoke();
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
   runtime.openNativePauseUi = () => app.openNativePauseUi();
   runtime.pauseRendering = () => app.pauseRendering();
@@ -499,6 +507,8 @@ class WebFrameDriver {
       "previewBlockTarget",
       "blockStateAt",
       "interactBlock",
+      "frameEmbeddedPreview",
+      "frameInteractionSurface",
       "openTitleUi",
       "openPauseUi",
       "openHelpUi",
@@ -524,6 +534,7 @@ class WebFrameDriver {
       "completeManagedScenarioProvision",
       "prepareManagedScenarioWorldStart",
       "completeManagedScenarioWorldStart",
+      "installManagedScenarioServices",
       "shutdown",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
@@ -535,6 +546,7 @@ class WebFrameDriver {
         "cross-origin isolation (SharedArrayBuffer/Atomics) is required for the streaming render loop",
       );
     }
+    this.applyNativeUiReport(this.session.installManagedScenarioServices());
     this.setNativeDebugOverlay(defaultDebugOverlayVisible());
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     document.addEventListener("visibilitychange", () => {
@@ -607,6 +619,24 @@ class WebFrameDriver {
     );
     this.handleSceneFrame(report);
     return report;
+  }
+
+  async renderOneFrameForSmoke(): Promise<WasmReport | null> {
+    this.pauseRendering();
+    while (this.tickFrameBusy || this.sessionBusy) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    this.tickFrameBusy = true;
+    runtime.state.tickFrameBusy = true;
+    try {
+      await this.tickFrame(performance.now());
+      return runtime.state.lastReport ?? null;
+    } finally {
+      this.tickFrameBusy = false;
+      runtime.state.tickFrameBusy = false;
+      runtime.state.tickPhase = "idle";
+      publishRuntimeState(runtime.state);
+    }
   }
 
   beginManagedScenarioSmoke(): WasmReport | null {
@@ -1085,9 +1115,25 @@ class WebFrameDriver {
       "standbyLoadedChunkCount",
       "standbyCadenceApplied",
       "standbyCameraReconciled",
+      "standbyQueuedUploadLifecycleItems",
+      "standbyEstimatedGpuTerrainBytes",
+      "standbyAtlasBaseBytes",
+      "standbyDuplicatedAtlasBaseBytes",
+      "standbySharedTerrainResourceOwnerCount",
+      "standbySwitchable",
       "standbyWorldSeedText",
       "embeddedPreviewWorldInstanceId",
       "embeddedPreviewPhase",
+      "embeddedPreviewAnchorX",
+      "embeddedPreviewAnchorY",
+      "embeddedPreviewAnchorZ",
+      "embeddedPreviewScale",
+      "embeddedPreviewBoundedSectionCount",
+      "embeddedPreviewDrawnSectionCount",
+      "embeddedPreviewDrawnIndexCount",
+      "embeddedPreviewPendingCompileJobs",
+      "embeddedPreviewQueuedUploadLifecycleItems",
+      "embeddedPreviewOutOfRegionSubmissionCount",
     ]) {
       if (typeof report[key] !== "undefined") {
         runtime.state[key] = report[key];
@@ -1125,6 +1171,24 @@ class WebFrameDriver {
       return null;
     }
     return this.session.blockStateAt(Math.trunc(x), Math.trunc(y), Math.trunc(z));
+  }
+
+  frameEmbeddedPreview(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    const report = this.session.frameEmbeddedPreview();
+    this.applyCameraState(report);
+    return report;
+  }
+
+  frameInteractionSurface(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    const report = this.session.frameInteractionSurface();
+    this.applyCameraState(report);
+    return report;
   }
 
   async interactBlock(action: string): Promise<WasmReport | null> {
