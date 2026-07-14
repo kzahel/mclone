@@ -361,7 +361,10 @@ mod tests {
                     .unwrap()
             )
         );
-        assert_eq!(managed_scenario_payload_fingerprint(&primary), 8_001_097_006_086_081_343);
+        assert_eq!(
+            managed_scenario_payload_fingerprint(&primary),
+            8_001_097_006_086_081_343
+        );
         assert_eq!(
             managed_scenario_payload_fingerprint(&destination),
             8_764_019_107_988_679_539

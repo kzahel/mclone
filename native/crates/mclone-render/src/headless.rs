@@ -1439,13 +1439,14 @@ fn fs_main() -> @location(0) vec4<f32> {
             &active_sections,
             atlas,
         )?;
-        let preview = TexturedSectionDrawResources::new(
+        let preview = TexturedSectionDrawResources::new_with_shared_resources(
             &device,
             &queue,
-            HEADLESS_FORMAT,
             &preview_sections,
-            atlas,
+            active.shared_resources(),
         )?;
+        assert!(active.shares_immutable_resources_with(&preview));
+        assert_eq!(active.shared_resource_owner_count(), 2);
         let placed_renderer = preview.create_placed_renderer(&device);
         let placement =
             WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::new(0.0, 0.5, 0.0), 0.2)?;

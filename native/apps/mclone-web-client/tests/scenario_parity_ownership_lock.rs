@@ -93,20 +93,42 @@ fn primary_and_destination_provisioning_are_independent() {
 }
 
 #[test]
-fn current_browser_compiler_and_second_renderer_shell_debt_is_named() {
+fn browser_compiler_debt_and_shared_renderer_boundary_are_named() {
     assert!(WEB_APP.contains("compiler: RenderCompiler | null;"));
     assert!(WEB_APP.contains("pendingTimings: Map<number, PendingCompile>;"));
     assert!(!WEB_APP.contains("Map<WorldInstanceId"));
 
-    let constructor = TERRAIN_RENDERER
+    let shared_constructor = TERRAIN_RENDERER
+        .split("impl TexturedSectionSharedResources {")
+        .nth(1)
+        .expect("shared terrain resource implementation exists")
+        .split("pub struct TexturedSectionDrawResources")
+        .next()
+        .expect("shared constructor precedes mutable draw resources");
+    assert!(shared_constructor.contains("TexturedChunkRenderer::new(device, color_format)"));
+    assert!(shared_constructor.contains("GpuChunkTextureAtlas::new"));
+
+    let draw_constructor = TERRAIN_RENDERER
         .split("impl TexturedSectionDrawResources {")
         .nth(1)
         .expect("textured terrain draw implementation exists")
         .split("pub fn create_placed_renderer")
         .next()
         .expect("constructor precedes the placed renderer");
-    assert!(constructor.contains("TexturedChunkRenderer::new(device, color_format)"));
-    assert!(constructor.contains("GpuChunkTextureAtlas::new"));
+    assert!(draw_constructor.contains("TexturedSectionSharedResources::new("));
+    assert!(draw_constructor.contains("Self::new_with_shared_resources("));
+    assert!(!draw_constructor.contains("GpuChunkTextureAtlas::new"));
+
+    let prepare = SCENE_SESSION
+        .split("pub fn prepare_warm_world_standby_shell(")
+        .nth(1)
+        .expect("standby shell preparation exists")
+        .split("pub fn begin_warm_world_standby(")
+        .next()
+        .expect("shell preparation precedes launch helper");
+    assert!(prepare.contains("TexturedSectionDrawResources::new_with_shared_resources("));
+    assert!(prepare.contains("self.active_world.draw.shared_resources()"));
+    assert!(!prepare.contains("TexturedSectionDrawResources::new("));
 }
 
 #[test]

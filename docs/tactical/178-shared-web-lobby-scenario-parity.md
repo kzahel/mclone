@@ -1,10 +1,10 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-1 locked the baseline and extracted the
-storage-neutral manifest, validation, keys, and authored payloads. Slice 2 is
-next. This tactical closes the browser exception left by Tacticals 174, 175,
-and 177 by refactoring their native-shaped startup seams into shared contracts.
-It does not authorize a second browser scenario implementation.
+Status: active 2026-07-14. Slices 0-2 locked the baseline, extracted portable
+scenario content, and removed the duplicate second-slot terrain shell. Slice 3
+is next. This tactical closes the browser exception left by Tacticals 174,
+175, and 177 by refactoring their native-shaped startup seams into shared
+contracts. It does not authorize a second browser scenario implementation.
 
 Topic: `embedded-worlds`
 
@@ -651,6 +651,62 @@ Deliverables:
 Exit criteria: the duplication ledger contains no second atlas or compatible
 pipeline set, pixels/readiness match the control, and the ordinary single-world
 path does not gain indirection measurable above the performance contract.
+
+#### Slice 2 completion record — 2026-07-14
+
+`TexturedSectionSharedResources` now owns the compatible direct-terrain
+pipelines, per-view topology, texture layout, and GPU atlas behind one reference
+counted resource owner. Each `TexturedSectionDrawResources` retains only its
+queue handle, mutable section buffers/maps, traversal readiness, and culling
+caches. The ordinary constructor creates exactly one shared owner and delegates
+to the same mutable-store constructor; it does not create a standby resource or
+add scenario polling.
+
+Warm-world shell preparation clones the active slot's compatible resource
+owner instead of compiling a second direct renderer or uploading a second
+atlas. A managed lobby's replacement primary also adopts that prepared owner,
+so replacing the pre-menu world cannot strand the standby as the sole owner.
+The final lobby receipt reports two owners, an 8,388,608-byte shared base atlas,
+and zero duplicated atlas bytes. Complete-slot exchange still contains no
+renderer construction, materialization, compile, accept, or upload work.
+
+The GPU characterization measured the original one-owner creation at 14.916 ms
+for the 1024x2048 atlas and pipelines. Its five measured mip levels occupy
+11,173,888 bytes. Constructing the second empty mutable store from that owner
+measured below the timer's displayed 0.001 ms resolution, with no atlas bytes.
+The product shell receipt was 0.0014 ms. Placed preview topology remains one
+opt-in renderer owned by the one preview; it was not duplicated between slots.
+
+Fresh flat, live-diorama activation, and synthetic-stereo captures were
+inspected after the change. The table and miniature retain correct scale,
+depth, water ordering, and matching eye composition; both A-to-B-to-A switches
+retain ready first-uncovered terrain. The current macOS adapter lacks wgpu
+`MULTIVIEW`, so full-frame materialization was source/test preserved but not
+claimed as a capable-device receipt in this slice.
+
+After a 98.10% idle preflight, the final five release direct-path samples
+averaged 2.576, 2.519, 2.541, 2.508, and 2.494 ms; P95 was 4.408, 4.355,
+4.402, 4.428, and 4.307 ms. Medians were 2.519/4.402 ms, 1.1%/1.5% above the
+Slice 0 2.492/4.338 ms controls and below the 3% investigation threshold.
+Within-batch average/P95 ranges were 3.3%/2.8%; every sample had zero
+over-budget frames and zero accounting violations. Postflight was 98.36% idle.
+No sample was rejected.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-render
+cargo test -p mclone-scene
+cargo test -p mclone-scene --test one_world_ownership_contract \
+  empty_terrain_shell_reports_real_atlas_and_lazy_multiview_cost \
+  -- --include-ignored --nocapture
+cargo test -p mclone-web-client --test scenario_parity_ownership_lock
+pnpm native:lobby-scenario:smoke
+pnpm native:lobby-scenario:stereo-smoke
+pnpm native:live-diorama:activation-smoke
+pnpm native:web:build
+pnpm native:thin-adapters:purity
+```
 
 Estimated effort: 1-2 days.
 

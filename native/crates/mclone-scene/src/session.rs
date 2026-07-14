@@ -1684,8 +1684,10 @@ impl McloneSceneHost {
         }
     }
 
-    /// Prepare the duplicate renderer shell while a loading cover still owns
-    /// presentation. This performs no destination storage or runtime work.
+    /// Prepare the per-world mutable renderer shell while a loading cover still
+    /// owns presentation. Compatible atlas and direct-terrain pipelines remain
+    /// shared with the active slot. This performs no destination storage or
+    /// runtime work.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prepare_warm_world_standby_shell(
         &mut self,
@@ -1707,12 +1709,11 @@ impl McloneSceneHost {
         }
 
         let shell_started_at = self.services.clock.now();
-        let draw = TexturedSectionDrawResources::new(
+        let draw = TexturedSectionDrawResources::new_with_shared_resources(
             device,
             queue,
-            self.color_format,
             &[],
-            self.mesh_assets.atlas.as_upload(),
+            self.active_world.draw.shared_resources(),
         )
         .context("initialize detached standby terrain renderer shell")?;
         let renderer_shell_create_ms =
@@ -1912,6 +1913,7 @@ impl McloneSceneHost {
             .prepared_warm_world_shell
             .take()
             .expect("prepared shell presence checked before fallible startup work");
+        let shared_terrain_resource_owner_count = draw.shared_resource_owner_count();
         let instance_id = WorldInstanceId::new(2);
         let asset_epoch = self.active_assets.epoch;
 
@@ -1956,6 +1958,8 @@ impl McloneSceneHost {
             renderer_multiview_materialized,
             atlas_size: [self.mesh_assets.atlas.width, self.mesh_assets.atlas.height],
             atlas_base_bytes: self.mesh_assets.atlas.byte_len(),
+            duplicated_atlas_base_bytes: 0,
+            shared_terrain_resource_owner_count,
             asset_epoch,
             standby_cadence,
             standby_cadence_applied: false,
@@ -3956,13 +3960,22 @@ impl McloneSceneHost {
                 scene.render_distance
             );
         }
-        let mut draw = TexturedSectionDrawResources::new(
-            device,
-            queue,
-            self.color_format,
-            &sections,
-            runtime.mesh_assets().atlas.as_upload(),
-        )
+        let prepared_shared_resources = self
+            .prepared_warm_world_shell
+            .as_ref()
+            .map(|shell| shell.draw.shared_resources());
+        let mut draw = match prepared_shared_resources {
+            Some(shared) => TexturedSectionDrawResources::new_with_shared_resources(
+                device, queue, &sections, shared,
+            ),
+            None => TexturedSectionDrawResources::new(
+                device,
+                queue,
+                self.color_format,
+                &sections,
+                runtime.mesh_assets().atlas.as_upload(),
+            ),
+        }
         .context("upload XR local startup render sections")?;
         draw.set_traversal_ready_sections(
             &runtime.traversal_ready_render_section_keys(camera_position),

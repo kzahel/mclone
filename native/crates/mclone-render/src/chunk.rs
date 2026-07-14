@@ -3009,13 +3009,41 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
     }
 }
 
-pub struct TexturedSectionDrawResources {
+/// Immutable device/asset terrain resources shared by compatible world slots.
+///
+/// Section residency and GPU mesh buffers deliberately do not live here. One
+/// host may retain multiple mutable worlds while paying for one atlas and one
+/// compatible direct-terrain pipeline/uniform topology.
+pub struct TexturedSectionSharedResources {
     renderer: TexturedChunkRenderer,
+    atlas: GpuChunkTextureAtlas,
+}
+
+impl TexturedSectionSharedResources {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<Arc<Self>> {
+        let renderer = TexturedChunkRenderer::new(device, color_format);
+        let atlas =
+            GpuChunkTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)
+                .context("failed to upload chunk texture atlas")?;
+        Ok(Arc::new(Self { renderer, atlas }))
+    }
+
+    pub const fn color_format(&self) -> wgpu::TextureFormat {
+        self.renderer.color_format
+    }
+}
+
+pub struct TexturedSectionDrawResources {
+    shared: Arc<TexturedSectionSharedResources>,
     sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
     visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
     traversal_ready_sections: BTreeSet<RenderSectionKey>,
     section_set_generation: u64,
-    atlas: GpuChunkTextureAtlas,
     queue: wgpu::Queue,
     // Slice F (docs/tactical/106): the prepared culling records only change when
     // the section set / readiness changes (upload, removal, traversal refresh),
@@ -3046,17 +3074,22 @@ impl TexturedSectionDrawResources {
         sections: &[TexturedRenderSectionMesh],
         atlas: ChunkTextureAtlas<'_>,
     ) -> Result<Self> {
-        let renderer = TexturedChunkRenderer::new(device, color_format);
-        let atlas =
-            GpuChunkTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)
-                .context("failed to upload chunk texture atlas")?;
+        let shared = TexturedSectionSharedResources::new(device, queue, color_format, atlas)?;
+        Self::new_with_shared_resources(device, queue, sections, shared)
+    }
+
+    pub fn new_with_shared_resources(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        sections: &[TexturedRenderSectionMesh],
+        shared: Arc<TexturedSectionSharedResources>,
+    ) -> Result<Self> {
         let mut resources = Self {
-            renderer,
+            shared,
             sections: BTreeMap::new(),
             visibility_sections: BTreeMap::new(),
             traversal_ready_sections: BTreeSet::new(),
             section_set_generation: 0,
-            atlas,
             queue: queue.clone(),
             cached_records: RefCell::new(None),
             records_dirty: Cell::new(true),
@@ -3068,14 +3101,26 @@ impl TexturedSectionDrawResources {
         Ok(resources)
     }
 
+    pub fn shared_resources(&self) -> Arc<TexturedSectionSharedResources> {
+        Arc::clone(&self.shared)
+    }
+
+    pub fn shares_immutable_resources_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
+    }
+
+    pub fn shared_resource_owner_count(&self) -> usize {
+        Arc::strong_count(&self.shared)
+    }
+
     /// Allocate the opt-in placed pipeline shell for this draw store. Nothing
     /// in `new` calls this, preserving the ordinary single-world allocation
     /// and shader-compilation path.
     pub fn create_placed_renderer(&self, device: &wgpu::Device) -> PlacedTexturedSectionRenderer {
         PlacedTexturedSectionRenderer::new(
             device,
-            self.renderer.color_format,
-            &self.renderer.texture_bind_group_layout,
+            self.shared.renderer.color_format,
+            &self.shared.renderer.texture_bind_group_layout,
         )
     }
 
@@ -3087,7 +3132,7 @@ impl TexturedSectionDrawResources {
         device: &wgpu::Device,
         renderer: &PlacedTexturedSectionRenderer,
     ) -> Result<()> {
-        drop(renderer.multiview_renderer(device, &self.renderer.texture_bind_group_layout)?);
+        drop(renderer.multiview_renderer(device, &self.shared.renderer.texture_bind_group_layout)?);
         Ok(())
     }
 
@@ -3291,13 +3336,13 @@ impl TexturedSectionDrawResources {
     /// draw. Warm-world admission uses this before publishing switchability so
     /// first-use pipeline creation can never land on the switch frame.
     pub fn materialize_multiview_renderer(&self, device: &wgpu::Device) -> Result<bool> {
-        let already_materialized = self.renderer.multiview.borrow().is_some();
-        drop(self.renderer.multiview_renderer(device)?);
+        let already_materialized = self.shared.renderer.multiview.borrow().is_some();
+        drop(self.shared.renderer.multiview_renderer(device)?);
         Ok(!already_materialized)
     }
 
     pub fn multiview_renderer_materialized(&self) -> bool {
-        self.renderer.multiview.borrow().is_some()
+        self.shared.renderer.multiview.borrow().is_some()
     }
 
     pub fn index_count(&self) -> u32 {
@@ -3925,7 +3970,7 @@ impl TexturedSectionDrawResources {
                 ..Default::default()
             });
             pass.set_bind_group(0, &renderer.bind_group, &[uniform_offset]);
-            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             pass.set_pipeline(&renderer.solid_pipeline);
             for (key, mesh) in &self.sections {
                 if culling.drawn_keys.contains(key) {
@@ -4086,7 +4131,7 @@ impl TexturedSectionDrawResources {
                 ..Default::default()
             });
             pass.set_bind_group(0, &renderer.bind_group, &[uniform_offset]);
-            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             pass.set_pipeline(&renderer.solid_pipeline);
             for (key, mesh) in &self.sections {
                 if prepared_draw.draws_in_slot(*key, view_slot) {
@@ -4151,7 +4196,7 @@ impl TexturedSectionDrawResources {
         placement: WorldPlacement,
     ) -> Result<[TexturedSectionRenderStats; 2]> {
         let multiview =
-            renderer.multiview_renderer(device, &self.renderer.texture_bind_group_layout)?;
+            renderer.multiview_renderer(device, &self.shared.renderer.texture_bind_group_layout)?;
         multiview.write_uniforms(
             queue,
             physical_render_views,
@@ -4181,7 +4226,7 @@ impl TexturedSectionDrawResources {
                 ..Default::default()
             });
             pass.set_bind_group(0, &multiview.bind_group, &[]);
-            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             pass.set_pipeline(&multiview.solid_pipeline);
             for (key, mesh) in &self.sections {
                 if prepared_draw.drawn_keys.contains(key) {
@@ -4217,10 +4262,10 @@ impl TexturedSectionDrawResources {
         if keys.is_empty() {
             return;
         }
-        let uniform_offset = self.renderer.uniforms.write_slot(
+        let uniform_offset = self.shared.renderer.uniforms.write_slot(
             queue,
             view_slot,
-            &uniform_bytes(render_view, options, self.renderer.color_format),
+            &uniform_bytes(render_view, options, self.shared.renderer.color_format),
         );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_ordered_translucent_section_render_pass"),
@@ -4242,9 +4287,9 @@ impl TexturedSectionDrawResources {
             }),
             ..Default::default()
         });
-        pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
-        pass.set_pipeline(&self.renderer.translucent_pipeline);
+        pass.set_bind_group(0, &self.shared.renderer.bind_group, &[uniform_offset]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+        pass.set_pipeline(&self.shared.renderer.translucent_pipeline);
         for key in keys {
             if prepared_stereo_draw.is_some_and(|prepared| !prepared.draws_in_slot(*key, view_slot))
             {
@@ -4305,7 +4350,7 @@ impl TexturedSectionDrawResources {
             ..Default::default()
         });
         pass.set_bind_group(0, &renderer.bind_group, &[uniform_offset]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_pipeline(&renderer.translucent_pipeline);
         for key in keys {
             if prepared_stereo_draw.is_some_and(|prepared| !prepared.draws_in_slot(*key, view_slot))
@@ -4331,8 +4376,13 @@ impl TexturedSectionDrawResources {
         if keys.is_empty() {
             return Ok(());
         }
-        let renderer = self.renderer.multiview_renderer(device)?;
-        renderer.write_uniforms(queue, render_views, options, self.renderer.color_format);
+        let renderer = self.shared.renderer.multiview_renderer(device)?;
+        renderer.write_uniforms(
+            queue,
+            render_views,
+            options,
+            self.shared.renderer.color_format,
+        );
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_ordered_translucent_section_multiview_render_pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -4354,7 +4404,7 @@ impl TexturedSectionDrawResources {
             ..Default::default()
         });
         pass.set_bind_group(0, &renderer.bind_group, &[]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_pipeline(&renderer.translucent_pipeline);
         for key in keys {
             if let Some(mesh) = self.sections.get(key) {
@@ -4381,7 +4431,7 @@ impl TexturedSectionDrawResources {
             return Ok(());
         }
         let multiview =
-            renderer.multiview_renderer(device, &self.renderer.texture_bind_group_layout)?;
+            renderer.multiview_renderer(device, &self.shared.renderer.texture_bind_group_layout)?;
         multiview.write_uniforms(
             queue,
             physical_render_views,
@@ -4410,7 +4460,7 @@ impl TexturedSectionDrawResources {
             ..Default::default()
         });
         pass.set_bind_group(0, &multiview.bind_group, &[]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_pipeline(&multiview.translucent_pipeline);
         for key in keys {
             if let Some(mesh) = self.sections.get(key) {
@@ -4475,8 +4525,13 @@ impl TexturedSectionDrawResources {
         options: [TexturedSectionRenderOptions; 2],
         phase: TexturedSectionRenderPhase,
     ) -> Result<[TexturedSectionRenderStats; 2]> {
-        let renderer = self.renderer.multiview_renderer(device)?;
-        renderer.write_uniforms(queue, render_views, options, self.renderer.color_format);
+        let renderer = self.shared.renderer.multiview_renderer(device)?;
+        renderer.write_uniforms(
+            queue,
+            render_views,
+            options,
+            self.shared.renderer.color_format,
+        );
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_multiview_render_pass"),
@@ -4500,7 +4555,7 @@ impl TexturedSectionDrawResources {
                 ..Default::default()
             });
             pass.set_bind_group(0, &renderer.bind_group, &[]);
-            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             if phase.draws_opaque() {
                 pass.set_pipeline(&renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
@@ -4565,10 +4620,10 @@ impl TexturedSectionDrawResources {
             timing.cull_ms = timing_elapsed_ms(cull_start);
         }
         let uniform_start = timing.as_ref().map(|_| timing_now());
-        let uniform_offset = self.renderer.uniforms.write_slot(
+        let uniform_offset = self.shared.renderer.uniforms.write_slot(
             queue,
             view_slot,
-            &uniform_bytes(render_view, options, self.renderer.color_format),
+            &uniform_bytes(render_view, options, self.shared.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
             timing.uniform_write_ms = timing_elapsed_ms(uniform_start);
@@ -4625,17 +4680,17 @@ impl TexturedSectionDrawResources {
                 timestamp_writes: target.gpu_timestamp_writes(phase.gpu_pass_id()),
                 ..Default::default()
             });
-            pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
-            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_bind_group(0, &self.shared.renderer.bind_group, &[uniform_offset]);
+            pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             if phase.draws_opaque() {
-                pass.set_pipeline(&self.renderer.solid_pipeline);
+                pass.set_pipeline(&self.shared.renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
                     if !culling.drawn_keys.contains(key) {
                         continue;
                     }
                     draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
                 }
-                pass.set_pipeline(&self.renderer.cutout_pipeline);
+                pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
                 for (key, mesh) in &self.sections {
                     if !culling.drawn_keys.contains(key) {
                         continue;
@@ -4644,7 +4699,7 @@ impl TexturedSectionDrawResources {
                 }
             }
             if phase.draws_translucent() {
-                pass.set_pipeline(&self.renderer.translucent_pipeline);
+                pass.set_pipeline(&self.shared.renderer.translucent_pipeline);
                 for (_, mesh) in translucent_sections {
                     draw_textured_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
                 }
@@ -4721,10 +4776,10 @@ impl TexturedSectionDrawResources {
     ) -> Result<TexturedSectionRenderStats> {
         let prepare_start = timing.as_ref().map(|_| timing_now());
         let uniform_start = timing.as_ref().map(|_| timing_now());
-        let uniform_offset = self.renderer.uniforms.write_slot(
+        let uniform_offset = self.shared.renderer.uniforms.write_slot(
             queue,
             view_slot,
-            &uniform_bytes(render_view, options, self.renderer.color_format),
+            &uniform_bytes(render_view, options, self.shared.renderer.color_format),
         );
         if let (Some(timing), Some(uniform_start)) = (&mut timing, uniform_start) {
             timing.uniform_write_ms = timing_elapsed_ms(uniform_start);
@@ -4756,17 +4811,17 @@ impl TexturedSectionDrawResources {
                 timestamp_writes: target.gpu_timestamp_writes(phase.gpu_pass_id()),
                 ..Default::default()
             });
-            pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
-            pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+            pass.set_bind_group(0, &self.shared.renderer.bind_group, &[uniform_offset]);
+            pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             if phase.draws_opaque() {
-                pass.set_pipeline(&self.renderer.solid_pipeline);
+                pass.set_pipeline(&self.shared.renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
                     if !prepared_draw.draws_in_slot(*key, view_slot) {
                         continue;
                     }
                     draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
                 }
-                pass.set_pipeline(&self.renderer.cutout_pipeline);
+                pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
                 for (key, mesh) in &self.sections {
                     if !prepared_draw.draws_in_slot(*key, view_slot) {
                         continue;
@@ -4775,7 +4830,7 @@ impl TexturedSectionDrawResources {
                 }
             }
             if phase.draws_translucent() {
-                pass.set_pipeline(&self.renderer.translucent_pipeline);
+                pass.set_pipeline(&self.shared.renderer.translucent_pipeline);
                 for key in &prepared_draw.translucent_keys {
                     if !prepared_draw.draws_in_slot(*key, view_slot) {
                         continue;

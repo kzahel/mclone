@@ -391,12 +391,19 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
         ],
     );
     let prepare = braced_item(&source, "pub fn prepare_warm_world_standby_shell(");
-    assert!(prepare.contains("TexturedSectionDrawResources::new("));
+    assert!(prepare.contains("TexturedSectionDrawResources::new_with_shared_resources("));
+    assert!(prepare.contains("self.active_world.draw.shared_resources()"));
     assert!(prepare.contains("&[],"));
     assert!(prepare.contains("self.prepared_warm_world_shell = Some("));
     assert!(prepare.contains("FarTerrainLodRenderer::new(device, self.color_format)"));
     assert!(prepare.contains("matches!(presentation, WarmWorldPresentationRequest::OpaqueGate)"));
     assert!(prepare.contains("matches!(presentation, WarmWorldPresentationRequest::Diorama"));
+
+    assert!(source.contains("let prepared_shared_resources = self"));
+    assert!(
+        source.contains("Some(shared) => TexturedSectionDrawResources::new_with_shared_resources(")
+    );
+    assert!(source.contains("None => TexturedSectionDrawResources::new("));
 
     let attach = braced_item(&source, "pub fn begin_prepared_warm_world_standby(");
     assert_in_order(
@@ -800,6 +807,20 @@ fn empty_terrain_shell_reports_real_atlas_and_lazy_multiview_cost() -> anyhow::R
         draw.section_count(),
     );
     assert_eq!(draw.section_count(), 0);
+    let shared_shell_started = Instant::now();
+    let standby_draw = TexturedSectionDrawResources::new_with_shared_resources(
+        &device,
+        &queue,
+        &[],
+        draw.shared_resources(),
+    )?;
+    let shared_shell_ms = shared_shell_started.elapsed().as_secs_f64() * 1_000.0;
+    assert!(draw.shares_immutable_resources_with(&standby_draw));
+    assert_eq!(draw.shared_resource_owner_count(), 2);
+    eprintln!(
+        "terrain_shell shared_standby_ms={shared_shell_ms:.3} duplicate_atlas_bytes=0 owners={}",
+        draw.shared_resource_owner_count()
+    );
 
     if !device.features().contains(wgpu::Features::MULTIVIEW) {
         eprintln!("terrain_shell multiview=unavailable");
