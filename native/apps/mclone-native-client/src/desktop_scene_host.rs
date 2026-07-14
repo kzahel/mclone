@@ -139,7 +139,11 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
         let mut request =
             WarmWorldStandbyRequest::new(manifest.seed, diorama.source_region.center())
                 .with_persistent_world_dir(&diorama.world_dir, manifest.world_generation_profile)
-                .with_embedded_preview(diorama.source_region, diorama.placement);
+                .with_embedded_preview(
+                    diorama.source_region,
+                    diorama.placement,
+                    diorama.return_placement,
+                );
         if let Some(cadence) = scene.warm_world_standby_cadence {
             request = request.with_standby_cadence(cadence);
         }

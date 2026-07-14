@@ -576,6 +576,8 @@ impl McloneSceneHost {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
         }
+        let activation_was_active = self.embedded_world_activation.phase.active();
+        self.advance_embedded_world_activation(dt_seconds);
         let mut transform = self
             .reconcile_room_scale_body_to_headset(&views)
             .context("reconcile XR room-scale body pose")?;
@@ -584,6 +586,13 @@ impl McloneSceneHost {
         if self.ui.is_active() {
             self.snap_turn_state.reset();
             self.clear_xr_blink_teleport();
+            timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
+            return Ok(timing);
+        }
+        if activation_was_active || self.embedded_world_activation.phase.active() {
+            self.snap_turn_state.reset();
+            self.clear_xr_blink_teleport();
+            self.head_comfort.reset();
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
         }

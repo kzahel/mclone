@@ -478,6 +478,9 @@ pub struct McloneSceneHost {
     standby_world: Option<DrawableWorldSlot>,
     warm_world_standby: Option<WarmWorldStandbyState>,
     embedded_world_preview: Option<EmbeddedWorldPreview>,
+    embedded_world_activation: EmbeddedWorldActivationState,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    embedded_world_activation_sequence: u64,
     #[cfg(not(target_arch = "wasm32"))]
     world_gate: Option<WorldGate>,
     #[cfg(not(target_arch = "wasm32"))]
@@ -1542,6 +1545,7 @@ impl McloneSceneHost {
         }
         self.record_eye0_summary(left_eye.summary);
         self.record_warm_world_first_destination_frame(first_drawn_section_count, upload);
+        self.record_embedded_world_activation_frame(first_drawn_section_count, upload, 2);
         Ok(self.frame_summary_with_timing(timing, upload))
     }
 
@@ -2319,6 +2323,17 @@ impl McloneSceneHost {
                     elapsed_ms(self.services.clock.elapsed_since(overlays_start));
             }
         }
+        if let Some(overlay) = self.embedded_world_activation_fade_overlay() {
+            self.screen_effects
+                .render_fade_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size),
+                    [Some(overlay), Some(overlay)],
+                )
+                .context("render embedded-world activation fade multiview")?;
+        }
         let submit_start = self.services.clock.now();
         let submission = queue.submit(Some(encoder.finish()));
         if let Some(timing) = timing.as_deref_mut() {
@@ -2358,6 +2373,7 @@ impl McloneSceneHost {
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         self.rendered_frames += 1;
         self.record_warm_world_first_destination_frame(stats[0].drawn_section_count, upload);
+        self.record_embedded_world_activation_frame(stats[0].drawn_section_count, upload, 2);
         Ok(XrTerrainMultiviewFrameSummary {
             rendered_frames: self.rendered_frames,
             section_count: self.active_world.draw.section_count(),
@@ -2588,6 +2604,17 @@ impl McloneSceneHost {
         frame_deadline: Option<MonotonicDeadline>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
+        if self.defer_embedded_world_destination_preparation() {
+            let upload = self.frozen_runtime_upload_summary();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.advance_warm_world_gpu(device, camera_position, frame_deadline)?;
+                self.synchronize_world_gate_state();
+            }
+            #[cfg(target_arch = "wasm32")]
+            let _ = (device, camera_position, frame_deadline, timing);
+            return Ok(upload);
+        }
         let first_frame_after_warm_world_selection =
             self.last_warm_world_switch.as_ref().is_some_and(|report| {
                 report.destination_instance_id == self.active_world.id
@@ -3795,6 +3822,16 @@ impl McloneSceneHost {
                     elapsed_ms(self.services.clock.elapsed_since(start))
                 });
             }
+        }
+        if let Some(overlay) = self.embedded_world_activation_fade_overlay() {
+            self.screen_effects.render_fade_in_slot(
+                device,
+                queue,
+                &mut encoder,
+                RenderFrameTarget::color(target.color_view, target.size),
+                overlay,
+                view_slot,
+            );
         }
         let finish_start = collect_split_timing.then(|| self.services.clock.now());
         let command_buffer = encoder.finish();

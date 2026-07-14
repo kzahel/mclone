@@ -395,7 +395,17 @@ impl OffscreenDriver {
         frame: FlatInputFrame,
         views: [XrView; 2],
     ) -> Result<()> {
-        let controllers = xr_emulation_controllers_from_flat_frame(frame);
+        let mut controllers = xr_emulation_controllers_from_flat_frame(frame);
+        if frame.attack || frame.use_item {
+            let center = (views[0].pose.position + views[1].pose.position) * 0.5;
+            let orientation = views[0]
+                .pose
+                .orientation
+                .slerp(views[1].pose.orientation, 0.5)
+                .normalize();
+            controllers[1].aim_position = Some(center);
+            controllers[1].aim_direction = Some(orientation * -glam::Vec3::Z);
+        }
         self.host
             .apply_frame_locomotion(&controllers, views, None)
             .context("apply synthetic stereo locomotion")?;

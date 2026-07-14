@@ -246,6 +246,14 @@ fn cli_defaults_live_diorama_to_authored_fixture_anchors() {
         diorama.placement.composition_anchor(),
         mclone_core::Vec3d::new(8.0, 65.03125, 8.0)
     );
+    assert_eq!(
+        diorama.return_placement.source_anchor(),
+        mclone_core::Vec3d::new(8.0, 65.03125, 8.0)
+    );
+    assert_eq!(
+        diorama.return_placement.composition_anchor(),
+        mclone_core::Vec3d::new(4.0, 67.03125, 8.0)
+    );
 }
 
 #[test]

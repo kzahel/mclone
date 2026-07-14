@@ -1143,8 +1143,26 @@ impl McloneSceneHost {
 
     pub(crate) fn apply_xr_gameplay_interaction_edges(
         &mut self,
-        edges: XrGameplayInteractionEdges,
+        mut edges: XrGameplayInteractionEdges,
     ) -> Result<()> {
+        if !edges.any() {
+            return Ok(());
+        }
+        if edges.use_item
+            && let Some(origin) = self.tracking_origin
+        {
+            let transform =
+                XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
+            if let Some((ray_origin, ray_direction)) =
+                xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)
+                && self.request_embedded_world_activation(
+                    vec3d_from_glam(ray_origin),
+                    vec3d_from_glam(ray_direction),
+                )
+            {
+                edges.use_item = false;
+            }
+        }
         if !edges.any() {
             return Ok(());
         }

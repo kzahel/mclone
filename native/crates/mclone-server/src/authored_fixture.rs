@@ -70,6 +70,17 @@ impl AuthoredWorldFixtureKind {
         }
     }
 
+    /// Tabletop composition point used when this fixture is the active world.
+    ///
+    /// The original Table fixture's preview anchor already has this meaning.
+    /// Island gains its paired return display in Tactical 175 Slice 6.
+    pub const fn preview_display_anchor(self) -> [f64; 3] {
+        match self {
+            Self::Table => self.preview_anchor(),
+            Self::Island => [4.0, 67.03125, 8.0],
+        }
+    }
+
     pub const fn mutation_block(self) -> [i32; 3] {
         match self {
             Self::Table => [7, 64, 7],
@@ -364,6 +375,14 @@ fn author_island_chunk(chunk: &mut MutableChunkBlockBuffer) {
             }
         }
     }
+
+    // Paired four-block display for showing world A after the warm whole-slot
+    // selection makes this island the active world. Its top is y=67.
+    for z in 7..=8 {
+        for x in 3..=4 {
+            chunk.set_block_at_y(x, 66, z, BRICKS);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -496,6 +515,7 @@ mod tests {
             .unwrap();
         let water = generated_block_state_id(WATER);
         let grass = generated_block_state_id(GRASS_BLOCK);
+        let bricks = generated_block_state_id(BRICKS);
 
         assert_eq!(
             snapshot_block_state(&center.snapshot, BlockPos::new(0, 64, 0)),
@@ -513,6 +533,11 @@ mod tests {
             ),
             grass
         );
+        assert_eq!(
+            snapshot_block_state(&center.snapshot, BlockPos::new(3, 66, 7)),
+            bricks
+        );
+        assert_eq!(manifest.kind.preview_display_anchor(), [4.0, 67.03125, 8.0]);
     }
 
     #[test]

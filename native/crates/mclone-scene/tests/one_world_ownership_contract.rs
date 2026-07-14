@@ -83,6 +83,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "standby_world",
     "warm_world_standby",
     "embedded_world_preview",
+    "embedded_world_activation",
+    "embedded_world_activation_sequence",
     "world_gate",
     "opaque_world_gate_renderer",
     "warm_world_switch_sequence",
@@ -168,7 +170,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 20);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 77);
+    assert_eq!(host_fields.len(), 79);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -263,6 +265,11 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("standby_world: None,"));
         assert!(constructor.contains("warm_world_standby: None,"));
         assert!(constructor.contains("embedded_world_preview: None,"));
+        assert!(
+            constructor
+                .contains("embedded_world_activation: EmbeddedWorldActivationState::default(),")
+        );
+        assert!(constructor.contains("embedded_world_activation_sequence: 0,"));
         assert!(constructor.contains("world_gate: None,"));
         assert!(constructor.contains("opaque_world_gate_renderer: None,"));
         assert!(constructor.contains("warm_world_switch_sequence: 0,"));

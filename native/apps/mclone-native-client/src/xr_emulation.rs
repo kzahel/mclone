@@ -7,7 +7,10 @@ use mclone_core::Vec3d;
 use mclone_input::{FlatInputFrame, KeyboardMouseInputAdapter};
 use mclone_render::headless::{HeadlessStereoFrameOptions, write_headless_stereo_frame_png};
 use mclone_render_session::{EngineCameraSnapshot, XrFov, XrView, XrViewPose};
-use mclone_scene::{EmbeddedWorldPreviewPhase, EmbeddedWorldPreviewSnapshot};
+use mclone_scene::{
+    EmbeddedWorldActivationPhase, EmbeddedWorldActivationReport, EmbeddedWorldPreviewPhase,
+    EmbeddedWorldPreviewSnapshot,
+};
 
 use crate::cli::XrEmulationScreenshotOptions;
 use crate::offscreen_scene_host::OffscreenDriver;
@@ -32,6 +35,8 @@ pub(crate) struct XrEmulationScreenshotReport {
     pub(crate) gui_command_count: usize,
     pub(crate) ui_panel_composite_count: u64,
     pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
+    pub(crate) embedded_activation_reports: Vec<EmbeddedWorldActivationReport>,
+    pub(crate) embedded_activation_switch_reports: Vec<mclone_scene::WarmWorldSwitchReport>,
 }
 
 pub(crate) fn run_xr_emulation_screenshot(
@@ -43,7 +48,15 @@ pub(crate) fn run_xr_emulation_screenshot(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let input_frames = options.input_frames;
-    let (capture, (summary, embedded_preview)) = write_headless_stereo_frame_png(
+    let (
+        capture,
+        (
+            summary,
+            embedded_preview,
+            embedded_activation_reports,
+            embedded_activation_switch_reports,
+        ),
+    ) = write_headless_stereo_frame_png(
         HeadlessStereoFrameOptions {
             path: options.path.clone(),
             eye_width: options.eye_width,
@@ -81,6 +94,15 @@ pub(crate) fn run_xr_emulation_screenshot(
                 left_view,
                 right_view,
             )?;
+            let (embedded_activation_reports, embedded_activation_switch_reports) =
+                drive_embedded_preview_activation_roundtrip(
+                    &mut driver,
+                    device,
+                    queue,
+                    size,
+                    left_view,
+                    right_view,
+                )?;
             drive_warm_world_swap_roundtrip_if_requested(
                 &mut driver,
                 device,
@@ -129,7 +151,12 @@ pub(crate) fn run_xr_emulation_screenshot(
                 views = synthetic_stereo_gate_views(&mut driver, size, 3.0)?;
             }
             let summary = driver.render_stereo(device, queue, views, left_view, right_view)?;
-            Ok((summary, driver.host().embedded_world_preview_snapshot()))
+            Ok((
+                summary,
+                driver.host().embedded_world_preview_snapshot(),
+                embedded_activation_reports,
+                embedded_activation_switch_reports,
+            ))
         },
     )?;
 
@@ -165,7 +192,122 @@ pub(crate) fn run_xr_emulation_screenshot(
         gui_command_count: summary.gui_command_count,
         ui_panel_composite_count: summary.ui_panel.composite_count,
         embedded_preview,
+        embedded_activation_reports,
+        embedded_activation_switch_reports,
     })
+}
+
+fn drive_embedded_preview_activation_roundtrip(
+    driver: &mut OffscreenDriver,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    size: [u32; 2],
+    left_view: &wgpu::TextureView,
+    right_view: &wgpu::TextureView,
+) -> Result<(
+    Vec<EmbeddedWorldActivationReport>,
+    Vec<mclone_scene::WarmWorldSwitchReport>,
+)> {
+    if driver.host().embedded_world_preview_snapshot().is_none() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let source_world = driver.host().active_world_instance_id();
+    let mut reports = Vec::with_capacity(2);
+    let mut switches = Vec::with_capacity(2);
+    let mut destination_world = None;
+    for leg in 0..2 {
+        let views = synthetic_stereo_preview_views(driver, size)?;
+        driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+        driver.apply_stereo_input_frame(
+            FlatInputFrame {
+                use_item: true,
+                ..FlatInputFrame::default()
+            },
+            views,
+        )?;
+        let requested = driver.host().embedded_world_activation_snapshot();
+        if requested.phase != EmbeddedWorldActivationPhase::Closing {
+            bail!("synthetic-stereo diorama Use did not begin a closing blink: {requested:?}");
+        }
+
+        let expected_source = driver.host().active_world_instance_id();
+        let mut completed = None;
+        for _ in 0..120 {
+            std::thread::sleep(XR_EMULATION_FRAME_TIME);
+            let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+            driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+            driver.render_stereo(device, queue, views, left_view, right_view)?;
+            let snapshot = driver.host().embedded_world_activation_snapshot();
+            if snapshot.phase == EmbeddedWorldActivationPhase::Failed {
+                bail!("synthetic-stereo diorama activation failed: {snapshot:?}");
+            }
+            if snapshot.phase == EmbeddedWorldActivationPhase::Idle {
+                completed = snapshot.last_report;
+                break;
+            }
+        }
+        let report = completed.context(
+            "synthetic-stereo diorama activation did not complete within 120 rendered frames",
+        )?;
+        let active_world = driver.host().active_world_instance_id();
+        if active_world == expected_source {
+            bail!("synthetic-stereo diorama activation retained its source world");
+        }
+        validate_stereo_embedded_world_activation(&report, expected_source, active_world)?;
+        switches.push(
+            driver
+                .host()
+                .last_warm_world_switch_report()
+                .context("synthetic-stereo activation completed without switch facts")?,
+        );
+        if leg == 0 {
+            destination_world = Some(active_world);
+        }
+        drive_embedded_preview_until_visible(driver, device, queue, size, left_view, right_view)?;
+        reports.push(report);
+    }
+    let destination_world = destination_world.context("diorama roundtrip lost destination id")?;
+    if driver.host().active_world_instance_id() != source_world
+        || reports[0].source_world != source_world
+        || reports[0].destination_world != destination_world
+        || reports[1].source_world != destination_world
+        || reports[1].destination_world != source_world
+    {
+        bail!("synthetic-stereo diorama activation lost A-to-B-to-A identity");
+    }
+    eprintln!(
+        "live_diorama_activation_stereo A={} B={} first_ms={:.3} return_ms={:.3}",
+        source_world.get(),
+        destination_world.get(),
+        reports[0].switch_elapsed_ms.unwrap_or_default(),
+        reports[1].switch_elapsed_ms.unwrap_or_default(),
+    );
+    Ok((reports, switches))
+}
+
+fn validate_stereo_embedded_world_activation(
+    report: &EmbeddedWorldActivationReport,
+    expected_source: mclone_scene::WorldInstanceId,
+    expected_destination: mclone_scene::WorldInstanceId,
+) -> Result<()> {
+    if report.source_world != expected_source
+        || report.destination_world != expected_destination
+        || report.switch_elapsed_ms.is_none()
+        || report.covered_rendered_frames == 0
+        || report.first_uncovered_world != Some(expected_destination)
+        || report.first_uncovered_drawn_section_count == 0
+        || report.first_uncovered_uploaded_section_count != 0
+        || report.first_uncovered_submitted_compile_section_count != 0
+        || report.first_uncovered_accepted_compile_result_count != 0
+        || report.first_uncovered_eye_count != 2
+        || report.completed_activation_frame.is_none()
+        || report.failure.is_some()
+    {
+        bail!(
+            "synthetic-stereo embedded-world activation violated cover/conservation facts: {report:?}"
+        );
+    }
+    Ok(())
 }
 
 fn drive_embedded_preview_until_visible(

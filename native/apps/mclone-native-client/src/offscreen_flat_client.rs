@@ -665,6 +665,13 @@ impl OffscreenFlatClientHost {
             });
     }
 
+    pub(crate) fn apply_input_frame(
+        &mut self,
+        frame: mclone_input::FlatInputFrame,
+    ) -> Result<Vec<(mclone_input::FlatInputAction, MonoWorldActionStatus)>> {
+        self.driver.apply_input_frame(frame)
+    }
+
     pub(crate) fn pending_stream_work(&self) -> usize {
         self.driver.host().pending_stream_work(self.camera.position)
     }
@@ -2197,6 +2204,9 @@ fn require_world_action_changed(
         MonoWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
         MonoWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
         MonoWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
+        MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
+            bail!("{label} activated an embedded world instead of changing a block")
+        }
     }
 }
 

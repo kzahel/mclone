@@ -1044,18 +1044,24 @@ impl ChunkApp {
         let Some(driver) = self.scene_driver.as_mut() else {
             return Ok(());
         };
-        if let MonoWorldActionStatus::Sent { target, changed } =
-            driver.handle_world_action(action)?
-        {
-            log::info!(
-                "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
-                action,
-                target.hit.block_pos.x,
-                target.hit.block_pos.y,
-                target.hit.block_pos.z,
-                target.hit.direction,
-                changed
-            );
+        match driver.handle_world_action(action)? {
+            MonoWorldActionStatus::Sent { target, changed } => {
+                log::info!(
+                    "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+                    action,
+                    target.hit.block_pos.x,
+                    target.hit.block_pos.y,
+                    target.hit.block_pos.z,
+                    target.hit.direction,
+                    changed
+                );
+            }
+            MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
+                log::info!("embedded-world activation requested through {action:?}");
+            }
+            MonoWorldActionStatus::NoRuntime
+            | MonoWorldActionStatus::NoTarget
+            | MonoWorldActionStatus::NoCommand => {}
         }
         Ok(())
     }

@@ -1166,6 +1166,74 @@ Exit criteria: the user can inspect B on the table, activate it through a short
 blink, arrive in ordinary full-scale B, inspect A on the paired table, and
 return without a loading hitch.
 
+### Slice 6 completion record — 2026-07-14
+
+The local diorama is now the shared activation target rather than a passive
+render-only preview. `mclone-scene` owns a placement-derived activation volume,
+16-block neutral ray test, readiness projection, and a 120 ms close / 30 ms
+covered / 120 ms open state machine. Flat Use/right-click and XR right-hand Use
+enter the same scene action. A hit consumes the block action; a miss retains the
+ordinary interaction path. Physical flat and XR locomotion are suppressed for
+the short transition without adding a platform-local key or geometry animation.
+
+The fully covered interval calls the existing complete-slot exchange with the
+two admitted world camera poses rather than inventing opaque-gate endpoints.
+The selected local slot regains its authored cadence, the demoted source takes
+the optional standby cadence, and the old active world becomes the visible
+return preview. Fixture A keeps the four-block ground-level island table;
+fixture B now has a paired four-block display anchor near its admitted spawn.
+The two placements swap after every ownership exchange while cameras, roots,
+persistence, runtimes, draw stores, and compiler state remain slot-local.
+
+The active destination preparation pump is held through the first uncovered
+frame. The retained preview can still become visible while fully covered, but
+the activation boundary cannot submit/accept compiles or upload terrain. This
+is a one-frame conservation rule, not a claim that ordinary destination
+streaming is permanently paused. Pre-existing queued/pending work is reported
+separately and may resume after the first visible destination frame.
+
+`pnpm native:live-diorama:activation-smoke` now runs the complete local
+composition lane and emits schema-version 1 activation evidence. Deterministic
+flat and synthetic-stereo Use each prove A-to-B-to-A identity. The accepted
+receipt records 120/30/120 ms timing; 0.009–0.012 ms slot exchanges; two and
+17 drawn flat destination sections; two and 15 drawn stereo destination
+sections; one versus two eyes; and zero first-uncovered compile submission,
+result acceptance, upload, runtime construction, or renderer materialization.
+Both cadence directions changed as authored. Fully covered flat frames are
+pixel-exact black, while both first-uncovered frames contain destination
+geometry. Representative SHA-256 receipts are:
+
+- A-to-B covered: `1818d75d...a56e`;
+- A-to-B first uncovered: `f8d22803...73a7`;
+- B-to-A covered: `1818d75d...a56e`; and
+- B-to-A first uncovered: `f1bb5636...afc3`.
+
+`pnpm native:live-diorama:run` launches the same fixture interactively. Aim at
+the miniature and Use/right-click to select it; repeat on the paired table to
+return.
+
+The first uncovered A-to-B and B-to-A images, ordinary desktop offscreen image,
+and final stereo composition were inspected. The ordinary one-world path still
+draws directly with no retained slot or activation state requested.
+
+Focused validation passes 389 server, 111 render-session, 138 active render
+tests (three GPU tests ignored by their explicit policy), 244 app-runtime tests
+plus the two dual-host integration tests, 114 scene tests plus 11 active
+ownership locks, and 159 native-client tests. Browser/WASM build and TypeScript
+typecheck pass; only the existing target-specific warnings remain.
+The current Mac still lacks a capable full-frame multiview adapter, so that
+execution receipt remains a named platform gap rather than a missing code path.
+
+Performance was compared with an isolated worktree at exact pre-slice commit
+`4a7dcc85`. The changed tree's five release samples measured 2.685 ms median
+average / 4.589 ms median P95 with 5.7%/3.4% spread. A first control batch was
+rejected because an unrelated Android emulator appeared mid-run and produced a
+31 ms outlier. After it exited and CPU returned to 96.8% idle, five replacement
+controls measured 2.670/4.545 ms with 3.8%/6.8% spread. Both batches retained
+1,936 sections with zero over-budget frames and zero accounting violations.
+The changed tree is +0.6% average and +1.0% P95, establishing no measurable
+single-world regression and claiming no optimization.
+
 ## Slice 7: Remote Hosted Preview
 
 Prove the drawable source is transport-neutral.

@@ -42,6 +42,13 @@ const WORLD_GATE_ENTER_MARGIN_BLOCKS: f64 = 0.35;
 const WORLD_GATE_EXIT_MARGIN_BLOCKS: f64 = 0.15;
 #[cfg(not(target_arch = "wasm32"))]
 const WORLD_GATE_OBSERVATION_DEPTH_BLOCKS: f64 = 2.0;
+const EMBEDDED_ACTIVATION_MARGIN_BLOCKS: f64 = 0.2;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) const EMBEDDED_ACTIVATION_MAX_RAY_BLOCKS: f64 = 16.0;
+pub(crate) const EMBEDDED_ACTIVATION_CLOSE_SECONDS: f64 = 0.12;
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+pub(crate) const EMBEDDED_ACTIVATION_COVERED_SECONDS: f64 = 0.03;
+pub(crate) const EMBEDDED_ACTIVATION_OPEN_SECONDS: f64 = 0.12;
 
 /// Stable client-side identity for one retained world instance.
 ///
@@ -102,8 +109,13 @@ impl WarmWorldStandbyRequest {
         mut self,
         region: EmbeddedChunkRegion,
         placement: WorldPlacement,
+        return_placement: WorldPlacement,
     ) -> Self {
-        self.presentation = WarmWorldPresentationRequest::Diorama { region, placement };
+        self.presentation = WarmWorldPresentationRequest::Diorama {
+            region,
+            placement,
+            return_placement,
+        };
         self
     }
 }
@@ -114,6 +126,7 @@ pub enum WarmWorldPresentationRequest {
     Diorama {
         region: EmbeddedChunkRegion,
         placement: WorldPlacement,
+        return_placement: WorldPlacement,
     },
 }
 
@@ -123,6 +136,202 @@ pub enum EmbeddedWorldPreviewPhase {
     Warming,
     Visible,
     Failed,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum EmbeddedWorldActivationPhase {
+    #[default]
+    Idle,
+    Closing,
+    Covered,
+    Opening,
+    Failed,
+}
+
+impl EmbeddedWorldActivationPhase {
+    pub const fn active(self) -> bool {
+        matches!(self, Self::Closing | Self::Covered | Self::Opening)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EmbeddedWorldActivationVolume {
+    pub min: Vec3d,
+    pub max: Vec3d,
+}
+
+impl EmbeddedWorldActivationVolume {
+    pub(crate) fn from_region(region: EmbeddedChunkRegion, placement: WorldPlacement) -> Self {
+        let radius = i64::from(region.horizontal_radius());
+        let min_chunk_x = i64::from(region.center().x) - radius;
+        let min_chunk_z = i64::from(region.center().z) - radius;
+        let max_chunk_x = i64::from(region.center().x) + radius + 1;
+        let max_chunk_z = i64::from(region.center().z) + radius + 1;
+        let source_min = Vec3d::new(
+            (min_chunk_x * 16) as f64,
+            f64::from(region.min_section_y()) * 16.0,
+            (min_chunk_z * 16) as f64,
+        );
+        let source_max = Vec3d::new(
+            (max_chunk_x * 16) as f64,
+            (f64::from(region.max_section_y()) + 1.0) * 16.0,
+            (max_chunk_z * 16) as f64,
+        );
+        let mapped_min = placement.source_to_composition(source_min);
+        let mapped_max = placement.source_to_composition(source_max);
+        let margin = Vec3d::new(
+            EMBEDDED_ACTIVATION_MARGIN_BLOCKS,
+            EMBEDDED_ACTIVATION_MARGIN_BLOCKS,
+            EMBEDDED_ACTIVATION_MARGIN_BLOCKS,
+        );
+        Self {
+            min: mapped_min.subtract(margin),
+            max: mapped_max.add(margin),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn ray_distance(self, origin: Vec3d, direction: Vec3d) -> Option<f64> {
+        if !origin.is_finite() || !direction.is_finite() {
+            return None;
+        }
+        let length_squared =
+            direction.x * direction.x + direction.y * direction.y + direction.z * direction.z;
+        if length_squared <= f64::EPSILON {
+            return None;
+        }
+        let inv_length = length_squared.sqrt().recip();
+        let direction = direction.scale(inv_length);
+        let mut near: f64 = 0.0;
+        let mut far = EMBEDDED_ACTIVATION_MAX_RAY_BLOCKS;
+        for (origin, direction, min, max) in [
+            (origin.x, direction.x, self.min.x, self.max.x),
+            (origin.y, direction.y, self.min.y, self.max.y),
+            (origin.z, direction.z, self.min.z, self.max.z),
+        ] {
+            if direction.abs() <= f64::EPSILON {
+                if origin < min || origin > max {
+                    return None;
+                }
+                continue;
+            }
+            let inverse = direction.recip();
+            let first = (min - origin) * inverse;
+            let second = (max - origin) * inverse;
+            near = near.max(first.min(second));
+            far = far.min(first.max(second));
+            if near > far {
+                return None;
+            }
+        }
+        (far >= 0.0 && near <= EMBEDDED_ACTIVATION_MAX_RAY_BLOCKS).then_some(near.max(0.0))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmbeddedWorldActivationReport {
+    pub sequence: u64,
+    pub source_world: WorldInstanceId,
+    pub destination_world: WorldInstanceId,
+    pub requested_after_rendered_frame: u32,
+    pub close_seconds: f64,
+    pub covered_seconds: f64,
+    pub open_seconds: f64,
+    pub switch_elapsed_ms: Option<f64>,
+    pub switched_activation_frame: Option<u32>,
+    pub covered_rendered_frames: u32,
+    pub first_uncovered_activation_frame: Option<u32>,
+    pub first_uncovered_world: Option<WorldInstanceId>,
+    pub first_uncovered_drawn_section_count: usize,
+    pub first_uncovered_uploaded_section_count: usize,
+    pub first_uncovered_submitted_compile_section_count: usize,
+    pub first_uncovered_accepted_compile_result_count: usize,
+    pub first_uncovered_queue_lifecycle_items: usize,
+    pub first_uncovered_pending_compile_jobs: usize,
+    pub first_uncovered_eye_count: usize,
+    pub completed_activation_frame: Option<u32>,
+    pub failure: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct EmbeddedWorldActivationSnapshot {
+    pub phase: EmbeddedWorldActivationPhase,
+    pub alpha: f32,
+    pub activation_ready: bool,
+    pub volume: Option<EmbeddedWorldActivationVolume>,
+    pub last_report: Option<EmbeddedWorldActivationReport>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct EmbeddedWorldActivationState {
+    pub phase: EmbeddedWorldActivationPhase,
+    pub phase_elapsed_seconds: f64,
+    pub activation_frame: u32,
+    pub volume: Option<EmbeddedWorldActivationVolume>,
+    pub report: Option<EmbeddedWorldActivationReport>,
+}
+
+impl EmbeddedWorldActivationState {
+    pub(crate) fn alpha(&self) -> f32 {
+        match self.phase {
+            EmbeddedWorldActivationPhase::Idle | EmbeddedWorldActivationPhase::Failed => 0.0,
+            EmbeddedWorldActivationPhase::Closing => (self.phase_elapsed_seconds
+                / EMBEDDED_ACTIVATION_CLOSE_SECONDS)
+                .clamp(0.0, 1.0) as f32,
+            EmbeddedWorldActivationPhase::Covered => 1.0,
+            EmbeddedWorldActivationPhase::Opening => (1.0
+                - self.phase_elapsed_seconds / EMBEDDED_ACTIVATION_OPEN_SECONDS)
+                .clamp(0.0, 1.0) as f32,
+        }
+    }
+
+    pub(crate) fn snapshot(&self, activation_ready: bool) -> EmbeddedWorldActivationSnapshot {
+        EmbeddedWorldActivationSnapshot {
+            phase: self.phase,
+            alpha: self.alpha(),
+            activation_ready,
+            volume: self.volume,
+            last_report: self.report.clone(),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn begin(
+        &mut self,
+        sequence: u64,
+        source_world: WorldInstanceId,
+        destination_world: WorldInstanceId,
+        rendered_frame: u32,
+        volume: EmbeddedWorldActivationVolume,
+    ) {
+        self.phase = EmbeddedWorldActivationPhase::Closing;
+        self.phase_elapsed_seconds = 0.0;
+        self.activation_frame = 0;
+        self.volume = Some(volume);
+        self.report = Some(EmbeddedWorldActivationReport {
+            sequence,
+            source_world,
+            destination_world,
+            requested_after_rendered_frame: rendered_frame,
+            close_seconds: EMBEDDED_ACTIVATION_CLOSE_SECONDS,
+            covered_seconds: EMBEDDED_ACTIVATION_COVERED_SECONDS,
+            open_seconds: EMBEDDED_ACTIVATION_OPEN_SECONDS,
+            switch_elapsed_ms: None,
+            switched_activation_frame: None,
+            covered_rendered_frames: 0,
+            first_uncovered_activation_frame: None,
+            first_uncovered_world: None,
+            first_uncovered_drawn_section_count: 0,
+            first_uncovered_uploaded_section_count: 0,
+            first_uncovered_submitted_compile_section_count: 0,
+            first_uncovered_accepted_compile_result_count: 0,
+            first_uncovered_queue_lifecycle_items: 0,
+            first_uncovered_pending_compile_jobs: 0,
+            first_uncovered_eye_count: 0,
+            completed_activation_frame: None,
+            failure: None,
+        });
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -239,6 +448,8 @@ pub(crate) struct EmbeddedWorldPreview {
     pub source_world: WorldInstanceId,
     pub region: EmbeddedChunkRegion,
     pub placement: WorldPlacement,
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub return_placement: WorldPlacement,
     pub asset_epoch: u64,
     pub phase: EmbeddedWorldPreviewPhase,
     pub renderer: PlacedTexturedSectionRenderer,
@@ -1230,6 +1441,58 @@ mod tests {
             bounded_preview_source_priority(region, placement, Vec3d::new(100.0, 200.0, -100.0)),
             Vec3d::new(63.5, 95.5, -64.0)
         );
+    }
+
+    #[test]
+    fn embedded_activation_volume_maps_region_and_bounds_ray_distance() {
+        let region = EmbeddedChunkRegion::new(ChunkPos::new(0, 0), 0, 3, 5).unwrap();
+        let placement = WorldPlacement::new(
+            Vec3d::new(8.0, 64.0, 8.0),
+            Vec3d::new(8.0, 65.0, 8.0),
+            0.125,
+        )
+        .unwrap();
+        let volume = EmbeddedWorldActivationVolume::from_region(region, placement);
+
+        assert!(volume.min.x < 7.0 && volume.max.x > 9.0);
+        assert!(volume.min.z < 7.0 && volume.max.z > 9.0);
+        assert!(
+            volume
+                .ray_distance(Vec3d::new(8.0, 66.0, -4.0), Vec3d::new(0.0, 0.0, 1.0))
+                .is_some()
+        );
+        assert!(
+            volume
+                .ray_distance(Vec3d::new(8.0, 66.0, -20.0), Vec3d::new(0.0, 0.0, 1.0))
+                .is_none()
+        );
+        assert!(
+            volume
+                .ray_distance(Vec3d::new(20.0, 66.0, -4.0), Vec3d::new(0.0, 0.0, 1.0))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn embedded_activation_alpha_closes_and_opens_without_overshoot() {
+        let mut state = EmbeddedWorldActivationState::default();
+        state.begin(
+            1,
+            WorldInstanceId::new(1),
+            WorldInstanceId::new(2),
+            7,
+            EmbeddedWorldActivationVolume {
+                min: Vec3d::ZERO,
+                max: Vec3d::new(1.0, 1.0, 1.0),
+            },
+        );
+        state.phase_elapsed_seconds = EMBEDDED_ACTIVATION_CLOSE_SECONDS * 0.5;
+        assert!((state.alpha() - 0.5).abs() < 1.0e-6);
+        state.phase = EmbeddedWorldActivationPhase::Covered;
+        assert_eq!(state.alpha(), 1.0);
+        state.phase = EmbeddedWorldActivationPhase::Opening;
+        state.phase_elapsed_seconds = EMBEDDED_ACTIVATION_OPEN_SECONDS * 0.5;
+        assert!((state.alpha() - 0.5).abs() < 1.0e-6);
     }
 
     #[test]

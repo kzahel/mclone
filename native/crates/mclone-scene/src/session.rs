@@ -338,6 +338,8 @@ impl McloneSceneHost {
             standby_world: None,
             warm_world_standby: None,
             embedded_world_preview: None,
+            embedded_world_activation: EmbeddedWorldActivationState::default(),
+            embedded_world_activation_sequence: 0,
             #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -526,6 +528,8 @@ impl McloneSceneHost {
             standby_world: None,
             warm_world_standby: None,
             embedded_world_preview: None,
+            embedded_world_activation: EmbeddedWorldActivationState::default(),
+            embedded_world_activation_sequence: 0,
             #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -726,6 +730,8 @@ impl McloneSceneHost {
             standby_world: None,
             warm_world_standby: None,
             embedded_world_preview: None,
+            embedded_world_activation: EmbeddedWorldActivationState::default(),
+            embedded_world_activation_sequence: 0,
             #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
             #[cfg(not(target_arch = "wasm32"))]
@@ -1456,29 +1462,35 @@ impl McloneSceneHost {
         });
         self.opaque_world_gate_renderer = gate_renderer;
         self.embedded_world_preview = match (presentation, placed_renderer) {
-            (WarmWorldPresentationRequest::Diorama { region, placement }, Some(renderer)) => {
-                Some(EmbeddedWorldPreview {
-                    source_world: instance_id,
+            (
+                WarmWorldPresentationRequest::Diorama {
                     region,
                     placement,
-                    asset_epoch,
-                    phase: EmbeddedWorldPreviewPhase::Warming,
-                    renderer,
-                    renderer_topology_ready: placed_renderer_topology_ready,
-                    source_anchor_gpu_resident: false,
-                    source_anchor_traversal_ready: false,
-                    bounded_section_count: 0,
-                    last_draw: TexturedSectionRenderStats::default(),
-                    source_host_mode: None,
-                    fixed_interest_center: region.center(),
-                    preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
-                    render: EmbeddedWorldPreviewRenderSnapshot::default(),
-                    mutation_sequence: 0,
-                    last_mutation: None,
-                    boundary_warning: preview_boundary_warning,
-                    failure: None,
-                })
-            }
+                    return_placement,
+                },
+                Some(renderer),
+            ) => Some(EmbeddedWorldPreview {
+                source_world: instance_id,
+                region,
+                placement,
+                return_placement,
+                asset_epoch,
+                phase: EmbeddedWorldPreviewPhase::Warming,
+                renderer,
+                renderer_topology_ready: placed_renderer_topology_ready,
+                source_anchor_gpu_resident: false,
+                source_anchor_traversal_ready: false,
+                bounded_section_count: 0,
+                last_draw: TexturedSectionRenderStats::default(),
+                source_host_mode: None,
+                fixed_interest_center: region.center(),
+                preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
+                render: EmbeddedWorldPreviewRenderSnapshot::default(),
+                mutation_sequence: 0,
+                last_mutation: None,
+                boundary_warning: preview_boundary_warning,
+                failure: None,
+            }),
             (WarmWorldPresentationRequest::OpaqueGate, None) => None,
             _ => unreachable!("presentation renderer construction stays paired"),
         };
@@ -1508,6 +1520,292 @@ impl McloneSceneHost {
         self.embedded_world_preview
             .as_ref()
             .map(EmbeddedWorldPreview::snapshot)
+    }
+
+    pub fn embedded_world_activation_snapshot(&self) -> EmbeddedWorldActivationSnapshot {
+        let mut snapshot = self
+            .embedded_world_activation
+            .snapshot(self.embedded_world_activation_ready());
+        if snapshot.volume.is_none() {
+            snapshot.volume = self.embedded_world_preview.as_ref().map(|preview| {
+                EmbeddedWorldActivationVolume::from_region(preview.region, preview.placement)
+            });
+        }
+        snapshot
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn embedded_world_activation_ready(&self) -> bool {
+        let Some(preview) = self.embedded_world_preview.as_ref() else {
+            return false;
+        };
+        let Some(standby) = self.standby_world.as_ref() else {
+            return false;
+        };
+        let Some(state) = self.warm_world_standby.as_ref() else {
+            return false;
+        };
+        preview.phase == EmbeddedWorldPreviewPhase::Visible
+            && preview.source_world == standby.id
+            && preview.renderer_topology_ready
+            && preview.source_anchor_gpu_resident
+            && preview.source_anchor_traversal_ready
+            && preview.bounded_section_count > 0
+            && state.phase == WarmWorldStandbyPhase::Switchable
+            && state.readiness.switchable
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn embedded_world_activation_ready(&self) -> bool {
+        false
+    }
+
+    /// Request the scene-owned diorama action through a neutral world-space
+    /// ray. Flat and XR adapters both enter here; block interaction is consumed
+    /// only when the ray actually hits a fully switchable preview volume.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn request_embedded_world_activation(
+        &mut self,
+        ray_origin: Vec3d,
+        ray_direction: Vec3d,
+    ) -> bool {
+        if self.embedded_world_activation.phase != EmbeddedWorldActivationPhase::Idle
+            || !self.embedded_world_activation_ready()
+        {
+            return false;
+        }
+        let Some(preview) = self.embedded_world_preview.as_ref() else {
+            return false;
+        };
+        let volume = EmbeddedWorldActivationVolume::from_region(preview.region, preview.placement);
+        if volume.ray_distance(ray_origin, ray_direction).is_none() {
+            return false;
+        }
+        let Some(standby) = self.standby_world.as_ref() else {
+            return false;
+        };
+        self.embedded_world_activation_sequence =
+            self.embedded_world_activation_sequence.saturating_add(1);
+        self.embedded_world_activation.begin(
+            self.embedded_world_activation_sequence,
+            self.active_world.id,
+            standby.id,
+            self.rendered_frames,
+            volume,
+        );
+        true
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn request_embedded_world_activation(
+        &mut self,
+        _ray_origin: Vec3d,
+        _ray_direction: Vec3d,
+    ) -> bool {
+        false
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn advance_embedded_world_activation(&mut self, dt_seconds: f64) -> bool {
+        if !self.embedded_world_activation.phase.active() {
+            return false;
+        }
+        let dt_seconds = if dt_seconds.is_finite() {
+            dt_seconds.clamp(0.0, 0.25)
+        } else {
+            0.0
+        };
+        match self.embedded_world_activation.phase {
+            EmbeddedWorldActivationPhase::Closing => {
+                self.embedded_world_activation.phase_elapsed_seconds += dt_seconds;
+                if self.embedded_world_activation.phase_elapsed_seconds
+                    < EMBEDDED_ACTIVATION_CLOSE_SECONDS
+                {
+                    return dt_seconds > 0.0;
+                }
+                let switch = self.swap_through_embedded_world_activation();
+                match switch {
+                    Ok(switch) => {
+                        if let Some(report) = self.embedded_world_activation.report.as_mut() {
+                            report.switch_elapsed_ms = Some(switch.switch_elapsed_ms);
+                            report.switched_activation_frame = Some(
+                                self.embedded_world_activation
+                                    .activation_frame
+                                    .saturating_add(1),
+                            );
+                        }
+                        if let Err(error) = self.retarget_embedded_world_preview_after_switch() {
+                            let failure = format!(
+                                "embedded-world activation preview retarget failed: {error:#}"
+                            );
+                            log::error!("{failure}");
+                            if let Some(preview) = self.embedded_world_preview.as_mut() {
+                                preview.phase = EmbeddedWorldPreviewPhase::Failed;
+                                preview.failure = Some(failure.clone());
+                            }
+                            // The complete-slot exchange already succeeded and
+                            // the selected destination is drawable. Reveal it
+                            // normally while keeping the invalid return preview
+                            // closed and the diagnostic failure explicit.
+                            self.embedded_world_activation.phase =
+                                EmbeddedWorldActivationPhase::Opening;
+                            self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                            if let Some(report) = self.embedded_world_activation.report.as_mut() {
+                                report.failure = Some(failure);
+                            }
+                            return true;
+                        }
+                        self.embedded_world_activation.phase =
+                            EmbeddedWorldActivationPhase::Covered;
+                        self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                    }
+                    Err(error) => {
+                        let failure = format!("embedded-world activation switch failed: {error:#}");
+                        log::error!("{failure}");
+                        self.embedded_world_activation.phase = EmbeddedWorldActivationPhase::Failed;
+                        self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                        if let Some(report) = self.embedded_world_activation.report.as_mut() {
+                            report.failure = Some(failure);
+                        }
+                    }
+                }
+                true
+            }
+            EmbeddedWorldActivationPhase::Covered => {
+                self.embedded_world_activation.phase_elapsed_seconds += dt_seconds;
+                if self.embedded_world_activation.phase_elapsed_seconds
+                    >= EMBEDDED_ACTIVATION_COVERED_SECONDS
+                    && self.embedded_world_activation_ready()
+                {
+                    self.embedded_world_activation.phase = EmbeddedWorldActivationPhase::Opening;
+                    self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                }
+                dt_seconds > 0.0
+            }
+            EmbeddedWorldActivationPhase::Opening => {
+                self.embedded_world_activation.phase_elapsed_seconds += dt_seconds;
+                if self.embedded_world_activation.phase_elapsed_seconds
+                    >= EMBEDDED_ACTIVATION_OPEN_SECONDS
+                {
+                    if let Some(report) = self.embedded_world_activation.report.as_mut() {
+                        report.completed_activation_frame = Some(
+                            self.embedded_world_activation
+                                .activation_frame
+                                .saturating_add(1),
+                        );
+                    }
+                    self.embedded_world_activation.phase = EmbeddedWorldActivationPhase::Idle;
+                    self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                }
+                dt_seconds > 0.0
+            }
+            EmbeddedWorldActivationPhase::Idle | EmbeddedWorldActivationPhase::Failed => false,
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn advance_embedded_world_activation(&mut self, _dt_seconds: f64) -> bool {
+        false
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn retarget_embedded_world_preview_after_switch(&mut self) -> Result<()> {
+        let Some(standby) = self.standby_world.as_mut() else {
+            bail!("standby slot disappeared after its ownership exchange");
+        };
+        let Some(preview) = self.embedded_world_preview.as_mut() else {
+            bail!("embedded preview disappeared after its ownership exchange");
+        };
+        let fixed_interest_center = preview.region.center();
+        if let Some(runtime) = standby.runtime.as_mut() {
+            runtime
+                .set_interest_center(fixed_interest_center)
+                .context("retarget retained preview interest after ownership exchange")?;
+        }
+        std::mem::swap(&mut preview.placement, &mut preview.return_placement);
+        preview.source_world = standby.id;
+        preview.phase = EmbeddedWorldPreviewPhase::Warming;
+        preview.source_anchor_gpu_resident = false;
+        preview.source_anchor_traversal_ready = false;
+        preview.bounded_section_count = 0;
+        preview.last_draw = TexturedSectionRenderStats::default();
+        preview.source_host_mode = standby.runtime.as_ref().map(|runtime| runtime.host_mode());
+        preview.fixed_interest_center = fixed_interest_center;
+        preview.preparation = EmbeddedWorldPreviewPreparationSnapshot::default();
+        preview.render = EmbeddedWorldPreviewRenderSnapshot::default();
+        preview.last_mutation = None;
+        preview.failure = None;
+        if let Some(state) = self.warm_world_standby.as_mut()
+            && let WarmWorldPresentationRequest::Diorama {
+                placement,
+                return_placement,
+                ..
+            } = &mut state.presentation
+        {
+            std::mem::swap(placement, return_placement);
+        }
+        self.embedded_world_activation.volume = Some(EmbeddedWorldActivationVolume::from_region(
+            preview.region,
+            preview.placement,
+        ));
+        Ok(())
+    }
+
+    pub(crate) fn embedded_world_activation_fade_overlay(&self) -> Option<ScreenFadeOverlay> {
+        let alpha = self.embedded_world_activation.alpha();
+        (alpha > 0.0).then_some(ScreenFadeOverlay::new([0.0, 0.0, 0.0], alpha))
+    }
+
+    pub(crate) fn defer_embedded_world_destination_preparation(&self) -> bool {
+        self.embedded_world_activation.phase.active()
+            && self
+                .embedded_world_activation
+                .report
+                .as_ref()
+                .is_some_and(|report| {
+                    report.switch_elapsed_ms.is_some()
+                        && report.first_uncovered_activation_frame.is_none()
+                })
+    }
+
+    pub(crate) fn record_embedded_world_activation_frame(
+        &mut self,
+        drawn_section_count: usize,
+        upload: XrTerrainUploadSummary,
+        eye_count: usize,
+    ) {
+        if !self.embedded_world_activation.phase.active() {
+            return;
+        }
+        self.embedded_world_activation.activation_frame = self
+            .embedded_world_activation
+            .activation_frame
+            .saturating_add(1);
+        let activation_frame = self.embedded_world_activation.activation_frame;
+        let alpha = self.embedded_world_activation.alpha();
+        let Some(report) = self.embedded_world_activation.report.as_mut() else {
+            return;
+        };
+        if alpha >= 1.0 {
+            report.covered_rendered_frames = report.covered_rendered_frames.saturating_add(1);
+        }
+        if report.switch_elapsed_ms.is_some()
+            && alpha < 1.0
+            && report.first_uncovered_activation_frame.is_none()
+        {
+            report.first_uncovered_activation_frame = Some(activation_frame);
+            report.first_uncovered_world = Some(self.active_world.id);
+            report.first_uncovered_drawn_section_count = drawn_section_count;
+            report.first_uncovered_uploaded_section_count = upload.uploaded_section_count;
+            report.first_uncovered_submitted_compile_section_count =
+                upload.submitted_compile_section_count;
+            report.first_uncovered_accepted_compile_result_count =
+                upload.accepted_compile_result_count;
+            report.first_uncovered_queue_lifecycle_items =
+                upload.queued_upload_lifecycle_item_count;
+            report.first_uncovered_pending_compile_jobs = upload.pending_compile_jobs_after;
+            report.first_uncovered_eye_count = eye_count;
+        }
     }
 
     /// Launch-smoke diagnostic for proving that the retained preview is a live
@@ -1707,6 +2005,22 @@ impl McloneSceneHost {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn swap_through_embedded_world_activation(&mut self) -> Result<WarmWorldSwitchReport> {
+        let destination = self
+            .standby_world
+            .as_ref()
+            .context("embedded-world activation has no retained destination")?;
+        let destination_entry_pose = destination
+            .accepted_entry_pose
+            .unwrap_or_else(|| WorldEntryPose::from_camera(&destination.camera));
+        let return_entry_pose = WorldEntryPose::from_camera(&self.active_world.camera);
+        self.swap_with_switchable_warm_world_using_poses(Some((
+            destination_entry_pose,
+            return_entry_pose,
+        )))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn swap_through_world_gate(&mut self) -> Result<WarmWorldSwitchReport> {
         let (destination_entry_pose, return_entry_pose) = {
             let gate = self
@@ -1767,7 +2081,7 @@ impl McloneSceneHost {
     #[cfg(not(target_arch = "wasm32"))]
     fn swap_with_switchable_warm_world_using_poses(
         &mut self,
-        gate_entry_poses: Option<(WorldEntryPose, WorldEntryPose)>,
+        selection_entry_poses: Option<(WorldEntryPose, WorldEntryPose)>,
     ) -> Result<WarmWorldSwitchReport> {
         let state = self
             .warm_world_standby
@@ -1780,12 +2094,23 @@ impl McloneSceneHost {
                 state.readiness.switchable,
             );
         }
-        let selected_source_endpoint = state
-            .source_endpoint
-            .context("switchable warm-world state has no source endpoint")?;
-        let selected_destination_endpoint = state
-            .destination_endpoint
-            .context("switchable warm-world state has no destination endpoint")?;
+        let (selected_source_endpoint, selected_destination_endpoint) =
+            if self.world_gate.is_none() && selection_entry_poses.is_some() {
+                (state.source_endpoint, state.destination_endpoint)
+            } else {
+                (
+                    Some(
+                        state
+                            .source_endpoint
+                            .context("switchable warm-world state has no source endpoint")?,
+                    ),
+                    Some(
+                        state
+                            .destination_endpoint
+                            .context("switchable warm-world state has no destination endpoint")?,
+                    ),
+                )
+            };
         let standby = self
             .standby_world
             .as_ref()
@@ -1820,9 +2145,13 @@ impl McloneSceneHost {
                 destination_renderer_ready,
             );
         }
-        let destination_entry_pose = gate_entry_poses
+        let destination_entry_pose = selection_entry_poses
             .map(|(destination, _)| destination)
-            .unwrap_or_else(|| world_gate_destination_entry_pose(selected_destination_endpoint));
+            .unwrap_or_else(|| {
+                world_gate_destination_entry_pose(
+                    selected_destination_endpoint.expect("gate endpoint checked above"),
+                )
+            });
         let destination_entry_section = entry_support_render_section(destination_entry_pose)
             .context("mapped warm-world destination pose has no entry section")?;
         if !standby.draw.contains_section(destination_entry_section)
@@ -1835,9 +2164,13 @@ impl McloneSceneHost {
                 destination_entry_section,
             );
         }
-        let return_entry_pose = gate_entry_poses
+        let return_entry_pose = selection_entry_poses
             .map(|(_, return_pose)| return_pose)
-            .unwrap_or_else(|| world_gate_destination_entry_pose(selected_source_endpoint));
+            .unwrap_or_else(|| {
+                world_gate_destination_entry_pose(
+                    selected_source_endpoint.expect("gate endpoint checked above"),
+                )
+            });
         let return_entry_section = entry_support_render_section(return_entry_pose)
             .context("mapped warm-world return pose has no entry section")?;
         if !self
@@ -1979,6 +2312,9 @@ impl McloneSceneHost {
                 .as_mut()
                 .expect("standby presence checked before ownership exchange"),
         );
+        // A deferred per-eye preparation summary belongs to the pre-exchange
+        // active slot. Never attribute or apply it after world ownership moves.
+        self.prefetched_live_upload = None;
         self.active_world.lifecycle = WorldSlotLifecycle::ActiveReady;
         self.standby_world
             .as_mut()
@@ -1995,8 +2331,8 @@ impl McloneSceneHost {
 
         self.retarget_warm_world_state_after_switch(
             renderer_multiview_required,
-            Some(selected_destination_endpoint),
-            Some(selected_source_endpoint),
+            selected_destination_endpoint,
+            selected_source_endpoint,
             return_entry_pose,
         )?;
 
@@ -2245,6 +2581,7 @@ impl McloneSceneHost {
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
         self.embedded_world_preview = None;
+        self.embedded_world_activation = EmbeddedWorldActivationState::default();
         // Drop the concrete slot unconditionally. State normally accompanies
         // it, but teardown and resource-rebuild safety must not depend on that
         // diagnostic invariant: taking the slot joins its runtime/compiler
@@ -2676,17 +3013,17 @@ impl McloneSceneHost {
             defer_sync_after_pre_drain: true,
         };
         let priority_position = match state.presentation {
-            WarmWorldPresentationRequest::Diorama { region, placement } => {
-                bounded_preview_source_priority(
-                    region,
-                    placement,
-                    Vec3d::new(
-                        f64::from(active_camera_position.x),
-                        f64::from(active_camera_position.y),
-                        f64::from(active_camera_position.z),
-                    ),
-                )
-            }
+            WarmWorldPresentationRequest::Diorama {
+                region, placement, ..
+            } => bounded_preview_source_priority(
+                region,
+                placement,
+                Vec3d::new(
+                    f64::from(active_camera_position.x),
+                    f64::from(active_camera_position.y),
+                    f64::from(active_camera_position.z),
+                ),
+            ),
             WarmWorldPresentationRequest::OpaqueGate => slot.camera.snapshot().eye,
         };
         let camera_position = glam_vec3_from_vec3d(priority_position);

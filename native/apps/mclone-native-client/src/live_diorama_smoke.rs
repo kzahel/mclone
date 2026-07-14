@@ -6,13 +6,16 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use image::ImageReader;
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, chunk_section_index};
+use mclone_input::{FlatInputAction, FlatInputFrame};
 use mclone_render::headless::{
     HeadlessFrameLoopOptions, run_headless_capture_loop, run_headless_frame_loop, save_rgba_png,
 };
 use mclone_render_session::EngineCameraViewMode;
 use mclone_scene::{
-    EmbeddedWorldPreviewMutationPhase, EmbeddedWorldPreviewMutationSnapshot,
-    EmbeddedWorldPreviewPhase, EmbeddedWorldPreviewTranslucentOrderSnapshot,
+    EmbeddedWorldActivationPhase, EmbeddedWorldActivationReport, EmbeddedWorldPreviewMutationPhase,
+    EmbeddedWorldPreviewMutationSnapshot, EmbeddedWorldPreviewPhase,
+    EmbeddedWorldPreviewTranslucentOrderSnapshot, MonoWorldActionStatus, WarmWorldSwitchReport,
+    WorldInstanceId,
 };
 use mclone_server::{
     AUTHORED_WORLD_FIXTURE_MARKER_FILE, AuthoredWorldFixtureManifest, SqliteWorldStore, WorldStore,
@@ -55,6 +58,7 @@ pub(crate) struct LiveDioramaSmokeReport {
     pub(crate) front_translucent_order: LiveDioramaTranslucentOrderReport,
     pub(crate) behind_translucent_order: LiveDioramaTranslucentOrderReport,
     pub(crate) stereo_translucent_order: LiveDioramaTranslucentOrderReport,
+    pub(crate) activation: LiveDioramaActivationSmokeReport,
     pub(crate) mutation: LiveDioramaMutationSmokeReport,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) soak: Option<LiveDioramaSoakReport>,
@@ -62,6 +66,47 @@ pub(crate) struct LiveDioramaSmokeReport {
     pub(crate) standby_cadence_applied: bool,
     pub(crate) standby_loaded_chunk_count: usize,
     pub(crate) standby_configured_chunk_limit: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveDioramaActivationSmokeReport {
+    pub(crate) schema_version: u32,
+    pub(crate) initial_path: PathBuf,
+    pub(crate) outbound_covered_path: PathBuf,
+    pub(crate) outbound_first_uncovered_path: PathBuf,
+    pub(crate) return_covered_path: PathBuf,
+    pub(crate) return_first_uncovered_path: PathBuf,
+    pub(crate) outbound: LiveDioramaActivationLegReport,
+    pub(crate) return_leg: LiveDioramaActivationLegReport,
+    pub(crate) synthetic_stereo: [LiveDioramaActivationLegReport; 2],
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LiveDioramaActivationLegReport {
+    pub(crate) sequence: u64,
+    pub(crate) source_world: u64,
+    pub(crate) destination_world: u64,
+    pub(crate) close_ms: f64,
+    pub(crate) covered_ms: f64,
+    pub(crate) open_ms: f64,
+    pub(crate) switch_elapsed_ms: f64,
+    pub(crate) covered_rendered_frames: u32,
+    pub(crate) first_uncovered_activation_frame: u32,
+    pub(crate) first_uncovered_drawn_section_count: usize,
+    pub(crate) first_uncovered_eye_count: usize,
+    pub(crate) first_uncovered_uploaded_section_count: usize,
+    pub(crate) first_uncovered_submitted_compile_section_count: usize,
+    pub(crate) first_uncovered_accepted_compile_result_count: usize,
+    pub(crate) first_uncovered_queue_lifecycle_items: usize,
+    pub(crate) first_uncovered_pending_compile_jobs: usize,
+    pub(crate) switch_uploaded_section_count: usize,
+    pub(crate) switch_submitted_compile_section_count: usize,
+    pub(crate) switch_accepted_compile_result_count: usize,
+    pub(crate) switch_materialized_renderer: bool,
+    pub(crate) source_cadence_changed: bool,
+    pub(crate) destination_cadence_changed: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -121,6 +166,17 @@ struct LiveDioramaMutationState {
     completed_frame_index: Option<usize>,
 }
 
+struct LiveDioramaActivationState {
+    host: OffscreenFlatClientHost,
+    source_world: WorldInstanceId,
+    destination_world: Option<WorldInstanceId>,
+    requested_leg_count: usize,
+    reports: Vec<EmbeddedWorldActivationReport>,
+    switches: Vec<WarmWorldSwitchReport>,
+    covered_frame_indices: Vec<usize>,
+    first_uncovered_frame_indices: Vec<usize>,
+}
+
 struct LiveDioramaSoakState {
     host: OffscreenFlatClientHost,
     target: Vec3,
@@ -174,6 +230,15 @@ pub(crate) fn run_live_diorama_smoke(
     let stereo_path = options.directory.join("a-plus-b-stereo.png");
     let mutation_before_path = options.directory.join("mutation-before.png");
     let mutation_after_path = options.directory.join("mutation-after.png");
+    let activation_initial_path = options.directory.join("activation-a-before.png");
+    let activation_outbound_covered_path = options.directory.join("activation-a-to-b-covered.png");
+    let activation_outbound_first_uncovered_path = options
+        .directory
+        .join("activation-a-to-b-first-uncovered.png");
+    let activation_return_covered_path = options.directory.join("activation-b-to-a-covered.png");
+    let activation_return_first_uncovered_path = options
+        .directory
+        .join("activation-b-to-a-first-uncovered.png");
     let report_path = options.directory.join("report.json");
 
     let mut active_scene = options.scene.clone();
@@ -277,6 +342,16 @@ pub(crate) fn run_live_diorama_smoke(
         bail!("A-only and A+B captures are pixel-identical");
     }
 
+    let activation = run_live_diorama_activation_smoke(
+        options,
+        &activation_initial_path,
+        &activation_outbound_covered_path,
+        &activation_outbound_first_uncovered_path,
+        &activation_return_covered_path,
+        &activation_return_first_uncovered_path,
+        &stereo.embedded_activation_reports,
+        &stereo.embedded_activation_switch_reports,
+    )?;
     let mutation = run_live_diorama_mutation_smoke(
         options,
         Vec3::from_array(front_eye),
@@ -320,6 +395,7 @@ pub(crate) fn run_live_diorama_smoke(
         front_translucent_order,
         behind_translucent_order,
         stereo_translucent_order,
+        activation,
         mutation,
         soak,
         standby_cadence_hz: [
@@ -474,6 +550,322 @@ fn run_live_diorama_post_mutation_soak(
         max_queued_upload_mesh_owned_bytes: state.max_queued_upload_mesh_owned_bytes,
         out_of_region_submission_count: state.out_of_region_submission_count,
         camera_orbit_changed_source_priority: state.source_priority_changed,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_live_diorama_activation_smoke(
+    options: &LiveDioramaSmokeOptions,
+    initial_path: &Path,
+    outbound_covered_path: &Path,
+    outbound_first_uncovered_path: &Path,
+    return_covered_path: &Path,
+    return_first_uncovered_path: &Path,
+    stereo_reports: &[EmbeddedWorldActivationReport],
+    stereo_switches: &[WarmWorldSwitchReport],
+) -> Result<LiveDioramaActivationSmokeReport> {
+    const FRAME_COUNT: usize = 64;
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let startup_camera = SpectatorCamera::spawn_for_scene(&scene);
+    let (_, frame_pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: FRAME_COUNT,
+            pace_frame_duration: None,
+        },
+        move |device, queue, format, size| {
+            let mut host = OffscreenFlatClientHost::new(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                startup_camera,
+            )?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Playable)?;
+            host.drive_until_embedded_preview_idle(device, queue)?;
+            aim_flat_host_at_embedded_preview(&mut host)?;
+            let source_world = host.scene_host().active_world_instance_id();
+            Ok(LiveDioramaActivationState {
+                host,
+                source_world,
+                destination_world: None,
+                requested_leg_count: 0,
+                reports: Vec::with_capacity(2),
+                switches: Vec::with_capacity(2),
+                covered_frame_indices: Vec::with_capacity(2),
+                first_uncovered_frame_indices: Vec::with_capacity(2),
+            })
+        },
+        |frame_index, frame, state| {
+            if frame_index > 0 {
+                state.host.apply_input_frame(FlatInputFrame::default())?;
+            }
+            state
+                .host
+                .render_frame(frame, OffscreenFlatClientFrameOptions { hud: false })?;
+
+            let snapshot = state.host.scene_host().embedded_world_activation_snapshot();
+            if snapshot.phase == EmbeddedWorldActivationPhase::Failed {
+                bail!("flat embedded-world activation failed: {snapshot:?}");
+            }
+            if snapshot.alpha >= 1.0
+                && state.covered_frame_indices.len() < state.requested_leg_count
+            {
+                state.covered_frame_indices.push(frame_index);
+            }
+            if snapshot
+                .last_report
+                .as_ref()
+                .is_some_and(|report| report.first_uncovered_activation_frame.is_some())
+                && state.first_uncovered_frame_indices.len() < state.requested_leg_count
+            {
+                state.first_uncovered_frame_indices.push(frame_index);
+            }
+
+            if snapshot.phase == EmbeddedWorldActivationPhase::Idle
+                && snapshot.last_report.as_ref().is_some_and(|report| {
+                    state.reports.last().map(|saved| saved.sequence) != Some(report.sequence)
+                })
+            {
+                let report = snapshot
+                    .last_report
+                    .context("flat embedded-world activation completed without a report")?;
+                state.switches.push(
+                    state
+                        .host
+                        .scene_host()
+                        .last_warm_world_switch_report()
+                        .context("flat embedded-world activation completed without switch facts")?,
+                );
+                state.reports.push(report);
+                if state.reports.len() == 1 {
+                    state.destination_world =
+                        Some(state.host.scene_host().active_world_instance_id());
+                    aim_flat_host_at_embedded_preview(&mut state.host)?;
+                    request_flat_embedded_world_activation(&mut state.host)?;
+                    state.requested_leg_count = 2;
+                }
+            }
+
+            if frame_index == 0 {
+                request_flat_embedded_world_activation(&mut state.host)?;
+                state.requested_leg_count = 1;
+            }
+            Ok(())
+        },
+    )?;
+
+    if state.reports.len() != 2
+        || state.switches.len() != 2
+        || state.covered_frame_indices.len() != 2
+        || state.first_uncovered_frame_indices.len() != 2
+    {
+        bail!(
+            "flat embedded-world activation did not produce two complete covered transitions: reports={} switches={} covered={} uncovered={}",
+            state.reports.len(),
+            state.switches.len(),
+            state.covered_frame_indices.len(),
+            state.first_uncovered_frame_indices.len(),
+        );
+    }
+    let destination_world = state
+        .destination_world
+        .context("flat embedded-world activation lost destination identity")?;
+    if state.host.scene_host().active_world_instance_id() != state.source_world
+        || state.reports[0].source_world != state.source_world
+        || state.reports[0].destination_world != destination_world
+        || state.reports[1].source_world != destination_world
+        || state.reports[1].destination_world != state.source_world
+    {
+        bail!("flat embedded-world activation lost A-to-B-to-A identity");
+    }
+    for (report, switch) in state.reports.iter().zip(&state.switches) {
+        validate_flat_embedded_world_activation(report, switch)?;
+    }
+    if stereo_reports.len() != 2 || stereo_switches.len() != 2 {
+        bail!(
+            "synthetic-stereo activation produced {} reports/{} switches, expected two each",
+            stereo_reports.len(),
+            stereo_switches.len(),
+        );
+    }
+
+    let covered = [
+        state.covered_frame_indices[0],
+        state.covered_frame_indices[1],
+    ];
+    let uncovered = [
+        state.first_uncovered_frame_indices[0],
+        state.first_uncovered_frame_indices[1],
+    ];
+    save_rgba_png(
+        initial_path,
+        options.width,
+        options.height,
+        &frame_pixels[0],
+    )?;
+    save_rgba_png(
+        outbound_covered_path,
+        options.width,
+        options.height,
+        &frame_pixels[covered[0]],
+    )?;
+    save_rgba_png(
+        outbound_first_uncovered_path,
+        options.width,
+        options.height,
+        &frame_pixels[uncovered[0]],
+    )?;
+    save_rgba_png(
+        return_covered_path,
+        options.width,
+        options.height,
+        &frame_pixels[covered[1]],
+    )?;
+    save_rgba_png(
+        return_first_uncovered_path,
+        options.width,
+        options.height,
+        &frame_pixels[uncovered[1]],
+    )?;
+    for frame_index in covered {
+        if frame_pixels[frame_index]
+            .chunks_exact(4)
+            .any(|pixel| pixel[..3] != [0, 0, 0])
+        {
+            bail!("covered activation frame {frame_index} was not fully black");
+        }
+    }
+    for frame_index in uncovered {
+        if !frame_pixels[frame_index]
+            .chunks_exact(4)
+            .any(|pixel| pixel[..3] != [0, 0, 0])
+        {
+            bail!("first uncovered activation frame {frame_index} was blank");
+        }
+    }
+
+    Ok(LiveDioramaActivationSmokeReport {
+        schema_version: 1,
+        initial_path: initial_path.to_owned(),
+        outbound_covered_path: outbound_covered_path.to_owned(),
+        outbound_first_uncovered_path: outbound_first_uncovered_path.to_owned(),
+        return_covered_path: return_covered_path.to_owned(),
+        return_first_uncovered_path: return_first_uncovered_path.to_owned(),
+        outbound: activation_leg_report(&state.reports[0], Some(&state.switches[0]))?,
+        return_leg: activation_leg_report(&state.reports[1], Some(&state.switches[1]))?,
+        synthetic_stereo: [
+            activation_leg_report(&stereo_reports[0], Some(&stereo_switches[0]))?,
+            activation_leg_report(&stereo_reports[1], Some(&stereo_switches[1]))?,
+        ],
+    })
+}
+
+fn aim_flat_host_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Result<()> {
+    let preview = host
+        .scene_host()
+        .embedded_world_preview_snapshot()
+        .context("flat activation has no embedded preview placement")?;
+    if preview.phase != EmbeddedWorldPreviewPhase::Visible {
+        bail!("flat activation preview is not visible: {preview:?}");
+    }
+    let anchor = preview.placement.composition_anchor();
+    let target = Vec3::new(anchor.x as f32, anchor.y as f32 + 0.25, anchor.z as f32);
+    let eye = Vec3::new(
+        anchor.x as f32,
+        anchor.y as f32 + 2.0,
+        anchor.z as f32 - 6.0,
+    );
+    host.set_camera_look_at(eye, target);
+    host.commit_camera()?;
+    Ok(())
+}
+
+fn request_flat_embedded_world_activation(host: &mut OffscreenFlatClientHost) -> Result<()> {
+    let statuses = host.apply_input_frame(FlatInputFrame {
+        use_item: true,
+        ..FlatInputFrame::default()
+    })?;
+    match statuses.as_slice() {
+        [(FlatInputAction::Use, MonoWorldActionStatus::EmbeddedWorldActivationRequested)] => Ok(()),
+        _ => bail!("flat diorama Use did not request scene activation: {statuses:?}"),
+    }
+}
+
+fn validate_flat_embedded_world_activation(
+    report: &EmbeddedWorldActivationReport,
+    switch: &WarmWorldSwitchReport,
+) -> Result<()> {
+    if report.switch_elapsed_ms.is_none()
+        || report.covered_rendered_frames == 0
+        || report.first_uncovered_world != Some(report.destination_world)
+        || report.first_uncovered_drawn_section_count == 0
+        || report.first_uncovered_uploaded_section_count != 0
+        || report.first_uncovered_submitted_compile_section_count != 0
+        || report.first_uncovered_accepted_compile_result_count != 0
+        || report.first_uncovered_eye_count != 1
+        || report.completed_activation_frame.is_none()
+        || report.failure.is_some()
+        || switch.source_instance_id != report.source_world
+        || switch.destination_instance_id != report.destination_world
+        || switch.switch_uploaded_section_count != 0
+        || switch.switch_submitted_compile_section_count != 0
+        || switch.switch_accepted_compile_result_count != 0
+        || switch.switch_materialized_renderer
+    {
+        bail!(
+            "flat embedded-world activation violated cover/conservation facts: report={report:?} switch={switch:?}"
+        );
+    }
+    Ok(())
+}
+
+fn activation_leg_report(
+    report: &EmbeddedWorldActivationReport,
+    switch: Option<&WarmWorldSwitchReport>,
+) -> Result<LiveDioramaActivationLegReport> {
+    Ok(LiveDioramaActivationLegReport {
+        sequence: report.sequence,
+        source_world: report.source_world.get(),
+        destination_world: report.destination_world.get(),
+        close_ms: report.close_seconds * 1_000.0,
+        covered_ms: report.covered_seconds * 1_000.0,
+        open_ms: report.open_seconds * 1_000.0,
+        switch_elapsed_ms: report
+            .switch_elapsed_ms
+            .context("activation report omitted switch duration")?,
+        covered_rendered_frames: report.covered_rendered_frames,
+        first_uncovered_activation_frame: report
+            .first_uncovered_activation_frame
+            .context("activation report omitted first uncovered frame")?,
+        first_uncovered_drawn_section_count: report.first_uncovered_drawn_section_count,
+        first_uncovered_eye_count: report.first_uncovered_eye_count,
+        first_uncovered_uploaded_section_count: report.first_uncovered_uploaded_section_count,
+        first_uncovered_submitted_compile_section_count: report
+            .first_uncovered_submitted_compile_section_count,
+        first_uncovered_accepted_compile_result_count: report
+            .first_uncovered_accepted_compile_result_count,
+        first_uncovered_queue_lifecycle_items: report.first_uncovered_queue_lifecycle_items,
+        first_uncovered_pending_compile_jobs: report.first_uncovered_pending_compile_jobs,
+        switch_uploaded_section_count: switch
+            .map_or(0, |switch| switch.switch_uploaded_section_count),
+        switch_submitted_compile_section_count: switch
+            .map_or(0, |switch| switch.switch_submitted_compile_section_count),
+        switch_accepted_compile_result_count: switch
+            .map_or(0, |switch| switch.switch_accepted_compile_result_count),
+        switch_materialized_renderer: switch
+            .is_some_and(|switch| switch.switch_materialized_renderer),
+        source_cadence_changed: switch.is_some_and(|switch| switch.source_cadence_changed),
+        destination_cadence_changed: switch
+            .is_some_and(|switch| switch.destination_cadence_changed),
     })
 }
 

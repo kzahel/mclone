@@ -90,6 +90,7 @@ pub enum MonoWorldActionStatus {
     NoRuntime,
     NoTarget,
     NoCommand,
+    EmbeddedWorldActivationRequested,
     Sent {
         target: BlockInteractionTarget,
         changed: bool,
@@ -126,11 +127,12 @@ pub struct MonoUiActionOutcome {
 pub struct MonoInputFrameOutcome {
     pub camera_changed: bool,
     pub pose_sync_changed: bool,
+    pub activation_changed: bool,
 }
 
 impl MonoInputFrameOutcome {
     pub const fn changed(self) -> bool {
-        self.camera_changed || self.pose_sync_changed
+        self.camera_changed || self.pose_sync_changed || self.activation_changed
     }
 }
 
@@ -499,14 +501,17 @@ impl McloneSceneHost {
         if !self.gameplay_startup_complete() {
             return Ok(MonoInputFrameOutcome::default());
         }
+        let activation_was_active = self.embedded_world_activation.phase.active();
+        let activation_changed = self.advance_embedded_world_activation(dt_seconds);
         let mut camera_changed = false;
-        if !self.mono_ui_is_active() {
+        if !self.mono_ui_is_active() && !activation_was_active {
             camera_changed |= self.apply_mono_movement_frame(frame, dt_seconds);
         }
         let pose_sync_changed = self.publish_mono_player_pose_if_due()?;
         Ok(MonoInputFrameOutcome {
             camera_changed,
             pose_sync_changed,
+            activation_changed,
         })
     }
 
@@ -1019,6 +1024,16 @@ impl McloneSceneHost {
         if self.active_world.runtime.is_none() {
             return Ok(MonoWorldActionStatus::NoRuntime);
         }
+        if self.embedded_world_activation.phase.active() {
+            return Ok(MonoWorldActionStatus::NoCommand);
+        }
+        if action == FlatInputAction::Use {
+            let camera = self.active_world.camera.snapshot();
+            let direction = mclone_client::view_vector(camera.yaw_radians, camera.pitch_radians);
+            if self.request_embedded_world_activation(camera.eye, direction) {
+                return Ok(MonoWorldActionStatus::EmbeddedWorldActivationRequested);
+            }
+        }
         self.commit_mono_player_pose_now()?;
         if let Some(command) = self.active_world.interaction.ensure_has_sent_carried_item() {
             self.active_world
@@ -1477,11 +1492,24 @@ impl McloneSceneHost {
                 )
                 .context("render Mono screen-space UI")?;
         }
+        if !matches!(ui, MonoUiPresentation::None)
+            && let Some(overlay) = self.embedded_world_activation_fade_overlay()
+        {
+            self.screen_effects.render_fade_in_slot(
+                device,
+                queue,
+                encoder,
+                target,
+                overlay,
+                SINGLE_VIEW_SLOT,
+            );
+        }
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_start));
 
         self.active_world.render_stats = render_stats;
         self.rendered_frames = self.rendered_frames.wrapping_add(1);
         self.record_warm_world_first_destination_frame(summary.drawn_section_count, upload);
+        self.record_embedded_world_activation_frame(summary.drawn_section_count, upload, 1);
         Ok(MonoSceneFrameSummary {
             render: summary,
             timing,
@@ -1524,6 +1552,16 @@ impl McloneSceneHost {
                     },
                 )
                 .context("render native-resolution Mono screen-space UI")?;
+        }
+        if let Some(overlay) = self.embedded_world_activation_fade_overlay() {
+            self.screen_effects.render_fade_in_slot(
+                device,
+                queue,
+                encoder,
+                target,
+                overlay,
+                SINGLE_VIEW_SLOT,
+            );
         }
         Ok((draw.commands().len(), hud_cache))
     }

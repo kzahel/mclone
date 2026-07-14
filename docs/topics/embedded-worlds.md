@@ -9,8 +9,8 @@ into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone and an active
-live-diorama tactical with live persistent terrain, water, and cross-world
-translucent ordering through completed Slice 5.**
+live-diorama tactical with local persistent terrain, water, cross-world
+translucent ordering, and blink activation/return through completed Slice 6.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -30,9 +30,14 @@ stereo A-to-B-to-A smokes prove next-frame drawing with no runtime
 reconstruction, switch-boundary upload, or lazy renderer creation. The retained
 preview now also proves a bounded authoritative mutation through persistence
 and globally orders its ocean with active-world water in physical composition
-space. There is still no N-world registry, product UI, blink activation, or
-remote preview, but simultaneous shared-depth terrain composition is now
-concrete. Separately,
+space. Flat and XR Use target the placed preview through a scene-owned ray,
+close a short shared blink, exchange the complete slots under full cover, and
+retarget the old active world onto the paired return table. Deterministic flat
+and stereo A-to-B-to-A receipts prove that the first uncovered frame already
+draws the destination with no boundary compile, upload, runtime creation, or
+renderer materialization. There is still no N-world registry, product UI, or
+remote preview, but simultaneous shared-depth terrain composition and local
+activation are now concrete. Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -56,7 +61,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 175 Slice 5).
+(Tactical 175 Slice 6).
 
 ## Motivation
 
@@ -243,7 +248,9 @@ the direct one-world shader and draw path remain unchanged. The first manual
 checkpoint is opaque/cutout local B geometry with shared-depth table occlusion.
 Later slices prove a live B block mutation, bounded-region enforcement, water
 and cross-world translucent ordering, simple blink activation/return through
-the existing whole-slot exchange, and a remote dedicated B. There is still
+the existing whole-slot exchange, and a remote dedicated B. The local parts
+of that ladder are now complete through activation; remote B remains next.
+There is still
 exactly one active slot and one optional preview; this is not an N-world
 registry. The authored fixture's void ring/table rim closes its edge. Sealed
 cuts through
@@ -659,14 +666,12 @@ bounded simultaneous-geometry plan lives in
 1. Keep the landed active-plus-optional-standby path, opaque A-to-B-to-A gate,
    optional standby cadence, lifecycle/invalidation contracts, and
    desktop/XR/no-request cost receipts green.
-2. With Tactical 175's authored-only server profile and persistent A/B fixtures
-   landed, execute the separate placed-terrain pipeline and scene-owned local
-   opaque/cutout diorama. Stop at its Slice 3 manual table review before
-   broadening behavior.
-3. After that review, prove live mutation, bounded-region enforcement,
-   water/translucent ordering, simple blink activation/return, and a remote
-   hosted source. Keep the dual-host/root-isolation smokes and materialized
-   multiview contract green.
+2. Keep Tactical 175's landed authored-only fixtures, separate placed-terrain
+   pipeline, live mutation, water/translucent ordering, and local blink
+   activation/return green without taxing the one-world path.
+3. Prove the same bounded preview and activation behavior with a remote hosted
+   source. Keep the dual-host/root-isolation smokes and materialized multiview
+   contract green.
 4. Generalize to an N-world registry only after the bounded live-diorama
    milestone is closed and a concrete multi-preview experience requires it.
 5. Lobby spawn: authoritative world behavior profile + authored room.
