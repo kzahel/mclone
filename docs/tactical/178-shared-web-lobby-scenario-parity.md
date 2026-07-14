@@ -1,10 +1,11 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: ready for unattended execution 2026-07-14. The audit and architecture
-decisions are locked; Slices 0-8 are pending an explicit implementation
-go-ahead. This tactical closes the browser exception left by Tacticals 174,
-175, and 177 by refactoring their native-shaped startup seams into shared
-contracts. It does not authorize a second browser scenario implementation.
+Status: active 2026-07-14. Slice 0 locked the current ownership debt, fresh
+native/browser performance controls, native visual comparison, and disabled
+browser transition. Slice 1 is next. This tactical closes the browser exception
+left by Tacticals 174, 175, and 177 by refactoring their native-shaped startup
+seams into shared contracts. It does not authorize a second browser scenario
+implementation.
 
 Topic: `embedded-worlds`
 
@@ -499,6 +500,70 @@ Deliverables:
 Exit criteria: the exact native assumptions to remove, every current duplicate
 and its required disposition, and both performance controls are named before
 refactoring.
+
+#### Slice 0 completion record — 2026-07-14
+
+The pre-refactor ownership lock now names all of the current exceptions rather
+than allowing a later browser implementation to grow around them. It locks the
+native-only `scenario_content` module, web capability reason, false WASM scene
+effect, `PathBuf` standby request, native launch service, active/destination
+operation separation, stable `WorldInstanceId` moving with the complete slot,
+single unqualified TypeScript compiler map, and duplicate terrain constructor.
+It also rejects scenario ids, fixture authorship, behavior policy, placement,
+and activation constants in TypeScript.
+
+The initial duplication ledger is:
+
+| Resource/state | Current count with scenario | Disposition |
+|---|---:|---|
+| authoritative server/runtime, persistence identity, client replica, camera, traversal, upload coordinator, section buffers | two | inherently per world |
+| browser integrated-server Worker | one today, two required | inherently per world once adopted |
+| native server/worldgen/light and per-runtime compile/drop workers | one set per native runtime | server workers inherently per world; compiler execution is pending host-scoped sharing where practical |
+| terrain atlas, sampler/bind ownership, shaders, layouts, compatible pipelines | two native copies | required shared; remove in Slice 2 |
+| mutable terrain residency and GPU section buffers | two | inherently per world |
+| browser compiler Worker, asset payload, SAB execution pool | one today | required singular host owner; qualify per-world queues in Slice 5 |
+| managed content operation/service state | two independent native operations | operations inherently per world; lifecycle policy pending shared refactor |
+| browser managed scenario records | none | pending thin IndexedDB adapter, never catalog rows |
+
+All entries above are classified; no duplicate was accepted merely because the
+native proof already owns it.
+
+The controls were captured from already-built release/production artifacts on
+an Apple M4 Pro with Chrome 150.0.7871.115. A first nominally idle preflight was
+rejected because a repository-triggered Cloudflare deploy was still running.
+The accepted preflight was 98.41% CPU idle with no Cargo, rustc, deploy,
+Wrangler, or emulator work; postflight was 98.18% idle.
+
+- Native 240-frame, 120 Hz release samples averaged 2.525, 2.455, 2.492,
+  2.476, and 2.521 ms; P95 was 4.348, 4.309, 4.338, 4.187, and 4.350 ms.
+  Medians were 2.492/4.338 ms. Average/P95 ranges were 2.85%/3.89%, with
+  zero over-budget frames and zero accounting violations in every run.
+- Production-browser movement samples reported compile averages of 13.0,
+  12.6, 13.1, 11.7, and 13.2 ms and average maximum-frame-gap observations of
+  8.4, 8.3, 8.3, 8.2, and 8.6 ms. The compile range was 12.8%, so this is a
+  noisy characterization control rather than a narrow machine budget; the
+  frame-gap range was 4.9%. All samples used one compiler Worker, one asset
+  send, shared-result-buffer transport, and no generated fallback or overflow.
+  No sample was discarded.
+
+Native flat and stereo lobby smokes completed two switches. The inspected
+receipts show the shared menu row, ground-level four-block table, live lobby
+and island previews with depth/water ordering, and matching stereo eyes. The
+new production-browser disabled smoke shows `ENTER LOBBY (UNAVAILABLE)` and
+proves clicking it emits no action or session replacement. Updating that smoke
+also corrected its old four-row title-menu coordinates for the shared five-row
+menu.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-web-client --test scenario_parity_ownership_lock
+cargo test -p mclone-app-runtime \
+  lobby_scenario_is_a_shared_native_effect_and_reason_bearing_web_gap
+pnpm native:web:lobby-scenario-disabled-smoke
+pnpm native:lobby-scenario:smoke
+pnpm native:lobby-scenario:stereo-smoke
+```
 
 Estimated effort: 0.5-1 day.
 

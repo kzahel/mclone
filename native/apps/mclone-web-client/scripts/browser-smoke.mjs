@@ -45,6 +45,8 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
+const lobbyUnavailableProbe = process.argv.includes("--lobby-unavailable-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE === "1";
 const farLodProbe = process.argv.includes("--far-lod-probe")
   || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
 const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
@@ -56,6 +58,7 @@ const appLoop = movementPerf
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
+  || lobbyUnavailableProbe
   || farLodProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
@@ -77,6 +80,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
+    : lobbyUnavailableProbe
+    ? "/tmp/mclone-native-web-lobby-unavailable-probe.png"
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
@@ -93,6 +98,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
+    : lobbyUnavailableProbe
+    ? "/tmp/mclone-native-web-lobby-unavailable-probe-canvas.png"
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
@@ -120,6 +127,8 @@ const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_
   ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
 const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
+const lobbyUnavailableProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-lobby-unavailable-probe.json";
 const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
 const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
@@ -436,6 +445,40 @@ async function run() {
           || canvasPixels.nonClearInteriorPixelCount <= 128
         ) {
           throw new Error(`asset-pack UI probe failed:\n${JSON.stringify(report, null, 2)}`);
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (lobbyUnavailableProbe) {
+        const lobbyUnavailableProbeResult = await runLobbyUnavailableProbe(page, canvas);
+        const result = await compactNativeUiState(page);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          lobbyUnavailableProbeReportPath,
+          lobbyUnavailableProbeResult,
+          canvasPixels,
+          result,
+        };
+        await writeFile(lobbyUnavailableProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        if (
+          !lobbyUnavailableProbeResult.ok
+          || pageErrors.length > 0
+          || canvasPixels.nonClearInteriorPixelCount <= 128
+        ) {
+          throw new Error(`disabled lobby probe failed:\n${JSON.stringify(report, null, 2)}`);
         }
         console.log(JSON.stringify(report, null, 2));
         return;
@@ -2535,7 +2578,7 @@ async function captureNativeUiProbe(page, canvas) {
   });
   const canvasPixels = analyzePng(canvasPng);
 
-  await clickNativeMenuButton(canvas, "title", 2);
+  await clickNativeMenuButton(canvas, "title", 3);
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
@@ -2561,7 +2604,7 @@ async function captureNativeUiProbe(page, canvas) {
   );
   const backedToTitle = await readNativeUiState(page);
 
-  await clickNativeMenuButton(canvas, "title", 0);
+  await clickNativeMenuButton(canvas, "title", 1);
   await page.waitForFunction(
     () => {
       const state = globalThis.__mcloneWebApp?.state;
@@ -2607,6 +2650,36 @@ async function captureNativeUiProbe(page, canvas) {
     backedFromWorldList,
     canvasScreenshotPath: nativeUiCanvasScreenshotPath,
     canvasPixels,
+  };
+}
+
+/**
+ * Transitional Slice 0 receipt: the shared title row is present but disabled,
+ * so clicking it cannot emit an action or replace the active session.
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
+async function runLobbyUnavailableProbe(page, canvas) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativeTitleUi?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.nativeUiScreen === "title",
+    undefined,
+    { timeout: 10_000 },
+  );
+  const before = await readNativeUiState(page);
+  await clickNativeMenuButton(canvas, "title", 0);
+  await page.waitForTimeout(100);
+  const after = await readNativeUiState(page);
+  return {
+    ok: before.nativeUiScreen === "title"
+      && after.nativeUiScreen === "title"
+      && JSON.stringify(after.lastUiAction) === JSON.stringify(before.lastUiAction)
+      && after.sessionState === before.sessionState
+      && after.sessionKind === before.sessionKind
+      && after.sessionSeed === before.sessionSeed
+      && after.sessionRemoteEndpoint === before.sessionRemoteEndpoint,
+    before,
+    after,
   };
 }
 
@@ -3172,7 +3245,7 @@ async function clickNativeMenuButton(canvas, menu, buttonIndex) {
       const guiWidth = Math.ceil(pixelWidth / scale);
       const guiHeight = Math.ceil(pixelHeight / scale);
       const menuTop = menu === "title"
-        ? guiHeight * 0.5 - 34.0
+        ? guiHeight * 0.5 - 46.0
         : guiHeight * 0.5 - 4.0;
       const guiX = guiWidth * 0.5;
       const guiY = menuTop + buttonIndex * 24.0 + 10.0;
