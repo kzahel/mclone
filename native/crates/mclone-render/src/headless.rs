@@ -1274,7 +1274,8 @@ mod tests {
     use super::*;
     use crate::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
     use crate::uniform::{
-        LEFT_EYE_VIEW_SLOT, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT,
+        LEFT_EYE_VIEW_SLOT, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
+        STEREO_VIEW_SLOT_COUNT,
     };
     use glam::Vec3;
     use mclone_core::{ChunkPos, Vec3d};
@@ -1448,6 +1449,7 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert!(active.shares_immutable_resources_with(&preview));
         assert_eq!(active.shared_resource_owner_count(), 2);
         let placed_renderer = preview.create_placed_renderer(&device);
+        assert!(!placed_renderer.clipped_renderer_materialized());
         let placement =
             WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::new(0.0, 0.5, 0.0), 0.2)?;
         let region = EmbeddedChunkRegion::new(ChunkPos::new(0, 0), 0, 0, 0)?;
@@ -1583,6 +1585,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             )?;
             preview.render_placed_prepared_stereo_draw_with_options_in_slot(
                 &placed_renderer,
+                &device,
                 &prepared_stereo,
                 &queue,
                 &mut encoder,
@@ -1645,6 +1648,231 @@ fn fs_main() -> @location(0) vec4<f32> {
              preview-over-active={preview_over_active} eye-differences={eye_difference_count} \
              green-centroids=({:.2},{:.2})",
             left_green.0, right_green.0,
+        );
+        assert!(!placed_renderer.clipped_renderer_materialized());
+        assert!(!placed_renderer.clipped_multiview_renderer_materialized());
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "GPU acceptance proof for Tactical 179 Slice 2"]
+    fn complementary_half_space_terrain_renders_mono_stereo_and_multiview() -> Result<()> {
+        use crate::composition_fixture::ComplementaryHalfSpaceTerrainFixture;
+
+        const WIDTH: u32 = 960;
+        const HEIGHT: u32 = 640;
+        let (device, queue) = create_headless_device()?;
+        let fixture = ComplementaryHalfSpaceTerrainFixture::new(&device, &queue, HEADLESS_FORMAT)?;
+        assert!(fixture.shares_immutable_resources());
+        assert!(!fixture.clipped_renderer_materialized());
+
+        let mono_target = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let mono_depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        let mono_view = ComplementaryHalfSpaceTerrainFixture::render_view([WIDTH, HEIGHT], 0.0);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_half_space_fixture_mono_encoder"),
+        });
+        let report = fixture.render_mono(
+            &device,
+            &queue,
+            &mut encoder,
+            ChunkRenderTarget::new(
+                &mono_target.view,
+                &mono_depth.view,
+                mono_target.size,
+                fixture_clear_color(),
+            ),
+            mono_view,
+            SINGLE_VIEW_SLOT,
+        )?;
+        queue.submit(std::iter::once(encoder.finish()));
+        assert!(fixture.clipped_renderer_materialized());
+        assert_eq!(report.left.drawn_section_count, 1);
+        assert_eq!(report.right.drawn_section_count, 1);
+        assert_eq!(report.left_translucent_section_count, 1);
+        assert_eq!(report.right_translucent_section_count, 1);
+
+        let mono_pixels = read_rgba8(&device, &queue, &mono_target.texture, WIDTH, HEIGHT)?;
+        save_rgba_png(
+            Path::new("/tmp/mclone-179-slice2-half-space-mono.png"),
+            WIDTH,
+            HEIGHT,
+            &mono_pixels,
+        )?;
+        let mut orange_left = 0usize;
+        let mut orange_right = 0usize;
+        let mut blue_left = 0usize;
+        let mut blue_right = 0usize;
+        let mut open_seam_pixels = 0usize;
+        for (index, pixel) in mono_pixels.chunks_exact(4).enumerate() {
+            let x = index as u32 % WIDTH;
+            let y = index as u32 / WIDTH;
+            if is_fixture_orange(pixel) {
+                if x + 8 < WIDTH / 2 {
+                    orange_left += 1;
+                } else if x > WIDTH / 2 + 8 {
+                    orange_right += 1;
+                }
+            }
+            if is_fixture_blue(pixel) {
+                if x + 8 < WIDTH / 2 {
+                    blue_left += 1;
+                } else if x > WIDTH / 2 + 8 {
+                    blue_right += 1;
+                }
+            }
+            if x.abs_diff(WIDTH / 2) < 24
+                && (HEIGHT / 3..HEIGHT * 2 / 3).contains(&y)
+                && is_fixture_clear(pixel)
+            {
+                open_seam_pixels += 1;
+            }
+        }
+        assert!(
+            orange_left > 5_000,
+            "missing left source pixels: {orange_left}"
+        );
+        assert!(
+            blue_right > 5_000,
+            "missing right source pixels: {blue_right}"
+        );
+        assert_eq!(orange_right, 0, "left source leaked right of clip plane");
+        assert_eq!(blue_left, 0, "right source leaked left of clip plane");
+        assert!(
+            open_seam_pixels > 100,
+            "authored open seam was not visible: {open_seam_pixels}"
+        );
+        let stereo_views = [
+            ComplementaryHalfSpaceTerrainFixture::render_view([640, 640], -0.12),
+            ComplementaryHalfSpaceTerrainFixture::render_view([640, 640], 0.12),
+        ];
+        let prepared = fixture.prepare_stereo(stereo_views);
+        let selection = prepared.stats();
+        assert_eq!(selection[0][0].drawn_section_count, 1);
+        assert_eq!(selection[0][1].drawn_section_count, 1);
+        assert_eq!(selection[1][0].drawn_section_count, 1);
+        assert_eq!(selection[1][1].drawn_section_count, 1);
+        let left_target = OffscreenTarget::new(&device, 640, 640, HEADLESS_FORMAT);
+        let right_target = OffscreenTarget::new(&device, 640, 640, HEADLESS_FORMAT);
+        let left_depth = ChunkDepthTarget::new(&device, 640, 640);
+        let right_depth = ChunkDepthTarget::new(&device, 640, 640);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_half_space_fixture_stereo_encoder"),
+        });
+        for (target, depth, render_view, view_slot) in [
+            (
+                &left_target,
+                &left_depth,
+                stereo_views[0],
+                LEFT_EYE_VIEW_SLOT,
+            ),
+            (
+                &right_target,
+                &right_depth,
+                stereo_views[1],
+                RIGHT_EYE_VIEW_SLOT,
+            ),
+        ] {
+            fixture.render_prepared_stereo_eye(
+                &prepared,
+                &device,
+                &queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &target.view,
+                    &depth.view,
+                    target.size,
+                    fixture_clear_color(),
+                ),
+                render_view,
+                view_slot,
+            )?;
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+        let left_pixels = read_rgba8(&device, &queue, &left_target.texture, 640, 640)?;
+        let right_pixels = read_rgba8(&device, &queue, &right_target.texture, 640, 640)?;
+        let eye_differences = left_pixels
+            .chunks_exact(4)
+            .zip(right_pixels.chunks_exact(4))
+            .filter(|(left, right)| left != right)
+            .count();
+        assert!(eye_differences > 1_000);
+        let stereo_pixels = stitch_rgba8_side_by_side(640, 640, &left_pixels, &right_pixels)?;
+        save_rgba_png(
+            Path::new("/tmp/mclone-179-slice2-half-space-stereo.png"),
+            1280,
+            640,
+            &stereo_pixels,
+        )?;
+
+        if device.features().contains(wgpu::Features::MULTIVIEW) {
+            let color = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("mclone_half_space_fixture_multiview_color"),
+                size: wgpu::Extent3d {
+                    width: 640,
+                    height: 640,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: HEADLESS_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let color_view = color.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                array_layer_count: Some(2),
+                ..Default::default()
+            });
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("mclone_half_space_fixture_multiview_depth"),
+                size: wgpu::Extent3d {
+                    width: 640,
+                    height: 640,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: crate::chunk::DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let depth_view = depth.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                array_layer_count: Some(2),
+                ..Default::default()
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mclone_half_space_fixture_multiview_encoder"),
+            });
+            fixture.render_prepared_multiview(
+                &prepared,
+                &device,
+                &queue,
+                &mut encoder,
+                crate::chunk::ChunkMultiviewRenderTarget::new(
+                    &color_view,
+                    &depth_view,
+                    [640, 640],
+                    fixture_clear_color(),
+                ),
+                stereo_views,
+            )?;
+            queue.submit(std::iter::once(encoder.finish()));
+            assert!(fixture.clipped_multiview_renderer_materialized());
+            let multiview_left = read_rgba8_layer(&device, &queue, &color, 640, 640, 0)?;
+            let multiview_right = read_rgba8_layer(&device, &queue, &color, 640, 640, 1)?;
+            assert_eq!(multiview_left, left_pixels);
+            assert_eq!(multiview_right, right_pixels);
+        } else {
+            eprintln!("half-space multiview device proof unavailable: adapter lacks MULTIVIEW");
+        }
+
+        eprintln!(
+            "half-space terrain proof: orange-left={orange_left} blue-right={blue_right} \
+             open-seam={open_seam_pixels} eye-differences={eye_differences}"
         );
         Ok(())
     }
@@ -1819,6 +2047,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             }
             preview.render_placed_prepared_with_options_in_slot(
                 placed_renderer,
+                device,
                 preview_records,
                 queue,
                 &mut encoder,
@@ -2093,6 +2322,22 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
 
     fn is_green(pixel: &[u8]) -> bool {
         pixel[1] > 100 && pixel[1] > pixel[0] * 2 && pixel[1] > pixel[2] * 2
+    }
+
+    fn is_fixture_orange(pixel: &[u8]) -> bool {
+        u16::from(pixel[0]) > 130
+            && u16::from(pixel[0]) > u16::from(pixel[1]) * 2
+            && u16::from(pixel[0]) > u16::from(pixel[2]) * 2
+    }
+
+    fn is_fixture_blue(pixel: &[u8]) -> bool {
+        u16::from(pixel[2]) > 130
+            && u16::from(pixel[2]) > u16::from(pixel[0]) * 2
+            && pixel[2] > pixel[1]
+    }
+
+    fn is_fixture_clear(pixel: &[u8]) -> bool {
+        pixel[0] < 20 && pixel[1] < 20 && pixel[2] < 20
     }
 
     fn color_bytes(color: [f32; 4]) -> [u8; 16] {

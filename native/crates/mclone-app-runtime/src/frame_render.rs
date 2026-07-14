@@ -977,6 +977,7 @@ fn render_terrain_phase(
 fn render_composed_translucent_terrain(
     active_draw: &TexturedSectionDrawResources,
     composition: TerrainCompositionFrame<'_>,
+    device: &wgpu::Device,
     queue: &wgpu::Queue,
     encoder: &mut wgpu::CommandEncoder,
     target: ChunkRenderTarget<'_>,
@@ -1023,6 +1024,7 @@ fn render_composed_translucent_terrain(
                     .draw
                     .render_ordered_placed_translucent_sections_in_slot(
                         composition.placed.renderer,
+                        device,
                         &keys,
                         placed_stereo_draw,
                         queue,
@@ -2226,6 +2228,7 @@ where
                         .draw
                         .render_placed_prepared_with_options_timed_in_slot(
                             placed.renderer,
+                            frame.device,
                             records,
                             frame.queue,
                             frame.encoder,
@@ -2239,6 +2242,7 @@ where
                         .draw
                         .render_placed_prepared_stereo_draw_with_options_timed_in_slot(
                             placed.renderer,
+                            frame.device,
                             prepared_draw,
                             frame.queue,
                             frame.encoder,
@@ -2251,6 +2255,7 @@ where
                     (false, PlacedTerrainPrepared::Mono(records)) => (
                         placed.draw.render_placed_prepared_with_options_in_slot(
                             placed.renderer,
+                            frame.device,
                             records,
                             frame.queue,
                             frame.encoder,
@@ -2267,6 +2272,7 @@ where
                             .draw
                             .render_placed_prepared_stereo_draw_with_options_in_slot(
                                 placed.renderer,
+                                frame.device,
                                 prepared_draw,
                                 frame.queue,
                                 frame.encoder,
@@ -2313,6 +2319,7 @@ where
                 let placed_draw_ms = render_composed_translucent_terrain(
                     draw,
                     composition,
+                    frame.device,
                     frame.queue,
                     frame.encoder,
                     translucent_target,

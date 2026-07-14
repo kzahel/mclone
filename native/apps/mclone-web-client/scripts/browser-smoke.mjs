@@ -45,6 +45,8 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
+const halfSpaceTerrainProbe = process.argv.includes("--half-space-terrain-probe")
+  || process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE === "1";
 const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-storage-probe")
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
 const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-runtime-probe")
@@ -68,6 +70,7 @@ const appLoop = movementPerf
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
+  || halfSpaceTerrainProbe
   || managedScenarioStorageProbe
   || managedScenarioRuntimeProbe
   || lobbyScenarioProbe
@@ -92,6 +95,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
+    : halfSpaceTerrainProbe
+    ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
     : lobbyScenarioProbe
@@ -112,6 +117,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
+    : halfSpaceTerrainProbe
+    ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
     : lobbyScenarioProbe
@@ -143,6 +150,8 @@ const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_
   ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
 const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
+const halfSpaceTerrainProbeReportPath = process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-half-space-terrain-probe.json";
 const managedScenarioStorageProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-storage-probe.json";
@@ -240,7 +249,7 @@ async function run() {
         };
       });
     }
-    if (managedScenarioRuntimeProbe || lobbyScenarioProbe) {
+    if (managedScenarioRuntimeProbe || lobbyScenarioProbe || halfSpaceTerrainProbe) {
       await page.addInitScript(() => {
         const root = /** @type {any} */ (globalThis);
         const NativeWorker = root.Worker;
@@ -441,6 +450,66 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (halfSpaceTerrainProbe) {
+        const halfSpaceTerrainProbeResult = await page.evaluate(
+          async () => await globalThis.__mcloneWebApp.renderHalfSpaceTerrainProof?.() ?? null,
+        );
+        await page.waitForTimeout(250);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const pixels = analyzeHalfSpaceTerrainPng(canvasPng);
+        const shutdownResult = await page.evaluate(
+          () => globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const workerStatsAfterShutdown = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          halfSpaceTerrainProbeReportPath,
+          halfSpaceTerrainProbeResult,
+          pixels,
+          shutdownResult,
+          workerStatsAfterShutdown,
+          pageErrors,
+        };
+        await writeFile(
+          halfSpaceTerrainProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          halfSpaceTerrainProbeResult?.ok !== true
+          || halfSpaceTerrainProbeResult?.sharedImmutableResources !== true
+          || halfSpaceTerrainProbeResult?.clippedRendererMaterialized !== true
+          || Number(halfSpaceTerrainProbeResult?.leftDrawnSections) !== 1
+          || Number(halfSpaceTerrainProbeResult?.rightDrawnSections) !== 1
+          || pixels.orangeLeft <= 5_000
+          || pixels.blueRight <= 5_000
+          || pixels.orangeRight !== 0
+          || pixels.blueLeft !== 0
+          || pixels.openSeamPixels <= 100
+          || shutdownResult?.shutdownComplete !== true
+          || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
+          || pageErrors.length > 0
+        ) {
+          throw new Error(
+            `browser half-space terrain probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (managedScenarioStorageProbe) {
         const managedScenarioStorageProbeResult = await runManagedScenarioStorageProbe(page);
         const result = await compactNativeUiState(page);
@@ -6487,6 +6556,50 @@ function analyzePng(bytes) {
     nearBlackInteriorPixelCount,
     transparentInteriorPixelCount,
     expectedClearColor: expected,
+  };
+}
+
+/** @param {Buffer} bytes */
+function analyzeHalfSpaceTerrainPng(bytes) {
+  const png = decodePngRgba(bytes);
+  let orangeLeft = 0;
+  let orangeRight = 0;
+  let blueLeft = 0;
+  let blueRight = 0;
+  let openSeamPixels = 0;
+  const midpoint = Math.floor(png.width / 2);
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const offset = (y * png.width + x) * 4;
+      const r = png.rgba[offset];
+      const g = png.rgba[offset + 1];
+      const b = png.rgba[offset + 2];
+      const orange = r > 130 && r > g * 2 && r > b * 2;
+      const blue = b > 130 && b > r * 2 && b > g;
+      if (orange && x + 8 < midpoint) orangeLeft += 1;
+      if (orange && x > midpoint + 8) orangeRight += 1;
+      if (blue && x + 8 < midpoint) blueLeft += 1;
+      if (blue && x > midpoint + 8) blueRight += 1;
+      if (
+        Math.abs(x - midpoint) < 24
+        && y >= Math.floor(png.height / 3)
+        && y < Math.floor(png.height * 2 / 3)
+        && r < 20
+        && g < 20
+        && b < 20
+      ) {
+        openSeamPixels += 1;
+      }
+    }
+  }
+  return {
+    width: png.width,
+    height: png.height,
+    orangeLeft,
+    orangeRight,
+    blueLeft,
+    blueRight,
+    openSeamPixels,
   };
 }
 

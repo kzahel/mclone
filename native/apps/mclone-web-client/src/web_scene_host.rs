@@ -33,8 +33,10 @@ use mclone_input::{
     FlatInputAction, FlatInputFrame, InputPromptKind, LookDelta, MovementImpulse,
     ResolvedFlatInput, TouchControlsMode,
 };
-use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
+use mclone_render::chunk::{ChunkDepthTarget, ChunkRenderTarget, TexturedSectionRenderOptions};
+use mclone_render::composition_fixture::ComplementaryHalfSpaceTerrainFixture;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+use mclone_render::uniform::SINGLE_VIEW_SLOT;
 use mclone_scene::{
     AssetReplacementStatus, ExternalSceneSessionStart, HostEffects, McloneSceneHost,
     McloneSceneHostOptions, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation,
@@ -307,6 +309,103 @@ impl WebSceneHost {
             .map_err(js_error)?;
         self.render_resource_generation = self.render_resource_generation.saturating_add(1);
         self.ui_report(false, None).map_err(JsValue::from)
+    }
+
+    /// Present the shared renderer-owned complementary-half-space fixture.
+    /// The browser adapter supplies only its WebGPU target and presentation.
+    #[wasm_bindgen(js_name = renderHalfSpaceTerrainProof)]
+    pub fn render_half_space_terrain_proof(&mut self) -> Result<JsValue, JsValue> {
+        let fixture = ComplementaryHalfSpaceTerrainFixture::new(
+            &self.context.device,
+            &self.context.queue,
+            self.context.format,
+        )
+        .map_err(js_error)?;
+        let surface_texture = self
+            .context
+            .surface
+            .get_current_texture()
+            .map_err(|error| {
+                JsValue::from_str(&format!("acquire half-space proof surface: {error}"))
+            })?;
+        let view = surface_texture.texture.create_view(&Default::default());
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mclone_web_half_space_terrain_proof_encoder"),
+                });
+        let size = [self.context.width, self.context.height];
+        let report = fixture
+            .render_mono(
+                &self.context.device,
+                &self.context.queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &view,
+                    &self.depth.view,
+                    size,
+                    ComplementaryHalfSpaceTerrainFixture::clear_color(),
+                ),
+                ComplementaryHalfSpaceTerrainFixture::render_view(size, 0.0),
+                SINGLE_VIEW_SLOT,
+            )
+            .map_err(js_error)?;
+        self.context.queue.submit(std::iter::once(encoder.finish()));
+        surface_texture.present();
+
+        let object = js_sys::Object::new();
+        report_set_bool(&object, "ok", true).map_err(JsValue::from)?;
+        report_set_string(&object, "backend", "browser-webgpu").map_err(JsValue::from)?;
+        report_set_bool(
+            &object,
+            "sharedImmutableResources",
+            fixture.shares_immutable_resources(),
+        )
+        .map_err(JsValue::from)?;
+        report_set_bool(
+            &object,
+            "clippedRendererMaterialized",
+            fixture.clipped_renderer_materialized(),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "leftDrawnSections",
+            report.left.drawn_section_count as f64,
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "rightDrawnSections",
+            report.right.drawn_section_count as f64,
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "leftDrawnIndices",
+            f64::from(report.left.drawn_index_count),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "rightDrawnIndices",
+            f64::from(report.right.drawn_index_count),
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "leftTranslucentSections",
+            report.left_translucent_section_count as f64,
+        )
+        .map_err(JsValue::from)?;
+        report_set_number(
+            &object,
+            "rightTranslucentSections",
+            report.right_translucent_section_count as f64,
+        )
+        .map_err(JsValue::from)?;
+        Ok(object.into())
     }
 
     #[wasm_bindgen(js_name = renderFrame)]

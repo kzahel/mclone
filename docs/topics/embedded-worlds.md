@@ -11,8 +11,9 @@ worlds.
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and completed shared Web/WASM lobby
-parity, followed by a proposed composable-world-presentation and live-preview
-actor milestone. Portable scenario content, shared immutable second-slot terrain
+parity, followed by an active composable-world-presentation and live-preview
+actor milestone through completed terrain Slices 0-2. Portable scenario content,
+shared immutable second-slot terrain
 resources, slot-targeted startup/readiness/activation/swap policy,
 catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
 runtime ownership, production desktop/mobile preview and activation,
@@ -109,24 +110,29 @@ feature-off remains within the attributed noise envelope. Desktop and 2x
 CPU-throttled mobile scenario receipts reached the lobby in 306/315 ms and the
 preview 1.234/1.602 s later, with about 10.3 ms maximum measured frame gaps.
 
-The proposed next renderer milestone is
+The active next renderer milestone is
 [`179-composable-world-presentation-and-live-preview-actors.md`](../tactical/179-composable-world-presentation-and-live-preview-actors.md).
-It first normalizes the existing placed-terrain path around separate placement,
-source-bounds, and composition-clip contracts, including a portable authored
-half-space terrain proof. It then moves mutable actor presentation/cache state
-with each world slot while sharing immutable actor assets and pipelines, and
-uses the same context for destination entities, remote players, and the retained
-slot's source-local full-body player. Its closeout requires real authoritative
-creature and joined-player movement in the native and browser diorama rather
-than renderer-only actors. Boundary-face resolution, collision, and authority
-handoff remain later split-world work.
+Its first three slices have characterized actor ownership, normalized the
+existing placed-terrain path around distinct placement, source-bounds, and
+composition-clip contracts, and landed opt-in portable half-space terrain
+clipping. One shared renderer fixture now draws complementary `x <= 0` and
+`x >= 0` sources with solid, cutout, and translucent phases through native and
+production browser WebGPU; inspected pixels show zero wrong-side leakage. The
+ordinary and placed-unclipped shaders stay unchanged, while clipped pipeline
+and uniform topology remains lazy. The next slices move mutable actor
+presentation/cache state with each world slot while sharing immutable actor
+assets and pipelines, then use the same context for destination entities,
+remote players, and the retained slot's source-local full-body player. Closeout
+still requires real authoritative creature and joined-player movement in the
+native and browser diorama rather than renderer-only actors. Boundary-face
+resolution, collision, and authority handoff remain later split-world work.
 
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 Slices 0-8 complete; Tactical 179 proposed; no headset was
-attached for a new real-device scenario receipt).
+(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-2 complete; no headset
+was attached for a new real-device scenario receipt).
 
 ## Motivation
 

@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: active 2026-07-14. Slices 0-1 are complete; Slices 2-7 remain.
+Status: active 2026-07-14. Slices 0-2 are complete; Slices 3-7 remain.
 
 Topic: `embedded-worlds`
 
@@ -827,6 +827,79 @@ Deliverables:
 Exit criteria: terrain validates the context's scale/bounds/clip separation for
 both diorama and split-world directions. Boundary-face resolution remains a
 named later dependency.
+
+#### Slice 2 completion record — 2026-07-14
+
+`PlacedTexturedSectionRenderer` now selects an opt-in clipped topology for a
+half-space context in every solid, cutout, and translucent mono/per-eye and
+full-frame multiview entry point. The clipped uniform appends one normalized
+composition-space plane to the unchanged placed payload. Portable generated
+WGSL exports composition position and uses fragment `discard` on the negative
+side of the plane. Transformed section AABBs wholly outside the half-space are
+rejected before ordinary camera-frustum testing; intersecting sections remain
+for exact fragment clipping, including the inclusive boundary.
+
+The direct terrain topology, direct uniform bytes, and checked-in direct and
+placed-unclipped shaders remain unchanged. Clipped mono and multiview
+pipelines and uniform rings are lazy and materialize only for a half-space
+submission. An executable source contract locks that separation and locks the
+browser proof to the shared renderer fixture rather than browser-owned clip
+logic. The existing unbounded placed GPU proof also asserts that it never
+materializes the clipped topology.
+
+The new shared `ComplementaryHalfSpaceTerrainFixture` owns two independent
+terrain stores with compatible shared immutable terrain resources, identity
+placements, `x <= 0` and `x >= 0` contexts, one depth target, authored
+solid/cutout/translucent geometry, and an intentionally open framed seam. Two
+placed renderer shells retain simultaneous source uniforms in one submission;
+this is fixture-local mutable draw state, while both stores still share their
+compatible immutable terrain resources. The shared stereo preparation feeds
+both per-eye and full-frame multiview rendering. The browser export supplies
+only its WebGPU target and presentation plumbing to this same Rust fixture.
+
+Native mono and synthetic-stereo proof captures were saved under
+`/tmp/mclone-179-slice2-half-space-*` and inspected. The mono receipt counted
+79,603 orange pixels on the left, 83,831 blue pixels on the right, zero
+wrong-side pixels in either direction, and 7,520 visible open-seam pixels.
+Stereo produced 1,406 differing pixels. The available adapter did not expose
+`MULTIVIEW`, so no capable-device execution is claimed; the multiview source,
+pipeline, preparation, and tests compile, and the GPU proof requires exact
+layer equality with per-eye output whenever that feature is exposed.
+
+Production browser WebGPU rendered the same shared proof and its inspected
+captures live under `/tmp/mclone-179-slice2-web-half-space*`. It reported one
+left and one right section, 288 indices on each side, one translucent draw per
+source, 100,995 orange-left and 106,352 blue-right pixels, zero wrong-side
+pixels, and 8,460 seam pixels. Its one compiler Worker and one server Worker
+both shut down to zero. No native/web duplicate feature implementation was
+introduced.
+
+The unchanged product was recaptured and inspected in native mono, stereo,
+live-diorama activation, desktop offscreen, and XR emulation, plus browser
+desktop, mobile, and adversarial lifecycle lanes. The destination retained two
+draws and 8,826 indices with zero out-of-region submissions and one shared
+terrain allocation held by two strong owners with no duplicated base atlas.
+Native stereo activation/return reported 159,124/210,563 eye
+differences, and XR emulation reported 249,679. Browser Workers returned to
+zero after every product smoke.
+
+Five already-built native feature-off samples initially measured a 2.486 ms
+median average and 4.363 ms median P95. The P95 crossed the investigation
+threshold, so the Slice 1 control and Slice 2 candidate were then run as five
+exact interleaved pairs. Candidate median average/P95 was 2.429/4.096 ms versus
+control 2.487/3.987 ms: -2.33%/+2.73%, with zero budget or accounting
+violations. Five production browser feature-off samples measured 13.2/18.3 ms
+median compile average/P95 versus the accepted Slice 1 13.5/18.7 ms baseline.
+All performance JSON, logs, screenshots, process checks, and the 85.76%-idle
+preflight remain under `/tmp/mclone-179-slice2-*`.
+
+Focused render, app-runtime, scene, and web-client tests passed, including the
+ignored native GPU proofs and 11 executable composition ownership contracts.
+Both adapter-purity gates, web scene-host adoption, native/wasm builds,
+TypeScript checking, formatting, and `git diff --check` passed. This slice
+proves portable terrain clipping only: the framed opening is deliberately
+authored, and boundary-face generation, collision, authority handoff, and a
+walkable seam remain later work.
 
 ### Slice 3: Per-World Actor State And Shared Immutable Resources
 

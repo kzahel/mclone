@@ -91,6 +91,7 @@ interface AppRuntime {
   frameEmbeddedPreview?: () => WasmReport | null;
   frameInteractionSurface?: () => WasmReport | null;
   renderOneFrameForSmoke?: () => Promise<WasmReport | null>;
+  renderHalfSpaceTerrainProof?: () => Promise<WasmReport | null>;
   rebuildRenderResourcesForSmoke?: () => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
   openNativePauseUi?: () => WasmReport | null;
@@ -276,6 +277,7 @@ async function boot(): Promise<WasmReport> {
   runtime.frameEmbeddedPreview = () => app.frameEmbeddedPreview();
   runtime.frameInteractionSurface = () => app.frameInteractionSurface();
   runtime.renderOneFrameForSmoke = () => app.renderOneFrameForSmoke();
+  runtime.renderHalfSpaceTerrainProof = () => app.renderHalfSpaceTerrainProof();
   runtime.rebuildRenderResourcesForSmoke = () => app.rebuildRenderResourcesForSmoke();
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
   runtime.openNativePauseUi = () => app.openNativePauseUi();
@@ -543,6 +545,7 @@ class WebFrameDriver {
       "completeManagedScenarioWorldStart",
       "discardManagedScenarioOperations",
       "installManagedScenarioServices",
+      "renderHalfSpaceTerrainProof",
       "shutdown",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
@@ -645,6 +648,14 @@ class WebFrameDriver {
       runtime.state.tickPhase = "idle";
       publishRuntimeState(runtime.state);
     }
+  }
+
+  async renderHalfSpaceTerrainProof(): Promise<WasmReport | null> {
+    this.pauseRendering();
+    while (this.tickFrameBusy || this.sessionBusy) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    return this.session?.renderHalfSpaceTerrainProof() ?? null;
   }
 
   rebuildRenderResourcesForSmoke(): WasmReport | null {

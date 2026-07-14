@@ -97,6 +97,41 @@ fn composition_context_stays_out_of_the_direct_single_world_path() {
 }
 
 #[test]
+fn half_space_clipping_is_an_opt_in_shared_renderer_topology() {
+    let terrain = read("../mclone-render/src/chunk.rs");
+    let direct_shader = read("../mclone-render/src/shaders/chunk_textured.wgsl");
+    let placed_shader = read("../mclone-render/src/shaders/chunk_textured_placed.wgsl");
+    let placed_multiview_shader =
+        read("../mclone-render/src/shaders/chunk_textured_placed_multiview.wgsl");
+    let selection = braced_item(&terrain, "fn selected_mono_renderer(");
+    let clipped_shader = terrain
+        .split("fn clipped_placed_shader_source(")
+        .nth(1)
+        .expect("clipped placed shader helper present")
+        .split("fn clipped_placed_multiview_shader_source(")
+        .next()
+        .expect("mono helper ends before multiview helper");
+
+    for unchanged_shader in [direct_shader, placed_shader, placed_multiview_shader] {
+        assert!(!unchanged_shader.contains("clip_plane"));
+    }
+    assert!(selection.contains("CompositionClip::Unbounded"));
+    assert!(selection.contains("SelectedPlacedMonoRenderer::Unbounded(self)"));
+    assert!(selection.contains("CompositionClip::HalfSpace"));
+    assert!(selection.contains("self.clipped_renderer"));
+    assert!(clipped_shader.contains("clip_plane: vec4<f32>"));
+    assert!(clipped_shader.contains("discard;"));
+
+    let fixture = read("../mclone-render/src/composition_fixture.rs");
+    let web = read("../../apps/mclone-web-client/src/web_scene_host.rs");
+    let web_proof = braced_item(&web, "pub fn render_half_space_terrain_proof(");
+    assert!(fixture.contains("pub struct ComplementaryHalfSpaceTerrainFixture"));
+    assert!(web_proof.contains("ComplementaryHalfSpaceTerrainFixture::new"));
+    assert!(!web_proof.contains("CompositionHalfSpace"));
+    assert!(!web_proof.contains("CompositionClip"));
+}
+
+#[test]
 fn actor_renderer_current_immutable_and_mutable_ownership_is_exact() {
     let actor = read("../mclone-render/src/entity.rs");
     let resources = braced_item(&actor, "pub struct ActorDrawResources {");

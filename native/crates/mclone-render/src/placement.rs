@@ -111,6 +111,18 @@ impl CompositionHalfSpace {
         self.signed_distance(composition_position) >= 0.0
     }
 
+    /// Return true only when every point in an axis-aligned box is outside
+    /// this half-space. Intersecting boxes remain GPU work so the fragment
+    /// clip can resolve the exact plane.
+    pub fn rejects_aabb(self, min: Vec3, max: Vec3) -> bool {
+        let farthest = Vec3::new(
+            if self.normal.x >= 0.0 { max.x } else { min.x },
+            if self.normal.y >= 0.0 { max.y } else { min.y },
+            if self.normal.z >= 0.0 { max.z } else { min.z },
+        );
+        self.signed_distance(farthest) < 0.0
+    }
+
     pub fn complementary(self) -> Self {
         Self {
             normal: -self.normal,
@@ -131,6 +143,13 @@ impl CompositionClip {
         match self {
             Self::Unbounded => true,
             Self::HalfSpace(half_space) => half_space.retains(composition_position),
+        }
+    }
+
+    pub fn rejects_aabb(self, min: Vec3, max: Vec3) -> bool {
+        match self {
+            Self::Unbounded => false,
+            Self::HalfSpace(half_space) => half_space.rejects_aabb(min, max),
         }
     }
 }
@@ -479,6 +498,8 @@ mod tests {
         assert!(complement.retains(Vec3::new(2.0, 0.0, 0.0)));
         assert!(!complement.retains(Vec3::new(3.0, 0.0, 0.0)));
         assert!(complement.retains(Vec3::new(1.0, 0.0, 0.0)));
+        assert!(!half_space.rejects_aabb(Vec3::new(1.0, -1.0, -1.0), Vec3::new(2.0, 1.0, 1.0),));
+        assert!(half_space.rejects_aabb(Vec3::new(-4.0, -1.0, -1.0), Vec3::new(1.0, 1.0, 1.0),));
     }
 
     #[test]
