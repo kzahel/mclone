@@ -7,9 +7,11 @@ entry. Flat and synthetic-stereo product smokes prove cancellation, launch,
 A-to-B-to-A activation, quit, and warm relaunch through that menu path. The
 local proof is now one shared scenario contract rather than parallel
 CLI-versus-product implementations; Tactical 175 may resume remote Slice 7.
-Tactical 178 owns the browser parity refactor; the web gap is larger than the
-IndexedDB executor alone because slot-targeted startup and dual-Worker/compiler
-ownership also remain native-shaped.
+Tactical 178 subsequently completed the browser parity refactor through the
+same contract: catalog-excluded IndexedDB provisioning, slot-targeted startup,
+dual server Workers, one stable-identity compiler broker, live preview,
+activation, persistence, lifecycle rejection, and feature-off performance
+closeout all pass without a TypeScript scenario implementation.
 
 Topic: `embedded-worlds`
 
@@ -379,14 +381,10 @@ The lobby is an engine feature, not a desktop-only menu item.
 - Synthetic stereo proves the shared XR input/render behavior without a
   headset. Real native XR validation follows the platform matrix when a capable
   runtime/device is available.
-- Web keeps compiling against the shared intent and state vocabulary. If
-  managed authored-content provisioning is not implemented in this tactical,
-  expose one reason-bearing web capability gap such as "Lobby scenarios need
-  IndexedDB managed-content provisioning." The button must be hidden or
-  visibly unavailable; it cannot emit a silent no-op.
-- A later browser implementation supplies an IndexedDB content executor behind
-  the same scenario policy. It must not recreate scenario selection, behavior,
-  placements, or readiness in TypeScript.
+- Web now consumes the same intent, scenario state, readiness, placement, and
+  activation vocabulary through Tactical 178. Its IndexedDB/Promise/Worker
+  code is a platform executor only and does not recreate scenario selection,
+  behavior, authored content, placement, or readiness in TypeScript.
 
 Add the scenario to the native feature-parity enforcement so it cannot
 silently disappear from Android or XR profiles after desktop bring-up.

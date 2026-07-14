@@ -638,14 +638,14 @@ mclone_run_session_smoke() {
         new-world)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title Singleplayer"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer"
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
             ;;
         persist-restart)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title Singleplayer"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer"
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
             sleep "${MCLONE_ANDROID_PERSIST_CREATE_SETTLE_SECONDS:-6}"
@@ -660,7 +660,7 @@ mclone_run_session_smoke() {
             sleep "${MCLONE_ANDROID_PERSIST_RELAUNCH_SECONDS:-15}"
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu after relaunch"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title after relaunch"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 24 * scale)) "title Singleplayer after relaunch"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer after relaunch"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 89 * scale)) "world-list first row after relaunch"
             mclone_android_tap_pixel "$serial" $((182 * scale)) $((325 * scale)) "world-list Open after relaunch"
             sleep "${MCLONE_ANDROID_PERSIST_REOPEN_SETTLE_SECONDS:-8}"
@@ -668,7 +668,7 @@ mclone_run_session_smoke() {
         join-remote)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
-            mclone_android_tap_pixel "$serial" "$center_x" "$center_y" "title Join Remote"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 12 * scale)) "title Join Remote"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "join-remote Connect"
             ;;
         *)

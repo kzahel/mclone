@@ -94,7 +94,7 @@ fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
         .next()
         .unwrap();
     assert!(!effect.contains("Ok(false)"));
-    assert!(!effect.contains("WEB_LOBBY_SCENARIO_REASON"));
+    assert!(!effect.contains("WEB_LOBBY_SCENARIO_INITIALIZING_REASON"));
     let request = WARM_WORLD
         .split("pub struct WarmWorldStandbyRequest {")
         .nth(1)

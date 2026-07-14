@@ -45,16 +45,20 @@ and writes its JSON receipt under `/tmp/mclone-live-diorama-smoke`. The
 interactive desktop lane uses the same shared scene owner and launch options.
 Capable-device multiview execution remains the same named gap.
 
-The first shared product scenario is available from the native title menu as
-`Enter Lobby`: desktop flat/XR and Android flat/XR profiles all route the same
-path-free action into `McloneSceneHost`, which launches a protected managed
-lobby and asynchronously warms its live island diorama. Flat and synthetic
-stereo lifecycle smokes pass, as do both Android APK builds. Web renders the
-same row disabled. The browser gap includes IndexedDB managed content,
-slot-targeted standby startup, and dual-Worker/compiler ownership; Tactical
+The first shared product scenario is available from every supported title menu
+as `Enter Lobby`. Desktop flat/XR, Android flat/XR, and Web/WASM profiles route
+the same path-free action into `McloneSceneHost`, which launches a protected
+managed lobby and asynchronously warms its live island diorama. Native uses
+app-private SQLite worlds and threads; web uses catalog-excluded IndexedDB
+records and Workers behind the same shared policy. The browser owns two server
+Workers and one namespaced compiler broker while both draw stores reuse one
+immutable terrain resource owner. Flat, synthetic-stereo, production-browser,
+and Android package/AVD gates pass. No TypeScript scenario selection,
+authorship, readiness, placement, or activation policy exists. Tactical
 [`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
-owns the shared-first parity refactor. Web does not synthesize support in
-TypeScript.
+records the completed parity refactor and performance receipts. A new
+capable-device multiview scenario receipt remains pending because no headset
+was attached at closeout.
 
 Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
 2026-07-12. The native client builds and the full-frame offscreen smoke renders
@@ -381,6 +385,9 @@ pnpm native:web:asset-pack-smoke
 pnpm native:web:block-edit-probe
 pnpm native:web:movement-perf
 pnpm native:web:remote-smoke
+pnpm native:web:lobby-scenario-smoke
+pnpm native:web:lobby-scenario-mobile-smoke
+pnpm native:web:lobby-scenario-lifecycle-smoke
 
 # Strict standalone first-party resolution audit
 pnpm --silent assets:validate:first-party \

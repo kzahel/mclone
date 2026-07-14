@@ -534,7 +534,7 @@ fn web_client_experience_profile_with_managed_scenarios(
     ClientExperienceProfile::new(settings).with_lobby_scenario(if managed_scenarios_available {
         ClientExperienceCapabilityStatus::Supported
     } else {
-        ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)
+        ClientExperienceCapabilityStatus::Pending(WEB_LOBBY_SCENARIO_INITIALIZING_REASON)
     })
 }
 
@@ -546,8 +546,8 @@ const WEB_DEBUG_DIAGNOSTICS_REASON: &str =
     "Debug diagnostics needs browser presenter wiring and panel proof";
 const WEB_SERVER_SIMULATION_CADENCE_REASON: &str =
     "Server simulation cadence needs browser runtime control and diagnostic proof";
-pub const WEB_LOBBY_SCENARIO_REASON: &str =
-    "Lobby scenarios need IndexedDB managed-content provisioning";
+pub const WEB_LOBBY_SCENARIO_INITIALIZING_REASON: &str =
+    "Lobby scenario services are still initializing";
 
 /// Audited browser feature gaps. Each entry names a concrete follow-up and must
 /// exactly match a reason-bearing capability in [`web_client_experience_profile`].
@@ -1953,7 +1953,7 @@ mod tests {
         let incomplete_profile = web_client_experience_profile_without_managed_scenarios();
         assert_eq!(
             incomplete_profile.lobby_scenario,
-            ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)
+            ClientExperienceCapabilityStatus::Pending(WEB_LOBBY_SCENARIO_INITIALIZING_REASON)
         );
         let mut controller = ClientExperienceController::new(incomplete_profile);
         let effects = controller.apply_ui_action(
@@ -1965,7 +1965,9 @@ mod tests {
             effects.settings.capability_projection.first_unavailable(),
             Some(ClientExperienceActionAvailability {
                 kind: ClientExperienceActionKind::EnterScenario,
-                status: ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON),
+                status: ClientExperienceCapabilityStatus::Pending(
+                    WEB_LOBBY_SCENARIO_INITIALIZING_REASON,
+                ),
             })
         );
         assert_eq!(

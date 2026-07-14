@@ -21,16 +21,21 @@ that one host.
 
 The web settings-feature profile remains intentionally honest: travel assist,
 frame-pipeline overlay, debug diagnostics, and server simulation cadence are
-its exact remaining reason-bearing gaps in `mclone-app-runtime`. The shared
-`Enter Lobby` product-scenario row is also visibly unavailable with the
-separate reason "Lobby scenarios need IndexedDB managed-content provisioning";
-it cannot emit a silent no-op. Native scenario policy remains shared, and a
-browser implementation must supply an IndexedDB content executor, generalize
-the shared slot-targeted startup/lifecycle seams, and own two browser runtimes
-without recreating scenario policy in TypeScript. Tactical
+its exact remaining reason-bearing gaps in `mclone-app-runtime`. `Enter Lobby`
+is supported. The browser provisions the same Rust-authored protected lobby and
+mutable island into catalog-excluded IndexedDB records, starts two independent
+integrated-server Workers, multiplexes both stable world identities through one
+compiler Worker, and submits the live island through the shared scene/render
+path. The two draw stores share compatible immutable atlas/pipeline resources.
+TypeScript owns only IndexedDB, Promise, Worker, input, and presentation
+mechanics; it does not choose or author scenario content, decide readiness,
+place geometry, or activate worlds. The temporary profile used while those
+services are installed reports a pending initialization state and is promoted
+atomically before the title is presented. Tactical
 [`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
-tracks that parity refactor and its feature-off performance gate. Far LOD is
-supported through the production shared resident compiler/cache/render path.
+records the completed parity refactor and feature-off/scenario-on performance
+evidence. Far LOD is supported through the production shared resident
+compiler/cache/render path.
 That path now uses 4/8/16 rings with two-chunk hysteresis and
 replacement-before-suppress transitions. Browser audio and teleport preview
 remain explicit absent service capabilities.
@@ -60,6 +65,13 @@ pnpm native:web:far-lod-remote-smoke
 # Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke
 
+# Enter the shared protected lobby, wait for its live island preview, and
+# validate desktop, CPU-throttled mobile, activation/persistence, and lifecycle
+# cancellation paths. Reports and screenshots stay under /tmp.
+pnpm native:web:lobby-scenario-smoke
+pnpm native:web:lobby-scenario-mobile-smoke
+pnpm native:web:lobby-scenario-lifecycle-smoke
+
 # Run the complete production host-mode and behavior matrix used for scene-host
 # changes. Captures and logs remain under /tmp.
 pnpm native:web:smoke
@@ -72,6 +84,9 @@ pnpm native:web:mobile-smoke
 pnpm native:web:block-edit-probe
 pnpm native:web:movement-perf
 pnpm native:web:remote-smoke
+pnpm native:web:lobby-scenario-smoke
+pnpm native:web:lobby-scenario-mobile-smoke
+pnpm native:web:lobby-scenario-lifecycle-smoke
 
 # Build the exact deploy bundle into dist-native-web/ without uploading.
 pnpm native:web:bundle

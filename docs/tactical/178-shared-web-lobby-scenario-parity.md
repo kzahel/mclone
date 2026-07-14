@@ -1,17 +1,18 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-7 locked the baseline, extracted portable
-scenario content, removed the duplicate second-slot terrain shell, and moved
-managed provisioning, slot-targeted startup, readiness, activation, and swap
-policy into shared Rust. Catalog-excluded, Worker-backed IndexedDB provisioning
-and dual browser runtime ownership through one namespaced compiler broker are
-also complete. The production desktop and mobile browser title enters the
-protected lobby, renders its live island preview, activates in both directions,
-persists destination edits, and rejects late runtime starts across cancellation,
-asset replacement, and resource rebuild. Performance and platform-parity
-closeout is next. This tactical closes the browser exception left by Tacticals
-174, 175, and 177 by refactoring their native-shaped startup seams into shared
-contracts. It does not authorize a second browser scenario implementation.
+Status: complete 2026-07-14. Slices 0-8 extracted portable scenario content,
+removed the duplicate second-slot terrain shell, and moved managed
+provisioning, slot-targeted startup, readiness, activation, and swap policy
+into shared Rust. Catalog-excluded, Worker-backed IndexedDB provisioning and
+dual browser runtime ownership through one namespaced compiler broker are
+complete. The production desktop and mobile browser title enters the protected
+lobby, renders its live island preview, activates in both directions, persists
+destination edits, and rejects late runtime starts across cancellation, asset
+replacement, and resource rebuild. Final feature-off performance and the
+available platform matrix pass. This tactical closes the browser exception
+left by Tacticals 174, 175, and 177 by refactoring their native-shaped startup
+seams into shared contracts. It did not create a second browser scenario
+implementation.
 
 Topic: `embedded-worlds`
 
@@ -1183,6 +1184,114 @@ Deliverables:
 Exit criteria: the web exception is removed, all five platform profiles support
 the scenario, feature-off performance clears the contract, and scenario-on cost
 is explicit enough to guide future lobby-default or cached-preview decisions.
+
+#### Slice 8 completion record — 2026-07-14
+
+The production web profile now reports the lobby scenario as supported. The
+temporary profile used while the browser installs its complete provisioning
+and runtime-service boundary is a `Pending` initialization state, not a
+platform exception, and disappears before the title is presented. The old
+IndexedDB-gap reason is gone. Executable ownership locks continue to reject
+TypeScript scenario identity, fixture authorship, behavior, placement,
+readiness, and activation policy. The only TypeScript changes in this slice
+were performance/smoke accounting and protocol-mechanical validation glue.
+
+The final native direct-path batch ran from an already-built release binary
+after a 93.7% idle preflight with no Cargo, rustc, deploy, bundler, or emulator
+process. One fully retained characterization batch was not accepted because
+its P95 range was 29.9%; no overlapping process was found, so no sample was
+discarded and the complete batch was rerun. The accepted five averages were
+2.470, 2.426, 2.449, 2.481, and 2.481 ms; P95 values were 4.359, 3.923,
+4.231, 4.288, and 4.262 ms. Medians were 2.470/4.262 ms, 0.88%/1.75% faster
+than the Slice 0 2.492/4.338 ms control. Average/P95 ranges were 2.23%/10.23%;
+the favorable low P95 sample explains the latter, while the worst P95 was only
+0.48% above control. Every run had zero over-budget frames and zero accounting
+violations. Postflight was 92.9% idle.
+
+After a 96.0% idle preflight, five exact-final-code production-browser
+feature-off runs reported compiler averages of 13.7, 13.7, 13.5, 13.6, and
+13.6 ms and average maximum-frame-gap values of 8.6, 8.7, 8.4, 8.7, and
+8.3 ms. The 13.6 ms compiler median is 4.6% above the noisy Slice 0 13.0 ms
+anchor and therefore uses Slice 6's interleaved untouched-control attribution:
+the candidate was 13.9/14.1 ms versus control 14.0/13.7 ms, a 1.1% candidate
+mean difference under the same machine drift. The final frame-gap median was
+8.6 ms versus 8.3 ms at Slice 0 and remains inside that interleaved run's
+8.4-8.6 ms environmental band. Every run used one compiler Worker, one asset
+send, shared-result-buffer transport, no generated fallback, and no overflow.
+Postflight was 95.7% idle.
+
+The final desktop scenario reached a playable lobby in 306 ms and its preview
+1.234 s later. It spent 168 ms in browser-main-renderer tasks across the
+1.540 s measured window, a 10.9% upper bound that includes screenshot work;
+Worker CPU is not exported and is explicitly excluded from that percentage.
+Maximum/P95 frame gaps were 10.32/10.20 ms. The 2x CPU-throttled mobile run
+reached the lobby in 315 ms and its preview 1.602 s later. Its equivalent upper
+bound was 320 ms across 1.917 s, or 16.7%, with 10.32/10.14 ms maximum/P95
+gaps. Both retained two server Workers, one shared compiler Worker, zero
+provisioning Workers after publication, two compiler sessions, one compiler
+WASM/asset initialization, and 81 destination chunks. Standby cadence was
+applied through the typed runtime operation.
+
+The measured live browser resource receipt reported an 8,710,077-byte WASM
+module, 13.2-14.1 MB of whole-page used JS heap, and 28,319,808 bytes of
+active shared-buffer capacity. The two draw stores referenced one
+8,388,608-byte base terrain atlas and zero duplicated atlas bytes; the bounded
+standby terrain estimate was 270,664 bytes. The preview drew two of three
+bounded sections and 8,826 indices with zero foreign-region submission. The
+production adapter does not export its main WASM heap size, so the report says
+so rather than inventing a retained-byte value. Managed authored payloads
+remain 927,561 bytes for the lobby and 126,551 bytes for the island before
+IndexedDB implementation overhead.
+
+The final lifecycle receipt measured 314 ms for first mouse activation, 279 ms
+for touch return, and 242 ms for activation after full shutdown/reopen. Every
+switch used five covered frames; the first uncovered destination already drew
+terrain with zero compile submission, compile acceptance, section upload, or
+renderer materialization. Three held late completions—Quit, asset replacement,
+and resource rebuild—were rejected, and final shutdown left zero server,
+compiler, or managed-content Workers.
+
+The full shared Cargo matrix, purity gates, Web build/typecheck, browser
+thread/app/catalog/mobile/asset/block-edit/movement/remote matrix, native
+offscreen and synthetic-stereo captures, lobby flat/stereo/activation lanes,
+flat Android APK and AVD app/new-world smokes, Android XR release APK, and XR
+feature check pass. The Android new-world validator exposed one stale title
+tap after `Enter Lobby` added a row; its shared harness coordinate now targets
+the actual `Singleplayer`/`Join Remote` rows and the rerun passed with inspected
+terrain pixels. The low-level browser thread smoke likewise now recognizes the
+qualified compiler broker's `release-world` doorbell and passes.
+
+No Quest or real desktop OpenXR headset was attached. Android XR packaging,
+desktop XR compilation, synthetic stereo, and the existing shared multiview
+source/tests pass, but this closeout does not claim a new capable-device
+multiview receipt. That optional device evidence remains the named gap.
+
+Focused evidence:
+
+```text
+cargo test --manifest-path native/Cargo.toml -p mclone-server \
+  -p mclone-app-runtime -p mclone-render-session -p mclone-render \
+  -p mclone-scene -p mclone-web-client
+pnpm native:thin-adapters:purity
+pnpm native:scene-host:purity
+pnpm native:web:typecheck
+pnpm native:web:thread-smoke
+pnpm native:web:app-smoke
+pnpm native:web:catalog-smoke
+pnpm native:web:mobile-smoke
+pnpm native:web:asset-pack-smoke
+pnpm native:web:block-edit-probe
+pnpm native:web:remote-smoke
+pnpm native:web:lobby-scenario-smoke
+pnpm native:web:lobby-scenario-mobile-smoke
+pnpm native:web:lobby-scenario-lifecycle-smoke
+pnpm native:desktop-offscreen:smoke
+pnpm native:xr-emulation:smoke
+pnpm native:android:avd-smoke -- --skip-build
+pnpm native:android:avd-session-smoke -- --skip-build
+pnpm native:android-xr:apk
+pnpm native:xr:check
+```
 
 Estimated effort: 1-2 days.
 

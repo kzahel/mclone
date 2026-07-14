@@ -781,6 +781,10 @@ function createCompilerWake(compiler) {
     error: "",
     /** @param {any} doorbell */
     wake(doorbell) {
+      if (doorbell?.kind === "release-world") {
+        compiler.releaseWorld(String(doorbell.worldInstanceId ?? ""));
+        return;
+      }
       metrics.compileCount += 1;
       metrics.pendingCount += 1;
       void compiler.compileWithDoorbell(doorbell).then((compiled) => {

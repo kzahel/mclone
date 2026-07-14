@@ -1,7 +1,7 @@
 import { chromium } from "@playwright/test";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, resolve, sep } from "node:path";
@@ -1610,6 +1610,7 @@ async function activateBrowserEmbeddedPreview(page, canvas, input, screenshot) {
       world: state.activeWorldInstanceId,
       sequence: Number(state.embeddedActivationSequence) || 0,
       pointerLockAttempted: state.pointerLockAttempted === true,
+      requestedAtMs: performance.now(),
     };
   });
   if (input === "mouse") {
@@ -1652,6 +1653,7 @@ async function activateBrowserEmbeddedPreview(page, canvas, input, screenshot) {
     { world: before.world, sequence: before.sequence },
     { timeout: 20_000, polling: "raf" },
   );
+  const completedAtMs = await page.evaluate(() => performance.now());
   await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
   const png = await canvas.screenshot({ path: screenshot, timeout: 60_000 });
@@ -1695,7 +1697,13 @@ async function activateBrowserEmbeddedPreview(page, canvas, input, screenshot) {
   ) {
     throw new Error(`embedded activation receipt was invalid: ${JSON.stringify({ after, pixels })}`);
   }
-  return { input, screenshot, pixels, ...after };
+  return {
+    input,
+    screenshot,
+    pixels,
+    activationElapsedMs: completedAtMs - before.requestedAtMs,
+    ...after,
+  };
 }
 
 /** @param {Page} page */
@@ -1755,6 +1763,9 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
   });
   const titlePixels = analyzePng(titlePng);
   await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const cdpBefore = await cdp.send("Performance.getMetrics");
   const before = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     const timing = {
@@ -1890,6 +1901,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
     const state = globalThis.__mcloneWebApp.state;
     const root = /** @type {any} */ (globalThis);
     const timing = root.__mcloneLobbyTiming;
+    const memory = /** @type {any} */ (performance).memory;
     timing.running = false;
     const gaps = timing.gaps.slice();
     const sorted = gaps.slice().sort(
@@ -1940,10 +1952,58 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
             qualifiedWorldCount: state.lastCompileReport.qualifiedWorldCount,
           }
         : null,
+      memory: {
+        jsHeapUsedBytes: Number(memory?.usedJSHeapSize) || 0,
+        jsHeapTotalBytes: Number(memory?.totalJSHeapSize) || 0,
+        jsHeapLimitBytes: Number(memory?.jsHeapSizeLimit) || 0,
+        activeRunnerSharedBufferCapacityBytes:
+          Number(state.runnerFrameMetrics?.sharedBufferCapacityBytes) || 0,
+        activeWorldgenSharedBufferCapacityBytes:
+          Number(state.worldgenJobFrameMetrics?.sharedBufferCapacityBytes) || 0,
+        activeLightSharedBufferCapacityBytes:
+          Number(state.lightStatusJobFrameMetrics?.sharedBufferCapacityBytes) || 0,
+        compilerSharedInputBufferCapacityBytes:
+          Number(state.lastCompileReport?.renderCompilerMetrics
+            ?.sharedInputBufferCapacityBytes) || 0,
+        compilerSharedResultBufferCapacityBytes:
+          Number(state.lastCompileReport?.renderCompilerMetrics
+            ?.sharedResultBufferCapacityBytes) || 0,
+      },
     };
   });
+  const cdpAfter = await cdp.send("Performance.getMetrics");
+  await cdp.detach();
+  const cdpBeforeByName = Object.fromEntries(
+    cdpBefore.metrics.map((metric) => [metric.name, metric.value]),
+  );
+  const cdpAfterByName = Object.fromEntries(
+    cdpAfter.metrics.map((metric) => [metric.name, metric.value]),
+  );
+  const browserProcessMetrics = Object.fromEntries(
+    cdpAfter.metrics
+      .filter((metric) => [
+        "TaskDuration",
+        "ScriptDuration",
+        "JSHeapUsedSize",
+        "JSHeapTotalSize",
+        "Nodes",
+      ].includes(metric.name))
+      .map((metric) => [metric.name, metric.value]),
+  );
+  const wasmModuleBytes = (await stat(
+    join(bindgenOutDir, "mclone_web_client_bg.wasm"),
+  )).size;
   const clickToLobbyPlayableMs = lobbyPlayable.atMs - before.startMs;
   const lobbyPlayableToPreviewMs = after.atMs - lobbyPlayable.atMs;
+  const measuredElapsedMs = after.atMs - before.startMs;
+  const mainRendererTaskDurationMs = Math.max(
+    0,
+    (Number(cdpAfterByName.TaskDuration) - Number(cdpBeforeByName.TaskDuration)) * 1000,
+  );
+  const mainRendererScriptDurationMs = Math.max(
+    0,
+    (Number(cdpAfterByName.ScriptDuration) - Number(cdpBeforeByName.ScriptDuration)) * 1000,
+  );
   const maxAllowedFrameGapMs = mobile ? 750 : 500;
   return {
     ok: titlePixels.nonClearInteriorPixelCount > 128
@@ -1986,6 +2046,31 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       clickToLobbyPlayableMs,
       lobbyPlayableToPreviewMs,
       maxAllowedFrameGapMs,
+    },
+    resourceAccounting: {
+      wasmModuleBytes,
+      mainWasmHeapBytes: null,
+      mainWasmHeapStatus: "not exported by the production app adapter",
+      browserProcessMetrics,
+      mainRendererCpu: {
+        measuredElapsedMs,
+        taskDurationMs: mainRendererTaskDurationMs,
+        scriptDurationMs: mainRendererScriptDurationMs,
+        taskUtilization: measuredElapsedMs > 0
+          ? mainRendererTaskDurationMs / measuredElapsedMs
+          : 0,
+        status: "upper bound for the browser main renderer during the probe; screenshots are included and Worker CPU is not exported",
+      },
+      ...after.memory,
+      sharedBufferCapacityBytes:
+        after.memory.activeRunnerSharedBufferCapacityBytes
+        + after.memory.activeWorldgenSharedBufferCapacityBytes
+        + after.memory.activeLightSharedBufferCapacityBytes
+        + after.memory.compilerSharedInputBufferCapacityBytes
+        + after.memory.compilerSharedResultBufferCapacityBytes,
+      sharedTerrainBaseGpuBytes: Number(after.standbyAtlasBaseBytes) || 0,
+      standbyEstimatedGpuTerrainBytes:
+        Number(after.standbyEstimatedGpuTerrainBytes) || 0,
     },
     screenshots: {
       title: lobbyScenarioTitleScreenshotPath,

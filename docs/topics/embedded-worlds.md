@@ -10,14 +10,13 @@ worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
-protected lobby productization milestone, and a shared web-parity refactor
-through production desktop/mobile menu, live-preview pixels, A-to-B-to-A
-activation, persistence, and adversarial lifecycle rejection. Portable
-scenario content, shared immutable second-slot terrain resources, slot-targeted
-startup/readiness/activation/swap policy, catalog-excluded IndexedDB
-provisioning, one compiler broker, and dual browser runtime ownership are
-landed. Final feature-off/scenario-on performance and platform closeout is
-next.**
+protected lobby productization milestone, and completed shared Web/WASM lobby
+parity. Portable scenario content, shared immutable second-slot terrain
+resources, slot-targeted startup/readiness/activation/swap policy,
+catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
+runtime ownership, production desktop/mobile preview and activation,
+persistence, adversarial lifecycle rejection, and final performance/platform
+closeout are landed.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -98,19 +97,23 @@ completed first productization milestone is
 enter the fixed local scenario from the shared title menu before broadening the
 destination source. Its no-scenario closeout remains faster than its pre-change
 baseline, while scenario-on renderer, CPU, memory, and thread costs remain
-separately recorded. The immediate parity follow-up is
+separately recorded. The completed parity follow-up is
 [`178-shared-web-lobby-scenario-parity.md`](../tactical/178-shared-web-lobby-scenario-parity.md):
 replace native-shaped managed-content and slot-start ownership with portable
 contracts, add only IndexedDB/Worker adapters, share compatible immutable
 renderer resources, and make the same scenario actionable on web without
-regressing the one-world path.
+regressing the one-world path. Its final native direct-path median is
+2.470/4.262 ms average/P95 versus the 2.492/4.338 ms control. Browser
+feature-off remains within the attributed noise envelope. Desktop and 2x
+CPU-throttled mobile scenario receipts reached the lobby in 306/315 ms and the
+preview 1.234/1.602 s later, with about 10.3 ms maximum measured frame gaps.
 
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 Slice 7 landed production browser activation, persistence, and
-late-completion lifecycle rejection through shared scene policy).
+(Tactical 178 Slices 0-8 complete; no headset was attached for a new
+real-device scenario receipt).
 
 ## Motivation
 
@@ -707,20 +710,19 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
-Tactical 178 Slice 5 closes the browser dual-runtime ownership gap. The web
-host consumes the same shared managed provision/start operations as native and
-keeps protected lobby instance 2 plus mutable island instance 3 alive in two
+Tactical 178 closes browser parity without a second scenario implementation.
+The web host consumes the same shared managed provision/start operations as
+native and keeps the protected lobby plus mutable island alive in two
 independent integrated-server Workers. One compiler Worker qualifies local
 request ids by stable world instance, prioritizes active work, and owns
 per-world snapshot mirrors forked from one immutable parsed asset template.
-The accepted receipt observed nine otherwise-colliding local ids without a
-cross-world result, one compiler/asset load, two live server Workers, corrected
-cameras for both worlds, and zero Workers after explicit shutdown. Browser
-standby cadence remains an explicit typed operation gap, not an ad-hoc message.
-Tactical 178 Slice 6 now drives that ownership from the production desktop and
-mobile browser title into a playable protected lobby and live shared-depth
-island preview. The next bounded work is browser Use activation, return,
-persistence, cancellation, and invalidation parity in Slice 7.
+The production desktop/mobile title reaches a playable protected lobby, shows
+the shared-depth island preview, activates through mouse and touch in both
+directions, persists an island edit, and rejects late completion across Quit,
+asset replacement, and resource rebuild. Standby cadence travels through the
+typed runtime operation. Shutdown leaves zero server, compiler, or
+provisioning Workers. Feature-off native/browser comparisons and scenario-on
+CPU/frame/memory/Worker receipts are recorded in the tactical.
 
 The warm-swap and opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md); the
@@ -736,24 +738,27 @@ bounded simultaneous-geometry plan lives in
 3. Keep Tactical 177's completed shared title launch, protected lobby,
    asynchronous fixed island, lifecycle, and no-scenario performance gates
    green.
-4. Bind the proven lobby to the most recently *actively played* compatible
+4. Keep Tactical 178's shared web provisioning, dual-runtime compiler
+   identity, activation/persistence lifecycle, and feature-off performance
+   gates green.
+5. Bind the proven lobby to the most recently *actively played* compatible
    local world. A background preview open must not itself update catalog
    recency.
-5. Next, prove the same bounded preview and activation behavior with a remote
+6. Next, prove the same bounded preview and activation behavior with a remote
    hosted source. Keep the dual-host/root-isolation smokes and materialized
    multiview contract green.
-6. Generalize to an N-world registry only after the bounded live-diorama
+7. Generalize to an N-world registry only after the bounded live-diorama
    milestone is closed and a concrete multi-preview experience requires it.
-7. T0 baked diorama and T1 seed explorer may reuse the same placement path as
+8. T0 baked diorama and T1 seed explorer may reuse the same placement path as
    cheaper fidelity alternatives to the live T3 sample.
-8. After the hosted-world milestone closes, allow a bounded active-world region
+9. After the hosted-world milestone closes, allow a bounded active-world region
    to source the same non-recursive placed-terrain path without a second slot.
-9. Add a real remote observer/subscription mode only when previews must stop
+10. Add a real remote observer/subscription mode only when previews must stop
    consuming ordinary joined-player identities.
-10. Add half-space visibility and boundary-aware meshing for an `x=0` render
+11. Add half-space visibility and boundary-aware meshing for an `x=0` render
    proof before attempting traversal.
-11. Add one-active-authority local handoff, then a traversable seam or portal.
-12. Treat federated remote authority and dynamic shadows as separate later
+12. Add one-active-authority local handoff, then a traversable seam or portal.
+13. Treat federated remote authority and dynamic shadows as separate later
     campaigns.
 
 Keep dynamic shadows as a separate topic when that work opens; it is the biggest

@@ -101,6 +101,14 @@ burn-down.
 > slot-targeted standby startup, dual-Worker/compiler identity, and WASM
 > lifecycle adoption remain. Tactical 178 owns a shared-first refactor and
 > forbids a TypeScript scenario implementation.
+> Refreshed again after Tactical 178 completed Slices 0-8. Web now provisions
+> the shared Rust-authored worlds into catalog-excluded IndexedDB records,
+> retains two server Workers behind shared slot-targeted lifecycle policy,
+> multiplexes them through one stable-identity compiler broker, renders the
+> live preview, activates A-to-B-to-A, persists the island edit, and rejects
+> stale lifecycle completions. Final native/browser feature-off performance and
+> the available desktop/web/Android/XR build matrix pass. No headset was
+> attached for a new capable-device multiview scenario receipt.
 > Refreshed on 2026-07-11 after Tactical 170 — Web Scene-Host Adoption moved
 > local-worker, IndexedDB, and remote-WebSocket browser modes onto
 > `McloneSceneHost`, deleted the old web orchestrator, and made browser adapter
@@ -187,7 +195,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | HUD (crosshair/debug/status) | ◐ (no in-world crosshair) | ◐ (debug/UI screenshots; no real HUD host) | ✗ | ✅ | ✗ | ✅ |
 | Hotbar (debug palette) | ✅ | ✗ | ✗ | ✅ | ✗ | ✅ |
 | Menus (title/pause/options) | ✅ | ◐ (screenshot scenarios; no real input host) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ (shared touch menu, AVD session smoke) | ◐ (world panel + pointer, user-validated; automation/tuning pending) | ✅ |
-| Built-in protected lobby scenario | ✅ | ✅ (scripted menu/activation) | ✅ (shared capability; real-device menu smoke pending) | ✅ (shared capability/APK; AVD scenario smoke pending) | ✅ (shared capability/APK; device scenario smoke pending) | ✗ (Tactical 178) |
+| Built-in protected lobby scenario | ✅ | ✅ (scripted menu/activation) | ✅ (shared capability; real-device menu smoke pending) | ✅ (shared capability/APK; AVD app/new-world regression smokes pass, scenario-specific tap smoke pending) | ✅ (shared capability/APK; device scenario smoke pending) | ✅ (desktop/mobile preview, activation, persistence, lifecycle; Tactical 178) |
 | Connect / world-select UI | ✗ | ✗ | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (persistent world catalog + New World smoke; connect text/smoke pending) | ◐ (world catalog UI wired; connect-screen smoke pending) | ◐ (world catalog UI wired; connect-screen text/smoke pending) |
 | Remote-dedicated connect (wired in app) | ✅ TCP | ◐ TCP screenshot/settle, no long-lived offscreen host | ✅ TCP | ✅ TCP property | ✅ TCP intent argv (LAN + --adb-reverse smokes passed) | ✅ WebSocket query param |
 | Persistence (world save/load, in-app) | ◐ (filesystem/SQLite catalog + chunk/entity records; remaining metadata) | ◐ (persistent-world probes; not a full interactive host) | ◐ (shared native catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (app-private catalog/storage; remaining metadata) | ◐ (IndexedDB catalog + chunk/entity records; player/world metadata pending) |
