@@ -115,6 +115,9 @@ const BINDGEN_WASM_URL = versionedUrl("./pkg/mclone_web_client_bg.wasm");
 const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker.js");
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
+const MANAGED_SCENARIO_PROVISION_WORKER_URL = versionedUrl(
+  "./mclone-managed-scenario-provision-worker.js",
+);
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
 const AUTHORED_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-authored.pbp");
 const FALLBACK_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-generated-fallback.pbp");
@@ -409,6 +412,8 @@ class WebFrameDriver {
       "mclone_web_catalog_prepare_create_world",
       "mclone_web_catalog_prepare_open_world",
       "mclone_web_catalog_prepare_delete_world",
+      "mclone_web_managed_scenario_prepare_world",
+      "mclone_web_managed_scenario_validate_world",
     ];
     for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {

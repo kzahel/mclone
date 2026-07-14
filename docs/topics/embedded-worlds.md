@@ -13,7 +13,9 @@ tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and a shared web-parity refactor
 with its baseline, portable scenario content, and immutable second-slot terrain
 resource sharing landed. Portable slot-targeted startup, readiness, activation,
-and swap ownership are also landed; IndexedDB provisioning is next.**
+and swap ownership are also landed. Browser managed content is now provisioned
+transactionally by a short-lived Worker into catalog-excluded IndexedDB records;
+dual browser runtime ownership is next.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -52,7 +54,10 @@ and reaches a second live preview. Shared Rust now issues independent tokened,
 storage-neutral provisioning and role-aware slot-start operations, and owns
 external-runtime readiness and complete-slot activation without WASM policy
 stubs. The browser still renders the action unavailable while IndexedDB and
-Worker adapters remain unconnected. A server-owned behavior
+runtime Worker adapters remain unconnected. Managed storage itself now reuses
+the existing chunk/entity stores, adds one metadata store, and delegates all
+fixture generation and validation to shared Rust in a short-lived provisioning
+Worker after a direct 22-40 ms main-thread measurement rejected inline work. A server-owned behavior
 profile travels with each slot: the managed lobby authoritatively denies
 player break/place while the island remains mutable, including after
 complete-slot exchanges.
@@ -91,8 +96,8 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 Slice 3 landed the shared slot-targeted startup and activation
-seams while retaining the native product and diagnostic behavior).
+(Tactical 178 Slice 4 landed catalog-excluded, transactional browser managed
+storage and moved its measured fixture work off the rAF thread).
 
 ## Motivation
 

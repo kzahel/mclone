@@ -1,9 +1,10 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-3 locked the baseline, extracted portable
+Status: active 2026-07-14. Slices 0-4 locked the baseline, extracted portable
 scenario content, removed the duplicate second-slot terrain shell, and moved
 managed provisioning, slot-targeted startup, readiness, activation, and swap
-policy into shared Rust. IndexedDB provisioning is next. This tactical closes
+policy into shared Rust. Catalog-excluded, Worker-backed IndexedDB provisioning
+is also complete. Dual browser runtime ownership is next. This tactical closes
 the browser exception left by Tacticals 174,
 175, and 177 by refactoring their native-shaped startup seams into shared
 contracts. It does not authorize a second browser scenario implementation.
@@ -827,6 +828,62 @@ Deliverables:
 
 Exit criteria: a browser storage smoke provisions, reopens, excludes, corrupts,
 and safely reports the two managed worlds without launching a second runtime.
+
+#### Slice 4 completion record — 2026-07-14
+
+The existing `mclone-web-worlds` database advanced from schema 2 to 3 by adding
+one `managedWorlds` metadata store. Managed lobby and island chunks continue to
+use the existing `chunks` and `entityChunks` stores under deterministic
+`managed.*` world ids. They never receive `worlds` catalog rows, and the
+ordinary title and Singleplayer paths do not open or populate managed content.
+The ordinary user catalog migration and create/open/delete smoke remains green.
+
+Shared Rust now owns the stored metadata contract and the exact
+`missing`/`valid`/`partial`/`incompatible`/`corrupt` validation vocabulary. It
+produces every fixture byte through the server persistence codec and validates
+stored chunk/entity records by decoding them and checking their identities.
+Valid mutable-world records may differ from the authored payload, so an edited
+island is reused rather than regenerated. Corrupt records are refused rather
+than silently overwritten; partial or version-incompatible records are replaced
+transactionally.
+
+The TypeScript adapter performs only generic IndexedDB mechanics. Each world is
+published in its own transaction spanning metadata, chunks, and entity chunks.
+First publication uses an exclusive metadata add, so concurrent duplicate
+requests converge on one valid identity and the losing transaction can be
+accepted only after shared revalidation. There is no staging key or combined
+primary/destination barrier. An operation token is returned unchanged, and an
+aborted short-lived Worker cannot publish a late completion.
+
+The first direct measurement found that Rust materialization took 22-40 ms on
+the browser main thread, which was too large for an uncovered frame. The final
+adapter therefore initializes the same WASM policy and performs validation,
+materialization, and IndexedDB work inside a short-lived provisioning Worker.
+The final receipt measured 24-43 ms of fixture work inside Workers; IndexedDB
+work ranged from 0-51 ms, including the intentionally losing concurrent
+transaction. These are not rAF-thread costs. The main-thread submission receipt
+was 0.155 ms at maximum in the final smoke.
+
+The storage smoke proves cancellation after Worker creation leaves the primary
+missing; concurrent primary requests publish/reuse one 49-chunk 927,561-byte
+world; destination publication independently writes 49 chunks and 126,551
+bytes; valid reuse preserves the complete byte digest; partial and incompatible
+states repair; corrupt bytes remain corrupt after refusal; both worlds reopen
+validly; and the user catalog count remains unchanged. The web menu remains
+explicitly unavailable because no second runtime is started in this slice.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-app-runtime
+cargo test -p mclone-web-client --test scenario_parity_ownership_lock
+cargo check -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:typecheck
+pnpm native:web:managed-scenario-storage-smoke
+pnpm native:web:catalog-smoke
+pnpm native:lobby-scenario:smoke
+pnpm native:thin-adapters:purity
+```
 
 Estimated effort: 1-2 days.
 

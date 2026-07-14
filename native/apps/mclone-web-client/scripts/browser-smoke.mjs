@@ -47,6 +47,8 @@ const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
 const lobbyUnavailableProbe = process.argv.includes("--lobby-unavailable-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE === "1";
+const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-storage-probe")
+  || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
 const farLodProbe = process.argv.includes("--far-lod-probe")
   || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
 const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
@@ -59,6 +61,7 @@ const appLoop = movementPerf
   || catalogUiProbe
   || assetPackUiProbe
   || lobbyUnavailableProbe
+  || managedScenarioStorageProbe
   || farLodProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
@@ -129,6 +132,9 @@ const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_P
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
 const lobbyUnavailableProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE_REPORT
   ?? "/tmp/mclone-native-web-lobby-unavailable-probe.json";
+const managedScenarioStorageProbeReportPath =
+  process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-managed-scenario-storage-probe.json";
 const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
 const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
@@ -315,6 +321,28 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (managedScenarioStorageProbe) {
+        const managedScenarioStorageProbeResult = await runManagedScenarioStorageProbe(page);
+        const result = await compactNativeUiState(page);
+        const report = {
+          url: appUrl,
+          managedScenarioStorageProbeReportPath,
+          managedScenarioStorageProbe,
+          managedScenarioStorageProbeResult,
+          result,
+        };
+        await writeFile(
+          managedScenarioStorageProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (!managedScenarioStorageProbeResult?.ok || pageErrors.length > 0) {
+          throw new Error(
+            `managed scenario storage probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (farLodProbe) {
         const farLodProbeResult = await runFarLodProbe(page, canvas);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
@@ -1871,7 +1899,9 @@ async function nativeUiGeometry(page) {
 function nativeTitleSingleplayerPoint(geometry) {
   return {
     x: geometry.width * 0.5,
-    y: geometry.height * 0.5 - 24.0,
+    // The title now starts with the lobby action. Singleplayer is the second
+    // 20 px row, centered 12 px above the panel midpoint.
+    y: geometry.height * 0.5 - 12.0,
   };
 }
 
@@ -2656,6 +2686,354 @@ async function captureNativeUiProbe(page, canvas) {
 /**
  * Transitional Slice 0 receipt: the shared title row is present but disabled,
  * so clicking it cannot emit an action or replace the active session.
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
+/** @param {Page} page */
+async function runManagedScenarioStorageProbe(page) {
+  return page.evaluate(async () => {
+    const catalog = await import(new URL("./mclone-web-world-catalog.js", location.href).href);
+    const scenarioId = "lobbyPreview";
+    const workerUrl = new URL(
+      "./mclone-managed-scenario-provision-worker.js",
+      location.href,
+    ).href;
+    const bindgenJsUrl = new URL("./pkg/mclone_web_client.js", location.href).href;
+    const bindgenWasmUrl = new URL("./pkg/mclone_web_client_bg.wasm", location.href).href;
+    /** @type {number[]} */
+    const workerSubmitSamples = [];
+    /**
+     * @param {string} operationToken
+     * @param {string} role
+     * @param {AbortSignal} [signal]
+     */
+    const provision = (operationToken, role, signal) => {
+      const startedAt = performance.now();
+      const pending = catalog.provisionIndexedDbManagedScenarioWorldInWorker({
+        workerUrl,
+        bindgenJsUrl,
+        bindgenWasmUrl,
+        operationToken,
+        scenarioId,
+        role,
+      }, signal);
+      workerSubmitSamples.push(performance.now() - startedAt);
+      return pending;
+    };
+    /** @type {string[]} */
+    const roles = ["primary", "destination"];
+    let db = await catalog.openWorldDb();
+
+    /** @param {IDBRequest<any>} handle */
+    const request = (handle) => new Promise((resolve, reject) => {
+      handle.onsuccess = () => resolve(handle.result);
+      handle.onerror = () => reject(handle.error ?? new Error("IndexedDB request failed"));
+    });
+    /** @param {IDBTransaction} transaction */
+    const done = (transaction) => new Promise((resolve, reject) => {
+      transaction.oncomplete = () => resolve(undefined);
+      transaction.onerror = () => reject(
+        transaction.error ?? new Error("IndexedDB transaction failed"),
+      );
+      transaction.onabort = () => reject(
+        transaction.error ?? new Error("IndexedDB transaction aborted"),
+      );
+    });
+    /**
+     * @param {IDBTransaction} transaction
+     * @param {string} storeName
+     * @param {string} worldId
+     */
+    const clearStoreWorld = (transaction, storeName, worldId) => new Promise((resolve, reject) => {
+      const store = transaction.objectStore(storeName);
+      const cursor = store.index(catalog.WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));
+      cursor.onsuccess = () => {
+        if (!cursor.result) {
+          resolve(undefined);
+          return;
+        }
+        store.delete(cursor.result.primaryKey);
+        cursor.result.continue();
+      };
+      cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed"));
+    });
+    /** @param {string} worldId */
+    const clearManagedWorld = async (worldId) => {
+      const transaction = db.transaction(
+        [
+          catalog.MANAGED_WORLD_METADATA_STORE,
+          catalog.WORLD_CHUNK_STORE,
+          catalog.WORLD_ENTITY_CHUNK_STORE,
+        ],
+        "readwrite",
+      );
+      transaction.objectStore(catalog.MANAGED_WORLD_METADATA_STORE).delete(worldId);
+      await Promise.all([
+        clearStoreWorld(transaction, catalog.WORLD_CHUNK_STORE, worldId),
+        clearStoreWorld(transaction, catalog.WORLD_ENTITY_CHUNK_STORE, worldId),
+      ]);
+      await done(transaction);
+    };
+    /**
+     * @param {string} worldId
+     * @param {(metadata: Record<string, any>) => Record<string, any>} mutate
+     */
+    const updateMetadata = async (worldId, mutate) => {
+      const transaction = db.transaction(catalog.MANAGED_WORLD_METADATA_STORE, "readwrite");
+      const store = transaction.objectStore(catalog.MANAGED_WORLD_METADATA_STORE);
+      const metadata = await request(store.get(worldId));
+      store.put(mutate({ ...metadata }));
+      await done(transaction);
+    };
+    /** @param {string} worldId */
+    const deleteFirstChunk = async (worldId) => {
+      const transaction = db.transaction(catalog.WORLD_CHUNK_STORE, "readwrite");
+      const store = transaction.objectStore(catalog.WORLD_CHUNK_STORE);
+      const cursor = store.index(catalog.WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));
+      await new Promise((resolve, reject) => {
+        cursor.onsuccess = () => {
+          if (cursor.result) store.delete(cursor.result.primaryKey);
+          resolve(undefined);
+        };
+        cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed"));
+      });
+      await done(transaction);
+    };
+    /** @param {string} worldId */
+    const corruptFirstChunk = async (worldId) => {
+      const transaction = db.transaction(catalog.WORLD_CHUNK_STORE, "readwrite");
+      const store = transaction.objectStore(catalog.WORLD_CHUNK_STORE);
+      const records = await request(
+        store.index(catalog.WORLD_ID_INDEX).getAll(IDBKeyRange.only(worldId)),
+      );
+      const first = records[0];
+      store.put({ ...first, record: new Uint8Array([0]) });
+      await done(transaction);
+    };
+    /** @param {string} worldId */
+    const chunkDigest = async (worldId) => {
+      const transaction = db.transaction(catalog.WORLD_CHUNK_STORE, "readonly");
+      const records = await request(
+        transaction.objectStore(catalog.WORLD_CHUNK_STORE)
+          .index(catalog.WORLD_ID_INDEX)
+          .getAll(IDBKeyRange.only(worldId)),
+      );
+      await done(transaction);
+      let hash = 0x811c9dc5;
+      let bytes = 0;
+      for (const record of records) {
+        const view = record.record instanceof Uint8Array
+          ? record.record
+          : new Uint8Array(record.record ?? []);
+        bytes += view.byteLength;
+        for (const byte of view) {
+          hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
+        }
+      }
+      return { count: records.length, bytes, hash };
+    };
+    const managedIdentities = async () => {
+      const transaction = db.transaction(
+        [
+          catalog.MANAGED_WORLD_METADATA_STORE,
+          catalog.WORLD_CHUNK_STORE,
+          catalog.WORLD_ENTITY_CHUNK_STORE,
+        ],
+        "readonly",
+      );
+      const metadataKeysPromise = request(
+        transaction.objectStore(catalog.MANAGED_WORLD_METADATA_STORE).getAllKeys(),
+      );
+      const chunkKeysPromise = request(
+        transaction.objectStore(catalog.WORLD_CHUNK_STORE).getAllKeys(),
+      );
+      const entityKeysPromise = request(
+        transaction.objectStore(catalog.WORLD_ENTITY_CHUNK_STORE).getAllKeys(),
+      );
+      const [metadataKeys, chunkKeys, entityKeys] = await Promise.all([
+        metadataKeysPromise,
+        chunkKeysPromise,
+        entityKeysPromise,
+      ]);
+      await done(transaction);
+      return {
+        metadata: metadataKeys.map(String).sort(),
+        chunks: [...new Set(chunkKeys.map((/** @type {any} */ key) => String(key[0])))].sort(),
+        entityChunks: [
+          ...new Set(entityKeys.map((/** @type {any} */ key) => String(key[0]))),
+        ].sort(),
+      };
+    };
+
+    /** @type {Record<string, any>} */
+    const discovered = {};
+    for (const role of roles) {
+      discovered[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
+      await clearManagedWorld(discovered[role].worldId);
+    }
+    const catalogBefore = await catalog.listIndexedDbCatalogWorlds(db);
+    /** @type {Record<string, any>} */
+    const before = {};
+    for (const role of roles) {
+      before[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
+    }
+
+    const controller = new AbortController();
+    const cancelledProvision = provision("cancelled-primary", "primary", controller.signal);
+    setTimeout(() => controller.abort("probe cancellation"), 0);
+    let cancelled = false;
+    try {
+      await cancelledProvision;
+    } catch {
+      cancelled = true;
+    }
+    const afterCancellation = await catalog.inspectIndexedDbManagedScenarioWorld(
+      db,
+      scenarioId,
+      "primary",
+    );
+
+    const primaryConcurrent = await Promise.all([
+      provision("primary-a", "primary"),
+      provision("primary-b", "primary"),
+    ]);
+    const destinationFirst = await provision("destination-a", "destination");
+    /** @type {Record<string, any>} */
+    const valid = {};
+    for (const role of roles) {
+      valid[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
+    }
+
+    const destinationId = valid.destination.worldId;
+    const digestBeforeReuse = await chunkDigest(destinationId);
+    const destinationReuse = await provision("destination-reuse", "destination");
+    const digestAfterReuse = await chunkDigest(destinationId);
+
+    await deleteFirstChunk(destinationId);
+    const partial = await catalog.inspectIndexedDbManagedScenarioWorld(
+      db,
+      scenarioId,
+      "destination",
+    );
+    const repairedPartial = await provision("destination-partial", "destination");
+
+    await updateMetadata(destinationId, (metadata) => ({
+      ...metadata,
+      contentVersion: Number(metadata.contentVersion) + 1,
+    }));
+    const incompatible = await catalog.inspectIndexedDbManagedScenarioWorld(
+      db,
+      scenarioId,
+      "destination",
+    );
+    const repairedIncompatible = await provision("destination-incompatible", "destination");
+
+    await corruptFirstChunk(destinationId);
+    const corrupt = await catalog.inspectIndexedDbManagedScenarioWorld(
+      db,
+      scenarioId,
+      "destination",
+    );
+    let corruptionRefused = false;
+    try {
+      await provision("destination-corrupt", "destination");
+    } catch {
+      corruptionRefused = true;
+    }
+    const corruptAfterRefusal = await catalog.inspectIndexedDbManagedScenarioWorld(
+      db,
+      scenarioId,
+      "destination",
+    );
+
+    // Mark the fixture incompatible so the same generic migration path can
+    // transactionally restore the deliberately corrupted probe record.
+    await updateMetadata(destinationId, (metadata) => ({
+      ...metadata,
+      contentVersion: Number(metadata.contentVersion) + 1,
+    }));
+    await provision("destination-cleanup", "destination");
+
+    const identities = await managedIdentities();
+    const catalogAfter = await catalog.listIndexedDbCatalogWorlds(db);
+    db.close();
+    db = await catalog.openWorldDb();
+    /** @type {Record<string, any>} */
+    const reopened = {};
+    for (const role of roles) {
+      reopened[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
+    }
+    db.close();
+
+    const expectedIds = roles.map((role) => valid[role].worldId).sort();
+    const materializeSamples = [
+      ...primaryConcurrent.map((result) => result.materializeMs),
+      destinationFirst.materializeMs,
+      destinationReuse.materializeMs,
+      repairedPartial.materializeMs,
+      repairedIncompatible.materializeMs,
+    ];
+    return {
+      ok: (
+        before.primary.status === "missing"
+        && before.destination.status === "missing"
+        && cancelled
+        && afterCancellation.status === "missing"
+        && primaryConcurrent.every((result) => result.chunkCount === 49)
+        && primaryConcurrent.some((result) => result.status === "provisioned")
+        && destinationFirst.status === "provisioned"
+        && valid.primary.status === "valid"
+        && valid.destination.status === "valid"
+        && destinationReuse.status === "reused"
+        && JSON.stringify(digestBeforeReuse) === JSON.stringify(digestAfterReuse)
+        && partial.status === "partial"
+        && repairedPartial.priorStatus === "partial"
+        && incompatible.status === "incompatible"
+        && repairedIncompatible.priorStatus === "incompatible"
+        && corrupt.status === "corrupt"
+        && corruptionRefused
+        && corruptAfterRefusal.status === "corrupt"
+        && reopened.primary.status === "valid"
+        && reopened.destination.status === "valid"
+        && catalogBefore.length === catalogAfter.length
+        && identities.metadata.length === 2
+        && JSON.stringify(identities.metadata) === JSON.stringify(expectedIds)
+        && identities.chunks.every((id) => expectedIds.includes(id))
+        && identities.entityChunks.every((id) => expectedIds.includes(id))
+      ),
+      before,
+      cancelled,
+      afterCancellation,
+      primaryConcurrent,
+      destinationFirst,
+      valid,
+      destinationReuse,
+      digestBeforeReuse,
+      digestAfterReuse,
+      partial,
+      repairedPartial,
+      incompatible,
+      repairedIncompatible,
+      corrupt,
+      corruptionRefused,
+      corruptAfterRefusal,
+      reopened,
+      identities,
+      catalogCountBefore: catalogBefore.length,
+      catalogCountAfter: catalogAfter.length,
+      maxMaterializeMs: Math.max(...materializeSamples),
+      maxWriteMs: Math.max(
+        ...primaryConcurrent.map((result) => result.writeMs),
+        destinationFirst.writeMs,
+        repairedPartial.writeMs,
+        repairedIncompatible.writeMs,
+      ),
+      maxMainThreadSubmitMs: Math.max(...workerSubmitSamples),
+    };
+  });
+}
+
+/**
  * @param {Page} page
  * @param {Locator} canvas
  */

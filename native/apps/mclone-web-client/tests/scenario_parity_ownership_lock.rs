@@ -28,6 +28,14 @@ const WEB_APP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-web-app.ts"
 ));
+const WEB_WORLD_CATALOG: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-web-world-catalog.ts"
+));
+const WEB_MANAGED_PROVISION_WORKER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-managed-scenario-provision-worker.ts"
+));
 
 use mclone_app_runtime::scenario_content::{
     ManagedScenarioManifest, ManagedScenarioWorldRole, managed_scenario_payload_fingerprint,
@@ -162,5 +170,22 @@ fn typescript_does_not_own_lobby_policy_or_authored_content() {
             !WEB_APP.contains(forbidden),
             "browser adapter must not own shared scenario term {forbidden}"
         );
+        assert!(
+            !WEB_WORLD_CATALOG.contains(forbidden),
+            "IndexedDB adapter must not own shared scenario term {forbidden}"
+        );
+        assert!(
+            !WEB_MANAGED_PROVISION_WORKER.contains(forbidden),
+            "provision Worker must not own shared scenario term {forbidden}"
+        );
     }
+    assert!(WEB_WORLD_CATALOG.contains("MANAGED_WORLD_METADATA_STORE"));
+    assert!(WEB_WORLD_CATALOG.contains("mclone_web_managed_scenario_prepare_world("));
+    assert!(WEB_WORLD_CATALOG.contains("mclone_web_managed_scenario_validate_world("));
+    assert!(!WEB_WORLD_CATALOG.contains("ChunkRecord::"));
+    assert!(!WEB_WORLD_CATALOG.contains("ProtectedLobby"));
+    assert!(WEB_WORLD_CATALOG.contains("MANAGED_WORLD_METADATA_STORE"));
+    assert!(WEB_WORLD_CATALOG.contains("provisionIndexedDbManagedScenarioWorldInWorker"));
+    assert!(WEB_MANAGED_PROVISION_WORKER.contains("provisionIndexedDbManagedScenarioWorld("));
+    assert!(!WEB_MANAGED_PROVISION_WORKER.contains("authored"));
 }

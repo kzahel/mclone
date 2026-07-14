@@ -4,9 +4,12 @@
 //! adapters. Filesystem paths, SQLite handles, IndexedDB handles, and async
 //! execution stay in platform executors; authored blocks and policy stay here.
 
+use std::collections::BTreeSet;
+
 use mclone_server::{
     AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, ChunkRecord, WorldBehaviorProfile,
-    authored_world_fixture_records, encode_chunk_record,
+    authored_world_fixture_records, decode_chunk_record, decode_entity_chunk_record,
+    encode_chunk_record,
 };
 use serde::{Deserialize, Serialize};
 
@@ -240,6 +243,180 @@ pub struct ManagedScenarioChunkRecord {
     pub bytes: Vec<u8>,
 }
 
+/// Versioned metadata published atomically with one managed world's records.
+///
+/// This is deliberately smaller than a browser catalog row: managed worlds are
+/// app-private storage identities and never become user-selectable worlds.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ManagedScenarioStoredWorldMetadata {
+    pub schema_version: u32,
+    pub role: ManagedScenarioWorldRole,
+    pub key: ManagedWorldKey,
+    pub content_id: String,
+    pub content_version: u32,
+    pub authored_payload_fingerprint: u64,
+}
+
+impl ManagedScenarioStoredWorldMetadata {
+    pub fn for_payload(payload: &ManagedScenarioWorldPayload) -> Self {
+        Self {
+            schema_version: MANAGED_SCENARIO_SCHEMA_VERSION,
+            role: payload.role,
+            key: payload.key.clone(),
+            content_id: payload.manifest.content_id.clone(),
+            content_version: payload.manifest.content_version,
+            authored_payload_fingerprint: managed_scenario_payload_fingerprint(payload),
+        }
+    }
+}
+
+/// Opaque stored record supplied to shared validation by a platform adapter.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedScenarioStoredRecord {
+    pub chunk_x: i32,
+    pub chunk_z: i32,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ManagedScenarioStoredWorldStatus {
+    Missing,
+    Valid,
+    Partial,
+    Incompatible,
+    Corrupt,
+}
+
+impl ManagedScenarioStoredWorldStatus {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Missing => "missing",
+            Self::Valid => "valid",
+            Self::Partial => "partial",
+            Self::Incompatible => "incompatible",
+            Self::Corrupt => "corrupt",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ManagedScenarioStoredWorldValidation {
+    pub status: ManagedScenarioStoredWorldStatus,
+    pub detail: String,
+}
+
+impl ManagedScenarioStoredWorldValidation {
+    fn new(status: ManagedScenarioStoredWorldStatus, detail: impl Into<String>) -> Self {
+        Self {
+            status,
+            detail: detail.into(),
+        }
+    }
+}
+
+/// Validate one platform's stored representation without imposing its storage
+/// API. Runtime edits are allowed: records must decode and cover the authored
+/// fixture, but their bytes need not remain equal to the original payload.
+pub fn validate_managed_scenario_stored_world(
+    payload: &ManagedScenarioWorldPayload,
+    metadata: Option<&ManagedScenarioStoredWorldMetadata>,
+    chunk_records: &[ManagedScenarioStoredRecord],
+    entity_chunk_records: &[ManagedScenarioStoredRecord],
+) -> ManagedScenarioStoredWorldValidation {
+    let Some(metadata) = metadata else {
+        return if chunk_records.is_empty() && entity_chunk_records.is_empty() {
+            ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Missing,
+                "managed world has no published metadata or records",
+            )
+        } else {
+            ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Partial,
+                "managed world has records without published metadata",
+            )
+        };
+    };
+
+    if metadata != &ManagedScenarioStoredWorldMetadata::for_payload(payload) {
+        return ManagedScenarioStoredWorldValidation::new(
+            ManagedScenarioStoredWorldStatus::Incompatible,
+            "managed world metadata does not match the shared content recipe",
+        );
+    }
+
+    let expected_positions = payload
+        .chunk_records
+        .iter()
+        .map(|record| (record.chunk_x, record.chunk_z))
+        .collect::<BTreeSet<_>>();
+    let mut found_positions = BTreeSet::new();
+    for record in chunk_records {
+        let Ok(decoded) = decode_chunk_record(&record.bytes) else {
+            return ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Corrupt,
+                format!(
+                    "managed chunk ({}, {}) does not decode",
+                    record.chunk_x, record.chunk_z
+                ),
+            );
+        };
+        if decoded.pos().x != record.chunk_x || decoded.pos().z != record.chunk_z {
+            return ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Corrupt,
+                format!(
+                    "managed chunk ({}, {}) contains mismatched coordinates",
+                    record.chunk_x, record.chunk_z
+                ),
+            );
+        }
+        if !found_positions.insert((record.chunk_x, record.chunk_z)) {
+            return ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Corrupt,
+                format!(
+                    "managed chunk ({}, {}) is duplicated",
+                    record.chunk_x, record.chunk_z
+                ),
+            );
+        }
+    }
+
+    for record in entity_chunk_records {
+        let Ok(decoded) = decode_entity_chunk_record(&record.bytes) else {
+            return ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Corrupt,
+                format!(
+                    "managed entity chunk ({}, {}) does not decode",
+                    record.chunk_x, record.chunk_z
+                ),
+            );
+        };
+        if decoded.pos.x != record.chunk_x || decoded.pos.z != record.chunk_z {
+            return ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Corrupt,
+                format!(
+                    "managed entity chunk ({}, {}) contains mismatched coordinates",
+                    record.chunk_x, record.chunk_z
+                ),
+            );
+        }
+    }
+
+    let missing_count = expected_positions.difference(&found_positions).count();
+    if missing_count != 0 {
+        return ManagedScenarioStoredWorldValidation::new(
+            ManagedScenarioStoredWorldStatus::Partial,
+            format!("managed world is missing {missing_count} authored chunks"),
+        );
+    }
+
+    ManagedScenarioStoredWorldValidation::new(
+        ManagedScenarioStoredWorldStatus::Valid,
+        "managed world metadata and records are valid",
+    )
+}
+
 pub fn managed_scenario_world_payload(
     manifest: &ManagedScenarioManifest,
     role: ManagedScenarioWorldRole,
@@ -385,6 +562,64 @@ mod tests {
         assert_eq!(
             managed_scenario_payload_fingerprint(&destination),
             8_764_019_107_988_679_539
+        );
+    }
+
+    #[test]
+    fn stored_world_validation_distinguishes_recoverable_and_corrupt_states() {
+        let manifest = ManagedScenarioManifest::lobby_preview_v1();
+        let payload =
+            managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination)
+                .unwrap();
+        let metadata = ManagedScenarioStoredWorldMetadata::for_payload(&payload);
+        let records = payload
+            .chunk_records
+            .iter()
+            .map(|record| ManagedScenarioStoredRecord {
+                chunk_x: record.chunk_x,
+                chunk_z: record.chunk_z,
+                bytes: record.bytes.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            validate_managed_scenario_stored_world(&payload, None, &[], &[]).status,
+            ManagedScenarioStoredWorldStatus::Missing
+        );
+        assert_eq!(
+            validate_managed_scenario_stored_world(&payload, None, &records, &[]).status,
+            ManagedScenarioStoredWorldStatus::Partial
+        );
+        assert_eq!(
+            validate_managed_scenario_stored_world(
+                &payload,
+                Some(&metadata),
+                &records[..records.len() - 1],
+                &[],
+            )
+            .status,
+            ManagedScenarioStoredWorldStatus::Partial
+        );
+
+        let mut incompatible = metadata.clone();
+        incompatible.content_version += 1;
+        assert_eq!(
+            validate_managed_scenario_stored_world(&payload, Some(&incompatible), &records, &[],)
+                .status,
+            ManagedScenarioStoredWorldStatus::Incompatible
+        );
+
+        let mut corrupt = records.clone();
+        corrupt[0].bytes.clear();
+        assert_eq!(
+            validate_managed_scenario_stored_world(&payload, Some(&metadata), &corrupt, &[],)
+                .status,
+            ManagedScenarioStoredWorldStatus::Corrupt
+        );
+        assert_eq!(
+            validate_managed_scenario_stored_world(&payload, Some(&metadata), &records, &[],)
+                .status,
+            ManagedScenarioStoredWorldStatus::Valid
         );
     }
 }
