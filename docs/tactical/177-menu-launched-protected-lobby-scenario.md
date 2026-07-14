@@ -1,9 +1,11 @@
 # 177: Menu-Launched Protected Lobby Scenario
 
-Status: proposed 2026-07-14. This is the immediate productization milestone
-after Tactical 175 Slice 6. It deliberately precedes Tactical 175's remote
-preview slice so the current local proof is first expressed as one shared
-scenario contract rather than accumulating a second menu-only implementation.
+Status: active 2026-07-14. Slice 0 characterization and comparison evidence is
+landed; Slice 1's CLI-first scenario execution seam is next. This is the
+immediate productization milestone after Tactical 175 Slice 6. It deliberately
+precedes Tactical 175's remote preview slice so the current local proof is
+first expressed as one shared scenario contract rather than accumulating a
+second menu-only implementation.
 
 Topic: `embedded-worlds`
 
@@ -429,6 +431,42 @@ Deliverables:
 
 Exit criteria: the exact code to extract, the unchanged path to preserve, and
 the performance/pixel receipts are named before refactoring.
+
+#### Slice 0 completion record — 2026-07-14
+
+The pre-refactor ownership is now executable rather than implicit. One
+native-client characterization test proves that `desktop_scene_host.rs`
+contains exactly one launch-only live-diorama projection, reads the authored
+fixture marker, constructs `WarmWorldStandbyRequest`, and delegates execution
+to the sole scene-owned `begin_warm_world_standby` seam. The same test locks the
+three single-world `SessionStartRequest` variants and confirms that the shared
+title layout has no lobby/scenario action before Slice 1. The future refactor
+must update this tripwire rather than leave the old projection beside the new
+one.
+
+The accepted pre-refactor `native:live-diorama:activation-smoke` retains schema
+1 and the established A-to-B-to-A facts: flat first-uncovered frames draw 2/17
+sections, stereo frames draw 2/15 sections for both eyes, and every switch and
+first-uncovered boundary reports zero construction, compile submission/result
+acceptance, or upload. Covered frames remain pixel-identical black. The five
+flat image hashes remain `8ffd99d4...e8a9`, `1818d75d...a56e`,
+`f8d22803...73a7`, `1818d75d...a56e`, and `f1bb5636...afc3` for initial,
+outbound-covered, outbound-visible, return-covered, and return-visible.
+
+The first release performance batch is retained but rejected: its fifth sample
+jumped to 3.025 ms average / 5.744 ms P95 with two overruns, and the immediate
+postflight found an unrelated Physbox/Cloudflare deployment consuming CPU. No
+sample was silently discarded. After that process exited and aggregate CPU
+returned to 93.3% idle, five replacement 240-frame runs measured averages of
+2.639, 2.652, 2.734, 2.683, and 2.660 ms (2.660 ms median; 3.6% spread) and
+P95s of 4.461, 4.524, 4.721, 4.686, and 4.554 ms (4.554 ms median; 5.7%
+spread). All retained 1,936 sections with zero overruns and zero accounting
+violations. The accepted reports are
+`/tmp/mclone-lobby-slice0-perf-{6..10}.json`; the rejected reports remain
+beside them as `{1..5}`.
+
+Focused native-client validation and diff whitespace checks pass. This slice
+changes no runtime behavior and produces no new pixels requiring review.
 
 ### Slice 1: One Scenario Execution Seam, CLI First
 

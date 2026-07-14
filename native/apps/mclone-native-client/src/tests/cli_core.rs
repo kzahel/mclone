@@ -51,6 +51,66 @@ fn desktop_cli_flags_are_classified_as_shared_or_desktop_local() {
 }
 
 #[test]
+fn live_diorama_productization_boundary_is_explicit_before_refactor() {
+    let desktop = include_str!("../desktop_scene_host.rs");
+    let scene = include_str!("../../../../crates/mclone-scene/src/session.rs");
+    let session = include_str!("../../../../crates/mclone-app-runtime/src/session.rs");
+    let ui = include_str!("../../../../crates/mclone-ui/src/v2.rs");
+
+    assert_eq!(
+        desktop
+            .matches("if let Some(diorama) = scene.live_diorama.as_ref()")
+            .count(),
+        1,
+        "Slice 0 expects exactly one desktop launch projection to extract"
+    );
+    for marker in [
+        "authored_world_fixture_marker_path(&diorama.world_dir)",
+        "WarmWorldStandbyRequest::new(",
+        ".with_persistent_world_dir(",
+        ".with_embedded_preview(",
+        "host.begin_warm_world_standby(device, queue, request)",
+    ] {
+        assert!(
+            desktop.contains(marker),
+            "desktop live-diorama assembly lost `{marker}` before extraction"
+        );
+    }
+    assert_eq!(
+        scene.matches("pub fn begin_warm_world_standby(").count(),
+        1,
+        "scene host remains the sole detached-world execution owner"
+    );
+    assert!(session.contains("pub enum SessionStartRequest"));
+    for variant in [
+        "CreateLocalWorld { options: LocalWorldCreateOptions }",
+        "OpenLocalWorld { id: LocalWorldId }",
+        "JoinRemote { endpoint: RemoteSessionEndpoint }",
+    ] {
+        assert!(session.contains(variant));
+    }
+    assert!(!session.contains("Lobby"));
+    assert!(!session.contains("Scenario"));
+
+    let title_start = ui.find("fn title_layout(").expect("shared title layout");
+    let title_end = ui[title_start..]
+        .find("fn world_list_row_id(")
+        .map(|offset| title_start + offset)
+        .expect("title layout end");
+    let title = &ui[title_start..title_end];
+    for action in [
+        "GameUiAction::OpenWorldList",
+        "GameUiAction::OpenJoinRemote",
+        "GameUiAction::OpenOptions",
+        "GameUiAction::Quit",
+    ] {
+        assert!(title.contains(action));
+    }
+    assert!(!title.contains("Lobby"));
+    assert!(!title.contains("Scenario"));
+}
+
+#[test]
 fn cli_defaults_to_window() {
     assert_eq!(
         Cli::parse([]).unwrap(),

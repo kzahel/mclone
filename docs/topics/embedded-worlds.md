@@ -69,7 +69,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 177 proposal after Tactical 175 Slice 6).
+(Tactical 177 Slice 0 after Tactical 175 Slice 6).
 
 ## Motivation
 
