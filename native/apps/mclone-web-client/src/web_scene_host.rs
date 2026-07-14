@@ -265,6 +265,8 @@ pub struct WebSceneHost {
         ),
     >,
     managed_world_starts: HashMap<String, ExternalSceneSessionStart>,
+    stale_managed_start_completion_count: usize,
+    render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
     startup_camera_reconciled: bool,
@@ -279,6 +281,31 @@ impl WebSceneHost {
     pub fn install_managed_scenario_services(&mut self) -> Result<JsValue, JsValue> {
         self.host_mut()?
             .set_client_experience_profile(web_client_experience_profile());
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
+
+    /// Deterministic device/resource-generation recovery hook. Production
+    /// device recreation can call the same prepared-asset entry after replacing
+    /// `WebCanvasContext`; the smoke uses the current device to verify retained
+    /// world cancellation and stale-start rejection without fabricating a loss.
+    #[wasm_bindgen(js_name = rebuildRenderResourcesForSmoke)]
+    pub fn rebuild_render_resources_for_smoke(&mut self) -> Result<JsValue, JsValue> {
+        let assets = self
+            .host_ref()?
+            .active_asset_snapshot_for_epoch(self.host_ref()?.active_asset_epoch());
+        let (device, queue) = (&self.context.device, &self.context.queue);
+        self.host
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
+            .rebuild_mono_render_resources_with_assets(
+                device,
+                queue,
+                assets.actors.atlas.clone(),
+                &assets.actors.figures,
+                &assets.screen_effects,
+            )
+            .map_err(js_error)?;
+        self.render_resource_generation = self.render_resource_generation.saturating_add(1);
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
@@ -607,6 +634,14 @@ impl WebSceneHost {
             MonoWorldActionStatus::DeniedByWorldBehavior => {
                 report_set_bool(&object, "hit", before_target.is_some()).map_err(JsValue::from)?;
                 report_set_bool(&object, "deniedByWorldBehavior", true).map_err(JsValue::from)?;
+                report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
+                report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
+            }
+            MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
+                report_set_bool(&object, "hit", true).map_err(JsValue::from)?;
+                report_set_bool(&object, "embeddedActivationRequested", true)
+                    .map_err(JsValue::from)?;
+                report_set_bool(&object, "deniedByWorldBehavior", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
             }
@@ -1022,6 +1057,17 @@ impl WebSceneHost {
         Ok(JsValue::NULL)
     }
 
+    /// Release adapter-side token/ticket bookkeeping after shared lifecycle
+    /// policy has cancelled the scenario operation epoch. In-flight Workers
+    /// may still finish, but their opaque start tickets are rejected by
+    /// `external_scene_start_is_current` before any slot installation.
+    #[wasm_bindgen(js_name = discardManagedScenarioOperations)]
+    pub fn discard_managed_scenario_operations(&mut self) -> Result<JsValue, JsValue> {
+        self.managed_provision_tokens.clear();
+        self.managed_world_starts.clear();
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
+
     #[wasm_bindgen(js_name = completeManagedScenarioProvision)]
     pub fn complete_managed_scenario_provision_request(
         &mut self,
@@ -1099,11 +1145,17 @@ impl WebSceneHost {
             .pending
             .take()
             .ok_or_else(|| JsValue::from_str("managed runtime start ticket was consumed"))?;
-        match start
+        let outcome = start
             .outcome
             .take()
-            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was not started"))?
-        {
+            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was not started"))?;
+        if !self.host_ref()?.external_scene_start_is_current(&pending) {
+            self.stale_managed_start_completion_count =
+                self.stale_managed_start_completion_count.saturating_add(1);
+            drop(outcome);
+            return self.ui_report(false, None).map_err(JsValue::from);
+        }
+        match outcome {
             Ok(runtime) => self.complete_started_runtime(pending, runtime),
             Err(error) => {
                 self.host_mut()?.fail_external_session_start(pending, error);
@@ -1626,6 +1678,8 @@ async fn create_scene_host(
         catalog_tokens: HashMap::new(),
         managed_provision_tokens: HashMap::new(),
         managed_world_starts: HashMap::new(),
+        stale_managed_start_completion_count: 0,
+        render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
         startup_camera_reconciled: false,
@@ -2032,6 +2086,26 @@ impl WebSceneHost {
         self.write_common_counts(&object)?;
 
         if let Some(host) = self.host.as_ref() {
+            report_set_bool(
+                &object,
+                "managedScenarioLaunchActive",
+                host.managed_scenario_launch_active(),
+            )?;
+            report_set_number(
+                &object,
+                "staleManagedStartCompletionCount",
+                self.stale_managed_start_completion_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "renderResourceGeneration",
+                self.render_resource_generation as f64,
+            )?;
+            report_set_string(
+                &object,
+                "managedScenarioDestinationFailure",
+                host.managed_scenario_destination_failure().unwrap_or(""),
+            )?;
             let camera = host.camera_frame_state();
             report_set_number(&object, "cameraX", camera.camera.eye.x)?;
             report_set_number(&object, "cameraY", camera.camera.eye.y)?;
@@ -2194,6 +2268,115 @@ impl WebSceneHost {
                     &object,
                     "embeddedPreviewOutOfRegionSubmissionCount",
                     preview.render.out_of_region_submission_count as f64,
+                )?;
+            }
+            let activation = host.embedded_world_activation_snapshot();
+            report_set_string(
+                &object,
+                "embeddedActivationPhase",
+                match activation.phase {
+                    mclone_scene::EmbeddedWorldActivationPhase::Idle => "idle",
+                    mclone_scene::EmbeddedWorldActivationPhase::Closing => "closing",
+                    mclone_scene::EmbeddedWorldActivationPhase::Covered => "covered",
+                    mclone_scene::EmbeddedWorldActivationPhase::Opening => "opening",
+                    mclone_scene::EmbeddedWorldActivationPhase::Failed => "failed",
+                },
+            )?;
+            report_set_number(
+                &object,
+                "embeddedActivationAlpha",
+                f64::from(activation.alpha),
+            )?;
+            report_set_bool(
+                &object,
+                "embeddedActivationReady",
+                activation.activation_ready,
+            )?;
+            report_set_number(&object, "embeddedActivationSequence", 0.0)?;
+            report_set_bool(&object, "embeddedActivationFailed", false)?;
+            if let Some(report) = activation.last_report {
+                report_set_number(
+                    &object,
+                    "embeddedActivationSequence",
+                    report.sequence as f64,
+                )?;
+                report_set_string(
+                    &object,
+                    "embeddedActivationSourceWorldInstanceId",
+                    &report.source_world.get().to_string(),
+                )?;
+                report_set_string(
+                    &object,
+                    "embeddedActivationDestinationWorldInstanceId",
+                    &report.destination_world.get().to_string(),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationSwitchElapsedMs",
+                    report.switch_elapsed_ms.unwrap_or(0.0),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationCoveredRenderedFrames",
+                    f64::from(report.covered_rendered_frames),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationFirstUncoveredFrame",
+                    f64::from(report.first_uncovered_activation_frame.unwrap_or(0)),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationFirstUncoveredDrawnSectionCount",
+                    report.first_uncovered_drawn_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationFirstUncoveredUploadedSectionCount",
+                    report.first_uncovered_uploaded_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationFirstUncoveredSubmittedCompileSectionCount",
+                    report.first_uncovered_submitted_compile_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationFirstUncoveredAcceptedCompileResultCount",
+                    report.first_uncovered_accepted_compile_result_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedActivationFirstUncoveredEyeCount",
+                    report.first_uncovered_eye_count as f64,
+                )?;
+                report_set_bool(
+                    &object,
+                    "embeddedActivationFailed",
+                    report.failure.is_some(),
+                )?;
+            }
+            if let Some(switch) = host.last_warm_world_switch_report() {
+                report_set_number(&object, "warmWorldSwitchSequence", switch.sequence as f64)?;
+                report_set_number(
+                    &object,
+                    "warmWorldSwitchUploadedSectionCount",
+                    switch.switch_uploaded_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "warmWorldSwitchSubmittedCompileSectionCount",
+                    switch.switch_submitted_compile_section_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "warmWorldSwitchAcceptedCompileResultCount",
+                    switch.switch_accepted_compile_result_count as f64,
+                )?;
+                report_set_bool(
+                    &object,
+                    "warmWorldSwitchMaterializedRenderer",
+                    switch.switch_materialized_renderer,
                 )?;
             }
             let active_selection = host.active_asset_pack_selection();

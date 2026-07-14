@@ -271,6 +271,17 @@ impl ManagedScenarioLaunchState {
         self.start_operations.complete(completion)
     }
 
+    pub(crate) fn owns_start(
+        &self,
+        token: PlatformOperationToken,
+        role: ManagedScenarioWorldRole,
+        instance_id: WorldInstanceId,
+    ) -> bool {
+        self.start_operations
+            .pending_kind(token)
+            .is_some_and(|start| start.role == role && start.instance_id == instance_id)
+    }
+
     pub(crate) fn cancel(&mut self) -> usize {
         let count = self.provision_operations.pending_len() + self.start_operations.pending_len();
         self.pending_provision_requests.clear();
@@ -1580,6 +1591,22 @@ mod tests {
         assert_eq!(operation.token, token);
         assert_eq!(operation.kind.instance_id, WorldInstanceId::new(41));
         assert_eq!(operation.kind.role, ManagedScenarioWorldRole::Primary);
+        assert!(launch.owns_start(
+            token,
+            ManagedScenarioWorldRole::Primary,
+            WorldInstanceId::new(41),
+        ));
+        assert!(!launch.owns_start(
+            token,
+            ManagedScenarioWorldRole::Destination,
+            WorldInstanceId::new(41),
+        ));
+        assert_eq!(launch.cancel(), 3);
+        assert!(!launch.owns_start(
+            token,
+            ManagedScenarioWorldRole::Primary,
+            WorldInstanceId::new(41),
+        ));
     }
 
     fn flat_pose() -> WorldEntryPose {

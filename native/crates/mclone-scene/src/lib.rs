@@ -85,7 +85,9 @@ use mclone_app_runtime::{
     SingleViewRuntimeStats, TraversalReadySectionCache, debug_block_palette_overlay,
     debug_hotbar_icons, elapsed_ms, micros_to_ms, set_player_appearance_command_for_ui_model,
 };
-use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection, AssetSource};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_assets::AssetSource;
+use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{AudioOutputCapability, landing_playback_for_impact};
@@ -126,7 +128,8 @@ use mclone_render::opaque_world_gate::OpaqueWorldGateRenderer;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render::screen_effect::{
-    ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState, UnderwaterOverlay,
+    ScreenEffectTextureAssets, ScreenEffectsRenderer, ScreenFadeOverlay, UnderwaterEffectState,
+    UnderwaterOverlay,
 };
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky::overworld_clear_color;

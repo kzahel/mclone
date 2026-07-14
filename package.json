@@ -94,6 +94,7 @@
     "native:web:app-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop",
     "native:web:lobby-scenario-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-scenario-probe",
     "native:web:lobby-scenario-mobile-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-scenario-mobile-probe",
+    "native:web:lobby-scenario-lifecycle-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --lobby-scenario-lifecycle-probe",
     "native:web:managed-scenario-storage-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --managed-scenario-storage-probe",
     "native:web:managed-scenario-runtime-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --managed-scenario-runtime-probe",
     "native:web:catalog-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --catalog-ui-probe",

@@ -724,7 +724,10 @@ fn retained_world_lifecycle_flushes_both_slots_and_cancels_before_rebuild() {
     );
 
     let mono_source = read("src/mono.rs");
-    let rebuild = braced_item(&mono_source, "pub fn rebuild_mono_render_resources(");
+    let rebuild = braced_item(
+        &mono_source,
+        "pub fn rebuild_mono_render_resources_with_assets(",
+    );
     assert_in_order(
         rebuild,
         &[

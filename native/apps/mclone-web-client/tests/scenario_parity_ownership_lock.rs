@@ -132,6 +132,35 @@ fn primary_and_destination_provisioning_are_independent() {
 }
 
 #[test]
+fn stale_browser_starts_are_rejected_before_slot_installation() {
+    let completion = SCENE_SESSION
+        .split("pub fn complete_external_session_start(")
+        .nth(1)
+        .expect("shared external completion exists")
+        .split("pub fn fail_external_session_start(")
+        .next()
+        .expect("completion precedes failure handling");
+    let guard = completion
+        .find("if !self.external_scene_start_is_current(&pending)")
+        .expect("shared operation-epoch guard exists");
+    let active_install = completion
+        .find("self.active_world.install(DrawableWorldSlotInstall {")
+        .expect("active-slot installation remains explicit");
+    let standby_install = completion
+        .find("self.install_prepared_warm_world_slot(")
+        .expect("standby-slot installation remains explicit");
+    assert!(guard < active_install);
+    assert!(guard < standby_install);
+
+    assert!(WEB_SCENE_HOST.contains("external_scene_start_is_current(&pending)"));
+    assert!(WEB_SCENE_HOST.contains("stale_managed_start_completion_count"));
+    assert!(WEB_SCENE_HOST.contains("discardManagedScenarioOperations"));
+    assert!(WEB_APP.contains("this.session?.discardManagedScenarioOperations()"));
+    assert!(WEB_APP.contains("pendingManagedRuntimeStarts"));
+    assert!(WEB_APP.contains("else if (this.managedScenarioLaunchObservedActive)"));
+}
+
+#[test]
 fn browser_compiler_broker_and_shared_renderer_boundary_are_singular() {
     assert!(WEB_APP.contains("compiler: RenderCompiler | null;"));
     assert!(WEB_APP.contains("pendingTimings: Map<string, PendingCompile>;"));

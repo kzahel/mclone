@@ -260,6 +260,16 @@ impl<K, R> PlatformOperationLedger<K, R> {
         self.pending.is_empty()
     }
 
+    /// Inspect a still-current request without consuming its completion slot.
+    /// Platform adapters use this only as a pre-install guard; the later
+    /// [`complete`](Self::complete) call remains the authoritative transition.
+    pub fn pending_kind(&self, token: PlatformOperationToken) -> Option<&K> {
+        (token.epoch == self.epoch)
+            .then(|| self.pending.get(&token))
+            .flatten()
+            .map(|pending| &pending.kind)
+    }
+
     pub fn issue(&mut self, kind: K, failure_restore: R) -> PlatformOperation<K>
     where
         K: Clone,

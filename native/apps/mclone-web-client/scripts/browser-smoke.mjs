@@ -49,8 +49,11 @@ const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-st
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
 const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-runtime-probe")
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE === "1";
+const lobbyScenarioLifecycleProbe = process.argv.includes("--lobby-scenario-lifecycle-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_LIFECYCLE_PROBE === "1";
 const lobbyScenarioProbe = process.argv.includes("--lobby-scenario-probe")
   || process.argv.includes("--lobby-scenario-mobile-probe")
+  || lobbyScenarioLifecycleProbe
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE === "1";
 const lobbyScenarioMobileProbe = process.argv.includes("--lobby-scenario-mobile-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_PROBE === "1";
@@ -92,7 +95,7 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
     : lobbyScenarioProbe
-    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}.png`
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
@@ -112,7 +115,7 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
     : lobbyScenarioProbe
-    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview.png`
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
@@ -147,7 +150,7 @@ const managedScenarioRuntimeProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-runtime-probe.json";
 const lobbyScenarioProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE_REPORT
-  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}.json`;
+  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.json`;
 const lobbyScenarioTitleScreenshotPath =
   `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-title.png`;
 const lobbyScenarioPlayableScreenshotPath =
@@ -245,17 +248,84 @@ async function run() {
           created: {},
           active: {},
         });
+        const control = /** @type {any} */ ({
+          holdNextByName: {},
+          holdAtCreatedByName: {},
+          failAtCreatedByName: {},
+          held: /** @type {Array<{name: string, release: () => void}>} */ ([]),
+          /** @param {string} name @param {number} count */
+          holdNext(name, count = 1) {
+            this.holdNextByName[name] = (Number(this.holdNextByName[name]) || 0) + count;
+          },
+          /** @param {string} name @param {number} ordinal */
+          holdAtCreated(name, ordinal) {
+            this.holdAtCreatedByName[name] = Number(ordinal);
+          },
+          /** @param {string} name @param {number} ordinal */
+          failAtCreated(name, ordinal) {
+            this.failAtCreatedByName[name] = Number(ordinal);
+          },
+          /** @param {string} name */
+          release(name) {
+            const held = /** @type {Array<{name: string, release: () => void}>} */ (this.held);
+            const remaining = [];
+            for (const entry of held) {
+              if (entry.name === name) {
+                entry.release();
+              } else {
+                remaining.push(entry);
+              }
+            }
+            this.held = remaining;
+          },
+        });
         root.__mcloneWorkerStats = stats;
+        root.__mcloneWorkerControl = control;
         root.Worker = new Proxy(NativeWorker, {
           /** @param {typeof Worker} Target @param {any[]} args */
           construct(Target, args) {
-            const worker = Reflect.construct(Target, args);
             const options = /** @type {WorkerOptions | undefined} */ (args[1]);
             const name = String(options?.name ?? "unnamed");
+            const ordinal = (Number(stats.created[name]) || 0) + 1;
+            if (Number(control.failAtCreatedByName[name]) === ordinal) {
+              delete control.failAtCreatedByName[name];
+              throw new Error(`injected ${name} Worker construction failure at ordinal ${ordinal}`);
+            }
+            const worker = Reflect.construct(Target, args);
             stats.created[name] = (Number(stats.created[name]) || 0) + 1;
             stats.active[name] = (Number(stats.active[name]) || 0) + 1;
             const terminate = worker.terminate.bind(worker);
+            const postMessage = worker.postMessage.bind(worker);
             let terminated = false;
+            const holdAtOrdinal = Number(control.holdAtCreatedByName[name]);
+            if (holdAtOrdinal === ordinal) {
+              delete control.holdAtCreatedByName[name];
+            }
+            if (Number(control.holdNextByName[name]) > 0 || holdAtOrdinal === ordinal) {
+              if (Number(control.holdNextByName[name]) > 0) {
+                control.holdNextByName[name] -= 1;
+              }
+              const queued = /** @type {any[][]} */ ([]);
+              let released = false;
+              /** @param {...any} messageArgs */
+              worker.postMessage = (...messageArgs) => {
+                if (released) {
+                  postMessage(...messageArgs);
+                } else {
+                  queued.push(messageArgs);
+                }
+              };
+              control.held.push({
+                name,
+                release() {
+                  if (released || terminated) return;
+                  released = true;
+                  for (const messageArgs of queued.splice(0)) {
+                    postMessage(...messageArgs);
+                  }
+                },
+              });
+            }
             worker.terminate = () => {
               if (!terminated) {
                 terminated = true;
@@ -394,11 +464,9 @@ async function run() {
         return;
       }
       if (lobbyScenarioProbe) {
-        const lobbyScenarioProbeResult = await runLobbyScenarioProbe(
-          page,
-          canvas,
-          lobbyScenarioMobileProbe,
-        );
+        const lobbyScenarioProbeResult = lobbyScenarioLifecycleProbe
+          ? await runLobbyScenarioLifecycleProbe(page, canvas)
+          : await runLobbyScenarioProbe(page, canvas, lobbyScenarioMobileProbe);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         const pageScreenshotCaptured = await page.screenshot({
           path: screenshotPath,
@@ -1012,6 +1080,662 @@ function waitForStopSignal() {
       process.once(signal, stop);
     }
   });
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
+async function runLobbyScenarioLifecycleProbe(page, canvas) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativeTitleUi?.());
+  await waitForNativeUiScreen(page, "title");
+  const initial = await page.evaluate(() => ({
+    activeWorldInstanceId: globalThis.__mcloneWebApp.state.activeWorldInstanceId,
+    activeWorldSeedText: globalThis.__mcloneWebApp.state.activeWorldSeedText,
+    managedRuntimeStartCount:
+      Number(globalThis.__mcloneWebApp.state.managedRuntimeStartCount) || 0,
+  }));
+
+  await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    root.__mcloneWorkerControl.holdNext("mclone-managed-content", 2);
+  });
+  await clickNativeMenuButton(canvas, "title", 0);
+  await waitForNativeUiScreen(page, "preparingLobby");
+  const repeatedLaunch = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.beginManagedScenarioSmoke?.() ?? null,
+  );
+  await clickNativeMenuButton(canvas, "preparingLobby", 0);
+  await waitForNativeUiScreen(page, "title");
+  await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    root.__mcloneWorkerControl.release("mclone-managed-content");
+  });
+  await page.waitForFunction(
+    () => {
+      const root = /** @type {any} */ (globalThis);
+      const state = root.__mcloneWebApp?.state;
+      return state?.managedScenarioLaunchActive === false
+        && Number(state?.managedProvisionWorkerCount) === 0
+        && Number(root.__mcloneWorkerStats?.active?.["mclone-managed-content"]) === 0;
+    },
+    undefined,
+    { timeout: 20_000 },
+  );
+  const cancelledProvisioning = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const state = root.__mcloneWebApp.state;
+    return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldSeedText: state.activeWorldSeedText,
+      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      managedRuntimeStartCount: Number(state.managedRuntimeStartCount) || 0,
+      workers: root.__mcloneWorkerStats,
+    };
+  });
+
+  const destinationFailureOrdinal = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const name = "mclone-integrated-server";
+    const ordinal = (Number(root.__mcloneWorkerStats.created[name]) || 0) + 2;
+    root.__mcloneWorkerControl.failAtCreated(name, ordinal);
+    return ordinal;
+  });
+  await clickNativeMenuButton(canvas, "title", 0);
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.activeWorldBehaviorProfile === "protected-lobby"
+        && String(state?.managedScenarioDestinationFailure ?? "").length > 0;
+    },
+    undefined,
+    { timeout: 45_000 },
+  );
+  const destinationFailure = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const state = root.__mcloneWebApp.state;
+    return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      failure: state.managedScenarioDestinationFailure,
+      standbyWorldPresent: state.standbyWorldPresent,
+      workers: root.__mcloneWorkerStats,
+    };
+  });
+  await quitBrowserScenarioToTitle(page, canvas);
+
+  const firstLaunch = await runLobbyScenarioProbe(page, canvas, false);
+  const firstSourceWorld = firstLaunch.after.activeWorldInstanceId;
+  const firstDestinationWorld = firstLaunch.after.standbyWorldInstanceId;
+  const outbound = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    "mouse",
+    "/tmp/mclone-native-web-lobby-lifecycle-island.png",
+  );
+  const returned = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    "touch",
+    "/tmp/mclone-native-web-lobby-lifecycle-return.png",
+  );
+  const mutationLeg = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    "mouse",
+    "/tmp/mclone-native-web-lobby-lifecycle-mutation-world.png",
+  );
+
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.currentTarget?.hit === true,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const mutation = await page.evaluate(async () => {
+    const app = globalThis.__mcloneWebApp;
+    return await app.interactBlock?.("break") ?? null;
+  });
+  const mutationBlock = {
+    x: Number(mutation?.blockX),
+    y: Number(mutation?.blockY),
+    z: Number(mutation?.blockZ),
+  };
+  if (!mutation?.commandSent || !Object.values(mutationBlock).every(Number.isFinite)) {
+    throw new Error(`island mutation was not submitted: ${JSON.stringify(mutation)}`);
+  }
+  const mutatedState = await waitForBlockStateAt(page, mutationBlock, 0);
+  await page.waitForFunction(
+    () => {
+      const report = globalThis.__mcloneWebApp?.state?.lastReport;
+      return Number(report?.runnerPendingPersistenceSaves) === 0
+        && Number(report?.runnerPendingPublications) === 0;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+  await quitBrowserScenarioToTitle(page, canvas);
+
+  const relaunched = await runLobbyScenarioProbe(page, canvas, false);
+  const reopenedIsland = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    "mouse",
+    "/tmp/mclone-native-web-lobby-lifecycle-reopened-island.png",
+  );
+  const persistedState = await waitForBlockStateAt(page, mutationBlock, 0);
+
+  const visibility = await exerciseBrowserScenarioVisibility(page);
+  await quitBrowserScenarioToTitle(page, canvas);
+  const quitDuringDestinationStartup =
+    await exerciseQuitDuringBrowserDestinationStartup(page, canvas);
+  const assetReplacementDuringWarmup =
+    await exerciseBrowserAssetReplacementDuringWarmup(page, canvas);
+  const resourceRebuildDuringStartup =
+    await exerciseBrowserResourceRebuildDuringStartup(page, canvas);
+  const final = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const state = root.__mcloneWebApp.state;
+    return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      embeddedActivationSequence: state.embeddedActivationSequence,
+      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      catalogEntryCount: state.worldCatalogEntryCount,
+      workers: root.__mcloneWorkerStats,
+    };
+  });
+
+  return {
+    ok: cancelledProvisioning.activeWorldInstanceId === initial.activeWorldInstanceId
+      && cancelledProvisioning.activeWorldSeedText === initial.activeWorldSeedText
+      && cancelledProvisioning.managedRuntimeStartCount === initial.managedRuntimeStartCount
+      && repeatedLaunch?.ok === true
+      && destinationFailure.activeWorldBehaviorProfile === "protected-lobby"
+      && String(destinationFailure.failure).length > 0
+      && destinationFailure.standbyWorldPresent !== true
+      && firstLaunch.ok
+      && relaunched.ok
+      && outbound.sourceWorld === firstSourceWorld
+      && outbound.destinationWorld === firstDestinationWorld
+      && returned.sourceWorld === firstDestinationWorld
+      && returned.destinationWorld === firstSourceWorld
+      && mutationLeg.destinationWorld === firstDestinationWorld
+      && mutationLeg.firstUncoveredUploadedSectionCount === 0
+      && mutationLeg.firstUncoveredSubmittedCompileSectionCount === 0
+      && mutationLeg.firstUncoveredAcceptedCompileResultCount === 0
+      && mutationLeg.switchUploadedSectionCount === 0
+      && mutationLeg.switchSubmittedCompileSectionCount === 0
+      && mutationLeg.switchAcceptedCompileResultCount === 0
+      && mutationLeg.switchMaterializedRenderer === false
+      && mutatedState.blockStateId === 0
+      && persistedState.blockStateId === 0
+      && reopenedIsland.destinationWorld === relaunched.after.standbyWorldInstanceId
+      && visibility.backgroundSaveAdvanced
+      && visibility.resumed
+      && quitDuringDestinationStartup.ok
+      && assetReplacementDuringWarmup.ok
+      && resourceRebuildDuringStartup.ok
+      && Number(final.catalogEntryCount) === 0
+      && Number(final.workers?.active?.["mclone-integrated-server"]) === 0,
+    initial,
+    repeatedLaunch,
+    cancelledProvisioning,
+    destinationFailureOrdinal,
+    destinationFailure,
+    firstLaunch,
+    outbound,
+    returned,
+    mutationLeg,
+    mutation,
+    mutationBlock,
+    mutatedState,
+    relaunched,
+    reopenedIsland,
+    persistedState,
+    visibility,
+    quitDuringDestinationStartup,
+    assetReplacementDuringWarmup,
+    resourceRebuildDuringStartup,
+    final,
+  };
+}
+
+/** @param {Page} page @param {Locator} canvas */
+async function quitBrowserScenarioToTitle(page, canvas) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  await clickNativeMenuButton(canvas, "pause", 2);
+  await waitForNativeUiScreen(page, "title");
+  await page.waitForFunction(
+    () => {
+      const root = /** @type {any} */ (globalThis);
+      return Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 0
+        && root.__mcloneWebApp?.state?.managedScenarioLaunchActive === false;
+    },
+    undefined,
+    { timeout: 30_000 },
+  );
+}
+
+/**
+ * Start the production lobby while holding the destination server Worker before
+ * its initialization message. The primary must become playable independently.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ */
+async function startBrowserScenarioWithHeldDestination(page, canvas) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativeTitleUi?.());
+  await waitForNativeUiScreen(page, "title");
+  const setup = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const name = "mclone-integrated-server";
+    const destinationOrdinal = (Number(root.__mcloneWorkerStats.created[name]) || 0) + 2;
+    root.__mcloneWorkerControl.holdAtCreated(name, destinationOrdinal);
+    return {
+      destinationOrdinal,
+      staleCompletionCount:
+        Number(root.__mcloneWebApp?.state?.staleManagedStartCompletionCount) || 0,
+    };
+  });
+  await clickNativeMenuButton(canvas, "title", 0);
+  await page.waitForFunction(
+    (destinationOrdinal) => {
+      const root = /** @type {any} */ (globalThis);
+      const state = root.__mcloneWebApp?.state;
+      return state?.activeWorldBehaviorProfile === "protected-lobby"
+        && state?.managedScenarioLaunchActive === true
+        && state?.standbyWorldPresent !== true
+        && Number(root.__mcloneWorkerStats?.created?.["mclone-integrated-server"])
+          >= destinationOrdinal
+        && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 2;
+    },
+    setup.destinationOrdinal,
+    { timeout: 45_000 },
+  );
+  return {
+    ...setup,
+    playable: await page.evaluate(() => {
+      const root = /** @type {any} */ (globalThis);
+      const state = root.__mcloneWebApp.state;
+      return {
+        activeWorldInstanceId: state.activeWorldInstanceId,
+        activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+        standbyWorldPresent: state.standbyWorldPresent,
+        workers: root.__mcloneWorkerStats,
+      };
+    }),
+  };
+}
+
+/** @param {Page} page */
+async function releaseHeldBrowserDestination(page) {
+  await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    root.__mcloneWorkerControl.release("mclone-integrated-server");
+  });
+}
+
+/** @param {Page} page @param {Locator} canvas */
+async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
+  const setup = await startBrowserScenarioWithHeldDestination(page, canvas);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  await clickNativeMenuButton(canvas, "pause", 2);
+  await waitForNativeUiScreen(page, "title");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.managedScenarioLaunchActive === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  await releaseHeldBrowserDestination(page);
+  await page.waitForFunction(
+    (staleCompletionCount) => {
+      const root = /** @type {any} */ (globalThis);
+      return Number(root.__mcloneWebApp?.state?.staleManagedStartCompletionCount)
+          > staleCompletionCount
+        && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 0;
+    },
+    setup.staleCompletionCount,
+    { timeout: 45_000 },
+  );
+  const after = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const state = root.__mcloneWebApp.state;
+    return {
+      screen: state.nativeUiScreen,
+      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      workers: root.__mcloneWorkerStats,
+    };
+  });
+  return {
+    ok: setup.playable.activeWorldBehaviorProfile === "protected-lobby"
+      && setup.playable.standbyWorldPresent !== true
+      && after.screen === "title"
+      && after.managedScenarioLaunchActive === false
+      && Number(after.staleManagedStartCompletionCount) > setup.staleCompletionCount
+      && Number(after.workers?.active?.["mclone-integrated-server"]) === 0,
+    setup,
+    after,
+  };
+}
+
+/**
+ * Select the authored pack through the production pause/options UI without
+ * reloading the page. This returns only after the shared replacement commit.
+ *
+ * @param {Page} page
+ */
+async function applyBrowserAssetSelectionWithoutReload(page) {
+  const before = await page.evaluate(() => ({
+    activeAssetEpoch:
+      Number(globalThis.__mcloneWebApp?.state?.lastReport?.activeAssetEpoch) || 0,
+    completionCount:
+      Number(globalThis.__mcloneWebApp?.state?.assetPackCompletionCount) || 0,
+  }));
+  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+  await waitForNativeUiScreen(page, "pause");
+  const geometry = await nativeUiGeometry(page);
+  await clickNativeUiPoint(page, {
+    x: geometry.width * 0.5,
+    y: geometry.height * 0.5 + 12.0,
+  });
+  await waitForNativeUiScreen(page, "options");
+  await clickNativeUiPoint(page, assetPackOptionsButtonPoint(geometry));
+  await waitForNativeUiScreen(page, "assetPacks");
+  await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
+  await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
+  const applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
+  await page.waitForFunction(
+    ({ epoch, completionCount }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const report = state?.lastReport;
+      return Number(state?.assetPackCompletionCount) > completionCount
+        && Number(report?.activeAssetEpoch) === epoch
+        && report?.assetReplacementState === "active"
+        && state?.managedScenarioLaunchActive === false
+        && state?.sessionBusy === false;
+    },
+    { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
+    { timeout: 120_000 },
+  );
+  return {
+    before,
+    applyReport,
+    after: await page.evaluate(() => {
+      const state = globalThis.__mcloneWebApp.state;
+      return {
+        activeAssetEpoch: Number(state.lastReport?.activeAssetEpoch) || 0,
+        assetReplacementState: state.lastReport?.assetReplacementState,
+        activeAuthored: state.lastReport?.assetPackActiveAuthored,
+        activeReference: state.lastReport?.assetPackActiveReference,
+        managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      };
+    }),
+  };
+}
+
+/** @param {Page} page @param {Locator} canvas */
+async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
+  const setup = await startBrowserScenarioWithHeldDestination(page, canvas);
+  const replacement = await applyBrowserAssetSelectionWithoutReload(page);
+  await releaseHeldBrowserDestination(page);
+  await page.waitForFunction(
+    (staleCompletionCount) => {
+      const root = /** @type {any} */ (globalThis);
+      const state = root.__mcloneWebApp?.state;
+      return Number(state?.staleManagedStartCompletionCount) > staleCompletionCount
+        && state?.managedScenarioLaunchActive === false
+        && state?.standbyWorldPresent !== true
+        && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
+    },
+    setup.staleCompletionCount,
+    { timeout: 45_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  const screenshot = "/tmp/mclone-native-web-lobby-lifecycle-asset-replacement.png";
+  const png = await canvas.screenshot({ path: screenshot, timeout: 60_000 });
+  const pixels = analyzePng(png);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  const after = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const state = root.__mcloneWebApp.state;
+    return {
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      standbyWorldPresent: state.standbyWorldPresent,
+      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      workers: root.__mcloneWorkerStats,
+    };
+  });
+  await quitBrowserScenarioToTitle(page, canvas);
+  return {
+    ok: replacement.after.activeAssetEpoch === replacement.before.activeAssetEpoch + 1
+      && replacement.after.assetReplacementState === "active"
+      && replacement.after.activeAuthored === true
+      && replacement.after.activeReference === false
+      && after.activeWorldBehaviorProfile === "protected-lobby"
+      && after.managedScenarioLaunchActive === false
+      && after.standbyWorldPresent !== true
+      && Number(after.staleManagedStartCompletionCount) > setup.staleCompletionCount
+      && Number(after.workers?.active?.["mclone-integrated-server"]) === 1
+      && pixels.nonClearInteriorPixelCount > 128,
+    setup,
+    replacement,
+    screenshot,
+    pixels,
+    after,
+  };
+}
+
+/** @param {Page} page @param {Locator} canvas */
+async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
+  const setup = await startBrowserScenarioWithHeldDestination(page, canvas);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  const beforeGeneration = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.renderResourceGeneration) || 0,
+  );
+  const rebuildReport = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.rebuildRenderResourcesForSmoke?.() ?? null,
+  );
+  await releaseHeldBrowserDestination(page);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  await page.waitForFunction(
+    ({ staleCompletionCount, beforeGeneration }) => {
+      const root = /** @type {any} */ (globalThis);
+      const state = root.__mcloneWebApp?.state;
+      return Number(state?.staleManagedStartCompletionCount) > staleCompletionCount
+        && Number(state?.renderResourceGeneration) === beforeGeneration + 1
+        && state?.managedScenarioLaunchActive === false
+        && state?.standbyWorldPresent !== true
+        && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
+    },
+    { staleCompletionCount: setup.staleCompletionCount, beforeGeneration },
+    { timeout: 45_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  const screenshot = "/tmp/mclone-native-web-lobby-lifecycle-resource-rebuild.png";
+  const png = await canvas.screenshot({ path: screenshot, timeout: 60_000 });
+  const pixels = analyzePng(png);
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  const after = await page.evaluate(() => {
+    const root = /** @type {any} */ (globalThis);
+    const state = root.__mcloneWebApp.state;
+    return {
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      renderResourceGeneration: state.renderResourceGeneration,
+      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      standbyWorldPresent: state.standbyWorldPresent,
+      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      workers: root.__mcloneWorkerStats,
+    };
+  });
+  await quitBrowserScenarioToTitle(page, canvas);
+  return {
+    ok: rebuildReport?.ok === true
+      && Number(after.renderResourceGeneration) === beforeGeneration + 1
+      && after.activeWorldBehaviorProfile === "protected-lobby"
+      && after.managedScenarioLaunchActive === false
+      && after.standbyWorldPresent !== true
+      && Number(after.staleManagedStartCompletionCount) > setup.staleCompletionCount
+      && Number(after.workers?.active?.["mclone-integrated-server"]) === 1
+      && pixels.nonClearInteriorPixelCount > 128,
+    setup,
+    beforeGeneration,
+    rebuildReport,
+    screenshot,
+    pixels,
+    after,
+  };
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {"mouse" | "touch"} input
+ * @param {string} screenshot
+ */
+async function activateBrowserEmbeddedPreview(page, canvas, input, screenshot) {
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  const before = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      world: state.activeWorldInstanceId,
+      sequence: Number(state.embeddedActivationSequence) || 0,
+      pointerLockAttempted: state.pointerLockAttempted === true,
+    };
+  });
+  if (input === "mouse") {
+    if (!before.pointerLockAttempted) {
+      await clickCanvasFraction(canvas, 0.5, 0.5);
+    }
+    const box = await canvas.boundingBox();
+    if (!box) throw new Error("activation canvas had no bounding box");
+    await page.mouse.click(box.x + box.width * 0.5, box.y + box.height * 0.5, {
+      button: "right",
+    });
+  } else {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.setNativeTouchControlsMode?.("on", false));
+    await dispatchTouchButtonPointerEvent(page, "use", "pointerdown", {
+      pointerId: 91,
+      buttons: 1,
+    });
+    await dispatchTouchButtonPointerEvent(page, "use", "pointerup", {
+      pointerId: 91,
+      buttons: 0,
+    });
+  }
+  await page.waitForFunction(
+    ({ world, sequence }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return Number(state?.embeddedActivationSequence) > sequence
+        && state?.embeddedActivationSourceWorldInstanceId === world;
+    },
+    { world: before.world, sequence: before.sequence },
+    { timeout: 10_000, polling: "raf" },
+  );
+  await page.waitForFunction(
+    ({ world, sequence }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.embeddedActivationPhase === "idle"
+        && Number(state?.embeddedActivationSequence) > sequence
+        && state?.activeWorldInstanceId !== world
+        && Number(state?.embeddedActivationFirstUncoveredFrame) > 0;
+    },
+    { world: before.world, sequence: before.sequence },
+    { timeout: 20_000, polling: "raf" },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  const png = await canvas.screenshot({ path: screenshot, timeout: 60_000 });
+  const pixels = analyzePng(png);
+  const after = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      sourceWorld: state.embeddedActivationSourceWorldInstanceId,
+      destinationWorld: state.embeddedActivationDestinationWorldInstanceId,
+      sequence: state.embeddedActivationSequence,
+      switchElapsedMs: state.embeddedActivationSwitchElapsedMs,
+      coveredRenderedFrames: state.embeddedActivationCoveredRenderedFrames,
+      firstUncoveredDrawnSectionCount:
+        state.embeddedActivationFirstUncoveredDrawnSectionCount,
+      firstUncoveredUploadedSectionCount:
+        state.embeddedActivationFirstUncoveredUploadedSectionCount,
+      firstUncoveredSubmittedCompileSectionCount:
+        state.embeddedActivationFirstUncoveredSubmittedCompileSectionCount,
+      firstUncoveredAcceptedCompileResultCount:
+        state.embeddedActivationFirstUncoveredAcceptedCompileResultCount,
+      firstUncoveredEyeCount: state.embeddedActivationFirstUncoveredEyeCount,
+      switchUploadedSectionCount: state.warmWorldSwitchUploadedSectionCount,
+      switchSubmittedCompileSectionCount: state.warmWorldSwitchSubmittedCompileSectionCount,
+      switchAcceptedCompileResultCount: state.warmWorldSwitchAcceptedCompileResultCount,
+      switchMaterializedRenderer: state.warmWorldSwitchMaterializedRenderer,
+      activationFailed: state.embeddedActivationFailed,
+    };
+  });
+  if (input === "touch") {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.setNativeTouchControlsMode?.("off", false));
+    await page.waitForTimeout(850);
+  }
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  if (
+    pixels.nonClearInteriorPixelCount <= 128
+    || Number(after.coveredRenderedFrames) < 1
+    || Number(after.firstUncoveredDrawnSectionCount) < 1
+    || Number(after.firstUncoveredEyeCount) !== 1
+    || after.activationFailed === true
+  ) {
+    throw new Error(`embedded activation receipt was invalid: ${JSON.stringify({ after, pixels })}`);
+  }
+  return { input, screenshot, pixels, ...after };
+}
+
+/** @param {Page} page */
+async function exerciseBrowserScenarioVisibility(page) {
+  const before = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.backgroundSaveCount) || 0,
+  );
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForFunction(
+    (before) => Number(globalThis.__mcloneWebApp?.state?.backgroundSaveCount) > before,
+    before,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.lastReport?.firstAfterResume === false,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const after = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.backgroundSaveCount) || 0,
+  );
+  return {
+    beforeBackgroundSaveCount: before,
+    afterBackgroundSaveCount: after,
+    backgroundSaveAdvanced: after > before,
+    resumed: true,
+  };
 }
 
 /**
@@ -4036,7 +4760,7 @@ async function readNativeUiState(page) {
 
 /**
  * @param {Locator} canvas
- * @param {"title"} menu
+ * @param {"title" | "pause" | "preparingLobby"} menu
  * @param {number} buttonIndex
  */
 async function clickNativeMenuButton(canvas, menu, buttonIndex) {
@@ -4059,7 +4783,9 @@ async function clickNativeMenuButton(canvas, menu, buttonIndex) {
       const guiHeight = Math.ceil(pixelHeight / scale);
       const menuTop = menu === "title"
         ? guiHeight * 0.5 - 46.0
-        : guiHeight * 0.5 - 4.0;
+        : menu === "pause"
+        ? guiHeight * 0.5 - 22.0
+        : guiHeight * 0.5 + 32.0;
       const guiX = guiWidth * 0.5;
       const guiY = menuTop + buttonIndex * 24.0 + 10.0;
       const rect = element.getBoundingClientRect();

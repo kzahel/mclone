@@ -189,6 +189,7 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn rebuild_mono_render_resources(
         &mut self,
         device: &wgpu::Device,
@@ -196,6 +197,28 @@ impl McloneSceneHost {
         actor_atlas: ActorTextureImage,
         actor_figures: &ActorFigureSet,
         asset_source: &impl AssetSource,
+    ) -> Result<()> {
+        let screen_effects = load_screen_effect_texture_assets(asset_source)
+            .context("reload Mono screen-effect assets")?;
+        self.rebuild_mono_render_resources_with_assets(
+            device,
+            queue,
+            actor_atlas,
+            actor_figures,
+            &screen_effects,
+        )
+    }
+
+    /// Rebuild against already-prepared host-neutral assets. Browser adapters
+    /// use this path after a WebGPU resource-generation reset; native adapters
+    /// retain the source-loading convenience wrapper above.
+    pub fn rebuild_mono_render_resources_with_assets(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        actor_atlas: ActorTextureImage,
+        actor_figures: &ActorFigureSet,
+        screen_effects: &ScreenEffectTextureAssets,
     ) -> Result<()> {
         // A retained slot owns resources created by the previous device. Until
         // multi-slot device migration is implemented, cancellation is the
@@ -245,9 +268,13 @@ impl McloneSceneHost {
             self.color_format,
             self.render_options.color_profile,
         );
-        self.screen_effects =
-            ScreenEffectsRenderer::new(device, queue, self.color_format, asset_source)
-                .context("rebuild Mono screen effects")?;
+        self.screen_effects = ScreenEffectsRenderer::new_with_assets(
+            device,
+            queue,
+            self.color_format,
+            screen_effects,
+        )
+        .context("rebuild Mono screen effects")?;
         self.active_world.traversal_ready_sections.clear();
         self.active_world.section_uploads.clear();
         self.active_world.render_stats = RenderStreamStats::default();

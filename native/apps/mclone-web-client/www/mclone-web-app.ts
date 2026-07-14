@@ -91,6 +91,7 @@ interface AppRuntime {
   frameEmbeddedPreview?: () => WasmReport | null;
   frameInteractionSurface?: () => WasmReport | null;
   renderOneFrameForSmoke?: () => Promise<WasmReport | null>;
+  rebuildRenderResourcesForSmoke?: () => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
   openNativePauseUi?: () => WasmReport | null;
   pauseRendering?: () => void;
@@ -275,6 +276,7 @@ async function boot(): Promise<WasmReport> {
   runtime.frameEmbeddedPreview = () => app.frameEmbeddedPreview();
   runtime.frameInteractionSurface = () => app.frameInteractionSurface();
   runtime.renderOneFrameForSmoke = () => app.renderOneFrameForSmoke();
+  runtime.rebuildRenderResourcesForSmoke = () => app.rebuildRenderResourcesForSmoke();
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
   runtime.openNativePauseUi = () => app.openNativePauseUi();
   runtime.pauseRendering = () => app.pauseRendering();
@@ -360,6 +362,8 @@ class WebFrameDriver {
     epoch: number;
   } | null;
   managedProvisionControllers: Map<string, AbortController>;
+  pendingManagedRuntimeStarts: Set<Promise<void>>;
+  managedScenarioLaunchObservedActive: boolean;
   managedOperationDrainActive: boolean;
   managedRuntimeStartCount: number;
 
@@ -405,6 +409,8 @@ class WebFrameDriver {
     this.sessionBusy = false;
     this.pendingAssetCompilerSwap = null;
     this.managedProvisionControllers = new Map();
+    this.pendingManagedRuntimeStarts = new Set();
+    this.managedScenarioLaunchObservedActive = false;
     this.managedOperationDrainActive = false;
     this.managedRuntimeStartCount = 0;
   }
@@ -509,6 +515,7 @@ class WebFrameDriver {
       "interactBlock",
       "frameEmbeddedPreview",
       "frameInteractionSurface",
+      "rebuildRenderResourcesForSmoke",
       "openTitleUi",
       "openPauseUi",
       "openHelpUi",
@@ -534,6 +541,7 @@ class WebFrameDriver {
       "completeManagedScenarioProvision",
       "prepareManagedScenarioWorldStart",
       "completeManagedScenarioWorldStart",
+      "discardManagedScenarioOperations",
       "installManagedScenarioServices",
       "shutdown",
     ]) {
@@ -639,6 +647,15 @@ class WebFrameDriver {
     }
   }
 
+  rebuildRenderResourcesForSmoke(): WasmReport | null {
+    if (!this.session || this.sessionBusy || this.tickFrameBusy) {
+      return null;
+    }
+    const report = this.session.rebuildRenderResourcesForSmoke();
+    this.applyNativeUiReport(report);
+    return report;
+  }
+
   beginManagedScenarioSmoke(): WasmReport | null {
     if (!this.session) {
       return null;
@@ -655,9 +672,11 @@ class WebFrameDriver {
       controller.abort("managed scenario smoke shutdown");
     }
     this.managedProvisionControllers.clear();
+    runtime.state.managedProvisionWorkerCount = 0;
     while (this.tickFrameBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    await Promise.allSettled([...this.pendingManagedRuntimeStarts]);
     await Promise.allSettled(
       [...this.pendingTimings.values()]
         .map((pending) => pending.workerPromise)
@@ -752,17 +771,47 @@ class WebFrameDriver {
     this.managedRuntimeStartCount += 1;
     runtime.state.managedRuntimeStartCount = this.managedRuntimeStartCount;
     runtime.state.lastManagedRuntimeStart = operation;
-    void start.start().then(() => {
-      if (!this.session) return;
-      const report = this.session.completeManagedScenarioWorldStart(start);
-      this.applyNativeUiReport(report);
-      this.drainManagedScenarioOperations();
-    }).catch((error: unknown) => {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      console.error(error);
-      publishRuntimeState(runtime.state);
-    }).finally(() => start.free());
+    const task = (async () => {
+      try {
+        await start.start();
+        if (!this.session) return;
+        const report = this.session.completeManagedScenarioWorldStart(start);
+        this.applyNativeUiReport(report);
+        this.drainManagedScenarioOperations();
+      } catch (error) {
+        runtime.state.ok = false;
+        runtime.state.status = stringifyError(error);
+        console.error(error);
+        publishRuntimeState(runtime.state);
+      } finally {
+        start.free();
+      }
+    })();
+    this.pendingManagedRuntimeStarts.add(task);
+    void task.finally(() => this.pendingManagedRuntimeStarts.delete(task));
+  }
+
+  cancelManagedScenarioAdapterOperations(reason: string): void {
+    for (const controller of this.managedProvisionControllers.values()) {
+      controller.abort(reason);
+    }
+    this.managedProvisionControllers.clear();
+    runtime.state.managedProvisionWorkerCount = 0;
+    this.session?.discardManagedScenarioOperations();
+  }
+
+  applyManagedScenarioLifecycleReport(report: WasmReport): void {
+    if (typeof report.managedScenarioLaunchActive === "undefined") {
+      return;
+    }
+    const active = Boolean(report.managedScenarioLaunchActive);
+    runtime.state.managedScenarioLaunchActive = active;
+    if (active) {
+      this.managedScenarioLaunchObservedActive = true;
+    } else if (this.managedScenarioLaunchObservedActive) {
+      this.managedScenarioLaunchObservedActive = false;
+      this.cancelManagedScenarioAdapterOperations("shared managed scenario epoch cancelled");
+    }
   }
 
 
@@ -1105,6 +1154,12 @@ class WebFrameDriver {
     runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.uiOptionsParent ?? null;
     applySessionReport(report, runtime.state);
+    this.applyManagedScenarioLifecycleReport(report);
+    for (const key of ["backgroundSaveCount", "firstAfterResume"]) {
+      if (typeof report[key] !== "undefined") {
+        runtime.state[key] = report[key];
+      }
+    }
     for (const key of [
       "activeWorldInstanceId",
       "activeWorldBehaviorProfile",
@@ -1122,6 +1177,10 @@ class WebFrameDriver {
       "standbySharedTerrainResourceOwnerCount",
       "standbySwitchable",
       "standbyWorldSeedText",
+      "managedScenarioLaunchActive",
+      "managedScenarioDestinationFailure",
+      "staleManagedStartCompletionCount",
+      "renderResourceGeneration",
       "embeddedPreviewWorldInstanceId",
       "embeddedPreviewPhase",
       "embeddedPreviewAnchorX",
@@ -1134,6 +1193,26 @@ class WebFrameDriver {
       "embeddedPreviewPendingCompileJobs",
       "embeddedPreviewQueuedUploadLifecycleItems",
       "embeddedPreviewOutOfRegionSubmissionCount",
+      "embeddedActivationPhase",
+      "embeddedActivationAlpha",
+      "embeddedActivationReady",
+      "embeddedActivationSequence",
+      "embeddedActivationSourceWorldInstanceId",
+      "embeddedActivationDestinationWorldInstanceId",
+      "embeddedActivationSwitchElapsedMs",
+      "embeddedActivationCoveredRenderedFrames",
+      "embeddedActivationFirstUncoveredFrame",
+      "embeddedActivationFirstUncoveredDrawnSectionCount",
+      "embeddedActivationFirstUncoveredUploadedSectionCount",
+      "embeddedActivationFirstUncoveredSubmittedCompileSectionCount",
+      "embeddedActivationFirstUncoveredAcceptedCompileResultCount",
+      "embeddedActivationFirstUncoveredEyeCount",
+      "embeddedActivationFailed",
+      "warmWorldSwitchSequence",
+      "warmWorldSwitchUploadedSectionCount",
+      "warmWorldSwitchSubmittedCompileSectionCount",
+      "warmWorldSwitchAcceptedCompileResultCount",
+      "warmWorldSwitchMaterializedRenderer",
     ]) {
       if (typeof report[key] !== "undefined") {
         runtime.state[key] = report[key];
@@ -1471,6 +1550,12 @@ class WebFrameDriver {
     runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.optionsParent ?? report.uiOptionsParent ?? null;
     applySessionReport(report, runtime.state);
+    this.applyManagedScenarioLifecycleReport(report);
+    for (const key of ["backgroundSaveCount", "firstAfterResume"]) {
+      if (typeof report[key] !== "undefined") {
+        runtime.state[key] = report[key];
+      }
+    }
     this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
     this.forceFullbright = Boolean(report.forceFullbright);
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;

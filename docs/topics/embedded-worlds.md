@@ -11,11 +11,13 @@ worlds.
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and a shared web-parity refactor
-through production desktop/mobile menu and live-preview pixels. Portable
+through production desktop/mobile menu, live-preview pixels, A-to-B-to-A
+activation, persistence, and adversarial lifecycle rejection. Portable
 scenario content, shared immutable second-slot terrain resources, slot-targeted
 startup/readiness/activation/swap policy, catalog-excluded IndexedDB
 provisioning, one compiler broker, and dual browser runtime ownership are
-landed. Browser activation and adversarial lifecycle parity are next.**
+landed. Final feature-off/scenario-on performance and platform closeout is
+next.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -64,7 +66,14 @@ measurement rejected inline work. One host compiler Worker serves both live
 world sessions, and both draw stores share the compatible atlas/pipeline owner.
 A server-owned behavior profile travels with each slot: the managed lobby
 authoritatively denies player break/place while the island remains mutable,
-including after complete-slot exchanges.
+including after complete-slot exchanges. Production mouse and touch input now
+drive the same scene-owned activation in both directions. Browser IndexedDB
+preserves an island edit across complete two-runtime shutdown and relaunch.
+Shared operation-token, role, and world-identity checks reject a late runtime
+before either slot can be installed; deterministic receipts cover Back during
+provisioning, Quit during destination startup, destination-only failure, asset
+replacement during warmup, renderer-resource rebuild, and visibility
+suspension/resume. No TypeScript scenario state machine was added.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -100,8 +109,8 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 Slice 4 landed catalog-excluded, transactional browser managed
-storage and moved its measured fixture work off the rAF thread).
+(Tactical 178 Slice 7 landed production browser activation, persistence, and
+late-completion lifecycle rejection through shared scene policy).
 
 ## Motivation
 

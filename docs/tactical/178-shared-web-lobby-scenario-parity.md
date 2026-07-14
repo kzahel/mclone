@@ -1,16 +1,17 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-6 locked the baseline, extracted portable
+Status: active 2026-07-14. Slices 0-7 locked the baseline, extracted portable
 scenario content, removed the duplicate second-slot terrain shell, and moved
 managed provisioning, slot-targeted startup, readiness, activation, and swap
 policy into shared Rust. Catalog-excluded, Worker-backed IndexedDB provisioning
 and dual browser runtime ownership through one namespaced compiler broker are
-also complete. The production desktop and mobile browser title now enters the
-protected lobby and renders its live island preview. Activation and adversarial
-lifecycle parity are next. This tactical closes the browser exception left by
-Tacticals 174, 175, and 177 by refactoring their native-shaped startup seams
-into shared contracts. It does not authorize a second browser scenario
-implementation.
+also complete. The production desktop and mobile browser title enters the
+protected lobby, renders its live island preview, activates in both directions,
+persists destination edits, and rejects late runtime starts across cancellation,
+asset replacement, and resource rebuild. Performance and platform-parity
+closeout is next. This tactical closes the browser exception left by Tacticals
+174, 175, and 177 by refactoring their native-shaped startup seams into shared
+contracts. It does not authorize a second browser scenario implementation.
 
 Topic: `embedded-worlds`
 
@@ -1096,6 +1097,66 @@ Deliverables:
 
 Exit criteria: the production browser scenario passes the same functional
 contract as native, including return, persistence, and cancellation.
+
+#### Slice 7 completion record — 2026-07-14
+
+Production mouse right-click and touch `Use` now enter the same scene-owned
+preview ray, blink, and complete-slot exchange. The lifecycle smoke completed
+lobby A -> island B -> lobby A -> island B with five covered frames per
+activation. Its first uncovered destination frame drew two sections with zero
+compile submissions, compile accepts, section uploads, or renderer
+materialization at the switch boundary. The native flat, synthetic-stereo, and
+diagnostic A-to-B-to-A lanes retain the same invariant.
+
+The browser broke island block `(0, 62, 1)`, waited for IndexedDB publication,
+quit both runtimes, relaunched fresh runtime identities, and observed air at the
+same coordinate. The protected lobby continued to deny break/place. A hidden
+visibility transition advanced the shared background-save counter and the
+visible transition resumed frame delivery. Managed worlds remained absent from
+the catalog.
+
+Late runtime completion is now guarded before installation by shared scene
+policy. `ManagedScenarioLaunchState` checks the exact operation token, role,
+and stable world-instance identity without consuming the later completion.
+`complete_external_session_start` drops a runtime before either slot can be
+mutated when that check fails. The browser adapter clears only its opaque
+operation tickets and reports a stale-completion counter; it does not decide
+whether a world is still admissible.
+
+Deterministic browser lifecycle controls exercised all named races. Back while
+both provisioning Workers were held left the original world untouched; a
+repeated launch emitted no second scenario; destination Worker construction
+failure left the protected lobby playable; and Quit with the destination start
+held rejected that completion after release. Asset replacement and renderer
+resource rebuild each cancelled a held destination, retained only the playable
+lobby, then rejected the released completion. Those three late-start cases
+advanced the stale counter from zero to three. The resource rebuild uses a new
+host-neutral prepared-screen-effect entry, so browser recovery calls the same
+scene rebuild implementation as native rather than maintaining a WASM copy.
+The current smoke rebuilds on the live device; it is a resource-generation
+recovery receipt, not a fabricated WebGPU device-loss claim.
+
+The final browser run reported a 307 ms click-to-playable lobby and 1.237 s
+from playable lobby to visible preview. Shutdown left zero active integrated
+server, compiler, or managed-content Workers. Fresh island, return-lobby,
+persisted-edit, asset-replacement, and resource-rebuild captures were inspected.
+The Android arm64 release library and debug APK also built successfully through
+the supported build script.
+
+Focused evidence:
+
+```text
+cargo test --manifest-path native/Cargo.toml -p mclone-app-runtime
+cargo test --manifest-path native/Cargo.toml -p mclone-scene
+cargo test --manifest-path native/Cargo.toml -p mclone-web-client
+pnpm native:web:typecheck
+pnpm native:web:lobby-scenario-lifecycle-smoke
+pnpm native:lobby-scenario:smoke
+pnpm native:lobby-scenario:stereo-smoke
+pnpm native:live-diorama:activation-smoke
+pnpm native:android:apk
+pnpm native:thin-adapters:purity
+```
 
 Estimated effort: 1-2 days.
 

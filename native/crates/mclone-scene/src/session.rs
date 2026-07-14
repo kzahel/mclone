@@ -1002,6 +1002,30 @@ impl McloneSceneHost {
         })
     }
 
+    pub const fn managed_scenario_launch_active(&self) -> bool {
+        self.managed_scenario_launch.is_some()
+    }
+
+    pub fn managed_scenario_destination_failure(&self) -> Option<&str> {
+        self.managed_scenario_launch
+            .as_ref()
+            .and_then(|launch| launch.destination_failure.as_deref())
+    }
+
+    /// True only while a taken asynchronous start still belongs to the live
+    /// shared scenario operation epoch. A platform adapter may finish Worker
+    /// construction after Back, Quit, asset replacement, or resource rebuild;
+    /// such a runtime must be dropped before it can replace either world slot.
+    pub fn external_scene_start_is_current(&self, pending: &ExternalSceneSessionStart) -> bool {
+        match &pending.target {
+            ExternalSceneStartTarget::ActiveSession => true,
+            ExternalSceneStartTarget::ManagedScenario { token, role } => self
+                .managed_scenario_launch
+                .as_ref()
+                .is_some_and(|launch| launch.owns_start(*token, *role, pending.instance_id)),
+        }
+    }
+
     /// Install an asynchronously constructed neutral runtime without moving
     /// session, render, UI, or camera policy into the platform adapter.
     pub fn complete_external_session_start(
@@ -1011,6 +1035,14 @@ impl McloneSceneHost {
         pending: ExternalSceneSessionStart,
         runtime: SceneSessionRuntime,
     ) -> Result<()> {
+        if !self.external_scene_start_is_current(&pending) {
+            log::info!(
+                "dropping stale external scene start instance={} target={:?}",
+                pending.instance_id.get(),
+                pending.target,
+            );
+            return Ok(());
+        }
         let active = runtime
             .active_session()
             .cloned()
