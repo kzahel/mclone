@@ -1,12 +1,14 @@
 # 175: Live Hosted World Diorama
 
-Status: active 2026-07-14. Slices 0–5 landed: contract/baseline,
-authored-only server/content foundation, static placed terrain, the first live
-local two-host composition, bounded live mutation/background accounting, and
-composition-space water/translucent ordering. The required Slice 3 human review
-replaced the oversized elevated table and coplanar preview before live updates.
-Slice 6 blink activation/return is next; capable-device multiview remains a
-shared named validation gap.
+Status: active 2026-07-14. Slices 0–6 landed: contract/baseline,
+authored-only server/content foundation, static and live local two-host
+composition, bounded mutation/background accounting, composition-space
+water/translucent ordering, and scene-owned blink activation/return. The
+required Slice 3 human review replaced the oversized elevated table and
+coplanar preview before live updates. Tactical 177 now productizes this local
+proof through one shared menu-launched protected-lobby scenario before this
+tactical resumes remote Slice 7. Capable-device multiview remains a shared
+named validation gap.
 
 Topic: `embedded-worlds`
 

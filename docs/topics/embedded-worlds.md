@@ -37,7 +37,11 @@ and stereo A-to-B-to-A receipts prove that the first uncovered frame already
 draws the destination with no boundary compile, upload, runtime creation, or
 renderer materialization. There is still no N-world registry, product UI, or
 remote preview, but simultaneous shared-depth terrain composition and local
-activation are now concrete. Separately,
+activation are now concrete. Tactical 177 now proposes the first product
+surface: one shared `Enter Lobby` action, versioned managed authored content,
+an authoritative protected-lobby behavior profile, lobby-first asynchronous
+destination warmup, and a common execution seam used by both menu and CLI.
+Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
 Tactical 174 now also classifies all 81 flattened scene-host fields, locks the
@@ -55,13 +59,17 @@ two drawable local worlds and switch through an opaque gate, with an explicit
 stop before simultaneous rendering. The next bounded composition milestone is
 [`175-live-hosted-world-diorama.md`](../tactical/175-live-hosted-world-diorama.md):
 draw one live local or remote hosted region as scaled geometry on a block-built
-table, then use only a simple blink around the already-proven activation.
+table, then use only a simple blink around the already-proven activation. The
+immediate productization plan is
+[`177-menu-launched-protected-lobby-scenario.md`](../tactical/177-menu-launched-protected-lobby-scenario.md):
+enter the fixed local scenario from the shared title menu before broadening the
+destination source.
 
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 175 Slice 6).
+(Tactical 177 proposal after Tactical 175 Slice 6).
 
 ## Motivation
 
@@ -669,22 +677,27 @@ bounded simultaneous-geometry plan lives in
 2. Keep Tactical 175's landed authored-only fixtures, separate placed-terrain
    pipeline, live mutation, water/translucent ordering, and local blink
    activation/return green without taxing the one-world path.
-3. Prove the same bounded preview and activation behavior with a remote hosted
+3. Execute Tactical 177: refactor CLI and product launch onto one shared
+   scenario seam, provision versioned managed authored content, enter the
+   protected lobby from the title, and warm the fixed island asynchronously.
+4. Bind the proven lobby to the most recently *actively played* compatible
+   local world. A background preview open must not itself update catalog
+   recency.
+5. Prove the same bounded preview and activation behavior with a remote hosted
    source. Keep the dual-host/root-isolation smokes and materialized multiview
    contract green.
-4. Generalize to an N-world registry only after the bounded live-diorama
+6. Generalize to an N-world registry only after the bounded live-diorama
    milestone is closed and a concrete multi-preview experience requires it.
-5. Lobby spawn: authoritative world behavior profile + authored room.
-6. T0 baked diorama and T1 seed explorer may reuse the same placement path as
+7. T0 baked diorama and T1 seed explorer may reuse the same placement path as
    cheaper fidelity alternatives to the live T3 sample.
-7. After the hosted-world milestone closes, allow a bounded active-world region
+8. After the hosted-world milestone closes, allow a bounded active-world region
    to source the same non-recursive placed-terrain path without a second slot.
-8. Add a real remote observer/subscription mode only when previews must stop
+9. Add a real remote observer/subscription mode only when previews must stop
    consuming ordinary joined-player identities.
-9. Add half-space visibility and boundary-aware meshing for an `x=0` render
+10. Add half-space visibility and boundary-aware meshing for an `x=0` render
    proof before attempting traversal.
-10. Add one-active-authority local handoff, then a traversable seam or portal.
-11. Treat federated remote authority and dynamic shadows as separate later
+11. Add one-active-authority local handoff, then a traversable seam or portal.
+12. Treat federated remote authority and dynamic shadows as separate later
     campaigns.
 
 Keep dynamic shadows as a separate topic when that work opens; it is the biggest
