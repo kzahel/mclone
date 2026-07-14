@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: active 2026-07-14. Slices 0-2 are complete; Slices 3-7 remain.
+Status: active 2026-07-14. Slices 0-3 are complete; Slices 4-7 remain.
 
 Topic: `embedded-worlds`
 
@@ -929,6 +929,68 @@ Deliverables:
 Exit criteria: actor mutable state is genuinely per world, immutable resources
 are singular, and ordinary rendering remains behaviorally and measurably
 unchanged.
+
+#### Slice 3 completion record — 2026-07-14
+
+`ActorSharedResources` now owns the compatible immutable atlas, figures,
+texture layouts, shader/pipeline layouts, and lazily initialized multiview
+pipeline topology behind one `Arc`. Each `DrawableWorldSlot` instead owns an
+optional `ActorDrawResources` containing its direct and multiview uniform
+state plus its own `ActorMeshCache`. The ordinary active draw resolves that
+state directly from `active_world`; it does not construct a composition
+context, select a clipped pipeline, or qualify actor ids by world in the hot
+loop. The direct actor shaders remain unchanged.
+
+The standby actor state stays absent through startup and terrain warming. It
+is created only when the retained slot first reaches switchable readiness,
+sharing the active slot's immutable owner. Complete-slot exchange moves this
+state with the runtime and world id. The focused GPU A-to-B-to-A proof prepares
+equal ids in two independent caches without an immutable topology rebuild,
+list alternation, or cross-contamination. Asset-epoch replacement,
+device-resource rebuilding, cancellation, and new-session installation now
+drop stale standby state and install a fresh per-world mutable state. The
+browser adversarial lifecycle lane exercised both asset replacement and a
+render-resource generation change successfully.
+
+Native and browser accounting both record two strong immutable owners after
+actor capability is published, 8,320 known retained immutable bytes for the
+actor atlas, and 1,345,024 allocated bytes for the standby mutable state. The
+known immutable byte total deliberately excludes driver-private pipeline and
+figure-collection storage rather than guessing it. The native warm-world
+A-to-B-to-A receipt also retained one shared terrain allocation, zero duplicated
+base-atlas bytes, and two actor-resource owners. The browser desktop and mobile
+receipts reported the same ownership and byte totals while leaving the
+destination actor-free until Slice 5, as intended.
+
+The frozen desktop actor capture before and after extraction has the identical
+SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+It was inspected under `/tmp/mclone-179-slice3-*-desktop-offscreen.png` and
+still shows the active cow and chicken with two submitted and two drawn actors.
+Native lobby, synthetic-stereo, live-diorama, warm-world swap, desktop
+offscreen, and XR-emulation captures were also inspected; stereo lobby and XR
+reported 210,563 and 249,676 differing eye pixels. Production WebGPU desktop,
+mobile, lifecycle, and movement captures were inspected under
+`/tmp/mclone-179-slice3-web-*`; preview terrain remained two draws and 8,826
+indices with zero out-of-region submissions, and all browser Workers returned
+to zero after shutdown.
+
+The first five native feature-off samples crossed the historical comparison
+threshold under current host load, so the unchanged Slice 2 control and Slice
+3 candidate were run as five exact interleaved pairs. Candidate median
+average/P95 was 2.665/4.532 ms versus control 2.639/4.559 ms:
++0.99%/-0.59%, with zero budget or frame-accounting violations. Five
+production browser WebGPU feature-off samples measured 13.2/18.4 ms median
+compile average/P95 versus the accepted Slice 2 13.2/18.3 ms baseline; every
+sample drew both active actors. Reports, logs, screenshots, binaries, and
+process checks remain under `/tmp/mclone-179-slice3-*`.
+
+Focused render GPU proofs, render, app-runtime, scene, web-client, scene
+composition, and flattened-ownership tests passed. Both adapter-purity gates,
+web scene-host adoption, native and wasm checks/builds, TypeScript checking,
+formatting, and `git diff --check` passed. No platform-specific actor feature
+implementation was introduced; production browser WebGPU was a Slice 3
+acceptance lane, not deferred parity work.
 
 ### Slice 4: Composition-Aware Actor Renderer
 

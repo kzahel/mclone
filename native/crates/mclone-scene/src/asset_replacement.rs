@@ -594,7 +594,7 @@ impl McloneSceneHost {
 
         self.mesh_assets = assets.mesh.clone();
         self.active_world.draw = draw;
-        self.actors = actors;
+        self.active_world.actors = Some(actors);
         self.screen_effects = screen_effects;
         self.world_gui_renderer = world_gui_renderer;
         self.world_gui_overlay_renderer = world_gui_overlay_renderer;

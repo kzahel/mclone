@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::num::{NonZeroU32, NonZeroU64};
+use std::sync::{Arc, OnceLock};
 
 use anyhow::{Context, Result, bail};
 use glam::{EulerRot, Mat4, Quat, Vec3};
@@ -308,12 +309,25 @@ pub struct ActorTextureRegion {
     pub height: u32,
 }
 
-pub struct ActorDrawResources {
+/// Device/asset-epoch actor topology shared by every compatible world slot.
+///
+/// This owns only immutable texture, figure, layout, shader, and pipeline
+/// state. Per-world uniforms, actor lists, mesh staging, and GPU mesh buffers
+/// live in `ActorDrawResources` so equal actor ids cannot alias across worlds.
+pub struct ActorSharedResources {
     renderer: ActorRenderer,
     atlas: GpuActorTextureAtlas,
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
     actor_figures: ActorFigureSet,
+}
+
+/// Mutable actor presentation state for exactly one drawable world slot.
+pub struct ActorDrawResources {
+    shared: Arc<ActorSharedResources>,
+    uniforms: PerViewUniformBuffer,
+    bind_group: wgpu::BindGroup,
+    multiview: RefCell<Option<ActorMultiviewDrawState>>,
     mesh_cache: ActorMeshCache,
 }
 
@@ -324,6 +338,14 @@ pub struct ActorDrawResources {
 /// diagnostics only: ordinary frame rendering does not construct it.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ActorDrawResourceSnapshot {
+    pub shared_strong_owner_count: usize,
+    /// Known retained bytes in the immutable shared atlas. Opaque driver
+    /// allocations for pipelines/layouts and figure collection overhead are
+    /// intentionally not guessed.
+    pub shared_known_retained_bytes: usize,
+    /// Counted CPU staging/cache, GPU mesh capacity, and uniform bytes owned by
+    /// this one world state.
+    pub mutable_state_allocated_bytes: u64,
     pub atlas_size: [u32; 2],
     pub atlas_base_bytes: usize,
     pub figure_count: usize,
@@ -352,6 +374,27 @@ pub struct ActorMeshCacheSnapshot {
     pub gpu_index_capacity_bytes: u64,
 }
 
+impl ActorSharedResources {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        atlas: ActorTextureAtlas<'_>,
+        actor_figures: Option<&ActorFigureSet>,
+    ) -> Result<Arc<Self>> {
+        let renderer = ActorRenderer::new(device, color_format);
+        let gpu_atlas =
+            GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
+        Ok(Arc::new(Self {
+            renderer,
+            atlas: gpu_atlas,
+            texture_layout: atlas.layout,
+            atlas_size: [atlas.width.max(1), atlas.height.max(1)],
+            actor_figures: actor_figures.cloned().unwrap_or_default(),
+        }))
+    }
+}
+
 impl ActorDrawResources {
     pub fn new(
         device: &wgpu::Device,
@@ -360,17 +403,40 @@ impl ActorDrawResources {
         atlas: ActorTextureAtlas<'_>,
         actor_figures: Option<&ActorFigureSet>,
     ) -> Result<Self> {
-        let renderer = ActorRenderer::new(device, color_format);
-        let gpu_atlas =
-            GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
-        Ok(Self {
-            renderer,
-            atlas: gpu_atlas,
-            texture_layout: atlas.layout,
-            atlas_size: [atlas.width.max(1), atlas.height.max(1)],
-            actor_figures: actor_figures.cloned().unwrap_or_default(),
+        let shared = ActorSharedResources::new(device, queue, color_format, atlas, actor_figures)?;
+        Ok(Self::new_with_shared_resources(device, shared))
+    }
+
+    pub fn new_with_shared_resources(
+        device: &wgpu::Device,
+        shared: Arc<ActorSharedResources>,
+    ) -> Self {
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_actor_uniforms",
+            UNIFORM_BYTE_SIZE,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
+        );
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_actor_bind_group"),
+            layout: &shared.renderer.uniform_bind_group_layout,
+            entries: &[uniforms.bind_group_entry(0)],
+        });
+        Self {
+            shared,
+            uniforms,
+            bind_group,
+            multiview: RefCell::new(None),
             mesh_cache: ActorMeshCache::new(device),
-        })
+        }
+    }
+
+    pub fn shared_resources(&self) -> Arc<ActorSharedResources> {
+        Arc::clone(&self.shared)
+    }
+
+    pub fn shares_immutable_resources_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
     }
 
     pub fn render(
@@ -417,9 +483,9 @@ impl ActorDrawResources {
             device,
             queue,
             actors,
-            self.texture_layout,
-            self.atlas_size,
-            &self.actor_figures,
+            self.shared.texture_layout,
+            self.shared.atlas_size,
+            &self.shared.actor_figures,
         );
         let Some(prepared) = prepared else {
             return Ok(ActorRenderStats {
@@ -428,7 +494,7 @@ impl ActorDrawResources {
             });
         };
 
-        let uniform_offset = self.renderer.uniforms.write_slot(
+        let uniform_offset = self.uniforms.write_slot(
             queue,
             view_slot,
             &uniform_bytes(render_view, render_options),
@@ -455,9 +521,9 @@ impl ActorDrawResources {
             timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
-        pass.set_pipeline(&self.renderer.pipeline);
-        pass.set_bind_group(0, &self.renderer.bind_group, &[uniform_offset]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_pipeline(&self.shared.renderer.pipeline);
+        pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
         pass.set_index_buffer(
             prepared.index_buffer.slice(..prepared.index_byte_len),
@@ -494,9 +560,9 @@ impl ActorDrawResources {
             device,
             queue,
             actors,
-            self.texture_layout,
-            self.atlas_size,
-            &self.actor_figures,
+            self.shared.texture_layout,
+            self.shared.atlas_size,
+            &self.shared.actor_figures,
         );
         let Some(prepared) = prepared else {
             return Ok(ActorRenderStats {
@@ -505,8 +571,18 @@ impl ActorDrawResources {
             });
         };
 
-        let renderer = self.renderer.multiview_renderer(device)?;
-        renderer.write_uniforms(queue, render_views, render_options);
+        let renderer = self.shared.renderer.multiview_renderer(device)?;
+        if self.multiview.borrow().is_none() {
+            *self.multiview.borrow_mut() = Some(ActorMultiviewDrawState::new(
+                device,
+                &renderer.uniform_bind_group_layout,
+            ));
+        }
+        let multiview = self.multiview.borrow();
+        let multiview = multiview
+            .as_ref()
+            .expect("actor multiview draw state initialized above");
+        multiview.write_uniforms(queue, render_views, render_options);
 
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("mclone_actor_multiview_render_pass"),
@@ -530,8 +606,8 @@ impl ActorDrawResources {
             ..Default::default()
         });
         pass.set_pipeline(&renderer.pipeline);
-        pass.set_bind_group(0, &renderer.bind_group, &[]);
-        pass.set_bind_group(1, &self.atlas.bind_group, &[]);
+        pass.set_bind_group(0, &multiview.bind_group, &[]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
         pass.set_index_buffer(
             prepared.index_buffer.slice(..prepared.index_byte_len),
@@ -548,34 +624,49 @@ impl ActorDrawResources {
     }
 
     pub fn resource_snapshot(&self) -> ActorDrawResourceSnapshot {
-        let multiview_materialized = self.renderer.multiview.borrow().is_some();
+        let multiview_pipeline_materialized = self.shared.renderer.multiview.get().is_some();
+        let multiview_uniform_materialized = self.multiview.borrow().is_some();
+        let atlas_base_bytes =
+            self.shared.atlas_size[0] as usize * self.shared.atlas_size[1] as usize * 4;
+        let direct_uniform_allocated_bytes = self.uniforms.allocated_byte_size();
+        let multiview_uniform_allocated_bytes = if multiview_uniform_materialized {
+            MULTIVIEW_UNIFORM_BYTE_SIZE
+        } else {
+            0
+        };
+        let mesh = self.mesh_cache.snapshot();
         ActorDrawResourceSnapshot {
-            atlas_size: self.atlas_size,
-            atlas_base_bytes: self.atlas_size[0] as usize * self.atlas_size[1] as usize * 4,
-            figure_count: self.actor_figures.len(),
+            shared_strong_owner_count: Arc::strong_count(&self.shared),
+            shared_known_retained_bytes: atlas_base_bytes,
+            mutable_state_allocated_bytes: direct_uniform_allocated_bytes
+                .saturating_add(multiview_uniform_allocated_bytes)
+                .saturating_add(mesh.cpu_vertex_capacity_bytes as u64)
+                .saturating_add(mesh.cpu_index_capacity_bytes as u64)
+                .saturating_add(mesh.cpu_vertex_staging_capacity_bytes as u64)
+                .saturating_add(mesh.cpu_index_staging_capacity_bytes as u64)
+                .saturating_add(mesh.gpu_vertex_capacity_bytes)
+                .saturating_add(mesh.gpu_index_capacity_bytes),
+            atlas_size: self.shared.atlas_size,
+            atlas_base_bytes,
+            figure_count: self.shared.actor_figures.len(),
             direct_pipeline_count: 1,
-            direct_uniform_payload_bytes: self.renderer.uniforms.payload_size(),
-            direct_uniform_slot_bytes: self.renderer.uniforms.slot_size(),
-            direct_uniform_slot_count: self.renderer.uniforms.slot_count(),
-            direct_uniform_allocated_bytes: self.renderer.uniforms.allocated_byte_size(),
-            multiview_pipeline_count: usize::from(multiview_materialized),
-            multiview_uniform_allocated_bytes: if multiview_materialized {
-                MULTIVIEW_UNIFORM_BYTE_SIZE
-            } else {
-                0
-            },
-            mesh: self.mesh_cache.snapshot(),
+            direct_uniform_payload_bytes: self.uniforms.payload_size(),
+            direct_uniform_slot_bytes: self.uniforms.slot_size(),
+            direct_uniform_slot_count: self.uniforms.slot_count(),
+            direct_uniform_allocated_bytes,
+            multiview_pipeline_count: usize::from(multiview_pipeline_materialized),
+            multiview_uniform_allocated_bytes,
+            mesh,
         }
     }
 }
 
 struct ActorRenderer {
     pipeline: wgpu::RenderPipeline,
-    uniforms: PerViewUniformBuffer,
-    bind_group: wgpu::BindGroup,
+    uniform_bind_group_layout: wgpu::BindGroupLayout,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
-    multiview: RefCell<Option<ActorMultiviewRenderer>>,
+    multiview: OnceLock<ActorMultiviewRenderer>,
 }
 
 impl ActorRenderer {
@@ -584,20 +675,18 @@ impl ActorRenderer {
             label: Some("mclone_actor_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/entity_actor.wgsl").into()),
         });
-        let uniforms = PerViewUniformBuffer::new(
-            device,
-            "mclone_actor_uniforms",
-            UNIFORM_BYTE_SIZE,
-            PER_VIEW_UNIFORM_SLOT_COUNT,
-        );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_actor_bind_group_layout"),
-            entries: &[uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX_FRAGMENT)],
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mclone_actor_bind_group"),
-            layout: &bind_group_layout,
-            entries: &[uniforms.bind_group_entry(0)],
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: NonZeroU64::new(UNIFORM_BYTE_SIZE),
+                },
+                count: None,
+            }],
         });
         let texture_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -637,41 +726,26 @@ impl ActorRenderer {
 
         Self {
             pipeline,
-            uniforms,
-            bind_group,
+            uniform_bind_group_layout: bind_group_layout,
             texture_bind_group_layout,
             color_format,
-            multiview: RefCell::new(None),
+            multiview: OnceLock::new(),
         }
     }
 
-    fn multiview_renderer(
-        &self,
-        device: &wgpu::Device,
-    ) -> Result<std::cell::Ref<'_, ActorMultiviewRenderer>> {
+    fn multiview_renderer(&self, device: &wgpu::Device) -> Result<&ActorMultiviewRenderer> {
         if !device.features().contains(wgpu::Features::MULTIVIEW) {
             bail!("actor multiview render requires wgpu MULTIVIEW");
         }
-        if self.multiview.borrow().is_none() {
-            let renderer = ActorMultiviewRenderer::new(
-                device,
-                self.color_format,
-                &self.texture_bind_group_layout,
-            );
-            *self.multiview.borrow_mut() = Some(renderer);
-        }
-        Ok(std::cell::Ref::map(self.multiview.borrow(), |renderer| {
-            renderer
-                .as_ref()
-                .expect("actor multiview renderer initialized above")
+        Ok(self.multiview.get_or_init(|| {
+            ActorMultiviewRenderer::new(device, self.color_format, &self.texture_bind_group_layout)
         }))
     }
 }
 
 struct ActorMultiviewRenderer {
     pipeline: wgpu::RenderPipeline,
-    uniform_buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
+    uniform_bind_group_layout: wgpu::BindGroupLayout,
 }
 
 impl ActorMultiviewRenderer {
@@ -685,12 +759,6 @@ impl ActorMultiviewRenderer {
             source: wgpu::ShaderSource::Wgsl(
                 include_str!("shaders/entity_actor_multiview.wgsl").into(),
             ),
-        });
-        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_actor_multiview_uniforms"),
-            size: MULTIVIEW_UNIFORM_BYTE_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
         });
         let uniform_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -706,14 +774,6 @@ impl ActorMultiviewRenderer {
                     count: None,
                 }],
             });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("mclone_actor_multiview_uniform_bind_group"),
-            layout: &uniform_bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniform_buffer.as_entire_binding(),
-            }],
-        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_actor_multiview_pipeline_layout"),
             bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
@@ -729,6 +789,33 @@ impl ActorMultiviewRenderer {
         );
         Self {
             pipeline,
+            uniform_bind_group_layout,
+        }
+    }
+}
+
+struct ActorMultiviewDrawState {
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl ActorMultiviewDrawState {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_actor_multiview_uniforms"),
+            size: MULTIVIEW_UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_actor_multiview_uniform_bind_group"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        Self {
             uniform_buffer,
             bind_group,
         }
@@ -2367,6 +2454,7 @@ mod tests {
         )?;
 
         let initial = resources.resource_snapshot();
+        assert_eq!(initial.shared_strong_owner_count, 1);
         assert_eq!(initial.atlas_size, [65, 32]);
         assert_eq!(initial.atlas_base_bytes, 8_320);
         assert_eq!(initial.figure_count, 1);
@@ -2391,9 +2479,9 @@ mod tests {
                 &device,
                 &queue,
                 actors,
-                resources.texture_layout,
-                resources.atlas_size,
-                &resources.actor_figures,
+                resources.shared.texture_layout,
+                resources.shared.atlas_size,
+                &resources.shared.actor_figures,
             );
             assert!(prepared.is_some());
         };
@@ -2425,6 +2513,60 @@ mod tests {
             player_moved.mesh.total_uploaded_bytes,
             player_moved.mesh.last_uploaded_bytes * 3
         );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "GPU actor-cache isolation; run explicitly on a host with a wgpu adapter"]
+    fn compatible_world_actor_states_share_topology_without_cache_thrash() -> Result<()> {
+        let (device, queue) = crate::headless::create_headless_device()?;
+        let [width, height] = test_actor_texture_atlas_size();
+        let rgba = vec![255; width as usize * height as usize * 4];
+        let mut world_a = ActorDrawResources::new(
+            &device,
+            &queue,
+            crate::headless::HEADLESS_FORMAT,
+            ActorTextureAtlas {
+                width,
+                height,
+                rgba: &rgba,
+                layout: test_actor_texture_layout(),
+            },
+            Some(&test_player_figures()),
+        )?;
+        let mut world_b =
+            ActorDrawResources::new_with_shared_resources(&device, world_a.shared_resources());
+        assert!(world_a.shares_immutable_resources_with(&world_b));
+        assert_eq!(world_a.resource_snapshot().shared_strong_owner_count, 2);
+        assert_eq!(world_b.resource_snapshot().shared_strong_owner_count, 2);
+        assert_eq!(world_a.resource_snapshot().atlas_base_bytes, 8_320);
+        assert_eq!(world_b.resource_snapshot().atlas_base_bytes, 8_320);
+
+        let actors_a = [ActorInstance::remote_player(Vec3::new(1.0, 2.0, 3.0), 0.0)];
+        let actors_b = [ActorInstance::remote_player(Vec3::new(9.0, 2.0, 3.0), 0.0)];
+        let prepare = |resources: &mut ActorDrawResources, actors: &[ActorInstance]| {
+            assert!(
+                resources
+                    .mesh_cache
+                    .prepare(
+                        &device,
+                        &queue,
+                        actors,
+                        resources.shared.texture_layout,
+                        resources.shared.atlas_size,
+                        &resources.shared.actor_figures,
+                    )
+                    .is_some()
+            );
+        };
+        prepare(&mut world_a, &actors_a);
+        prepare(&mut world_b, &actors_b);
+        prepare(&mut world_a, &actors_a);
+        assert_eq!(world_a.resource_snapshot().mesh.rebuild_count, 1);
+        assert_eq!(world_a.resource_snapshot().mesh.upload_count, 1);
+        assert_eq!(world_b.resource_snapshot().mesh.rebuild_count, 1);
+        assert_eq!(world_b.resource_snapshot().mesh.upload_count, 1);
+        assert_ne!(world_a.mesh_cache.actors, world_b.mesh_cache.actors);
         Ok(())
     }
 

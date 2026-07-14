@@ -132,20 +132,32 @@ fn half_space_clipping_is_an_opt_in_shared_renderer_topology() {
 }
 
 #[test]
-fn actor_renderer_current_immutable_and_mutable_ownership_is_exact() {
+fn actor_renderer_shared_topology_and_per_world_state_are_exact() {
     let actor = read("../mclone-render/src/entity.rs");
-    let resources = braced_item(&actor, "pub struct ActorDrawResources {");
+    let shared = braced_item(&actor, "pub struct ActorSharedResources {");
     for field in [
         "renderer: ActorRenderer",
         "atlas: GpuActorTextureAtlas",
         "texture_layout: ActorTextureLayout",
         "atlas_size: [u32; 2]",
         "actor_figures: ActorFigureSet",
+    ] {
+        assert!(
+            shared.contains(field),
+            "missing shared actor resource `{field}`"
+        );
+    }
+    let state = braced_item(&actor, "pub struct ActorDrawResources {");
+    for field in [
+        "shared: Arc<ActorSharedResources>",
+        "uniforms: PerViewUniformBuffer",
+        "bind_group: wgpu::BindGroup",
+        "multiview: RefCell<Option<ActorMultiviewDrawState>>",
         "mesh_cache: ActorMeshCache",
     ] {
         assert!(
-            resources.contains(field),
-            "missing actor resource `{field}`"
+            state.contains(field),
+            "missing per-world actor state `{field}`"
         );
     }
     let cache = braced_item(&actor, "struct ActorMeshCache {");
@@ -178,14 +190,14 @@ fn actor_renderer_current_immutable_and_mutable_ownership_is_exact() {
 }
 
 #[test]
-fn scene_current_actor_path_is_raw_active_only_and_globally_cached() {
+fn scene_current_actor_path_is_raw_active_only_and_slot_cached() {
     let scene = read("src/lib.rs");
     let host = braced_item(&scene, "pub struct McloneSceneHost {");
     let slot = braced_item(&scene, "struct DrawableWorldSlot {");
     let collect = braced_item(&scene, "fn current_actor_instances(&self)");
 
-    assert!(host.contains("actors: ActorDrawResources"));
-    assert!(!slot.contains("ActorDrawResources"));
+    assert!(!host.contains("actors: ActorDrawResources"));
+    assert!(slot.contains("actors: Option<ActorDrawResources>"));
     assert!(!slot.contains("ActorInterpolationState"));
     assert!(collect.contains("self.active_world"));
     assert!(collect.contains("runtime.client().actor_presentations()"));
@@ -245,12 +257,23 @@ fn retained_destination_presentations_exist_below_scene_omission() {
 }
 
 #[test]
-fn complete_slot_exchange_currently_leaves_global_actor_cache_outside_slots() {
+fn complete_slot_exchange_carries_actor_state_and_replacement_drops_stale_topology() {
     let session = read("src/session.rs");
     let swap = braced_item(&session, "fn swap_with_switchable_warm_world_using_poses(");
     assert!(swap.contains("std::mem::swap("));
-    assert!(!swap.contains("self.actors"));
     assert!(!swap.contains("ActorDrawResources::new"));
+
+    let gpu_advance = braced_item(&session, "pub(crate) fn advance_warm_world_gpu(");
+    assert!(gpu_advance.contains("if slot.actors.is_none()"));
+    assert!(gpu_advance.contains("ActorDrawResources::new_with_shared_resources"));
+    assert_in_order(
+        gpu_advance,
+        &[
+            "state.readiness.switchable",
+            "if slot.actors.is_none()",
+            "slot.lifecycle = WorldSlotLifecycle::StandbySwitchable",
+        ],
+    );
 
     let asset_replacement = read("src/asset_replacement.rs");
     let replacement = braced_item(&asset_replacement, "fn commit_asset_replacement(");
@@ -259,7 +282,7 @@ fn complete_slot_exchange_currently_leaves_global_actor_cache_outside_slots() {
         &[
             "self.cancel_warm_world_standby(\"asset replacement\");",
             "let actors = ActorDrawResources::new(",
-            "self.actors = actors;",
+            "self.active_world.actors = Some(actors);",
         ],
     );
 }

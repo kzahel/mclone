@@ -2309,6 +2309,26 @@ impl WebSceneHost {
                     "standbySharedTerrainResourceOwnerCount",
                     standby.shared_terrain_resource_owner_count as f64,
                 )?;
+                report_set_bool(
+                    &object,
+                    "standbyActorStateMaterialized",
+                    standby.actor_state_materialized,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbySharedActorResourceOwnerCount",
+                    standby.shared_actor_resource_owner_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbySharedActorKnownRetainedBytes",
+                    standby.shared_actor_known_retained_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "standbyActorStateAllocatedBytes",
+                    standby.standby_actor_state_allocated_bytes as f64,
+                )?;
                 report_set_bool(&object, "standbySwitchable", standby.readiness.switchable)?;
                 report_set_string(&object, "standbyWorldSeedText", &standby.seed.to_string())?;
             } else {

@@ -70,6 +70,7 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "interaction",
     "player_model",
     "draw",
+    "actors",
     "traversal_ready_sections",
     "section_uploads",
     "far_lod",
@@ -118,7 +119,6 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "player_collision_box_visible",
     "crosshair_visible",
     "travel_assist_mode",
-    "actors",
     "selection_outline",
     "world_gui_renderer",
     "world_gui_overlay_renderer",
@@ -173,9 +173,9 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 21);
+    assert_eq!(slot_fields.len(), 22);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 83);
+    assert_eq!(host_fields.len(), 82);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")

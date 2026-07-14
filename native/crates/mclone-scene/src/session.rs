@@ -347,6 +347,16 @@ impl McloneSceneHost {
                 external_runtime_startup_pending: false,
                 camera,
                 draw,
+                actors: Some(
+                    ActorDrawResources::new(
+                        device,
+                        queue,
+                        color_format,
+                        actor_atlas.as_upload(),
+                        Some(&actor_figures),
+                    )
+                    .context("initialize XR terrain actor draw resources")?,
+                ),
                 render_stats: RenderStreamStats::default(),
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
@@ -407,14 +417,6 @@ impl McloneSceneHost {
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
-            actors: ActorDrawResources::new(
-                device,
-                queue,
-                color_format,
-                actor_atlas.as_upload(),
-                Some(&actor_figures),
-            )
-            .context("initialize XR terrain actor draw resources")?,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
@@ -539,6 +541,16 @@ impl McloneSceneHost {
                 external_runtime_startup_pending: false,
                 camera: started.camera,
                 draw: started.draw,
+                actors: Some(
+                    ActorDrawResources::new(
+                        device,
+                        queue,
+                        color_format,
+                        actor_atlas.as_upload(),
+                        Some(&actor_figures),
+                    )
+                    .context("initialize XR terrain actor draw resources")?,
+                ),
                 render_stats: started.render_stats,
                 accepted_entry_pose,
                 pending_startup_sections: Vec::new(),
@@ -599,14 +611,6 @@ impl McloneSceneHost {
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
-            actors: ActorDrawResources::new(
-                device,
-                queue,
-                color_format,
-                actor_atlas.as_upload(),
-                Some(&actor_figures),
-            )
-            .context("initialize XR terrain actor draw resources")?,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
@@ -743,6 +747,7 @@ impl McloneSceneHost {
                 external_runtime_startup_pending: true,
                 camera,
                 draw,
+                actors: Some(actors),
                 render_stats: RenderStreamStats::default(),
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
@@ -805,7 +810,6 @@ impl McloneSceneHost {
             player_collision_box_visible: false,
             crosshair_visible: true,
             travel_assist_mode: GameTravelAssistMode::Off,
-            actors,
             selection_outline: SelectionOutlineRenderer::new(device, color_format),
             world_gui_renderer,
             world_gui_overlay_renderer: WorldGuiRenderer::new(device, color_format),
@@ -1105,6 +1109,14 @@ impl McloneSceneHost {
                     )
                 }
                 .context("reset scene terrain for external session start")?;
+                let actors = ActorDrawResources::new_with_shared_resources(
+                    device,
+                    self.active_world
+                        .actors
+                        .as_ref()
+                        .expect("active world owns actor draw state")
+                        .shared_resources(),
+                );
                 self.active_world.install(DrawableWorldSlotInstall {
                     id: pending.instance_id,
                     managed_world_key: pending.managed_world_key.clone(),
@@ -1117,6 +1129,7 @@ impl McloneSceneHost {
                     external_runtime_startup_pending: true,
                     camera,
                     draw,
+                    actors: Some(actors),
                     render_stats: RenderStreamStats::default(),
                     accepted_entry_pose: None,
                     pending_startup_sections: Vec::new(),
@@ -2294,6 +2307,7 @@ impl McloneSceneHost {
                 external_runtime_startup_pending,
                 camera,
                 draw,
+                actors: None,
                 render_stats: RenderStreamStats::default(),
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
@@ -2318,6 +2332,16 @@ impl McloneSceneHost {
             atlas_base_bytes: self.mesh_assets.atlas.byte_len(),
             duplicated_atlas_base_bytes: 0,
             shared_terrain_resource_owner_count,
+            actor_state_materialized: false,
+            shared_actor_resource_owner_count: 1,
+            shared_actor_known_retained_bytes: self
+                .active_world
+                .actors
+                .as_ref()
+                .expect("active world owns actor draw state")
+                .resource_snapshot()
+                .shared_known_retained_bytes,
+            standby_actor_state_allocated_bytes: 0,
             asset_epoch,
             standby_cadence,
             standby_cadence_applied: false,
@@ -4216,6 +4240,27 @@ impl McloneSceneHost {
                     state.worst_gpu_advance_ms,
                 );
             }
+            if slot.actors.is_none() {
+                let shared = self
+                    .active_world
+                    .actors
+                    .as_ref()
+                    .expect("active world owns actor draw state")
+                    .shared_resources();
+                slot.actors = Some(ActorDrawResources::new_with_shared_resources(
+                    device, shared,
+                ));
+            }
+            let actor_snapshot = slot
+                .actors
+                .as_ref()
+                .expect("switchable standby owns actor draw state")
+                .resource_snapshot();
+            state.actor_state_materialized = true;
+            state.shared_actor_resource_owner_count = actor_snapshot.shared_strong_owner_count;
+            state.shared_actor_known_retained_bytes = actor_snapshot.shared_known_retained_bytes;
+            state.standby_actor_state_allocated_bytes =
+                actor_snapshot.mutable_state_allocated_bytes;
             slot.lifecycle = WorldSlotLifecycle::StandbySwitchable;
             state.phase = WarmWorldStandbyPhase::Switchable;
         }
@@ -4373,6 +4418,7 @@ impl McloneSceneHost {
         let face_count = quad_face_count_from_indices(index_count);
         let mesh_assets = runtime.mesh_assets().clone();
         let accepted_entry_pose = Some(WorldEntryPose::from_camera(&camera));
+        let actors = self.active_world.actors.take();
         self.active_world.install(DrawableWorldSlotInstall {
             id: self.active_world.id,
             managed_world_key: self.active_world.managed_world_key.clone(),
@@ -4385,6 +4431,7 @@ impl McloneSceneHost {
             external_runtime_startup_pending: false,
             camera,
             draw,
+            actors,
             render_stats: RenderStreamStats {
                 section_count,
                 index_count,
@@ -4588,6 +4635,14 @@ impl McloneSceneHost {
 
         let mesh_assets = started.runtime.mesh_assets().clone();
         let accepted_entry_pose = Some(WorldEntryPose::from_camera(&started.camera));
+        let actors = ActorDrawResources::new_with_shared_resources(
+            device,
+            self.active_world
+                .actors
+                .as_ref()
+                .expect("active world owns actor draw state")
+                .shared_resources(),
+        );
         self.active_world.install(DrawableWorldSlotInstall {
             id: self.active_world.id,
             managed_world_key: None,
@@ -4600,6 +4655,7 @@ impl McloneSceneHost {
             external_runtime_startup_pending: false,
             camera: started.camera,
             draw: started.draw,
+            actors: Some(actors),
             render_stats: started.render_stats,
             accepted_entry_pose,
             pending_startup_sections: Vec::new(),

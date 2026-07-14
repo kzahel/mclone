@@ -369,6 +369,7 @@ struct DrawableWorldSlot {
     interaction: ClientInteractionController,
     player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
+    actors: Option<ActorDrawResources>,
     traversal_ready_sections: TraversalReadySectionCache,
     section_uploads: RenderSectionUploadCoordinator,
     far_lod: FarTerrainLodRenderer,
@@ -393,6 +394,7 @@ struct DrawableWorldSlotInstall {
     external_runtime_startup_pending: bool,
     camera: EngineCameraController,
     draw: TexturedSectionDrawResources,
+    actors: Option<ActorDrawResources>,
     render_stats: RenderStreamStats,
     accepted_entry_pose: Option<WorldEntryPose>,
     pending_startup_sections: Vec<TexturedRenderSectionMesh>,
@@ -420,6 +422,7 @@ impl DrawableWorldSlot {
             interaction: ClientInteractionController::new(),
             player_model: GamePlayerModel::default(),
             draw: install.draw,
+            actors: install.actors,
             traversal_ready_sections: TraversalReadySectionCache::default(),
             section_uploads: RenderSectionUploadCoordinator::default(),
             far_lod,
@@ -443,6 +446,7 @@ impl DrawableWorldSlot {
         self.external_runtime_startup_pending = install.external_runtime_startup_pending;
         self.camera = install.camera;
         self.draw = install.draw;
+        self.actors = install.actors;
         self.render_stats = install.render_stats;
         self.accepted_entry_pose = install.accepted_entry_pose;
         self.pending_startup_sections = install.pending_startup_sections;
@@ -523,7 +527,6 @@ pub struct McloneSceneHost {
     player_collision_box_visible: bool,
     crosshair_visible: bool,
     travel_assist_mode: GameTravelAssistMode,
-    actors: ActorDrawResources,
     selection_outline: SelectionOutlineRenderer,
     world_gui_renderer: WorldGuiRenderer,
     world_gui_overlay_renderer: WorldGuiRenderer,
@@ -1835,7 +1838,10 @@ impl McloneSceneHost {
             );
         }
         if include_actors {
-            self.actors
+            self.active_world
+                .actors
+                .as_mut()
+                .expect("active world owns actor draw state")
                 .render_in_slot(
                     device,
                     queue,
@@ -2209,7 +2215,10 @@ impl McloneSceneHost {
         let actor_stats = if include_actors {
             let actor_start = self.services.clock.now();
             let actor_stats = self
+                .active_world
                 .actors
+                .as_mut()
+                .expect("active world owns actor draw state")
                 .render_multiview(
                     device,
                     queue,
@@ -3557,7 +3566,12 @@ impl McloneSceneHost {
                     &mut self.active_world.draw,
                     prepared_draw,
                     terrain_composition,
-                    Some(&mut self.actors),
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
                     Some(&mut self.screen_effects),
                     None,
                     render_view,
@@ -3582,7 +3596,12 @@ impl McloneSceneHost {
                     &mut self.active_world.draw,
                     prepared_draw,
                     opaque_world_gate,
-                    Some(&mut self.actors),
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
                     Some(&mut self.screen_effects),
                     None,
                     render_view,
@@ -3610,7 +3629,12 @@ impl McloneSceneHost {
                     &mut self.active_world.draw,
                     prepared_draw,
                     terrain_composition,
-                    Some(&mut self.actors),
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
                     Some(&mut self.screen_effects),
                     None,
                     render_view,
@@ -3636,7 +3660,12 @@ impl McloneSceneHost {
                     &mut self.active_world.draw,
                     prepared_draw,
                     opaque_world_gate,
-                    Some(&mut self.actors),
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
                     Some(&mut self.screen_effects),
                     None,
                     render_view,

@@ -235,14 +235,16 @@ impl McloneSceneHost {
             self.mesh_assets.atlas.as_upload(),
         )
         .context("rebuild Mono terrain draw resources")?;
-        self.actors = ActorDrawResources::new(
-            device,
-            queue,
-            self.color_format,
-            actor_atlas.as_upload(),
-            Some(actor_figures),
-        )
-        .context("rebuild Mono actor draw resources")?;
+        self.active_world.actors = Some(
+            ActorDrawResources::new(
+                device,
+                queue,
+                self.color_format,
+                actor_atlas.as_upload(),
+                Some(actor_figures),
+            )
+            .context("rebuild Mono actor draw resources")?,
+        );
         self.active_world.far_lod = FarTerrainLodRenderer::new(device, self.color_format);
         self.selection_outline = SelectionOutlineRenderer::new(device, self.color_format);
         self.world_gui_renderer = WorldGuiRenderer::new(device, self.color_format);
@@ -1414,7 +1416,12 @@ impl McloneSceneHost {
                         },
                         translucent_order: &translucent_order,
                     },
-                    Some(&mut self.actors),
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
                     Some(&mut self.screen_effects),
                     None,
                     render_view,
@@ -1439,7 +1446,12 @@ impl McloneSceneHost {
                     far_lod,
                     far_lod_mesh,
                     opaque_world_gate,
-                    Some(&mut self.actors),
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
                     Some(&mut self.screen_effects),
                     None,
                     render_view,

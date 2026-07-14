@@ -1995,6 +1995,10 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       standbyAtlasBaseBytes: state.standbyAtlasBaseBytes,
       standbyDuplicatedAtlasBaseBytes: state.standbyDuplicatedAtlasBaseBytes,
       standbySharedTerrainResourceOwnerCount: state.standbySharedTerrainResourceOwnerCount,
+      standbyActorStateMaterialized: state.standbyActorStateMaterialized,
+      standbySharedActorResourceOwnerCount: state.standbySharedActorResourceOwnerCount,
+      standbySharedActorKnownRetainedBytes: state.standbySharedActorKnownRetainedBytes,
+      standbyActorStateAllocatedBytes: state.standbyActorStateAllocatedBytes,
       embeddedPreviewWorldInstanceId: state.embeddedPreviewWorldInstanceId,
       embeddedPreviewPhase: state.embeddedPreviewPhase,
       embeddedPreviewScale: state.embeddedPreviewScale,
@@ -2097,6 +2101,10 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       && Number(after.embeddedPreviewOutOfRegionSubmissionCount) === 0
       && Number(after.standbyDuplicatedAtlasBaseBytes) === 0
       && Number(after.standbySharedTerrainResourceOwnerCount) === 2
+      && after.standbyActorStateMaterialized === true
+      && Number(after.standbySharedActorResourceOwnerCount) === 2
+      && Number(after.standbySharedActorKnownRetainedBytes) > 0
+      && Number(after.standbyActorStateAllocatedBytes) > 0
       && Number(after.compiler?.workerInitCount) === 1
       && Number(after.compiler?.workerAssetLoadCount) === 1
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 2
