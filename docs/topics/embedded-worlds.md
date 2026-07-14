@@ -11,7 +11,8 @@ worlds.
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and completed shared Web/WASM lobby
-parity. Portable scenario content, shared immutable second-slot terrain
+parity, followed by a proposed composable-world-presentation and live-preview
+actor milestone. Portable scenario content, shared immutable second-slot terrain
 resources, slot-targeted startup/readiness/activation/swap policy,
 catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
 runtime ownership, production desktop/mobile preview and activation,
@@ -108,12 +109,24 @@ feature-off remains within the attributed noise envelope. Desktop and 2x
 CPU-throttled mobile scenario receipts reached the lobby in 306/315 ms and the
 preview 1.234/1.602 s later, with about 10.3 ms maximum measured frame gaps.
 
+The proposed next renderer milestone is
+[`179-composable-world-presentation-and-live-preview-actors.md`](../tactical/179-composable-world-presentation-and-live-preview-actors.md).
+It first normalizes the existing placed-terrain path around separate placement,
+source-bounds, and composition-clip contracts, including a portable authored
+half-space terrain proof. It then moves mutable actor presentation/cache state
+with each world slot while sharing immutable actor assets and pipelines, and
+uses the same context for destination entities, remote players, and the retained
+slot's source-local full-body player. Its closeout requires real authoritative
+creature and joined-player movement in the native and browser diorama rather
+than renderer-only actors. Boundary-face resolution, collision, and authority
+handoff remain later split-world work.
+
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 Slices 0-8 complete; no headset was attached for a new
-real-device scenario receipt).
+(Tactical 178 Slices 0-8 complete; Tactical 179 proposed; no headset was
+attached for a new real-device scenario receipt).
 
 ## Motivation
 
@@ -710,7 +723,7 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
-Tactical 178 closes browser parity without a second scenario implementation.
+Tactical 178 closed browser parity without a second scenario implementation.
 The web host consumes the same shared managed provision/start operations as
 native and keeps the protected lobby plus mutable island alive in two
 independent integrated-server Workers. One compiler Worker qualifies local
@@ -723,6 +736,14 @@ asset replacement, and resource rebuild. Standby cadence travels through the
 typed runtime operation. Shutdown leaves zero server, compiler, or
 provisioning Workers. Feature-off native/browser comparisons and scenario-on
 CPU/frame/memory/Worker receipts are recorded in the tactical.
+
+Tactical 179 is the next bounded composition campaign. It keeps that shared
+runtime/platform foundation, extracts one terrain-led placement/bounds/clip
+context without touching the direct path, proves complementary half-space
+coverage through portable WebGPU shaders, and makes actors the second renderer
+consumer. Its product endpoint is live destination creatures and players on the
+table on native and web; its half-space proof deliberately stops before voxel
+boundary faces or traversal.
 
 The warm-swap and opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md); the
@@ -741,25 +762,28 @@ bounded simultaneous-geometry plan lives in
 4. Keep Tactical 178's shared web provisioning, dual-runtime compiler
    identity, activation/persistence lifecycle, and feature-off performance
    gates green.
-5. Bind the proven lobby to the most recently *actively played* compatible
+5. Implement Tactical 179's terrain normalization, half-space proof, per-world
+   actor ownership, and live creature/player diorama through one shared native
+   and web path.
+6. Bind the proven lobby to the most recently *actively played* compatible
    local world. A background preview open must not itself update catalog
    recency.
-6. Next, prove the same bounded preview and activation behavior with a remote
+7. Prove the same bounded preview and activation behavior with a remote
    hosted source. Keep the dual-host/root-isolation smokes and materialized
    multiview contract green.
-7. Generalize to an N-world registry only after the bounded live-diorama
+8. Generalize to an N-world registry only after the bounded live-diorama
    milestone is closed and a concrete multi-preview experience requires it.
-8. T0 baked diorama and T1 seed explorer may reuse the same placement path as
+9. T0 baked diorama and T1 seed explorer may reuse the same placement path as
    cheaper fidelity alternatives to the live T3 sample.
-9. After the hosted-world milestone closes, allow a bounded active-world region
+10. After the hosted-world milestone closes, allow a bounded active-world region
    to source the same non-recursive placed-terrain path without a second slot.
-10. Add a real remote observer/subscription mode only when previews must stop
+11. Add a real remote observer/subscription mode only when previews must stop
    consuming ordinary joined-player identities.
-11. Add half-space visibility and boundary-aware meshing for an `x=0` render
-   proof before attempting traversal.
-12. Add one-active-authority local handoff, then a traversable seam or portal.
-13. Treat federated remote authority and dynamic shadows as separate later
-    campaigns.
+12. Follow Tactical 179's renderer-only half-space proof with boundary-aware
+   meshing for an `x=0` scene proof before attempting traversal.
+13. Add one-active-authority local handoff, then a traversable seam or portal.
+14. Treat federated remote authority and dynamic shadows as separate later
+   campaigns.
 
 Keep dynamic shadows as a separate topic when that work opens; it is the biggest
 and most novel piece and is orthogonal to embedding. Every new render feature
