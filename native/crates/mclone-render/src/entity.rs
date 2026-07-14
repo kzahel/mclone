@@ -1370,6 +1370,8 @@ fn append_asset_lab_local_box(
         face_colors,
         [[uv; 4]; 6],
         actor.packed_light,
+        // lab_point_to_actor_local mirrors Z, which reverses handedness.
+        BoxWinding::Reverse,
         |corner_index| {
             let lab_position = content_matrix.transform_point3(corners[corner_index]);
             actor_world_position(
@@ -1857,6 +1859,7 @@ fn append_model_cuboid(
         face_colors,
         cow_cuboid_face_uvs(*cuboid, texture_region, atlas_size),
         actor.packed_light,
+        BoxWinding::Preserve,
         |corner_index| {
             let model_position = transform_model_part_point(corners[corner_index], part);
             actor_world_position(actor, model_pixels_to_actor_local(model_position))
@@ -1864,11 +1867,18 @@ fn append_model_cuboid(
     );
 }
 
+#[derive(Clone, Copy)]
+enum BoxWinding {
+    Preserve,
+    Reverse,
+}
+
 fn append_transformed_box(
     mesh: &mut ActorMesh,
     face_colors: [[f32; 4]; 6],
     face_uvs: [[[f32; 2]; 4]; 6],
     packed_light: u32,
+    winding: BoxWinding,
     mut world_corner: impl FnMut(usize) -> Vec3,
 ) {
     let faces = [
@@ -1890,8 +1900,11 @@ fn append_transformed_box(
                 packed_light,
             });
         }
-        mesh.indices
-            .extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+        let indices = match winding {
+            BoxWinding::Preserve => [base, base + 1, base + 2, base, base + 2, base + 3],
+            BoxWinding::Reverse => [base, base + 2, base + 1, base, base + 3, base + 2],
+        };
+        mesh.indices.extend_from_slice(&indices);
     }
 }
 
@@ -2078,6 +2091,7 @@ fn append_box(
         face_colors,
         [[uv; 4]; 6],
         actor.packed_light,
+        BoxWinding::Preserve,
         |corner_index| actor_world_position(actor, corners[corner_index]),
     );
 }
@@ -2246,6 +2260,25 @@ mod tests {
         ActorFigureSet::new([(mclone_assets::chicken_figure_id(), test_chicken_figure())])
     }
 
+    fn test_single_box_figure() -> ActorFigure {
+        let asset: mclone_assets::FigureAsset = serde_json::from_str(
+            r##"{
+                "schemaVersion": 1,
+                "name": "winding_test",
+                "materials": { "body": { "color": "#ffffff" } },
+                "textures": {},
+                "parts": [{
+                    "name": "body",
+                    "material": "body",
+                    "primitive": { "kind": "box", "size": [1, 1, 1] }
+                }],
+                "clips": {}
+            }"##,
+        )
+        .unwrap();
+        crate::asset_lab_figure::compile_figure_asset(&asset).unwrap()
+    }
+
     #[test]
     fn actor_mesh_emits_asset_lab_player_model() {
         let figures = test_player_figures();
@@ -2270,6 +2303,42 @@ mod tests {
         assert!(bounds.min.x < 0.56);
         assert!(bounds.max.x > 1.44);
         assert!(bounds.max.z > 3.18);
+    }
+
+    #[test]
+    fn asset_lab_box_winding_faces_outward_after_handedness_conversion() {
+        let figures = ActorFigureSet::new([(default_player_figure_id(), test_single_box_figure())]);
+        let mesh = actor_mesh(
+            &[ActorInstance::remote_player(Vec3::ZERO, 0.0)],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &figures,
+        );
+        let bounds = mesh_bounds(&mesh);
+        let box_center = (bounds.min + bounds.max) * 0.5;
+
+        assert_eq!(mesh.vertices.len(), 6 * 4);
+        assert_eq!(mesh.indices.len(), 6 * 6);
+        for face_index in 0..6 {
+            let vertex_start = face_index * 4;
+            let index_start = face_index * 6;
+            let a = Vec3::from_array(mesh.vertices[mesh.indices[index_start] as usize].position);
+            let b =
+                Vec3::from_array(mesh.vertices[mesh.indices[index_start + 1] as usize].position);
+            let c =
+                Vec3::from_array(mesh.vertices[mesh.indices[index_start + 2] as usize].position);
+            let face_center = mesh.vertices[vertex_start..vertex_start + 4]
+                .iter()
+                .map(|vertex| Vec3::from_array(vertex.position))
+                .sum::<Vec3>()
+                * 0.25;
+            let normal = (b - a).cross(c - a);
+
+            assert!(
+                normal.dot(face_center - box_center) > 0.0,
+                "asset-lab box face {face_index} points inward"
+            );
+        }
     }
 
     #[test]

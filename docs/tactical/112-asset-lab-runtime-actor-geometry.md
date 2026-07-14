@@ -134,6 +134,23 @@ Review output inspected:
 /tmp/mclone-actor-review-sheet.png
 ```
 
+Follow-up correction:
+
+- The Asset Lab-to-native Z-axis reflection now explicitly reverses triangle
+  winding. Previously, back-face culling removed the exterior faces of every
+  authored figure while the non-reflected vanilla cow mesh rendered normally.
+- A mesh regression test verifies that all six faces of an authored box point
+  outward after the handedness conversion.
+- Re-captured and inspected the native actor review sheet with solid exterior
+  faces on the authored player and chicken models.
+
+Validation:
+
+```powershell
+cargo test --manifest-path native/Cargo.toml -p mclone-render
+cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --actor-review-sheet /tmp/mclone-actor-winding-fixed.png --width 1152 --height 512
+```
+
 ### Slice 2 - Real Asset Ownership
 
 - [x] Move figure JSON loading behind `mclone-assets` or a small shared
