@@ -22,7 +22,7 @@ use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
 use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
-use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
+use mclone_render::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
 use mclone_render_session::EngineCameraController;
 use mclone_server::{SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile};
 
@@ -342,32 +342,18 @@ pub struct EmbeddedWorldActivationVolume {
 }
 
 impl EmbeddedWorldActivationVolume {
-    pub(crate) fn from_region(region: EmbeddedChunkRegion, placement: WorldPlacement) -> Self {
-        let radius = i64::from(region.horizontal_radius());
-        let min_chunk_x = i64::from(region.center().x) - radius;
-        let min_chunk_z = i64::from(region.center().z) - radius;
-        let max_chunk_x = i64::from(region.center().x) + radius + 1;
-        let max_chunk_z = i64::from(region.center().z) + radius + 1;
-        let source_min = Vec3d::new(
-            (min_chunk_x * 16) as f64,
-            f64::from(region.min_section_y()) * 16.0,
-            (min_chunk_z * 16) as f64,
-        );
-        let source_max = Vec3d::new(
-            (max_chunk_x * 16) as f64,
-            (f64::from(region.max_section_y()) + 1.0) * 16.0,
-            (max_chunk_z * 16) as f64,
-        );
-        let mapped_min = placement.source_to_composition(source_min);
-        let mapped_max = placement.source_to_composition(source_max);
+    pub(crate) fn from_context(context: WorldCompositionContext) -> Self {
+        let bounds = context
+            .composition_bounds()
+            .expect("embedded activation context carries source presentation bounds");
         let margin = Vec3d::new(
             EMBEDDED_ACTIVATION_MARGIN_BLOCKS,
             EMBEDDED_ACTIVATION_MARGIN_BLOCKS,
             EMBEDDED_ACTIVATION_MARGIN_BLOCKS,
         );
         Self {
-            min: mapped_min.subtract(margin),
-            max: mapped_max.add(margin),
+            min: Vec3d::new(bounds.min_x, bounds.min_y, bounds.min_z).subtract(margin),
+            max: Vec3d::new(bounds.max_x, bounds.max_y, bounds.max_z).add(margin),
         }
     }
 
@@ -625,9 +611,9 @@ pub(crate) struct EmbeddedWorldPreviewMutationState {
 pub(crate) struct EmbeddedWorldPreview {
     pub source_world: WorldInstanceId,
     pub region: EmbeddedChunkRegion,
-    pub placement: WorldPlacement,
+    pub context: WorldCompositionContext,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub return_placement: WorldPlacement,
+    pub return_context: WorldCompositionContext,
     pub asset_epoch: u64,
     pub phase: EmbeddedWorldPreviewPhase,
     pub renderer: PlacedTexturedSectionRenderer,
@@ -651,7 +637,7 @@ impl EmbeddedWorldPreview {
         EmbeddedWorldPreviewSnapshot {
             source_world: self.source_world,
             region: self.region,
-            placement: self.placement,
+            placement: self.context.placement(),
             asset_epoch: self.asset_epoch,
             phase: self.phase,
             renderer_topology_ready: self.renderer_topology_ready,
@@ -1693,7 +1679,9 @@ mod tests {
             0.125,
         )
         .unwrap();
-        let volume = EmbeddedWorldActivationVolume::from_region(region, placement);
+        let volume = EmbeddedWorldActivationVolume::from_context(
+            WorldCompositionContext::unbounded(placement, Some(region.source_bounds())),
+        );
 
         assert!(volume.min.x < 7.0 && volume.max.x > 9.0);
         assert!(volume.min.z < 7.0 && volume.max.z > 9.0);

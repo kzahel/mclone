@@ -693,7 +693,7 @@ fn render_composed_translucent_terrain_multiview(
     render_views: [ChunkRenderView; 2],
     active_options: [TexturedSectionRenderOptions; 2],
     placed_options: [TexturedSectionRenderOptions; 2],
-    placement: mclone_render::placement::WorldPlacement,
+    context: mclone_render::placement::WorldCompositionContext,
 ) -> Result<()> {
     let mut start = 0;
     while start < order.len() {
@@ -728,7 +728,7 @@ fn render_composed_translucent_terrain_multiview(
                     target,
                     render_views,
                     placed_options,
-                    placement,
+                    context,
                 )?;
             }
         }
@@ -1378,7 +1378,9 @@ impl McloneSceneHost {
                     .as_ref()
                     .filter(|slot| slot.id == preview.source_world)
                     .map(|slot| {
-                        let records = slot.draw.prepare_render_records_for_region(preview.region);
+                        let records = slot
+                            .draw
+                            .prepare_render_records_for_context(preview.context);
                         let preview_time = slot
                             .runtime
                             .as_ref()
@@ -1395,7 +1397,7 @@ impl McloneSceneHost {
                             &records,
                             render_views,
                             [options; 2],
-                            preview.placement,
+                            preview.context,
                         );
                         (
                             prepared,
@@ -1416,7 +1418,7 @@ impl McloneSceneHost {
                     prepared_stereo_draw
                         .translucent_records(mclone_render::placement::WorldPlacement::identity()),
                     preview.source_world,
-                    prepared.0.translucent_records(preview.placement),
+                    prepared.0.translucent_records(preview.context.placement()),
                     &terrain_views,
                 )
             });
@@ -2087,7 +2089,9 @@ impl McloneSceneHost {
                     .as_ref()
                     .filter(|slot| slot.id == preview.source_world)
                     .map(|slot| {
-                        let records = slot.draw.prepare_render_records_for_region(preview.region);
+                        let records = slot
+                            .draw
+                            .prepare_render_records_for_context(preview.context);
                         let preview_time = slot
                             .runtime
                             .as_ref()
@@ -2104,7 +2108,7 @@ impl McloneSceneHost {
                             preview.source_world,
                             records,
                             [options; 2],
-                            preview.placement,
+                            preview.context,
                             bounded_section_count,
                             out_of_region_submission_count,
                         )
@@ -2141,7 +2145,7 @@ impl McloneSceneHost {
             source_world,
             records,
             options,
-            placement,
+            context,
             bounded_section_count,
             out_of_region_submission_count,
         )) = preview_frame
@@ -2160,7 +2164,7 @@ impl McloneSceneHost {
                 &records,
                 terrain_views,
                 options,
-                placement,
+                context,
             );
             let draw_started_at = self.services.clock.now();
             let stats = standby
@@ -2174,11 +2178,11 @@ impl McloneSceneHost {
                     render_target.with_loaded_color().with_loaded_depth(),
                     terrain_views,
                     options,
-                    placement,
+                    context,
                 )
                 .context("render embedded world preview multiview")?;
             let draw_ms = elapsed_ms(self.services.clock.elapsed_since(draw_started_at));
-            preview_translucent_frame = Some((source_world, prepared, options, placement));
+            preview_translucent_frame = Some((source_world, prepared, options, context));
             Some((
                 stats,
                 prepare_timing.cull_ms,
@@ -2229,7 +2233,7 @@ impl McloneSceneHost {
             EmbeddedWorldPreviewTranslucentOrderSnapshot::default();
         if split_translucent_terrain {
             let translucent_start = self.services.clock.now();
-            if let Some((source_world, prepared, options, placement)) =
+            if let Some((source_world, prepared, options, context)) =
                 preview_translucent_frame.as_ref()
             {
                 let preview = self
@@ -2247,7 +2251,7 @@ impl McloneSceneHost {
                     prepared_stereo_draw
                         .translucent_records(mclone_render::placement::WorldPlacement::identity()),
                     *source_world,
-                    prepared.translucent_records(*placement),
+                    prepared.translucent_records(context.placement()),
                     &terrain_views,
                 );
                 preview_translucent_order_snapshot = embedded_translucent_order_snapshot(
@@ -2267,7 +2271,7 @@ impl McloneSceneHost {
                     terrain_views,
                     terrain_options,
                     *options,
-                    *placement,
+                    *context,
                 )
                 .context("render XR composed terrain multiview translucent chunks")?;
             } else {
@@ -3534,7 +3538,7 @@ impl McloneSceneHost {
                         draw: &standby.draw,
                         renderer: &preview.renderer,
                         prepared: PlacedTerrainPrepared::Stereo(prepared),
-                        placement: preview.placement,
+                        context: preview.context,
                         render_options: self.render_options.with_sky_darken(
                             mclone_render::light_texture::sky_darken(preview_time),
                         ),

@@ -1,4 +1,4 @@
-//! Tactical 179 Slice 0 locks the current terrain/actor composition seams.
+//! Tactical 179 locks the evolving terrain/actor composition seams.
 //!
 //! Several assertions are deliberately transitional. Later tactical slices
 //! update them only when shared ownership replaces the characterized shape.
@@ -55,13 +55,45 @@ fn existing_terrain_placement_is_opt_in_and_bounded_separately() {
 
     assert!(placement.contains("pub struct WorldPlacement"));
     assert!(placement.contains("pub struct EmbeddedChunkRegion"));
-    assert!(!placement.contains("WorldCompositionContext"));
-    assert!(terrain.contains("prepare_render_records_for_region"));
+    assert!(placement.contains("pub struct WorldCompositionContext"));
+    assert!(placement.contains("pub struct WorldSourceBounds"));
+    assert!(placement.contains("pub struct CompositionHalfSpace"));
+    assert!(placement.contains("pub enum CompositionClip"));
+    assert!(terrain.contains("prepare_render_records_for_context"));
     assert!(terrain.contains("pub struct PlacedTexturedSectionRenderer"));
     assert!(!direct_shader.contains("source_anchor_scale"));
     assert!(!direct_shader.contains("composition_anchor"));
     assert!(placed_shader.contains("source_anchor_scale"));
     assert!(placed_shader.contains("composition_anchor"));
+}
+
+#[test]
+fn composition_context_stays_out_of_the_direct_single_world_path() {
+    let terrain = read("../mclone-render/src/chunk.rs");
+    let direct = braced_item(&terrain, "fn render_with_options_inner(");
+    let direct_uniforms = braced_item(&terrain, "fn uniform_bytes(");
+    let placed_uniforms = braced_item(&terrain, "fn placed_uniform_bytes(");
+    assert!(!direct.contains("WorldCompositionContext"));
+    assert!(!direct.contains("context"));
+    assert!(!direct_uniforms.contains("WorldCompositionContext"));
+    assert!(!direct_uniforms.contains("placement"));
+    assert!(!placed_uniforms.contains("WorldCompositionContext"));
+    assert!(placed_uniforms.contains("placement: WorldPlacement"));
+
+    let session = read("src/session.rs");
+    let install = braced_item(&session, "fn install_prepared_warm_world_slot(");
+    let preview_branch = install
+        .split("self.embedded_world_preview = match")
+        .nth(1)
+        .expect("preview/no-preview construction branch remains explicit");
+    assert!(preview_branch.contains("WarmWorldPresentationRequest::Diorama"));
+    assert!(preview_branch.contains("WorldCompositionContext::unbounded"));
+    assert!(preview_branch.contains("WarmWorldPresentationRequest::OpaqueGate"));
+    let opaque_branch = preview_branch
+        .split("WarmWorldPresentationRequest::OpaqueGate")
+        .nth(1)
+        .expect("opaque no-preview branch remains explicit");
+    assert!(!opaque_branch.contains("WorldCompositionContext::unbounded"));
 }
 
 #[test]

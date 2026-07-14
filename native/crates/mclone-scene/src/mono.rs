@@ -1344,7 +1344,10 @@ impl McloneSceneHost {
                 self.standby_world
                     .as_ref()
                     .filter(|slot| slot.id == preview.source_world)
-                    .map(|slot| slot.draw.prepare_render_records_for_region(preview.region))
+                    .map(|slot| {
+                        slot.draw
+                            .prepare_render_records_for_context(preview.context)
+                    })
             });
         let world_gui = FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
         let (mut summary, preview_render_timing, preview_translucent_order) =
@@ -1371,13 +1374,16 @@ impl McloneSceneHost {
                     &active_records,
                     terrain_view,
                     render_options,
-                    mclone_render::placement::WorldPlacement::identity(),
+                    mclone_render::placement::WorldCompositionContext::unbounded(
+                        mclone_render::placement::WorldPlacement::identity(),
+                        None,
+                    ),
                 );
                 let placed_translucent = standby.draw.prepare_placed_translucent_records(
                     preview_records,
                     terrain_view,
                     preview_options,
-                    preview.placement,
+                    preview.context,
                 );
                 let translucent_order = compose_translucent_terrain_order(
                     self.active_world.id,
@@ -1403,7 +1409,7 @@ impl McloneSceneHost {
                             draw: &standby.draw,
                             renderer: &preview.renderer,
                             prepared: PlacedTerrainPrepared::Mono(preview_records),
-                            placement: preview.placement,
+                            context: preview.context,
                             render_options: preview_options,
                         },
                         translucent_order: &translucent_order,

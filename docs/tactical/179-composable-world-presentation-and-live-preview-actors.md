@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: active 2026-07-14. Slice 0 is complete; Slices 1-7 remain.
+Status: active 2026-07-14. Slices 0-1 are complete; Slices 2-7 remain.
 
 Topic: `embedded-worlds`
 
@@ -714,6 +714,93 @@ Deliverables:
 
 Exit criteria: the current diorama is expressed through one renderer-neutral
 context without changing its pixels or direct-path cost.
+
+#### Slice 1 completion record — 2026-07-14
+
+`mclone-render::placement` now owns the validated composition vocabulary.
+`WorldSourceBounds` is finite and nonempty with min-inclusive/max-exclusive
+membership; `CompositionHalfSpace` rejects finite-zero normals, normalizes its
+plane equation, and retains its inclusive boundary; `CompositionClip`
+distinguishes unbounded and half-space presentation; and
+`WorldCompositionContext` combines those facts with the existing validated
+`WorldPlacement`. Tests cover invalid values, exact boundary behavior,
+complementary half-spaces, transformed AABBs, source/composition round trips,
+large and distant source anchors, and distinct mono/stereo source-local camera
+and projection facts.
+
+`EmbeddedChunkRegion::source_bounds` derives renderer selection bounds with
+wide integer arithmetic, but the retained runtime-interest region remains a
+separate scene/server input. Prepared terrain records can now be filtered by
+those bounds, while placement-aware solid, cutout, translucent, per-eye, and
+full-frame multiview entry points consume the context. The retained diorama
+stores its destination and return contexts alongside their corresponding
+slots, swaps the complete contexts at activation, and derives its activation
+volume from the context's transformed bounds. Fog, packed light, depth,
+translucent ordering, and the placed shader payload retain their existing
+paths.
+
+The ordinary terrain renderer and shader were not changed. An executable
+source contract locks `render_with_options_inner` and `uniform_bytes` free of
+the context, keeps `placed_uniform_bytes` on the unchanged `WorldPlacement`
+payload, and proves that context construction occurs only in the explicit
+`Diorama` install branch, not the `OpaqueGate`/no-preview branch. The existing
+direct and placed-unclipped shaders remain byte-shape-independent of bounds or
+clip state; Slice 2 will add clipping only to new opt-in pipelines.
+
+All required product pixels were recaptured under `/tmp` and inspected. Native
+lobby mono/stereo, live-diorama activation, desktop offscreen, and XR emulation
+show the same bounded table/island placement, active cow, water/translucency,
+and clean stereo parallax as Slice 0. Activation retained two destination
+sections with 8,826 indices, stereo activation reported 159,124 differing eye
+pixels, lobby return reported 210,563, and XR emulation reported 249,679. The
+explicit shared-depth fixture passed with 6,004 active-over-preview pixels,
+13,340 preview-over-active pixels, 10,383 stereo differences, and green
+centroids at 325.77/313.24. Its adapter did not expose `MULTIVIEW`; this is
+recorded without claiming a real full-frame-device receipt, while the shared
+multiview code compiled and its preparation contracts passed.
+
+Production browser WebGPU was an acceptance lane in this slice, not deferred
+parity. The inspected desktop, mobile two-times CPU-throttled, and lifecycle
+captures live at `/tmp/mclone-179-slice1-web-lobby-*`. Each retained the same
+three bounded destination sections, two draws and 8,826 indices, zero
+out-of-region sections, and two of two active actor draws. The destination
+remains actor-free by design until Slice 5. The inspected movement-performance
+canvas likewise retained the ordinary active-world image and controls.
+
+The five already-built native direct-path samples were:
+
+```text
+average ms: 2.365, 2.413, 2.420, 2.680, 2.574
+P95 ms:    3.895, 3.879, 4.015, 4.500, 4.171
+```
+
+Median average/P95 was 2.420/4.015 ms, only 1.1%/0.3% above the Slice 0
+2.394/4.004 ms control. Nearest-rank P95 across the retained five samples is
+the slower 2.680/4.500 ms observation; no outlier was discarded. All runs had
+zero budget or accounting violations.
+
+An initial ten-run browser candidate batch centered around 14.2/19.5 ms and
+crossed the 3% investigation threshold. Those samples were retained rather
+than selected away. An untouched detached `c3ec05bd` build and the candidate
+were then run as five exact interleaved pairs after a 97.66%-idle preflight.
+Candidate median compile average/P95 was 13.5/18.7 ms versus control
+13.4/18.5 ms, a 0.75%/1.08% difference; median frame gap was 8.4 versus
+8.3 ms, a 1.2% difference. Every paired run preserved two of two actor draws,
+one compiler Worker, one asset send, shared-result-buffer transport, and zero
+fallbacks or overflows. The interleaved control attributes the earlier spread
+to host drift and clears the performance gate. All initial, control, paired,
+image, process-preflight, and JSON receipts remain under
+`/tmp/mclone-179-slice1-*`. The final postflight was 91.45% CPU idle with no
+Cargo, rustc, wasm-bindgen, browser-smoke, Playwright, or emulator process left
+active.
+
+Focused render, app-runtime, scene, and web-client suites passed, including the
+explicit ignored GPU composition fixture. The expanded client,
+render-session, and server run added 614 passing tests. Both adapter-purity
+gates, workspace checking, wasm build, TypeScript checking, native product
+smokes, browser product smokes, formatting, and `git diff --check` passed. No
+platform-specific feature implementation was introduced: native and WebGPU
+continue to invoke the same scene and renderer contracts.
 
 ### Slice 2: Portable Half-Space Terrain Proof
 

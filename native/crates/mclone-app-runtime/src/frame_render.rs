@@ -17,7 +17,7 @@ use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodRenderer};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
-use mclone_render::placement::WorldPlacement;
+use mclone_render::placement::WorldCompositionContext;
 use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
@@ -172,7 +172,7 @@ pub struct PlacedTerrainFrame<'a> {
     pub draw: &'a TexturedSectionDrawResources,
     pub renderer: &'a PlacedTexturedSectionRenderer,
     pub prepared: PlacedTerrainPrepared<'a>,
-    pub placement: WorldPlacement,
+    pub context: WorldCompositionContext,
     pub render_options: TexturedSectionRenderOptions,
 }
 
@@ -1030,7 +1030,7 @@ fn render_composed_translucent_terrain(
                         target,
                         render_view,
                         composition.placed.render_options,
-                        composition.placed.placement,
+                        composition.placed.context,
                         view_slot,
                     );
                 placed_draw_ms += composition_timing_elapsed_ms(placed_started_at);
@@ -2232,7 +2232,7 @@ where
                             placed_target,
                             render_view,
                             placed.render_options,
-                            placed.placement,
+                            placed.context,
                             view_slot,
                         )?,
                     (true, PlacedTerrainPrepared::Stereo(prepared_draw)) => placed
@@ -2245,7 +2245,7 @@ where
                             placed_target,
                             render_view,
                             placed.render_options,
-                            placed.placement,
+                            placed.context,
                             view_slot,
                         )?,
                     (false, PlacedTerrainPrepared::Mono(records)) => (
@@ -2257,7 +2257,7 @@ where
                             placed_target,
                             render_view,
                             placed.render_options,
-                            placed.placement,
+                            placed.context,
                             view_slot,
                         )?,
                         TexturedSectionRenderTiming::default(),
@@ -2273,7 +2273,7 @@ where
                                 placed_target,
                                 render_view,
                                 placed.render_options,
-                                placed.placement,
+                                placed.context,
                                 view_slot,
                             )?,
                         TexturedSectionRenderTiming::default(),

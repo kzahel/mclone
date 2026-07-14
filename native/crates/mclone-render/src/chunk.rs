@@ -25,7 +25,7 @@ use wgpu::util::DeviceExt;
 use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
-use crate::placement::{EmbeddedChunkRegion, WorldPlacement};
+use crate::placement::{WorldCompositionContext, WorldPlacement, WorldSourceBounds};
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
 use crate::uniform::{
@@ -716,11 +716,11 @@ impl PreparedTexturedSectionRecords {
     /// Build the stable, bounded record set consumed by an embedded terrain
     /// presentation. The source store remains untouched and may continue to
     /// retain neighboring sections for lighting or later interest changes.
-    pub fn for_embedded_region(&self, region: EmbeddedChunkRegion) -> Self {
+    pub fn for_source_bounds(&self, bounds: WorldSourceBounds) -> Self {
         let records = self
             .records
             .iter()
-            .filter(|(key, _)| region.contains(**key))
+            .filter(|(key, _)| bounds.contains_render_section(**key))
             .map(|(key, record)| (*key, *record))
             .collect::<BTreeMap<_, _>>();
         let loaded_section_count = records.values().filter(|record| record.drawable).count();
@@ -3136,11 +3136,15 @@ impl TexturedSectionDrawResources {
         Ok(())
     }
 
-    pub fn prepare_render_records_for_region(
+    pub fn prepare_render_records_for_context(
         &self,
-        region: EmbeddedChunkRegion,
-    ) -> PreparedTexturedSectionRecords {
-        self.prepare_render_records().for_embedded_region(region)
+        context: WorldCompositionContext,
+    ) -> Arc<PreparedTexturedSectionRecords> {
+        let records = self.prepare_render_records();
+        match context.source_bounds() {
+            Some(bounds) => Arc::new(records.for_source_bounds(bounds)),
+            None => records,
+        }
     }
 
     pub fn update_sections(
@@ -3857,7 +3861,7 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         physical_render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
         view_slot: PerViewSlot,
     ) -> Result<TexturedSectionRenderStats> {
         self.render_placed_prepared_with_options_inner(
@@ -3868,7 +3872,7 @@ impl TexturedSectionDrawResources {
             target,
             physical_render_view,
             options,
-            placement,
+            context.placement(),
             view_slot,
             None,
         )
@@ -3884,7 +3888,7 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         physical_render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
         view_slot: PerViewSlot,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let mut timing = TexturedSectionRenderTiming::default();
@@ -3896,7 +3900,7 @@ impl TexturedSectionDrawResources {
             target,
             physical_render_view,
             options,
-            placement,
+            context.placement(),
             view_slot,
             Some(&mut timing),
         )?;
@@ -3995,8 +3999,9 @@ impl TexturedSectionDrawResources {
         records: &PreparedTexturedSectionRecords,
         physical_render_views: [ChunkRenderView; 2],
         options: [TexturedSectionRenderOptions; 2],
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
     ) -> PreparedTexturedSectionStereoDraw {
+        let placement = context.placement();
         let source_render_views =
             physical_render_views.map(|view| placement.source_render_view(view));
         let frustums = physical_render_views.map(|view| PlacedClipFrustum::new(view, placement));
@@ -4039,8 +4044,9 @@ impl TexturedSectionDrawResources {
         records: &PreparedTexturedSectionRecords,
         physical_render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
     ) -> Vec<TexturedSectionTranslucentRecord> {
+        let placement = context.placement();
         let source_render_view = placement.source_render_view(physical_render_view);
         let placed_frustum = PlacedClipFrustum::new(physical_render_view, placement);
         let culling = {
@@ -4067,14 +4073,14 @@ impl TexturedSectionDrawResources {
         records: &PreparedTexturedSectionRecords,
         physical_render_views: [ChunkRenderView; 2],
         options: [TexturedSectionRenderOptions; 2],
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
     ) -> (
         PreparedTexturedSectionStereoDraw,
         TexturedSectionRenderTiming,
     ) {
         let started_at = timing_now();
         let prepared =
-            self.prepare_placed_stereo_draw(records, physical_render_views, options, placement);
+            self.prepare_placed_stereo_draw(records, physical_render_views, options, context);
         let elapsed_ms = timing_elapsed_ms(started_at);
         (
             prepared,
@@ -4096,9 +4102,10 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         physical_render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
         view_slot: PerViewSlot,
     ) -> Result<TexturedSectionRenderStats> {
+        let placement = context.placement();
         let uniform_offset = renderer.uniforms.write_slot(
             queue,
             view_slot,
@@ -4158,7 +4165,7 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         physical_render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
         view_slot: PerViewSlot,
     ) -> Result<(TexturedSectionRenderStats, TexturedSectionRenderTiming)> {
         let started_at = timing_now();
@@ -4170,7 +4177,7 @@ impl TexturedSectionDrawResources {
             target,
             physical_render_view,
             options,
-            placement,
+            context,
             view_slot,
         )?;
         Ok((
@@ -4193,8 +4200,9 @@ impl TexturedSectionDrawResources {
         target: ChunkMultiviewRenderTarget<'_>,
         physical_render_views: [ChunkRenderView; 2],
         options: [TexturedSectionRenderOptions; 2],
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
     ) -> Result<[TexturedSectionRenderStats; 2]> {
+        let placement = context.placement();
         let multiview =
             renderer.multiview_renderer(device, &self.shared.renderer.texture_bind_group_layout)?;
         multiview.write_uniforms(
@@ -4313,12 +4321,13 @@ impl TexturedSectionDrawResources {
         target: ChunkRenderTarget<'_>,
         physical_render_view: ChunkRenderView,
         options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
         view_slot: PerViewSlot,
     ) {
         if keys.is_empty() {
             return;
         }
+        let placement = context.placement();
         let uniform_offset = renderer.uniforms.write_slot(
             queue,
             view_slot,
@@ -4425,11 +4434,12 @@ impl TexturedSectionDrawResources {
         target: ChunkMultiviewRenderTarget<'_>,
         physical_render_views: [ChunkRenderView; 2],
         options: [TexturedSectionRenderOptions; 2],
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
     ) -> Result<()> {
         if keys.is_empty() {
             return Ok(());
         }
+        let placement = context.placement();
         let multiview =
             renderer.multiview_renderer(device, &self.shared.renderer.texture_bind_group_layout)?;
         multiview.write_uniforms(
@@ -5161,7 +5171,7 @@ fn placed_multiview_uniform_bytes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::{ChunkPos, Vec3d};
+    use mclone_core::Vec3d;
     use mclone_mesh::{
         ChunkMeshInput, TexturedChunkVertex, TexturedVisibleChunkMesh, build_visible_chunk_mesh,
     };
@@ -5388,8 +5398,10 @@ mod tests {
             ),
         ];
         let records = prepared_records_for_sections(&sections);
-        let region = EmbeddedChunkRegion::new(ChunkPos::new(-1, -1), 1, 3, 4).unwrap();
-        let bounded = records.for_embedded_region(region);
+        let region =
+            crate::placement::EmbeddedChunkRegion::new(mclone_core::ChunkPos::new(-1, -1), 1, 3, 4)
+                .unwrap();
+        let bounded = records.for_source_bounds(region.source_bounds());
 
         assert_eq!(
             bounded.section_keys().collect::<Vec<_>>(),

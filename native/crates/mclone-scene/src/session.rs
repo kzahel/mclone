@@ -2377,8 +2377,14 @@ impl McloneSceneHost {
             ) => Some(EmbeddedWorldPreview {
                 source_world: instance_id,
                 region,
-                placement,
-                return_placement,
+                context: mclone_render::placement::WorldCompositionContext::unbounded(
+                    placement,
+                    Some(region.source_bounds()),
+                ),
+                return_context: mclone_render::placement::WorldCompositionContext::unbounded(
+                    return_placement,
+                    Some(region.source_bounds()),
+                ),
                 asset_epoch,
                 phase: EmbeddedWorldPreviewPhase::Warming,
                 renderer,
@@ -2432,9 +2438,10 @@ impl McloneSceneHost {
             .embedded_world_activation
             .snapshot(self.embedded_world_activation_ready());
         if snapshot.volume.is_none() {
-            snapshot.volume = self.embedded_world_preview.as_ref().map(|preview| {
-                EmbeddedWorldActivationVolume::from_region(preview.region, preview.placement)
-            });
+            snapshot.volume = self
+                .embedded_world_preview
+                .as_ref()
+                .map(|preview| EmbeddedWorldActivationVolume::from_context(preview.context));
         }
         snapshot
     }
@@ -2475,7 +2482,7 @@ impl McloneSceneHost {
         let Some(preview) = self.embedded_world_preview.as_ref() else {
             return false;
         };
-        let volume = EmbeddedWorldActivationVolume::from_region(preview.region, preview.placement);
+        let volume = EmbeddedWorldActivationVolume::from_context(preview.context);
         if volume.ray_distance(ray_origin, ray_direction).is_none() {
             return false;
         }
@@ -2604,7 +2611,7 @@ impl McloneSceneHost {
                 .set_interest_center(fixed_interest_center)
                 .context("retarget retained preview interest after ownership exchange")?;
         }
-        std::mem::swap(&mut preview.placement, &mut preview.return_placement);
+        std::mem::swap(&mut preview.context, &mut preview.return_context);
         preview.source_world = standby.id;
         preview.phase = EmbeddedWorldPreviewPhase::Warming;
         preview.source_anchor_gpu_resident = false;
@@ -2626,10 +2633,8 @@ impl McloneSceneHost {
         {
             std::mem::swap(placement, return_placement);
         }
-        self.embedded_world_activation.volume = Some(EmbeddedWorldActivationVolume::from_region(
-            preview.region,
-            preview.placement,
-        ));
+        self.embedded_world_activation.volume =
+            Some(EmbeddedWorldActivationVolume::from_context(preview.context));
         Ok(())
     }
 
@@ -4216,8 +4221,11 @@ impl McloneSceneHost {
         }
 
         if let Some(preview) = self.embedded_world_preview.as_mut() {
-            let source_anchor_section = anchor_render_section(preview.placement.source_anchor());
-            let bounded_records = slot.draw.prepare_render_records_for_region(preview.region);
+            let source_anchor_section =
+                anchor_render_section(preview.context.placement().source_anchor());
+            let bounded_records = slot
+                .draw
+                .prepare_render_records_for_context(preview.context);
             preview.bounded_section_count = bounded_records.section_keys().len();
             preview.source_anchor_gpu_resident =
                 source_anchor_section.is_some_and(|key| slot.draw.contains_section(key));

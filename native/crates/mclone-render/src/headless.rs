@@ -1272,7 +1272,7 @@ fn elapsed_ms(duration: std::time::Duration) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::placement::{EmbeddedChunkRegion, WorldPlacement};
+    use crate::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
     use crate::uniform::{
         LEFT_EYE_VIEW_SLOT, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, STEREO_VIEW_SLOT_COUNT,
     };
@@ -1451,7 +1451,8 @@ fn fs_main() -> @location(0) vec4<f32> {
         let placement =
             WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::new(0.0, 0.5, 0.0), 0.2)?;
         let region = EmbeddedChunkRegion::new(ChunkPos::new(0, 0), 0, 0, 0)?;
-        let preview_records = preview.prepare_render_records_for_region(region);
+        let context = WorldCompositionContext::unbounded(placement, Some(region.source_bounds()));
+        let preview_records = preview.prepare_render_records_for_context(context);
         let mut render_options = TexturedSectionRenderOptions::default();
         render_options.force_fullbright = true;
         render_options.section_occlusion_culling = false;
@@ -1470,7 +1471,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             &preview_records,
             view,
             render_options,
-            placement,
+            context,
             LEFT_EYE_VIEW_SLOT,
             true,
             false,
@@ -1488,7 +1489,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             &preview_records,
             view,
             render_options,
-            placement,
+            context,
             LEFT_EYE_VIEW_SLOT,
             false,
             true,
@@ -1506,7 +1507,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             &preview_records,
             view,
             render_options,
-            placement,
+            context,
             LEFT_EYE_VIEW_SLOT,
             true,
             true,
@@ -1558,7 +1559,7 @@ fn fs_main() -> @location(0) vec4<f32> {
             &preview_records,
             stereo_views,
             [render_options; 2],
-            placement,
+            context,
         );
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_placed_fixture_stereo_encoder"),
@@ -1595,7 +1596,7 @@ fn fs_main() -> @location(0) vec4<f32> {
                 .with_loaded_depth(),
                 render_view,
                 render_options,
-                placement,
+                context,
                 view_slot,
             )?;
         }
@@ -1633,7 +1634,7 @@ fn fs_main() -> @location(0) vec4<f32> {
                 &prepared_stereo,
                 stereo_views,
                 render_options,
-                placement,
+                context,
             )?;
         } else {
             eprintln!("placed terrain multiview device proof unavailable: adapter lacks MULTIVIEW");
@@ -1783,7 +1784,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         preview_records: &crate::chunk::PreparedTexturedSectionRecords,
         render_view: crate::chunk::ChunkRenderView,
         render_options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
         view_slot: crate::uniform::PerViewSlot,
         draw_active: bool,
         draw_preview: bool,
@@ -1824,7 +1825,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
                 render_target,
                 render_view,
                 render_options,
-                placement,
+                context,
                 view_slot,
             )?
         } else {
@@ -1843,7 +1844,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         prepared_stereo: &crate::chunk::PreparedTexturedSectionStereoDraw,
         render_views: [crate::chunk::ChunkRenderView; 2],
         render_options: TexturedSectionRenderOptions,
-        placement: WorldPlacement,
+        context: WorldCompositionContext,
     ) -> Result<()> {
         let color = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("mclone_placed_fixture_multiview_color"),
@@ -1903,7 +1904,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
             ),
             render_views,
             [render_options; 2],
-            placement,
+            context,
         )?;
         queue.submit(std::iter::once(encoder.finish()));
         let left = read_rgba8_layer(device, queue, &color, 64, 64, 0)?;
