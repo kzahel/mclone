@@ -56,6 +56,9 @@ use crate::render_assets::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
     NativeRenderSectionCompileDispatcher, load_textured_mesh_assets,
 };
+use crate::scenario_content::{
+    NativeManagedScenarioContentOperationService, NativeManagedScenarioContentService,
+};
 use crate::scene_session_runtime::{
     DEFAULT_STARTUP_READINESS_TIMEOUT, FarLodRuntimeSettleSnapshot, SceneRuntimeService,
     SceneSessionRuntime, StartupReadinessPolicy,
@@ -81,6 +84,16 @@ const MAX_STARTUP_RECONCILE_PASSES: usize = 4;
 
 pub fn native_world_catalog_operations(root: PathBuf) -> WorldCatalogOperationService {
     WorldCatalogOperationService::immediate(Box::new(NativeWorldCatalog::new(root)))
+}
+
+pub fn native_managed_scenario_content(root: PathBuf) -> NativeManagedScenarioContentService {
+    NativeManagedScenarioContentService::new(root)
+}
+
+pub fn native_managed_scenario_content_operations(
+    root: PathBuf,
+) -> NativeManagedScenarioContentOperationService {
+    NativeManagedScenarioContentOperationService::background(root)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

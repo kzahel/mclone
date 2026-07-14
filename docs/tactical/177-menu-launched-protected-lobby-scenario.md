@@ -1,9 +1,11 @@
 # 177: Menu-Launched Protected Lobby Scenario
 
-Status: active 2026-07-14. Slices 0-1 are landed; versioned managed scenario
-provisioning is next. The CLI now projects into the same scene-owned scenario
+Status: active 2026-07-14. Slices 0-2 are landed; authoritative lobby
+protection is next. The CLI now projects into the same scene-owned scenario
 operation intended for the product menu, and renderer-shell preparation is
-independent from retained-runtime attachment. This is the
+independent from retained-runtime attachment. A tokened native managed-content
+executor now resolves the path-free intent into versioned, atomically
+published lobby and island roots outside the user catalog. This is the
 immediate productization milestone after Tactical 175 Slice 6. It deliberately
 precedes Tactical 175's remote preview slice so the current local proof is
 first expressed as one shared scenario contract rather than accumulating a
@@ -545,6 +547,37 @@ Deliverables:
 Exit criteria: a path-free lobby intent resolves to two verified persistent
 managed worlds on every native host shape without `/tmp`, user-catalog, or
 render-thread provisioning policy.
+
+#### Slice 2 completion record — 2026-07-14
+
+`mclone-app-runtime` now owns the native managed-scenario content service and
+its background token/epoch executor. `LobbyPreview` resolves to the explicit
+`lobby-preview-v1/scenario.json` contract, with `lobby-v1` and
+`demo-island-v1` content under separate persistent roots. The service builds
+both server-owned authored recipes beneath a uniquely owned unpublished
+staging directory, validates their fixture markers and SQLite headers, and
+atomically publishes the complete scenario directory. Valid published content
+is only read and reused; the destructive diagnostic fixture rebuild helper is
+never called against a published product root.
+
+Tests edit an island chunk in SQLite, resolve the scenario again, compare the
+database byte-for-byte, and reopen the edited block as air. Corrupt JSON,
+valid-but-mismatched content versions, invalid SQLite headers, and unrelated
+pre-existing directories produce reason-bearing errors without overwrite.
+Stale staging owned by another invocation remains untouched. Two simultaneous
+background resolves converge on one valid published root, while the common
+platform-operation ledger classifies cancelled-epoch completions as stale and
+second completions as duplicates.
+
+Desktop derives the managed root as a `scenarios` sibling of its stable
+application `worlds` root. The shared Android platform adapter derives the
+same separate internal-app-data child for both flat and XR clients, falling
+back through the existing app-data policy. A catalog-separation test provisions
+both worlds and proves `NativeWorldCatalog` still lists zero rows. All content
+tests use unique injected temporary roots; no test or executor touches the
+user's application data. Focused app-runtime, Android-platform, native-client,
+format/diff, and native-web build validation pass. This slice creates no new
+rendered output.
 
 ### Slice 3: Authoritative Protected Lobby Behavior
 

@@ -2035,6 +2035,12 @@ pub(crate) fn default_native_world_root() -> PathBuf {
         .join("worlds")
 }
 
+pub(crate) fn default_native_scenario_root() -> PathBuf {
+    mclone_app_runtime::scenario_content::native_managed_scenario_root_from_world_root(
+        &default_native_world_root(),
+    )
+}
+
 fn default_loading_settle_distances() -> Vec<i32> {
     vec![5, 10, 15, 20]
 }

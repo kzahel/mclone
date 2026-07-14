@@ -1,5 +1,7 @@
 use super::*;
-use crate::cli::DESKTOP_LOCAL_ARG_FLAGS;
+use crate::cli::{
+    DESKTOP_LOCAL_ARG_FLAGS, default_native_scenario_root, default_native_world_root,
+};
 use std::collections::BTreeSet;
 
 fn collect_cli_source_flags(source: &str) -> BTreeSet<String> {
@@ -398,6 +400,15 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
         }
+    );
+}
+
+#[test]
+fn desktop_managed_scenarios_use_a_catalog_sibling_root() {
+    let world_root = default_native_world_root();
+    assert_eq!(
+        default_native_scenario_root(),
+        world_root.parent().unwrap_or(&world_root).join("scenarios")
     );
 }
 

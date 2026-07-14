@@ -44,7 +44,10 @@ destination warmup. Its first implementation slice has now landed the common
 execution seam: a path-free built-in scenario intent projects into a prepared
 native scene request, while duplicate renderer-shell/topology preparation is
 independent from destination runtime attachment. The existing CLI diorama uses
-that executor and retains exact activation pixels.
+that executor and retains exact activation pixels. A native background content
+executor now also resolves that intent into versioned, atomically published
+lobby/island roots under app-private `scenarios` storage, preserving island
+edits while keeping both managed worlds outside the user catalog.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -73,7 +76,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 177 Slice 1 after Tactical 175 Slice 6).
+(Tactical 177 Slice 2 after Tactical 175 Slice 6).
 
 ## Motivation
 
