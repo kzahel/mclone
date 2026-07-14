@@ -1,9 +1,10 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: proposed 2026-07-14. The audit is complete; Slices 0-8 are pending.
-This tactical closes the browser exception left by Tacticals 174, 175, and
-177 by refactoring their native-shaped startup seams into shared contracts.
-It does not authorize a second browser scenario implementation.
+Status: ready for unattended execution 2026-07-14. The audit and architecture
+decisions are locked; Slices 0-8 are pending an explicit implementation
+go-ahead. This tactical closes the browser exception left by Tacticals 174,
+175, and 177 by refactoring their native-shaped startup seams into shared
+contracts. It does not authorize a second browser scenario implementation.
 
 Topic: `embedded-worlds`
 
@@ -180,15 +181,16 @@ When asset epoch and device generation match, the slots should reuse:
 - atlas texture/view/sampler ownership;
 - shader modules, bind-group layouts, and compatible render pipelines;
 - immutable renderer topology/material resources;
-- browser compiler asset data and, where safe, the worker execution pool.
+- browser compiler asset data and the host-scoped worker execution pool.
 
 The mutable per-slot draw store remains separate. Today
 `TexturedSectionDrawResources::new` recompiles pipelines and uploads an atlas
 for each slot. Slice 2 replaces that duplicate immutable shell with a shared
-resource owner before browser product enablement. If a compiler Worker or other
-resource cannot safely be shared, the completion record must name why, record
-its retained cost, and show that sharing would violate isolation, correctness,
-or frame budgets.
+resource owner before browser product enablement. The resources listed above
+are required shared owners. If implementation evidence shows that one cannot
+be shared while preserving isolation, correctness, or frame budgets, stop and
+report the boundary; do not silently reclassify it as an allowed duplicate in a
+completion record.
 
 Any new long-lived Worker/thread, duplicate pipeline/atlas, or duplicate
 allocation above 1 MiB must appear in a per-slice duplication ledger. No such
@@ -227,7 +229,7 @@ duplication is accepted merely because the native proof already did it.
 | Browser completion | active-slot session replacement | explicit primary or destination completion |
 | Startup readiness | native startup seed meshes | native seed or externally resident-runtime evidence |
 | Web runner settings | generation profile only | generation plus behavior/freeze settings |
-| Browser compiles | one unqualified request-id map | runtime/slot-qualified request ownership |
+| Browser compiles | one unqualified request-id map | stable-world-instance-qualified request ownership |
 | WASM activation | false/no-op stubs | shared preview and swap advancement |
 | Managed persistence | native versioned directories | versioned, catalog-excluded IndexedDB transaction |
 | Renderer shell | duplicate atlas/pipelines per slot | shared immutable resources, separate mutable draws |
@@ -251,15 +253,30 @@ shared scenario definition
 platform managed-content executor
   native: versioned app-private SQLite roots
   web: versioned catalog-excluded IndexedDB records
-  -> ProvisionedScenario { stable primary/destination keys }
+  <- ProvisionManagedWorld { operation token, role, content key }
+  -> ProvisionedManagedWorld { role, stable managed key }
+
+  primary and destination execute independently
+  primary completion may start while destination is still provisioning
 
 shared McloneSceneHost state machine
-  -> StartScenarioWorld { operation token, role, managed key, start facts }
+  -> StartScenarioWorld {
+       operation token,
+       stable WorldInstanceId,
+       current role,
+       managed key,
+       start facts,
+     }
 
 platform slot-start executor
   native: NativeSessionStartupPump / integrated runner
   web: WebIntegratedServerRunner / Worker
-  -> StartedWorldSlot { role, SceneSessionRuntime, admission evidence }
+  -> StartedWorldSlot {
+       stable WorldInstanceId,
+       role,
+       SceneSessionRuntime,
+       admission evidence,
+     }
 
 shared scene admission and composition
   -> active slot playable
@@ -279,6 +296,14 @@ SQLite handle, IndexedDB object, or JS promise. Native and web adapters map the
 key to their storage. The key must include enough scenario/content version
 identity to prevent incompatible content reuse without exposing the storage
 layout to scene policy.
+
+Persistence identity and live runtime identity are distinct. A stable
+`WorldInstanceId` is assigned when a world-start operation is accepted and
+remains attached to that runtime, compiler client, draw state, diagnostics,
+and cancellation ownership through every whole-slot exchange. `Primary`,
+`Destination`, `Active`, `Standby`, and physical slot A/B are changing roles,
+not identities. They must never namespace compiler requests, promises,
+persistence, or lifecycle ownership.
 
 ### Slot-targeted asynchronous startup
 
@@ -311,12 +336,18 @@ The evidence producer differs; the readiness decision remains shared.
 ### Browser persistence
 
 Upgrade the existing browser database with a managed-scenario metadata store
-and stable reserved world ids. Lobby/island records may reuse the existing
-chunk and entity-chunk stores because those are already keyed by world id, but
-managed worlds must not receive `worlds` catalog rows.
+and stable reserved world ids. Lobby/island records reuse the existing chunk
+and entity-chunk stores because those are already keyed by world id, but
+managed worlds must not receive `worlds` catalog rows. This same-database shape
+is the locked default; changing it requires migration evidence rather than a
+second scenario database chosen inside an implementation slice.
 
-Provision metadata, chunks, and entity chunks atomically. Shared Rust produces
-the expected manifest and authored `ChunkRecord`s. TypeScript may execute the
+Provision each managed world's metadata, chunks, and entity chunks atomically
+in its own tokened transaction. The shared scenario manifest relates the two
+world definitions, but there is no combined publication barrier: primary
+publication can start the lobby while destination provisioning continues, and
+destination failure never rolls back a valid primary. Shared Rust produces the
+expected manifest and authored `ChunkRecord`s. TypeScript may execute the
 IndexedDB transaction and carry opaque records, but may not reproduce fixture
 generation or validation policy. Provisioning must not block the rAF thread;
 use a short-lived Worker or another measured asynchronous path if record
@@ -326,14 +357,18 @@ materialization/serialization is not safely below budget.
 
 Two Rust runtime/compiler clients cannot share an unqualified JavaScript
 `Map<request_id, ...>` because request ids may overlap. Introduce an explicit
-runtime/slot namespace into request, timing, completion, cancellation, and
-asset-epoch ownership.
+stable `WorldInstanceId` namespace into request, timing, completion,
+cancellation, and asset-epoch ownership. Slot or role names are forbidden
+because activation exchanges them.
 
-Prefer one host-scoped browser compiler broker and shared worker pool over two
-independent copies when the existing resident protocol can be multiplexed
-without head-of-line blocking. Per-runtime queues/rings are valid mutable state;
-duplicating asset payloads or a full worker pool requires the duplication
-ledger and measurement described above.
+Use one host-scoped browser compiler broker and one shared worker execution
+pool. Each world keeps its own namespaced queue/ring, cancellation state,
+priority, and result accounting; immutable compiler asset data and Worker
+execution capacity remain shared. Admission must preserve active-world
+priority and prevent standby head-of-line blocking. If the existing resident
+protocol cannot be multiplexed while preserving isolation and frame budgets,
+stop with measurements and an interface analysis. Do not silently create a
+second full compiler pool or duplicate asset payloads inside Slice 5.
 
 ## Performance Contract
 
@@ -403,6 +438,36 @@ inside an uncovered interactive frame. Background work must use the existing
 bounded compile/accept/upload grants and must not consume the active world's
 last render-thread grant.
 
+## Unattended Execution Protocol
+
+One explicit instruction to implement this tactical authorizes sequential work
+through Slices 0-8. It does not waive any acceptance or stop condition.
+
+For every slice, the implementing agent must:
+
+1. update this tactical with the slice status and a concrete completion record;
+2. implement only the bounded slice, splitting it into smaller verified commits
+   if necessary rather than carrying an unverifiable large change;
+3. run the focused tests, source/ownership gates, and performance checks named
+   by the slice;
+4. capture under `/tmp` and visually inspect every newly pixel-producing path
+   before proceeding;
+5. retain performance samples, reports, and any rejected sample with its
+   measured external cause;
+6. commit each green endpoint with `Topic: embedded-worlds`; and
+7. continue automatically to the next slice when its exit criteria are met.
+
+An unavailable optional device receipt is recorded honestly and does not by
+itself pause host-neutral work when the existing compile, synthetic-stereo,
+and available-device gates pass. A change to platform-specific XR behavior
+still requires the relevant real-device gate before it can be called proven.
+
+The Slice 6 interactive checklist is an unattended rendered-output checkpoint:
+the agent runs the production browser path, inspects desktop and mobile
+captures, and continues when the objective checks are unambiguous. It pauses
+for human feedback only when visual/product judgment is genuinely required or
+one of the stop rules below fires.
+
 ## Implementation Slices
 
 ### Slice 0: Lock The Parity Debt And Baselines
@@ -416,9 +481,14 @@ Deliverables:
   completion, and TypeScript compiler request map.
 - Lock the shared owners listed above and reject TypeScript scenario policy,
   fixture ids, placement constants, readiness decisions, and activation state.
-- Record the initial duplication ledger: per-slot mutable state, atlas/pipeline
-  copies, compiler workers, server/job workers, retained bytes, and thread/Worker
-  counts.
+- Lock stable `WorldInstanceId` namespaces against active/standby, role, or
+  slot-derived compiler and lifecycle identity.
+- Lock independent primary/destination provisioning and reject a combined
+  completion barrier that delays primary startup.
+- Record the initial duplication ledger: classify per-slot mutable state,
+  atlas/pipeline copies, compiler workers, server/job workers, retained bytes,
+  and thread/Worker counts as required shared, inherently per-world, or pending
+  removal. Leave no unclassified duplicate.
 - Capture a fresh five-run native feature-off control and a five-run production
   browser control after idle-system preflight.
 - Re-run native lobby A-to-B-to-A and inspect its flat/stereo captures as the
@@ -426,8 +496,9 @@ Deliverables:
 - Add a disabled-web smoke that proves the current reason-bearing state so the
   later promotion is an explicit tested transition.
 
-Exit criteria: the exact native assumptions to remove, every allowed duplicate,
-and both performance controls are named before refactoring.
+Exit criteria: the exact native assumptions to remove, every current duplicate
+and its required disposition, and both performance controls are named before
+refactoring.
 
 Estimated effort: 0.5-1 day.
 
@@ -440,7 +511,8 @@ Deliverables:
 
 - Move manifests, ids, versions, expected roles, behavior profiles, and logical
   validation out of the native-only module.
-- Define stable storage-neutral managed-world keys.
+- Define stable storage-neutral managed-world keys separately from stable live
+  `WorldInstanceId`s.
 - Keep the native filesystem/SQLite executor behind the same portable plan and
   preserve its staging, atomic publish, reuse, and corruption behavior.
 - Build browser provisioning payloads from
@@ -490,7 +562,8 @@ Deliverables:
 - Replace `PathBuf`-shaped scene requests with portable managed-world keys and
   start facts.
 - Add tokened primary/destination start operations that complete into a named
-  slot with a neutral `SceneSessionRuntime` aggregate.
+  slot with a neutral `SceneSessionRuntime` aggregate while retaining the
+  runtime's stable `WorldInstanceId` through later slot exchanges.
 - Move managed launch state, renderer preparation, readiness advancement,
   activation requests, and slot swap out of native-only compilation where their
   dependencies are host-neutral.
@@ -522,7 +595,9 @@ Deliverables:
   invalidating user catalog worlds.
 - Use deterministic reserved world ids for lobby and island records; never add
   them to the user `worlds` catalog store.
-- Commit metadata, chunks, and entity chunks transactionally.
+- Commit each world's metadata, chunks, and entity chunks transactionally under
+  its own operation token; primary publication never waits on destination
+  publication.
 - Reuse valid matching content without rewriting the mutable island.
 - Detect missing, partial, incompatible, and corrupt managed content through
   the shared validation result vocabulary.
@@ -550,9 +625,10 @@ Deliverables:
 - Start the protected lobby as primary and the mutable island as destination
   with independent Worker/runtime/persistence ownership.
 - Qualify compiler requests, timings, results, cancellation, and asset epochs by
-  runtime/slot identity.
-- Prefer a host-scoped compiler broker/shared pool; record and justify any
-  unavoidable per-runtime compiler worker or asset duplication.
+  stable `WorldInstanceId`, never current runtime role or slot.
+- Install one host-scoped compiler broker/shared Worker pool with per-world
+  queues/rings and active-world priority. Stop with evidence rather than create
+  a second full pool if safe multiplexing fails.
 - Drain and acknowledge initial camera corrections for both runtimes.
 - Apply existing standby cadence where supported; if browser cadence remains
   unavailable, measure the cost and keep the typed gap explicit rather than
@@ -569,7 +645,7 @@ Estimated effort: 1.5-3 days.
 
 ### Slice 6: First Browser Lobby And Live Preview Pixels
 
-This is the first required human review checkpoint.
+This is the first required unattended rendered-output checkpoint.
 
 Deliverables:
 
@@ -588,7 +664,7 @@ Deliverables:
 - Run a five-sample browser feature-off comparison and an interleaved control if
   the 3% investigation threshold is crossed.
 
-Manual review:
+Interactive and captured validation:
 
 1. Open the production web app and choose `Enter Lobby` from the title.
 2. Confirm control begins in the protected lobby before the island is ready.
@@ -599,8 +675,8 @@ Manual review:
 6. Open ordinary Singleplayer afterward and confirm its startup remains normal.
 
 Exit criteria: desktop and mobile browser show the same live scenario preview
-as native through shared scene/render code, and the user accepts the basic
-visual/startup feel before activation lifecycle work proceeds.
+as native through shared scene/render code, the agent records an unambiguous
+visual/startup acceptance receipt, and no stop condition requires human input.
 
 Estimated effort: 1-2 days.
 
@@ -723,9 +799,9 @@ reports, storage probes, and logs likewise stay outside the repository.
 ## Risk Register
 
 1. **Compiler request collision or head-of-line blocking.** Two runtime clients
-   currently meet one unqualified JS timing/request map. Namespace first; then
-   measure whether a shared broker or separate execution pools give the safer
-   bounded result.
+   currently meet one unqualified JS timing/request map. Namespace by stable
+   `WorldInstanceId`, use one broker/pool with per-world queues, and stop rather
+   than duplicate the pool if bounded active-world priority cannot be proven.
 2. **External standby readiness.** Browser startup has no native seed-mesh
    bundle. Readiness must consume resident-runtime evidence without weakening
    entry coverage or forking policy.
@@ -755,7 +831,19 @@ reports, storage probes, and logs likewise stay outside the repository.
   shared seam before any browser scenario runtime lands.
 - After Slice 5, stop if two browser runtimes cannot shut down independently or
   compiler completions cannot be unambiguously attributed.
-- After Slice 6, request human visual/startup review before activation closeout.
+- Stop if implementation would key persistent, compiler, promise, diagnostic,
+  or lifecycle state by a changing active/standby role or physical slot.
+- Stop if primary startup would be forced to await destination provisioning or
+  if destination failure would invalidate an already valid primary lobby.
+- Stop before a destructive IndexedDB migration or repair that could affect a
+  user catalog world.
+- Stop rather than add a second full compiler Worker pool, duplicate immutable
+  compiler asset payloads, or introduce browser-only scenario policy.
+- After Slice 6, continue on an unambiguous captured visual receipt; pause only
+  if the result requires subjective product judgment or differs materially from
+  the shared native scenario.
+- Stop if browser resource limits would require changing the milestone from a
+  live hosted destination to a static/baked preview or other fidelity tier.
 - At any slice, a feature-off regression above the performance contract blocks
   progression until attributed and resolved or explicitly accepted by the
   user.

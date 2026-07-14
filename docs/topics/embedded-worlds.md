@@ -10,8 +10,8 @@ worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
-protected lobby productization milestone, and a proposed shared web-parity
-refactor.**
+protected lobby productization milestone, and a shared web-parity refactor
+ready for unattended execution.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -86,7 +86,8 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 parity plan opened after the Tactical 177 audit).
+(Tactical 178 architecture and unattended execution rules locked after the
+Tactical 177 audit).
 
 ## Motivation
 
