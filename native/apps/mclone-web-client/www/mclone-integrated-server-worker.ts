@@ -30,6 +30,7 @@ interface IntegratedServerWorkerMessage {
   requestId?: number;
   seed?: number | string;
   generationProfile?: "overworld" | "authored-only";
+  behaviorProfile?: "mutable" | "protected-lobby";
   lightStatusBatchSize?: number;
   jobWorkerUrl?: string;
   bindgenJsUrl?: string;
@@ -39,6 +40,7 @@ interface IntegratedServerWorkerMessage {
   clearWorldStorage?: boolean;
   runnerTransportKind?: string;
   tickIntervalMs?: number;
+  freezeScheduledFluidTicks?: boolean;
   frame?: Uint8Array;
   transportKind?: "shared-memory" | "message-transfer";
   controlBuffer?: SharedArrayBuffer;
@@ -215,6 +217,13 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   const generationProfile = String(message.generationProfile ?? "overworld");
   if (typeof (server as any).setWorldGenerationProfile === "function") {
     (server as any).setWorldGenerationProfile(generationProfile);
+  }
+  const behaviorProfile = String(message.behaviorProfile ?? "mutable");
+  if (typeof (server as any).setWorldBehaviorProfile === "function") {
+    (server as any).setWorldBehaviorProfile(behaviorProfile);
+  }
+  if (typeof (server as any).setScheduledFluidTicksFrozen === "function") {
+    (server as any).setScheduledFluidTicksFrozen(Boolean(message.freezeScheduledFluidTicks));
   }
   const rawLightStatusBatchSize = Number(message.lightStatusBatchSize);
   const lightStatusBatchSize = Number.isFinite(rawLightStatusBatchSize)

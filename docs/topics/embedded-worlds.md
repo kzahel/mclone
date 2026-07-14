@@ -694,6 +694,19 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
+Tactical 178 Slice 5 closes the browser dual-runtime ownership gap. The web
+host consumes the same shared managed provision/start operations as native and
+keeps protected lobby instance 2 plus mutable island instance 3 alive in two
+independent integrated-server Workers. One compiler Worker qualifies local
+request ids by stable world instance, prioritizes active work, and owns
+per-world snapshot mirrors forked from one immutable parsed asset template.
+The accepted receipt observed nine otherwise-colliding local ids without a
+cross-world result, one compiler/asset load, two live server Workers, corrected
+cameras for both worlds, and zero Workers after explicit shutdown. Browser
+standby cadence remains an explicit typed operation gap, not an ad-hoc message.
+Production menu enablement and live-preview pixel acceptance are Tactical 178
+Slice 6.
+
 The warm-swap and opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md); the
 bounded simultaneous-geometry plan lives in

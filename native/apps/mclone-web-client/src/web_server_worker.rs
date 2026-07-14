@@ -55,6 +55,8 @@ const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 pub struct WebIntegratedServerRunnerConfig {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
+    pub freeze_scheduled_fluid_ticks: bool,
     pub light_status_batch_size: usize,
     pub worker_url: String,
     pub job_worker_url: String,
@@ -85,6 +87,8 @@ impl WebIntegratedServerRunnerConfig {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            world_behavior_profile: mclone_server::WorldBehaviorProfile::default(),
+            freeze_scheduled_fluid_ticks: false,
             light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             worker_url: worker_url.into(),
             job_worker_url: job_worker_url.into(),
@@ -110,6 +114,19 @@ impl WebIntegratedServerRunnerConfig {
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub const fn with_world_behavior_profile(
+        mut self,
+        profile: mclone_server::WorldBehaviorProfile,
+    ) -> Self {
+        self.world_behavior_profile = profile;
+        self
+    }
+
+    pub const fn with_freeze_scheduled_fluid_ticks(mut self, freeze: bool) -> Self {
+        self.freeze_scheduled_fluid_ticks = freeze;
         self
     }
 
@@ -442,6 +459,16 @@ impl WebIntegratedServerRunner {
             &message,
             "generationProfile",
             config.world_generation_profile.label(),
+        )?;
+        set_string(
+            &message,
+            "behaviorProfile",
+            config.world_behavior_profile.label(),
+        )?;
+        set_bool(
+            &message,
+            "freezeScheduledFluidTicks",
+            config.freeze_scheduled_fluid_ticks,
         )?;
         set_number(
             &message,
@@ -1776,6 +1803,19 @@ impl McloneWebIntegratedServerWorker {
         self.server
             .set_world_generation_profile(profile)
             .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = setWorldBehaviorProfile)]
+    pub fn set_world_behavior_profile(&mut self, profile: String) -> Result<(), JsValue> {
+        let profile = mclone_server::WorldBehaviorProfile::parse_label(&profile)
+            .map_err(|error| JsValue::from_str(&error))?;
+        self.server.set_world_behavior_profile(profile);
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = setScheduledFluidTicksFrozen)]
+    pub fn set_scheduled_fluid_ticks_frozen(&mut self, frozen: bool) {
+        self.server.set_scheduled_fluid_ticks_frozen(frozen);
     }
 
     #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]

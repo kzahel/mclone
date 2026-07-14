@@ -30,6 +30,32 @@ pub const MIN_FLAT_RENDER_SCALE: f32 = 0.25;
 pub const MAX_FLAT_RENDER_SCALE: f32 = 2.0;
 const SCALE_EPSILON: f32 = 0.000_1;
 
+#[cfg(not(target_arch = "wasm32"))]
+type CompositionTimingSample = std::time::Instant;
+
+#[cfg(target_arch = "wasm32")]
+type CompositionTimingSample = f64;
+
+#[cfg(not(target_arch = "wasm32"))]
+fn composition_timing_now() -> CompositionTimingSample {
+    std::time::Instant::now()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn composition_timing_now() -> CompositionTimingSample {
+    js_sys::Date::now()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn composition_timing_elapsed_ms(start: CompositionTimingSample) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+#[cfg(target_arch = "wasm32")]
+fn composition_timing_elapsed_ms(start: CompositionTimingSample) -> f64 {
+    (js_sys::Date::now() - start).max(0.0)
+}
+
 const FLAT_SCALE_PRESENT_WGSL: &str = r#"
 @group(0) @binding(0)
 var source_texture: texture_2d<f32>;
@@ -991,7 +1017,7 @@ fn render_composed_translucent_terrain(
                 );
             }
             TerrainCompositionSource::Placed => {
-                let placed_started_at = std::time::Instant::now();
+                let placed_started_at = composition_timing_now();
                 composition
                     .placed
                     .draw
@@ -1007,7 +1033,7 @@ fn render_composed_translucent_terrain(
                         composition.placed.placement,
                         view_slot,
                     );
-                placed_draw_ms += placed_started_at.elapsed().as_secs_f64() * 1000.0;
+                placed_draw_ms += composition_timing_elapsed_ms(placed_started_at);
             }
         }
         start = end;

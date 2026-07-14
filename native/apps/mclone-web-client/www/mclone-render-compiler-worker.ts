@@ -35,6 +35,9 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 interface RenderCompileWorkerInbound {
   kind?: string;
   requestId?: number;
+  clientRequestId?: number;
+  worldInstanceId?: string;
+  worldPriority?: "active" | "standby";
   workKind?: "render-sections" | "far-lod";
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
@@ -78,7 +81,8 @@ interface SharedCompileResult {
 }
 
 let wasmModulePromise = null;
-let compilerSession: WebRenderCompilerSession | null = null;
+let compilerTemplate: WebRenderCompilerSession | null = null;
+const compilerSessions = new Map<string, WebRenderCompilerSession>();
 let workerWasmInitCount = 0;
 let workerCompileCount = 0;
 let workerAssetLoadCount = 0;
@@ -95,6 +99,10 @@ workerSelf.onmessage = async (event: MessageEvent) => {
   }
   if (message.kind === "compile-render-sections") {
     await handleCompile(message);
+    return;
+  }
+  if (message.kind === "release-render-compiler-world") {
+    compilerSessions.delete(String(message.worldInstanceId ?? ""));
     return;
   }
 
@@ -117,7 +125,7 @@ async function handleInit(message: RenderCompileWorkerInbound): Promise<void> {
         + byteLengthOf(message.referencePack)
         + byteLengthOf(message.fallbackPack)
       : byteLengthOf(message.assetPack);
-    compilerSession = selected
+    compilerTemplate = selected
       ? module.WebRenderCompilerSession.newSelected(
           message.authoredPack as Uint8Array,
           message.referencePack as Uint8Array,
@@ -126,10 +134,11 @@ async function handleInit(message: RenderCompileWorkerInbound): Promise<void> {
           Boolean(message.referenceEnabled),
         )
       : new module.WebRenderCompilerSession(message.assetPack as Uint8Array);
-    workerAssetLoadCount = Number(compilerSession.assetLoadCount?.()) || 1;
-    workerAssetPackInitByteLength = Number(compilerSession.assetPackByteLength?.())
+    compilerSessions.clear();
+    workerAssetLoadCount = Number(compilerTemplate.assetLoadCount?.()) || 1;
+    workerAssetPackInitByteLength = Number(compilerTemplate.assetPackByteLength?.())
       || assetPackByteLength;
-    workerAssetPackFileCount = Number(compilerSession.assetPackFileCount?.()) || 0;
+    workerAssetPackFileCount = Number(compilerTemplate.assetPackFileCount?.()) || 0;
     workerAssetEpoch = Number(message.assetEpoch) || 0;
     workerSelf.postMessage({
       ok: true,
@@ -168,6 +177,18 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
   try {
     workerCompileCount += 1;
     const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
+    const worldInstanceId = String(message.worldInstanceId ?? "");
+    if (worldInstanceId.length === 0) {
+      throw new Error("render compile request is missing its world instance id");
+    }
+    if (compilerTemplate === null) {
+      throw new Error("render compiler assets are not initialized");
+    }
+    let session = compilerSessions.get(worldInstanceId);
+    if (session === undefined) {
+      session = compilerTemplate.forkWorldSession();
+      compilerSessions.set(worldInstanceId, session);
+    }
     const workKind = message.workKind === "far-lod" ? "far-lod" : "render-sections";
     const farLodCompile = workKind === "far-lod";
     const targetSections = normalizeTargetSections(message.targetSections);
@@ -182,31 +203,22 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       ? message.sharedInputBuffer.byteLength
       : 0;
     const hasPersistentSnapshotCompiler =
-      compilerSession !== null
-      && snapshotInput !== null
+      snapshotInput !== null
       && targetSections.length > 0
-      && typeof compilerSession.compileSnapshotSectionsForTargets === "function";
+      && typeof session.compileSnapshotSectionsForTargets === "function";
     const hasPersistentGeneratedCompiler =
-      compilerSession !== null
-      && targetSections.length > 0
-      && typeof compilerSession.compileGeneratedChunkSectionsForTargets === "function";
+      targetSections.length > 0
+      && typeof session.compileGeneratedChunkSectionsForTargets === "function";
     const hasPersistentFullCompiler =
-      compilerSession !== null
-      && typeof compilerSession.compileGeneratedChunkSections === "function";
+      typeof session.compileGeneratedChunkSections === "function";
     const hasPersistentFarLodCompiler =
-      compilerSession !== null
-      && typeof compilerSession.compileFarLodTile === "function";
+      typeof session.compileFarLodTile === "function";
     const hasGeneratedTargetedCompiler =
       targetSections.length > 0
       && (
         hasPersistentGeneratedCompiler
         || typeof module.mclone_web_compile_generated_chunk_sections_for_targets === "function"
       );
-    // The `hasPersistent*` flags above already gate on `compilerSession !== null` (and the
-    // snapshot flag on `snapshotInput !== null`), but those guards live in stored booleans that
-    // TS cannot use to narrow the module-level `compilerSession`. The persistent branches below
-    // are only reached when the flag is set, so this non-null view is sound.
-    const session = compilerSession as WebRenderCompilerSession;
     if (farLodCompile && !hasPersistentFarLodCompiler) {
       throw new Error("resident render compiler does not expose compileFarLodTile");
     }
@@ -257,6 +269,9 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
     const report = {
       ok: true,
       requestId: message.requestId,
+      clientRequestId: message.clientRequestId,
+      worldInstanceId,
+      worldPriority: message.worldPriority,
       workKind,
       transportKind: response.transportKind,
       sharedMemorySupported: renderCompilerSharedMemorySupported(),
@@ -266,7 +281,8 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       workerAssetPackInitByteLength,
       workerAssetPackFileCount,
       assetEpoch: workerAssetEpoch,
-      persistentAssetCatalog: compilerSession !== null,
+      persistentAssetCatalog: true,
+      compilerWorldSessionCount: compilerSessions.size,
       requestAssetPackByteLength,
       requestTargetSectionsByteLength,
       requestSnapshotInputByteLength,
@@ -287,9 +303,9 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       // Report the delta width and resident mirror size straight from the persistent Rust
       // session so the perf fence can see input shrink to upserts-only and confirm the
       // mirror stays bounded to the loaded view (evictions track client unloads).
-      snapshotInputUpsertCount: Number(compilerSession?.lastDeltaUpsertCount?.()) || 0,
-      snapshotInputEvictionCount: Number(compilerSession?.lastDeltaEvictionCount?.()) || 0,
-      snapshotMirrorChunkCount: Number(compilerSession?.mirrorChunkCount?.()) || 0,
+      snapshotInputUpsertCount: Number(session.lastDeltaUpsertCount?.()) || 0,
+      snapshotInputEvictionCount: Number(session.lastDeltaEvictionCount?.()) || 0,
+      snapshotMirrorChunkCount: Number(session.mirrorChunkCount?.()) || 0,
       snapshotInputCompileUsed: !farLodCompile && hasPersistentSnapshotCompiler,
       generatedViewFallbackUsed: !farLodCompile && !hasPersistentSnapshotCompiler,
       sharedResultBufferUsed: response.sharedResultBufferUsed,
@@ -315,6 +331,9 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
     workerSelf.postMessage({
       ok: false,
       requestId: message.requestId,
+      clientRequestId: message.clientRequestId,
+      worldInstanceId: message.worldInstanceId,
+      worldPriority: message.worldPriority,
       transportKind: RENDER_COMPILER_TRANSPORT_KIND,
       sharedMemorySupported: renderCompilerSharedMemorySupported(),
       workerWasmInitCount,
@@ -322,7 +341,8 @@ async function handleCompile(message: RenderCompileWorkerInbound): Promise<void>
       workerAssetLoadCount,
       workerAssetPackInitByteLength,
       workerAssetPackFileCount,
-      persistentAssetCatalog: compilerSession !== null,
+      persistentAssetCatalog: compilerTemplate !== null,
+      compilerWorldSessionCount: compilerSessions.size,
       reason: stringifyError(error),
     });
   }

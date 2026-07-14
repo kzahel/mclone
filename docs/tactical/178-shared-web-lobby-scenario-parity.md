@@ -1,10 +1,11 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-4 locked the baseline, extracted portable
+Status: active 2026-07-14. Slices 0-5 locked the baseline, extracted portable
 scenario content, removed the duplicate second-slot terrain shell, and moved
 managed provisioning, slot-targeted startup, readiness, activation, and swap
 policy into shared Rust. Catalog-excluded, Worker-backed IndexedDB provisioning
-is also complete. Dual browser runtime ownership is next. This tactical closes
+and dual browser runtime ownership through one namespaced compiler broker are
+also complete. First production browser menu/preview pixels are next. This tactical closes
 the browser exception left by Tacticals 174,
 175, and 177 by refactoring their native-shaped startup seams into shared
 contracts. It does not authorize a second browser scenario implementation.
@@ -913,6 +914,58 @@ Deliverables:
 
 Exit criteria: two browser runtimes remain alive concurrently and independently
 mutable, but the destination is not yet required to render.
+
+Landed 2026-07-14. The browser adapter now consumes the same independently
+tokened provision/start operations as native. An opaque WASM start ticket owns
+Worker construction while awaiting, so destination startup does not borrow
+`WebSceneHost` or pause the active animation-frame pump. The protected primary
+and mutable destination use distinct IndexedDB keys, integrated-server Workers,
+runtime services, cameras, replicas, and live `WorldInstanceId`s.
+
+The one existing render-compiler Worker is now a host broker. Rust doorbells
+carry stable instance id and active/standby priority; JavaScript assigns a
+globally unique broker request id; the Worker forks independent mutable
+snapshot mirrors from one parsed immutable asset template. Active requests are
+selected ahead of queued standby requests. Runtime drop releases its compiler
+namespace after already-submitted work drains. The accepted probe observed
+three historical qualified ids (the replaced startup world plus primary and
+destination), two live compiler sessions, and nine real local-request-id
+collisions safely separated by the broker namespace. It still reported exactly
+one compiler Worker, one WASM initialization, and one asset load.
+
+The final browser receipt reached protected seed `17501` as active instance 2
+and mutable seed `17502` as standby instance 3. Primary startup was playable;
+the destination had 81 loaded chunks and its initial camera correction was
+acknowledged. Worker instrumentation observed three integrated-server Workers
+created (initial, primary, destination), exactly two live after replacement,
+two short-lived provision Workers with zero retained, and one live compiler
+Worker. Explicit shutdown reduced all instrumented Worker classes to zero with
+no page error. Shared server tests retain the authoritative protected/mutable
+mutation contract; Slice 4's reopen/digest proof retains persistence identity.
+
+Browser cadence control remains the pre-existing typed gap:
+`WebSceneRuntimeService::set_simulation_cadence` returns the explicit typed
+worker-operation error, and the receipt records `standbyCadenceApplied=false`.
+No ad-hoc Worker message was added. Scenario-on cost and the decision whether
+to promote that typed operation remain measured work for Slices 6/8.
+
+Making placed translucent composition execute in WASM also exposed one
+unconditional `std::time::Instant`; it was replaced with the same target-aware
+native/`Date.now()` timing shape already used by render code. The final capture
+had 583 interior colors and 905,436 non-clear interior pixels; it was inspected
+as a correctly playable flat authored lobby. Preview visual acceptance remains
+Slice 6.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-server world_behavior_profile --lib
+cargo test -p mclone-web-client --test scenario_parity_ownership_lock
+cargo check -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:web:typecheck
+pnpm native:web:managed-scenario-runtime-smoke
+pnpm native:thin-adapters:purity
+```
 
 Estimated effort: 1.5-3 days.
 

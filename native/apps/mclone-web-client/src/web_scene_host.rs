@@ -15,6 +15,7 @@ use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, Platfo
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
 };
+use mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority;
 use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionRuntimeKind,
     SessionStartRequest,
@@ -159,6 +160,62 @@ struct LastFrameStats {
     far_lod_uploaded_bytes: usize,
 }
 
+/// Opaque browser start ticket. Worker construction runs without borrowing
+/// `WebSceneHost`, so an independently warming destination cannot pause the
+/// active world's animation-frame pump.
+#[wasm_bindgen]
+pub struct WebManagedScenarioRuntimeStart {
+    pending: Option<ExternalSceneSessionStart>,
+    config: Option<WebIntegratedServerRunnerConfig>,
+    outcome: Option<Result<crate::WebRuntime, String>>,
+}
+
+#[wasm_bindgen]
+impl WebManagedScenarioRuntimeStart {
+    #[wasm_bindgen(js_name = start)]
+    pub async fn start(&mut self) -> Result<JsValue, JsValue> {
+        if self.outcome.is_some() {
+            return Err(JsValue::from_str(
+                "managed runtime start ticket was already started",
+            ));
+        }
+        let pending = self
+            .pending
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was consumed"))?;
+        let center = pending.scene.center();
+        let render_distance = pending.scene.render_distance;
+        let config = self
+            .config
+            .take()
+            .ok_or_else(|| JsValue::from_str("managed runtime start config was consumed"))?;
+        self.outcome = Some(
+            match crate::WebRuntime::web_worker_integrated_at(config, center).await {
+                Ok(mut runtime) => match runtime.request_chunk_view_deferred(
+                    center,
+                    render_distance,
+                    chunk_tracking_radius_for_render_distance(render_distance),
+                ) {
+                    Ok(_) => Ok(runtime),
+                    Err(error) => Err(error),
+                },
+                Err(error) => Err(error),
+            },
+        );
+        let object = js_sys::Object::new();
+        report_set_bool(
+            &object,
+            "ok",
+            self.outcome.as_ref().is_some_and(Result::is_ok),
+        )
+        .map_err(JsValue::from)?;
+        if let Some(Err(error)) = &self.outcome {
+            report_set_string(&object, "reason", error).map_err(JsValue::from)?;
+        }
+        Ok(object.into())
+    }
+}
+
 /// Browser resource/presentation rim around the one shared scene-policy owner.
 #[wasm_bindgen]
 pub struct WebSceneHost {
@@ -198,6 +255,14 @@ pub struct WebSceneHost {
     interaction_count: usize,
     mesh_build_count: usize,
     catalog_tokens: HashMap<String, PlatformOperationToken>,
+    managed_provision_tokens: HashMap<
+        String,
+        (
+            PlatformOperationToken,
+            mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
+        ),
+    >,
+    managed_world_starts: HashMap<String, ExternalSceneSessionStart>,
     render_color_profile: String,
     last_runner_kind: String,
     startup_camera_reconciled: bool,
@@ -833,6 +898,168 @@ impl WebSceneHost {
         .await
     }
 
+    #[wasm_bindgen(js_name = beginManagedScenarioSmoke)]
+    pub fn begin_managed_scenario_smoke(&mut self) -> Result<JsValue, JsValue> {
+        self.host_mut()?
+            .begin_managed_scenario_launch(
+                mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview(),
+            )
+            .map_err(js_error)?;
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
+
+    /// Take one shared-policy managed-world adapter operation. JavaScript only
+    /// executes storage/Worker mechanics; it never chooses scenario content or
+    /// startup policy.
+    #[wasm_bindgen(js_name = takeManagedScenarioOperation)]
+    pub fn take_managed_scenario_operation(&mut self) -> Result<JsValue, JsValue> {
+        if let Some(operation) = self.host_mut()?.take_managed_scenario_provision_request() {
+            let request_id = platform_operation_key("provision", operation.token);
+            let role = operation.kind.role;
+            self.managed_provision_tokens
+                .insert(request_id.clone(), (operation.token, role));
+            let object = js_sys::Object::new();
+            report_set_string(&object, "kind", "provision").map_err(JsValue::from)?;
+            report_set_string(&object, "requestId", &request_id).map_err(JsValue::from)?;
+            report_set_string(&object, "scenarioId", "lobbyPreview").map_err(JsValue::from)?;
+            report_set_string(&object, "role", managed_world_role_label(role))
+                .map_err(JsValue::from)?;
+            return Ok(object.into());
+        }
+        if let Some(start) = self.host_mut()?.take_managed_scenario_world_start() {
+            let (token, role) = match &start.target {
+                mclone_scene::ExternalSceneStartTarget::ManagedScenario { token, role } => {
+                    (*token, *role)
+                }
+                mclone_scene::ExternalSceneStartTarget::ActiveSession => {
+                    return Err(JsValue::from_str(
+                        "managed scenario queue produced an active-session start",
+                    ));
+                }
+            };
+            let request_id = platform_operation_key("start", token);
+            let world_id = start
+                .managed_world_key
+                .as_ref()
+                .ok_or_else(|| JsValue::from_str("managed world start omitted its storage key"))?
+                .as_str()
+                .to_owned();
+            let object = js_sys::Object::new();
+            report_set_string(&object, "kind", "start").map_err(JsValue::from)?;
+            report_set_string(&object, "requestId", &request_id).map_err(JsValue::from)?;
+            report_set_string(&object, "role", managed_world_role_label(role))
+                .map_err(JsValue::from)?;
+            report_set_string(&object, "worldId", &world_id).map_err(JsValue::from)?;
+            report_set_string(&object, "seedText", &start.scene.seed.to_string())
+                .map_err(JsValue::from)?;
+            report_set_string(
+                &object,
+                "worldInstanceId",
+                &start.instance_id.get().to_string(),
+            )
+            .map_err(JsValue::from)?;
+            report_set_string(
+                &object,
+                "behaviorProfile",
+                start.scene.world_behavior_profile.label(),
+            )
+            .map_err(JsValue::from)?;
+            self.managed_world_starts.insert(request_id, start);
+            return Ok(object.into());
+        }
+        Ok(JsValue::NULL)
+    }
+
+    #[wasm_bindgen(js_name = completeManagedScenarioProvision)]
+    pub fn complete_managed_scenario_provision_request(
+        &mut self,
+        request_id: String,
+        world_id: String,
+        error: String,
+    ) -> Result<JsValue, JsValue> {
+        let Some((token, role)) = self.managed_provision_tokens.remove(&request_id) else {
+            return Err(JsValue::from_str("unknown managed provision request"));
+        };
+        let result = if error.is_empty() {
+            let key = mclone_app_runtime::scenario_content::ManagedWorldKey::new(world_id)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            Ok(mclone_app_runtime::scenario_content::ProvisionedManagedScenarioWorld { role, key })
+        } else {
+            Err(error)
+        };
+        let (device, queue) = (&self.context.device, &self.context.queue);
+        self.host
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
+            .complete_managed_scenario_provision(
+                device,
+                queue,
+                PlatformOperationCompletion { token, result },
+            )
+            .map_err(js_error)?;
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = prepareManagedScenarioWorldStart)]
+    pub fn prepare_managed_scenario_world_start(
+        &mut self,
+        request_id: String,
+        worker_url: String,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Result<WebManagedScenarioRuntimeStart, JsValue> {
+        let pending = self
+            .managed_world_starts
+            .remove(&request_id)
+            .ok_or_else(|| JsValue::from_str("unknown managed world start request"))?;
+        let seed = pending.scene.seed;
+        let world_id = pending
+            .managed_world_key
+            .as_ref()
+            .ok_or_else(|| JsValue::from_str("managed world start omitted its storage key"))?
+            .as_str()
+            .to_owned();
+        let config = WebIntegratedServerRunnerConfig::new(
+            seed,
+            worker_url,
+            job_worker_url,
+            bindgen_js_url,
+            bindgen_wasm_url,
+        )
+        .with_indexed_db_world(world_id, false)
+        .with_world_generation_profile(pending.scene.world_generation_profile)
+        .with_world_behavior_profile(pending.scene.world_behavior_profile)
+        .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks);
+        Ok(WebManagedScenarioRuntimeStart {
+            pending: Some(pending),
+            config: Some(config),
+            outcome: None,
+        })
+    }
+
+    #[wasm_bindgen(js_name = completeManagedScenarioWorldStart)]
+    pub fn complete_managed_scenario_world_start(
+        &mut self,
+        start: &mut WebManagedScenarioRuntimeStart,
+    ) -> Result<JsValue, JsValue> {
+        let pending = start
+            .pending
+            .take()
+            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was consumed"))?;
+        match start
+            .outcome
+            .take()
+            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was not started"))?
+        {
+            Ok(runtime) => self.complete_started_runtime(pending, runtime),
+            Err(error) => {
+                self.host_mut()?.fail_external_session_start(pending, error);
+                self.ui_report(false, None).map_err(JsValue::from)
+            }
+        }
+    }
+
     #[wasm_bindgen(js_name = joinRemoteWebSocket)]
     pub async fn join_remote_websocket(&mut self, url: String) -> Result<JsValue, JsValue> {
         if !self.has_pending_session_start() {
@@ -1247,6 +1474,8 @@ async fn create_scene_host(
         active_assets.mesh.clone(),
         compiler_wake.clone(),
         clock.clone(),
+        1,
+        RuntimeRenderPriority::Active,
     )
     .into_scene_session_runtime(descriptor.clone());
     let operation = match &descriptor {
@@ -1343,6 +1572,8 @@ async fn create_scene_host(
         interaction_count: 0,
         mesh_build_count: 0,
         catalog_tokens: HashMap::new(),
+        managed_provision_tokens: HashMap::new(),
+        managed_world_starts: HashMap::new(),
         render_color_profile,
         last_runner_kind: "none".to_owned(),
         startup_camera_reconciled: false,
@@ -1383,6 +1614,8 @@ impl WebSceneHost {
         let center = pending.scene.center();
         let render_distance = pending.scene.render_distance;
         config.world_generation_profile = pending.scene.world_generation_profile;
+        config.world_behavior_profile = pending.scene.world_behavior_profile;
+        config.freeze_scheduled_fluid_ticks = pending.scene.freeze_scheduled_fluid_ticks;
         match crate::WebRuntime::web_worker_integrated_at(config, center).await {
             Ok(mut runtime) => {
                 runtime
@@ -1428,6 +1661,19 @@ impl WebSceneHost {
             active_assets.mesh.clone(),
             self.compiler_wake.clone(),
             self.platform.clock_handle(),
+            pending.instance_id.get(),
+            match &pending.target {
+                mclone_scene::ExternalSceneStartTarget::ActiveSession
+                | mclone_scene::ExternalSceneStartTarget::ManagedScenario {
+                    role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary,
+                    ..
+                } => RuntimeRenderPriority::Active,
+                mclone_scene::ExternalSceneStartTarget::ManagedScenario {
+                    role:
+                        mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+                    ..
+                } => RuntimeRenderPriority::Standby,
+            },
         )
         .into_scene_session_runtime(descriptor.clone());
         let (device, queue) = (&self.context.device, &self.context.queue);
@@ -1774,6 +2020,64 @@ impl WebSceneHost {
                 "activeAssetEpoch",
                 host.active_asset_epoch() as f64,
             )?;
+            report_set_string(
+                &object,
+                "activeWorldInstanceId",
+                &host.active_world_instance_id().get().to_string(),
+            )?;
+            report_set_string(
+                &object,
+                "activeWorldBehaviorProfile",
+                host.active_world_behavior_profile().label(),
+            )?;
+            report_set_string(
+                &object,
+                "activeWorldSeedText",
+                &host.active_world_seed().to_string(),
+            )?;
+            if let Some(standby) = host.warm_world_standby_snapshot() {
+                report_set_bool(&object, "standbyWorldPresent", true)?;
+                report_set_string(
+                    &object,
+                    "standbyWorldInstanceId",
+                    &standby.instance_id.get().to_string(),
+                )?;
+                report_set_string(&object, "standbyWorldPhase", standby.phase.label())?;
+                report_set_number(
+                    &object,
+                    "standbyLoadedChunkCount",
+                    standby.loaded_chunks as f64,
+                )?;
+                report_set_bool(
+                    &object,
+                    "standbyCadenceApplied",
+                    standby.standby_cadence_applied,
+                )?;
+                report_set_bool(
+                    &object,
+                    "standbyCameraReconciled",
+                    standby.camera_reconciled,
+                )?;
+                report_set_string(&object, "standbyWorldSeedText", &standby.seed.to_string())?;
+            } else {
+                report_set_bool(&object, "standbyWorldPresent", false)?;
+            }
+            if let Some(preview) = host.embedded_world_preview_snapshot() {
+                report_set_string(
+                    &object,
+                    "embeddedPreviewWorldInstanceId",
+                    &preview.source_world.get().to_string(),
+                )?;
+                report_set_string(
+                    &object,
+                    "embeddedPreviewPhase",
+                    match preview.phase {
+                        mclone_scene::EmbeddedWorldPreviewPhase::Warming => "warming",
+                        mclone_scene::EmbeddedWorldPreviewPhase::Visible => "visible",
+                        mclone_scene::EmbeddedWorldPreviewPhase::Failed => "failed",
+                    },
+                )?;
+            }
             let active_selection = host.active_asset_pack_selection();
             report_set_bool(
                 &object,
@@ -2445,6 +2749,21 @@ fn direction_label(direction: Direction) -> &'static str {
         Direction::West => "west",
         Direction::East => "east",
     }
+}
+
+fn managed_world_role_label(
+    role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
+) -> &'static str {
+    match role {
+        mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => "primary",
+        mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+            "destination"
+        }
+    }
+}
+
+fn platform_operation_key(prefix: &str, token: PlatformOperationToken) -> String {
+    format!("{prefix}-{}-{}", token.epoch.get(), token.request_id.get())
 }
 
 fn write_block_target(

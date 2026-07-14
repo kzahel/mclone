@@ -2,6 +2,7 @@ use wasm_bindgen::{JsCast, prelude::*};
 use web_sys::HtmlCanvasElement;
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::rc::Rc;
 
 use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime,
@@ -33,7 +34,8 @@ use mclone_app_runtime::scenario_content::{
     validate_managed_scenario_stored_world,
 };
 use mclone_app_runtime::scene_session_runtime::{
-    FarLodRuntimeSettleSnapshot, SceneRuntimeService, SceneSessionRuntime, StartupReadinessPolicy,
+    FarLodRuntimeSettleSnapshot, RuntimeRenderPriority, SceneRuntimeService, SceneSessionRuntime,
+    StartupReadinessPolicy,
 };
 use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_app_runtime::startup_args::{
@@ -275,7 +277,7 @@ pub fn mclone_web_compile_generated_chunk_sections_for_targets(
 
 #[wasm_bindgen]
 pub struct WebRenderCompilerSession {
-    mesh_assets: WebTexturedMeshAssets,
+    mesh_assets: Rc<WebTexturedMeshAssets>,
     asset_pack_byte_length: usize,
     asset_load_count: usize,
     compile_count: usize,
@@ -300,7 +302,7 @@ impl WebRenderCompilerSession {
         let mesh_assets = load_textured_mesh_assets_from_pack(asset_pack_bytes.to_vec())
             .map_err(JsValue::from)?;
         Ok(Self {
-            mesh_assets,
+            mesh_assets: Rc::new(mesh_assets),
             asset_pack_byte_length,
             asset_load_count: 1,
             compile_count: 0,
@@ -332,11 +334,11 @@ impl WebRenderCompilerSession {
         )
         .map_err(JsValue::from)?;
         Ok(Self {
-            mesh_assets: WebTexturedMeshAssets {
+            mesh_assets: Rc::new(WebTexturedMeshAssets {
                 catalog: mesh_assets.catalog,
                 far_lod_materials: mesh_assets.far_lod_materials,
                 asset_pack_file_count,
-            },
+            }),
             asset_pack_byte_length,
             asset_load_count: 3,
             compile_count: 0,
@@ -366,6 +368,23 @@ impl WebRenderCompilerSession {
     #[wasm_bindgen(js_name = compileCount)]
     pub fn compile_count(&self) -> usize {
         self.compile_count
+    }
+
+    /// Create an independent per-world snapshot mirror while retaining the
+    /// one immutable parsed asset catalog owned by the Worker.
+    #[wasm_bindgen(js_name = forkWorldSession)]
+    pub fn fork_world_session(&self) -> WebRenderCompilerSession {
+        Self {
+            mesh_assets: Rc::clone(&self.mesh_assets),
+            asset_pack_byte_length: self.asset_pack_byte_length,
+            asset_load_count: 0,
+            compile_count: 0,
+            snapshot_mirror: BTreeMap::new(),
+            mirror_generation: 0,
+            biome_zoom_seed: None,
+            last_delta_upsert_count: 0,
+            last_delta_eviction_count: 0,
+        }
     }
 
     #[wasm_bindgen(js_name = compileFarLodTile)]
@@ -1936,6 +1955,8 @@ impl FarTerrainLodCompiler for WebRenderSectionCompiler {
 #[derive(Clone)]
 struct WebRenderCompilerWakeSink {
     callback: js_sys::Function,
+    world_instance_id: u64,
+    priority: RuntimeRenderPriority,
 }
 
 impl std::fmt::Debug for WebRenderCompilerWakeSink {
@@ -1953,11 +1974,30 @@ impl WebRenderCompilerWakeSink {
             .write_doorbell(&doorbell)
             .map_err(anyhow::Error::msg)?
         {
+            set_string(
+                &doorbell,
+                "worldInstanceId",
+                &self.world_instance_id.to_string(),
+            )
+            .map_err(anyhow::Error::msg)?;
+            set_string(&doorbell, "worldPriority", self.priority.label())
+                .map_err(anyhow::Error::msg)?;
             self.callback
                 .call1(&JsValue::NULL, &doorbell)
                 .map_err(|error| anyhow::anyhow!("render-compiler wake failed: {error:?}"))?;
         }
         Ok(())
+    }
+
+    fn release_world(&self) {
+        let message = js_sys::Object::new();
+        let _ = set_string(&message, "kind", "release-world");
+        let _ = set_string(
+            &message,
+            "worldInstanceId",
+            &self.world_instance_id.to_string(),
+        );
+        let _ = self.callback.call1(&JsValue::NULL, &message);
     }
 }
 
@@ -1991,12 +2031,20 @@ impl std::fmt::Debug for WebSceneRuntimeService {
     }
 }
 
+impl Drop for WebSceneRuntimeService {
+    fn drop(&mut self) {
+        self.compiler_wake.release_world();
+    }
+}
+
 impl WebSceneRuntimeService {
     pub fn new(
         runtime: WebRuntime,
         mesh_assets: TexturedMeshAssets,
         compiler_wake: js_sys::Function,
         clock: MonotonicClockHandle,
+        world_instance_id: u64,
+        priority: RuntimeRenderPriority,
     ) -> Self {
         Self {
             runtime,
@@ -2007,6 +2055,8 @@ impl WebSceneRuntimeService {
             clock,
             compiler_wake: WebRenderCompilerWakeSink {
                 callback: compiler_wake,
+                world_instance_id,
+                priority,
             },
             deferred_chunk_drops: BoundedDeferredDropQueue::new(DEFAULT_DEFERRED_DROP_MAX_ITEMS),
         }
@@ -2118,6 +2168,10 @@ impl SceneRuntimeService for WebSceneRuntimeService {
             SingleViewHostMode::LocalIntegrated => "web-worker-integrated",
             SingleViewHostMode::RemoteDedicated => "websocket-remote",
         }
+    }
+
+    fn set_render_priority(&mut self, priority: RuntimeRenderPriority) {
+        self.compiler_wake.priority = priority;
     }
 
     fn core(&self) -> &mclone_app_runtime::SingleViewRuntime {

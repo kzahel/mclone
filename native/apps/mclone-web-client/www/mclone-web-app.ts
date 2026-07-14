@@ -25,6 +25,7 @@ import {
   listIndexedDbCatalogWorlds,
   openIndexedDbCatalogWorld,
   openWorldDb,
+  provisionIndexedDbManagedScenarioWorldInWorker,
   setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
 import type { WebLocalWorldSummary } from "./mclone-web-world-catalog.js";
@@ -101,6 +102,8 @@ interface AppRuntime {
   setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
   setNativeTouchControlsMode?: (mode: TouchControlsMode, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
+  beginManagedScenarioSmoke?: () => WasmReport | null;
+  shutdownForSmoke?: () => Promise<WasmReport | null>;
 }
 
 declare global {
@@ -289,6 +292,8 @@ async function boot(): Promise<WasmReport> {
     app.setNativeTouchControlsMode(mode, persist)
   );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
+  runtime.beginManagedScenarioSmoke = () => app.beginManagedScenarioSmoke();
+  runtime.shutdownForSmoke = () => app.shutdownForSmoke();
   try {
     await app.init();
     runtime.ready = true;
@@ -328,7 +333,7 @@ class WebFrameDriver {
   mouseDeltaX: number;
   mouseDeltaY: number;
   compileSequence: number;
-  pendingTimings: Map<number, PendingCompile>;
+  pendingTimings: Map<string, PendingCompile>;
   finalizingCount: number;
   hasRendered: boolean;
   loadedCenter: { centerX: number, centerZ: number } | null;
@@ -346,6 +351,9 @@ class WebFrameDriver {
     candidate: RenderCompiler;
     epoch: number;
   } | null;
+  managedProvisionControllers: Map<string, AbortController>;
+  managedOperationDrainActive: boolean;
+  managedRuntimeStartCount: number;
 
   constructor() {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
@@ -388,6 +396,9 @@ class WebFrameDriver {
     this.tickFrameBusy = false;
     this.sessionBusy = false;
     this.pendingAssetCompilerSwap = null;
+    this.managedProvisionControllers = new Map();
+    this.managedOperationDrainActive = false;
+    this.managedRuntimeStartCount = 0;
   }
 
   async init(): Promise<void> {
@@ -444,6 +455,10 @@ class WebFrameDriver {
     this.fallbackAssetPack = fallbackAssetPack;
     this.compiler = this.createRenderCompiler();
     const compilerWake = (doorbell: WasmReport): void => {
+      if (doorbell.kind === "release-world") {
+        this.compiler?.releaseWorld(String(doorbell.worldInstanceId ?? ""));
+        return;
+      }
       void this.wakeRenderCompiler(doorbell);
     };
     runtime.state.status = "initializing webgpu";
@@ -504,6 +519,12 @@ class WebFrameDriver {
       "setTouchControlsMode",
       "setTouchControlsOverlay",
       "setHidden",
+      "beginManagedScenarioSmoke",
+      "takeManagedScenarioOperation",
+      "completeManagedScenarioProvision",
+      "prepareManagedScenarioWorldStart",
+      "completeManagedScenarioWorldStart",
+      "shutdown",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebSceneHost.${name} export`);
@@ -586,6 +607,132 @@ class WebFrameDriver {
     );
     this.handleSceneFrame(report);
     return report;
+  }
+
+  beginManagedScenarioSmoke(): WasmReport | null {
+    if (!this.session) {
+      return null;
+    }
+    const report = this.session.beginManagedScenarioSmoke();
+    this.applyNativeUiReport(report);
+    this.drainManagedScenarioOperations();
+    return report;
+  }
+
+  async shutdownForSmoke(): Promise<WasmReport | null> {
+    this.pauseRendering();
+    for (const controller of this.managedProvisionControllers.values()) {
+      controller.abort("managed scenario smoke shutdown");
+    }
+    this.managedProvisionControllers.clear();
+    while (this.tickFrameBusy) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await Promise.allSettled(
+      [...this.pendingTimings.values()]
+        .map((pending) => pending.workerPromise)
+        .filter((promise): promise is Promise<any> => promise !== null),
+    );
+    this.compiler?.terminate();
+    const report = this.session?.shutdown() ?? null;
+    if (report?.ok) {
+      runtime.state.shutdownComplete = Boolean(report.shutdownComplete);
+      publishRuntimeState(runtime.state);
+    }
+    return report;
+  }
+
+  drainManagedScenarioOperations(): void {
+    if (!this.session || this.managedOperationDrainActive) {
+      return;
+    }
+    this.managedOperationDrainActive = true;
+    try {
+      for (;;) {
+        const operation = this.session.takeManagedScenarioOperation() as WasmReport | null;
+        if (!operation || typeof operation !== "object") {
+          break;
+        }
+        if (operation.kind === "provision") {
+          this.launchManagedScenarioProvision(operation);
+        } else if (operation.kind === "start") {
+          this.launchManagedScenarioRuntime(operation);
+        } else {
+          throw new Error(`unknown managed scenario operation ${String(operation.kind)}`);
+        }
+      }
+    } catch (error) {
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      console.error(error);
+      publishRuntimeState(runtime.state);
+    } finally {
+      this.managedOperationDrainActive = false;
+    }
+  }
+
+  launchManagedScenarioProvision(operation: WasmReport): void {
+    const requestId = String(operation.requestId ?? "");
+    const controller = new AbortController();
+    this.managedProvisionControllers.set(requestId, controller);
+    runtime.state.managedProvisionWorkerCount = this.managedProvisionControllers.size;
+    void provisionIndexedDbManagedScenarioWorldInWorker({
+      workerUrl: MANAGED_SCENARIO_PROVISION_WORKER_URL.href,
+      bindgenJsUrl: BINDGEN_JS_URL.href,
+      bindgenWasmUrl: BINDGEN_WASM_URL.href,
+      operationToken: requestId,
+      scenarioId: String(operation.scenarioId ?? ""),
+      role: String(operation.role ?? ""),
+    }, controller.signal).then((result) => {
+      if (!this.session) return;
+      const report = this.session.completeManagedScenarioProvision(
+        requestId,
+        result.worldId,
+        "",
+      );
+      runtime.state.lastManagedProvision = result;
+      this.applyNativeUiReport(report);
+      this.drainManagedScenarioOperations();
+    }).catch((error: unknown) => {
+      if (!this.session || controller.signal.aborted) return;
+      const report = this.session.completeManagedScenarioProvision(
+        requestId,
+        "",
+        stringifyError(error),
+      );
+      this.applyNativeUiReport(report);
+      this.drainManagedScenarioOperations();
+    }).finally(() => {
+      this.managedProvisionControllers.delete(requestId);
+      runtime.state.managedProvisionWorkerCount = this.managedProvisionControllers.size;
+      publishRuntimeState(runtime.state);
+    });
+  }
+
+  launchManagedScenarioRuntime(operation: WasmReport): void {
+    if (!this.session) return;
+    const requestId = String(operation.requestId ?? "");
+    const start = this.session.prepareManagedScenarioWorldStart(
+      requestId,
+      SERVER_WORKER_URL.href,
+      SERVER_JOB_WORKER_URL.href,
+      BINDGEN_JS_URL.href,
+      BINDGEN_WASM_URL.href,
+    );
+    this.managedRuntimeStartCount += 1;
+    runtime.state.managedRuntimeStartCount = this.managedRuntimeStartCount;
+    runtime.state.lastManagedRuntimeStart = operation;
+    void start.start().then(() => {
+      if (!this.session) return;
+      const report = this.session.completeManagedScenarioWorldStart(start);
+      this.applyNativeUiReport(report);
+      this.drainManagedScenarioOperations();
+    }).catch((error: unknown) => {
+      runtime.state.ok = false;
+      runtime.state.status = stringifyError(error);
+      console.error(error);
+      publishRuntimeState(runtime.state);
+    }).finally(() => start.free());
   }
 
 
@@ -771,12 +918,15 @@ class WebFrameDriver {
     }
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(frame);
+    this.drainManagedScenarioOperations();
   }
 
   wakeRenderCompiler(doorbell: WasmReport): Promise<any> {
     const compiler = this.compiler as RenderCompiler;
     const module = this.module as WasmModule;
     const requestId = Number(doorbell.requestId);
+    const worldInstanceId = String(doorbell.worldInstanceId ?? "");
+    const requestKey = `${worldInstanceId}:${requestId}`;
     const timing = new module.WebCompileTiming(
       ++this.compileSequence,
       "stream",
@@ -819,7 +969,7 @@ class WebFrameDriver {
               Number(priorCompileReport?.pendingCompileJobCount) || 0,
           }
         : null;
-      this.pendingTimings.delete(requestId);
+      this.pendingTimings.delete(requestKey);
       runtime.state.compileInFlightCount = this.pendingTimings.size;
       publishRuntimeState(runtime.state);
       return compiled;
@@ -835,12 +985,12 @@ class WebFrameDriver {
         runtime.state.lastFrameGapMs,
       );
       recordCompileTiming(timing);
-      this.pendingTimings.delete(requestId);
+      this.pendingTimings.delete(requestKey);
       runtime.state.compileInFlightCount = this.pendingTimings.size;
       throw error;
     });
     pending.workerPromise = promise;
-    this.pendingTimings.set(requestId, pending);
+    this.pendingTimings.set(requestKey, pending);
     runtime.state.compileInFlightCount = this.pendingTimings.size;
     publishActiveCompileTiming(timing);
     return promise;
@@ -925,6 +1075,24 @@ class WebFrameDriver {
     runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.uiOptionsParent ?? null;
     applySessionReport(report, runtime.state);
+    for (const key of [
+      "activeWorldInstanceId",
+      "activeWorldBehaviorProfile",
+      "activeWorldSeedText",
+      "standbyWorldPresent",
+      "standbyWorldInstanceId",
+      "standbyWorldPhase",
+      "standbyLoadedChunkCount",
+      "standbyCadenceApplied",
+      "standbyCameraReconciled",
+      "standbyWorldSeedText",
+      "embeddedPreviewWorldInstanceId",
+      "embeddedPreviewPhase",
+    ]) {
+      if (typeof report[key] !== "undefined") {
+        runtime.state[key] = report[key];
+      }
+    }
     if (typeof report.sectionOcclusionCulling !== "undefined") {
       this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
     }
@@ -1295,6 +1463,7 @@ class WebFrameDriver {
     this.dispatchSceneSessionOperation(report, options);
     this.dispatchWorldCatalogOperation(report, options);
     this.dispatchAssetPackOperation(report);
+    this.drainManagedScenarioOperations();
   }
 
   dispatchSceneSessionOperation(

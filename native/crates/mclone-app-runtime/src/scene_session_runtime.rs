@@ -48,6 +48,22 @@ pub enum StartupReadinessPolicy {
     Idle,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum RuntimeRenderPriority {
+    #[default]
+    Active,
+    Standby,
+}
+
+impl RuntimeRenderPriority {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Standby => "standby",
+        }
+    }
+}
+
 /// Platform-neutral evidence required before a client may enter gameplay.
 ///
 /// Native startup pumps and asynchronously driven browser startup both use
@@ -106,6 +122,7 @@ pub trait SceneRuntimeService {
     fn release_render_compile_jobs(&mut self, count: usize) -> usize;
     fn simulation_cadence(&self) -> Option<SimulationCadenceConfig>;
     fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> Result<bool>;
+    fn set_render_priority(&mut self, _priority: RuntimeRenderPriority) {}
     fn loaded_chunk_count(&self) -> usize;
     fn set_chunk_view_with_update_policy_timed(
         &mut self,

@@ -1411,7 +1411,7 @@ impl McloneSceneHost {
         }
     }
 
-    fn begin_managed_scenario_launch(
+    pub fn begin_managed_scenario_launch(
         &mut self,
         intent: mclone_app_runtime::scenario::ScenarioLaunchIntent,
     ) -> Result<bool> {
@@ -3157,6 +3157,22 @@ impl McloneSceneHost {
             .as_mut()
             .expect("ownership exchange retains old active slot")
             .lifecycle = WorldSlotLifecycle::StandbySwitchable;
+        self.active_world
+            .runtime
+            .as_mut()
+            .expect("selected active slot retains its runtime")
+            .set_render_priority(
+                mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority::Active,
+            );
+        self.standby_world
+            .as_mut()
+            .expect("ownership exchange retains old active slot")
+            .runtime
+            .as_mut()
+            .expect("return standby retains its runtime")
+            .set_render_priority(
+                mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority::Standby,
+            );
 
         let destination_descriptor = self
             .active_world

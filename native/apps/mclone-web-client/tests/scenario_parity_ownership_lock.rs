@@ -36,6 +36,15 @@ const WEB_MANAGED_PROVISION_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-managed-scenario-provision-worker.ts"
 ));
+const WEB_RENDER_COMPILER_SHARED: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-render-compiler-shared.ts"
+));
+const WEB_RENDER_COMPILER_WORKER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-render-compiler-worker.ts"
+));
+const WEB_CANVAS: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/web_canvas.rs"));
 
 use mclone_app_runtime::scenario_content::{
     ManagedScenarioManifest, ManagedScenarioWorldRole, managed_scenario_payload_fingerprint,
@@ -118,10 +127,18 @@ fn primary_and_destination_provisioning_are_independent() {
 }
 
 #[test]
-fn browser_compiler_debt_and_shared_renderer_boundary_are_named() {
+fn browser_compiler_broker_and_shared_renderer_boundary_are_singular() {
     assert!(WEB_APP.contains("compiler: RenderCompiler | null;"));
-    assert!(WEB_APP.contains("pendingTimings: Map<number, PendingCompile>;"));
+    assert!(WEB_APP.contains("pendingTimings: Map<string, PendingCompile>;"));
     assert!(!WEB_APP.contains("Map<WorldInstanceId"));
+    assert!(WEB_APP.contains("this.compiler?.releaseWorld("));
+    assert!(WEB_RENDER_COMPILER_SHARED.contains("nextBrokerRequestId"));
+    assert!(WEB_RENDER_COMPILER_SHARED.contains("worldPriority === \"active\""));
+    assert!(WEB_RENDER_COMPILER_SHARED.contains("release-render-compiler-world"));
+    assert!(WEB_RENDER_COMPILER_WORKER.contains("compilerSessions = new Map"));
+    assert!(WEB_RENDER_COMPILER_WORKER.contains("compilerTemplate.forkWorldSession()"));
+    assert!(WEB_CANVAS.contains("worldInstanceId"));
+    assert!(WEB_CANVAS.contains("worldPriority"));
 
     let shared_constructor = TERRAIN_RENDERER
         .split("impl TexturedSectionSharedResources {")

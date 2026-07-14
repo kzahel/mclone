@@ -38,6 +38,8 @@ export interface RenderCompilerAssetSelection {
 // byte counts back for diagnostics; it never decodes the packed section bytes itself.
 export interface RenderCompileDoorbell {
   requestId?: number;
+  worldInstanceId?: string;
+  worldPriority?: "active" | "standby";
   workKind?: "render-sections" | "far-lod";
   centerX?: number;
   centerZ?: number;
@@ -85,6 +87,9 @@ export interface RenderCompileSharedInputArena {
 export interface RenderCompileWorkerRequest {
   kind: string;
   requestId: number;
+  clientRequestId: number;
+  worldInstanceId: string;
+  worldPriority: "active" | "standby";
   workKind?: "render-sections" | "far-lod";
   bindgenJsUrl: string;
   bindgenWasmUrl: string;
@@ -126,10 +131,13 @@ export interface RenderCompilePending {
   requestMetrics: Record<string, any>;
   sharedResult: RenderCompileSharedResultArena | null;
   sharedInput: RenderCompileSharedInputArena | null;
+  worldInstanceId: string;
 }
 
 interface RenderCompilerDispatchArgs {
-  requestId: number;
+  clientRequestId: number;
+  worldInstanceId: string;
+  worldPriority: "active" | "standby";
   workKind?: "render-sections" | "far-lod";
   centerX?: number;
   centerZ?: number;
@@ -155,6 +163,12 @@ interface RenderCompilerDispatchArgs {
   };
 }
 
+interface QueuedRenderCompile {
+  requestId: number;
+  worldPriority: "active" | "standby";
+  message: RenderCompileWorkerRequest;
+}
+
 export async function fetchAssetPack(assetPackUrl: URL): Promise<Uint8Array> {
   const response = await fetch(assetPackUrl);
   if (!response.ok) {
@@ -174,6 +188,12 @@ export class RenderSectionWorkerCompiler {
   rejectReady!: (reason?: any) => void;
   initTimeout: ReturnType<typeof setTimeout>;
   worker: Worker;
+  nextBrokerRequestId: number;
+  activeRequestId: number | null;
+  queued: QueuedRenderCompile[];
+  pendingWorldReleases: Set<string>;
+  qualifiedWorldIds: Set<string>;
+  clientRequestWorlds: Map<number, Set<string>>;
 
   constructor(
     assetPack: Uint8Array | RenderCompilerAssetSelection,
@@ -191,6 +211,12 @@ export class RenderSectionWorkerCompiler {
     this.bindgenJsUrl = bindgenJsUrl as URL;
     this.bindgenWasmUrl = bindgenWasmUrl as URL;
     this.pending = new Map();
+    this.nextBrokerRequestId = 1;
+    this.activeRequestId = null;
+    this.queued = [];
+    this.pendingWorldReleases = new Set();
+    this.qualifiedWorldIds = new Set();
+    this.clientRequestWorlds = new Map();
     this.metrics = {
       transportKind: RENDER_COMPILER_TRANSPORT_KIND,
       sharedMemorySupported: renderCompilerSharedMemorySupported(),
@@ -201,6 +227,7 @@ export class RenderSectionWorkerCompiler {
       workerAssetPackFileCount: 0,
       persistentAssetCatalog: false,
       compileCount: 0,
+      qualifiedLocalRequestIdCollisionCount: 0,
       assetPackSendCount: 0,
       transferredRequestByteCount: 0,
       transferredResponseByteCount: 0,
@@ -238,6 +265,9 @@ export class RenderSectionWorkerCompiler {
       if (!pending) return;
       this.pending.delete(requestId);
       clearTimeout(pending.timeout);
+      if (this.activeRequestId === requestId) {
+        this.activeRequestId = null;
+      }
       const response = renderCompilerPackedResponse(data, pending);
       const packed = response.packed;
       const packedByteLength = response.packedByteLength;
@@ -287,6 +317,9 @@ export class RenderSectionWorkerCompiler {
           workerAssetPackFileCount: renderCompilerMetrics.workerAssetPackFileCount,
           persistentAssetCatalog: renderCompilerMetrics.persistentAssetCatalog,
           compileCount: renderCompilerMetrics.compileCount,
+          qualifiedWorldCount: renderCompilerMetrics.qualifiedWorldCount,
+          qualifiedLocalRequestIdCollisionCount:
+            renderCompilerMetrics.qualifiedLocalRequestIdCollisionCount,
           workerCompileCount: renderCompilerMetrics.workerCompileCount,
           assetPackSendCount: renderCompilerMetrics.assetPackSendCount,
           requestAssetPackByteLength: renderCompilerMetrics.requestAssetPackByteLength,
@@ -311,6 +344,8 @@ export class RenderSectionWorkerCompiler {
         },
         packed,
       });
+      this.flushWorldReleases();
+      this.pumpQueue();
     };
     this.worker.onerror = (event) => {
       clearTimeout(this.initTimeout);
@@ -389,14 +424,28 @@ export class RenderSectionWorkerCompiler {
   // Rust via the next frame's poll, so JS never decodes the packed bytes.
   async compileWithDoorbell(doorbell: RenderCompileDoorbell): Promise<any> {
     await this.ready;
-    const requestId = Number(doorbell.requestId) || 0;
-    if (requestId <= 0) {
+    const clientRequestId = Number(doorbell.requestId) || 0;
+    if (clientRequestId <= 0) {
       throw new Error(`invalid render compile doorbell id ${String(doorbell.requestId)}`);
     }
+    const worldInstanceId = String(doorbell.worldInstanceId ?? "");
+    if (worldInstanceId.length === 0) {
+      throw new Error("render compile doorbell is missing its world instance id");
+    }
+    this.qualifiedWorldIds.add(worldInstanceId);
+    this.metrics.qualifiedWorldCount = this.qualifiedWorldIds.size;
+    const requestWorlds = this.clientRequestWorlds.get(clientRequestId) ?? new Set<string>();
+    if (!requestWorlds.has(worldInstanceId) && requestWorlds.size > 0) {
+      this.metrics.qualifiedLocalRequestIdCollisionCount += 1;
+    }
+    requestWorlds.add(worldInstanceId);
+    this.clientRequestWorlds.set(clientRequestId, requestWorlds);
     const sharedResult = sharedResultArenaFromDoorbell(doorbell);
     const sharedInput = sharedInputArenaFromDoorbell(doorbell);
     return this.dispatchCompile({
-      requestId,
+      clientRequestId,
+      worldInstanceId,
+      worldPriority: doorbell.worldPriority === "standby" ? "standby" : "active",
       workKind: doorbell.workKind,
       centerX: doorbell.centerX,
       centerZ: doorbell.centerZ,
@@ -423,7 +472,9 @@ export class RenderSectionWorkerCompiler {
   }
 
   dispatchCompile({
-    requestId,
+    clientRequestId,
+    worldInstanceId,
+    worldPriority,
     workKind,
     centerX,
     centerZ,
@@ -444,6 +495,7 @@ export class RenderSectionWorkerCompiler {
     sharedInput,
     requestSource,
   }: RenderCompilerDispatchArgs): Promise<any> {
+    const requestId = this.nextBrokerRequestId++;
     return new Promise((resolve, reject) => {
       const requestMetrics = renderCompilerRequestMetrics(
         targetSections,
@@ -456,7 +508,14 @@ export class RenderSectionWorkerCompiler {
       const timeout = setTimeout(() => {
         if (!this.pending.has(requestId)) return;
         this.pending.delete(requestId);
-        reject(new Error(`timed out waiting for render compiler worker request ${requestId}`));
+        this.queued = this.queued.filter((entry) => entry.requestId !== requestId);
+        if (this.activeRequestId === requestId) {
+          this.activeRequestId = null;
+          this.pumpQueue();
+        }
+        reject(new Error(
+          `timed out waiting for render compiler worker request ${worldInstanceId}:${clientRequestId}`,
+        ));
       }, 20_000);
       this.pending.set(requestId, {
         resolve,
@@ -465,10 +524,14 @@ export class RenderSectionWorkerCompiler {
         requestMetrics,
         sharedResult,
         sharedInput,
+        worldInstanceId,
       });
       const message: RenderCompileWorkerRequest = {
         kind: "compile-render-sections",
         requestId,
+        clientRequestId,
+        worldInstanceId,
+        worldPriority,
         workKind,
         bindgenJsUrl: this.bindgenJsUrl.href,
         bindgenWasmUrl: this.bindgenWasmUrl.href,
@@ -499,12 +562,45 @@ export class RenderSectionWorkerCompiler {
         message.sharedResultResponseBuffer = sharedResult.responseBuffer;
         message.sharedResultBufferCapacityBytes = sharedResult.responseCapacity;
       }
-      this.worker.postMessage(message);
+      this.queued.push({ requestId, worldPriority, message });
+      this.pumpQueue();
     });
+  }
+
+  pumpQueue(): void {
+    if (this.activeRequestId !== null || this.queued.length === 0) {
+      return;
+    }
+    const activeIndex = this.queued.findIndex((entry) => entry.worldPriority === "active");
+    const [next] = this.queued.splice(activeIndex >= 0 ? activeIndex : 0, 1);
+    this.activeRequestId = next.requestId;
+    this.worker.postMessage(next.message);
   }
 
   pendingJobCount(): number {
     return this.pending.size;
+  }
+
+  releaseWorld(worldInstanceId: string): void {
+    const id = String(worldInstanceId);
+    this.pendingWorldReleases.add(id);
+    this.flushWorldReleases();
+  }
+
+  flushWorldReleases(): void {
+    for (const worldInstanceId of [...this.pendingWorldReleases]) {
+      const activeForWorld = this.activeRequestId !== null
+        && this.pending.get(this.activeRequestId)?.worldInstanceId === worldInstanceId;
+      const queuedForWorld = this.queued.some(
+        (entry) => entry.message.worldInstanceId === worldInstanceId,
+      );
+      if (activeForWorld || queuedForWorld) continue;
+      this.worker.postMessage({
+        kind: "release-render-compiler-world",
+        worldInstanceId,
+      });
+      this.pendingWorldReleases.delete(worldInstanceId);
+    }
   }
 
   terminate(): void {
@@ -518,6 +614,9 @@ export class RenderSectionWorkerCompiler {
       pending.reject(error);
     }
     this.pending.clear();
+    this.queued = [];
+    this.activeRequestId = null;
+    this.pendingWorldReleases.clear();
   }
 }
 
@@ -672,6 +771,9 @@ export function renderCompilerMetricsForResponse(
       || 0,
     persistentAssetCatalog: Boolean(workerReport.persistentAssetCatalog ?? cumulativeMetrics.persistentAssetCatalog),
     compileCount: Number(cumulativeMetrics.compileCount) || 0,
+    qualifiedWorldCount: Number(cumulativeMetrics.qualifiedWorldCount) || 0,
+    qualifiedLocalRequestIdCollisionCount:
+      Number(cumulativeMetrics.qualifiedLocalRequestIdCollisionCount) || 0,
     workerCompileCount: Number(workerReport.workerCompileCount) || 0,
     assetPackSendCount: Number(cumulativeMetrics.assetPackSendCount) || 0,
     requestAssetPackByteLength: Number(requestMetrics.requestAssetPackByteLength)

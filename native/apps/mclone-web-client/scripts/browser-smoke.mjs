@@ -49,6 +49,8 @@ const lobbyUnavailableProbe = process.argv.includes("--lobby-unavailable-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_UNAVAILABLE_PROBE === "1";
 const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-storage-probe")
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
+const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-runtime-probe")
+  || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE === "1";
 const farLodProbe = process.argv.includes("--far-lod-probe")
   || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
 const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
@@ -62,6 +64,7 @@ const appLoop = movementPerf
   || assetPackUiProbe
   || lobbyUnavailableProbe
   || managedScenarioStorageProbe
+  || managedScenarioRuntimeProbe
   || farLodProbe
   || remoteWebSocket
   || process.argv.includes("--app-loop")
@@ -85,6 +88,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
     : lobbyUnavailableProbe
     ? "/tmp/mclone-native-web-lobby-unavailable-probe.png"
+    : managedScenarioRuntimeProbe
+    ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
@@ -103,6 +108,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
     : lobbyUnavailableProbe
     ? "/tmp/mclone-native-web-lobby-unavailable-probe-canvas.png"
+    : managedScenarioRuntimeProbe
+    ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
@@ -135,6 +142,9 @@ const lobbyUnavailableProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_UNAV
 const managedScenarioStorageProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-storage-probe.json";
+const managedScenarioRuntimeProbeReportPath =
+  process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-managed-scenario-runtime-probe.json";
 const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
 const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
@@ -216,6 +226,37 @@ async function run() {
           globalThis.sessionStorage?.setItem("mclone.fullscreenRequestCount", String(count + 1));
           return Promise.resolve();
         };
+      });
+    }
+    if (managedScenarioRuntimeProbe) {
+      await page.addInitScript(() => {
+        const root = /** @type {any} */ (globalThis);
+        const NativeWorker = root.Worker;
+        const stats = /** @type {{created: Record<string, number>, active: Record<string, number>}} */ ({
+          created: {},
+          active: {},
+        });
+        root.__mcloneWorkerStats = stats;
+        root.Worker = new Proxy(NativeWorker, {
+          /** @param {typeof Worker} Target @param {any[]} args */
+          construct(Target, args) {
+            const worker = Reflect.construct(Target, args);
+            const options = /** @type {WorkerOptions | undefined} */ (args[1]);
+            const name = String(options?.name ?? "unnamed");
+            stats.created[name] = (Number(stats.created[name]) || 0) + 1;
+            stats.active[name] = (Number(stats.active[name]) || 0) + 1;
+            const terminate = worker.terminate.bind(worker);
+            let terminated = false;
+            worker.terminate = () => {
+              if (!terminated) {
+                terminated = true;
+                stats.active[name] = Math.max(0, (Number(stats.active[name]) || 0) - 1);
+              }
+              terminate();
+            };
+            return worker;
+          },
+        });
       });
     }
     /** @type {string[]} */
@@ -338,6 +379,57 @@ async function run() {
         if (!managedScenarioStorageProbeResult?.ok || pageErrors.length > 0) {
           throw new Error(
             `managed scenario storage probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+      if (managedScenarioRuntimeProbe) {
+        const managedScenarioRuntimeProbeResult = await runManagedScenarioRuntimeProbe(page);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        const shutdownResult = await page.evaluate(
+          () => globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const workerStatsAfterShutdown = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          managedScenarioRuntimeProbeReportPath,
+          managedScenarioRuntimeProbeResult,
+          shutdownResult,
+          workerStatsAfterShutdown,
+          canvasPixels,
+          result,
+          pageErrors,
+        };
+        await writeFile(
+          managedScenarioRuntimeProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          !managedScenarioRuntimeProbeResult.ok
+          || shutdownResult?.shutdownComplete !== true
+          || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
+          || pageErrors.length > 0
+          || canvasPixels.nonClearInteriorPixelCount <= 128
+        ) {
+          throw new Error(
+            `managed scenario runtime probe failed:\n${JSON.stringify(report, null, 2)}`,
           );
         }
         console.log(JSON.stringify(report, null, 2));
@@ -896,6 +988,88 @@ function waitForStopSignal() {
       process.once(signal, stop);
     }
   });
+}
+
+/** @param {Page} page */
+async function runManagedScenarioRuntimeProbe(page) {
+  const launch = await page.evaluate(
+    () => globalThis.__mcloneWebApp.beginManagedScenarioSmoke?.() ?? null,
+  );
+  if (!launch?.ok) {
+    throw new Error(`managed scenario launch was rejected: ${JSON.stringify(launch)}`);
+  }
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.managedRuntimeStartCount >= 2
+          && state?.activeWorldBehaviorProfile === "protected-lobby"
+          && state?.standbyWorldPresent === true
+          && Number(state?.standbyLoadedChunkCount) > 0
+          && state?.standbyCameraReconciled === true
+          && state?.startupReady === true
+          && String(state?.activeWorldInstanceId ?? "").length > 0
+          && String(state?.standbyWorldInstanceId ?? "").length > 0
+          && state?.activeWorldInstanceId !== state?.standbyWorldInstanceId;
+      },
+      undefined,
+      { timeout: 45_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `managed scenario runtimes did not become independent: ${String(error)}\n`
+      + JSON.stringify(state, null, 2),
+    );
+  }
+  const snapshot = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
+      activeWorldSeedText: state.activeWorldSeedText,
+      standbyWorldInstanceId: state.standbyWorldInstanceId,
+      standbyWorldPhase: state.standbyWorldPhase,
+      standbyLoadedChunkCount: state.standbyLoadedChunkCount,
+      standbyCadenceApplied: state.standbyCadenceApplied,
+      standbyCameraReconciled: state.standbyCameraReconciled,
+      standbyWorldSeedText: state.standbyWorldSeedText,
+      startupReady: state.startupReady,
+      managedRuntimeStartCount: state.managedRuntimeStartCount,
+      managedProvisionWorkerCount: state.managedProvisionWorkerCount,
+      lastManagedRuntimeStart: state.lastManagedRuntimeStart,
+      lastManagedProvision: state.lastManagedProvision,
+      renderCompiler: state.lastCompileReport
+        ? {
+            workerInitCount: state.lastCompileReport.workerInitCount,
+            workerAssetLoadCount: state.lastCompileReport.workerAssetLoadCount,
+            compilerWorldSessionCount: state.lastCompileReport.compilerWorldSessionCount,
+            qualifiedWorldCount: state.lastCompileReport.qualifiedWorldCount,
+            qualifiedLocalRequestIdCollisionCount:
+              state.lastCompileReport.qualifiedLocalRequestIdCollisionCount,
+            worldInstanceId: state.lastCompileReport.worldInstanceId,
+            worldPriority: state.lastCompileReport.worldPriority,
+          }
+        : null,
+      workers: /** @type {any} */ (globalThis).__mcloneWorkerStats,
+    };
+  });
+  return {
+    ok: snapshot.managedRuntimeStartCount === 2
+      && snapshot.activeWorldBehaviorProfile === "protected-lobby"
+      && snapshot.activeWorldInstanceId !== snapshot.standbyWorldInstanceId
+      && snapshot.activeWorldSeedText !== snapshot.standbyWorldSeedText
+      && Number(snapshot.standbyLoadedChunkCount) > 0
+      && snapshot.standbyCameraReconciled === true
+      && snapshot.startupReady === true
+      && Number(snapshot.renderCompiler?.workerInitCount) === 1
+      && Number(snapshot.renderCompiler?.qualifiedWorldCount) >= 3
+      && Number(snapshot.renderCompiler?.qualifiedLocalRequestIdCollisionCount) >= 1
+      && Number(snapshot.workers?.active?.["mclone-integrated-server"]) === 2
+      && Number(snapshot.workers?.active?.["mclone-render-compiler-app"]) === 1,
+    launch,
+    snapshot,
+  };
 }
 
 /**
