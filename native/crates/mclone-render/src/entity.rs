@@ -317,6 +317,41 @@ pub struct ActorDrawResources {
     mesh_cache: ActorMeshCache,
 }
 
+/// Read-only ownership and allocation facts for one actor renderer.
+///
+/// Tactical 179 uses this snapshot to distinguish immutable topology from the
+/// mutable mesh cache before that ownership is split across world slots. It is
+/// diagnostics only: ordinary frame rendering does not construct it.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ActorDrawResourceSnapshot {
+    pub atlas_size: [u32; 2],
+    pub atlas_base_bytes: usize,
+    pub figure_count: usize,
+    pub direct_pipeline_count: usize,
+    pub direct_uniform_payload_bytes: u64,
+    pub direct_uniform_slot_bytes: u64,
+    pub direct_uniform_slot_count: u32,
+    pub direct_uniform_allocated_bytes: u64,
+    pub multiview_pipeline_count: usize,
+    pub multiview_uniform_allocated_bytes: u64,
+    pub mesh: ActorMeshCacheSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ActorMeshCacheSnapshot {
+    pub cached_actor_count: usize,
+    pub rebuild_count: u64,
+    pub upload_count: u64,
+    pub last_uploaded_bytes: u64,
+    pub total_uploaded_bytes: u64,
+    pub cpu_vertex_capacity_bytes: usize,
+    pub cpu_index_capacity_bytes: usize,
+    pub cpu_vertex_staging_capacity_bytes: usize,
+    pub cpu_index_staging_capacity_bytes: usize,
+    pub gpu_vertex_capacity_bytes: u64,
+    pub gpu_index_capacity_bytes: u64,
+}
+
 impl ActorDrawResources {
     pub fn new(
         device: &wgpu::Device,
@@ -510,6 +545,27 @@ impl ActorDrawResources {
             vertex_count: prepared.vertex_count,
             index_count: prepared.index_count,
         })
+    }
+
+    pub fn resource_snapshot(&self) -> ActorDrawResourceSnapshot {
+        let multiview_materialized = self.renderer.multiview.borrow().is_some();
+        ActorDrawResourceSnapshot {
+            atlas_size: self.atlas_size,
+            atlas_base_bytes: self.atlas_size[0] as usize * self.atlas_size[1] as usize * 4,
+            figure_count: self.actor_figures.len(),
+            direct_pipeline_count: 1,
+            direct_uniform_payload_bytes: self.renderer.uniforms.payload_size(),
+            direct_uniform_slot_bytes: self.renderer.uniforms.slot_size(),
+            direct_uniform_slot_count: self.renderer.uniforms.slot_count(),
+            direct_uniform_allocated_bytes: self.renderer.uniforms.allocated_byte_size(),
+            multiview_pipeline_count: usize::from(multiview_materialized),
+            multiview_uniform_allocated_bytes: if multiview_materialized {
+                MULTIVIEW_UNIFORM_BYTE_SIZE
+            } else {
+                0
+            },
+            mesh: self.mesh_cache.snapshot(),
+        }
     }
 }
 
@@ -880,6 +936,10 @@ struct ActorMeshCache {
     vertex_buffer_size: wgpu::BufferAddress,
     index_buffer_size: wgpu::BufferAddress,
     uploaded: bool,
+    rebuild_count: u64,
+    upload_count: u64,
+    last_uploaded_bytes: u64,
+    total_uploaded_bytes: u64,
 }
 
 struct PreparedActorBuffers<'a> {
@@ -917,6 +977,10 @@ impl ActorMeshCache {
             vertex_buffer_size: actor_buffer_capacity(ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE, 0),
             index_buffer_size: actor_buffer_capacity(ACTOR_INDEX_BUFFER_MIN_BYTE_SIZE, 0),
             uploaded: false,
+            rebuild_count: 0,
+            upload_count: 0,
+            last_uploaded_bytes: 0,
+            total_uploaded_bytes: 0,
         }
     }
 
@@ -941,6 +1005,7 @@ impl ActorMeshCache {
                 &mut self.scratch,
             );
             self.uploaded = false;
+            self.rebuild_count = self.rebuild_count.saturating_add(1);
         }
         if self.mesh.vertices.is_empty() || self.mesh.indices.is_empty() {
             return None;
@@ -967,6 +1032,11 @@ impl ActorMeshCache {
                 queue.write_buffer(buffer, 0, &self.index_bytes);
             }
             self.uploaded = true;
+            self.upload_count = self.upload_count.saturating_add(1);
+            self.last_uploaded_bytes = vertex_byte_len.saturating_add(index_byte_len);
+            self.total_uploaded_bytes = self
+                .total_uploaded_bytes
+                .saturating_add(self.last_uploaded_bytes);
         }
 
         Some(PreparedActorBuffers {
@@ -1025,6 +1095,22 @@ impl ActorMeshCache {
                 mapped_at_creation: false,
             }));
             self.uploaded = false;
+        }
+    }
+
+    fn snapshot(&self) -> ActorMeshCacheSnapshot {
+        ActorMeshCacheSnapshot {
+            cached_actor_count: self.actors.len(),
+            rebuild_count: self.rebuild_count,
+            upload_count: self.upload_count,
+            last_uploaded_bytes: self.last_uploaded_bytes,
+            total_uploaded_bytes: self.total_uploaded_bytes,
+            cpu_vertex_capacity_bytes: self.mesh.vertices.capacity() * ACTOR_VERTEX_BYTE_LEN,
+            cpu_index_capacity_bytes: self.mesh.indices.capacity() * std::mem::size_of::<u32>(),
+            cpu_vertex_staging_capacity_bytes: self.vertex_bytes.capacity(),
+            cpu_index_staging_capacity_bytes: self.index_bytes.capacity(),
+            gpu_vertex_capacity_bytes: self.vertex_buffer_size,
+            gpu_index_capacity_bytes: self.index_buffer_size,
         }
     }
 }
@@ -2258,6 +2344,88 @@ mod tests {
 
     fn test_chicken_figures() -> ActorFigureSet {
         ActorFigureSet::new([(mclone_assets::chicken_figure_id(), test_chicken_figure())])
+    }
+
+    #[test]
+    #[ignore = "GPU ownership characterization; run explicitly on a host with a wgpu adapter"]
+    fn actor_resource_snapshot_prices_whole_list_cow_and_player_updates() -> Result<()> {
+        let (device, queue) = crate::headless::create_headless_device()?;
+        let [width, height] = test_actor_texture_atlas_size();
+        let rgba = vec![255; width as usize * height as usize * 4];
+        let figures = test_player_figures();
+        let mut resources = ActorDrawResources::new(
+            &device,
+            &queue,
+            crate::headless::HEADLESS_FORMAT,
+            ActorTextureAtlas {
+                width,
+                height,
+                rgba: &rgba,
+                layout: test_actor_texture_layout(),
+            },
+            Some(&figures),
+        )?;
+
+        let initial = resources.resource_snapshot();
+        assert_eq!(initial.atlas_size, [65, 32]);
+        assert_eq!(initial.atlas_base_bytes, 8_320);
+        assert_eq!(initial.figure_count, 1);
+        assert_eq!(initial.direct_pipeline_count, 1);
+        assert_eq!(initial.direct_uniform_payload_bytes, 128);
+        assert_eq!(initial.direct_uniform_slot_count, 6);
+        assert_eq!(initial.multiview_pipeline_count, 0);
+        assert_eq!(initial.multiview_uniform_allocated_bytes, 0);
+        assert_eq!(initial.mesh.cpu_vertex_capacity_bytes, 327_680);
+        assert_eq!(initial.mesh.cpu_index_capacity_bytes, 49_152);
+        assert_eq!(initial.mesh.cpu_vertex_staging_capacity_bytes, 327_680);
+        assert_eq!(initial.mesh.cpu_index_staging_capacity_bytes, 49_152);
+        assert_eq!(initial.mesh.gpu_vertex_capacity_bytes, 524_288);
+        assert_eq!(initial.mesh.gpu_index_capacity_bytes, 65_536);
+
+        let mut actors = vec![
+            ActorInstance::cow_model(Vec3::new(1.0, 2.0, 3.0), 0.0, 0.9, 1.4),
+            ActorInstance::remote_player(Vec3::new(4.0, 2.0, 3.0), 0.0),
+        ];
+        let prepare = |resources: &mut ActorDrawResources, actors: &[ActorInstance]| {
+            let prepared = resources.mesh_cache.prepare(
+                &device,
+                &queue,
+                actors,
+                resources.texture_layout,
+                resources.atlas_size,
+                &resources.actor_figures,
+            );
+            assert!(prepared.is_some());
+        };
+
+        prepare(&mut resources, &actors);
+        let first = resources.resource_snapshot();
+        assert_eq!(first.mesh.cached_actor_count, 2);
+        assert_eq!(first.mesh.rebuild_count, 1);
+        assert_eq!(first.mesh.upload_count, 1);
+        assert!(first.mesh.last_uploaded_bytes > 0);
+
+        prepare(&mut resources, &actors);
+        let unchanged = resources.resource_snapshot();
+        assert_eq!(unchanged.mesh.rebuild_count, 1);
+        assert_eq!(unchanged.mesh.upload_count, 1);
+
+        actors[0].feet_position.x += 0.25;
+        prepare(&mut resources, &actors);
+        let cow_moved = resources.resource_snapshot();
+        assert_eq!(cow_moved.mesh.rebuild_count, 2);
+        assert_eq!(cow_moved.mesh.upload_count, 2);
+
+        actors[1].feet_position.x += 0.25;
+        prepare(&mut resources, &actors);
+        let player_moved = resources.resource_snapshot();
+        assert_eq!(player_moved.mesh.rebuild_count, 3);
+        assert_eq!(player_moved.mesh.upload_count, 3);
+        assert_eq!(
+            player_moved.mesh.total_uploaded_bytes,
+            player_moved.mesh.last_uploaded_bytes * 3
+        );
+        Ok(())
     }
 
     fn test_single_box_figure() -> ActorFigure {

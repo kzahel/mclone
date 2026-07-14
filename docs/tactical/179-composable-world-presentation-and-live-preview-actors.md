@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: proposed 2026-07-14. No implementation slice has started.
+Status: active 2026-07-14. Slice 0 is complete; Slices 1-7 remain.
 
 Topic: `embedded-worlds`
 
@@ -587,6 +587,106 @@ Deliverables:
 
 Exit criteria: the refactor starts from measured actor behavior and exact
 ownership facts rather than an assumed renderer architecture.
+
+#### Slice 0 completion record — 2026-07-14
+
+The current seams are now executable facts rather than prose assumptions.
+`composable_world_presentation_contract` locks the opt-in placed-terrain shader
+and bounded-record path, global opaque/actor/translucent phase order, active-only
+raw actor collection, active-view local-player body policy, destination replica
+presentations below the scene omission, dedicated remote-player tracking,
+managed payload's current lack of entity records, asset replacement ordering,
+and complete-slot exchange's current omission of the global actor cache. The
+ordinary actor and terrain shaders remain free of a composition context or clip
+uniform.
+
+`ActorDrawResources::resource_snapshot` and its cache counters expose read-only
+allocation and update facts without constructing diagnostics in the frame loop.
+The measured current allocation ledger is:
+
+| Class | Current allocation/topology | Mutability and target classification |
+| --- | --- | --- |
+| actor atlas | one 65x32 RGBA texture, 8,320 base texel bytes, one view/sampler/bind group | immutable; share across compatible slots |
+| texture layout | one white region and one 64x32 cow region | immutable; share |
+| figures | one three-entry first-party compiled registry: player, bear, chicken | immutable; share |
+| direct topology | one eagerly created shader/pipeline, texture layout, uniform layout, and bind group | immutable topology; share, preserving the direct path |
+| direct uniforms | 128-byte payload, six device-aligned ring slots; 256-byte slots and 1,536 allocated bytes on this M4 Pro | per-view mutable values in shared renderer topology; not per-world duplication |
+| multiview topology | absent at construction; first multiview use lazily creates one pipeline and one 256-byte two-view uniform buffer | immutable/lazy compatible topology; share |
+| actor-instance list | fresh active-runtime list plus optional active local body; no retained preview list | inherently per-world presentation/scratch after refactor |
+| mesh and scratch vectors | one combined mesh with 8,192-vertex and 12,288-index minimum capacities; 327,680/49,152 CPU mesh bytes plus equal byte-staging minima | inherently per-world mutable cache |
+| GPU mesh buffers | one eager pair with 524,288 vertex bytes and 65,536 index bytes, 589,824 bytes total minimum | inherently per-world mutable; second pair must be lazy |
+| cache topology | one global `ActorMeshCache`, outside both `DrawableWorldSlot`s | pending Slice 3 refactor into isolated per-slot state |
+
+This classifies every possible actor duplicate. Atlas, layout, figures,
+pipelines, bind-group topology, and multiview topology are shared. Source lists,
+presentation/interpolation scratch, the combined CPU mesh, staging bytes, and
+GPU vertex/index buffers are inherently per world. Only the current aggregate
+ownership boundary is pending refactor; there is no unclassified duplicate.
+Opaque backend driver overhead and compiled-figure heap capacity are not
+reported as byte-exact because wgpu and `BTreeMap` do not expose them, but both
+currently have exactly one owner and neither is duplicated by a standby slot.
+
+Production active actors consume `ClientRuntime::actor_presentations()`
+directly. Although `mclone-client` has `ActorInterpolationState`, the scene does
+not construct, reconcile, or step it. The GPU characterization submitted one
+cow and one remote player: initial draw caused one whole-list rebuild/upload,
+an unchanged draw caused none, a changed cow caused the second rebuild/upload,
+and a changed player caused the third. Thus each distinct authoritative list
+causes exactly one combined CPU rebuild and one combined upload on its next
+draw; unchanged display frames cause neither. This milestone preserves that
+authoritative update cadence rather than enabling per-render-frame
+interpolation.
+
+Pixels and counts confirm the starting product state. The inspected native
+`/tmp/mclone-lobby-scenario-smoke/lobby-with-preview.png` and browser
+`/tmp/mclone-native-web-lobby-scenario-desktop-preview.png` show the same
+terrain/water-only destination preview. Browser provisioning reports
+`entityChunkCount=0`, while the ordinary active frame reports and visibly draws
+two of two active actors. The separately inspected native
+`/tmp/mclone-desktop-offscreen.png` likewise reports two entities, two submitted
+actors, and two drawn actors. No preview actor count exists yet because the
+scene never collects the standby presentations.
+
+The first process-list preflight was retained and rejected because fresh-build
+Spotlight indexing overlapped it. After the release build completed, the
+accepted aggregate preflight was 91.6% CPU idle and the postflight was 91.3%
+idle, with no Cargo, rustc, wasm-bindgen, Playwright, deploy, or emulator process
+left active. The already-built native 240-frame, 120 Hz controls were:
+
+```text
+average ms: 2.339, 2.436, 2.379, 2.532, 2.394
+P95 ms:    3.949, 4.004, 4.024, 4.162, 3.930
+```
+
+Median average/P95 was 2.394/4.004 ms. The ranges were 2.339-2.532 ms
+(8.1% of median) and 3.930-4.162 ms (5.8%). All five samples had zero
+over-budget frames and zero accounting violations. Against Tactical 178's
+historical exact-final-code 2.470/4.262 ms medians, this fresh control is
+3.1%/6.1% faster rather than a regression.
+
+The five production-browser feature-off movement controls reported compiler
+averages of 13.7, 13.4, 14.0, 13.6, and 13.6 ms, with per-run nearest-rank P95
+(the maximum of 16 samples) of 19.5, 18.7, 19.8, 18.4, and 18.7 ms. Median and
+range were 13.6 ms and 13.4-14.0 ms (4.4%) for the average, and 18.7 ms and
+18.4-19.8 ms (7.5%) for P95. Average maximum-frame-gap observations were 8.5,
+8.4, 8.8, 8.3, and 8.4 ms: 8.4 ms median, 8.3-8.8 ms range (6.0%), and 9.3 ms
+nearest-rank P95 in every run. Every sample used one compiler Worker, one asset
+send, shared-result-buffer transport, no generated fallback, no overflow, and
+drew the same two active actors. The 13.6 ms compiler median equals Tactical
+178's final browser control and the 8.4 ms frame-gap median is below its
+8.6 ms result. No retained sample was discarded.
+
+Focused evidence includes the render/scene suites, the explicit ignored GPU
+allocation/update test, native lobby and desktop captures, production browser
+WebGPU lobby and movement captures, and the five-run native/browser reports
+under `/tmp/mclone-179-slice0-*`. The complete focused server, client,
+app-runtime, render-session, render, scene, and web-client suites passed, as did
+both purity gates, the wasm build, TypeScript checking, and `git diff --check`.
+Native lobby mono/stereo, live-diorama activation, desktop offscreen, and XR
+emulation passed. Production WebGPU desktop, mobile, and lifecycle lobby lanes
+also passed. The inspected stereo return had 210,563 differing eye pixels, XR
+emulation had 249,679, and the mobile preview retained two of two active actor
+draws while the destination island remained actor-free.
 
 ### Slice 1: Shared Composition Context And Terrain Normalization
 

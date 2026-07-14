@@ -145,6 +145,22 @@ impl PerViewUniformBuffer {
         offset
     }
 
+    pub const fn payload_size(&self) -> wgpu::BufferAddress {
+        self.payload_size.get()
+    }
+
+    pub const fn slot_size(&self) -> wgpu::BufferAddress {
+        self.slot_size
+    }
+
+    pub const fn slot_count(&self) -> u32 {
+        self.slot_count
+    }
+
+    pub const fn allocated_byte_size(&self) -> wgpu::BufferAddress {
+        self.slot_size * self.slot_count as wgpu::BufferAddress
+    }
+
     fn slot_offset(&self, slot: u32) -> u32 {
         (self.slot_size * slot as wgpu::BufferAddress) as u32
     }
