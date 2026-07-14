@@ -53,7 +53,7 @@ fn web_adapter_consumes_the_shared_manifest_and_fixture_receipts() {
 }
 
 #[test]
-fn pre_refactor_browser_scenario_debt_is_explicit_and_bounded() {
+fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
     assert!(APP_RUNTIME_LIB.contains("pub mod scenario_content;"));
     assert!(!APP_RUNTIME_LIB.contains(
         "#[cfg(not(target_arch = \"wasm32\"))]\n\
@@ -63,11 +63,27 @@ fn pre_refactor_browser_scenario_debt_is_explicit_and_bounded() {
         CLIENT_EXPERIENCE
             .contains("ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)")
     );
-    assert!(SCENE_SESSION.contains("#[cfg(target_arch = \"wasm32\")]"));
     assert!(SCENE_SESSION.contains("pub(crate) fn apply_managed_scenario_effect("));
-    assert!(SCENE_SESSION.contains("Ok(false)"));
-    assert!(WARM_WORLD.contains("pub world_dir: Option<PathBuf>"));
-    assert!(WARM_WORLD.contains("NativeManagedScenarioContentOperationService"));
+    let effect = SCENE_SESSION
+        .split("pub(crate) fn apply_managed_scenario_effect(")
+        .nth(1)
+        .expect("shared scenario effect exists")
+        .split("fn begin_managed_scenario_launch(")
+        .next()
+        .unwrap();
+    assert!(!effect.contains("Ok(false)"));
+    assert!(!effect.contains("WEB_LOBBY_SCENARIO_REASON"));
+    let request = WARM_WORLD
+        .split("pub struct WarmWorldStandbyRequest {")
+        .nth(1)
+        .unwrap()
+        .split("impl WarmWorldStandbyRequest")
+        .next()
+        .unwrap();
+    assert!(!request.contains("PathBuf"));
+    assert!(request.contains("pub managed_world_key: Option<ManagedWorldKey>"));
+    assert!(WARM_WORLD.contains("PlatformOperationLedger<ProvisionManagedScenarioWorld"));
+    assert!(!WARM_WORLD.contains("NativeManagedScenarioContentOperationService"));
 }
 
 #[test]
@@ -83,12 +99,13 @@ fn live_identity_moves_with_the_complete_world_slot() {
 
 #[test]
 fn primary_and_destination_provisioning_are_independent() {
-    assert!(SCENE_SESSION.contains("let mut primary_operations ="));
-    assert!(SCENE_SESSION.contains("let mut destination_operations ="));
-    assert!(SCENE_SESSION.contains("let primary_token = primary_operations.submit(intent);"));
-    assert!(
-        SCENE_SESSION.contains("let destination_token = destination_operations.submit(intent);")
-    );
+    assert!(WARM_WORLD.contains("ManagedScenarioWorldRole::Primary,"));
+    assert!(WARM_WORLD.contains("ManagedScenarioWorldRole::Destination,"));
+    assert!(WARM_WORLD.contains("provision_operations.issue("));
+    assert!(SCENE_SESSION.contains("take_managed_scenario_provision_request"));
+    assert!(SCENE_SESSION.contains("complete_managed_scenario_provision"));
+    assert!(SCENE_SESSION.contains("take_managed_scenario_world_start"));
+    assert!(SCENE_SESSION.contains("complete_external_session_start"));
     assert!(!SCENE_SESSION.contains("CombinedScenarioContentCompletion"));
 }
 

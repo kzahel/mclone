@@ -57,6 +57,7 @@ fn field_names(item: &str) -> Vec<&str> {
 
 const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "id",
+    "managed_world_key",
     "descriptor",
     "storage",
     "lifecycle",
@@ -81,9 +82,11 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
 const SCENE_HOST_FIELDS: &[&str] = &[
     "active_world",
     "standby_world",
+    "next_world_instance_id",
     "warm_world_standby",
     "prepared_warm_world_shell",
     "managed_scenario_launch",
+    "native_managed_scenario_adapter",
     "embedded_world_preview",
     "embedded_world_activation",
     "embedded_world_activation_sequence",
@@ -170,9 +173,9 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 20);
+    assert_eq!(slot_fields.len(), 21);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 81);
+    assert_eq!(host_fields.len(), 83);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
@@ -405,27 +408,42 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     );
     assert!(source.contains("None => TexturedSectionDrawResources::new("));
 
-    let attach = braced_item(&source, "pub fn begin_prepared_warm_world_standby(");
+    let attach = braced_item(
+        &source,
+        "fn begin_prepared_warm_world_standby_with_native_world_dir(",
+    );
     assert_in_order(
         attach,
         &[
             "scene.world_root = None;",
-            "scene.world_dir = request.world_dir.clone();",
+            "request.managed_world_key.as_ref()",
+            "adapter.world_dir(key)",
             "scene.world_generation_profile = request.world_generation_profile;",
             "scene.use_initial_spawn_center = false;",
             "LocalIntegratedStartupPump::with_mesh_assets(",
+            "self.install_prepared_warm_world_slot(",
+        ],
+    );
+    let install = braced_item(&source, "fn install_prepared_warm_world_slot(");
+    assert_in_order(
+        install,
+        &[
             ".prepared_warm_world_shell",
             "id: instance_id,",
+            "managed_world_key: request.managed_world_key.clone(),",
             "lifecycle: WorldSlotLifecycle::Starting,",
-            "runtime: None,",
-            "local_startup: Some(SceneLocalStartup {",
+            "runtime,",
+            "local_startup,",
+            "external_runtime_startup_pending,",
             "self.warm_world_standby = Some(WarmWorldStandbyState {",
         ],
     );
-    assert!(!attach.contains("TexturedSectionDrawResources::new("));
-    assert!(!attach.contains("self.active_world.install("));
-    assert!(attach.contains("self.opaque_world_gate_renderer = gate_renderer;"));
-    assert!(attach.contains("self.embedded_world_preview = match (presentation, placed_renderer)"));
+    assert!(!install.contains("TexturedSectionDrawResources::new("));
+    assert!(!install.contains("self.active_world.install("));
+    assert!(install.contains("self.opaque_world_gate_renderer = gate_renderer;"));
+    assert!(
+        install.contains("self.embedded_world_preview = match (presentation, placed_renderer)")
+    );
 
     let advance = braced_item(&source, "fn advance_warm_world_standby(");
     assert!(advance.contains("startup.pump.step(camera_position)"));
@@ -528,9 +546,13 @@ fn external_and_native_replacement_installs_keep_the_same_core_cluster() {
     assert_in_order(
         external,
         &[
-            "let draw = TexturedSectionDrawResources::new(",
+            "match completion_target",
+            "TexturedSectionDrawResources::new_with_shared_resources(",
+            "TexturedSectionDrawResources::new(",
             "self.active_world.install(DrawableWorldSlotInstall {",
-            "scene: pending.scene,",
+            "id: pending.instance_id,",
+            "managed_world_key: pending.managed_world_key.clone(),",
+            "scene: pending.scene.clone(),",
             "runtime: Some(runtime),",
             "local_startup: None,",
             "external_runtime_startup_pending: true,",
@@ -731,7 +753,7 @@ fn managed_scenario_lifecycle_cancels_tokens_and_admits_a_clean_retry() {
         cancel,
         &[
             "self.managed_scenario_launch.take()",
-            "operations.begin_epoch()",
+            "launch.cancel()",
             "self.prepared_warm_world_shell = None;",
             "self.standby_world.take()",
         ],
@@ -749,9 +771,15 @@ fn managed_scenario_lifecycle_cancels_tokens_and_admits_a_clean_retry() {
     );
 
     let poll = braced_item(&source, "fn poll_managed_scenario_launch(");
-    assert!(poll.contains("launch.destination_failure = Some"));
-    assert!(poll.contains("Lobby startup failed:"));
-    assert!(poll.contains("self.session.request_start("));
+    assert!(poll.contains("self.take_managed_scenario_provision_request()"));
+    assert!(poll.contains("adapter.submit(request)"));
+    assert!(poll.contains("self.complete_managed_scenario_provision("));
+    assert!(poll.contains("self.start_native_managed_scenario_world_requests("));
+
+    let shared_completion = braced_item(&source, "pub fn complete_managed_scenario_provision(");
+    assert!(shared_completion.contains("launch.complete_provision(completion)"));
+    assert!(shared_completion.contains("launch.issue_start(start)"));
+    assert!(shared_completion.contains("Lobby content preparation failed:"));
 }
 
 #[test]

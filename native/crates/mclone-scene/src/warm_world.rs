@@ -1,25 +1,26 @@
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::monotonic::MonotonicInstant;
+use mclone_app_runtime::platform_operation::{
+    PlatformOperation, PlatformOperationCompletion, PlatformOperationLedger,
+    PlatformOperationResolution, PlatformOperationToken,
+};
 use mclone_app_runtime::scenario::BuiltInScenarioId;
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::scenario::ScenarioLaunchIntent;
-#[cfg(not(target_arch = "wasm32"))]
-use mclone_app_runtime::scenario_content::NativeManagedScenarioContentOperationService;
-#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::scenario_content::{
+    ManagedScenarioManifest, ManagedScenarioWorldRole, ManagedWorldKey,
+    ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld,
+};
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_render::far_lod::FarTerrainLodRenderer;
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::placement::{EmbeddedChunkRegion, WorldPlacement};
 use mclone_render_session::EngineCameraController;
@@ -27,29 +28,17 @@ use mclone_server::{SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerati
 
 use crate::McloneSceneHostOptions;
 
-#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_FORWARD_BLOCKS: f64 = 6.0;
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) const PROVISIONAL_GATE_SEARCH_RADIUS_BLOCKS: i32 = 16;
-#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_EXIT_OFFSET_BLOCKS: f64 = 1.25;
-#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_HALF_WIDTH_BLOCKS: i32 = 1;
-#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_APPROACH_DEPTH_BLOCKS: i32 = 2;
-#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_HEIGHT_BLOCKS: i32 = 4;
-#[cfg(not(target_arch = "wasm32"))]
 const PROVISIONAL_GATE_SURFACE_SEARCH_BLOCKS: i32 = 12;
-#[cfg(not(target_arch = "wasm32"))]
 const WORLD_GATE_WIDTH_BLOCKS: f64 = 3.0;
-#[cfg(not(target_arch = "wasm32"))]
 const WORLD_GATE_HEIGHT_BLOCKS: f64 = 4.0;
-#[cfg(not(target_arch = "wasm32"))]
 const WORLD_GATE_ENTER_MARGIN_BLOCKS: f64 = 0.35;
-#[cfg(not(target_arch = "wasm32"))]
 const WORLD_GATE_EXIT_MARGIN_BLOCKS: f64 = 0.15;
-#[cfg(not(target_arch = "wasm32"))]
 const WORLD_GATE_OBSERVATION_DEPTH_BLOCKS: f64 = 2.0;
 const EMBEDDED_ACTIVATION_MARGIN_BLOCKS: f64 = 0.2;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -79,10 +68,11 @@ impl WorldInstanceId {
 /// Prepared local leaf for a detached retained-world startup.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WarmWorldStandbyRequest {
+    pub instance_id: Option<WorldInstanceId>,
     pub seed: i64,
     pub entry_center: ChunkPos,
     pub standby_cadence: Option<SimulationCadenceConfig>,
-    pub world_dir: Option<PathBuf>,
+    pub managed_world_key: Option<ManagedWorldKey>,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub world_generation_profile: WorldGenerationProfile,
     pub presentation: WarmWorldPresentationRequest,
@@ -91,14 +81,20 @@ pub struct WarmWorldStandbyRequest {
 impl WarmWorldStandbyRequest {
     pub const fn new(seed: i64, entry_center: ChunkPos) -> Self {
         Self {
+            instance_id: None,
             seed,
             entry_center,
             standby_cadence: None,
-            world_dir: None,
+            managed_world_key: None,
             world_behavior_profile: WorldBehaviorProfile::Mutable,
             world_generation_profile: WorldGenerationProfile::Overworld,
             presentation: WarmWorldPresentationRequest::OpaqueGate,
         }
+    }
+
+    pub const fn with_instance_id(mut self, instance_id: WorldInstanceId) -> Self {
+        self.instance_id = Some(instance_id);
+        self
     }
 
     pub const fn with_standby_cadence(mut self, cadence: SimulationCadenceConfig) -> Self {
@@ -106,18 +102,23 @@ impl WarmWorldStandbyRequest {
         self
     }
 
-    pub fn with_persistent_world_dir(
+    pub fn with_managed_world_key(
         mut self,
-        world_dir: impl Into<PathBuf>,
+        managed_world_key: ManagedWorldKey,
         world_generation_profile: WorldGenerationProfile,
     ) -> Self {
-        self.world_dir = Some(world_dir.into());
+        self.managed_world_key = Some(managed_world_key);
         self.world_generation_profile = world_generation_profile;
         self
     }
 
     pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
         self.world_behavior_profile = profile;
+        self
+    }
+
+    pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
+        self.world_generation_profile = profile;
         self
     }
 
@@ -156,7 +157,6 @@ pub struct PreparedEmbeddedWorldScenario {
     pub destination: WarmWorldStandbyRequest,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ManagedScenarioLaunchPhase {
     ResolvingContent,
@@ -167,15 +167,118 @@ pub(crate) enum ManagedScenarioLaunchPhase {
     DestinationFailed,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+/// One storage-neutral start accepted by the shared managed-scenario state
+/// machine. Platform adapters resolve `managed_world_key` into their own
+/// storage and return a neutral runtime; neither paths nor JS handles cross
+/// this boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ManagedScenarioWorldStart {
+    pub instance_id: WorldInstanceId,
+    pub role: ManagedScenarioWorldRole,
+    pub managed_world_key: ManagedWorldKey,
+    pub scene: McloneSceneHostOptions,
+    pub descriptor: ActiveSessionDescriptor,
+    pub destination: Option<PreparedEmbeddedWorldScenario>,
+}
+
 #[derive(Debug)]
 pub(crate) struct ManagedScenarioLaunchState {
     pub(crate) intent: ScenarioLaunchIntent,
+    pub(crate) manifest: ManagedScenarioManifest,
     pub(crate) phase: ManagedScenarioLaunchPhase,
-    pub(crate) primary_operations: Option<NativeManagedScenarioContentOperationService>,
-    pub(crate) destination_operations: Option<NativeManagedScenarioContentOperationService>,
+    provision_operations:
+        PlatformOperationLedger<ProvisionManagedScenarioWorld, ScenarioLaunchIntent>,
+    pending_provision_requests: VecDeque<PlatformOperation<ProvisionManagedScenarioWorld>>,
+    start_operations: PlatformOperationLedger<ManagedScenarioWorldStart, ScenarioLaunchIntent>,
+    pending_start_requests: VecDeque<PlatformOperation<ManagedScenarioWorldStart>>,
+    pub(crate) primary_provisioned: Option<ProvisionedManagedScenarioWorld>,
+    pub(crate) destination_provisioned: Option<ProvisionedManagedScenarioWorld>,
+    pub(crate) primary_start_token: Option<PlatformOperationToken>,
+    pub(crate) destination_start_token: Option<PlatformOperationToken>,
     pub(crate) destination: Option<PreparedEmbeddedWorldScenario>,
     pub(crate) destination_failure: Option<String>,
+}
+
+impl ManagedScenarioLaunchState {
+    pub(crate) fn new(intent: ScenarioLaunchIntent) -> Self {
+        let manifest = ManagedScenarioManifest::for_intent(intent);
+        let mut provision_operations = PlatformOperationLedger::new();
+        let mut pending_provision_requests = VecDeque::new();
+        for role in [
+            ManagedScenarioWorldRole::Primary,
+            ManagedScenarioWorldRole::Destination,
+        ] {
+            pending_provision_requests.push_back(
+                provision_operations.issue(ProvisionManagedScenarioWorld { intent, role }, intent),
+            );
+        }
+        Self {
+            intent,
+            manifest,
+            phase: ManagedScenarioLaunchPhase::ResolvingContent,
+            provision_operations,
+            pending_provision_requests,
+            start_operations: PlatformOperationLedger::new(),
+            pending_start_requests: VecDeque::new(),
+            primary_provisioned: None,
+            destination_provisioned: None,
+            primary_start_token: None,
+            destination_start_token: None,
+            destination: None,
+            destination_failure: None,
+        }
+    }
+
+    pub(crate) fn take_provision_request(
+        &mut self,
+    ) -> Option<PlatformOperation<ProvisionManagedScenarioWorld>> {
+        self.pending_provision_requests.pop_front()
+    }
+
+    pub(crate) fn complete_provision(
+        &mut self,
+        completion: PlatformOperationCompletion<ProvisionedManagedScenarioWorld, String>,
+    ) -> PlatformOperationResolution<
+        ProvisionManagedScenarioWorld,
+        ScenarioLaunchIntent,
+        ProvisionedManagedScenarioWorld,
+        String,
+    > {
+        self.provision_operations.complete(completion)
+    }
+
+    pub(crate) fn issue_start(
+        &mut self,
+        start: ManagedScenarioWorldStart,
+    ) -> PlatformOperationToken {
+        let operation = self.start_operations.issue(start, self.intent);
+        let token = operation.token;
+        self.pending_start_requests.push_back(operation);
+        token
+    }
+
+    pub(crate) fn take_start_request(
+        &mut self,
+    ) -> Option<PlatformOperation<ManagedScenarioWorldStart>> {
+        self.pending_start_requests.pop_front()
+    }
+
+    pub(crate) fn complete_start(
+        &mut self,
+        completion: PlatformOperationCompletion<(), String>,
+    ) -> PlatformOperationResolution<ManagedScenarioWorldStart, ScenarioLaunchIntent, (), String>
+    {
+        self.start_operations.complete(completion)
+    }
+
+    pub(crate) fn cancel(&mut self) -> usize {
+        let count = self.provision_operations.pending_len() + self.start_operations.pending_len();
+        self.pending_provision_requests.clear();
+        self.pending_start_requests.clear();
+        let _ = self.provision_operations.teardown();
+        let _ = self.start_operations.teardown();
+        count
+    }
 }
 
 impl PreparedEmbeddedWorldScenario {
@@ -184,7 +287,6 @@ impl PreparedEmbeddedWorldScenario {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct PreparedWarmWorldRendererShell {
     pub presentation: WarmWorldPresentationRequest,
     pub draw: TexturedSectionDrawResources,
@@ -504,11 +606,8 @@ pub struct EmbeddedWorldPreviewMutationSnapshot {
 
 pub(crate) struct EmbeddedWorldPreviewMutationState {
     pub snapshot: EmbeddedWorldPreviewMutationSnapshot,
-    #[cfg(not(target_arch = "wasm32"))]
     pub submitted_compile_baseline: usize,
-    #[cfg(not(target_arch = "wasm32"))]
     pub accepted_compile_baseline: usize,
-    #[cfg(not(target_arch = "wasm32"))]
     pub uploaded_section_baseline: usize,
 }
 
@@ -530,7 +629,6 @@ pub(crate) struct EmbeddedWorldPreview {
     pub fixed_interest_center: ChunkPos,
     pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
     pub render: EmbeddedWorldPreviewRenderSnapshot,
-    #[cfg(not(target_arch = "wasm32"))]
     pub mutation_sequence: u64,
     pub last_mutation: Option<EmbeddedWorldPreviewMutationState>,
     pub boundary_warning: Option<String>,
@@ -648,7 +746,6 @@ pub enum WorldGateSwitchDirection {
     NegativeToPositive,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl WorldGateSwitchDirection {
     const fn approach_sign(self) -> f64 {
         match self {
@@ -695,7 +792,6 @@ pub struct WorldGateSnapshot {
 /// Endpoint placement remains tied to each world's authoritative safe-surface
 /// spawn. The model owns transition policy but no GPU resources or saved blocks.
 #[derive(Clone, Debug, PartialEq)]
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) struct WorldGate {
     active_world_id: WorldInstanceId,
     destination_world_id: WorldInstanceId,
@@ -708,7 +804,6 @@ pub(crate) struct WorldGate {
     crossing_count: u64,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl WorldGate {
     pub(crate) fn new(
         active_world_id: WorldInstanceId,
@@ -881,12 +976,10 @@ impl WorldGate {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn dot(left: Vec3d, right: Vec3d) -> f64 {
     left.x * right.x + left.y * right.y + left.z * right.z
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn glam_vec3_from_vec3d(value: Vec3d) -> glam::Vec3 {
     glam::Vec3::new(value.x as f32, value.y as f32, value.z as f32)
 }
@@ -1047,11 +1140,8 @@ pub struct WarmWorldSwitchReport {
 pub(crate) enum WorldSlotLifecycle {
     Starting,
     ActiveReady,
-    #[cfg(not(target_arch = "wasm32"))]
     StandbyCpuReady,
-    #[cfg(not(target_arch = "wasm32"))]
     StandbyGpuWarming,
-    #[cfg(not(target_arch = "wasm32"))]
     StandbySwitchable,
     Empty,
 }
@@ -1131,7 +1221,6 @@ pub(crate) struct WarmWorldStandbyState {
     pub gpu_advance_count: usize,
     pub gpu_ready_advance_count: usize,
     pub gpu_skipped_no_slack_count: usize,
-    #[cfg(not(target_arch = "wasm32"))]
     pub last_gpu_advance_frame: Option<u32>,
     pub camera_reconciled: bool,
     pub loaded_chunks: usize,
@@ -1235,7 +1324,6 @@ fn elapsed_between_ms(start: MonotonicInstant, end: MonotonicInstant) -> f64 {
     end.saturating_duration_since(start).as_secs_f64() * 1_000.0
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn entry_support_render_section(pose: WorldEntryPose) -> Option<RenderSectionKey> {
     if !pose.feet_position.is_finite() {
         return None;
@@ -1250,7 +1338,6 @@ pub(crate) fn entry_support_render_section(pose: WorldEntryPose) -> Option<Rende
     ))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn anchor_render_section(anchor: Vec3d) -> Option<RenderSectionKey> {
     if !anchor.is_finite() {
         return None;
@@ -1268,14 +1355,12 @@ pub(crate) fn anchor_render_section(anchor: Vec3d) -> Option<RenderSectionKey> {
 /// Map a crossing to the clear approach on the far side of an endpoint.
 /// Endpoint normals point back toward their authored approach, so arrival
 /// proceeds opposite the normal and faces away from the gate.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn world_gate_destination_entry_pose(
     endpoint: WorldGateEndpointCandidate,
 ) -> WorldEntryPose {
     world_gate_entry_pose_on_side(endpoint, -1.0)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn world_gate_entry_pose_on_side(
     endpoint: WorldGateEndpointCandidate,
     side_sign: f64,
@@ -1289,7 +1374,6 @@ fn world_gate_entry_pose_on_side(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn resolve_world_gate_endpoint(
     runtime: &SceneSessionRuntime,
     pose: WorldEntryPose,
@@ -1302,7 +1386,6 @@ pub(crate) fn resolve_world_gate_endpoint(
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn resolve_world_gate_endpoint_with(
     pose: WorldEntryPose,
     mut block_loaded: impl FnMut(BlockPos) -> bool,
@@ -1360,14 +1443,12 @@ fn resolve_world_gate_endpoint_with(
     None
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn nearest_surface_deltas() -> impl Iterator<Item = i32> {
     std::iter::once(0).chain(
         (1..=PROVISIONAL_GATE_SURFACE_SEARCH_BLOCKS).flat_map(|distance| [distance, -distance]),
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(clippy::too_many_arguments)]
 fn gate_footprint_clear(
     center_x: i32,
@@ -1403,7 +1484,6 @@ fn gate_footprint_clear(
     true
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn cardinal_forward(yaw_radians: f64) -> (i32, i32) {
     let x = -yaw_radians.sin();
     let z = yaw_radians.cos();
@@ -1414,7 +1494,6 @@ fn cardinal_forward(yaw_radians: f64) -> (i32, i32) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn bounded_preview_source_priority(
     region: EmbeddedChunkRegion,
     placement: WorldPlacement,
@@ -1442,6 +1521,66 @@ pub(crate) fn bounded_preview_source_priority(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn managed_launch_issues_independent_portable_operations() {
+        let intent = ScenarioLaunchIntent::lobby_preview();
+        let mut launch = ManagedScenarioLaunchState::new(intent);
+        let primary = launch.take_provision_request().unwrap();
+        let destination = launch.take_provision_request().unwrap();
+        assert_eq!(primary.kind.role, ManagedScenarioWorldRole::Primary);
+        assert_eq!(destination.kind.role, ManagedScenarioWorldRole::Destination);
+        assert_ne!(primary.token, destination.token);
+        assert!(launch.take_provision_request().is_none());
+
+        let primary_key = launch
+            .manifest
+            .world_key(ManagedScenarioWorldRole::Primary)
+            .unwrap();
+        assert!(matches!(
+            launch.complete_provision(PlatformOperationCompletion {
+                token: primary.token,
+                result: Ok(ProvisionedManagedScenarioWorld {
+                    role: ManagedScenarioWorldRole::Primary,
+                    key: primary_key,
+                }),
+            }),
+            PlatformOperationResolution::Applied { kind, .. }
+                if kind.role == ManagedScenarioWorldRole::Primary
+        ));
+        assert_eq!(launch.cancel(), 1);
+        assert!(matches!(
+            launch.complete_provision(PlatformOperationCompletion {
+                token: destination.token,
+                result: Err("late".to_owned()),
+            }),
+            PlatformOperationResolution::Stale(_)
+        ));
+    }
+
+    #[test]
+    fn managed_start_identity_is_not_derived_from_role_or_slot() {
+        let intent = ScenarioLaunchIntent::lobby_preview();
+        let mut launch = ManagedScenarioLaunchState::new(intent);
+        let key = launch
+            .manifest
+            .world_key(ManagedScenarioWorldRole::Primary)
+            .unwrap();
+        let scene = McloneSceneHostOptions::default();
+        let start = ManagedScenarioWorldStart {
+            instance_id: WorldInstanceId::new(41),
+            role: ManagedScenarioWorldRole::Primary,
+            managed_world_key: key,
+            descriptor: ActiveSessionDescriptor::new_seed_local_world(scene.seed),
+            scene,
+            destination: None,
+        };
+        let token = launch.issue_start(start);
+        let operation = launch.take_start_request().unwrap();
+        assert_eq!(operation.token, token);
+        assert_eq!(operation.kind.instance_id, WorldInstanceId::new(41));
+        assert_eq!(operation.kind.role, ManagedScenarioWorldRole::Primary);
+    }
 
     fn flat_pose() -> WorldEntryPose {
         WorldEntryPose {

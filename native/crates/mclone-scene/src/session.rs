@@ -6,15 +6,10 @@ use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::session::SessionStorageIntent;
 
-#[cfg(not(target_arch = "wasm32"))]
 const STANDBY_RUNTIME_POLL_BUDGET: Duration = Duration::from_micros(500);
-#[cfg(not(target_arch = "wasm32"))]
 const STANDBY_UPLOAD_BUDGET: usize = 1;
-#[cfg(not(target_arch = "wasm32"))]
 const STANDBY_ACCEPT_BUDGET: usize = 1;
-#[cfg(not(target_arch = "wasm32"))]
 const STANDBY_COMPILE_REQUEST_BUDGET: usize = 1;
-#[cfg(not(target_arch = "wasm32"))]
 const STANDBY_PREPARATION_BUDGET: Duration = Duration::from_micros(750);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -200,11 +195,24 @@ pub(crate) type ScenePendingSessionStart = SessionStartPayload<McloneSceneHostOp
 /// classified the request, construct the Worker or WebSocket runtime, and
 /// complete it back into the same scene host.
 #[derive(Clone, Debug, PartialEq)]
+pub enum ExternalSceneStartTarget {
+    ActiveSession,
+    ManagedScenario {
+        token: mclone_app_runtime::platform_operation::PlatformOperationToken,
+        role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ExternalSceneSessionStart {
+    pub target: ExternalSceneStartTarget,
+    pub instance_id: WorldInstanceId,
+    pub managed_world_key: Option<ManagedWorldKey>,
     pub request: SessionStartRequest,
     pub runtime_kind: SessionRuntimeKind,
     pub scene: McloneSceneHostOptions,
     pub descriptor: ActiveSessionDescriptor,
+    pub destination: Option<PreparedEmbeddedWorldScenario>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -215,6 +223,15 @@ pub(crate) enum SceneSessionStartOutcome {
 }
 
 impl McloneSceneHost {
+    fn allocate_world_instance_id(&mut self) -> WorldInstanceId {
+        let id = WorldInstanceId::new(self.next_world_instance_id);
+        self.next_world_instance_id = self
+            .next_world_instance_id
+            .checked_add(1)
+            .expect("world instance ID space exhausted");
+        id
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         device: &wgpu::Device,
@@ -307,6 +324,7 @@ impl McloneSceneHost {
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
                 id: WorldInstanceId::new(1),
+                managed_world_key: None,
                 descriptor: descriptor.clone(),
                 lifecycle: WorldSlotLifecycle::Starting,
                 asset_epoch: 0,
@@ -336,19 +354,16 @@ impl McloneSceneHost {
         let mut state = Self {
             active_world,
             standby_world: None,
+            next_world_instance_id: 2,
             warm_world_standby: None,
-            #[cfg(not(target_arch = "wasm32"))]
             prepared_warm_world_shell: None,
-            #[cfg(not(target_arch = "wasm32"))]
             managed_scenario_launch: None,
+            native_managed_scenario_adapter: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
-            #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
-            #[cfg(not(target_arch = "wasm32"))]
             opaque_world_gate_renderer: None,
-            #[cfg(not(target_arch = "wasm32"))]
             warm_world_switch_sequence: 0,
             last_warm_world_switch: None,
             services: SceneHostServices {
@@ -508,6 +523,7 @@ impl McloneSceneHost {
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
                 id: WorldInstanceId::new(1),
+                managed_world_key: None,
                 descriptor: Some(active_session),
                 lifecycle: WorldSlotLifecycle::ActiveReady,
                 asset_epoch: 0,
@@ -530,19 +546,16 @@ impl McloneSceneHost {
         let mut state = Self {
             active_world,
             standby_world: None,
+            next_world_instance_id: 2,
             warm_world_standby: None,
-            #[cfg(not(target_arch = "wasm32"))]
             prepared_warm_world_shell: None,
-            #[cfg(not(target_arch = "wasm32"))]
             managed_scenario_launch: None,
+            native_managed_scenario_adapter: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
-            #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
-            #[cfg(not(target_arch = "wasm32"))]
             opaque_world_gate_renderer: None,
-            #[cfg(not(target_arch = "wasm32"))]
             warm_world_switch_sequence: 0,
             last_warm_world_switch: None,
             services: SceneHostServices {
@@ -714,6 +727,7 @@ impl McloneSceneHost {
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
                 id: WorldInstanceId::new(1),
+                managed_world_key: None,
                 descriptor: Some(active_session),
                 lifecycle: WorldSlotLifecycle::Starting,
                 asset_epoch: active_assets.epoch,
@@ -736,19 +750,17 @@ impl McloneSceneHost {
         let mut state = Self {
             active_world,
             standby_world: None,
+            next_world_instance_id: 2,
             warm_world_standby: None,
-            #[cfg(not(target_arch = "wasm32"))]
             prepared_warm_world_shell: None,
-            #[cfg(not(target_arch = "wasm32"))]
             managed_scenario_launch: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            native_managed_scenario_adapter: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
-            #[cfg(not(target_arch = "wasm32"))]
             world_gate: None,
-            #[cfg(not(target_arch = "wasm32"))]
             opaque_world_gate_renderer: None,
-            #[cfg(not(target_arch = "wasm32"))]
             warm_world_switch_sequence: 0,
             last_warm_world_switch: None,
             services: SceneHostServices {
@@ -959,20 +971,28 @@ impl McloneSceneHost {
     pub fn take_external_session_start(&mut self) -> Option<ExternalSceneSessionStart> {
         let pending = self.session.take_pending_start()?;
         Some(ExternalSceneSessionStart {
+            target: ExternalSceneStartTarget::ActiveSession,
+            instance_id: self.allocate_world_instance_id(),
+            managed_world_key: None,
             request: pending.request,
             runtime_kind: pending.payload.runtime_kind,
             scene: pending.payload.options,
             descriptor: pending.payload.descriptor,
+            destination: None,
         })
     }
 
     pub fn external_session_start_snapshot(&self) -> Option<ExternalSceneSessionStart> {
         let pending = self.session.pending_start()?;
         Some(ExternalSceneSessionStart {
+            target: ExternalSceneStartTarget::ActiveSession,
+            instance_id: WorldInstanceId::new(self.next_world_instance_id),
+            managed_world_key: None,
             request: pending.request.clone(),
             runtime_kind: pending.payload.runtime_kind,
             scene: pending.payload.options.clone(),
             descriptor: pending.payload.descriptor.clone(),
+            destination: None,
         })
     }
 
@@ -1004,39 +1024,135 @@ impl McloneSceneHost {
             );
         }
 
-        let movement_speed_multiplier = self.active_world.camera.movement_speed_multiplier();
-        let camera = SceneCameraConfig::from_scene(&pending.scene)
-            .spawn_for_chunk_with_speed(runtime.interest_center(), movement_speed_multiplier);
-        let draw = TexturedSectionDrawResources::new(
-            device,
-            queue,
-            self.color_format,
-            &[],
-            self.mesh_assets.atlas.as_upload(),
-        )
-        .context("reset scene terrain for external session start")?;
-        self.active_world.install(DrawableWorldSlotInstall {
-            id: self.active_world.id,
-            descriptor: Some(active.clone()),
-            lifecycle: WorldSlotLifecycle::Starting,
-            asset_epoch: self.active_assets.epoch,
-            scene: pending.scene,
-            runtime: Some(runtime),
-            local_startup: None,
-            external_runtime_startup_pending: true,
-            camera,
-            draw,
-            render_stats: RenderStreamStats::default(),
-            accepted_entry_pose: None,
-            pending_startup_sections: Vec::new(),
-        });
-        self.clear_transient_world_state();
-        self.clear_menu_input_state();
-        self.session.complete_start(active.clone());
-        self.status_overlay = StatusOverlay::hidden();
-        self.apply_started_session_ui(&active);
-        self.sync_player_appearance()
-            .context("sync external session player appearance")?;
+        let completion_target = pending.target.clone();
+        match completion_target {
+            ExternalSceneStartTarget::ActiveSession
+            | ExternalSceneStartTarget::ManagedScenario {
+                role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary,
+                ..
+            } => {
+                let movement_speed_multiplier =
+                    self.active_world.camera.movement_speed_multiplier();
+                let camera = SceneCameraConfig::from_scene(&pending.scene)
+                    .spawn_for_chunk_with_speed(
+                        runtime.interest_center(),
+                        movement_speed_multiplier,
+                    );
+                let draw = if matches!(
+                    completion_target,
+                    ExternalSceneStartTarget::ManagedScenario { .. }
+                ) {
+                    match self.prepared_warm_world_shell.as_ref() {
+                        Some(shell) => TexturedSectionDrawResources::new_with_shared_resources(
+                            device,
+                            queue,
+                            &[],
+                            shell.draw.shared_resources(),
+                        ),
+                        None => TexturedSectionDrawResources::new(
+                            device,
+                            queue,
+                            self.color_format,
+                            &[],
+                            self.mesh_assets.atlas.as_upload(),
+                        ),
+                    }
+                } else {
+                    TexturedSectionDrawResources::new(
+                        device,
+                        queue,
+                        self.color_format,
+                        &[],
+                        self.mesh_assets.atlas.as_upload(),
+                    )
+                }
+                .context("reset scene terrain for external session start")?;
+                self.active_world.install(DrawableWorldSlotInstall {
+                    id: pending.instance_id,
+                    managed_world_key: pending.managed_world_key.clone(),
+                    descriptor: Some(active.clone()),
+                    lifecycle: WorldSlotLifecycle::Starting,
+                    asset_epoch: self.active_assets.epoch,
+                    scene: pending.scene.clone(),
+                    runtime: Some(runtime),
+                    local_startup: None,
+                    external_runtime_startup_pending: true,
+                    camera,
+                    draw,
+                    render_stats: RenderStreamStats::default(),
+                    accepted_entry_pose: None,
+                    pending_startup_sections: Vec::new(),
+                });
+                self.clear_transient_world_state();
+                self.clear_menu_input_state();
+                self.session.complete_start(active.clone());
+                self.status_overlay = StatusOverlay::hidden();
+                self.apply_started_session_ui(&active);
+                self.sync_player_appearance()
+                    .context("sync external session player appearance")?;
+            }
+            ExternalSceneStartTarget::ManagedScenario {
+                role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+                ..
+            } => {
+                let mut destination = pending
+                    .destination
+                    .clone()
+                    .context("managed destination completion omitted its presentation")?;
+                destination.destination.instance_id = Some(pending.instance_id);
+                let camera = SceneCameraConfig::from_scene(&pending.scene)
+                    .spawn_for_chunk(runtime.interest_center());
+                self.install_prepared_warm_world_slot(
+                    destination.destination,
+                    pending.scene.clone(),
+                    active,
+                    Some(runtime),
+                    None,
+                    true,
+                    camera,
+                )?;
+            }
+        }
+        if let ExternalSceneStartTarget::ManagedScenario { token, role } = completion_target {
+            self.complete_managed_scenario_world_start(token, role, pending.instance_id)?;
+        }
+        Ok(())
+    }
+
+    fn complete_managed_scenario_world_start(
+        &mut self,
+        token: mclone_app_runtime::platform_operation::PlatformOperationToken,
+        role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
+        instance_id: WorldInstanceId,
+    ) -> Result<()> {
+        let Some(mut launch) = self.managed_scenario_launch.take() else {
+            bail!("managed scenario world completion has no active launch");
+        };
+        match launch.complete_start(
+            mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                token,
+                result: Ok(()),
+            },
+        ) {
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                kind,
+                ..
+            } if kind.role == role && kind.instance_id == instance_id => match role {
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
+                    launch.primary_start_token = None;
+                    launch.phase = ManagedScenarioLaunchPhase::PrimaryPlayable;
+                    self.try_issue_managed_scenario_destination_start(&mut launch)?;
+                }
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+                    launch.destination_start_token = None;
+                }
+            },
+            resolution => {
+                self.managed_scenario_launch = Some(launch);
+                bail!("managed scenario world completion was not applicable: {resolution:?}");
+            }
+        }
+        self.managed_scenario_launch = Some(launch);
         Ok(())
     }
 
@@ -1046,6 +1162,10 @@ impl McloneSceneHost {
         error: impl Into<String>,
     ) {
         let message = error.into();
+        if let ExternalSceneStartTarget::ManagedScenario { token, .. } = pending.target {
+            self.fail_managed_scenario_world_start(token, message);
+            return;
+        }
         log::error!(
             "failed to start external scene session {:?}: {}",
             pending.request,
@@ -1278,7 +1398,6 @@ impl McloneSceneHost {
         Ok(())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn apply_managed_scenario_effect(
         &mut self,
         effect: ClientExperienceScenarioEffect,
@@ -1292,21 +1411,6 @@ impl McloneSceneHost {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(crate) fn apply_managed_scenario_effect(
-        &mut self,
-        _effect: ClientExperienceScenarioEffect,
-        _device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-    ) -> Result<bool> {
-        self.status_overlay = StatusOverlay::new(
-            mclone_app_runtime::client_experience::WEB_LOBBY_SCENARIO_REASON,
-            false,
-        );
-        Ok(false)
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     fn begin_managed_scenario_launch(
         &mut self,
         intent: mclone_app_runtime::scenario::ScenarioLaunchIntent,
@@ -1334,46 +1438,153 @@ impl McloneSceneHost {
         {
             bail!("a retained-world scenario is already active");
         }
-        let world_root = self
-            .active_world
-            .scene
-            .world_root
-            .as_deref()
-            .context("Lobby scenarios require persistent application storage")?;
-        let scenario_root =
-            mclone_app_runtime::scenario_content::native_managed_scenario_root_from_world_root(
-                world_root,
-            );
-        let mut primary_operations =
-            mclone_app_runtime::scenario_content::NativeManagedScenarioContentOperationService::background(
-                scenario_root.clone(),
-            );
-        let mut destination_operations =
-            mclone_app_runtime::scenario_content::NativeManagedScenarioContentOperationService::background(
-                scenario_root,
-            );
-        let primary_token = primary_operations.submit(intent);
-        let destination_token = destination_operations.submit(intent);
-        self.managed_scenario_launch = Some(ManagedScenarioLaunchState {
-            intent,
-            phase: ManagedScenarioLaunchPhase::ResolvingContent,
-            primary_operations: Some(primary_operations),
-            destination_operations: Some(destination_operations),
-            destination: None,
-            destination_failure: None,
-        });
+        self.managed_scenario_launch = Some(ManagedScenarioLaunchState::new(intent));
         self.status_overlay = StatusOverlay::new("Preparing Lobby", true);
-        log::info!(
-            "managed lobby scenario content requested epoch={} request={}",
-            primary_token.epoch.get(),
-            primary_token.request_id.get()
-        );
-        log::info!(
-            "managed lobby destination content requested epoch={} request={}",
-            destination_token.epoch.get(),
-            destination_token.request_id.get()
-        );
+        log::info!("managed lobby scenario requested through shared provision service");
         Ok(false)
+    }
+
+    /// Take one independently tokened, storage-neutral provisioning request.
+    /// Native and browser adapters consume the same operation shape.
+    pub fn take_managed_scenario_provision_request(
+        &mut self,
+    ) -> Option<
+        mclone_app_runtime::platform_operation::PlatformOperation<
+            mclone_app_runtime::scenario_content::ProvisionManagedScenarioWorld,
+        >,
+    > {
+        self.managed_scenario_launch
+            .as_mut()
+            .and_then(ManagedScenarioLaunchState::take_provision_request)
+    }
+
+    pub fn complete_managed_scenario_provision(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        completion: mclone_app_runtime::platform_operation::PlatformOperationCompletion<
+            mclone_app_runtime::scenario_content::ProvisionedManagedScenarioWorld,
+            String,
+        >,
+    ) -> Result<()> {
+        let Some(mut launch) = self.managed_scenario_launch.take() else {
+            return Ok(());
+        };
+        match launch.complete_provision(completion) {
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                kind,
+                value,
+                ..
+            } => {
+                if kind.role != value.role {
+                    bail!(
+                        "managed scenario provision role mismatch: requested {:?}, got {:?}",
+                        kind.role,
+                        value.role
+                    );
+                }
+                let expected_key = launch.manifest.world_key(kind.role)?;
+                if value.key != expected_key {
+                    bail!(
+                        "managed scenario provision key mismatch: expected `{}`, got `{}`",
+                        expected_key.as_str(),
+                        value.key.as_str()
+                    );
+                }
+                match kind.role {
+                    mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
+                        let primary = self
+                            .prepare_managed_lobby_primary(&launch.manifest, value.key.clone())?;
+                        let destination_key = launch.manifest.world_key(
+                            mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+                        )?;
+                        let shell_definition = self
+                            .prepare_managed_lobby_destination(&launch.manifest, destination_key)?;
+                        if let Err(error) = self.prepare_embedded_world_scenario_shell(
+                            device,
+                            queue,
+                            &shell_definition,
+                        ) {
+                            launch.destination_failure = Some(format!(
+                                "prepare managed lobby destination renderer shell: {error:#}"
+                            ));
+                            self.prepared_warm_world_shell = None;
+                        }
+                        let descriptor =
+                            ActiveSessionDescriptor::new_seed_local_world(primary.seed);
+                        let start = ManagedScenarioWorldStart {
+                            instance_id: self.allocate_world_instance_id(),
+                            role: kind.role,
+                            managed_world_key: value.key.clone(),
+                            scene: primary,
+                            descriptor,
+                            destination: None,
+                        };
+                        let token = launch.issue_start(start);
+                        launch.primary_start_token = Some(token);
+                        launch.primary_provisioned = Some(value);
+                        launch.phase = ManagedScenarioLaunchPhase::StartingPrimary;
+                        self.ui.close();
+                    }
+                    mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+                        launch.destination = Some(self.prepare_managed_lobby_destination(
+                            &launch.manifest,
+                            value.key.clone(),
+                        )?);
+                        launch.destination_provisioned = Some(value);
+                    }
+                }
+            }
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
+                kind,
+                error,
+                ..
+            } => match kind.role {
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
+                    let _ = launch.cancel();
+                    self.prepared_warm_world_shell = None;
+                    self.ui.set_screen(Some(GameScreen::Title));
+                    self.status_overlay = StatusOverlay::new(
+                        format!("Lobby content preparation failed: {error}"),
+                        false,
+                    );
+                    return Ok(());
+                }
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+                    launch.destination_failure = Some(error);
+                }
+            },
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Stale(_)
+            | mclone_app_runtime::platform_operation::PlatformOperationResolution::Duplicate(_)
+            | mclone_app_runtime::platform_operation::PlatformOperationResolution::Unknown(_) => {
+                self.managed_scenario_launch = Some(launch);
+                return Ok(());
+            }
+        }
+        self.try_issue_managed_scenario_destination_start(&mut launch)?;
+        self.managed_scenario_launch = Some(launch);
+        Ok(())
+    }
+
+    pub fn take_managed_scenario_world_start(&mut self) -> Option<ExternalSceneSessionStart> {
+        let operation = self
+            .managed_scenario_launch
+            .as_mut()
+            .and_then(ManagedScenarioLaunchState::take_start_request)?;
+        let start = operation.kind;
+        Some(ExternalSceneSessionStart {
+            target: ExternalSceneStartTarget::ManagedScenario {
+                token: operation.token,
+                role: start.role,
+            },
+            instance_id: start.instance_id,
+            managed_world_key: Some(start.managed_world_key),
+            request: SessionStartRequest::new_seed_local_world(start.scene.seed),
+            runtime_kind: SessionRuntimeKind::Local,
+            scene: start.scene,
+            descriptor: start.descriptor,
+            destination: start.destination,
+        })
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1382,171 +1593,49 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
-        let Some(mut launch) = self.managed_scenario_launch.take() else {
+        if self.managed_scenario_launch.is_none() {
             return Ok(());
-        };
-        if let Some(operations) = launch.destination_operations.as_mut() {
-            for resolution in operations.poll() {
-                match resolution {
-                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
-                        value,
-                        ..
-                    } => {
-                        match self.prepare_managed_lobby_destination(&value) {
-                            Ok(destination) => launch.destination = Some(destination),
-                            Err(error) => {
-                                launch.destination_failure = Some(format!(
-                                    "prepare managed lobby destination: {error:#}"
-                                ));
-                            }
-                        }
-                        launch.destination_operations = None;
-                        break;
-                    }
-                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
-                        error,
-                        ..
-                    } => {
-                        launch.destination_failure = Some(error);
-                        launch.destination_operations = None;
-                        break;
-                    }
-                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Stale(_)
-                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Duplicate(_)
-                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Unknown(_) => {}
-                }
+        }
+        if self.native_managed_scenario_adapter.is_none() {
+            let world_root = self
+                .active_world
+                .scene
+                .world_root
+                .as_deref()
+                .context("Lobby scenarios require persistent application storage")?;
+            let scenario_root =
+                mclone_app_runtime::scenario_content::native_managed_scenario_root_from_world_root(
+                    world_root,
+                );
+            self.native_managed_scenario_adapter = Some(
+                mclone_app_runtime::scenario_content::NativeManagedScenarioProvisionAdapter::background(
+                    scenario_root,
+                ),
+            );
+        }
+        while let Some(request) = self.take_managed_scenario_provision_request() {
+            if let Some(adapter) = self.native_managed_scenario_adapter.as_mut() {
+                adapter.submit(request);
             }
         }
-
-        if launch.phase == ManagedScenarioLaunchPhase::ResolvingContent
-            && let Some(operations) = launch.primary_operations.as_mut()
-        {
-            for resolution in operations.poll() {
-                match resolution {
-                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
-                        value,
-                        ..
-                    } => {
-                        log::info!(
-                            "managed scenario primary content resolved id={:?}",
-                            launch.intent.id
-                        );
-                        let primary = match self.prepare_managed_lobby_primary(&value) {
-                            Ok(primary) => primary,
-                            Err(error) => {
-                                if let Some(operations) = launch.destination_operations.as_mut() {
-                                    let _ = operations.begin_epoch();
-                                }
-                                self.prepared_warm_world_shell = None;
-                                self.ui.set_screen(Some(GameScreen::Title));
-                                self.status_overlay = StatusOverlay::new(
-                                    format!("Lobby startup failed: {error:#}"),
-                                    false,
-                                );
-                                return Ok(());
-                            }
-                        };
-                        let shell_definition = launch.destination.clone().or_else(|| {
-                            match self.prepare_managed_lobby_destination(&value) {
-                                Ok(destination) => {
-                                    launch.destination = Some(destination.clone());
-                                    Some(destination)
-                                }
-                                Err(error) => {
-                                    launch.destination_failure = Some(format!(
-                                        "prepare managed lobby renderer-shell definition: {error:#}"
-                                    ));
-                                    None
-                                }
-                            }
-                        });
-                        if let Some(shell_definition) = shell_definition
-                            && let Err(error) = self.prepare_embedded_world_scenario_shell(
-                                device,
-                                queue,
-                                &shell_definition,
-                            )
-                        {
-                            if let Some(operations) = launch.destination_operations.as_mut() {
-                                let _ = operations.begin_epoch();
-                            }
-                            launch.destination_operations = None;
-                            launch.destination = None;
-                            launch.destination_failure = Some(format!(
-                                "prepare managed lobby destination renderer shell: {error:#}"
-                            ));
-                            self.prepared_warm_world_shell = None;
-                        }
-                        let request = SessionStartRequest::new_seed_local_world(primary.seed);
-                        let Some(descriptor) = request.active_descriptor() else {
-                            if let Some(operations) = launch.destination_operations.as_mut() {
-                                let _ = operations.begin_epoch();
-                            }
-                            self.prepared_warm_world_shell = None;
-                            self.ui.set_screen(Some(GameScreen::Title));
-                            self.status_overlay = StatusOverlay::new(
-                                "Lobby startup failed: local request has no descriptor",
-                                false,
-                            );
-                            return Ok(());
-                        };
-                        self.session.request_start(
-                            request.clone(),
-                            ScenePendingSessionStart {
-                                runtime_kind: SessionRuntimeKind::Local,
-                                options: primary,
-                                descriptor,
-                            },
-                        );
-                        if let Err(error) = self.start_pending_session(device, queue) {
-                            if let Some(operations) = launch.destination_operations.as_mut() {
-                                let _ = operations.begin_epoch();
-                            }
-                            self.prepared_warm_world_shell = None;
-                            self.ui.set_screen(Some(GameScreen::Title));
-                            self.status_overlay = StatusOverlay::new(
-                                format!("Lobby startup failed: {error:#}"),
-                                false,
-                            );
-                            return Ok(());
-                        }
-                        self.ui.close();
-                        launch.phase = ManagedScenarioLaunchPhase::StartingPrimary;
-                        launch.primary_operations = None;
-                        break;
-                    }
-                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
-                        error,
-                        ..
-                    } => {
-                        if let Some(operations) = launch.destination_operations.as_mut() {
-                            let _ = operations.begin_epoch();
-                        }
-                        self.ui.set_screen(Some(GameScreen::Title));
-                        self.status_overlay = StatusOverlay::new(
-                            format!("Lobby content preparation failed: {error}"),
-                            false,
-                        );
-                        return Ok(());
-                    }
-                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Stale(_)
-                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Duplicate(_)
-                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Unknown(_) => {}
-                }
-            }
+        let completions = self
+            .native_managed_scenario_adapter
+            .as_mut()
+            .map(NativeManagedScenarioProvisionAdapter::poll)
+            .unwrap_or_default();
+        for completion in completions {
+            self.complete_managed_scenario_provision(device, queue, completion)?;
         }
-
-        self.try_attach_managed_scenario_destination(&mut launch);
-        self.managed_scenario_launch = Some(launch);
+        self.start_native_managed_scenario_world_requests(device, queue)?;
         Ok(())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn prepare_managed_lobby_primary(
         &self,
-        content: &mclone_app_runtime::scenario_content::NativeManagedScenarioContent,
+        manifest: &mclone_app_runtime::scenario_content::ManagedScenarioManifest,
+        _managed_world_key: mclone_app_runtime::scenario_content::ManagedWorldKey,
     ) -> Result<McloneSceneHostOptions> {
-        let primary_manifest = &content.primary.manifest;
+        let primary_manifest = &manifest.primary;
         let primary_fixture = &primary_manifest.fixture;
 
         let mut primary = self.active_world.scene.clone();
@@ -1554,7 +1643,7 @@ impl McloneSceneHost {
         primary.chunk_x = primary_fixture.center_chunk[0];
         primary.chunk_z = primary_fixture.center_chunk[1];
         primary.remote_addr = None;
-        primary.world_dir = Some(content.primary.root.clone());
+        primary.world_dir = None;
         primary.world_generation_profile = primary_fixture.world_generation_profile;
         primary.world_behavior_profile = primary_manifest.behavior_profile;
         primary.use_initial_spawn_center = false;
@@ -1562,13 +1651,13 @@ impl McloneSceneHost {
         primary.validated()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn prepare_managed_lobby_destination(
         &self,
-        content: &mclone_app_runtime::scenario_content::NativeManagedScenarioContent,
+        manifest: &mclone_app_runtime::scenario_content::ManagedScenarioManifest,
+        managed_world_key: mclone_app_runtime::scenario_content::ManagedWorldKey,
     ) -> Result<PreparedEmbeddedWorldScenario> {
-        let primary_fixture = &content.primary.manifest.fixture;
-        let destination_manifest = &content.destination.manifest;
+        let primary_fixture = &manifest.primary.fixture;
+        let destination_manifest = &manifest.destination;
         let destination_fixture = &destination_manifest.fixture;
         let center = ChunkPos::new(
             destination_fixture.center_chunk[0],
@@ -1591,68 +1680,197 @@ impl McloneSceneHost {
             1.0 / 8.0,
         )?;
         let destination = WarmWorldStandbyRequest::new(destination_fixture.seed, center)
-            .with_persistent_world_dir(
-                &content.destination.root,
+            .with_managed_world_key(
+                managed_world_key,
                 destination_fixture.world_generation_profile,
             )
             .with_world_behavior_profile(destination_manifest.behavior_profile)
             .with_embedded_preview(region, placement, return_placement);
         Ok(PreparedEmbeddedWorldScenario::new(
-            content.manifest.scenario_id,
+            manifest.scenario_id,
             destination,
         ))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn start_native_managed_scenario_world_requests(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        while let Some(mut start) = self.take_managed_scenario_world_start() {
+            let ExternalSceneStartTarget::ManagedScenario { token, role } = start.target else {
+                unreachable!("managed scenario queue produced an ordinary session start");
+            };
+            match role {
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
+                    let key = start
+                        .managed_world_key
+                        .as_ref()
+                        .context("native managed primary start omitted its storage key")?;
+                    start.scene.world_dir = Some(
+                        self.native_managed_scenario_adapter
+                            .as_ref()
+                            .and_then(|adapter| adapter.world_dir(key))
+                            .with_context(|| {
+                                format!(
+                                    "native primary path was not resolved for `{}`",
+                                    key.as_str()
+                                )
+                            })?
+                            .to_owned(),
+                    );
+                    self.active_world.id = start.instance_id;
+                    self.active_world.managed_world_key = start.managed_world_key.clone();
+                    self.session.request_start(
+                        start.request.clone(),
+                        ScenePendingSessionStart {
+                            runtime_kind: SessionRuntimeKind::Local,
+                            options: start.scene,
+                            descriptor: start.descriptor,
+                        },
+                    );
+                    if let Err(error) = self.start_pending_session(device, queue) {
+                        self.fail_managed_scenario_world_start(token, error.to_string());
+                    }
+                }
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+                    let destination = start
+                        .destination
+                        .context("managed destination start omitted its presentation")?;
+                    if let Err(error) = self.begin_prepared_embedded_world_scenario(destination) {
+                        self.fail_managed_scenario_world_start(token, error.to_string());
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn fail_managed_scenario_world_start(
+        &mut self,
+        token: mclone_app_runtime::platform_operation::PlatformOperationToken,
+        error: String,
+    ) {
+        let Some(mut launch) = self.managed_scenario_launch.take() else {
+            return;
+        };
+        let resolution = launch.complete_start(
+            mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                token,
+                result: Err(error.clone()),
+            },
+        );
+        if let mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
+            kind,
+            ..
+        } = resolution
+        {
+            match kind.role {
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
+                    let _ = launch.cancel();
+                    self.prepared_warm_world_shell = None;
+                    self.ui.set_screen(Some(GameScreen::Title));
+                    self.status_overlay =
+                        StatusOverlay::new(format!("Lobby startup failed: {error}"), false);
+                    return;
+                }
+                mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+                    launch.destination_failure = Some(error);
+                    launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
+                }
+            }
+        }
+        self.managed_scenario_launch = Some(launch);
+    }
+
     fn advance_managed_scenario_after_primary(&mut self, active_completed: bool) {
         let Some(mut launch) = self.managed_scenario_launch.take() else {
             return;
         };
         if launch.phase == ManagedScenarioLaunchPhase::StartingPrimary {
             if active_completed {
-                launch.phase = ManagedScenarioLaunchPhase::PrimaryPlayable;
-            } else if matches!(self.session.state(), GameSessionState::Failed { .. }) {
-                if let Some(operations) = launch.destination_operations.as_mut() {
-                    let _ = operations.begin_epoch();
+                if let Some(token) = launch.primary_start_token.take() {
+                    match launch.complete_start(
+                        mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                            token,
+                            result: Ok(()),
+                        },
+                    ) {
+                        mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                            kind,
+                            ..
+                        } if kind.instance_id == self.active_world.id => {
+                            launch.phase = ManagedScenarioLaunchPhase::PrimaryPlayable;
+                        }
+                        _ => {
+                            launch.destination_failure =
+                                Some("primary start completion was stale or mismatched".to_owned());
+                        }
+                    }
                 }
+            } else if matches!(self.session.state(), GameSessionState::Failed { .. }) {
+                let _ = launch.cancel();
                 self.prepared_warm_world_shell = None;
                 self.ui.set_screen(Some(GameScreen::Title));
                 return;
             }
         }
-        self.try_attach_managed_scenario_destination(&mut launch);
+        if let Err(error) = self.try_issue_managed_scenario_destination_start(&mut launch) {
+            launch.destination_failure = Some(format!("prepare destination start: {error:#}"));
+        }
         self.managed_scenario_launch = Some(launch);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn try_attach_managed_scenario_destination(&mut self, launch: &mut ManagedScenarioLaunchState) {
+    fn try_issue_managed_scenario_destination_start(
+        &mut self,
+        launch: &mut ManagedScenarioLaunchState,
+    ) -> Result<()> {
         if launch.phase != ManagedScenarioLaunchPhase::PrimaryPlayable {
-            return;
+            return Ok(());
         }
         if let Some(error) = launch.destination_failure.take() {
             self.prepared_warm_world_shell = None;
             launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
             self.status_overlay =
                 StatusOverlay::new(format!("Lobby preview unavailable: {error}"), false);
-            return;
+            return Ok(());
         }
         let Some(destination) = launch.destination.take() else {
-            return;
+            return Ok(());
         };
-        match self.begin_prepared_embedded_world_scenario(destination) {
-            Ok(()) => {
-                launch.phase = ManagedScenarioLaunchPhase::WarmingDestination;
-            }
-            Err(error) => {
-                self.prepared_warm_world_shell = None;
-                launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
-                self.status_overlay =
-                    StatusOverlay::new(format!("Lobby preview unavailable: {error:#}"), false);
-            }
-        }
+        let key = destination
+            .destination
+            .managed_world_key
+            .clone()
+            .context("managed destination start omitted its storage key")?;
+        let mut scene = self.active_world.scene.clone();
+        scene.seed = destination.destination.seed;
+        scene.chunk_x = destination.destination.entry_center.x;
+        scene.chunk_z = destination.destination.entry_center.z;
+        scene.remote_addr = None;
+        scene.world_dir = None;
+        scene.world_behavior_profile = destination.destination.world_behavior_profile;
+        scene.world_generation_profile = destination.destination.world_generation_profile;
+        scene.use_initial_spawn_center = false;
+        let scene = scene.validated()?;
+        let instance_id = self.allocate_world_instance_id();
+        let mut destination = destination;
+        destination.destination.instance_id = Some(instance_id);
+        let start = ManagedScenarioWorldStart {
+            instance_id,
+            role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+            managed_world_key: key,
+            descriptor: ActiveSessionDescriptor::new_seed_local_world(scene.seed),
+            scene,
+            destination: Some(destination),
+        };
+        let token = launch.issue_start(start);
+        launch.destination_start_token = Some(token);
+        launch.phase = ManagedScenarioLaunchPhase::WarmingDestination;
+        Ok(())
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn update_managed_scenario_destination_status(&mut self) {
         let Some(launch) = self.managed_scenario_launch.as_mut() else {
             return;
@@ -1663,6 +1881,19 @@ impl McloneSceneHost {
         let Some(standby) = self.warm_world_standby.as_ref() else {
             return;
         };
+        if self
+            .standby_world
+            .as_ref()
+            .is_some_and(|slot| slot.runtime.is_some())
+            && let Some(token) = launch.destination_start_token.take()
+        {
+            let _ = launch.complete_start(
+                mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                    token,
+                    result: Ok(()),
+                },
+            );
+        }
         match standby.phase {
             WarmWorldStandbyPhase::Switchable => {
                 launch.phase = ManagedScenarioLaunchPhase::PreviewReady;
@@ -1688,7 +1919,6 @@ impl McloneSceneHost {
     /// owns presentation. Compatible atlas and direct-terrain pipelines remain
     /// shared with the active slot. This performs no destination storage or
     /// runtime work.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn prepare_warm_world_standby_shell(
         &mut self,
         device: &wgpu::Device,
@@ -1802,7 +2032,28 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    /// Native diagnostic adapter for an explicitly authored persistent world.
+    /// The shared scenario request remains path-free; only native assembly
+    /// resolves its storage handle here.
     #[cfg(not(target_arch = "wasm32"))]
+    pub fn begin_native_embedded_world_scenario(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        scenario: PreparedEmbeddedWorldScenario,
+        world_dir: &std::path::Path,
+    ) -> Result<()> {
+        self.prepare_embedded_world_scenario_shell(device, queue, &scenario)?;
+        if let Err(error) = self.begin_prepared_warm_world_standby_with_native_world_dir(
+            scenario.destination,
+            Some(world_dir),
+        ) {
+            self.prepared_warm_world_shell = None;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     pub fn prepare_embedded_world_scenario_shell(
         &mut self,
         device: &wgpu::Device,
@@ -1844,6 +2095,15 @@ impl McloneSceneHost {
         &mut self,
         request: WarmWorldStandbyRequest,
     ) -> Result<()> {
+        self.begin_prepared_warm_world_standby_with_native_world_dir(request, None)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn begin_prepared_warm_world_standby_with_native_world_dir(
+        &mut self,
+        request: WarmWorldStandbyRequest,
+        native_world_dir: Option<&std::path::Path>,
+    ) -> Result<()> {
         if self.warm_world_standby.is_some() || self.standby_world.is_some() {
             bail!("a warm-world standby request already exists");
         }
@@ -1864,31 +2124,32 @@ impl McloneSceneHost {
         if self.active_world.scene.seed == request.seed {
             bail!("warm-world standby seed must differ from the active seed");
         }
-        let presentation = request.presentation;
-        let preview_boundary_warning = matches!(presentation, WarmWorldPresentationRequest::Diorama { .. })
-            .then(|| request.world_generation_profile.authored_missing_chunk().is_none())
-            .filter(|warn| *warn)
-            .map(|_| {
-                "non-authored preview uses a hard region edge; canonical neighbor-culled faces may be exposed"
-                    .to_owned()
-            });
-
-        let started_at = self.services.clock.now();
         let mut scene = self.active_world.scene.clone();
         scene.seed = request.seed;
         scene.chunk_x = request.entry_center.x;
         scene.chunk_z = request.entry_center.z;
         scene.remote_addr = None;
         scene.world_root = None;
-        scene.world_dir = request.world_dir.clone();
+        scene.world_dir = match (native_world_dir, request.managed_world_key.as_ref()) {
+            (Some(world_dir), _) => Some(world_dir.to_owned()),
+            (None, Some(key)) => Some(
+                self.native_managed_scenario_adapter
+                    .as_ref()
+                    .and_then(|adapter| adapter.world_dir(key))
+                    .with_context(|| {
+                        format!(
+                            "native managed-world path was not resolved for `{}`",
+                            key.as_str()
+                        )
+                    })?
+                    .to_owned(),
+            ),
+            (None, None) => None,
+        };
         scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
         scene.use_initial_spawn_center = false;
         let scene = scene.validated()?;
-        let standby_cadence = request.standby_cadence.unwrap_or(scene.simulation_cadence);
-        if !standby_cadence.is_valid() {
-            bail!("warm-world standby cadence must be valid");
-        }
         let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
         let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
         let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
@@ -1898,6 +2159,69 @@ impl McloneSceneHost {
             self.mesh_assets.clone(),
         )
         .context("create detached standby local startup pump")?;
+        let local_startup = SceneLocalStartup {
+            request: startup_request,
+            descriptor: Some(descriptor.clone()),
+            scene: scene.clone(),
+            pump,
+            camera: camera.clone(),
+            startup_view_pose: None,
+        };
+        self.install_prepared_warm_world_slot(
+            request,
+            scene,
+            descriptor,
+            None,
+            Some(local_startup),
+            false,
+            camera,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn install_prepared_warm_world_slot(
+        &mut self,
+        request: WarmWorldStandbyRequest,
+        scene: McloneSceneHostOptions,
+        descriptor: ActiveSessionDescriptor,
+        runtime: Option<SceneSessionRuntime>,
+        local_startup: Option<SceneLocalStartup>,
+        external_runtime_startup_pending: bool,
+        camera: EngineCameraController,
+    ) -> Result<()> {
+        if self.warm_world_standby.is_some() || self.standby_world.is_some() {
+            bail!("a warm-world standby request already exists");
+        }
+        let prepared_presentation = self
+            .prepared_warm_world_shell
+            .as_ref()
+            .map(|shell| shell.presentation)
+            .ok_or_else(|| anyhow!("warm-world renderer shell was not prepared"))?;
+        if prepared_presentation != request.presentation {
+            bail!("prepared warm-world renderer presentation does not match request");
+        }
+        if matches!(
+            self.active_world.descriptor,
+            Some(ActiveSessionDescriptor::Remote { .. })
+        ) {
+            bail!("warm-world standby currently requires an active local world");
+        }
+        if self.active_world.scene.seed == request.seed {
+            bail!("warm-world standby seed must differ from the active seed");
+        }
+        let standby_cadence = request.standby_cadence.unwrap_or(scene.simulation_cadence);
+        if !standby_cadence.is_valid() {
+            bail!("warm-world standby cadence must be valid");
+        }
+        let presentation = request.presentation;
+        let preview_boundary_warning = matches!(presentation, WarmWorldPresentationRequest::Diorama { .. })
+            .then(|| request.world_generation_profile.authored_missing_chunk().is_none())
+            .filter(|warn| *warn)
+            .map(|_| {
+                "non-authored preview uses a hard region edge; canonical neighbor-culled faces may be exposed"
+                    .to_owned()
+            });
+        let started_at = self.services.clock.now();
         let PreparedWarmWorldRendererShell {
             presentation: _,
             draw,
@@ -1914,26 +2238,22 @@ impl McloneSceneHost {
             .take()
             .expect("prepared shell presence checked before fallible startup work");
         let shared_terrain_resource_owner_count = draw.shared_resource_owner_count();
-        let instance_id = WorldInstanceId::new(2);
+        let instance_id = request
+            .instance_id
+            .unwrap_or_else(|| self.allocate_world_instance_id());
         let asset_epoch = self.active_assets.epoch;
 
         self.standby_world = Some(DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
                 id: instance_id,
+                managed_world_key: request.managed_world_key.clone(),
                 descriptor: Some(descriptor.clone()),
                 lifecycle: WorldSlotLifecycle::Starting,
                 asset_epoch,
                 scene: scene.clone(),
-                runtime: None,
-                local_startup: Some(SceneLocalStartup {
-                    request: startup_request,
-                    descriptor: Some(descriptor),
-                    scene: scene.clone(),
-                    pump,
-                    camera: camera.clone(),
-                    startup_view_pose: None,
-                }),
-                external_runtime_startup_pending: false,
+                runtime,
+                local_startup,
+                external_runtime_startup_pending,
                 camera,
                 draw,
                 render_stats: RenderStreamStats::default(),
@@ -2081,7 +2401,6 @@ impl McloneSceneHost {
         snapshot
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn embedded_world_activation_ready(&self) -> bool {
         let Some(preview) = self.embedded_world_preview.as_ref() else {
             return false;
@@ -2102,15 +2421,9 @@ impl McloneSceneHost {
             && state.readiness.switchable
     }
 
-    #[cfg(target_arch = "wasm32")]
-    fn embedded_world_activation_ready(&self) -> bool {
-        false
-    }
-
     /// Request the scene-owned diorama action through a neutral world-space
     /// ray. Flat and XR adapters both enter here; block interaction is consumed
     /// only when the ray actually hits a fully switchable preview volume.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn request_embedded_world_activation(
         &mut self,
         ray_origin: Vec3d,
@@ -2143,16 +2456,6 @@ impl McloneSceneHost {
         true
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub fn request_embedded_world_activation(
-        &mut self,
-        _ray_origin: Vec3d,
-        _ray_direction: Vec3d,
-    ) -> bool {
-        false
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn advance_embedded_world_activation(&mut self, dt_seconds: f64) -> bool {
         if !self.embedded_world_activation.phase.active() {
             return false;
@@ -2250,12 +2553,6 @@ impl McloneSceneHost {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub fn advance_embedded_world_activation(&mut self, _dt_seconds: f64) -> bool {
-        false
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     fn retarget_embedded_world_preview_after_switch(&mut self) -> Result<()> {
         let Some(standby) = self.standby_world.as_mut() else {
             bail!("standby slot disappeared after its ownership exchange");
@@ -2464,12 +2761,10 @@ impl McloneSceneHost {
         Ok(snapshot)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn world_gate_snapshot(&self) -> Option<WorldGateSnapshot> {
         self.world_gate.as_ref().map(WorldGate::snapshot)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn synchronize_world_gate_state(&mut self) {
         let Some(state) = self.warm_world_standby.as_ref() else {
             self.world_gate = None;
@@ -2536,7 +2831,6 @@ impl McloneSceneHost {
     /// Apply one shared warm-world selection command between presented frames.
     /// The complete slot moves atomically; no runtime, draw store, renderer, or
     /// upload work is constructed here.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn apply_warm_world_selection_command(
         &mut self,
         command: WarmWorldSelectionCommand,
@@ -2551,7 +2845,6 @@ impl McloneSceneHost {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn swap_through_embedded_world_activation(&mut self) -> Result<WarmWorldSwitchReport> {
         let destination = self
             .standby_world
@@ -2567,7 +2860,6 @@ impl McloneSceneHost {
         )))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn swap_through_world_gate(&mut self) -> Result<WarmWorldSwitchReport> {
         let (destination_entry_pose, return_entry_pose) = {
             let gate = self
@@ -2590,7 +2882,6 @@ impl McloneSceneHost {
         Ok(report)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn apply_world_gate_visual_midpoint(&mut self, point: Vec3d) -> Result<bool> {
         let Some(observation) = self
             .world_gate
@@ -2625,7 +2916,6 @@ impl McloneSceneHost {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn swap_with_switchable_warm_world_using_poses(
         &mut self,
         selection_entry_poses: Option<(WorldEntryPose, WorldEntryPose)>,
@@ -2942,7 +3232,6 @@ impl McloneSceneHost {
         Ok(report)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn commit_world_slot_camera(
         slot: &mut DrawableWorldSlot,
         clock: &MonotonicClockHandle,
@@ -2968,7 +3257,6 @@ impl McloneSceneHost {
         Ok((changed, position_changed))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn invalidate_warm_world_destination_after_correction(&mut self) {
         let standby = self
             .standby_world
@@ -2988,7 +3276,6 @@ impl McloneSceneHost {
         state.readiness.switchable = false;
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn retarget_warm_world_state_after_switch(
         &mut self,
         renderer_multiview_required: bool,
@@ -3127,26 +3414,20 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(mut launch) = self.managed_scenario_launch.take() {
-            let mut cancelled = 0;
-            if let Some(operations) = launch.primary_operations.as_mut() {
-                cancelled += operations.begin_epoch().len();
-            }
-            if let Some(operations) = launch.destination_operations.as_mut() {
-                cancelled += operations.begin_epoch().len();
-            }
+            let cancelled = launch.cancel();
             log::info!(
                 "cancelled managed scenario operations count={} reason={reason}",
                 cancelled
             );
         }
-        self.embedded_world_preview = None;
-        self.embedded_world_activation = EmbeddedWorldActivationState::default();
         #[cfg(not(target_arch = "wasm32"))]
         {
-            self.prepared_warm_world_shell = None;
+            self.native_managed_scenario_adapter = None;
         }
+        self.embedded_world_preview = None;
+        self.embedded_world_activation = EmbeddedWorldActivationState::default();
+        self.prepared_warm_world_shell = None;
         // Drop the concrete slot unconditionally. State normally accompanies
         // it, but teardown and resource-rebuild safety must not depend on that
         // diagnostic invariant: taking the slot joins its runtime/compiler
@@ -3172,7 +3453,6 @@ impl McloneSceneHost {
         state.gpu_index_count = 0;
         state.loaded_chunks = 0;
         state.renderer_multiview_materialized = false;
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(gate) = self.world_gate.as_mut() {
             gate.set_availability(WorldGateAvailability::Failed);
         }
@@ -3246,7 +3526,6 @@ impl McloneSceneHost {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn advance_warm_world_standby(&mut self) {
         let Some(mut state) = self.warm_world_standby.take() else {
             return;
@@ -3269,7 +3548,8 @@ impl McloneSceneHost {
         let advance_started_at = self.services.clock.now();
         let mut retain_slot = true;
 
-        if state.phase == WarmWorldStandbyPhase::Warming {
+        #[cfg(not(target_arch = "wasm32"))]
+        if state.phase == WarmWorldStandbyPhase::Warming && slot.local_startup.is_some() {
             let startup_step_started_at = self.services.clock.now();
             let step_result = {
                 let startup = slot
@@ -3383,7 +3663,35 @@ impl McloneSceneHost {
         }
 
         if retain_slot
+            && state.phase == WarmWorldStandbyPhase::Warming
+            && slot.local_startup.is_none()
+            && slot.runtime.is_some()
+        {
+            state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
+        }
+
+        if retain_slot
             && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
+            && slot.external_runtime_startup_pending
+        {
+            let camera_position = glam_vec3_from_vec3d(slot.camera.snapshot().eye);
+            let runtime_ready = slot.runtime.as_ref().is_some_and(|runtime| {
+                runtime.startup_host_ready(
+                    mclone_app_runtime::StartupReadinessPolicy::Playable,
+                    camera_position,
+                )
+            });
+            if runtime_ready {
+                slot.external_runtime_startup_pending = false;
+                slot.lifecycle = WorldSlotLifecycle::StandbyCpuReady;
+                slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
+                state.camera_reconciled = true;
+            }
+        }
+
+        if retain_slot
+            && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
+            && !slot.external_runtime_startup_pending
             && matches!(
                 state.presentation,
                 WarmWorldPresentationRequest::Diorama { .. }
@@ -3409,6 +3717,7 @@ impl McloneSceneHost {
 
         if retain_slot
             && state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
+            && !slot.external_runtime_startup_pending
             && self.active_world.lifecycle == WorldSlotLifecycle::ActiveReady
             && matches!(state.presentation, WarmWorldPresentationRequest::OpaqueGate)
         {
@@ -3486,7 +3795,6 @@ impl McloneSceneHost {
 
     /// Advance at most one budgeted standby GPU-preparation pass after the
     /// active slot has consumed its render-thread work for this frame.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn advance_warm_world_gpu(
         &mut self,
         device: &wgpu::Device,
@@ -3503,11 +3811,17 @@ impl McloneSceneHost {
         if matches!(
             state.phase,
             WarmWorldStandbyPhase::Warming
-                | WarmWorldStandbyPhase::ResolvingEndpoints
                 | WarmWorldStandbyPhase::PlacementFailed
                 | WarmWorldStandbyPhase::Failed
                 | WarmWorldStandbyPhase::Cancelled
         ) {
+            self.standby_world = Some(slot);
+            self.warm_world_standby = Some(state);
+            return Ok(());
+        }
+        if state.phase == WarmWorldStandbyPhase::ResolvingEndpoints
+            && !slot.external_runtime_startup_pending
+        {
             self.standby_world = Some(slot);
             self.warm_world_standby = Some(state);
             return Ok(());
@@ -3532,35 +3846,44 @@ impl McloneSceneHost {
         if !state.readiness.startup_seed_enqueued {
             let startup_sections = std::mem::take(&mut slot.pending_startup_sections);
             if startup_sections.is_empty() {
-                state.phase = WarmWorldStandbyPhase::Failed;
-                state.failure = Some("CPU-ready standby has no startup seed meshes".to_owned());
-                self.warm_world_standby = Some(state);
-                return Ok(());
+                if slot.local_startup.is_none() && slot.runtime.is_some() {
+                    state.readiness.startup_seed_enqueued = true;
+                    state.readiness.startup_seed_drained = true;
+                    state
+                        .gpu_warm_started_at
+                        .get_or_insert_with(|| self.services.clock.now());
+                } else {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.failure = Some("CPU-ready standby has no startup seed meshes".to_owned());
+                    self.warm_world_standby = Some(state);
+                    return Ok(());
+                }
+            } else {
+                let expected_lifecycle_items = startup_sections.len();
+                let update = RenderSectionCacheUpdate::from_startup_seed(startup_sections);
+                let enqueue = slot.section_uploads.enqueue_cache_update(update);
+                if enqueue.queued_lifecycle_items != expected_lifecycle_items
+                    || enqueue.superseded_lifecycle_items != 0
+                    || enqueue.released_compile_jobs != 0
+                {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.failure = Some(format!(
+                        "startup seed enqueue violated lifecycle conservation: expected={} queued={} superseded={} released={}",
+                        expected_lifecycle_items,
+                        enqueue.queued_lifecycle_items,
+                        enqueue.superseded_lifecycle_items,
+                        enqueue.released_compile_jobs,
+                    ));
+                    self.warm_world_standby = Some(state);
+                    return Ok(());
+                }
+                state.gpu_warm_started_at = Some(self.services.clock.now());
+                state.upload_queue_nonempty_since = state.gpu_warm_started_at;
+                state.initial_upload_lifecycle_items = expected_lifecycle_items;
+                state.readiness.startup_seed_enqueued = true;
+                slot.lifecycle = WorldSlotLifecycle::StandbyGpuWarming;
+                state.phase = WarmWorldStandbyPhase::GpuWarming;
             }
-            let expected_lifecycle_items = startup_sections.len();
-            let update = RenderSectionCacheUpdate::from_startup_seed(startup_sections);
-            let enqueue = slot.section_uploads.enqueue_cache_update(update);
-            if enqueue.queued_lifecycle_items != expected_lifecycle_items
-                || enqueue.superseded_lifecycle_items != 0
-                || enqueue.released_compile_jobs != 0
-            {
-                state.phase = WarmWorldStandbyPhase::Failed;
-                state.failure = Some(format!(
-                    "startup seed enqueue violated lifecycle conservation: expected={} queued={} superseded={} released={}",
-                    expected_lifecycle_items,
-                    enqueue.queued_lifecycle_items,
-                    enqueue.superseded_lifecycle_items,
-                    enqueue.released_compile_jobs,
-                ));
-                self.warm_world_standby = Some(state);
-                return Ok(());
-            }
-            state.gpu_warm_started_at = Some(self.services.clock.now());
-            state.upload_queue_nonempty_since = state.gpu_warm_started_at;
-            state.initial_upload_lifecycle_items = expected_lifecycle_items;
-            state.readiness.startup_seed_enqueued = true;
-            slot.lifecycle = WorldSlotLifecycle::StandbyGpuWarming;
-            state.phase = WarmWorldStandbyPhase::GpuWarming;
         } else if state.phase == WarmWorldStandbyPhase::CpuReady {
             state.phase = WarmWorldStandbyPhase::GpuWarming;
         }
@@ -3898,6 +4221,8 @@ impl McloneSceneHost {
         _device: &wgpu::Device,
         _queue: &wgpu::Queue,
     ) -> Result<bool> {
+        self.advance_warm_world_standby();
+        self.update_managed_scenario_destination_status();
         Ok(false)
     }
 
@@ -3988,6 +4313,7 @@ impl McloneSceneHost {
         let accepted_entry_pose = Some(WorldEntryPose::from_camera(&camera));
         self.active_world.install(DrawableWorldSlotInstall {
             id: self.active_world.id,
+            managed_world_key: self.active_world.managed_world_key.clone(),
             descriptor: Some(descriptor.clone()),
             lifecycle: WorldSlotLifecycle::ActiveReady,
             asset_epoch: self.active_assets.epoch,
@@ -4110,7 +4436,6 @@ impl McloneSceneHost {
     /// Clear only host presentation caches whose meaning changes when another
     /// complete world slot becomes active. Slot-owned traversal, uploads, draw
     /// resources, runtime state, and camera state intentionally survive.
-    #[cfg(not(target_arch = "wasm32"))]
     fn clear_world_selection_presentation_state(&mut self) {
         self.underwater_effects = XrUnderwaterEffectStates::default();
         self.last_underwater_update = None;
@@ -4203,6 +4528,7 @@ impl McloneSceneHost {
         let accepted_entry_pose = Some(WorldEntryPose::from_camera(&started.camera));
         self.active_world.install(DrawableWorldSlotInstall {
             id: self.active_world.id,
+            managed_world_key: None,
             descriptor: Some(descriptor.clone()),
             lifecycle: WorldSlotLifecycle::ActiveReady,
             asset_epoch: self.active_assets.epoch,
@@ -5021,7 +5347,6 @@ pub fn local_integrated_scene_options(
         .with_integrated_world_session_storage(storage)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 const fn vec3d_from_array([x, y, z]: [f64; 3]) -> Vec3d {
     Vec3d::new(x, y, z)
 }

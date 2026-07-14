@@ -12,7 +12,8 @@ Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and a shared web-parity refactor
 with its baseline, portable scenario content, and immutable second-slot terrain
-resource sharing landed. Slot-targeted shared startup is next.**
+resource sharing landed. Portable slot-targeted startup, readiness, activation,
+and swap ownership are also landed; IndexedDB provisioning is next.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -47,8 +48,11 @@ destination renderer shell is prepared under startup cover, then the island
 appears through the existing exact readiness gate. The same flat and
 synthetic-stereo menu path completes A-to-B-to-A activation. Flat lifecycle
 proof also cancels a pending launch, quits, reuses the same managed content,
-and reaches a second live preview. Web renders the shared action unavailable
-with an explicit IndexedDB provisioning reason. A server-owned behavior
+and reaches a second live preview. Shared Rust now issues independent tokened,
+storage-neutral provisioning and role-aware slot-start operations, and owns
+external-runtime readiness and complete-slot activation without WASM policy
+stubs. The browser still renders the action unavailable while IndexedDB and
+Worker adapters remain unconnected. A server-owned behavior
 profile travels with each slot: the managed lobby authoritatively denies
 player break/place while the island remains mutable, including after
 complete-slot exchanges.
@@ -87,8 +91,8 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 178 architecture and unattended execution rules locked after the
-Tactical 177 audit).
+(Tactical 178 Slice 3 landed the shared slot-targeted startup and activation
+seams while retaining the native product and diagnostic behavior).
 
 ## Motivation
 

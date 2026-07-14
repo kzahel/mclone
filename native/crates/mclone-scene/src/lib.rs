@@ -63,6 +63,9 @@ use mclone_app_runtime::native_service_assembly::{
 };
 use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, PreparedSceneAssets};
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
+use mclone_app_runtime::scenario_content::ManagedWorldKey;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::scenario_content::NativeManagedScenarioProvisionAdapter;
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::seed_reroll::NewWorldSeedReroll;
 #[cfg(not(target_arch = "wasm32"))]
@@ -119,7 +122,6 @@ use mclone_render::gui::{
     GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
     WorldGuiRenderer,
 };
-#[cfg(not(target_arch = "wasm32"))]
 use mclone_render::opaque_world_gate::OpaqueWorldGateRenderer;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::screen_effect::load_screen_effect_texture_assets;
@@ -349,6 +351,7 @@ struct WorldPreparationPolicy {
 /// path while allowing one explicitly requested detached standby beside it.
 struct DrawableWorldSlot {
     id: WorldInstanceId,
+    managed_world_key: Option<ManagedWorldKey>,
     descriptor: Option<ActiveSessionDescriptor>,
     storage: WorldSlotStorage,
     lifecycle: WorldSlotLifecycle,
@@ -377,6 +380,7 @@ struct DrawableWorldSlot {
 /// a host never exposes a runtime paired with the previous camera or draw map.
 struct DrawableWorldSlotInstall {
     id: WorldInstanceId,
+    managed_world_key: Option<ManagedWorldKey>,
     descriptor: Option<ActiveSessionDescriptor>,
     lifecycle: WorldSlotLifecycle,
     asset_epoch: u64,
@@ -400,6 +404,7 @@ impl DrawableWorldSlot {
         let storage = WorldSlotStorage::from_scene(&install.scene, install.descriptor.as_ref());
         Self {
             id: install.id,
+            managed_world_key: install.managed_world_key,
             descriptor: install.descriptor,
             storage,
             lifecycle: install.lifecycle,
@@ -424,6 +429,7 @@ impl DrawableWorldSlot {
 
     fn install(&mut self, install: DrawableWorldSlotInstall) {
         self.id = install.id;
+        self.managed_world_key = install.managed_world_key;
         self.descriptor = install.descriptor;
         self.storage = WorldSlotStorage::from_scene(&install.scene, self.descriptor.as_ref());
         self.lifecycle = install.lifecycle;
@@ -452,7 +458,6 @@ impl DrawableWorldSlot {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn complete_detached_local_startup(
         &mut self,
         descriptor: ActiveSessionDescriptor,
@@ -476,20 +481,18 @@ impl DrawableWorldSlot {
 pub struct McloneSceneHost {
     active_world: DrawableWorldSlot,
     standby_world: Option<DrawableWorldSlot>,
+    next_world_instance_id: u64,
     warm_world_standby: Option<WarmWorldStandbyState>,
-    #[cfg(not(target_arch = "wasm32"))]
     prepared_warm_world_shell: Option<PreparedWarmWorldRendererShell>,
-    #[cfg(not(target_arch = "wasm32"))]
     managed_scenario_launch: Option<ManagedScenarioLaunchState>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_managed_scenario_adapter: Option<NativeManagedScenarioProvisionAdapter>,
     embedded_world_preview: Option<EmbeddedWorldPreview>,
     embedded_world_activation: EmbeddedWorldActivationState,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     embedded_world_activation_sequence: u64,
-    #[cfg(not(target_arch = "wasm32"))]
     world_gate: Option<WorldGate>,
-    #[cfg(not(target_arch = "wasm32"))]
     opaque_world_gate_renderer: Option<OpaqueWorldGateRenderer>,
-    #[cfg(not(target_arch = "wasm32"))]
     warm_world_switch_sequence: u64,
     last_warm_world_switch: Option<WarmWorldSwitchReport>,
     services: SceneHostServices,
@@ -2610,13 +2613,8 @@ impl McloneSceneHost {
     ) -> Result<XrTerrainUploadSummary> {
         if self.defer_embedded_world_destination_preparation() {
             let upload = self.frozen_runtime_upload_summary();
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                self.advance_warm_world_gpu(device, camera_position, frame_deadline)?;
-                self.synchronize_world_gate_state();
-            }
-            #[cfg(target_arch = "wasm32")]
-            let _ = (device, camera_position, frame_deadline, timing);
+            self.advance_warm_world_gpu(device, camera_position, frame_deadline)?;
+            self.synchronize_world_gate_state();
             return Ok(upload);
         }
         let first_frame_after_warm_world_selection =
@@ -2652,13 +2650,8 @@ impl McloneSceneHost {
             &policy,
             timing,
         )?;
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
-            self.synchronize_world_gate_state();
-        }
-        #[cfg(target_arch = "wasm32")]
-        let _ = standby_deadline;
+        self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
+        self.synchronize_world_gate_state();
         Ok(upload)
     }
 

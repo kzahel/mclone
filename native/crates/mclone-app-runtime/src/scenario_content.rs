@@ -31,6 +31,23 @@ pub enum ManagedScenarioWorldRole {
     Destination,
 }
 
+/// Shared request handed to a platform managed-content executor.
+///
+/// Primary and destination requests are issued independently so a slow or
+/// failed destination never delays primary startup.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProvisionManagedScenarioWorld {
+    pub intent: ScenarioLaunchIntent,
+    pub role: ManagedScenarioWorldRole,
+}
+
+/// Storage-neutral result returned by a platform content executor.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProvisionedManagedScenarioWorld {
+    pub role: ManagedScenarioWorldRole,
+    pub key: ManagedWorldKey,
+}
+
 /// Stable storage identity. This is deliberately unrelated to the live scene
 /// instance id, role of the currently active slot, or a native filesystem path.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]

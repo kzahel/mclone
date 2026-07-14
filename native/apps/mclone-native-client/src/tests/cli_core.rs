@@ -78,10 +78,10 @@ fn live_diorama_productization_uses_one_scene_scenario_executor() {
     for marker in [
         "authored_world_fixture_marker_path(&diorama.world_dir)",
         "WarmWorldStandbyRequest::new(",
-        ".with_persistent_world_dir(",
+        ".with_world_generation_profile(",
         ".with_embedded_preview(",
         "PreparedEmbeddedWorldScenario::new(BuiltInScenarioId::LobbyPreview, request)",
-        "host.begin_embedded_world_scenario(device, queue, scenario)",
+        "host.begin_native_embedded_world_scenario(device, queue, scenario, &diorama.world_dir)",
     ] {
         assert!(
             desktop.contains(marker),

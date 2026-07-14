@@ -1,8 +1,10 @@
 # 178: Shared Web Lobby Scenario Parity
 
-Status: active 2026-07-14. Slices 0-2 locked the baseline, extracted portable
-scenario content, and removed the duplicate second-slot terrain shell. Slice 3
-is next. This tactical closes the browser exception left by Tacticals 174,
+Status: active 2026-07-14. Slices 0-3 locked the baseline, extracted portable
+scenario content, removed the duplicate second-slot terrain shell, and moved
+managed provisioning, slot-targeted startup, readiness, activation, and swap
+policy into shared Rust. IndexedDB provisioning is next. This tactical closes
+the browser exception left by Tacticals 174,
 175, and 177 by refactoring their native-shaped startup seams into shared
 contracts. It does not authorize a second browser scenario implementation.
 
@@ -740,6 +742,62 @@ Deliverables:
 Exit criteria: native product and diagnostic paths use the new shared seam,
 `mclone-scene` contains no false/no-op WASM scenario policy stubs, and no
 browser runtime has been added yet.
+
+#### Slice 3 completion record — 2026-07-14
+
+`ManagedScenarioLaunchState` now owns independent tokened primary and
+destination provisioning operations and a separate tokened slot-start ledger
+in portable scene code. Provisioning completions carry only deterministic
+`ManagedWorldKey`s. Start requests carry a stable `WorldInstanceId`, role,
+scene, descriptor, and optional destination presentation; neither contract
+contains a filesystem path or derives identity from the slot that currently
+owns the world.
+
+`NativeManagedScenarioProvisionAdapter` is now the native rim around that
+state machine. It retains key-to-path resolution, filesystem publication, and
+background threads outside the shared contracts, then returns path-free
+tokened completions. The direct diagnostic diorama also enters through an
+explicit native adapter method instead of smuggling `PathBuf` through the
+portable standby request.
+
+External session completion is role-aware and installs its neutral runtime
+aggregate into either the active managed-primary slot or the managed
+destination slot. Native local startup and external-runtime startup converge
+on the same prepared warm-slot installer and `Switchable` readiness policy.
+The external path drains and acknowledges its own initial camera correction,
+resolves terrain-relative placement, and advances through the ordinary bounded
+compiler, accept, and upload path. Complete-slot activation, blink advancement,
+preview retargeting, and stable instance identity through A-to-B-to-A exchange
+no longer have false or no-op WASM policy substitutes.
+
+No browser executor or second browser runtime was added in this slice. The web
+menu remains explicitly unavailable until Slices 4-6 connect IndexedDB and
+Worker adapters to these shared operations. Ordinary one-world construction
+adds only inert ledgers, identifiers, and untaken branches; it performs no
+scenario provisioning, renderer creation, runtime startup, or polling.
+
+The native product smoke again cancelled a pending launch, relaunched, reused
+managed content, completed five captures and two switches, denied mutation in
+the lobby, and allowed mutation on the island. It reported two shared terrain
+resource owners and zero duplicated atlas bytes. Flat lobby, return-island,
+diagnostic activation, and synthetic-stereo captures were inspected; table
+scale, shared-depth placement, water ordering, matching eye composition, and
+ready first-uncovered destination terrain remain correct.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-app-runtime
+cargo test -p mclone-scene
+cargo test -p mclone-scene --test one_world_ownership_contract
+cargo test -p mclone-server -p mclone-web-client
+cargo check -p mclone-web-client --target wasm32-unknown-unknown
+pnpm native:lobby-scenario:smoke
+pnpm native:lobby-scenario:stereo-smoke
+pnpm native:live-diorama:activation-smoke
+pnpm native:web:build
+pnpm native:thin-adapters:purity
+```
 
 Estimated effort: 2-3 days.
 

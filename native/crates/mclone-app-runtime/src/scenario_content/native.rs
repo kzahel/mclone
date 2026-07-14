@@ -4,6 +4,7 @@
 //! path-free intent into versioned, app-private filesystem content without
 //! admitting those worlds to the user world catalog.
 
+use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -26,7 +27,8 @@ use crate::scenario::{BuiltInScenarioId, ScenarioLaunchIntent};
 
 use super::{
     LOBBY_PREVIEW_DIRECTORY, MANAGED_SCENARIO_MANIFEST_FILE, ManagedScenarioManifest,
-    ManagedScenarioWorldManifest,
+    ManagedScenarioWorldManifest, ManagedScenarioWorldRole, ManagedWorldKey,
+    ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld,
 };
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
@@ -259,6 +261,120 @@ impl NativeManagedScenarioContentOperationService {
         &mut self,
     ) -> Vec<CancelledPlatformOperation<ScenarioLaunchIntent, ScenarioLaunchIntent>> {
         self.operations.begin_epoch()
+    }
+}
+
+#[derive(Debug)]
+struct NativeProvisionCompletion {
+    token: PlatformOperationToken,
+    result: Result<(ProvisionedManagedScenarioWorld, PathBuf), String>,
+}
+
+/// Native execution adapter for the shared, externally tokened provisioning
+/// operation. Paths remain here and are looked up only when native assembly
+/// constructs an integrated-server runner.
+#[derive(Debug)]
+pub struct NativeManagedScenarioProvisionAdapter {
+    content: NativeManagedScenarioContentService,
+    sender: mpsc::Sender<NativeProvisionCompletion>,
+    receiver: mpsc::Receiver<NativeProvisionCompletion>,
+    workers: Vec<JoinHandle<()>>,
+    world_dirs: HashMap<ManagedWorldKey, PathBuf>,
+    immediate: Vec<NativeProvisionCompletion>,
+}
+
+impl NativeManagedScenarioProvisionAdapter {
+    pub fn background(root: impl Into<PathBuf>) -> Self {
+        let (sender, receiver) = mpsc::channel();
+        Self {
+            content: NativeManagedScenarioContentService::new(root),
+            sender,
+            receiver,
+            workers: Vec::new(),
+            world_dirs: HashMap::new(),
+            immediate: Vec::new(),
+        }
+    }
+
+    pub fn submit(&mut self, operation: PlatformOperation<ProvisionManagedScenarioWorld>) {
+        self.reap_workers();
+        let service = self.content.clone();
+        let sender = self.sender.clone();
+        let token = operation.token;
+        let request = operation.kind;
+        match thread::Builder::new()
+            .name(format!("mclone-scenario-world-{}", token.request_id.get()))
+            .spawn(move || {
+                let result = service.resolve(request.intent).and_then(|content| {
+                    let (world, key) = match request.role {
+                        ManagedScenarioWorldRole::Primary => (
+                            content.primary,
+                            content
+                                .manifest
+                                .world_key(ManagedScenarioWorldRole::Primary)?,
+                        ),
+                        ManagedScenarioWorldRole::Destination => (
+                            content.destination,
+                            content
+                                .manifest
+                                .world_key(ManagedScenarioWorldRole::Destination)?,
+                        ),
+                    };
+                    Ok((
+                        ProvisionedManagedScenarioWorld {
+                            role: request.role,
+                            key,
+                        },
+                        world.root,
+                    ))
+                });
+                let _ = sender.send(NativeProvisionCompletion {
+                    token,
+                    result: result.map_err(|error| format!("{error:#}")),
+                });
+            }) {
+            Ok(worker) => self.workers.push(worker),
+            Err(error) => self.immediate.push(NativeProvisionCompletion {
+                token,
+                result: Err(format!("spawn managed scenario content worker: {error}")),
+            }),
+        }
+    }
+
+    pub fn poll(
+        &mut self,
+    ) -> Vec<PlatformOperationCompletion<ProvisionedManagedScenarioWorld, String>> {
+        self.reap_workers();
+        let mut ready = self.immediate.drain(..).collect::<Vec<_>>();
+        ready.extend(self.receiver.try_iter());
+        ready
+            .into_iter()
+            .map(|completion| PlatformOperationCompletion {
+                token: completion.token,
+                result: completion.result.map(|(provisioned, world_dir)| {
+                    self.world_dirs.insert(provisioned.key.clone(), world_dir);
+                    provisioned
+                }),
+            })
+            .collect()
+    }
+
+    pub fn world_dir(&self, key: &ManagedWorldKey) -> Option<&Path> {
+        self.world_dirs.get(key).map(PathBuf::as_path)
+    }
+
+    fn reap_workers(&mut self) {
+        let mut index = 0;
+        while index < self.workers.len() {
+            if self.workers[index].is_finished() {
+                let worker = self.workers.swap_remove(index);
+                if worker.join().is_err() {
+                    log::warn!("managed scenario provision worker panicked");
+                }
+            } else {
+                index += 1;
+            }
+        }
     }
 }
 
@@ -701,6 +817,53 @@ mod tests {
                 .count(),
             1
         );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn externally_tokened_adapter_keeps_paths_out_of_shared_completions() {
+        let root = unique_test_root("external-tokens");
+        let mut adapter = NativeManagedScenarioProvisionAdapter::background(root.join("scenarios"));
+        let intent = ScenarioLaunchIntent::lobby_preview();
+        let mut ledger = crate::platform_operation::PlatformOperationLedger::new();
+        let primary = ledger.issue(
+            ProvisionManagedScenarioWorld {
+                intent,
+                role: ManagedScenarioWorldRole::Primary,
+            },
+            intent,
+        );
+        let destination = ledger.issue(
+            ProvisionManagedScenarioWorld {
+                intent,
+                role: ManagedScenarioWorldRole::Destination,
+            },
+            intent,
+        );
+        let tokens = [primary.token, destination.token];
+        adapter.submit(destination);
+        adapter.submit(primary);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut completions = Vec::new();
+        while completions.len() < 2 {
+            completions.extend(adapter.poll());
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        completions.sort_by_key(|completion| completion.token.request_id);
+        assert_eq!(
+            completions
+                .iter()
+                .map(|completion| completion.token)
+                .collect::<Vec<_>>(),
+            tokens
+        );
+        for completion in completions {
+            let provisioned = completion.result.unwrap();
+            assert!(adapter.world_dir(&provisioned.key).unwrap().is_dir());
+            assert!(provisioned.key.as_str().starts_with("managed."));
+        }
         fs::remove_dir_all(root).unwrap();
     }
 

@@ -140,7 +140,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             })?;
         let mut request =
             WarmWorldStandbyRequest::new(manifest.seed, diorama.source_region.center())
-                .with_persistent_world_dir(&diorama.world_dir, manifest.world_generation_profile)
+                .with_world_generation_profile(manifest.world_generation_profile)
                 .with_embedded_preview(
                     diorama.source_region,
                     diorama.placement,
@@ -150,7 +150,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             request = request.with_standby_cadence(cadence);
         }
         let scenario = PreparedEmbeddedWorldScenario::new(BuiltInScenarioId::LobbyPreview, request);
-        host.begin_embedded_world_scenario(device, queue, scenario)
+        host.begin_native_embedded_world_scenario(device, queue, scenario, &diorama.world_dir)
             .context("initialize live world diorama scenario")?;
     } else if let Some(seed) = scene.warm_world_standby_seed {
         let mut request =
