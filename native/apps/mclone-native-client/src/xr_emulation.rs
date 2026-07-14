@@ -12,7 +12,7 @@ use mclone_scene::{
     EmbeddedWorldPreviewSnapshot,
 };
 
-use crate::cli::XrEmulationScreenshotOptions;
+use crate::cli::{LobbyScenarioSmokeOptions, XrEmulationScreenshotOptions};
 use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::WindowSceneAssets;
@@ -37,6 +37,167 @@ pub(crate) struct XrEmulationScreenshotReport {
     pub(crate) embedded_preview: Option<EmbeddedWorldPreviewSnapshot>,
     pub(crate) embedded_activation_reports: Vec<EmbeddedWorldActivationReport>,
     pub(crate) embedded_activation_switch_reports: Vec<mclone_scene::WarmWorldSwitchReport>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LobbyScenarioStereoSmokeReport {
+    pub(crate) path: PathBuf,
+    pub(crate) eye_pixel_difference_count: usize,
+    pub(crate) switch_count: u64,
+}
+
+pub(crate) fn run_lobby_scenario_stereo_smoke(
+    options: &LobbyScenarioSmokeOptions,
+) -> Result<LobbyScenarioStereoSmokeReport> {
+    if options.directory.exists() {
+        std::fs::remove_dir_all(&options.directory).with_context(|| {
+            format!(
+                "clear lobby scenario stereo smoke directory `{}`",
+                options.directory.display()
+            )
+        })?;
+    }
+    std::fs::create_dir_all(&options.directory).with_context(|| {
+        format!(
+            "create lobby scenario stereo smoke directory `{}`",
+            options.directory.display()
+        )
+    })?;
+    let path = options.directory.join("returned-lobby-stereo.png");
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let (capture, (summary, switch_count)) = write_headless_stereo_frame_png(
+        HeadlessStereoFrameOptions {
+            path: path.clone(),
+            eye_width: options.width,
+            eye_height: options.height,
+        },
+        move |device, queue, format, size, left_view, right_view| {
+            let mut driver = OffscreenDriver::new_stereo_emulation(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+            )?;
+            if let Some(registry) =
+                mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
+                    asset_source.clone(),
+                )?
+            {
+                driver.host_mut().configure_asset_pack_sources(
+                    registry,
+                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                )?;
+            }
+            let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+            driver.drive_stereo_until_streamed(device, queue, views)?;
+            driver
+                .host_mut()
+                .set_mono_ui_screen(Some(mclone_ui::GameScreen::Title));
+            driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+            driver.render_stereo(device, queue, views, left_view, right_view)?;
+            driver.host_mut().apply_xr_ui_action(
+                mclone_ui::GameUiAction::EnterScenario(mclone_ui::GameScenarioId::LobbyPreview),
+                device,
+                queue,
+            )?;
+
+            let mut saw_playable_lobby = false;
+            let mut saw_visible_preview = false;
+            for _ in 0..480 {
+                std::thread::sleep(Duration::from_millis(4));
+                views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
+                driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+                driver.render_stereo(device, queue, views, left_view, right_view)?;
+                if driver.host().active_world_seed()
+                    == mclone_server::AuthoredWorldFixtureKind::Table.seed()
+                    && driver.host().local_startup_complete()
+                {
+                    saw_playable_lobby = true;
+                    if driver.host().active_world_behavior_profile()
+                        != mclone_server::WorldBehaviorProfile::ProtectedLobby
+                    {
+                        bail!("synthetic-stereo lobby did not retain protected authority");
+                    }
+                }
+                if let Some(preview) = driver.host().embedded_world_preview_snapshot() {
+                    if preview.phase == EmbeddedWorldPreviewPhase::Failed {
+                        bail!("synthetic-stereo lobby preview failed: {preview:?}");
+                    }
+                    if preview.phase == EmbeddedWorldPreviewPhase::Visible {
+                        saw_visible_preview = true;
+                        break;
+                    }
+                }
+            }
+            if !saw_playable_lobby || !saw_visible_preview {
+                bail!(
+                    "synthetic-stereo menu launch did not reach playable lobby and visible preview: lobby={saw_playable_lobby} preview={saw_visible_preview}"
+                );
+            }
+            views = synthetic_stereo_preview_views(&mut driver, size)?;
+            driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+            driver.render_stereo(device, queue, views, left_view, right_view)?;
+            if driver
+                .host()
+                .embedded_world_preview_snapshot()
+                .is_none_or(|preview| preview.last_drawn_section_count == 0)
+            {
+                bail!("synthetic-stereo lobby preview produced no placed draws");
+            }
+            let (activation_reports, switch_reports) = drive_embedded_preview_activation_roundtrip(
+                &mut driver,
+                device,
+                queue,
+                size,
+                left_view,
+                right_view,
+            )?;
+            if activation_reports.len() != 2 || switch_reports.len() != 2 {
+                bail!("synthetic-stereo lobby did not complete two activation legs");
+            }
+            if driver.host().active_world_seed()
+                != mclone_server::AuthoredWorldFixtureKind::Table.seed()
+                || driver.host().active_world_behavior_profile()
+                    != mclone_server::WorldBehaviorProfile::ProtectedLobby
+            {
+                bail!("synthetic-stereo lobby round trip did not return to protected lobby");
+            }
+            views = synthetic_stereo_preview_views(&mut driver, size)?;
+            driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
+            let summary = driver.render_stereo(device, queue, views, left_view, right_view)?;
+            Ok((summary, switch_reports.len() as u64))
+        },
+    )?;
+    if capture.non_clear_rgb_pixel_count == 0 || summary.drawn_section_count == 0 {
+        bail!("synthetic-stereo lobby capture rendered no world pixels");
+    }
+    if capture.eye_pixel_difference_count == 0 {
+        bail!("synthetic-stereo lobby eyes are pixel-identical");
+    }
+    let receipt = serde_json::json!({
+        "schema": 1,
+        "capture": path,
+        "eyePixelDifferenceCount": capture.eye_pixel_difference_count,
+        "switchCount": switch_count,
+        "lobbyBehavior": "protectedLobby",
+        "islandBehavior": "mutable",
+    });
+    std::fs::write(
+        options.directory.join("report.json"),
+        serde_json::to_vec_pretty(&receipt)?,
+    )?;
+    Ok(LobbyScenarioStereoSmokeReport {
+        path,
+        eye_pixel_difference_count: capture.eye_pixel_difference_count,
+        switch_count,
+    })
 }
 
 pub(crate) fn run_xr_emulation_screenshot(

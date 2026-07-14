@@ -769,7 +769,7 @@ fn run_live_diorama_activation_smoke(
     })
 }
 
-fn aim_flat_host_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Result<()> {
+pub(crate) fn aim_flat_host_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Result<()> {
     let preview = host
         .scene_host()
         .embedded_world_preview_snapshot()
@@ -789,7 +789,9 @@ fn aim_flat_host_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Resu
     Ok(())
 }
 
-fn request_flat_embedded_world_activation(host: &mut OffscreenFlatClientHost) -> Result<()> {
+pub(crate) fn request_flat_embedded_world_activation(
+    host: &mut OffscreenFlatClientHost,
+) -> Result<()> {
     let statuses = host.apply_input_frame(FlatInputFrame {
         use_item: true,
         ..FlatInputFrame::default()

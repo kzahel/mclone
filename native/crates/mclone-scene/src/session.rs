@@ -339,6 +339,8 @@ impl McloneSceneHost {
             warm_world_standby: None,
             #[cfg(not(target_arch = "wasm32"))]
             prepared_warm_world_shell: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            managed_scenario_launch: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
@@ -531,6 +533,8 @@ impl McloneSceneHost {
             warm_world_standby: None,
             #[cfg(not(target_arch = "wasm32"))]
             prepared_warm_world_shell: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            managed_scenario_launch: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
@@ -735,6 +739,8 @@ impl McloneSceneHost {
             warm_world_standby: None,
             #[cfg(not(target_arch = "wasm32"))]
             prepared_warm_world_shell: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            managed_scenario_launch: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
             embedded_world_activation_sequence: 0,
@@ -1270,6 +1276,399 @@ impl McloneSceneHost {
             scene.render_distance
         );
         Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn apply_managed_scenario_effect(
+        &mut self,
+        effect: ClientExperienceScenarioEffect,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        match effect {
+            ClientExperienceScenarioEffect::Launch(intent) => {
+                self.begin_managed_scenario_launch(intent)
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn apply_managed_scenario_effect(
+        &mut self,
+        _effect: ClientExperienceScenarioEffect,
+        _device: &wgpu::Device,
+        _queue: &wgpu::Queue,
+    ) -> Result<bool> {
+        self.status_overlay = StatusOverlay::new(
+            mclone_app_runtime::client_experience::WEB_LOBBY_SCENARIO_REASON,
+            false,
+        );
+        Ok(false)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn begin_managed_scenario_launch(
+        &mut self,
+        intent: mclone_app_runtime::scenario::ScenarioLaunchIntent,
+    ) -> Result<bool> {
+        if self.managed_scenario_launch.is_some() {
+            log::info!("ignoring repeated managed lobby scenario launch");
+            return Ok(false);
+        }
+        if self.prepared_warm_world_shell.is_some()
+            || self.warm_world_standby.is_some()
+            || self.standby_world.is_some()
+        {
+            bail!("a retained-world scenario is already active");
+        }
+        let world_root = self
+            .active_world
+            .scene
+            .world_root
+            .as_deref()
+            .context("Lobby scenarios require persistent application storage")?;
+        let scenario_root =
+            mclone_app_runtime::scenario_content::native_managed_scenario_root_from_world_root(
+                world_root,
+            );
+        let mut primary_operations =
+            mclone_app_runtime::scenario_content::NativeManagedScenarioContentOperationService::background(
+                scenario_root.clone(),
+            );
+        let mut destination_operations =
+            mclone_app_runtime::scenario_content::NativeManagedScenarioContentOperationService::background(
+                scenario_root,
+            );
+        let primary_token = primary_operations.submit(intent);
+        let destination_token = destination_operations.submit(intent);
+        self.managed_scenario_launch = Some(ManagedScenarioLaunchState {
+            intent,
+            phase: ManagedScenarioLaunchPhase::ResolvingContent,
+            primary_operations: Some(primary_operations),
+            destination_operations: Some(destination_operations),
+            destination: None,
+            destination_failure: None,
+        });
+        self.status_overlay = StatusOverlay::new("Preparing Lobby", true);
+        log::info!(
+            "managed lobby scenario content requested epoch={} request={}",
+            primary_token.epoch.get(),
+            primary_token.request_id.get()
+        );
+        log::info!(
+            "managed lobby destination content requested epoch={} request={}",
+            destination_token.epoch.get(),
+            destination_token.request_id.get()
+        );
+        Ok(false)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn poll_managed_scenario_launch(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        let Some(mut launch) = self.managed_scenario_launch.take() else {
+            return Ok(());
+        };
+        if let Some(operations) = launch.destination_operations.as_mut() {
+            for resolution in operations.poll() {
+                match resolution {
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                        value,
+                        ..
+                    } => {
+                        match self.prepare_managed_lobby_destination(&value) {
+                            Ok(destination) => launch.destination = Some(destination),
+                            Err(error) => {
+                                launch.destination_failure = Some(format!(
+                                    "prepare managed lobby destination: {error:#}"
+                                ));
+                            }
+                        }
+                        launch.destination_operations = None;
+                        break;
+                    }
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
+                        error,
+                        ..
+                    } => {
+                        launch.destination_failure = Some(error);
+                        launch.destination_operations = None;
+                        break;
+                    }
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Stale(_)
+                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Duplicate(_)
+                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Unknown(_) => {}
+                }
+            }
+        }
+
+        if launch.phase == ManagedScenarioLaunchPhase::ResolvingContent
+            && let Some(operations) = launch.primary_operations.as_mut()
+        {
+            for resolution in operations.poll() {
+                match resolution {
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                        value,
+                        ..
+                    } => {
+                        log::info!(
+                            "managed scenario primary content resolved id={:?}",
+                            launch.intent.id
+                        );
+                        let primary = match self.prepare_managed_lobby_primary(&value) {
+                            Ok(primary) => primary,
+                            Err(error) => {
+                                if let Some(operations) = launch.destination_operations.as_mut() {
+                                    let _ = operations.begin_epoch();
+                                }
+                                self.prepared_warm_world_shell = None;
+                                self.ui.set_screen(Some(GameScreen::Title));
+                                self.status_overlay = StatusOverlay::new(
+                                    format!("Lobby startup failed: {error:#}"),
+                                    false,
+                                );
+                                return Ok(());
+                            }
+                        };
+                        let shell_definition = launch.destination.clone().or_else(|| {
+                            match self.prepare_managed_lobby_destination(&value) {
+                                Ok(destination) => {
+                                    launch.destination = Some(destination.clone());
+                                    Some(destination)
+                                }
+                                Err(error) => {
+                                    launch.destination_failure = Some(format!(
+                                        "prepare managed lobby renderer-shell definition: {error:#}"
+                                    ));
+                                    None
+                                }
+                            }
+                        });
+                        if let Some(shell_definition) = shell_definition
+                            && let Err(error) = self.prepare_embedded_world_scenario_shell(
+                                device,
+                                queue,
+                                &shell_definition,
+                            )
+                        {
+                            if let Some(operations) = launch.destination_operations.as_mut() {
+                                let _ = operations.begin_epoch();
+                            }
+                            launch.destination_operations = None;
+                            launch.destination = None;
+                            launch.destination_failure = Some(format!(
+                                "prepare managed lobby destination renderer shell: {error:#}"
+                            ));
+                            self.prepared_warm_world_shell = None;
+                        }
+                        let request = SessionStartRequest::new_seed_local_world(primary.seed);
+                        let Some(descriptor) = request.active_descriptor() else {
+                            if let Some(operations) = launch.destination_operations.as_mut() {
+                                let _ = operations.begin_epoch();
+                            }
+                            self.prepared_warm_world_shell = None;
+                            self.ui.set_screen(Some(GameScreen::Title));
+                            self.status_overlay = StatusOverlay::new(
+                                "Lobby startup failed: local request has no descriptor",
+                                false,
+                            );
+                            return Ok(());
+                        };
+                        self.session.request_start(
+                            request.clone(),
+                            ScenePendingSessionStart {
+                                runtime_kind: SessionRuntimeKind::Local,
+                                options: primary,
+                                descriptor,
+                            },
+                        );
+                        if let Err(error) = self.start_pending_session(device, queue) {
+                            if let Some(operations) = launch.destination_operations.as_mut() {
+                                let _ = operations.begin_epoch();
+                            }
+                            self.prepared_warm_world_shell = None;
+                            self.ui.set_screen(Some(GameScreen::Title));
+                            self.status_overlay = StatusOverlay::new(
+                                format!("Lobby startup failed: {error:#}"),
+                                false,
+                            );
+                            return Ok(());
+                        }
+                        self.ui.close();
+                        launch.phase = ManagedScenarioLaunchPhase::StartingPrimary;
+                        launch.primary_operations = None;
+                        break;
+                    }
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
+                        error,
+                        ..
+                    } => {
+                        if let Some(operations) = launch.destination_operations.as_mut() {
+                            let _ = operations.begin_epoch();
+                        }
+                        self.ui.set_screen(Some(GameScreen::Title));
+                        self.status_overlay = StatusOverlay::new(
+                            format!("Lobby content preparation failed: {error}"),
+                            false,
+                        );
+                        return Ok(());
+                    }
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Stale(_)
+                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Duplicate(_)
+                    | mclone_app_runtime::platform_operation::PlatformOperationResolution::Unknown(_) => {}
+                }
+            }
+        }
+
+        self.try_attach_managed_scenario_destination(&mut launch);
+        self.managed_scenario_launch = Some(launch);
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn prepare_managed_lobby_primary(
+        &self,
+        content: &mclone_app_runtime::scenario_content::NativeManagedScenarioContent,
+    ) -> Result<McloneSceneHostOptions> {
+        let primary_manifest = &content.primary.manifest;
+        let primary_fixture = &primary_manifest.fixture;
+
+        let mut primary = self.active_world.scene.clone();
+        primary.seed = primary_fixture.seed;
+        primary.chunk_x = primary_fixture.center_chunk[0];
+        primary.chunk_z = primary_fixture.center_chunk[1];
+        primary.remote_addr = None;
+        primary.world_dir = Some(content.primary.root.clone());
+        primary.world_generation_profile = primary_fixture.world_generation_profile;
+        primary.world_behavior_profile = primary_manifest.behavior_profile;
+        primary.use_initial_spawn_center = false;
+        primary.freeze_scheduled_fluid_ticks = true;
+        primary.validated()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn prepare_managed_lobby_destination(
+        &self,
+        content: &mclone_app_runtime::scenario_content::NativeManagedScenarioContent,
+    ) -> Result<PreparedEmbeddedWorldScenario> {
+        let primary_fixture = &content.primary.manifest.fixture;
+        let destination_manifest = &content.destination.manifest;
+        let destination_fixture = &destination_manifest.fixture;
+        let center = ChunkPos::new(
+            destination_fixture.center_chunk[0],
+            destination_fixture.center_chunk[1],
+        );
+        let region = mclone_render::placement::EmbeddedChunkRegion::new(
+            center,
+            0,
+            destination_fixture.preview_min_section_y,
+            destination_fixture.preview_max_section_y,
+        )?;
+        let placement = mclone_render::placement::WorldPlacement::new(
+            vec3d_from_array(destination_fixture.preview_anchor),
+            vec3d_from_array(primary_fixture.preview_anchor),
+            1.0 / 8.0,
+        )?;
+        let return_placement = mclone_render::placement::WorldPlacement::new(
+            vec3d_from_array(primary_fixture.preview_anchor),
+            vec3d_from_array(destination_fixture.kind.preview_display_anchor()),
+            1.0 / 8.0,
+        )?;
+        let destination = WarmWorldStandbyRequest::new(destination_fixture.seed, center)
+            .with_persistent_world_dir(
+                &content.destination.root,
+                destination_fixture.world_generation_profile,
+            )
+            .with_world_behavior_profile(destination_manifest.behavior_profile)
+            .with_embedded_preview(region, placement, return_placement);
+        Ok(PreparedEmbeddedWorldScenario::new(
+            content.manifest.scenario_id,
+            destination,
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn advance_managed_scenario_after_primary(&mut self, active_completed: bool) {
+        let Some(mut launch) = self.managed_scenario_launch.take() else {
+            return;
+        };
+        if launch.phase == ManagedScenarioLaunchPhase::StartingPrimary {
+            if active_completed {
+                launch.phase = ManagedScenarioLaunchPhase::PrimaryPlayable;
+            } else if matches!(self.session.state(), GameSessionState::Failed { .. }) {
+                if let Some(operations) = launch.destination_operations.as_mut() {
+                    let _ = operations.begin_epoch();
+                }
+                self.prepared_warm_world_shell = None;
+                self.ui.set_screen(Some(GameScreen::Title));
+                return;
+            }
+        }
+        self.try_attach_managed_scenario_destination(&mut launch);
+        self.managed_scenario_launch = Some(launch);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn try_attach_managed_scenario_destination(&mut self, launch: &mut ManagedScenarioLaunchState) {
+        if launch.phase != ManagedScenarioLaunchPhase::PrimaryPlayable {
+            return;
+        }
+        if let Some(error) = launch.destination_failure.take() {
+            self.prepared_warm_world_shell = None;
+            launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
+            self.status_overlay =
+                StatusOverlay::new(format!("Lobby preview unavailable: {error}"), false);
+            return;
+        }
+        let Some(destination) = launch.destination.take() else {
+            return;
+        };
+        match self.begin_prepared_embedded_world_scenario(destination) {
+            Ok(()) => {
+                launch.phase = ManagedScenarioLaunchPhase::WarmingDestination;
+            }
+            Err(error) => {
+                self.prepared_warm_world_shell = None;
+                launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
+                self.status_overlay =
+                    StatusOverlay::new(format!("Lobby preview unavailable: {error:#}"), false);
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn update_managed_scenario_destination_status(&mut self) {
+        let Some(launch) = self.managed_scenario_launch.as_mut() else {
+            return;
+        };
+        if launch.phase != ManagedScenarioLaunchPhase::WarmingDestination {
+            return;
+        }
+        let Some(standby) = self.warm_world_standby.as_ref() else {
+            return;
+        };
+        match standby.phase {
+            WarmWorldStandbyPhase::Switchable => {
+                launch.phase = ManagedScenarioLaunchPhase::PreviewReady;
+            }
+            WarmWorldStandbyPhase::Failed | WarmWorldStandbyPhase::Cancelled => {
+                launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
+                self.status_overlay = StatusOverlay::new(
+                    format!(
+                        "Lobby preview unavailable: {}",
+                        standby
+                            .failure
+                            .as_deref()
+                            .unwrap_or("destination startup failed")
+                    ),
+                    false,
+                );
+            }
+            _ => {}
+        }
     }
 
     /// Prepare the duplicate renderer shell while a loading cover still owns
@@ -2711,6 +3110,20 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn cancel_warm_world_standby(&mut self, reason: &str) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(mut launch) = self.managed_scenario_launch.take() {
+            let mut cancelled = 0;
+            if let Some(operations) = launch.primary_operations.as_mut() {
+                cancelled += operations.begin_epoch().len();
+            }
+            if let Some(operations) = launch.destination_operations.as_mut() {
+                cancelled += operations.begin_epoch().len();
+            }
+            log::info!(
+                "cancelled managed scenario operations count={} reason={reason}",
+                cancelled
+            );
+        }
         self.embedded_world_preview = None;
         self.embedded_world_activation = EmbeddedWorldActivationState::default();
         #[cfg(not(target_arch = "wasm32"))]
@@ -3454,8 +3867,11 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
+        self.poll_managed_scenario_launch(device, queue)?;
         let active_completed = self.advance_active_local_startup(device, queue)?;
+        self.advance_managed_scenario_after_primary(active_completed);
         self.advance_warm_world_standby();
+        self.update_managed_scenario_destination_status();
         Ok(active_completed)
     }
 
@@ -3790,12 +4206,17 @@ impl McloneSceneHost {
         Ok(descriptor)
     }
 
-    pub(crate) fn apply_xr_ui_action(
+    pub fn apply_xr_ui_action(
         &mut self,
         action: GameUiAction,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<bool> {
+        if matches!(action, GameUiAction::BackToTitle)
+            && self.ui.screen() == Some(GameScreen::PreparingLobby)
+        {
+            self.cancel_warm_world_standby("managed scenario title cancellation");
+        }
         if self.active_world.local_startup.is_some() {
             return Ok(false);
         }
@@ -3845,9 +4266,13 @@ impl McloneSceneHost {
             self.apply_xr_catalog_effects(effects.catalog, device, queue)?;
         let session_scene_replaced =
             self.apply_xr_session_effects(effects.session, device, queue)?;
+        let mut scenario_scene_replaced = false;
+        for effect in effects.scenario {
+            scenario_scene_replaced |= self.apply_managed_scenario_effect(effect, device, queue)?;
+        }
         self.apply_asset_pack_effects(effects.asset_packs);
         if !self.apply_xr_settings_effects(effects.settings)? {
-            return Ok(catalog_scene_replaced || session_scene_replaced);
+            return Ok(catalog_scene_replaced || session_scene_replaced || scenario_scene_replaced);
         }
         for effect in effects.gameplay {
             match effect {
@@ -3867,9 +4292,10 @@ impl McloneSceneHost {
                 ClientExperienceProjectionEffect::ApplyUiAction(action) => {
                     self.apply_xr_projection_action(action);
                 }
+                ClientExperienceProjectionEffect::SuppressUiAction => {}
             }
         }
-        Ok(catalog_scene_replaced || session_scene_replaced)
+        Ok(catalog_scene_replaced || session_scene_replaced || scenario_scene_replaced)
     }
 
     pub(crate) fn apply_xr_catalog_effects(
@@ -4567,6 +4993,11 @@ pub fn local_integrated_scene_options(
             ),
         )
         .with_integrated_world_session_storage(storage)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn vec3d_from_array([x, y, z]: [f64; 3]) -> Vec3d {
+    Vec3d::new(x, y, z)
 }
 
 pub fn single_view_host_options(scene: &McloneSceneHostOptions) -> SingleViewHostOptions {

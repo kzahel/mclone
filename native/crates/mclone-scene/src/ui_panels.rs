@@ -586,6 +586,11 @@ impl McloneSceneHost {
             },
         );
         GameUiRenderState {
+            lobby_scenario_available: self
+                .client_experience
+                .profile()
+                .lobby_scenario
+                .is_supported(),
             world_catalog: self
                 .client_experience
                 .catalog()

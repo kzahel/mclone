@@ -1233,6 +1233,7 @@ impl Default for AssetPacksUiState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameScreen {
     Title,
+    PreparingLobby,
     WorldList,
     WorldCreate,
     WorldDeleteConfirm {
@@ -1258,6 +1259,11 @@ pub enum GameScreen {
     AssetPacks {
         parent: GameOptionsParent,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameScenarioId {
+    LobbyPreview,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1650,6 +1656,7 @@ const fn lane_rate_is_clean(host_rate_hz: u32, lane_rate_hz: u32) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GameUiAction {
     StartWorld,
+    EnterScenario(GameScenarioId),
     OpenWorldList,
     OpenWorldCreate,
     SelectWorld(WorldCatalogUiWorldId),
@@ -1802,6 +1809,7 @@ impl GameTouchSettings {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameUiRenderState {
+    pub lobby_scenario_available: bool,
     pub world_catalog: WorldCatalogUiState,
     pub asset_packs: AssetPacksUiState,
     pub render_distance: i32,
@@ -1842,6 +1850,7 @@ pub struct GameUiRenderState {
 impl Default for GameUiRenderState {
     fn default() -> Self {
         Self {
+            lobby_scenario_available: true,
             world_catalog: WorldCatalogUiState::default(),
             asset_packs: AssetPacksUiState::default(),
             render_distance: 2,

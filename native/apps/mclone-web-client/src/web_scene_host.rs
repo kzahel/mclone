@@ -2404,6 +2404,7 @@ fn screen_label(screen: Option<GameScreen>) -> &'static str {
     match screen {
         None => "none",
         Some(GameScreen::Title) => "title",
+        Some(GameScreen::PreparingLobby) => "preparingLobby",
         Some(GameScreen::WorldList) => "worldList",
         Some(GameScreen::WorldCreate) => "worldCreate",
         Some(GameScreen::WorldDeleteConfirm { .. }) => "worldDeleteConfirm",

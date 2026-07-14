@@ -11,11 +11,12 @@ use crate::far_lod::{
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     GameCollisionMode, GameFarLodDetailMode, GameFramePacingMode, GameMovementMode,
-    GamePlayerModel, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode,
-    GameUiAction, GameUiRenderState, GameXrTurnMode,
+    GamePlayerModel, GameScenarioId, GameSimulationCadence, GameTouchSettings,
+    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
+use crate::scenario::ScenarioLaunchIntent;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClientExperienceController {
@@ -84,6 +85,23 @@ impl ClientExperienceController {
     ) -> ClientExperienceEffects {
         let mut effects = ClientExperienceEffects::default();
         match action {
+            GameUiAction::EnterScenario(GameScenarioId::LobbyPreview) => {
+                if self.profile.lobby_scenario.is_supported() {
+                    effects
+                        .scenario
+                        .push(ClientExperienceScenarioEffect::Launch(
+                            ScenarioLaunchIntent::lobby_preview(),
+                        ));
+                } else {
+                    effects.settings.capability_projection.push(
+                        ClientExperienceActionKind::EnterScenario,
+                        self.profile.lobby_scenario,
+                    );
+                    effects
+                        .projection
+                        .push(ClientExperienceProjectionEffect::SuppressUiAction);
+                }
+            }
             GameUiAction::OpenWorldList
             | GameUiAction::OpenWorldCreate
             | GameUiAction::SelectWorld(_)
@@ -222,6 +240,7 @@ pub struct ClientExperienceEffects {
     pub session: ClientSessionEffects,
     pub settings: ClientExperienceSettingsEffects,
     pub asset_packs: Vec<ClientAssetPackEffect>,
+    pub scenario: Vec<ClientExperienceScenarioEffect>,
     pub gameplay: Vec<ClientExperienceGameplayEffect>,
     pub projection: Vec<ClientExperienceProjectionEffect>,
 }
@@ -237,19 +256,34 @@ pub enum ClientExperienceGameplayEffect {
     AssignHotbarBlock { slot: u8, block_state: u32 },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientExperienceScenarioEffect {
+    Launch(ScenarioLaunchIntent),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientExperienceProjectionEffect {
     ApplyUiAction(GameUiAction),
+    SuppressUiAction,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ClientExperienceProfile {
     pub settings: ClientExperienceSettingsProfile,
+    pub lobby_scenario: ClientExperienceCapabilityStatus,
 }
 
 impl ClientExperienceProfile {
     pub const fn new(settings: ClientExperienceSettingsProfile) -> Self {
-        Self { settings }
+        Self {
+            settings,
+            lobby_scenario: ClientExperienceCapabilityStatus::Supported,
+        }
+    }
+
+    pub const fn with_lobby_scenario(mut self, status: ClientExperienceCapabilityStatus) -> Self {
+        self.lobby_scenario = status;
+        self
     }
 }
 
@@ -483,7 +517,9 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
         ClientExperienceCapabilityStatus::Unsupported(WEB_DEBUG_DIAGNOSTICS_REASON);
     settings.server_simulation_cadence =
         ClientExperienceCapabilityStatus::Unsupported(WEB_SERVER_SIMULATION_CADENCE_REASON);
-    ClientExperienceProfile::new(settings)
+    ClientExperienceProfile::new(settings).with_lobby_scenario(
+        ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON),
+    )
 }
 
 const WEB_TRAVEL_ASSIST_REASON: &str =
@@ -494,6 +530,8 @@ const WEB_DEBUG_DIAGNOSTICS_REASON: &str =
     "Debug diagnostics needs browser presenter wiring and panel proof";
 const WEB_SERVER_SIMULATION_CADENCE_REASON: &str =
     "Server simulation cadence needs browser runtime control and diagnostic proof";
+pub const WEB_LOBBY_SCENARIO_REASON: &str =
+    "Lobby scenarios need IndexedDB managed-content provisioning";
 
 /// Audited browser feature gaps. Each entry names a concrete follow-up and must
 /// exactly match a reason-bearing capability in [`web_client_experience_profile`].
@@ -1417,6 +1455,7 @@ pub enum ClientExperienceActionClassification {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientExperienceActionKind {
     StartWorld,
+    EnterScenario,
     OpenWorldList,
     OpenWorldCreate,
     SelectWorld,
@@ -1475,6 +1514,7 @@ pub enum ClientExperienceActionKind {
 pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceActionKind {
     match action {
         GameUiAction::StartWorld => ClientExperienceActionKind::StartWorld,
+        GameUiAction::EnterScenario(_) => ClientExperienceActionKind::EnterScenario,
         GameUiAction::OpenWorldList => ClientExperienceActionKind::OpenWorldList,
         GameUiAction::OpenWorldCreate => ClientExperienceActionKind::OpenWorldCreate,
         GameUiAction::SelectWorld(_) => ClientExperienceActionKind::SelectWorld,
@@ -1593,7 +1633,9 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetServerSimulationCadence => {
             ClientExperienceActionClassification::CapabilityGated
         }
-        ClientExperienceActionKind::Quit => ClientExperienceActionClassification::HostEffectAction,
+        ClientExperienceActionKind::EnterScenario | ClientExperienceActionKind::Quit => {
+            ClientExperienceActionClassification::HostEffectAction
+        }
         ClientExperienceActionKind::StartWorld
         | ClientExperienceActionKind::Resume
         | ClientExperienceActionKind::OpenBlockPalette
@@ -1640,7 +1682,7 @@ mod tests {
     use crate::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS;
     use crate::world_catalog::{WorldCatalogCapabilities, WorldCatalogRequest};
     use mclone_ui::{
-        AssetPackUiId, GameHelpParent, GameOptionsCategory, GameOptionsParent,
+        AssetPackUiId, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId,
         WorldCatalogUiWorldId,
     };
 
@@ -1783,6 +1825,7 @@ mod tests {
     fn classification_covers_every_game_ui_action_variant() {
         let samples = [
             GameUiAction::StartWorld,
+            GameUiAction::EnterScenario(GameScenarioId::LobbyPreview),
             GameUiAction::OpenWorldList,
             GameUiAction::OpenWorldCreate,
             GameUiAction::SelectWorld(WorldCatalogUiWorldId(1)),
@@ -1844,7 +1887,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 54);
+        assert_eq!(samples.len(), 55);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -1863,6 +1906,55 @@ mod tests {
         assert_eq!(
             classify_game_ui_action(GameUiAction::Quit),
             ClientExperienceActionClassification::HostEffectAction
+        );
+    }
+
+    #[test]
+    fn lobby_scenario_is_a_shared_native_effect_and_reason_bearing_web_gap() {
+        for profile in [
+            desktop_native_client_experience_profile(),
+            xr_native_client_experience_profile(),
+            android_flat_native_client_experience_profile(),
+        ] {
+            assert_eq!(
+                profile.lobby_scenario,
+                ClientExperienceCapabilityStatus::Supported
+            );
+            let mut controller = ClientExperienceController::new(profile);
+            let effects = controller.apply_ui_action(
+                GameUiAction::EnterScenario(GameScenarioId::LobbyPreview),
+                context(),
+            );
+            assert_eq!(
+                effects.scenario,
+                vec![ClientExperienceScenarioEffect::Launch(
+                    ScenarioLaunchIntent::lobby_preview()
+                )]
+            );
+            assert!(effects.projection.is_empty());
+        }
+
+        let profile = web_client_experience_profile();
+        assert_eq!(
+            profile.lobby_scenario,
+            ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON)
+        );
+        let mut controller = ClientExperienceController::new(profile);
+        let effects = controller.apply_ui_action(
+            GameUiAction::EnterScenario(GameScenarioId::LobbyPreview),
+            context(),
+        );
+        assert!(effects.scenario.is_empty());
+        assert_eq!(
+            effects.settings.capability_projection.first_unavailable(),
+            Some(ClientExperienceActionAvailability {
+                kind: ClientExperienceActionKind::EnterScenario,
+                status: ClientExperienceCapabilityStatus::Unsupported(WEB_LOBBY_SCENARIO_REASON),
+            })
+        );
+        assert_eq!(
+            effects.projection,
+            vec![ClientExperienceProjectionEffect::SuppressUiAction]
         );
     }
 

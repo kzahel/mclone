@@ -1,15 +1,14 @@
 # 177: Menu-Launched Protected Lobby Scenario
 
-Status: active 2026-07-14. Slices 0-3 are landed; shared menu launch and
-asynchronous lobby-first startup are next. The CLI now projects into the same scene-owned scenario
-operation intended for the product menu, and renderer-shell preparation is
-independent from retained-runtime attachment. A tokened native managed-content
-executor now resolves the path-free intent into versioned, atomically
-published lobby and island roots outside the user catalog. This is the
-immediate productization milestone after Tactical 175 Slice 6. It deliberately
-precedes Tactical 175's remote preview slice so the current local proof is
-first expressed as one shared scenario contract rather than accumulating a
-second menu-only implementation.
+Status: active 2026-07-14. Slices 0-4 are landed; lifecycle, parity, and
+performance closeout is next. The shared title menu now launches the protected
+lobby through independently cancellable primary and destination operations,
+then attaches the live island preview without blocking lobby entry. Flat and
+synthetic-stereo product smokes prove A-to-B-to-A activation through that menu
+path. This is the immediate productization milestone after Tactical 175 Slice
+6. It deliberately precedes Tactical 175's remote preview slice so the current
+local proof is first expressed as one shared scenario contract rather than
+accumulating a second menu-only implementation.
 
 Topic: `embedded-worlds`
 
@@ -671,6 +670,53 @@ select `Enter Lobby`, move in the protected lobby before B is ready, see B
 appear, enter it, and return. Stop for feedback on the menu label/order,
 first-entry loading, empty-table warming presentation, protection feedback,
 blink feel, and arrival/return poses.
+
+#### Slice 4 completion record — 2026-07-14
+
+The shared title layout now places `Enter Lobby` above `Singleplayer` and
+emits a typed `EnterScenario(LobbyPreview)` action. `ClientExperienceCore`
+classifies it as one shared host effect. Desktop flat, desktop XR, flat Android,
+and Android XR profiles expose the same supported capability; web renders the
+row disabled and reason-bearing because IndexedDB managed-content provisioning
+is not implemented. Native app adapters gained no scenario state machine.
+
+`McloneSceneHost` resolves the primary and destination with separate tokened
+operation services over the current atomically published v1 content bundle.
+Primary completion prepares the destination renderer shell while title/loading
+presentation still covers the frame, then starts the authored lobby through
+the ordinary local-session seam. The lobby becomes playable independently of
+the destination operation. Destination completion attaches to the prebuilt
+shell and proceeds through existing detached startup, compilation, upload, and
+exact visibility budgets. A malformed destination or shell leaves a playable
+lobby with a nonfatal status; primary preparation/startup returns to the title
+as an ordinary failure. Back before startup commitment and all existing
+retained-world/asset/resource teardown paths epoch-cancel both operations.
+
+The deterministic flat smoke clicks the rendered menu widget rather than
+injecting a private launch request. It records title at frame 0, playable lobby
+with an empty table at frame 17, visible island preview at frame 56, island
+with return preview at frame 75, and returned lobby at frame 94. It asserts
+protected lobby authority, mutable island authority, two complete-slot
+exchanges, and the isolated managed root
+`/tmp/mclone-lobby-scenario-smoke/app-data/scenarios`. The five inspected
+captures are `title.png`, `lobby-before-preview.png`,
+`lobby-with-preview.png`, `island-with-return-preview.png`, and
+`returned-lobby.png` beneath that smoke directory. The player-reviewed 1:8
+table placement remains unchanged and shows no table/terrain z-fighting.
+
+`native:lobby-scenario:stereo-smoke` drives the same typed title action through
+the XR scene reducer, waits for the independently warmed preview, activates
+A-to-B-to-A with the synthetic stereo eye midpoint, and writes an inspected
+side-by-side return capture. Both eyes draw the placed preview, differ in
+210,563 pixels, and both activation legs preserve covered-frame conservation.
+The receipt and `returned-lobby-stereo.png` live under
+`/tmp/mclone-lobby-scenario-stereo-smoke`.
+
+Focused UI, app-runtime, scene, native-client, and ownership suites pass along
+with native web compilation and both adapter/scene-host purity gates. The
+menu-driven flat and stereo proofs are now stable commands. Because this run
+was explicitly authorized to continue unattended, the usual Slice 4 manual
+pause is recorded as available rather than blocking Slice 5 closeout.
 
 ### Slice 5: Lifecycle, Parity, And Performance Closeout
 

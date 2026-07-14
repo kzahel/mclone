@@ -2810,6 +2810,7 @@ pub(super) fn gui_key_from_label(label: &str) -> Option<GuiKey> {
 pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
     match action {
         GameUiAction::StartWorld => "startWorld",
+        GameUiAction::EnterScenario(_) => "enterScenario",
         GameUiAction::OpenWorldList => "openWorldList",
         GameUiAction::OpenWorldCreate => "openWorldCreate",
         GameUiAction::SelectWorld(_) => "selectWorld",

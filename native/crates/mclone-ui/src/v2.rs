@@ -2,21 +2,21 @@ use crate::{
     AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsCategory,
-    GameOptionsParent, GameScreen, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList,
-    GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay,
-    Point, Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
-    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
-    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
-    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
-    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
-    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
-    render_flat_hud_frame_pipeline_layer, render_flat_hud_hotbar_layer,
-    render_flat_hud_prompt_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
-    render_flat_hud_transient_layers, render_loading_progress_overlay,
-    render_loading_progress_panel_at, render_palette_slot_contents, render_touch_panel,
-    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
-    touch_look_slider_value,
+    GameOptionsParent, GameScenarioId, GameScreen, GameTurnMode, GameUiAction, GameUiRenderState,
+    GuiDrawList, GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction,
+    LoadingProgressOverlay, Point, Rect, Slider, WidgetId, WorldCatalogUiEntry,
+    WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect, block_palette_slot_rect,
+    centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
+    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
+    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
+    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
+    render_flat_hud_debug_layer, render_flat_hud_frame_pipeline_layer,
+    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
+    render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    render_loading_progress_overlay, render_loading_progress_panel_at,
+    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
+    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -26,6 +26,7 @@ use mclone_input::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiScreenId {
     Title,
+    PreparingLobby,
     WorldList,
     WorldCreate,
     WorldDeleteConfirm {
@@ -57,6 +58,7 @@ impl UiScreenId {
     pub fn from_game_screen(screen: Option<GameScreen>) -> Option<Self> {
         match screen {
             Some(GameScreen::Title) => Some(Self::Title),
+            Some(GameScreen::PreparingLobby) => Some(Self::PreparingLobby),
             Some(GameScreen::WorldList) => Some(Self::WorldList),
             Some(GameScreen::WorldCreate) => Some(Self::WorldCreate),
             Some(GameScreen::WorldDeleteConfirm { id }) => Some(Self::WorldDeleteConfirm { id }),
@@ -650,6 +652,10 @@ impl UiSurface {
             (Some(UiScreenId::Title), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::Title)))
             }
+            (Some(UiScreenId::PreparingLobby), GuiKey::Escape) => {
+                (true, Some(GameUiAction::BackToTitle))
+            }
+            (Some(UiScreenId::PreparingLobby), _) => (true, None),
             (Some(UiScreenId::WorldList), GuiKey::Escape) => {
                 (true, Some(GameUiAction::BackToTitle))
             }
@@ -737,6 +743,7 @@ impl UiSurface {
         let mut draw = GuiDrawList::new();
         match self.screen {
             Some(UiScreenId::Title) => self.render_title(&mut draw),
+            Some(UiScreenId::PreparingLobby) => self.render_preparing_lobby(&mut draw),
             Some(UiScreenId::WorldList) => self.render_world_list(&mut draw),
             Some(UiScreenId::WorldCreate) => self.render_world_create(&mut draw),
             Some(UiScreenId::WorldDeleteConfirm { id }) => {
@@ -769,7 +776,14 @@ impl UiSurface {
         }
         self.layout_revision = self.layout_revision.wrapping_add(1);
         self.layout = match self.screen {
-            Some(UiScreenId::Title) => title_layout(self.scale, self.layout_revision),
+            Some(UiScreenId::Title) => title_layout(
+                self.scale,
+                self.layout_revision,
+                self.render_state.lobby_scenario_available,
+            ),
+            Some(UiScreenId::PreparingLobby) => {
+                preparing_lobby_layout(self.scale, self.layout_revision)
+            }
             Some(UiScreenId::WorldList) => world_list_layout(
                 self.scale,
                 self.layout_revision,
@@ -888,6 +902,28 @@ impl UiSurface {
             self.scale.height - 12.0,
             Color::rgba(160, 176, 170, 255),
         );
+    }
+
+    fn render_preparing_lobby(&self, draw: &mut GuiDrawList) {
+        render_title_background(draw, self.scale);
+        self.font.draw_centered_atlas(
+            draw,
+            "PREPARING LOBBY",
+            self.scale.width * 0.5,
+            self.scale.height * 0.5 - 18.0,
+            Color::rgba(245, 252, 234, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            "Provisioning managed scenario content...",
+            self.scale.width * 0.5,
+            self.scale.height * 0.5,
+            Color::rgba(185, 212, 198, 255),
+        );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
     }
 
     fn render_world_list(&self, draw: &mut GuiDrawList) {
@@ -2298,6 +2334,9 @@ impl GameUiHost {
             | GameUiAction::OpenWorld(_)
             | GameUiAction::CreateCatalogWorld
             | GameUiAction::AssignHotbarBlock { .. } => self.screen = None,
+            GameUiAction::EnterScenario(GameScenarioId::LobbyPreview) => {
+                self.screen = Some(GameScreen::PreparingLobby)
+            }
             GameUiAction::OpenWorldList | GameUiAction::CancelDeleteWorld => {
                 self.screen = Some(GameScreen::WorldList)
             }
@@ -2506,6 +2545,8 @@ const UI_V2_TITLE_START: UiWidgetId = UiWidgetId(401);
 const UI_V2_TITLE_JOIN_REMOTE: UiWidgetId = UiWidgetId(402);
 const UI_V2_TITLE_OPTIONS: UiWidgetId = UiWidgetId(403);
 const UI_V2_TITLE_QUIT: UiWidgetId = UiWidgetId(404);
+const UI_V2_TITLE_ENTER_LOBBY: UiWidgetId = UiWidgetId(405);
+const UI_V2_PREPARING_LOBBY_BACK: UiWidgetId = UiWidgetId(406);
 const UI_V2_WORLD_LIST_OPEN: UiWidgetId = UiWidgetId(801);
 const UI_V2_WORLD_LIST_CREATE: UiWidgetId = UiWidgetId(802);
 const UI_V2_WORLD_LIST_DELETE: UiWidgetId = UiWidgetId(803);
@@ -2564,13 +2605,26 @@ const UI_V2_SERVER_SETTINGS_BACK: UiWidgetId = UiWidgetId(704);
 const UI_V2_HELP_BACK: UiWidgetId = UiWidgetId(201);
 const UI_V2_BLOCK_PALETTE_BASE: u64 = 3000;
 
-fn title_layout(scale: GuiScale, revision: u64) -> UiLayout {
+fn title_layout(scale: GuiScale, revision: u64, lobby_scenario_available: bool) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Title), revision);
-    let y = scale.height * 0.5 - 34.0;
+    let y = scale.height * 0.5 - 46.0;
+    layout.push(
+        UiWidget::button(
+            UI_V2_TITLE_ENTER_LOBBY,
+            menu_button_rect(scale, y),
+            if lobby_scenario_available {
+                "Enter Lobby"
+            } else {
+                "Enter Lobby (Unavailable)"
+            },
+        )
+        .enabled(lobby_scenario_available)
+        .action(GameUiAction::EnterScenario(GameScenarioId::LobbyPreview)),
+    );
     layout.push(
         UiWidget::button(
             UI_V2_TITLE_START,
-            menu_button_rect(scale, y),
+            menu_button_rect(scale, y + 24.0),
             "Singleplayer",
         )
         .action(GameUiAction::OpenWorldList),
@@ -2578,7 +2632,7 @@ fn title_layout(scale: GuiScale, revision: u64) -> UiLayout {
     layout.push(
         UiWidget::button(
             UI_V2_TITLE_JOIN_REMOTE,
-            menu_button_rect(scale, y + 24.0),
+            menu_button_rect(scale, y + 48.0),
             "Join Remote",
         )
         .action(GameUiAction::OpenJoinRemote),
@@ -2586,14 +2640,27 @@ fn title_layout(scale: GuiScale, revision: u64) -> UiLayout {
     layout.push(
         UiWidget::button(
             UI_V2_TITLE_OPTIONS,
-            menu_button_rect(scale, y + 48.0),
+            menu_button_rect(scale, y + 72.0),
             "Options",
         )
         .action(GameUiAction::OpenOptions(GameOptionsParent::Title)),
     );
     layout.push(
-        UiWidget::button(UI_V2_TITLE_QUIT, menu_button_rect(scale, y + 72.0), "Quit")
+        UiWidget::button(UI_V2_TITLE_QUIT, menu_button_rect(scale, y + 96.0), "Quit")
             .action(GameUiAction::Quit),
+    );
+    layout
+}
+
+fn preparing_lobby_layout(scale: GuiScale, revision: u64) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::PreparingLobby), revision);
+    layout.push(
+        UiWidget::button(
+            UI_V2_PREPARING_LOBBY_BACK,
+            menu_button_rect(scale, scale.height * 0.5 + 32.0),
+            "Back",
+        )
+        .action(GameUiAction::BackToTitle),
     );
     layout
 }

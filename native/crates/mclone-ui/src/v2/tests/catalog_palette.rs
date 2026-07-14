@@ -12,6 +12,19 @@ fn title_flow_screens_route_through_v2_surface() {
     assert_eq!(title.cache, UiDrawCacheStats::rebuild());
     let snapshot = host.v2_debug_snapshot().expect("Title has debug data");
     assert_eq!(snapshot.screen, Some(UiScreenId::Title));
+    let lobby = snapshot
+        .widgets
+        .iter()
+        .find(|widget| widget.id == UI_V2_TITLE_ENTER_LOBBY)
+        .expect("Enter Lobby button");
+    let singleplayer = snapshot
+        .widgets
+        .iter()
+        .find(|widget| widget.id == UI_V2_TITLE_START)
+        .expect("Singleplayer button");
+    assert_eq!(lobby.label, "Enter Lobby");
+    assert!(lobby.enabled);
+    assert!(lobby.rect.y < singleplayer.rect.y);
     assert!(
         snapshot
             .widgets
@@ -74,6 +87,26 @@ fn title_flow_screens_route_through_v2_surface() {
     assert!(host.pointer_down(point_in(create)));
     let (_handled, action) = host.pointer_up(point_in(create));
     assert_eq!(action, Some(GameUiAction::CreateCatalogWorld));
+}
+
+#[test]
+fn lobby_capability_is_visible_and_non_actionable_when_unavailable() {
+    let mut host = GameUiHost::new();
+    host.set_scale(GuiScale::from_pixels(960, 540));
+    let mut state = world_catalog_render_state();
+    state.lobby_scenario_available = false;
+    host.render_v2_panel_draw_list(state).unwrap();
+    let lobby = host
+        .v2_debug_snapshot()
+        .unwrap()
+        .widgets
+        .into_iter()
+        .find(|widget| widget.id == UI_V2_TITLE_ENTER_LOBBY)
+        .unwrap();
+    assert_eq!(lobby.label, "Enter Lobby (Unavailable)");
+    assert!(!lobby.enabled);
+    assert!(host.pointer_down(point_in(lobby.rect)));
+    assert_eq!(host.pointer_up(point_in(lobby.rect)).1, None);
 }
 
 #[test]

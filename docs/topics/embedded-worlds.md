@@ -8,9 +8,9 @@ live model of a distant or nearby active-world location, a "palantir" window
 into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
-Status: **a closed, measured scene-owned warm-world milestone and an active
-live-diorama tactical with local persistent terrain, water, cross-world
-translucent ordering, and blink activation/return through completed Slice 6.**
+Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
+tactical through completed local Slice 6, and a menu-launched protected lobby
+productization tactical through Slice 4.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
 world as placed opaque/cutout geometry in the active world's mono, per-eye, and
 multiview frame ordering. It owns one direct active `DrawableWorldSlot`, one
@@ -35,22 +35,19 @@ close a short shared blink, exchange the complete slots under full cover, and
 retarget the old active world onto the paired return table. Deterministic flat
 and stereo A-to-B-to-A receipts prove that the first uncovered frame already
 draws the destination with no boundary compile, upload, runtime creation, or
-renderer materialization. There is still no N-world registry, product UI, or
-remote preview, but simultaneous shared-depth terrain composition and local
-activation are now concrete. Tactical 177 now proposes the first product
-surface: one shared `Enter Lobby` action, versioned managed authored content,
-an authoritative protected-lobby behavior profile and lobby-first asynchronous
-destination warmup. Its first implementation slice has now landed the common
-execution seam: a path-free built-in scenario intent projects into a prepared
-native scene request, while duplicate renderer-shell/topology preparation is
-independent from destination runtime attachment. The existing CLI diorama uses
-that executor and retains exact activation pixels. A native background content
-executor now also resolves that intent into versioned, atomically published
-lobby/island roots under app-private `scenarios` storage, preserving island
-edits while keeping both managed worlds outside the user catalog. A separate
-server-owned world behavior profile now travels with each slot: the managed
-lobby authoritatively denies player break/place while the island remains
-mutable, including after complete-slot exchanges.
+renderer materialization. There is still no N-world registry or remote
+preview, but simultaneous shared-depth terrain composition and local activation
+are now concrete. The first product surface is also live: shared native
+profiles expose `Enter Lobby`, versioned managed authored content resolves
+outside the user catalog, and separate tokened primary/destination operations
+make the protected lobby playable before the fixed island is ready. The
+destination renderer shell is prepared under startup cover, then the island
+appears through the existing exact readiness gate. The same flat and
+synthetic-stereo menu path completes A-to-B-to-A activation. Web renders the
+shared action unavailable with an explicit IndexedDB provisioning reason. A
+server-owned behavior profile travels with each slot: the managed lobby
+authoritatively denies player break/place while the island remains mutable,
+including after complete-slot exchanges.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -79,7 +76,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-14
-(Tactical 177 Slice 3 after Tactical 175 Slice 6).
+(Tactical 177 Slice 4 after Tactical 175 Slice 6).
 
 ## Motivation
 
@@ -687,9 +684,8 @@ bounded simultaneous-geometry plan lives in
 2. Keep Tactical 175's landed authored-only fixtures, separate placed-terrain
    pipeline, live mutation, water/translucent ordering, and local blink
    activation/return green without taxing the one-world path.
-3. Execute Tactical 177: refactor CLI and product launch onto one shared
-   scenario seam, provision versioned managed authored content, enter the
-   protected lobby from the title, and warm the fixed island asynchronously.
+3. Close Tactical 177's lifecycle, platform, and performance evidence for the
+   landed shared title launch, protected lobby, and asynchronous fixed island.
 4. Bind the proven lobby to the most recently *actively played* compatible
    local world. A background preview open must not itself update catalog
    recency.

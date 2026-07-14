@@ -80,6 +80,8 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--live-diorama-source-region",
     "--live-diorama-smoke",
     "--live-diorama-world-dir",
+    "--lobby-scenario-smoke",
+    "--lobby-scenario-stereo-smoke",
     "--lod-settle-probe",
     "--lod-settle-script",
     "--menu",
@@ -313,6 +315,15 @@ pub(crate) struct LiveDioramaSmokeOptions {
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) soak_seconds: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LobbyScenarioSmokeOptions {
+    pub(crate) directory: PathBuf,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) scene: SceneOptions,
+    pub(crate) render_options: TexturedSectionRenderOptions,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -655,6 +666,12 @@ pub(crate) enum Cli {
     LiveDioramaSmoke {
         options: LiveDioramaSmokeOptions,
     },
+    LobbyScenarioSmoke {
+        options: LobbyScenarioSmokeOptions,
+    },
+    LobbyScenarioStereoSmoke {
+        options: LobbyScenarioSmokeOptions,
+    },
     HeadlessDualView {
         options: HeadlessDualViewOptions,
     },
@@ -719,6 +736,8 @@ enum HeadlessMode {
     LodSettleProbe(PathBuf),
     Screenshot(PathBuf),
     LiveDioramaSmoke(PathBuf),
+    LobbyScenarioSmoke(PathBuf),
+    LobbyScenarioStereoSmoke(PathBuf),
     WarmWorldSwapSmoke(PathBuf),
     XrEmulationScreenshot(PathBuf),
     RendererRebuildSmoke(PathBuf),
@@ -1096,6 +1115,38 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::LiveDioramaSmoke(path))?;
+                }
+                "--lobby-scenario-smoke" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--lobby-scenario-smoke requires an output directory")?;
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || startup_streaming_perf
+                        || loading_settle_perf
+                    {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::LobbyScenarioSmoke(path))?;
+                }
+                "--lobby-scenario-stereo-smoke" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--lobby-scenario-stereo-smoke requires an output directory")?;
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || startup_streaming_perf
+                        || loading_settle_perf
+                    {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::LobbyScenarioStereoSmoke(path))?;
                 }
                 "--warm-world-swap-smoke" => {
                     let path = args
@@ -1763,6 +1814,42 @@ impl Cli {
                         scene,
                         render_options,
                         soak_seconds: live_diorama_soak_seconds,
+                    },
+                })
+            }
+            Some(HeadlessMode::LobbyScenarioSmoke(directory)) => {
+                scene.world_root = Some(directory.join("app-data/worlds"));
+                scene.world_dir = None;
+                scene.remote_addr = None;
+                scene.live_diorama = None;
+                scene.warm_world_standby_seed = None;
+                scene.render_distance = 2;
+                scene.debug_passive_showcase = false;
+                Ok(Self::LobbyScenarioSmoke {
+                    options: LobbyScenarioSmokeOptions {
+                        directory,
+                        width: width.unwrap_or(640),
+                        height: height.unwrap_or(400),
+                        scene,
+                        render_options,
+                    },
+                })
+            }
+            Some(HeadlessMode::LobbyScenarioStereoSmoke(directory)) => {
+                scene.world_root = Some(directory.join("app-data/worlds"));
+                scene.world_dir = None;
+                scene.remote_addr = None;
+                scene.live_diorama = None;
+                scene.warm_world_standby_seed = None;
+                scene.render_distance = 2;
+                scene.debug_passive_showcase = false;
+                Ok(Self::LobbyScenarioStereoSmoke {
+                    options: LobbyScenarioSmokeOptions {
+                        directory,
+                        width: width.unwrap_or(640),
+                        height: height.unwrap_or(640),
+                        scene,
+                        render_options,
                     },
                 })
             }

@@ -73,6 +73,50 @@ fn cli_parses_live_diorama_smoke_options() {
 }
 
 #[test]
+fn cli_lobby_scenario_smoke_uses_an_isolated_managed_root() {
+    let cli = Cli::parse([
+        "--lobby-scenario-smoke".to_owned(),
+        "/tmp/lobby-product".to_owned(),
+        "--width".to_owned(),
+        "640".to_owned(),
+        "--height".to_owned(),
+        "400".to_owned(),
+    ])
+    .unwrap();
+    let Cli::LobbyScenarioSmoke { options } = cli else {
+        panic!("expected lobby scenario smoke CLI");
+    };
+    assert_eq!(options.directory, PathBuf::from("/tmp/lobby-product"));
+    assert_eq!([options.width, options.height], [640, 400]);
+    assert_eq!(
+        options.scene.world_root,
+        Some(PathBuf::from("/tmp/lobby-product/app-data/worlds"))
+    );
+    assert!(options.scene.world_dir.is_none());
+    assert!(options.scene.live_diorama.is_none());
+}
+
+#[test]
+fn cli_lobby_scenario_stereo_smoke_uses_an_isolated_managed_root() {
+    let cli = Cli::parse([
+        "--lobby-scenario-stereo-smoke".to_owned(),
+        "/tmp/lobby-stereo".to_owned(),
+    ])
+    .unwrap();
+    let Cli::LobbyScenarioStereoSmoke { options } = cli else {
+        panic!("expected lobby scenario stereo smoke CLI");
+    };
+    assert_eq!(options.directory, PathBuf::from("/tmp/lobby-stereo"));
+    assert_eq!([options.width, options.height], [640, 640]);
+    assert_eq!(
+        options.scene.world_root,
+        Some(PathBuf::from("/tmp/lobby-stereo/app-data/worlds"))
+    );
+    assert!(options.scene.world_dir.is_none());
+    assert!(options.scene.live_diorama.is_none());
+}
+
+#[test]
 fn cli_rejects_live_diorama_soak_without_smoke() {
     let error =
         Cli::parse(["--live-diorama-soak-seconds".to_owned(), "600".to_owned()]).unwrap_err();

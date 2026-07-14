@@ -19,9 +19,9 @@ use mclone_app_runtime::client_experience::xr_native_client_experience_profile;
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
     ClientExperienceGameplayEffect, ClientExperienceMovementSettingChange, ClientExperienceProfile,
-    ClientExperienceProjectionEffect, ClientExperienceSettingsEffects,
-    ClientExperienceSettingsState, client_experience_should_apply_ui_projection,
-    desktop_native_client_experience_profile,
+    ClientExperienceProjectionEffect, ClientExperienceScenarioEffect,
+    ClientExperienceSettingsEffects, ClientExperienceSettingsState,
+    client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::client_session_failed_start_ui_effects;
 use mclone_app_runtime::client_session_policy::{
@@ -479,6 +479,8 @@ pub struct McloneSceneHost {
     warm_world_standby: Option<WarmWorldStandbyState>,
     #[cfg(not(target_arch = "wasm32"))]
     prepared_warm_world_shell: Option<PreparedWarmWorldRendererShell>,
+    #[cfg(not(target_arch = "wasm32"))]
+    managed_scenario_launch: Option<ManagedScenarioLaunchState>,
     embedded_world_preview: Option<EmbeddedWorldPreview>,
     embedded_world_activation: EmbeddedWorldActivationState,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -5370,11 +5372,16 @@ mod tests {
                 effects.gameplay.is_empty(),
                 "emulated XR menu/session flow should not emit gameplay effects"
             );
+            assert!(
+                effects.scenario.is_empty(),
+                "emulated XR catalog flow should not emit scenario effects"
+            );
             for effect in effects.projection {
                 match effect {
                     ClientExperienceProjectionEffect::ApplyUiAction(action) => {
                         self.ui.apply_action(action);
                     }
+                    ClientExperienceProjectionEffect::SuppressUiAction => {}
                 }
             }
         }

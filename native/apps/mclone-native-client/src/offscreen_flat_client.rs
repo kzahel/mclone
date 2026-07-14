@@ -19,8 +19,8 @@ use mclone_ui::{GameTravelAssistMode, Point};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
-    HeadlessScreenshotOptions, HeadlessScreenshotUi, SceneOptions, StartupWaitPolicy,
-    WarmWorldSwapSmokeOptions,
+    HeadlessScreenshotOptions, HeadlessScreenshotUi, LobbyScenarioSmokeOptions, SceneOptions,
+    StartupWaitPolicy, WarmWorldSwapSmokeOptions,
 };
 use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
@@ -2183,6 +2183,313 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
             target: final_target,
         },
     ])
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct LobbyScenarioSmokeReport {
+    pub(crate) directory: PathBuf,
+    pub(crate) capture_count: usize,
+    pub(crate) switch_count: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LobbyScenarioSmokePhase {
+    Title,
+    WaitingForLobby,
+    LobbyEmptyTable,
+    WaitingForPreview,
+    ActivatingIsland,
+    IslandPreview,
+    ActivatingReturn,
+    ReturnedLobby,
+    Complete,
+}
+
+struct LobbyScenarioSmokeState {
+    host: OffscreenFlatClientHost,
+    phase: LobbyScenarioSmokePhase,
+    captures: Vec<(&'static str, usize)>,
+}
+
+pub(crate) fn run_lobby_scenario_smoke(
+    options: &LobbyScenarioSmokeOptions,
+) -> Result<LobbyScenarioSmokeReport> {
+    const FRAME_COUNT: usize = 256;
+    if options.directory.exists() {
+        std::fs::remove_dir_all(&options.directory).with_context(|| {
+            format!(
+                "clear lobby scenario smoke directory `{}`",
+                options.directory.display()
+            )
+        })?;
+    }
+    std::fs::create_dir_all(&options.directory).with_context(|| {
+        format!(
+            "create lobby scenario smoke directory `{}`",
+            options.directory.display()
+        )
+    })?;
+    let assets = WindowSceneAssets::load()?;
+    let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
+    let scene = options.scene.clone();
+    let render_options = options.render_options;
+    let startup_camera = SpectatorCamera::spawn_for_scene(&scene);
+    let (_, frame_pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: options.width,
+            height: options.height,
+            frame_count: FRAME_COUNT,
+            pace_frame_duration: None,
+        },
+        move |device, queue, format, size| {
+            let mut host = OffscreenFlatClientHost::new(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+                startup_camera,
+            )?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Playable)?;
+            host.scene_host_mut()
+                .set_mono_ui_screen(Some(mclone_ui::GameScreen::Title));
+            Ok(LobbyScenarioSmokeState {
+                host,
+                phase: LobbyScenarioSmokePhase::Title,
+                captures: Vec::with_capacity(5),
+            })
+        },
+        |frame_index, frame, state| {
+            let device = frame.device;
+            let queue = frame.queue;
+            if state.phase != LobbyScenarioSmokePhase::Title
+                && state.phase != LobbyScenarioSmokePhase::Complete
+            {
+                state.host.apply_input_frame(FlatInputFrame::default())?;
+            }
+            state
+                .host
+                .render_frame(frame, OffscreenFlatClientFrameOptions { hud: false })?;
+
+            match state.phase {
+                LobbyScenarioSmokePhase::Title => {
+                    state.captures.push(("title", frame_index));
+                    let widget = state
+                        .host
+                        .scene_host_mut()
+                        .mono_ui_debug_snapshot()
+                        .context("title frame has no UI debug snapshot")?
+                        .widgets
+                        .into_iter()
+                        .find(|widget| widget.label == "Enter Lobby")
+                        .context("title frame has no enabled Enter Lobby widget")?;
+                    let point = Point {
+                        x: widget.rect.center_x(),
+                        y: widget.rect.y + widget.rect.height * 0.5,
+                    };
+                    state.host.run_script(
+                        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
+                            point,
+                            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
+                                mclone_ui::GameScenarioId::LobbyPreview,
+                            )),
+                        }]),
+                        device,
+                        queue,
+                    )?;
+                    state.phase = LobbyScenarioSmokePhase::WaitingForLobby;
+                }
+                LobbyScenarioSmokePhase::WaitingForLobby => {
+                    if state.host.scene_host().active_world_seed()
+                        == mclone_server::AuthoredWorldFixtureKind::Table.seed()
+                        && state.host.scene_host().local_startup_complete()
+                    {
+                        if state.host.scene_host().active_world_behavior_profile()
+                            != mclone_server::WorldBehaviorProfile::ProtectedLobby
+                        {
+                            bail!("menu-launched lobby did not retain protected authority");
+                        }
+                        if state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .is_some_and(|preview| {
+                                preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
+                                    || preview.last_drawn_section_count > 0
+                            })
+                        {
+                            bail!("lobby preview drew before the empty-table checkpoint");
+                        }
+                        let [x, y, z] =
+                            mclone_server::AuthoredWorldFixtureKind::Table.preview_anchor();
+                        let eye = state.host.scene_host().camera_snapshot().eye;
+                        state.host.set_camera_look_at(
+                            Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+                            Vec3::new(x as f32, y as f32 + 0.25, z as f32),
+                        );
+                        state.host.commit_camera()?;
+                        state.phase = LobbyScenarioSmokePhase::LobbyEmptyTable;
+                    }
+                }
+                LobbyScenarioSmokePhase::LobbyEmptyTable => {
+                    if state
+                        .host
+                        .scene_host()
+                        .embedded_world_preview_snapshot()
+                        .is_some_and(|preview| preview.last_drawn_section_count > 0)
+                    {
+                        bail!("lobby preview warmed before the empty-table frame was captured");
+                    }
+                    state.captures.push(("lobby-before-preview", frame_index));
+                    state.phase = LobbyScenarioSmokePhase::WaitingForPreview;
+                }
+                LobbyScenarioSmokePhase::WaitingForPreview => {
+                    if state
+                        .host
+                        .scene_host()
+                        .embedded_world_preview_snapshot()
+                        .is_some_and(|preview| {
+                            preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
+                                && preview.last_drawn_section_count > 0
+                        })
+                    {
+                        state.captures.push(("lobby-with-preview", frame_index));
+                        aim_current_eye_at_embedded_preview(&mut state.host)?;
+                        crate::live_diorama_smoke::request_flat_embedded_world_activation(
+                            &mut state.host,
+                        )?;
+                        state.phase = LobbyScenarioSmokePhase::ActivatingIsland;
+                    }
+                }
+                LobbyScenarioSmokePhase::ActivatingIsland => {
+                    let activation = state.host.scene_host().embedded_world_activation_snapshot();
+                    if state.host.scene_host().active_world_seed()
+                        == mclone_server::AuthoredWorldFixtureKind::Island.seed()
+                        && activation.phase == mclone_scene::EmbeddedWorldActivationPhase::Idle
+                        && activation.last_report.is_some()
+                    {
+                        if state.host.scene_host().active_world_behavior_profile()
+                            != mclone_server::WorldBehaviorProfile::Mutable
+                        {
+                            bail!("menu-launched island did not retain mutable authority");
+                        }
+                        crate::live_diorama_smoke::aim_flat_host_at_embedded_preview(
+                            &mut state.host,
+                        )?;
+                        state.phase = LobbyScenarioSmokePhase::IslandPreview;
+                    }
+                }
+                LobbyScenarioSmokePhase::IslandPreview => {
+                    if state
+                        .host
+                        .scene_host()
+                        .embedded_world_preview_snapshot()
+                        .is_some_and(|preview| preview.last_drawn_section_count > 0)
+                    {
+                        state
+                            .captures
+                            .push(("island-with-return-preview", frame_index));
+                        crate::live_diorama_smoke::request_flat_embedded_world_activation(
+                            &mut state.host,
+                        )?;
+                        state.phase = LobbyScenarioSmokePhase::ActivatingReturn;
+                    }
+                }
+                LobbyScenarioSmokePhase::ActivatingReturn => {
+                    let activation = state.host.scene_host().embedded_world_activation_snapshot();
+                    if state.host.scene_host().active_world_seed()
+                        == mclone_server::AuthoredWorldFixtureKind::Table.seed()
+                        && activation.phase == mclone_scene::EmbeddedWorldActivationPhase::Idle
+                        && activation
+                            .last_report
+                            .as_ref()
+                            .is_some_and(|report| report.sequence >= 2)
+                    {
+                        aim_current_eye_at_embedded_preview(&mut state.host)?;
+                        state.phase = LobbyScenarioSmokePhase::ReturnedLobby;
+                    }
+                }
+                LobbyScenarioSmokePhase::ReturnedLobby => {
+                    if state
+                        .host
+                        .scene_host()
+                        .embedded_world_preview_snapshot()
+                        .is_some_and(|preview| preview.last_drawn_section_count > 0)
+                    {
+                        state.captures.push(("returned-lobby", frame_index));
+                        state.phase = LobbyScenarioSmokePhase::Complete;
+                    }
+                }
+                LobbyScenarioSmokePhase::Complete => {}
+            }
+            if state.phase != LobbyScenarioSmokePhase::Complete {
+                std::thread::sleep(Duration::from_millis(4));
+            }
+            Ok(())
+        },
+    )?;
+
+    if state.phase != LobbyScenarioSmokePhase::Complete || state.captures.len() != 5 {
+        bail!(
+            "lobby scenario smoke did not complete in {FRAME_COUNT} frames: phase={:?} captures={:?} standby={:?}",
+            state.phase,
+            state.captures,
+            state.host.scene_host().warm_world_standby_snapshot()
+        );
+    }
+    for (label, frame_index) in &state.captures {
+        save_rgba_png(
+            &options.directory.join(format!("{label}.png")),
+            options.width,
+            options.height,
+            &frame_pixels[*frame_index],
+        )?;
+    }
+    let switch_count = state
+        .host
+        .scene_host()
+        .last_warm_world_switch_report()
+        .map_or(0, |report| report.sequence);
+    if switch_count != 2 {
+        bail!("lobby scenario smoke expected two slot exchanges, got {switch_count}");
+    }
+    let receipt = serde_json::json!({
+        "schema": 1,
+        "captures": state.captures.iter().map(|(label, frame)| {
+            serde_json::json!({ "label": label, "frame": frame })
+        }).collect::<Vec<_>>(),
+        "switchCount": switch_count,
+        "managedRoot": options.scene.world_root.as_ref().map(|root| root.parent().unwrap_or(root).join("scenarios")),
+        "lobbyBehavior": "protectedLobby",
+        "islandBehavior": "mutable",
+    });
+    std::fs::write(
+        options.directory.join("report.json"),
+        serde_json::to_vec_pretty(&receipt)?,
+    )?;
+    Ok(LobbyScenarioSmokeReport {
+        directory: options.directory.clone(),
+        capture_count: state.captures.len(),
+        switch_count,
+    })
+}
+
+fn aim_current_eye_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Result<()> {
+    let preview = host
+        .scene_host()
+        .embedded_world_preview_snapshot()
+        .context("lobby scenario has no embedded preview placement")?;
+    let anchor = preview.placement.composition_anchor();
+    let eye = host.scene_host().camera_snapshot().eye;
+    host.set_camera_look_at(
+        Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32),
+        Vec3::new(anchor.x as f32, anchor.y as f32 + 0.25, anchor.z as f32),
+    );
+    host.commit_camera()?;
+    Ok(())
 }
 
 fn require_world_action_changed(

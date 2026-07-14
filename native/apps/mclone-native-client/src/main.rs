@@ -45,6 +45,7 @@ use crate::headless::{
 };
 use crate::live_diorama_smoke::run_live_diorama_smoke;
 use crate::lod_settle_probe::run_lod_settle_probe;
+use crate::offscreen_flat_client::run_lobby_scenario_smoke;
 use crate::offscreen_flat_client::run_offscreen_warm_world_swap_smoke;
 use crate::perf::{
     run_frame_budget_probe, run_loading_settle_perf, run_movement_perf_smoke,
@@ -52,6 +53,7 @@ use crate::perf::{
 };
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
 use crate::torch_light_probe::run_torch_light_probe;
+use crate::xr_emulation::run_lobby_scenario_stereo_smoke;
 use crate::xr_emulation::run_xr_emulation_screenshot;
 use anyhow::Result;
 #[cfg(test)]
@@ -135,6 +137,26 @@ fn main() -> Result<()> {
                 report.preview_drawn_section_count,
                 report.preview_drawn_index_count,
                 report.stereo_eye_pixel_difference_count,
+            );
+            Ok(())
+        }
+        Cli::LobbyScenarioSmoke { options } => {
+            let report = run_lobby_scenario_smoke(&options)?;
+            println!(
+                "lobby scenario smoke saved to {} (captures={}, switches={})",
+                report.directory.display(),
+                report.capture_count,
+                report.switch_count,
+            );
+            Ok(())
+        }
+        Cli::LobbyScenarioStereoSmoke { options } => {
+            let report = run_lobby_scenario_stereo_smoke(&options)?;
+            println!(
+                "lobby scenario stereo smoke saved to {} (eye differences={}, switches={})",
+                report.path.display(),
+                report.eye_pixel_difference_count,
+                report.switch_count,
             );
             Ok(())
         }

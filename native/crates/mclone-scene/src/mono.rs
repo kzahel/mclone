@@ -869,6 +869,11 @@ impl McloneSceneHost {
     where
         H: HostEffects,
     {
+        if matches!(action, GameUiAction::BackToTitle)
+            && self.ui.screen() == Some(GameScreen::PreparingLobby)
+        {
+            self.cancel_warm_world_standby("managed scenario title cancellation");
+        }
         if self.active_world.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
             return Ok(MonoUiActionOutcome::default());
         }
@@ -911,6 +916,7 @@ impl McloneSceneHost {
         );
         let starts_session = effects.session.session_start.is_some()
             || !effects.catalog.session_starts.is_empty()
+            || !effects.scenario.is_empty()
             || matches!(
                 action,
                 GameUiAction::OpenWorld(_) | GameUiAction::CreateCatalogWorld
@@ -951,9 +957,13 @@ impl McloneSceneHost {
             self.apply_xr_catalog_effects(effects.catalog, device, queue)?;
         let session_scene_replaced =
             self.apply_mono_session_effects(effects.session, device, queue, host)?;
+        let mut scenario_scene_replaced = false;
+        for effect in effects.scenario {
+            scenario_scene_replaced |= self.apply_managed_scenario_effect(effect, device, queue)?;
+        }
         self.apply_asset_pack_effects(effects.asset_packs);
         if !apply_client_experience_settings_effects(self, host, effects.settings)? {
-            return Ok(catalog_scene_replaced || session_scene_replaced);
+            return Ok(catalog_scene_replaced || session_scene_replaced || scenario_scene_replaced);
         }
         for effect in effects.gameplay {
             match effect {
@@ -967,9 +977,10 @@ impl McloneSceneHost {
                 ClientExperienceProjectionEffect::ApplyUiAction(action) => {
                     self.ui.apply_action(action);
                 }
+                ClientExperienceProjectionEffect::SuppressUiAction => {}
             }
         }
-        Ok(catalog_scene_replaced || session_scene_replaced)
+        Ok(catalog_scene_replaced || session_scene_replaced || scenario_scene_replaced)
     }
 
     fn apply_mono_session_effects<H>(

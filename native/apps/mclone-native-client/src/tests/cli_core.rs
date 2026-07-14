@@ -126,6 +126,7 @@ fn live_diorama_productization_uses_one_scene_scenario_executor() {
         .expect("title layout end");
     let title = &ui[title_start..title_end];
     for action in [
+        "GameUiAction::EnterScenario(GameScenarioId::LobbyPreview)",
         "GameUiAction::OpenWorldList",
         "GameUiAction::OpenJoinRemote",
         "GameUiAction::OpenOptions",
@@ -133,8 +134,8 @@ fn live_diorama_productization_uses_one_scene_scenario_executor() {
     ] {
         assert!(title.contains(action));
     }
-    assert!(!title.contains("Lobby"));
-    assert!(!title.contains("Scenario"));
+    assert!(title.contains("Enter Lobby"));
+    assert!(title.find("Enter Lobby").unwrap() < title.find("Singleplayer").unwrap());
 }
 
 #[test]

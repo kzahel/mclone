@@ -4,6 +4,10 @@ use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::monotonic::MonotonicInstant;
 use mclone_app_runtime::scenario::BuiltInScenarioId;
 #[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::scenario::ScenarioLaunchIntent;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_app_runtime::scenario_content::NativeManagedScenarioContentOperationService;
+#[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
@@ -150,6 +154,28 @@ pub enum WarmWorldPresentationRequest {
 pub struct PreparedEmbeddedWorldScenario {
     pub id: BuiltInScenarioId,
     pub destination: WarmWorldStandbyRequest,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ManagedScenarioLaunchPhase {
+    ResolvingContent,
+    StartingPrimary,
+    PrimaryPlayable,
+    WarmingDestination,
+    PreviewReady,
+    DestinationFailed,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub(crate) struct ManagedScenarioLaunchState {
+    pub(crate) intent: ScenarioLaunchIntent,
+    pub(crate) phase: ManagedScenarioLaunchPhase,
+    pub(crate) primary_operations: Option<NativeManagedScenarioContentOperationService>,
+    pub(crate) destination_operations: Option<NativeManagedScenarioContentOperationService>,
+    pub(crate) destination: Option<PreparedEmbeddedWorldScenario>,
+    pub(crate) destination_failure: Option<String>,
 }
 
 impl PreparedEmbeddedWorldScenario {
