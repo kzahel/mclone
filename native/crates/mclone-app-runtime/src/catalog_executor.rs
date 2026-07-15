@@ -326,6 +326,21 @@ mod tests {
                     }
                     None => self.record(Err(world_not_found(&id))),
                 },
+                WorldCatalogRequest::RecordWorldPlayed { id } => match self.summary(&id) {
+                    Some(mut summary) => {
+                        summary.last_played_unix_millis = Some(3_000);
+                        if let Some(existing) = self
+                            .worlds
+                            .borrow_mut()
+                            .iter_mut()
+                            .find(|world| world.id == id)
+                        {
+                            *existing = summary.clone();
+                        }
+                        self.record(Ok(WorldCatalogResponse::WorldPlayRecorded { summary }))
+                    }
+                    None => self.record(Err(world_not_found(&id))),
+                },
                 WorldCatalogRequest::DeleteWorld { id } => match self.summary(&id) {
                     Some(_) => {
                         if let Err(error) = validate_delete_inactive_world(&id, active_world) {

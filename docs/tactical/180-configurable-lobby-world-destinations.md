@@ -257,3 +257,55 @@ zero overflow. The direct native pixel witness was inspected and remains
 byte-identical at SHA-256
 `8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
 No performance or architecture stop condition fired.
+
+### Slice 2 — 2026-07-15
+
+Shared catalog policy now retains every returned world summary while preserving
+the existing eight-row UI cap as presentation only. Destination selection uses
+the canonical catalog ordering to choose the most recently played compatible
+world, including deterministic ties, and returns no selection for empty or
+incompatible-only catalogs. A pending list is distinguishable from unrelated
+catalog work so scenario routing can wait for authoritative selection instead
+of prematurely choosing the fallback.
+
+`RecordWorldPlayed` is a typed catalog operation on both native and web. It
+validates and updates only catalog metadata with a monotonic timestamp; it does
+not invoke `OpenWorld`, open the native SQLite world store, or start a browser
+Worker runtime. The shared controller folds its completion into the full
+catalog cache without emitting a session start. Cancelled and stale
+completions cannot change cached recency. The scene issues this operation only
+after a successful complete-slot switch whose destination descriptor names a
+catalog world, leaving preview warmup read-only. Actual catalog destination
+routing remains the next slice, so that hook is not yet reached by the current
+authored-fixture product route.
+
+Focused validation passed:
+
+- `cargo test -p mclone-app-runtime client_catalog_policy`: 15 passed;
+- `cargo test -p mclone-app-runtime world_catalog`: 19 passed;
+- `cargo test -p mclone-app-runtime catalog_executor`: 7 passed;
+- `cargo test -p mclone-scene catalog_activation` completed with no matching
+  focused tests, while the affected scene crate compiled in the web and native
+  lanes;
+- `pnpm native:web:typecheck` and `git diff --check` passed.
+
+The native catalog test removes the world's SQLite database before recording
+play, proving that the metadata-only operation does not reopen or recreate the
+world store. Production browser WebGPU `pnpm native:web:smoke` directly passed
+the IndexedDB create/open/record-play/delete contract, including a strictly
+newer record-play timestamp; `pnpm native:web:catalog-smoke` also passed the
+menu-driven create/open/delete flow. New native direct, browser world, and
+browser catalog UI pixels at `/tmp/mclone-180-slice2-native-direct.png`,
+`/tmp/mclone-native-web-smoke.png`, and
+`/tmp/mclone-native-web-catalog-ui-probe.png` were inspected.
+
+Five native feature-off samples measured 2.582/4.514 ms median average/P95,
+versus the Slice 1 accepted 2.568/4.532 ms current control
+(+0.55%/-0.40%), with no over-budget frames or accounting violations. Five
+production browser feature-off samples measured 13.4/18.6 ms median compile
+average/P95, versus 13.6/18.9 ms in Slice 1 (-1.47%/-1.59%). Shared-result
+transport remained active with one compiler Worker, no asset-pack resend, and
+zero result overflow. The direct native witness remains byte-identical at
+SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+No performance or architecture stop condition fired.

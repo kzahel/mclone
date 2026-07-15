@@ -14,6 +14,7 @@ type IndexedDbCatalogPolicy = Pick<
   | "mclone_web_catalog_prepare_world_list"
   | "mclone_web_catalog_prepare_create_world"
   | "mclone_web_catalog_prepare_open_world"
+  | "mclone_web_catalog_prepare_record_world_played"
   | "mclone_web_catalog_prepare_delete_world"
   | "mclone_web_managed_scenario_prepare_world"
   | "mclone_web_managed_scenario_validate_world"
@@ -178,6 +179,22 @@ export async function openIndexedDbCatalogWorld(
     ) as WebLocalWorldSummary;
   await putIndexedDbCatalogSummary(db, opened);
   return opened;
+}
+
+export async function recordIndexedDbCatalogWorldPlayed(
+  db: IDBDatabase,
+  id: string,
+): Promise<WebLocalWorldSummary> {
+  const policy = requireIndexedDbCatalogPolicy();
+  const normalizedId = policy.mclone_web_catalog_validate_world_id(id);
+  const summary = await getIndexedDbCatalogWorld(db, normalizedId);
+  const recorded = policy.mclone_web_catalog_prepare_record_world_played(
+    normalizedId,
+    summary,
+    nextCatalogTimestamp(),
+  ) as WebLocalWorldSummary;
+  await putIndexedDbCatalogSummary(db, recorded);
+  return recorded;
 }
 
 export async function deleteIndexedDbCatalogWorld(

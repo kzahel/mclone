@@ -2667,6 +2667,18 @@ pub fn mclone_web_catalog_prepare_open_world(
     encode_web_local_world_summary(&summary).map_err(JsValue::from)
 }
 
+#[wasm_bindgen(js_name = mclone_web_catalog_prepare_record_world_played)]
+pub fn mclone_web_catalog_prepare_record_world_played(
+    id: String,
+    record: JsValue,
+    now_unix_millis: f64,
+) -> Result<JsValue, JsValue> {
+    // Recording active play has the same metadata validation and timestamp
+    // transition as an ordinary open, but the IndexedDB adapter never opens a
+    // runtime or world store for this operation.
+    mclone_web_catalog_prepare_open_world(id, record, now_unix_millis)
+}
+
 #[wasm_bindgen(js_name = mclone_web_catalog_prepare_delete_world)]
 pub fn mclone_web_catalog_prepare_delete_world(
     id: String,
@@ -3139,6 +3151,9 @@ pub(super) fn decode_world_catalog_response(
             summary: decode_web_local_world_summary(payload)?,
         }),
         "openWorld" => Ok(WorldCatalogResponse::WorldOpened {
+            summary: decode_web_local_world_summary(payload)?,
+        }),
+        "recordWorldPlayed" => Ok(WorldCatalogResponse::WorldPlayRecorded {
             summary: decode_web_local_world_summary(payload)?,
         }),
         "deleteWorld" => Ok(WorldCatalogResponse::WorldDeleted {

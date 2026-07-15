@@ -24,6 +24,7 @@ import {
   deleteIndexedDbCatalogWorld,
   listIndexedDbCatalogWorlds,
   openIndexedDbCatalogWorld,
+  recordIndexedDbCatalogWorldPlayed,
   openWorldDb,
   provisionIndexedDbManagedScenarioWorldInWorker,
   setIndexedDbCatalogPolicy,
@@ -1935,6 +1936,11 @@ class WebFrameDriver {
       }
       case "openWorld":
         return openIndexedDbCatalogWorld(db, String(report.catalogWorldId ?? ""));
+      case "recordWorldPlayed":
+        return recordIndexedDbCatalogWorldPlayed(
+          db,
+          String(report.catalogWorldId ?? ""),
+        );
       case "deleteWorld": {
         const activeWorldId = String(report.activeWorldId ?? "").trim();
         return deleteIndexedDbCatalogWorld(

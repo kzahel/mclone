@@ -7,6 +7,7 @@ import {
   deleteIndexedDbCatalogWorld,
   listIndexedDbCatalogWorlds,
   openIndexedDbCatalogWorld,
+  recordIndexedDbCatalogWorldPlayed,
   openWorldDb,
   setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
@@ -622,6 +623,7 @@ async function runIndexedDbCatalogSmoke() {
 
     const afterCreate = await listIndexedDbCatalogWorlds(db);
     const opened = await openIndexedDbCatalogWorld(db, worldId);
+    const recorded = await recordIndexedDbCatalogWorldPlayed(db, worldId);
     const deleted = await deleteIndexedDbCatalogWorld(db, worldId);
     const afterDelete = await listIndexedDbCatalogWorlds(db);
     const openDeletedRejected = await rejectsWithMessage(
@@ -636,6 +638,7 @@ async function runIndexedDbCatalogSmoke() {
         && created.displayName === "Smoke Catalog World"
         && opened.id === worldId
         && Number(opened.lastPlayedUnixMillis) >= Number(created.lastPlayedUnixMillis)
+        && Number(recorded.lastPlayedUnixMillis) > Number(opened.lastPlayedUnixMillis)
         && deleted.id === worldId
         && duplicateRejected
         && activeDeleteRejected
@@ -652,6 +655,7 @@ async function runIndexedDbCatalogSmoke() {
       afterDeleteCount: afterDelete.length,
       created,
       opened,
+      recorded,
       deleted,
       recordsBeforeDelete,
       recordsAfterDelete,

@@ -273,6 +273,7 @@ pub enum WorldCatalogRequest {
     ListWorlds,
     CreateWorld { options: LocalWorldCreateOptions },
     OpenWorld { id: LocalWorldId },
+    RecordWorldPlayed { id: LocalWorldId },
     DeleteWorld { id: LocalWorldId },
 }
 
@@ -282,6 +283,7 @@ impl WorldCatalogRequest {
             Self::ListWorlds => WorldCatalogOperation::ListWorlds,
             Self::CreateWorld { .. } => WorldCatalogOperation::CreateWorld,
             Self::OpenWorld { .. } => WorldCatalogOperation::OpenWorld,
+            Self::RecordWorldPlayed { .. } => WorldCatalogOperation::RecordWorldPlayed,
             Self::DeleteWorld { .. } => WorldCatalogOperation::DeleteWorld,
         }
     }
@@ -300,6 +302,9 @@ pub enum WorldCatalogResponse {
     WorldOpened {
         summary: LocalWorldSummary,
     },
+    WorldPlayRecorded {
+        summary: LocalWorldSummary,
+    },
     WorldDeleted {
         id: LocalWorldId,
     },
@@ -311,6 +316,7 @@ pub enum WorldCatalogOperation {
     ListWorlds,
     CreateWorld,
     OpenWorld,
+    RecordWorldPlayed,
     DeleteWorld,
 }
 
@@ -411,14 +417,30 @@ pub fn validate_local_world_compatible(summary: &LocalWorldSummary) -> WorldCata
 }
 
 pub fn sort_local_world_summaries(worlds: &mut [LocalWorldSummary]) {
-    worlds.sort_by(|a, b| {
-        let a_last_played = a.last_played_unix_millis.unwrap_or(a.created_unix_millis);
-        let b_last_played = b.last_played_unix_millis.unwrap_or(b.created_unix_millis);
-        b_last_played
-            .cmp(&a_last_played)
-            .then_with(|| a.display_name.cmp(&b.display_name))
-            .then_with(|| a.id.cmp(&b.id))
-    });
+    worlds.sort_by(compare_local_world_summaries);
+}
+
+/// Select the same compatible world that would appear first in the canonical
+/// catalog ordering, without opening storage or changing recency.
+pub fn most_recent_compatible_local_world(
+    worlds: &[LocalWorldSummary],
+) -> Option<&LocalWorldSummary> {
+    worlds
+        .iter()
+        .filter(|world| world.compatible)
+        .min_by(|a, b| compare_local_world_summaries(a, b))
+}
+
+fn compare_local_world_summaries(
+    a: &LocalWorldSummary,
+    b: &LocalWorldSummary,
+) -> std::cmp::Ordering {
+    let a_last_played = a.last_played_unix_millis.unwrap_or(a.created_unix_millis);
+    let b_last_played = b.last_played_unix_millis.unwrap_or(b.created_unix_millis);
+    b_last_played
+        .cmp(&a_last_played)
+        .then_with(|| a.display_name.cmp(&b.display_name))
+        .then_with(|| a.id.cmp(&b.id))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -459,6 +481,11 @@ impl NativeWorldCatalog {
             WorldCatalogRequest::OpenWorld { id } => Ok(WorldCatalogResponse::WorldOpened {
                 summary: self.open_world(&id)?.summary,
             }),
+            WorldCatalogRequest::RecordWorldPlayed { id } => {
+                Ok(WorldCatalogResponse::WorldPlayRecorded {
+                    summary: self.record_world_played(&id)?,
+                })
+            }
             WorldCatalogRequest::DeleteWorld { id } => {
                 self.delete_world(&id, active_world)?;
                 Ok(WorldCatalogResponse::WorldDeleted { id })
@@ -592,6 +619,23 @@ impl NativeWorldCatalog {
             )
         })?;
         Ok((opened, store))
+    }
+
+    /// Update catalog recency after a world has actually become active.
+    ///
+    /// This deliberately does not open the SQLite store: lobby preview
+    /// selection and activation already own the live runtime lifecycle.
+    pub fn record_world_played(&self, id: &LocalWorldId) -> WorldCatalogResult<LocalWorldSummary> {
+        let mut summary = self.read_summary(id)?;
+        validate_local_world_compatible(&summary)?;
+        let next = summary
+            .last_played_unix_millis
+            .map(|previous| previous.saturating_add(1))
+            .unwrap_or_default()
+            .max(now_unix_millis());
+        summary.last_played_unix_millis = Some(next);
+        self.write_summary(&summary)?;
+        Ok(summary)
     }
 
     pub fn delete_world(
@@ -1085,6 +1129,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn recent_compatible_selection_uses_canonical_catalog_order() {
+        let mut alpha =
+            LocalWorldSummary::new(LocalWorldId::new("alpha").unwrap(), "Alpha", 1, 100).unwrap();
+        let mut beta =
+            LocalWorldSummary::new(LocalWorldId::new("beta").unwrap(), "Beta", 2, 100).unwrap();
+        let mut newest =
+            LocalWorldSummary::new(LocalWorldId::new("newest").unwrap(), "Newest", 3, 100).unwrap();
+        alpha.last_played_unix_millis = Some(500);
+        beta.last_played_unix_millis = Some(500);
+        newest.last_played_unix_millis = Some(600);
+        newest.compatible = false;
+
+        assert_eq!(
+            most_recent_compatible_local_world(&[beta, newest, alpha])
+                .map(|world| world.id.as_str()),
+            Some("alpha")
+        );
+        assert!(most_recent_compatible_local_world(&[]).is_none());
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn native_catalog_creates_lists_opens_and_deletes_worlds() {
@@ -1173,6 +1238,28 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn native_record_play_updates_metadata_without_opening_world_store() {
+        let temp = TestTempDir::new("native-catalog-record-play");
+        let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
+        let created = catalog
+            .create_world(LocalWorldCreateOptions::new("Recorded", 19).unwrap())
+            .unwrap();
+        let database_path =
+            SqliteWorldStore::database_path_for_world_dir(&catalog.world_dir(&created.id));
+        fs::remove_file(&database_path).unwrap();
+
+        let recorded = catalog.record_world_played(&created.id).unwrap();
+
+        assert_eq!(recorded.id, created.id);
+        assert!(
+            recorded.last_played_unix_millis.unwrap() >= created.last_played_unix_millis.unwrap()
+        );
+        assert_eq!(catalog.read_summary(&created.id).unwrap(), recorded);
+        assert!(!database_path.exists());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn native_catalog_request_dispatch_returns_shared_responses() {
         let temp = TestTempDir::new("native-catalog-dispatch");
         let catalog = NativeWorldCatalog::new(temp.path().join("worlds"));
@@ -1210,6 +1297,17 @@ mod tests {
         assert!(matches!(
             opened,
             WorldCatalogResponse::WorldOpened { ref summary } if summary.id == id
+        ));
+
+        let recorded = catalog
+            .handle_request(
+                WorldCatalogRequest::RecordWorldPlayed { id: id.clone() },
+                None,
+            )
+            .unwrap();
+        assert!(matches!(
+            recorded,
+            WorldCatalogResponse::WorldPlayRecorded { ref summary } if summary.id == id
         ));
 
         let deleted = catalog

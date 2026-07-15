@@ -3271,6 +3271,7 @@ impl McloneSceneHost {
             .descriptor
             .clone()
             .context("selected warm world has no active-session descriptor")?;
+        let activated_catalog_world = destination_descriptor.local_world_id().cloned();
         self.session.complete_start(destination_descriptor);
         self.clear_world_selection_presentation_state();
 
@@ -3280,6 +3281,9 @@ impl McloneSceneHost {
             selected_source_endpoint,
             return_entry_pose,
         )?;
+        if let Some(id) = activated_catalog_world {
+            self.request_catalog_activation_play_record(id);
+        }
 
         self.warm_world_switch_sequence = self.warm_world_switch_sequence.saturating_add(1);
         let report = WarmWorldSwitchReport {
@@ -3338,6 +3342,26 @@ impl McloneSceneHost {
         );
         self.last_warm_world_switch = Some(report.clone());
         Ok(report)
+    }
+
+    fn request_catalog_activation_play_record(&mut self, id: LocalWorldId) {
+        let Some(mut operations) = self.services.catalog_operations.take() else {
+            log::warn!(
+                "catalog activation for `{id}` could not record recency: no catalog service"
+            );
+            return;
+        };
+        let effects = self
+            .client_experience
+            .catalog_mut()
+            .request_record_world_played(id.clone());
+        for request in effects.catalog_requests {
+            operations.submit(request, Some(id.clone()));
+        }
+        let completed = operations.poll(self.client_experience.catalog_mut());
+        debug_assert!(completed.session_starts.is_empty());
+        debug_assert!(completed.catalog_requests.is_empty());
+        self.services.catalog_operations = Some(operations);
     }
 
     fn commit_world_slot_camera(

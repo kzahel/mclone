@@ -5789,6 +5789,17 @@ mod tests {
                         .clone();
                     WorldCatalogResponse::WorldOpened { summary }
                 }
+                WorldCatalogRequest::RecordWorldPlayed { id } => {
+                    let summary = self
+                        .worlds
+                        .iter_mut()
+                        .find(|world| world.id == id)
+                        .unwrap_or_else(|| panic!("emulated catalog missing world `{id}`"));
+                    summary.last_played_unix_millis = Some(3_000);
+                    WorldCatalogResponse::WorldPlayRecorded {
+                        summary: summary.clone(),
+                    }
+                }
                 WorldCatalogRequest::DeleteWorld { id } => {
                     let index = self
                         .worlds

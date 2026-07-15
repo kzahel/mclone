@@ -3684,6 +3684,10 @@ fn write_catalog_request(
             report_set_string(object, "catalogOperation", "openWorld")?;
             report_set_string(object, "catalogWorldId", id.as_str())
         }
+        WorldCatalogRequest::RecordWorldPlayed { id } => {
+            report_set_string(object, "catalogOperation", "recordWorldPlayed")?;
+            report_set_string(object, "catalogWorldId", id.as_str())
+        }
         WorldCatalogRequest::DeleteWorld { id } => {
             report_set_string(object, "catalogOperation", "deleteWorld")?;
             report_set_string(object, "catalogWorldId", id.as_str())

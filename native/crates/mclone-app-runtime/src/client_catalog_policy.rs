@@ -4,7 +4,7 @@ use crate::session::{ActiveSessionDescriptor, SessionStartRequest};
 use crate::world_catalog::{
     LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
     WorldCatalogError, WorldCatalogRequest, WorldCatalogRequestId, WorldCatalogResponse,
-    sort_local_world_summaries,
+    most_recent_compatible_local_world, sort_local_world_summaries,
 };
 use mclone_ui::{
     GameUiAction, WORLD_CATALOG_UI_ROW_CAPACITY, WorldCatalogUiEntry, WorldCatalogUiState,
@@ -14,6 +14,7 @@ use mclone_ui::{
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClientCatalogController {
     capabilities: WorldCatalogCapabilities,
+    worlds: Vec<LocalWorldSummary>,
     entries: Vec<ClientCatalogEntry>,
     ui: WorldCatalogUiState,
     active_world: Option<LocalWorldId>,
@@ -31,6 +32,7 @@ impl ClientCatalogController {
     pub fn new() -> Self {
         Self {
             capabilities: WorldCatalogCapabilities::default(),
+            worlds: Vec::new(),
             entries: Vec::new(),
             ui: WorldCatalogUiState::default(),
             active_world: None,
@@ -59,10 +61,21 @@ impl ClientCatalogController {
     }
 
     pub fn world_summary(&self, id: &LocalWorldId) -> Option<&LocalWorldSummary> {
-        self.entries
-            .iter()
-            .find(|entry| &entry.summary.id == id)
-            .map(|entry| &entry.summary)
+        self.worlds.iter().find(|summary| &summary.id == id)
+    }
+
+    pub fn world_summaries(&self) -> &[LocalWorldSummary] {
+        &self.worlds
+    }
+
+    pub fn most_recent_compatible_world(&self) -> Option<&LocalWorldSummary> {
+        most_recent_compatible_local_world(&self.worlds)
+    }
+
+    pub fn world_list_pending(&self) -> bool {
+        self.pending
+            .values()
+            .any(|pending| matches!(pending, PendingCatalogRequest::List))
     }
 
     pub fn set_create_display_name(&mut self, display_name: &str) {
@@ -74,7 +87,7 @@ impl ClientCatalogController {
     }
 
     pub fn set_capabilities(&mut self, capabilities: WorldCatalogCapabilities) {
-        let worlds = self.world_summaries();
+        let worlds = self.worlds.clone();
         let status = self.ui.status;
         self.set_worlds(capabilities, worlds, status);
     }
@@ -99,6 +112,23 @@ impl ClientCatalogController {
             return ClientCatalogEffects::default();
         }
         self.queue_catalog_request(WorldCatalogRequest::ListWorlds, PendingCatalogRequest::List)
+    }
+
+    /// Record recency only after a catalog world has actually become active.
+    /// This request never starts or reopens a session.
+    pub fn request_record_world_played(&mut self, id: LocalWorldId) -> ClientCatalogEffects {
+        if !self.capabilities.open_supported {
+            self.set_unsupported_status();
+            return ClientCatalogEffects::default();
+        }
+        if self.world_summary(&id).is_none() {
+            self.ui.status = WorldCatalogUiStatus::new("Selected world is unavailable", false);
+            return ClientCatalogEffects::default();
+        }
+        self.queue_catalog_request(
+            WorldCatalogRequest::RecordWorldPlayed { id: id.clone() },
+            PendingCatalogRequest::RecordPlayed { id },
+        )
     }
 
     pub fn apply_ui_action(
@@ -181,6 +211,13 @@ impl ClientCatalogController {
                 self.upsert_world(summary.clone());
                 self.select_local_world(&summary.id);
                 ClientCatalogEffects::with_session_start(start)
+            }
+            (
+                PendingCatalogRequest::RecordPlayed { id },
+                WorldCatalogResponse::WorldPlayRecorded { summary },
+            ) if id == summary.id => {
+                self.upsert_world(summary);
+                ClientCatalogEffects::default()
             }
             (
                 PendingCatalogRequest::Delete { id, display_name },
@@ -306,9 +343,10 @@ impl ClientCatalogController {
 
     fn set_world_catalog_worlds(
         &mut self,
-        worlds: Vec<LocalWorldSummary>,
+        mut worlds: Vec<LocalWorldSummary>,
         status: WorldCatalogUiStatus,
     ) {
+        sort_local_world_summaries(&mut worlds);
         let previous_selected = self.ui.selected;
         let create_display_name = self.ui.create_display_name;
         let total_world_count = worlds.len();
@@ -316,7 +354,7 @@ impl ClientCatalogController {
         let mut cached_entries = Vec::new();
         let mut ui_entries = Vec::new();
 
-        for summary in worlds.into_iter().take(WORLD_CATALOG_UI_ROW_CAPACITY) {
+        for summary in worlds.iter().take(WORLD_CATALOG_UI_ROW_CAPACITY).cloned() {
             let ui_id = allocate_world_catalog_ui_id(&summary.id, &mut used_ui_ids);
             ui_entries.push(world_catalog_ui_entry(ui_id, &summary));
             cached_entries.push(ClientCatalogEntry { ui_id, summary });
@@ -344,12 +382,13 @@ impl ClientCatalogController {
         state.set_entries(&ui_entries);
         state.loading = !self.pending.is_empty();
 
+        self.worlds = worlds;
         self.entries = cached_entries;
         self.ui = state;
     }
 
     fn upsert_world(&mut self, summary: LocalWorldSummary) {
-        let mut worlds = self.world_summaries();
+        let mut worlds = self.worlds.clone();
         if let Some(existing) = worlds.iter_mut().find(|world| world.id == summary.id) {
             *existing = summary;
         } else {
@@ -361,7 +400,8 @@ impl ClientCatalogController {
 
     fn remove_world(&mut self, id: &LocalWorldId) {
         let worlds = self
-            .world_summaries()
+            .worlds
+            .clone()
             .into_iter()
             .filter(|world| &world.id != id)
             .collect::<Vec<_>>();
@@ -377,13 +417,6 @@ impl ClientCatalogController {
         {
             self.ui.selected = Some(ui_id);
         }
-    }
-
-    fn world_summaries(&self) -> Vec<LocalWorldSummary> {
-        self.entries
-            .iter()
-            .map(|entry| entry.summary.clone())
-            .collect()
     }
 
     fn catalog_entry_for_ui_id(&self, ui_id: WorldCatalogUiWorldId) -> Option<&ClientCatalogEntry> {
@@ -481,6 +514,9 @@ enum PendingCatalogRequest {
         options: LocalWorldCreateOptions,
     },
     Open {
+        id: LocalWorldId,
+    },
+    RecordPlayed {
         id: LocalWorldId,
     },
     Delete {
@@ -708,6 +744,147 @@ mod tests {
                 .selected_entry()
                 .and_then(|entry| entry.last_played_unix_millis),
             Some(500)
+        );
+    }
+
+    #[test]
+    fn catalog_retains_all_worlds_and_selects_most_recent_compatible() {
+        let mut worlds = (0..10)
+            .map(|index| {
+                let mut world =
+                    summary(&format!("world-{index}"), &format!("World {index}"), index);
+                world.last_played_unix_millis = Some(1_000 - index as u64);
+                world
+            })
+            .collect::<Vec<_>>();
+        worlds[0].compatible = false;
+        let outside_ui_id = worlds[9].id.clone();
+        let controller = persistent_controller(worlds);
+
+        assert_eq!(
+            controller.ui_state().entry_count(),
+            WORLD_CATALOG_UI_ROW_CAPACITY
+        );
+        assert_eq!(controller.world_summaries().len(), 10);
+        assert!(controller.world_summary(&outside_ui_id).is_some());
+        assert_eq!(
+            controller
+                .most_recent_compatible_world()
+                .map(|world| world.id.as_str()),
+            Some("world-1")
+        );
+    }
+
+    #[test]
+    fn most_recent_compatible_selection_uses_catalog_tie_breaks() {
+        let mut alpha = summary("alpha", "Alpha", 1);
+        let mut beta = summary("beta", "Beta", 2);
+        let mut incompatible = summary("newest", "Newest", 3);
+        alpha.last_played_unix_millis = Some(500);
+        beta.last_played_unix_millis = Some(500);
+        incompatible.last_played_unix_millis = Some(600);
+        incompatible.compatible = false;
+
+        let controller = persistent_controller(vec![beta, incompatible, alpha]);
+
+        assert_eq!(
+            controller
+                .most_recent_compatible_world()
+                .map(|world| world.id.as_str()),
+            Some("alpha")
+        );
+    }
+
+    #[test]
+    fn most_recent_compatible_selection_rejects_empty_and_incompatible_catalogs() {
+        assert!(
+            persistent_controller(Vec::new())
+                .most_recent_compatible_world()
+                .is_none()
+        );
+
+        let mut incompatible = summary("newest", "Newest", 3);
+        incompatible.last_played_unix_millis = Some(600);
+        incompatible.compatible = false;
+        assert!(
+            persistent_controller(vec![incompatible])
+                .most_recent_compatible_world()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn record_play_updates_cached_recency_without_starting_session() {
+        let alpha = summary("alpha-base", "Alpha Base", 11);
+        let mut controller = persistent_controller(vec![alpha.clone()]);
+
+        let request = only_request(controller.request_record_world_played(alpha.id.clone()));
+        assert_eq!(
+            request.request,
+            WorldCatalogRequest::RecordWorldPlayed {
+                id: alpha.id.clone()
+            }
+        );
+        let mut recorded = alpha.clone();
+        recorded.last_played_unix_millis = Some(750);
+        let effects = controller.apply_catalog_response(
+            request.id,
+            WorldCatalogResponse::WorldPlayRecorded {
+                summary: recorded.clone(),
+            },
+        );
+
+        assert!(effects.catalog_requests.is_empty());
+        assert!(effects.session_starts.is_empty());
+        assert_eq!(
+            controller
+                .world_summary(&alpha.id)
+                .and_then(|world| world.last_played_unix_millis),
+            Some(750)
+        );
+    }
+
+    #[test]
+    fn list_pending_is_distinct_from_other_catalog_work() {
+        let alpha = summary("alpha-base", "Alpha Base", 11);
+        let mut controller = persistent_controller(vec![alpha.clone()]);
+        let record = only_request(controller.request_record_world_played(alpha.id));
+        assert!(!controller.world_list_pending());
+
+        let list = only_request(controller.request_world_list());
+        assert!(controller.world_list_pending());
+        controller.apply_catalog_error(list.id, WorldCatalogError::unsupported("cancelled list"));
+        assert!(!controller.world_list_pending());
+        controller.apply_catalog_error(
+            record.id,
+            WorldCatalogError::unsupported("cancelled record"),
+        );
+    }
+
+    #[test]
+    fn stale_record_completion_cannot_change_cached_recency() {
+        let alpha = summary("alpha-base", "Alpha Base", 11);
+        let mut controller = persistent_controller(vec![alpha.clone()]);
+        let record = only_request(controller.request_record_world_played(alpha.id.clone()));
+        controller.apply_catalog_error(
+            record.id,
+            WorldCatalogError::unsupported("cancelled record"),
+        );
+
+        let mut stale = alpha.clone();
+        stale.last_played_unix_millis = Some(900);
+        let effects = controller.apply_catalog_response(
+            record.id,
+            WorldCatalogResponse::WorldPlayRecorded { summary: stale },
+        );
+
+        assert!(effects.catalog_requests.is_empty());
+        assert!(effects.session_starts.is_empty());
+        assert_eq!(
+            controller
+                .world_summary(&alpha.id)
+                .and_then(|world| world.last_played_unix_millis),
+            alpha.last_played_unix_millis
         );
     }
 
