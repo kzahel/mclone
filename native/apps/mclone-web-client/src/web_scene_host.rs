@@ -1199,9 +1199,21 @@ impl WebSceneHost {
 
     #[wasm_bindgen(js_name = beginManagedScenarioSmoke)]
     pub fn begin_managed_scenario_smoke(&mut self) -> Result<JsValue, JsValue> {
+        self.begin_managed_scenario_smoke_with_chunk_span(2)
+    }
+
+    #[wasm_bindgen(js_name = beginManagedScenarioSmokeWithChunkSpan)]
+    pub fn begin_managed_scenario_smoke_with_chunk_span(
+        &mut self,
+        chunk_span: u32,
+    ) -> Result<JsValue, JsValue> {
+        let bounds = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(chunk_span)
+            .map_err(js_error)?;
         self.host_mut()?
             .begin_managed_scenario_launch(
-                mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview(),
+                mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview()
+                    .with_preview_bounds(bounds)
+                    .map_err(js_error)?,
             )
             .map_err(js_error)?;
         self.ui_report(false, None).map_err(JsValue::from)
@@ -2476,6 +2488,46 @@ impl WebSceneHost {
                     &object,
                     "embeddedPreviewScale",
                     preview.placement.uniform_scale(),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewMinChunkX",
+                    f64::from(preview.region.min_chunk().x),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewMinChunkZ",
+                    f64::from(preview.region.min_chunk().z),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewMaxChunkX",
+                    f64::from(preview.region.max_chunk().x),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewMaxChunkZ",
+                    f64::from(preview.region.max_chunk().z),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewChunkWidth",
+                    f64::from(preview.region.chunk_width()),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewChunkDepth",
+                    f64::from(preview.region.chunk_depth()),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewMinSectionY",
+                    f64::from(preview.region.min_section_y()),
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewMaxSectionY",
+                    f64::from(preview.region.max_section_y()),
                 )?;
                 report_set_number(
                     &object,

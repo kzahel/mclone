@@ -109,7 +109,7 @@ interface AppRuntime {
   setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
   setNativeTouchControlsMode?: (mode: TouchControlsMode, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
-  beginManagedScenarioSmoke?: () => WasmReport | null;
+  beginManagedScenarioSmoke?: (chunkSpan?: number) => WasmReport | null;
   shutdownForSmoke?: () => Promise<WasmReport | null>;
 }
 
@@ -306,7 +306,8 @@ async function boot(): Promise<WasmReport> {
     app.setNativeTouchControlsMode(mode, persist)
   );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.beginManagedScenarioSmoke = () => app.beginManagedScenarioSmoke();
+  runtime.beginManagedScenarioSmoke = (chunkSpan = 2) =>
+    app.beginManagedScenarioSmoke(chunkSpan);
   runtime.shutdownForSmoke = () => app.shutdownForSmoke();
   try {
     await app.init();
@@ -678,11 +679,11 @@ class WebFrameDriver {
     return report;
   }
 
-  beginManagedScenarioSmoke(): WasmReport | null {
+  beginManagedScenarioSmoke(chunkSpan = 2): WasmReport | null {
     if (!this.session) {
       return null;
     }
-    const report = this.session.beginManagedScenarioSmoke();
+    const report = this.session.beginManagedScenarioSmokeWithChunkSpan(chunkSpan);
     this.applyNativeUiReport(report);
     this.drainManagedScenarioOperations();
     return report;
@@ -1213,6 +1214,14 @@ class WebFrameDriver {
       "embeddedPreviewAnchorY",
       "embeddedPreviewAnchorZ",
       "embeddedPreviewScale",
+      "embeddedPreviewMinChunkX",
+      "embeddedPreviewMinChunkZ",
+      "embeddedPreviewMaxChunkX",
+      "embeddedPreviewMaxChunkZ",
+      "embeddedPreviewChunkWidth",
+      "embeddedPreviewChunkDepth",
+      "embeddedPreviewMinSectionY",
+      "embeddedPreviewMaxSectionY",
       "embeddedPreviewBoundedSectionCount",
       "embeddedPreviewDrawnSectionCount",
       "embeddedPreviewDrawnIndexCount",

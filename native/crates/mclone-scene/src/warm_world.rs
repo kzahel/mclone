@@ -1797,11 +1797,10 @@ pub(crate) fn bounded_preview_source_priority(
     composition_camera: Vec3d,
 ) -> Vec3d {
     let source = placement.composition_to_source(composition_camera);
-    let radius = i64::from(region.horizontal_radius());
-    let min_chunk_x = i64::from(region.center().x) - radius;
-    let max_chunk_x = i64::from(region.center().x) + radius;
-    let min_chunk_z = i64::from(region.center().z) - radius;
-    let max_chunk_z = i64::from(region.center().z) + radius;
+    let min_chunk_x = i64::from(region.min_chunk().x);
+    let max_chunk_x = i64::from(region.max_chunk().x);
+    let min_chunk_z = i64::from(region.min_chunk().z);
+    let max_chunk_z = i64::from(region.max_chunk().z);
     let min_x = (min_chunk_x * 16) as f64;
     let max_x = ((max_chunk_x + 1) * 16) as f64 - 0.5;
     let min_z = (min_chunk_z * 16) as f64;

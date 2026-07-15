@@ -55,9 +55,12 @@ const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-ru
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE === "1";
 const lobbyScenarioLifecycleProbe = process.argv.includes("--lobby-scenario-lifecycle-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_LIFECYCLE_PROBE === "1";
+const lobbyScenarioBoundsProbe = process.argv.includes("--lobby-scenario-bounds-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_BOUNDS_PROBE === "1";
 const lobbyScenarioProbe = process.argv.includes("--lobby-scenario-probe")
   || process.argv.includes("--lobby-scenario-mobile-probe")
   || lobbyScenarioLifecycleProbe
+  || lobbyScenarioBoundsProbe
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE === "1";
 const lobbyScenarioMobileProbe = process.argv.includes("--lobby-scenario-mobile-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_PROBE === "1";
@@ -105,7 +108,7 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
     : lobbyScenarioProbe
-    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.png`
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioBoundsProbe ? "bounds-4x4" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
@@ -129,7 +132,7 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
     : lobbyScenarioProbe
-    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview.png`
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioBoundsProbe ? "bounds-4x4" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
@@ -168,7 +171,7 @@ const managedScenarioRuntimeProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-runtime-probe.json";
 const lobbyScenarioProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE_REPORT
-  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.json`;
+  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioBoundsProbe ? "bounds-4x4" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.json`;
 const lobbyScenarioTitleScreenshotPath =
   `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-title.png`;
 const lobbyScenarioPlayableScreenshotPath =
@@ -625,7 +628,12 @@ async function run() {
       if (lobbyScenarioProbe) {
         const lobbyScenarioProbeResult = lobbyScenarioLifecycleProbe
           ? await runLobbyScenarioLifecycleProbe(page, canvas)
-          : await runLobbyScenarioProbe(page, canvas, lobbyScenarioMobileProbe);
+          : await runLobbyScenarioProbe(
+            page,
+            canvas,
+            lobbyScenarioMobileProbe,
+            lobbyScenarioBoundsProbe ? 4 : null,
+          );
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         const pageScreenshotCaptured = await page.screenshot({
           path: screenshotPath,
@@ -654,8 +662,12 @@ async function run() {
           lobbyScenarioProbeReportPath,
           `${JSON.stringify(report, null, 2)}\n`,
         );
+        const previewAfter = /** @type {any} */ (lobbyScenarioProbeResult).after;
         if (
           !lobbyScenarioProbeResult.ok
+          || (lobbyScenarioBoundsProbe
+            && (Number(previewAfter?.embeddedPreviewChunkWidth) !== 4
+              || Number(previewAfter?.embeddedPreviewChunkDepth) !== 4))
           || shutdownResult?.shutdownComplete !== true
           || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
           || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
@@ -2001,8 +2013,9 @@ async function exerciseBrowserScenarioVisibility(page) {
  * @param {Page} page
  * @param {Locator} canvas
  * @param {boolean} mobile
+ * @param {number | null} chunkSpan
  */
-async function runLobbyScenarioProbe(page, canvas, mobile) {
+async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
   await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
   await page.evaluate(() => globalThis.__mcloneWebApp?.openNativeTitleUi?.());
   await waitForNativeUiScreen(page, "title");
@@ -2045,7 +2058,12 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
     };
   });
 
-  const clickReport = await clickNativeMenuButton(canvas, "title", 0);
+  const clickReport = chunkSpan === null
+    ? await clickNativeMenuButton(canvas, "title", 0)
+    : await page.evaluate(
+      (span) => globalThis.__mcloneWebApp?.beginManagedScenarioSmoke?.(span) ?? null,
+      chunkSpan,
+    );
   await page.waitForFunction(
     (priorWorld) => {
       const state = globalThis.__mcloneWebApp?.state;
@@ -2325,6 +2343,14 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       embeddedPreviewWorldInstanceId: state.embeddedPreviewWorldInstanceId,
       embeddedPreviewPhase: state.embeddedPreviewPhase,
       embeddedPreviewScale: state.embeddedPreviewScale,
+      embeddedPreviewMinChunkX: state.embeddedPreviewMinChunkX,
+      embeddedPreviewMinChunkZ: state.embeddedPreviewMinChunkZ,
+      embeddedPreviewMaxChunkX: state.embeddedPreviewMaxChunkX,
+      embeddedPreviewMaxChunkZ: state.embeddedPreviewMaxChunkZ,
+      embeddedPreviewChunkWidth: state.embeddedPreviewChunkWidth,
+      embeddedPreviewChunkDepth: state.embeddedPreviewChunkDepth,
+      embeddedPreviewMinSectionY: state.embeddedPreviewMinSectionY,
+      embeddedPreviewMaxSectionY: state.embeddedPreviewMaxSectionY,
       embeddedPreviewBoundedSectionCount: state.embeddedPreviewBoundedSectionCount,
       embeddedPreviewDrawnSectionCount: state.embeddedPreviewDrawnSectionCount,
       embeddedPreviewDrawnIndexCount: state.embeddedPreviewDrawnIndexCount,

@@ -295,7 +295,7 @@ fn cli_parses_launch_only_live_diorama_placement() {
     let diorama = scene.live_diorama.expect("live diorama parsed");
     assert_eq!(diorama.world_dir, PathBuf::from("/tmp/island-b"));
     assert_eq!(diorama.source_region.center(), ChunkPos::new(2, -3));
-    assert_eq!(diorama.source_region.horizontal_radius(), 1);
+    assert_eq!(diorama.source_region.symmetric_horizontal_radius(), Some(1));
     assert_eq!(diorama.source_region.min_section_y(), 4);
     assert_eq!(diorama.source_region.max_section_y(), 6);
     assert_eq!(

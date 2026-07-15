@@ -208,3 +208,52 @@ Focused pre-change validation passed:
 The tactical and index now lock rectangular 2x2/4x4 configuration, most-recent
 compatible selection, managed full-overworld fallback, recency-on-activation,
 supported arrival, per-slice browser WebGPU acceptance, and direct-path gates.
+
+### Slice 1 — 2026-07-15
+
+`EmbeddedChunkRegion` now stores inclusive minimum and maximum chunk and
+section coordinates. Center-plus-radius construction remains compatibility
+sugar, while exact rectangular construction, width/depth diagnostics, bounds
+conversion, containment, source-priority clamping, and even-sized 2x2/4x4
+behavior use the canonical min/max model. Even spans keep scenario entry and
+streaming interest pinned to the explicit entry chunk instead of adopting an
+arbitrary geometric midpoint.
+
+`ScenarioPreviewBounds` is a path-free, serialized launch setting with
+validated inclusive offsets and a maximum span of 16 chunks per axis. The
+product default is 2x2; the same browser entry point accepted a runtime 4x4
+configuration without a native/web feature fork. Stable default intent JSON
+remains `{"id":"lobby-preview"}`. Web diagnostics now expose exact horizontal
+and vertical bounds, and the checked-in browser bounds lane fails unless the
+live retained preview reports 4x4.
+
+Focused validation passed:
+
+- `cargo test -p mclone-render placement`: 11 passed;
+- `cargo test -p mclone-app-runtime scenario`: 20 relevant tests passed;
+- `cargo test -p mclone-scene warm_world`: 14 library tests plus the focused
+  ownership exchange passed;
+- the native-client live-diorama placement CLI test passed;
+- `pnpm native:web:typecheck` and `git diff --check` passed.
+
+Native `pnpm native:lobby-scenario:smoke` completed six captures and two slot
+switches using the 2x2 product default. The new native lobby/preview/return
+pixels under `/tmp/mclone-lobby-scenario-smoke` were inspected. Production
+browser WebGPU `pnpm native:web:lobby-scenario-bounds-smoke` completed with
+bounds `(-2,-2)..(1,1)`, 4x4 chunks, sections `3..5`, 48 bounded sections,
+two drawn authored sections, zero out-of-region submissions, live actors, and
+complete Worker shutdown. Its new preview pixels and JSON receipt are under
+`/tmp/mclone-native-web-lobby-scenario-bounds-4x4*` and were inspected.
+
+The first native absolute feature-off batch drifted above the Tactical 179
+historical comparison, so it was not accepted without attribution. Five exact
+interleaved current/control pairs against detached commit `4717c5bd` measured
+2.568/4.532 ms candidate median average/P95 versus 2.554/4.552 ms control,
++0.55%/-0.44%, with no over-budget frames or accounting violations. Five
+production browser feature-off samples measured 13.6/18.9 ms median compile
+average/P95 versus 13.3/18.5 ms in the accepted control, +2.26%/+2.16%, with
+two of two direct actors, one compiler Worker, shared-result transport, and
+zero overflow. The direct native pixel witness was inspected and remains
+byte-identical at SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+No performance or architecture stop condition fired.

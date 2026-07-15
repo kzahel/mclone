@@ -357,10 +357,14 @@ impl WorldCompositionContext {
 }
 
 /// Inclusive, section-aligned source bounds for an embedded terrain draw.
+///
+/// Rectangular chunk bounds are the canonical representation. The
+/// center-plus-radius constructor remains convenience sugar for older square
+/// fixtures, but product previews may use even spans such as 2x2 or 4x4.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EmbeddedChunkRegion {
-    center: ChunkPos,
-    horizontal_radius: u32,
+    min_chunk: ChunkPos,
+    max_chunk: ChunkPos,
     min_section_y: i32,
     max_section_y: i32,
 }
@@ -372,23 +376,75 @@ impl EmbeddedChunkRegion {
         min_section_y: i32,
         max_section_y: i32,
     ) -> Result<Self> {
+        let radius = i64::from(horizontal_radius);
+        let min_chunk_x = i64::from(center.x) - radius;
+        let max_chunk_x = i64::from(center.x) + radius;
+        let min_chunk_z = i64::from(center.z) - radius;
+        let max_chunk_z = i64::from(center.z) + radius;
+        let [min_chunk_x, max_chunk_x, min_chunk_z, max_chunk_z] =
+            [min_chunk_x, max_chunk_x, min_chunk_z, max_chunk_z].map(|value| {
+                i32::try_from(value)
+                    .map_err(|_| anyhow::anyhow!("embedded chunk radius exceeds coordinate range"))
+            });
+        Self::from_chunk_bounds(
+            ChunkPos::new(min_chunk_x?, min_chunk_z?),
+            ChunkPos::new(max_chunk_x?, max_chunk_z?),
+            min_section_y,
+            max_section_y,
+        )
+    }
+
+    pub fn from_chunk_bounds(
+        min_chunk: ChunkPos,
+        max_chunk: ChunkPos,
+        min_section_y: i32,
+        max_section_y: i32,
+    ) -> Result<Self> {
+        if min_chunk.x > max_chunk.x || min_chunk.z > max_chunk.z {
+            bail!("embedded chunk region minimum chunk must not exceed maximum");
+        }
         if min_section_y > max_section_y {
             bail!("embedded chunk region minimum section must not exceed maximum");
         }
         Ok(Self {
-            center,
-            horizontal_radius,
+            min_chunk,
+            max_chunk,
             min_section_y,
             max_section_y,
         })
     }
 
     pub fn center(self) -> ChunkPos {
-        self.center
+        ChunkPos::new(
+            midpoint_i32(self.min_chunk.x, self.max_chunk.x),
+            midpoint_i32(self.min_chunk.z, self.max_chunk.z),
+        )
     }
 
-    pub fn horizontal_radius(self) -> u32 {
-        self.horizontal_radius
+    pub fn min_chunk(self) -> ChunkPos {
+        self.min_chunk
+    }
+
+    pub fn max_chunk(self) -> ChunkPos {
+        self.max_chunk
+    }
+
+    pub fn chunk_width(self) -> u32 {
+        inclusive_i32_span(self.min_chunk.x, self.max_chunk.x)
+    }
+
+    pub fn chunk_depth(self) -> u32 {
+        inclusive_i32_span(self.min_chunk.z, self.max_chunk.z)
+    }
+
+    pub fn symmetric_horizontal_radius(self) -> Option<u32> {
+        let center = self.center();
+        let x_min = i64::from(center.x) - i64::from(self.min_chunk.x);
+        let x_max = i64::from(self.max_chunk.x) - i64::from(center.x);
+        let z_min = i64::from(center.z) - i64::from(self.min_chunk.z);
+        let z_max = i64::from(self.max_chunk.z) - i64::from(center.z);
+        (x_min == x_max && x_min == z_min && x_min == z_max)
+            .then(|| u32::try_from(x_min).expect("nonnegative i32 radius fits u32"))
     }
 
     pub fn min_section_y(self) -> i32 {
@@ -400,9 +456,10 @@ impl EmbeddedChunkRegion {
     }
 
     pub fn contains(self, key: RenderSectionKey) -> bool {
-        let radius = i64::from(self.horizontal_radius);
-        (i64::from(key.chunk_x) - i64::from(self.center.x)).abs() <= radius
-            && (i64::from(key.chunk_z) - i64::from(self.center.z)).abs() <= radius
+        key.chunk_x >= self.min_chunk.x
+            && key.chunk_x <= self.max_chunk.x
+            && key.chunk_z >= self.min_chunk.z
+            && key.chunk_z <= self.max_chunk.z
             && key.section_y >= self.min_section_y
             && key.section_y <= self.max_section_y
     }
@@ -410,11 +467,10 @@ impl EmbeddedChunkRegion {
     /// Derive the section-aligned presentation AABB. This conversion does not
     /// transfer runtime interest ownership into renderer vocabulary.
     pub fn source_bounds(self) -> WorldSourceBounds {
-        let radius = i64::from(self.horizontal_radius);
-        let min_chunk_x = i64::from(self.center.x) - radius;
-        let max_chunk_x_exclusive = i64::from(self.center.x) + radius + 1;
-        let min_chunk_z = i64::from(self.center.z) - radius;
-        let max_chunk_z_exclusive = i64::from(self.center.z) + radius + 1;
+        let min_chunk_x = i64::from(self.min_chunk.x);
+        let max_chunk_x_exclusive = i64::from(self.max_chunk.x) + 1;
+        let min_chunk_z = i64::from(self.min_chunk.z);
+        let max_chunk_z_exclusive = i64::from(self.max_chunk.z) + 1;
         let min_section_y = i64::from(self.min_section_y);
         let max_section_y_exclusive = i64::from(self.max_section_y) + 1;
         WorldSourceBounds::new(
@@ -431,6 +487,16 @@ impl EmbeddedChunkRegion {
         )
         .expect("a valid section region always produces finite non-empty bounds")
     }
+}
+
+fn midpoint_i32(min: i32, max: i32) -> i32 {
+    let midpoint = i64::from(min) + (i64::from(max) - i64::from(min)) / 2;
+    i32::try_from(midpoint).expect("midpoint of two i32 values fits i32")
+}
+
+fn inclusive_i32_span(min: i32, max: i32) -> u32 {
+    u32::try_from(i64::from(max) - i64::from(min) + 1)
+        .expect("validated inclusive i32 span fits u32")
 }
 
 #[cfg(test)]
@@ -476,6 +542,11 @@ mod tests {
     fn region_handles_negative_chunks_and_inclusive_vertical_bounds() {
         let region = EmbeddedChunkRegion::new(ChunkPos::new(-4, -7), 2, -3, 5).unwrap();
 
+        assert_eq!(region.min_chunk(), ChunkPos::new(-6, -9));
+        assert_eq!(region.max_chunk(), ChunkPos::new(-2, -5));
+        assert_eq!(region.chunk_width(), 5);
+        assert_eq!(region.chunk_depth(), 5);
+        assert_eq!(region.symmetric_horizontal_radius(), Some(2));
         assert!(region.contains(RenderSectionKey::new(-6, -3, -9)));
         assert!(region.contains(RenderSectionKey::new(-2, 5, -5)));
         assert!(!region.contains(RenderSectionKey::new(-7, 0, -7)));
@@ -486,6 +557,34 @@ mod tests {
     #[test]
     fn invalid_vertical_region_is_rejected() {
         assert!(EmbeddedChunkRegion::new(ChunkPos::new(0, 0), 0, 2, 1).is_err());
+        assert!(
+            EmbeddedChunkRegion::from_chunk_bounds(ChunkPos::new(1, 0), ChunkPos::new(0, 1), 0, 1,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn exact_even_rectangles_are_not_coerced_to_radius_squares() {
+        let two =
+            EmbeddedChunkRegion::from_chunk_bounds(ChunkPos::new(-1, 4), ChunkPos::new(0, 5), 3, 6)
+                .unwrap();
+        let four = EmbeddedChunkRegion::from_chunk_bounds(
+            ChunkPos::new(8, -5),
+            ChunkPos::new(11, -2),
+            2,
+            7,
+        )
+        .unwrap();
+
+        assert_eq!((two.chunk_width(), two.chunk_depth()), (2, 2));
+        assert_eq!((four.chunk_width(), four.chunk_depth()), (4, 4));
+        assert_eq!(two.symmetric_horizontal_radius(), None);
+        assert_eq!(four.symmetric_horizontal_radius(), None);
+        assert!(two.contains(RenderSectionKey::new(-1, 3, 4)));
+        assert!(two.contains(RenderSectionKey::new(0, 6, 5)));
+        assert!(!two.contains(RenderSectionKey::new(1, 4, 5)));
+        assert_eq!(two.source_bounds().min(), Vec3d::new(-16.0, 48.0, 64.0));
+        assert_eq!(two.source_bounds().max(), Vec3d::new(16.0, 112.0, 96.0));
     }
 
     #[test]
@@ -523,9 +622,9 @@ mod tests {
 
     #[test]
     fn region_bounds_match_section_membership_at_large_coordinates() {
-        let region = EmbeddedChunkRegion::new(
-            ChunkPos::new(i32::MAX - 4, i32::MIN + 4),
-            4,
+        let region = EmbeddedChunkRegion::from_chunk_bounds(
+            ChunkPos::new(i32::MAX - 8, i32::MIN),
+            ChunkPos::new(i32::MAX, i32::MIN + 8),
             i32::MIN + 2,
             i32::MIN + 5,
         )

@@ -1556,8 +1556,11 @@ impl McloneSceneHost {
                         let destination_key = launch.manifest.world_key(
                             mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
                         )?;
-                        let shell_definition = self
-                            .prepare_managed_lobby_destination(&launch.manifest, destination_key)?;
+                        let shell_definition = self.prepare_managed_lobby_destination(
+                            &launch.manifest,
+                            destination_key,
+                            launch.intent.preview_bounds,
+                        )?;
                         if let Err(error) = self.prepare_embedded_world_scenario_shell(
                             device,
                             queue,
@@ -1588,6 +1591,7 @@ impl McloneSceneHost {
                         launch.destination = Some(self.prepare_managed_lobby_destination(
                             &launch.manifest,
                             value.key.clone(),
+                            launch.intent.preview_bounds,
                         )?);
                         launch.destination_provisioned = Some(value);
                     }
@@ -1715,6 +1719,7 @@ impl McloneSceneHost {
         &self,
         manifest: &mclone_app_runtime::scenario_content::ManagedScenarioManifest,
         managed_world_key: mclone_app_runtime::scenario_content::ManagedWorldKey,
+        preview_bounds: mclone_app_runtime::scenario::ScenarioPreviewBounds,
     ) -> Result<PreparedEmbeddedWorldScenario> {
         let primary_fixture = &manifest.primary.fixture;
         let destination_manifest = &manifest.destination;
@@ -1723,14 +1728,16 @@ impl McloneSceneHost {
             destination_fixture.center_chunk[0],
             destination_fixture.center_chunk[1],
         );
-        let region = mclone_render::placement::EmbeddedChunkRegion::new(
-            center,
-            0,
-            destination_fixture.preview_min_section_y,
-            destination_fixture.preview_max_section_y,
-        )?;
+        let preview_anchor = vec3d_from_array(destination_fixture.preview_anchor);
+        let anchor_section_y = mclone_core::block_to_section_coord(
+            preview_anchor
+                .y
+                .floor()
+                .clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        );
+        let region = preview_bounds.resolve(center, anchor_section_y)?;
         let placement = mclone_render::placement::WorldPlacement::new(
-            vec3d_from_array(destination_fixture.preview_anchor),
+            preview_anchor,
             vec3d_from_array(primary_fixture.preview_anchor),
             1.0 / 8.0,
         )?;
@@ -2430,7 +2437,11 @@ impl McloneSceneHost {
                 bounded_section_count: 0,
                 last_draw: TexturedSectionRenderStats::default(),
                 source_host_mode: None,
-                fixed_interest_center: region.center(),
+                // Even-sized preview bounds do not have a unique geometric
+                // center chunk. Keep streaming interest pinned to the
+                // scenario entry anchor instead of silently biasing it toward
+                // the lower midpoint selected by `region.center()`.
+                fixed_interest_center: request.entry_center,
                 preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
                 render: EmbeddedWorldPreviewRenderSnapshot::default(),
                 pending_actor_update: None,

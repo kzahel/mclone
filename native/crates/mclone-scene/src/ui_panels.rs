@@ -795,15 +795,16 @@ impl McloneSceneHost {
             lines.insert(
                 0,
                 format!(
-                    "PREVIEW {:?} W{} {} R({},{})+{} S{:.4}",
+                    "PREVIEW {:?} W{} {} C({},{})..({},{}) S{:.4}",
                     preview.phase,
                     preview.source_world.get(),
                     preview
                         .source_host_mode
                         .map_or("starting", |mode| mode.label()),
-                    preview.region.center().x,
-                    preview.region.center().z,
-                    preview.region.horizontal_radius(),
+                    preview.region.min_chunk().x,
+                    preview.region.min_chunk().z,
+                    preview.region.max_chunk().x,
+                    preview.region.max_chunk().z,
                     preview.placement.uniform_scale(),
                 ),
             );
