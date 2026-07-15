@@ -57,6 +57,7 @@ pub struct WebIntegratedServerRunnerConfig {
     pub world_generation_profile: WorldGenerationProfile,
     pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
     pub freeze_scheduled_fluid_ticks: bool,
+    pub debug_passive_showcase: bool,
     pub light_status_batch_size: usize,
     pub worker_url: String,
     pub job_worker_url: String,
@@ -89,6 +90,7 @@ impl WebIntegratedServerRunnerConfig {
             world_generation_profile: WorldGenerationProfile::default(),
             world_behavior_profile: mclone_server::WorldBehaviorProfile::default(),
             freeze_scheduled_fluid_ticks: false,
+            debug_passive_showcase: true,
             light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             worker_url: worker_url.into(),
             job_worker_url: job_worker_url.into(),
@@ -127,6 +129,11 @@ impl WebIntegratedServerRunnerConfig {
 
     pub const fn with_freeze_scheduled_fluid_ticks(mut self, freeze: bool) -> Self {
         self.freeze_scheduled_fluid_ticks = freeze;
+        self
+    }
+
+    pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
+        self.debug_passive_showcase = enabled;
         self
     }
 
@@ -469,6 +476,11 @@ impl WebIntegratedServerRunner {
             &message,
             "freezeScheduledFluidTicks",
             config.freeze_scheduled_fluid_ticks,
+        )?;
+        set_bool(
+            &message,
+            "debugPassiveShowcase",
+            config.debug_passive_showcase,
         )?;
         set_number(
             &message,
@@ -1816,6 +1828,11 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = setScheduledFluidTicksFrozen)]
     pub fn set_scheduled_fluid_ticks_frozen(&mut self, frozen: bool) {
         self.server.set_scheduled_fluid_ticks_frozen(frozen);
+    }
+
+    #[wasm_bindgen(js_name = setDebugPassiveShowcaseEnabled)]
+    pub fn set_debug_passive_showcase_enabled(&mut self, enabled: bool) {
+        self.server.set_debug_passive_showcase_enabled(enabled);
     }
 
     #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]

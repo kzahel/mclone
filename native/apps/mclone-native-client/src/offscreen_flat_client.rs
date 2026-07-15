@@ -2207,6 +2207,8 @@ enum LobbyScenarioSmokePhase {
     WaitingForLobby,
     LobbyEmptyTable,
     WaitingForPreview,
+    WaitingForPreviewMotion,
+    ActivatingPreview,
     ActivatingIsland,
     IslandPreview,
     ActivatingReturn,
@@ -2224,12 +2226,13 @@ struct LobbyScenarioSmokeState {
         &'static str,
         mclone_scene::EmbeddedWorldPreviewRenderSnapshot,
     )>,
+    motion_receipt: Option<mclone_scene::EmbeddedWorldPreviewRenderSnapshot>,
 }
 
 pub(crate) fn run_lobby_scenario_smoke(
     options: &LobbyScenarioSmokeOptions,
 ) -> Result<LobbyScenarioSmokeReport> {
-    const FRAME_COUNT: usize = 256;
+    const FRAME_COUNT: usize = 320;
     if options.directory.exists() {
         std::fs::remove_dir_all(&options.directory).with_context(|| {
             format!(
@@ -2274,8 +2277,9 @@ pub(crate) fn run_lobby_scenario_smoke(
             Ok(LobbyScenarioSmokeState {
                 host,
                 phase: LobbyScenarioSmokePhase::Title,
-                captures: Vec::with_capacity(5),
+                captures: Vec::with_capacity(6),
                 actor_receipts: Vec::with_capacity(3),
+                motion_receipt: None,
             })
         },
         |frame_index, frame, state| {
@@ -2403,22 +2407,79 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .is_some_and(|preview| {
                             preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
                                 && preview.last_drawn_section_count > 0
-                                && preview.render.last_drawn_actor_count > 0
+                                && preview.render.last_actor_entity_count == 2
+                                && preview.render.last_drawn_actor_count == 3
+                                && preview.render.actor_observation_count == 2
                         })
                     {
-                        state.captures.push(("lobby-with-preview", frame_index));
+                        state
+                            .captures
+                            .push(("lobby-with-preview-initial", frame_index));
+                        state.phase = LobbyScenarioSmokePhase::WaitingForPreviewMotion;
+                    }
+                }
+                LobbyScenarioSmokePhase::WaitingForPreviewMotion => {
+                    if state
+                        .host
+                        .scene_host()
+                        .embedded_world_preview_snapshot()
+                        .is_some_and(|preview| preview.render.actor_motion_sequence > 0)
+                    {
                         let preview = state
                             .host
                             .scene_host()
                             .embedded_world_preview_snapshot()
-                            .expect("visible lobby preview checked above");
+                            .expect("moving lobby preview checked above");
+                        let from = preview
+                            .render
+                            .last_actor_motion_from
+                            .context("moving lobby preview has no source pose")?;
+                        let to = preview
+                            .render
+                            .last_actor_motion_to
+                            .context("moving lobby preview has no destination pose")?;
+                        if from.entity_id != to.entity_id
+                            || from.kind != to.kind
+                            || to.age_ticks <= from.age_ticks
+                            || from.source_feet_position == to.source_feet_position
+                            || from.composition_feet_position == to.composition_feet_position
+                            || to.source_packed_light == 0
+                            || preview.render.last_actor_update_to_visible_frame_count != 1
+                        {
+                            bail!(
+                                "lobby actor motion receipt is incomplete: {:?}",
+                                preview.render
+                            );
+                        }
+                        let source_distance = from
+                            .source_feet_position
+                            .distance_to_sqr(to.source_feet_position)
+                            .sqrt();
+                        let composition_distance = from
+                            .composition_feet_position
+                            .distance_to_sqr(to.composition_feet_position)
+                            .sqrt();
+                        let expected_composition_distance =
+                            source_distance * preview.placement.uniform_scale();
+                        if (composition_distance - expected_composition_distance).abs() > 1.0e-6 {
+                            bail!(
+                                "lobby actor composition motion did not preserve placement scale: source={source_distance} composition={composition_distance} expected={expected_composition_distance}"
+                            );
+                        }
+                        state
+                            .captures
+                            .push(("lobby-with-preview-moved", frame_index));
                         state.actor_receipts.push(("lobby", preview.render));
-                        aim_current_eye_at_embedded_preview(&mut state.host)?;
-                        crate::live_diorama_smoke::request_flat_embedded_world_activation(
-                            &mut state.host,
-                        )?;
-                        state.phase = LobbyScenarioSmokePhase::ActivatingIsland;
+                        state.motion_receipt = Some(preview.render);
+                        state.phase = LobbyScenarioSmokePhase::ActivatingPreview;
                     }
+                }
+                LobbyScenarioSmokePhase::ActivatingPreview => {
+                    aim_current_eye_at_embedded_preview(&mut state.host)?;
+                    crate::live_diorama_smoke::request_flat_embedded_world_activation(
+                        &mut state.host,
+                    )?;
+                    state.phase = LobbyScenarioSmokePhase::ActivatingIsland;
                 }
                 LobbyScenarioSmokePhase::ActivatingIsland => {
                     let activation = state.host.scene_host().embedded_world_activation_snapshot();
@@ -2484,7 +2545,9 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .embedded_world_preview_snapshot()
                         .is_some_and(|preview| {
                             preview.last_drawn_section_count > 0
-                                && preview.render.last_drawn_actor_count > 0
+                                && preview.render.last_actor_entity_count == 2
+                                && preview.render.last_drawn_actor_count == 3
+                                && preview.render.actor_observation_count == 2
                         })
                     {
                         state.captures.push(("returned-lobby", frame_index));
@@ -2493,6 +2556,20 @@ pub(crate) fn run_lobby_scenario_smoke(
                             .scene_host()
                             .embedded_world_preview_snapshot()
                             .expect("visible returned lobby preview checked above");
+                        let moved = state
+                            .motion_receipt
+                            .and_then(|receipt| receipt.last_actor_motion_to)
+                            .context("returned lobby has no retained movement witness")?;
+                        if !preview_actor_observations(preview.render).any(|observation| {
+                            observation.entity_id == moved.entity_id
+                                && observation.kind == moved.kind
+                                && observation.age_ticks >= moved.age_ticks
+                        }) {
+                            bail!(
+                                "A-to-B-to-A return duplicated or reset the moving actor: {:?}",
+                                preview.render
+                            );
+                        }
                         state
                             .actor_receipts
                             .push(("returned-lobby", preview.render));
@@ -2540,6 +2617,9 @@ pub(crate) fn run_lobby_scenario_smoke(
                             .is_some_and(|preview| {
                                 preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
                                     && preview.last_drawn_section_count > 0
+                                    && preview.render.last_actor_entity_count == 2
+                                    && preview.render.last_drawn_actor_count == 3
+                                    && preview.render.actor_observation_count == 2
                             })
                     {
                         if state.host.scene_host().active_world_behavior_profile()
@@ -2547,19 +2627,43 @@ pub(crate) fn run_lobby_scenario_smoke(
                         {
                             bail!("reopened lobby did not retain protected authority");
                         }
+                        let preview = state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .expect("reopened preview checked above");
+                        let moved = state
+                            .motion_receipt
+                            .and_then(|receipt| receipt.last_actor_motion_to)
+                            .context("reopened lobby has no movement witness")?;
+                        if !preview_actor_observations(preview.render).any(|observation| {
+                            observation.kind == moved.kind
+                                && observation.age_ticks >= moved.age_ticks
+                        }) {
+                            bail!(
+                                "reopened authored actor reset instead of loading persisted state: {:?}",
+                                preview.render
+                            );
+                        }
                         state.phase = LobbyScenarioSmokePhase::Complete;
                     }
                 }
                 LobbyScenarioSmokePhase::Complete => {}
             }
             if state.phase != LobbyScenarioSmokePhase::Complete {
-                std::thread::sleep(Duration::from_millis(4));
+                std::thread::sleep(
+                    if state.phase == LobbyScenarioSmokePhase::WaitingForPreviewMotion {
+                        Duration::from_millis(50)
+                    } else {
+                        Duration::from_millis(4)
+                    },
+                );
             }
             Ok(())
         },
     )?;
 
-    if state.phase != LobbyScenarioSmokePhase::Complete || state.captures.len() != 5 {
+    if state.phase != LobbyScenarioSmokePhase::Complete || state.captures.len() != 6 {
         bail!(
             "lobby scenario smoke did not complete in {FRAME_COUNT} frames: phase={:?} captures={:?} standby={:?}",
             state.phase,
@@ -2591,6 +2695,21 @@ pub(crate) fn run_lobby_scenario_smoke(
         {
             bail!("{label} composed actor receipt lost or duplicated an actor: {receipt:?}");
         }
+    }
+    let initial_frame = state
+        .captures
+        .iter()
+        .find_map(|(label, frame)| (*label == "lobby-with-preview-initial").then_some(*frame))
+        .context("lobby smoke has no frozen initial actor frame")?;
+    let moved_frame = state
+        .captures
+        .iter()
+        .find_map(|(label, frame)| (*label == "lobby-with-preview-moved").then_some(*frame))
+        .context("lobby smoke has no moved actor frame")?;
+    let actor_motion_pixel_difference_ratio =
+        rgba_pixel_difference_ratio(&frame_pixels[initial_frame], &frame_pixels[moved_frame])?;
+    if actor_motion_pixel_difference_ratio <= 0.0 {
+        bail!("authoritative destination actor motion changed no composed pixels");
     }
     for (label, frame_index) in &state.captures {
         save_rgba_png(
@@ -2645,6 +2764,25 @@ pub(crate) fn run_lobby_scenario_smoke(
                 "placedMultiviewPipelines": receipt.placed_actor_multiview_pipeline_count,
             })
         }).collect::<Vec<_>>(),
+        "actorMotion": state.motion_receipt.and_then(|receipt| {
+            receipt.last_actor_motion_from.zip(receipt.last_actor_motion_to).map(|(from, to)| {
+                serde_json::json!({
+                    "sequence": receipt.actor_motion_sequence,
+                    "entityId": to.entity_id.0.to_string(),
+                    "kind": format!("{:?}", to.kind),
+                    "fromAgeTicks": from.age_ticks.to_string(),
+                    "toAgeTicks": to.age_ticks.to_string(),
+                    "fromSource": [from.source_feet_position.x, from.source_feet_position.y, from.source_feet_position.z],
+                    "toSource": [to.source_feet_position.x, to.source_feet_position.y, to.source_feet_position.z],
+                    "fromComposition": [from.composition_feet_position.x, from.composition_feet_position.y, from.composition_feet_position.z],
+                    "toComposition": [to.composition_feet_position.x, to.composition_feet_position.y, to.composition_feet_position.z],
+                    "sourcePackedLight": to.source_packed_light,
+                    "updateToVisibleMs": receipt.last_actor_update_to_visible_ms,
+                    "updateToVisibleFrames": receipt.last_actor_update_to_visible_frame_count,
+                    "pixelDifferenceRatio": actor_motion_pixel_difference_ratio,
+                })
+            })
+        }),
         "scenarioCost": {
             "rendererShellCreateMs": scenario_cost.renderer_shell_create_ms,
             "rendererMultiviewCreateMs": scenario_cost.renderer_multiview_create_ms,
@@ -2672,6 +2810,17 @@ pub(crate) fn run_lobby_scenario_smoke(
         cancelled_launch_count: 1,
         relaunch_count: 1,
     })
+}
+
+fn preview_actor_observations(
+    render: mclone_scene::EmbeddedWorldPreviewRenderSnapshot,
+) -> impl Iterator<Item = mclone_scene::EmbeddedWorldPreviewActorObservation> {
+    [
+        render.first_actor_observation,
+        render.second_actor_observation,
+    ]
+    .into_iter()
+    .flatten()
 }
 
 fn aim_current_eye_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Result<()> {

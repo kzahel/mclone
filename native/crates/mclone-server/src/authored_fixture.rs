@@ -4,7 +4,8 @@ use std::fs;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
-use mclone_core::{ChunkPos, ChunkRevision, ChunkStatus};
+use mclone_core::{ChunkPos, ChunkRevision, ChunkStatus, Vec3d};
+use mclone_protocol::EntityRotation;
 use mclone_worldgen::block::{BRICKS, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,9 @@ use serde::{Deserialize, Serialize};
 use crate::ChunkStoreError;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
-use crate::persistence::ChunkRecord;
+use crate::persistence::{
+    ChunkRecord, EntityChunkRecord, EntityPersistentId, EntitySavePayload, EntitySaveRecord,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::persistence::{SqliteWorldStore, WorldStore};
 use crate::{
@@ -28,12 +31,18 @@ pub const AUTHORED_WORLD_FIXTURE_CENTER: ChunkPos = ChunkPos::new(0, 0);
 // render-distance-two tracking view, avoiding expensive first-run lighting for
 // dozens of persistence misses during independent fixture inspection.
 pub const AUTHORED_WORLD_FIXTURE_VOID_PADDING_RADIUS: i32 = 3;
+pub const AUTHORED_LOBBY_COW_PERSISTENT_ID: EntityPersistentId =
+    EntityPersistentId::new(0x6d63_6c6f_6e65_0002, 1);
+pub const AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID: EntityPersistentId =
+    EntityPersistentId::new(0x6d63_6c6f_6e65_0002, 2);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AuthoredWorldFixtureKind {
     Table,
     Island,
+    LobbyTableV2,
+    LobbyIslandV2,
 }
 
 impl AuthoredWorldFixtureKind {
@@ -41,6 +50,8 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table => "live-diorama-table-a-v1",
             Self::Island => "live-diorama-island-b-v1",
+            Self::LobbyTableV2 => "lobby-table-a-v2",
+            Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
     }
 
@@ -48,20 +59,22 @@ impl AuthoredWorldFixtureKind {
         match self {
             Self::Table => "table-a",
             Self::Island => "island-b",
+            Self::LobbyTableV2 => "lobby-table-a-v2",
+            Self::LobbyIslandV2 => "lobby-island-b-v2",
         }
     }
 
     pub const fn seed(self) -> i64 {
         match self {
-            Self::Table => 17_501,
-            Self::Island => 17_502,
+            Self::Table | Self::LobbyTableV2 => 17_501,
+            Self::Island | Self::LobbyIslandV2 => 17_502,
         }
     }
 
     pub const fn expected_spawn(self) -> [f64; 3] {
         match self {
-            Self::Table => [0.5, 64.0, 0.5],
-            Self::Island => [1.5, 65.0, 8.5],
+            Self::Table | Self::LobbyTableV2 => [0.5, 64.0, 0.5],
+            Self::Island | Self::LobbyIslandV2 => [1.5, 65.0, 8.5],
         }
     }
 
@@ -70,8 +83,8 @@ impl AuthoredWorldFixtureKind {
             // The table is a two-by-two brick plinth whose top is y=65. Keep
             // the composition plane a small, deliberate distance above that
             // surface instead of making it coplanar and depth-unstable.
-            Self::Table => [8.0, 65.03125, 8.0],
-            Self::Island => [8.5, 65.0, 8.5],
+            Self::Table | Self::LobbyTableV2 => [8.0, 65.03125, 8.0],
+            Self::Island | Self::LobbyIslandV2 => [8.5, 65.0, 8.5],
         }
     }
 
@@ -81,18 +94,22 @@ impl AuthoredWorldFixtureKind {
     /// Island gains its paired return display in Tactical 175 Slice 6.
     pub const fn preview_display_anchor(self) -> [f64; 3] {
         match self {
-            Self::Table => self.preview_anchor(),
-            Self::Island => [4.0, 67.03125, 8.0],
+            Self::Table | Self::LobbyTableV2 => self.preview_anchor(),
+            Self::Island | Self::LobbyIslandV2 => [4.0, 67.03125, 8.0],
         }
     }
 
     pub const fn mutation_block(self) -> [i32; 3] {
         match self {
-            Self::Table => [7, 64, 7],
+            Self::Table | Self::LobbyTableV2 => [7, 64, 7],
             // A visible grass block inside the source region and ordinary
             // debug-creative reach of the fixture's accepted spawn.
-            Self::Island => [5, 65, 8],
+            Self::Island | Self::LobbyIslandV2 => [5, 65, 8],
         }
+    }
+
+    pub const fn has_authored_passive_entities(self) -> bool {
+        matches!(self, Self::LobbyIslandV2)
     }
 }
 
@@ -137,7 +154,11 @@ impl AuthoredWorldFixtureManifest {
 
 pub fn authored_world_fixture_records(
     kind: AuthoredWorldFixtureKind,
-) -> ChunkStoreResult<(AuthoredWorldFixtureManifest, Vec<ChunkRecord>)> {
+) -> ChunkStoreResult<(
+    AuthoredWorldFixtureManifest,
+    Vec<ChunkRecord>,
+    Vec<EntityChunkRecord>,
+)> {
     let manifest = AuthoredWorldFixtureManifest::new(kind);
     let mut chunks = BTreeMap::new();
     for chunk_z in
@@ -154,7 +175,7 @@ pub fn authored_world_fixture_records(
                 AUTHORED_WORLD_HEIGHT,
             );
             match kind {
-                AuthoredWorldFixtureKind::Table => {
+                AuthoredWorldFixtureKind::Table | AuthoredWorldFixtureKind::LobbyTableV2 => {
                     author_flat_grass_chunk(&mut buffer);
                     if pos == AUTHORED_WORLD_FIXTURE_CENTER {
                         author_table_display(&mut buffer);
@@ -164,10 +185,12 @@ pub fn authored_world_fixture_records(
                         author_table_comparison_pool(&mut buffer, 0..=1);
                     }
                 }
-                AuthoredWorldFixtureKind::Island if pos == AUTHORED_WORLD_FIXTURE_CENTER => {
+                AuthoredWorldFixtureKind::Island | AuthoredWorldFixtureKind::LobbyIslandV2
+                    if pos == AUTHORED_WORLD_FIXTURE_CENTER =>
+                {
                     author_island_chunk(&mut buffer);
                 }
-                AuthoredWorldFixtureKind::Island => {}
+                AuthoredWorldFixtureKind::Island | AuthoredWorldFixtureKind::LobbyIslandV2 => {}
             }
             chunks.insert(pos, GeneratedChunk::from_mutable_buffer(buffer));
         }
@@ -204,7 +227,12 @@ pub fn authored_world_fixture_records(
             ChunkRecord::from_snapshot(snapshot.with_light_sections(true, light_sections))
         })
         .collect();
-    Ok((manifest, records))
+    let entity_records = if kind.has_authored_passive_entities() {
+        vec![authored_lobby_island_entities()]
+    } else {
+        Vec::new()
+    };
+    Ok((manifest, records, entity_records))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -212,9 +240,12 @@ pub fn write_authored_world_fixture_to_store(
     store: &mut dyn WorldStore,
     kind: AuthoredWorldFixtureKind,
 ) -> ChunkStoreResult<AuthoredWorldFixtureManifest> {
-    let (manifest, records) = authored_world_fixture_records(kind)?;
+    let (manifest, records, entity_records) = authored_world_fixture_records(kind)?;
     for record in &records {
         store.save_chunk(record)?;
+    }
+    for record in &entity_records {
+        store.save_entity_chunk(record)?;
     }
     store.flush()?;
     Ok(manifest)
@@ -395,13 +426,46 @@ fn author_island_chunk(chunk: &mut MutableChunkBlockBuffer) {
     }
 }
 
+fn authored_lobby_island_entities() -> EntityChunkRecord {
+    EntityChunkRecord::new(
+        AUTHORED_WORLD_FIXTURE_CENTER,
+        1,
+        vec![
+            EntitySaveRecord {
+                persistent_id: AUTHORED_LOBBY_COW_PERSISTENT_ID,
+                kind: "minecraft:cow".to_owned(),
+                position: Vec3d::new(6.5, 66.0, 8.5),
+                delta_movement: Vec3d::ZERO,
+                y_rot_degrees: 90.0,
+                x_rot_degrees: 0.0,
+                rotation: Some(EntityRotation::IDENTITY),
+                on_ground: true,
+                age_ticks: 0,
+                payload: EntitySavePayload::Cow,
+            },
+            EntitySaveRecord {
+                persistent_id: AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID,
+                kind: "minecraft:chicken".to_owned(),
+                position: Vec3d::new(10.5, 66.0, 8.5),
+                delta_movement: Vec3d::ZERO,
+                y_rot_degrees: -90.0,
+                x_rot_degrees: 0.0,
+                rotation: Some(EntityRotation::IDENTITY),
+                on_ground: true,
+                age_ticks: 0,
+                payload: EntitySavePayload::Chicken { egg_time: 6_000 },
+            },
+        ],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::Duration;
 
     use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkSnapshot, Vec3d};
-    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+    use mclone_protocol::{ChunkView, ClientCommand, EntityKind, EntitySnapshot, ServerUpdate};
     use mclone_worldgen::block::{AIR, generated_block_state_id};
 
     use super::*;
@@ -414,8 +478,10 @@ mod tests {
         for kind in [
             AuthoredWorldFixtureKind::Table,
             AuthoredWorldFixtureKind::Island,
+            AuthoredWorldFixtureKind::LobbyTableV2,
+            AuthoredWorldFixtureKind::LobbyIslandV2,
         ] {
-            let (manifest, records) = authored_world_fixture_records(kind).unwrap();
+            let (manifest, records, entity_records) = authored_world_fixture_records(kind).unwrap();
             assert_eq!(
                 records.len(),
                 (AUTHORED_WORLD_FIXTURE_VOID_PADDING_RADIUS * 2 + 1).pow(2) as usize
@@ -430,7 +496,10 @@ mod tests {
                 assert_eq!(record.snapshot.min_y, AUTHORED_WORLD_MIN_Y);
                 assert_eq!(record.snapshot.height, AUTHORED_WORLD_HEIGHT);
             }
-            if kind == AuthoredWorldFixtureKind::Island {
+            if matches!(
+                kind,
+                AuthoredWorldFixtureKind::Island | AuthoredWorldFixtureKind::LobbyIslandV2
+            ) {
                 for record in records
                     .iter()
                     .filter(|record| record.pos() != AUTHORED_WORLD_FIXTURE_CENTER)
@@ -457,12 +526,16 @@ mod tests {
                 ),
                 AIR_BLOCK_STATE_ID
             );
+            assert_eq!(
+                entity_records.len(),
+                usize::from(kind.has_authored_passive_entities())
+            );
         }
     }
 
     #[test]
     fn table_fixture_is_player_scale_and_preview_clears_its_top() {
-        let (manifest, records) =
+        let (manifest, records, _) =
             authored_world_fixture_records(AuthoredWorldFixtureKind::Table).unwrap();
         let center = records
             .iter()
@@ -517,7 +590,7 @@ mod tests {
 
     #[test]
     fn island_fixture_contains_persisted_ocean_and_dry_mutation_block() {
-        let (manifest, records) =
+        let (manifest, records, _) =
             authored_world_fixture_records(AuthoredWorldFixtureKind::Island).unwrap();
         let center = records
             .iter()
@@ -548,6 +621,34 @@ mod tests {
             bricks
         );
         assert_eq!(manifest.kind.preview_display_anchor(), [4.0, 67.03125, 8.0]);
+    }
+
+    #[test]
+    fn lobby_v2_island_authors_stable_passive_entity_records() {
+        let (_, _, entity_records) =
+            authored_world_fixture_records(AuthoredWorldFixtureKind::LobbyIslandV2).unwrap();
+
+        assert_eq!(entity_records.len(), 1);
+        let record = &entity_records[0];
+        assert_eq!(record.pos, AUTHORED_WORLD_FIXTURE_CENTER);
+        assert_eq!(record.entities.len(), 2);
+        assert_eq!(
+            record.entities[0].persistent_id,
+            AUTHORED_LOBBY_COW_PERSISTENT_ID
+        );
+        assert_eq!(record.entities[0].kind, "minecraft:cow");
+        assert_eq!(record.entities[0].position, Vec3d::new(6.5, 66.0, 8.5));
+        assert_eq!(record.entities[0].payload, EntitySavePayload::Cow);
+        assert_eq!(
+            record.entities[1].persistent_id,
+            AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID
+        );
+        assert_eq!(record.entities[1].kind, "minecraft:chicken");
+        assert_eq!(record.entities[1].position, Vec3d::new(10.5, 66.0, 8.5));
+        assert_eq!(
+            record.entities[1].payload,
+            EntitySavePayload::Chicken { egg_time: 6_000 }
+        );
     }
 
     #[test]
@@ -625,6 +726,89 @@ mod tests {
             }
             fs::remove_dir_all(root).unwrap();
         }
+    }
+
+    #[test]
+    fn lobby_v2_passive_entities_move_and_reload_without_duplication() {
+        let root = unique_test_root("lobby-v2-entities");
+        let manifest =
+            write_authored_world_fixture_dir(&root, AuthoredWorldFixtureKind::LobbyIslandV2)
+                .unwrap();
+        let saved_positions = {
+            let mut server =
+                IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
+            server
+                .set_world_generation_profile(manifest.world_generation_profile)
+                .unwrap();
+            server.set_debug_passive_showcase_enabled(false);
+            let updates = load_view_until_idle(&mut server, AUTHORED_WORLD_FIXTURE_CENTER);
+            let mut entities = passive_snapshots(&updates);
+            assert_eq!(
+                entities
+                    .iter()
+                    .map(|entity| entity.kind)
+                    .collect::<Vec<_>>(),
+                vec![EntityKind::Cow, EntityKind::Chicken]
+            );
+            let initial_positions = entities
+                .iter()
+                .map(|entity| (entity.id, entity.position))
+                .collect::<BTreeMap<_, _>>();
+
+            let mut moved = false;
+            for _ in 0..2_000 {
+                let report = server.try_simulation_tick_report().unwrap();
+                for update in report.updates {
+                    if let ServerUpdate::EntityUpdate(update) = update
+                        && let Some(entity) =
+                            entities.iter_mut().find(|entity| entity.id == update.id)
+                    {
+                        entity.position = update.position;
+                        entity.age_ticks = update.age_ticks;
+                        moved |= initial_positions[&update.id] != update.position;
+                    }
+                }
+                if moved {
+                    break;
+                }
+            }
+            assert!(
+                moved,
+                "an authored passive actor should move through ordinary AI"
+            );
+            assert!(entities.iter().all(|entity| entity.age_ticks > 0));
+            let positions = entities
+                .iter()
+                .map(|entity| (entity.kind, entity.position))
+                .collect::<Vec<_>>();
+            server.shutdown_persistence().unwrap();
+            positions
+        };
+
+        let mut server =
+            IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
+        server
+            .set_world_generation_profile(manifest.world_generation_profile)
+            .unwrap();
+        server.set_debug_passive_showcase_enabled(false);
+        let updates = load_view_until_idle(&mut server, AUTHORED_WORLD_FIXTURE_CENTER);
+        let reloaded = passive_snapshots(&updates);
+        assert_eq!(
+            reloaded.len(),
+            2,
+            "reload must not duplicate authored actors"
+        );
+        for entity in reloaded {
+            assert_eq!(
+                entity.position,
+                saved_positions
+                    .iter()
+                    .find_map(|(kind, position)| (*kind == entity.kind).then_some(*position))
+                    .expect("saved actor kind")
+            );
+        }
+        server.shutdown_persistence().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -707,6 +891,26 @@ mod tests {
             std::thread::yield_now();
         }
         panic!("fixture server did not become idle");
+    }
+
+    fn passive_snapshots(updates: &[ServerUpdate]) -> Vec<EntitySnapshot> {
+        let mut entities = updates
+            .iter()
+            .filter_map(|update| match update {
+                ServerUpdate::EntitySnapshot(snapshot)
+                    if matches!(snapshot.kind, EntityKind::Cow | EntityKind::Chicken) =>
+                {
+                    Some(*snapshot)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        entities.sort_by_key(|entity| match entity.kind {
+            EntityKind::Cow => 0,
+            EntityKind::Chicken => 1,
+            _ => 2,
+        });
+        entities
     }
 
     fn snapshot_is_all_air(snapshot: &ChunkSnapshot) -> bool {

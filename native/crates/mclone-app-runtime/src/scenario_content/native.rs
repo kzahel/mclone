@@ -64,12 +64,12 @@ impl NativeManagedScenarioContentService {
 
     pub fn resolve(&self, intent: ScenarioLaunchIntent) -> Result<NativeManagedScenarioContent> {
         match intent.id {
-            BuiltInScenarioId::LobbyPreview => self.ensure_lobby_preview_v1(),
+            BuiltInScenarioId::LobbyPreview => self.ensure_current_lobby_preview(),
         }
     }
 
-    fn ensure_lobby_preview_v1(&self) -> Result<NativeManagedScenarioContent> {
-        let expected = ManagedScenarioManifest::lobby_preview_v1();
+    fn ensure_current_lobby_preview(&self) -> Result<NativeManagedScenarioContent> {
+        let expected = ManagedScenarioManifest::current_lobby_preview();
         let published = self.root.join(LOBBY_PREVIEW_DIRECTORY);
         if published.exists() {
             return validate_published_scenario(&published, &expected);
@@ -423,7 +423,7 @@ fn validate_published_scenario(
     })?;
     if &manifest != expected {
         bail!(
-            "managed scenario manifest `{}` does not match lobby-preview v1",
+            "managed scenario manifest `{}` does not match the requested content recipe",
             manifest_path.display()
         );
     }
@@ -504,6 +504,7 @@ mod tests {
     use mclone_server::WorldStore;
 
     use super::*;
+    use crate::scenario_content::LOBBY_PREVIEW_V1_DIRECTORY;
     use crate::world_catalog::NativeWorldCatalog;
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
@@ -571,6 +572,30 @@ mod tests {
     }
 
     #[test]
+    fn current_lobby_publication_leaves_v1_content_untouched() {
+        let root = unique_test_root("v1-preservation");
+        let managed_root = root.join("scenarios");
+        let v1 = managed_root.join(LOBBY_PREVIEW_V1_DIRECTORY);
+        fs::create_dir_all(&v1).unwrap();
+        fs::write(v1.join("keep.txt"), b"v1 remains owned by its old recipe").unwrap();
+
+        let content = NativeManagedScenarioContentService::new(&managed_root)
+            .resolve(ScenarioLaunchIntent::lobby_preview())
+            .unwrap();
+
+        assert_eq!(content.root, managed_root.join(LOBBY_PREVIEW_DIRECTORY));
+        assert_eq!(
+            content.manifest,
+            ManagedScenarioManifest::lobby_preview_v2()
+        );
+        assert_eq!(
+            fs::read(v1.join("keep.txt")).unwrap(),
+            b"v1 remains owned by its old recipe"
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn managed_lobby_refuses_corrupt_or_unrelated_published_content() {
         let root = unique_test_root("reject");
         let service = NativeManagedScenarioContentService::new(root.join("scenarios"));
@@ -603,12 +628,12 @@ mod tests {
                 .resolve(ScenarioLaunchIntent::lobby_preview())
                 .unwrap_err()
                 .to_string()
-                .contains("does not match lobby-preview v1")
+                .contains("does not match the requested content recipe")
         );
 
         fs::write(
             &manifest_path,
-            serde_json::to_vec_pretty(&ManagedScenarioManifest::lobby_preview_v1()).unwrap(),
+            serde_json::to_vec_pretty(&ManagedScenarioManifest::current_lobby_preview()).unwrap(),
         )
         .unwrap();
         let database = SqliteWorldStore::database_path_for_world_dir(&content.destination.root);

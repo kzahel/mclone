@@ -41,6 +41,7 @@ interface IntegratedServerWorkerMessage {
   runnerTransportKind?: string;
   tickIntervalMs?: number;
   freezeScheduledFluidTicks?: boolean;
+  debugPassiveShowcase?: boolean;
   frame?: Uint8Array;
   transportKind?: "shared-memory" | "message-transfer";
   controlBuffer?: SharedArrayBuffer;
@@ -224,6 +225,9 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   }
   if (typeof (server as any).setScheduledFluidTicksFrozen === "function") {
     (server as any).setScheduledFluidTicksFrozen(Boolean(message.freezeScheduledFluidTicks));
+  }
+  if (typeof (server as any).setDebugPassiveShowcaseEnabled === "function") {
+    (server as any).setDebugPassiveShowcaseEnabled(message.debugPassiveShowcase !== false);
   }
   const rawLightStatusBatchSize = Number(message.lightStatusBatchSize);
   const lightStatusBatchSize = Number.isFinite(rawLightStatusBatchSize)

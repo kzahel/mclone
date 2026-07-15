@@ -1215,6 +1215,64 @@ Exit criteria: the checked-in lobby scenario reliably contains a real
 destination creature that the user can watch move on the table on native and
 web.
 
+#### Slice 6 completion record — 2026-07-15
+
+The shared authored-fixture pipeline now emits versioned entity codec records
+beside its block chunks. Lobby/island v2 use new recipe ids, managed keys, and
+the `lobby-preview-v2` directory, leaving all v1 keys and storage untouched.
+The v2 island authors stable cow/chicken ids 1/2 through the ordinary server
+codec; native SQLite and browser IndexedDB managed operations provision and
+validate the same Rust-authored block/entity payload. Browser generation and
+serialization remain in the short-lived provisioning Worker. Exact fixture,
+SQLite reload, ordinary ticking/AI movement, and no-duplicate reopen tests are
+locked, as are v1 preservation and native/browser recipe parity.
+
+The scene now retains source and composed observations for authoritative actor
+motion, including stable entity identity, age, feet positions, packed source
+light, publication sequence, and update-to-visible timing. The checked-in
+native lobby smoke observes chicken 2 advance from age 117 to 118 and source
+`z=8.5` to `8.56125`; its 1:8 composed pose advances from `z=8.0` to
+`8.00765625`. The update reaches a drawn frame in one frame/0.311 ms. It draws
+the two persistent entities plus the retained source-local player, rebuilds and
+uploads two actor meshes, retains 589,824 bytes of actor GPU capacity, and
+changes five frozen-frame RGB pixels on the tabletop. A-to-B-to-A and a full
+process reopen retain the same ids without reset or duplication while ordinary
+AI continues.
+
+Production browser WebGPU remained a per-slice product gate through the same
+Rust scene and actor renderer. Desktop and two-times CPU-throttled mobile
+receipts observe that identical chicken movement and one-frame publication,
+draw all three preview actors, and change 23 and 132 tabletop pixels. Each
+retains 589,824 actor GPU bytes and reports two rebuilds/uploads. The measured
+main-renderer task upper bounds across provisioning, startup, motion, and
+capture are 15.0% desktop and 20.3% mobile; maximum frame gaps remain about
+10.3 ms. The browser lifecycle proof also retains the stable entities across
+activation, return, edit, complete shutdown, and relaunch, while its existing
+cancellation, failure, asset replacement, resource rebuild, and zero-Worker
+shutdown checks remain green. TypeScript only forwards the shared passive-
+showcase option and authored bytes; it contains no fixture, AI, movement,
+placement, or visibility implementation.
+
+Every new capture and report was written under `/tmp` and inspected, including
+native flat/stereo, browser desktop/mobile, motion-difference, returned-live-
+actor, and relaunch images. The ordinary desktop offscreen image remains
+byte-identical with SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+Five native no-preview samples measured 2.584/4.397 ms median average/P95
+versus Slice 5's 2.537/4.378 ms, a +1.85%/+0.43% difference with zero budget or
+accounting violations. Five production-browser no-preview samples measured
+12.9/18.3 ms versus 13.0/17.8 ms, a -0.77%/+2.81% difference; all retained the
+two direct actor draws, one compiler Worker, shared-result transport, and zero
+overflow. Both lanes remain inside the performance contract.
+
+The complete server, client, app-runtime, render-session, render, scene, and
+web-client suites passed. Native and wasm checks, TypeScript checking, fixture
+and ownership locks, native flat/stereo and browser desktop/mobile/lifecycle
+scenario smokes, managed-storage repair/refusal/reopen, desktop offscreen,
+browser Worker/app/catalog/mobile/asset/edit/remote regressions, adapter-purity
+gates, formatting, and diff checks also passed. The creature movement and
+pixels are unambiguous, so no stop rule fires before the joined-player proof.
+
 ### Slice 7: Live Joined-Player Proof And Closeout
 
 Close the milestone with ordinary multiplayer presentation and final cost

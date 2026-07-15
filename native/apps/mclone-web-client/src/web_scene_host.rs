@@ -1340,7 +1340,8 @@ impl WebSceneHost {
         .with_indexed_db_world(world_id, false)
         .with_world_generation_profile(pending.scene.world_generation_profile)
         .with_world_behavior_profile(pending.scene.world_behavior_profile)
-        .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks);
+        .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
+        .with_debug_passive_showcase(pending.scene.debug_passive_showcase);
         Ok(WebManagedScenarioRuntimeStart {
             pending: Some(pending),
             config: Some(config),
@@ -1664,6 +1665,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         bindgen_wasm_url,
     )
     .with_world_generation_profile(scene_startup.world_generation_profile)
+    .with_debug_passive_showcase(scene_startup.debug_passive_showcase)
     .with_light_status_batch_size(scene_startup.light_status_batch_size);
     if storage.world_storage == "indexeddb" {
         config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
@@ -1935,6 +1937,7 @@ impl WebSceneHost {
         config.world_generation_profile = pending.scene.world_generation_profile;
         config.world_behavior_profile = pending.scene.world_behavior_profile;
         config.freeze_scheduled_fluid_ticks = pending.scene.freeze_scheduled_fluid_ticks;
+        config.debug_passive_showcase = pending.scene.debug_passive_showcase;
         match crate::WebRuntime::web_worker_integrated_at(config, center).await {
             Ok(mut runtime) => {
                 runtime
@@ -2566,6 +2569,114 @@ impl WebSceneHost {
                     "embeddedPreviewPlacedActorMultiviewPipelineCount",
                     preview.render.placed_actor_multiview_pipeline_count as f64,
                 )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorObservationCount",
+                    preview.render.actor_observation_count as f64,
+                )?;
+                for (prefix, observation) in [
+                    ("First", preview.render.first_actor_observation),
+                    ("Second", preview.render.second_actor_observation),
+                ] {
+                    let Some(observation) = observation else {
+                        continue;
+                    };
+                    report_set_string(
+                        &object,
+                        &format!("embeddedPreview{prefix}ActorEntityId"),
+                        &observation.entity_id.0.to_string(),
+                    )?;
+                    report_set_string(
+                        &object,
+                        &format!("embeddedPreview{prefix}ActorKind"),
+                        match observation.kind {
+                            mclone_protocol::EntityKind::Cow => "cow",
+                            mclone_protocol::EntityKind::Chicken => "chicken",
+                            mclone_protocol::EntityKind::DebugCube => "debugCube",
+                            mclone_protocol::EntityKind::Item => "item",
+                        },
+                    )?;
+                    report_set_string(
+                        &object,
+                        &format!("embeddedPreview{prefix}ActorAgeTicks"),
+                        &observation.age_ticks.to_string(),
+                    )?;
+                    report_set_number(
+                        &object,
+                        &format!("embeddedPreview{prefix}ActorSourcePackedLight"),
+                        observation.source_packed_light as f64,
+                    )?;
+                }
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorMotionSequence",
+                    preview.render.actor_motion_sequence as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorUpdateToVisibleMs",
+                    preview.render.last_actor_update_to_visible_ms,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorUpdateToVisibleFrameCount",
+                    preview.render.last_actor_update_to_visible_frame_count as f64,
+                )?;
+                if let (Some(from), Some(to)) = (
+                    preview.render.last_actor_motion_from,
+                    preview.render.last_actor_motion_to,
+                ) {
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewActorMotionEntityId",
+                        &to.entity_id.0.to_string(),
+                    )?;
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewActorMotionKind",
+                        match to.kind {
+                            mclone_protocol::EntityKind::Cow => "cow",
+                            mclone_protocol::EntityKind::Chicken => "chicken",
+                            mclone_protocol::EntityKind::DebugCube => "debugCube",
+                            mclone_protocol::EntityKind::Item => "item",
+                        },
+                    )?;
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewActorMotionFromAgeTicks",
+                        &from.age_ticks.to_string(),
+                    )?;
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewActorMotionToAgeTicks",
+                        &to.age_ticks.to_string(),
+                    )?;
+                    report_set_number(
+                        &object,
+                        "embeddedPreviewActorMotionSourcePackedLight",
+                        to.source_packed_light as f64,
+                    )?;
+                    for (suffix, value) in [
+                        ("FromSourceX", from.source_feet_position.x),
+                        ("FromSourceY", from.source_feet_position.y),
+                        ("FromSourceZ", from.source_feet_position.z),
+                        ("ToSourceX", to.source_feet_position.x),
+                        ("ToSourceY", to.source_feet_position.y),
+                        ("ToSourceZ", to.source_feet_position.z),
+                        ("FromCompositionX", from.composition_feet_position.x),
+                        ("FromCompositionY", from.composition_feet_position.y),
+                        ("FromCompositionZ", from.composition_feet_position.z),
+                        ("ToCompositionX", to.composition_feet_position.x),
+                        ("ToCompositionY", to.composition_feet_position.y),
+                        ("ToCompositionZ", to.composition_feet_position.z),
+                    ] {
+                        report_set_number(
+                            &object,
+                            &format!("embeddedPreviewActorMotion{suffix}"),
+                            value,
+                        )?;
+                    }
+                }
             }
             let activation = host.embedded_world_activation_snapshot();
             report_set_string(

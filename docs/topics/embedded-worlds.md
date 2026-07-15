@@ -12,7 +12,7 @@ Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and completed shared Web/WASM lobby
 parity, followed by an active composable-world-presentation and live-preview
-actor milestone through completed Slices 0-5. Portable scenario content,
+actor milestone through completed Slices 0-6. Portable scenario content,
 shared immutable second-slot terrain and actor resources, per-world actor
 presentation/cache state, slot-targeted startup/readiness/activation/swap policy,
 catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
@@ -112,7 +112,7 @@ preview 1.234/1.602 s later, with about 10.3 ms maximum measured frame gaps.
 
 The active next renderer milestone is
 [`179-composable-world-presentation-and-live-preview-actors.md`](../tactical/179-composable-world-presentation-and-live-preview-actors.md).
-Its first five slices have characterized actor ownership, normalized the
+Its first six slices have characterized actor ownership, normalized the
 existing placed-terrain path around distinct placement, source-bounds, and
 composition-clip contracts, and landed opt-in portable half-space terrain
 clipping. One shared renderer fixture now draws complementary `x <= 0` and
@@ -141,8 +141,16 @@ scaled, source-lit actors with shared depth; slot exchange keeps the appropriate
 source-local body on both sides. The direct actor path remains byte-identical
 and within its measured noise envelope, while preview diagnostics separately
 expose selection, rejection, cache, GPU-capacity, and placed-pipeline costs.
-Closeout still requires real authoritative creature and joined-player
-movement in the native and browser diorama rather than renderer-only actors.
+Versioned v2 managed content now carries shared Rust-authored entity codec
+records without reinterpreting v1 storage. Its stable cow and chicken load,
+tick, publish, persist, and move through ordinary authority and AI. Native and
+production browser desktop/mobile receipts observe the same chicken id and
+source/composed displacement, publish it to a visible frame in one frame, and
+show changed tabletop pixels. A-to-B-to-A and full reopen retain both entity
+ids without duplication, while TypeScript remains only a storage/Worker
+adapter. The native and browser direct paths remain within their measured
+noise envelopes. Closeout still requires joined-player movement in the native
+and browser diorama through ordinary multiplayer updates.
 Boundary-face resolution, collision, and authority handoff remain later
 split-world work.
 
@@ -150,7 +158,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-15
-(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-5 complete; the
+(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-6 complete; the
 current Metal adapter did not expose `MULTIVIEW`, and no headset was attached
 for a new real-device scenario receipt).
 

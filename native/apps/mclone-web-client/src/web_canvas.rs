@@ -2695,7 +2695,7 @@ pub fn mclone_web_managed_scenario_prepare_world(
     let scenario_id = parse_web_managed_scenario_id(&scenario_id).map_err(JsValue::from)?;
     let role = parse_web_managed_world_role(&role).map_err(JsValue::from)?;
     let manifest = match scenario_id {
-        BuiltInScenarioId::LobbyPreview => ManagedScenarioManifest::lobby_preview_v1(),
+        BuiltInScenarioId::LobbyPreview => ManagedScenarioManifest::current_lobby_preview(),
     };
     let payload = managed_scenario_world_payload(&manifest, role)
         .map_err(|error| JsValue::from(error.to_string()))?;
@@ -2715,7 +2715,7 @@ pub fn mclone_web_managed_scenario_validate_world(
     let scenario_id = parse_web_managed_scenario_id(&scenario_id).map_err(JsValue::from)?;
     let role = parse_web_managed_world_role(&role).map_err(JsValue::from)?;
     let manifest = match scenario_id {
-        BuiltInScenarioId::LobbyPreview => ManagedScenarioManifest::lobby_preview_v1(),
+        BuiltInScenarioId::LobbyPreview => ManagedScenarioManifest::current_lobby_preview(),
     };
     let payload = managed_scenario_world_payload(&manifest, role)
         .map_err(|error| JsValue::from(error.to_string()))?;
@@ -2807,10 +2807,23 @@ fn encode_web_managed_scenario_payload(
         .map_err(|error| format!("failed to attach managed metadata: {error:?}"))?;
     js_sys::Reflect::set(&result, &JsValue::from_str("chunks"), &chunk_records)
         .map_err(|error| format!("failed to attach managed chunks: {error:?}"))?;
+    let entity_chunk_records = js_sys::Array::new();
+    for record in &payload.entity_chunk_records {
+        let object = js_sys::Object::new();
+        set_number(&object, "x", f64::from(record.chunk_x))?;
+        set_number(&object, "z", f64::from(record.chunk_z))?;
+        js_sys::Reflect::set(
+            &object,
+            &JsValue::from_str("record"),
+            js_sys::Uint8Array::from(record.bytes.as_slice()).as_ref(),
+        )
+        .map_err(|error| format!("failed to attach managed entity chunk bytes: {error:?}"))?;
+        entity_chunk_records.push(&object);
+    }
     js_sys::Reflect::set(
         &result,
         &JsValue::from_str("entityChunks"),
-        &js_sys::Array::new(),
+        &entity_chunk_records,
     )
     .map_err(|error| format!("failed to attach managed entity chunks: {error:?}"))?;
     Ok(result.into())

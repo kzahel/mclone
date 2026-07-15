@@ -175,6 +175,8 @@ const lobbyScenarioPlayableScreenshotPath =
   `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-playable.png`;
 const lobbyScenarioWarmingScreenshotPath =
   `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-warming.png`;
+const lobbyScenarioMovedScreenshotPath =
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview-moved.png`;
 const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
 const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
@@ -1334,6 +1336,45 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     "touch",
     "/tmp/mclone-native-web-lobby-lifecycle-return.png",
   );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.embeddedPreviewPhase === "visible"
+          && Number(state?.embeddedPreviewActorEntityCount) === 2
+          && Number(state?.embeddedPreviewActorObservationCount) === 2
+          && Number(state?.embeddedPreviewDrawnActorCount) === 3;
+      },
+      undefined,
+      { timeout: 45_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`returned live-actor preview did not settle: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`);
+  }
+  const returnedActors = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      entityCount: state.embeddedPreviewActorEntityCount,
+      observationCount: state.embeddedPreviewActorObservationCount,
+      first: {
+        id: state.embeddedPreviewFirstActorEntityId,
+        kind: state.embeddedPreviewFirstActorKind,
+        ageTicks: state.embeddedPreviewFirstActorAgeTicks,
+      },
+      second: {
+        id: state.embeddedPreviewSecondActorEntityId,
+        kind: state.embeddedPreviewSecondActorKind,
+        ageTicks: state.embeddedPreviewSecondActorAgeTicks,
+      },
+    };
+  });
+  const returnedActorsPng = await canvas.screenshot({
+    path: "/tmp/mclone-native-web-lobby-lifecycle-return-live-actors.png",
+    timeout: 60_000,
+  });
+  const returnedActorPixels = analyzePng(returnedActorsPng);
   const mutationLeg = await activateBrowserEmbeddedPreview(
     page,
     canvas,
@@ -1379,6 +1420,30 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     "/tmp/mclone-native-web-lobby-lifecycle-reopened-island.png",
   );
   const persistedState = await waitForBlockStateAt(page, mutationBlock, 0);
+  const persistedActor = [
+    {
+      kind: relaunched.after.embeddedPreviewFirstActorKind,
+      ageTicks: relaunched.after.embeddedPreviewFirstActorAgeTicks,
+    },
+    {
+      kind: relaunched.after.embeddedPreviewSecondActorKind,
+      ageTicks: relaunched.after.embeddedPreviewSecondActorAgeTicks,
+    },
+  ].find((actor) => actor.kind === firstLaunch.after.embeddedPreviewActorMotionKind);
+  const relaunchedPersistenceOk = relaunched.after.embeddedPreviewPhase === "visible"
+    && Number(relaunched.after.embeddedPreviewActorEntityCount) === 2
+    && Number(relaunched.after.embeddedPreviewActorObservationCount) === 2
+    && Number(relaunched.after.embeddedPreviewSubmittedActorCount) === 3
+    && Number(relaunched.after.embeddedPreviewDrawnActorCount) === 3
+    && relaunched.after.embeddedPreviewFirstActorEntityId === "1"
+    && relaunched.after.embeddedPreviewFirstActorKind === "cow"
+    && relaunched.after.embeddedPreviewSecondActorEntityId === "2"
+    && relaunched.after.embeddedPreviewSecondActorKind === "chicken"
+    && Number(relaunched.after.embeddedPreviewActorMotionSequence)
+      > Number(relaunched.actorMotion.initialSequence)
+    && Number(relaunched.after.embeddedPreviewActorMotionToAgeTicks)
+      > Number(relaunched.after.embeddedPreviewActorMotionFromAgeTicks)
+    && relaunched.pixels.preview.nonClearInteriorPixelCount > 128;
 
   const visibility = await exerciseBrowserScenarioVisibility(page);
   await quitBrowserScenarioToTitle(page, canvas);
@@ -1410,11 +1475,14 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && String(destinationFailure.failure).length > 0
       && destinationFailure.standbyWorldPresent !== true
       && firstLaunch.ok
-      && relaunched.ok
+      && relaunchedPersistenceOk
       && outbound.sourceWorld === firstSourceWorld
       && outbound.destinationWorld === firstDestinationWorld
       && returned.sourceWorld === firstDestinationWorld
       && returned.destinationWorld === firstSourceWorld
+      && Number(returnedActors.entityCount) === 2
+      && Number(returnedActors.observationCount) === 2
+      && returnedActorPixels.nonClearInteriorPixelCount > 128
       && mutationLeg.destinationWorld === firstDestinationWorld
       && mutationLeg.firstUncoveredUploadedSectionCount === 0
       && mutationLeg.firstUncoveredSubmittedCompileSectionCount === 0
@@ -1425,6 +1493,9 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && mutationLeg.switchMaterializedRenderer === false
       && mutatedState.blockStateId === 0
       && persistedState.blockStateId === 0
+      && persistedActor !== undefined
+      && Number(persistedActor.ageTicks)
+        >= Number(firstLaunch.after.embeddedPreviewActorMotionToAgeTicks)
       && reopenedIsland.destinationWorld === relaunched.after.standbyWorldInstanceId
       && visibility.backgroundSaveAdvanced
       && visibility.resumed
@@ -1441,6 +1512,8 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     firstLaunch,
     outbound,
     returned,
+    returnedActors,
+    returnedActorPixels,
     mutationLeg,
     mutation,
     mutationBlock,
@@ -1448,6 +1521,8 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     relaunched,
     reopenedIsland,
     persistedState,
+    persistedActor,
+    relaunchedPersistenceOk,
     visibility,
     quitDuringDestinationStartup,
     assetReplacementDuringWarmup,
@@ -2026,19 +2101,31 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
     await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
   }
 
-  await page.waitForFunction(
-    () => {
-      const state = globalThis.__mcloneWebApp?.state;
-      return state?.embeddedPreviewPhase === "visible"
-        && Number(state?.embeddedPreviewDrawnSectionCount) > 0
-        && Number(state?.embeddedPreviewDrawnActorCount) > 0
-        && state?.standbySwitchable === true;
-    },
-    undefined,
-    { timeout: 45_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.embeddedPreviewPhase === "visible"
+          && Number(state?.embeddedPreviewDrawnSectionCount) > 0
+          && Number(state?.embeddedPreviewActorEntityCount) === 2
+          && Number(state?.embeddedPreviewActorObservationCount) === 2
+          && Number(state?.embeddedPreviewDrawnActorCount) === 3
+          && state?.standbySwitchable === true;
+      },
+      undefined,
+      { timeout: 45_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `browser lobby preview did not expose two authored actors: ${String(error)}\n`
+      + JSON.stringify(state, null, 2),
+    );
+  }
   await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
   const previewFramePixels = [];
+  /** @type {Buffer[]} */
+  const previewFramePngs = [];
   for (let frameIndex = 0; frameIndex < 5; frameIndex += 1) {
     await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
     await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
@@ -2049,9 +2136,43 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       path: framePath,
       timeout: 60_000,
     });
+    previewFramePngs.push(framePng);
     previewFramePixels.push(analyzePng(framePng));
   }
   const previewPixels = previewFramePixels[previewFramePixels.length - 1];
+  const initialPreviewPng = previewFramePngs[previewFramePngs.length - 1];
+  const initialActorMotionSequence = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.embeddedPreviewActorMotionSequence) || 0,
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  await page.waitForFunction(
+    (baseline) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      const sourceDistance = Math.hypot(
+        Number(state?.embeddedPreviewActorMotionToSourceX)
+          - Number(state?.embeddedPreviewActorMotionFromSourceX),
+        Number(state?.embeddedPreviewActorMotionToSourceY)
+          - Number(state?.embeddedPreviewActorMotionFromSourceY),
+        Number(state?.embeddedPreviewActorMotionToSourceZ)
+          - Number(state?.embeddedPreviewActorMotionFromSourceZ),
+      );
+      return Number(state?.embeddedPreviewActorMotionSequence) > baseline
+        && String(state?.embeddedPreviewActorMotionEntityId ?? "").length > 0
+        && sourceDistance > 1e-5
+        && Number(state?.embeddedPreviewActorUpdateToVisibleFrameCount) === 1;
+    },
+    initialActorMotionSequence,
+    { timeout: 45_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
+  await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
+  const movedPreviewPng = await canvas.screenshot({
+    path: lobbyScenarioMovedScreenshotPath,
+    timeout: 60_000,
+  });
+  const movedPreviewPixels = analyzePng(movedPreviewPng);
+  const actorMotionPixelDifference = comparePngPixels(initialPreviewPng, movedPreviewPng);
   const after = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     const root = /** @type {any} */ (globalThis);
@@ -2114,6 +2235,45 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
         state.embeddedPreviewPlacedActorPipelineCount,
       embeddedPreviewPlacedActorMultiviewPipelineCount:
         state.embeddedPreviewPlacedActorMultiviewPipelineCount,
+      embeddedPreviewActorObservationCount: state.embeddedPreviewActorObservationCount,
+      embeddedPreviewFirstActorEntityId: state.embeddedPreviewFirstActorEntityId,
+      embeddedPreviewFirstActorKind: state.embeddedPreviewFirstActorKind,
+      embeddedPreviewFirstActorAgeTicks: state.embeddedPreviewFirstActorAgeTicks,
+      embeddedPreviewFirstActorSourcePackedLight:
+        state.embeddedPreviewFirstActorSourcePackedLight,
+      embeddedPreviewSecondActorEntityId: state.embeddedPreviewSecondActorEntityId,
+      embeddedPreviewSecondActorKind: state.embeddedPreviewSecondActorKind,
+      embeddedPreviewSecondActorAgeTicks: state.embeddedPreviewSecondActorAgeTicks,
+      embeddedPreviewSecondActorSourcePackedLight:
+        state.embeddedPreviewSecondActorSourcePackedLight,
+      embeddedPreviewActorMotionSequence: state.embeddedPreviewActorMotionSequence,
+      embeddedPreviewActorMotionEntityId: state.embeddedPreviewActorMotionEntityId,
+      embeddedPreviewActorMotionKind: state.embeddedPreviewActorMotionKind,
+      embeddedPreviewActorMotionFromAgeTicks: state.embeddedPreviewActorMotionFromAgeTicks,
+      embeddedPreviewActorMotionToAgeTicks: state.embeddedPreviewActorMotionToAgeTicks,
+      embeddedPreviewActorMotionSourcePackedLight:
+        state.embeddedPreviewActorMotionSourcePackedLight,
+      embeddedPreviewActorMotionFromSourceX: state.embeddedPreviewActorMotionFromSourceX,
+      embeddedPreviewActorMotionFromSourceY: state.embeddedPreviewActorMotionFromSourceY,
+      embeddedPreviewActorMotionFromSourceZ: state.embeddedPreviewActorMotionFromSourceZ,
+      embeddedPreviewActorMotionToSourceX: state.embeddedPreviewActorMotionToSourceX,
+      embeddedPreviewActorMotionToSourceY: state.embeddedPreviewActorMotionToSourceY,
+      embeddedPreviewActorMotionToSourceZ: state.embeddedPreviewActorMotionToSourceZ,
+      embeddedPreviewActorMotionFromCompositionX:
+        state.embeddedPreviewActorMotionFromCompositionX,
+      embeddedPreviewActorMotionFromCompositionY:
+        state.embeddedPreviewActorMotionFromCompositionY,
+      embeddedPreviewActorMotionFromCompositionZ:
+        state.embeddedPreviewActorMotionFromCompositionZ,
+      embeddedPreviewActorMotionToCompositionX:
+        state.embeddedPreviewActorMotionToCompositionX,
+      embeddedPreviewActorMotionToCompositionY:
+        state.embeddedPreviewActorMotionToCompositionY,
+      embeddedPreviewActorMotionToCompositionZ:
+        state.embeddedPreviewActorMotionToCompositionZ,
+      embeddedPreviewActorUpdateToVisibleMs: state.embeddedPreviewActorUpdateToVisibleMs,
+      embeddedPreviewActorUpdateToVisibleFrameCount:
+        state.embeddedPreviewActorUpdateToVisibleFrameCount,
       frameCount: state.frameCount,
       frameGaps: {
         count: gaps.length,
@@ -2181,6 +2341,24 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
     0,
     (Number(cdpAfterByName.ScriptDuration) - Number(cdpBeforeByName.ScriptDuration)) * 1000,
   );
+  const actorMotionSourceDistance = Math.hypot(
+    Number(after.embeddedPreviewActorMotionToSourceX)
+      - Number(after.embeddedPreviewActorMotionFromSourceX),
+    Number(after.embeddedPreviewActorMotionToSourceY)
+      - Number(after.embeddedPreviewActorMotionFromSourceY),
+    Number(after.embeddedPreviewActorMotionToSourceZ)
+      - Number(after.embeddedPreviewActorMotionFromSourceZ),
+  );
+  const actorMotionCompositionDistance = Math.hypot(
+    Number(after.embeddedPreviewActorMotionToCompositionX)
+      - Number(after.embeddedPreviewActorMotionFromCompositionX),
+    Number(after.embeddedPreviewActorMotionToCompositionY)
+      - Number(after.embeddedPreviewActorMotionFromCompositionY),
+    Number(after.embeddedPreviewActorMotionToCompositionZ)
+      - Number(after.embeddedPreviewActorMotionFromCompositionZ),
+  );
+  const actorMotionExpectedCompositionDistance =
+    actorMotionSourceDistance * Number(after.embeddedPreviewScale);
   const maxAllowedFrameGapMs = mobile ? 750 : 500;
   return {
     ok: titlePixels.nonClearInteriorPixelCount > 128
@@ -2203,6 +2381,8 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       && Number(after.embeddedPreviewBoundedSectionCount) > 0
       && Number(after.embeddedPreviewDrawnSectionCount) > 0
       && Number(after.embeddedPreviewOutOfRegionSubmissionCount) === 0
+      && Number(after.embeddedPreviewActorEntityCount) === 2
+      && Number(after.embeddedPreviewActorObservationCount) === 2
       && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 1
       && Number(after.embeddedPreviewSubmittedActorCount) === (
         Number(after.embeddedPreviewActorEntityCount)
@@ -2219,6 +2399,19 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
         === Number(after.embeddedPreviewActorMeshRebuildCount)
       && Number(after.embeddedPreviewActorGpuCapacityBytes) > 0
       && Number(after.embeddedPreviewPlacedActorPipelineCount) === 1
+      && Number(after.embeddedPreviewActorMotionSequence) > initialActorMotionSequence
+      && ["cow", "chicken"].includes(String(after.embeddedPreviewActorMotionKind))
+      && Number(after.embeddedPreviewActorMotionToAgeTicks)
+        > Number(after.embeddedPreviewActorMotionFromAgeTicks)
+      && Number(after.embeddedPreviewActorMotionSourcePackedLight) > 0
+      && actorMotionSourceDistance > 0
+      && actorMotionCompositionDistance > 0
+      && Math.abs(
+        actorMotionCompositionDistance - actorMotionExpectedCompositionDistance,
+      ) <= 1e-6
+      && Number(after.embeddedPreviewActorUpdateToVisibleMs) >= 0
+      && Number(after.embeddedPreviewActorUpdateToVisibleFrameCount) === 1
+      && actorMotionPixelDifference.differentPixelCount > 0
       && Number(after.standbyDuplicatedAtlasBaseBytes) === 0
       && Number(after.standbySharedTerrainResourceOwnerCount) === 2
       && after.standbyActorStateMaterialized === true
@@ -2239,6 +2432,13 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
     warmingObserved: warmingPixels !== null,
     warmingState,
     after,
+    actorMotion: {
+      initialSequence: initialActorMotionSequence,
+      sourceDistance: actorMotionSourceDistance,
+      compositionDistance: actorMotionCompositionDistance,
+      expectedCompositionDistance: actorMotionExpectedCompositionDistance,
+      pixelDifference: actorMotionPixelDifference,
+    },
     timing: {
       clickToLobbyPlayableMs,
       lobbyPlayableToPreviewMs,
@@ -2274,12 +2474,14 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       playable: lobbyScenarioPlayableScreenshotPath,
       warming: warmingPixels ? lobbyScenarioWarmingScreenshotPath : null,
       preview: canvasScreenshotPath,
+      previewMoved: lobbyScenarioMovedScreenshotPath,
     },
     pixels: {
       title: titlePixels,
       playable: playablePixels,
       warming: warmingPixels,
       preview: previewPixels,
+      previewMoved: movedPreviewPixels,
       previewFrames: previewFramePixels,
     },
   };
@@ -4449,10 +4651,14 @@ async function runManagedScenarioStorageProbe(page) {
         && cancelled
         && afterCancellation.status === "missing"
         && primaryConcurrent.every((result) => result.chunkCount === 49)
+        && primaryConcurrent.every((result) => result.entityChunkCount === 0)
         && primaryConcurrent.some((result) => result.status === "provisioned")
         && destinationFirst.status === "provisioned"
+        && destinationFirst.entityChunkCount === 1
         && valid.primary.status === "valid"
         && valid.destination.status === "valid"
+        && valid.primary.entityChunkCount === 0
+        && valid.destination.entityChunkCount === 1
         && destinationReuse.status === "reused"
         && JSON.stringify(digestBeforeReuse) === JSON.stringify(digestAfterReuse)
         && partial.status === "partial"
@@ -4464,10 +4670,14 @@ async function runManagedScenarioStorageProbe(page) {
         && corruptAfterRefusal.status === "corrupt"
         && reopened.primary.status === "valid"
         && reopened.destination.status === "valid"
+        && reopened.primary.entityChunkCount === 0
+        && reopened.destination.entityChunkCount === 1
         && catalogBefore.length === catalogAfter.length
         && identities.metadata.length === 2
         && JSON.stringify(identities.metadata) === JSON.stringify(expectedIds)
         && identities.chunks.every((id) => expectedIds.includes(id))
+        && identities.entityChunks.length === 1
+        && identities.entityChunks[0] === valid.destination.worldId
         && identities.entityChunks.every((id) => expectedIds.includes(id))
       ),
       before,

@@ -106,6 +106,7 @@ use mclone_input::{
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
+use mclone_protocol::EntitySnapshot;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -408,6 +409,20 @@ struct PreviewActorInstances {
     entity_count: usize,
     remote_player_count: usize,
     source_local_player_count: usize,
+    entity_observations: Vec<EmbeddedWorldPreviewActorObservation>,
+}
+
+fn changed_entity_motion(
+    before: &[EntitySnapshot],
+    after: &[EntitySnapshot],
+) -> Option<(EntitySnapshot, EntitySnapshot)> {
+    before.iter().find_map(|before| {
+        after
+            .iter()
+            .find(|after| after.id == before.id && after.position != before.position)
+            .copied()
+            .map(|after| (*before, after))
+    })
 }
 
 impl DrawableWorldSlot {
@@ -1555,6 +1570,7 @@ impl McloneSceneHost {
                     )
                 })
         });
+        let actor_rendered_at = self.services.clock.now();
         if let Some(preview) = self.embedded_world_preview.as_mut() {
             let stats = TexturedSectionRenderStats {
                 drawn_section_count: left_eye.summary.placed_drawn_section_count,
@@ -1594,6 +1610,11 @@ impl McloneSceneHost {
                     left_eye.timing.placed_actor_ms + right_eye.timing.placed_actor_ms,
                     left_eye.summary.placed_actor_stats,
                     resources,
+                    &preview_actor_instances
+                        .as_ref()
+                        .expect("preview actor receipt requires collected actors")
+                        .entity_observations,
+                    actor_rendered_at,
                 );
             }
         }
@@ -2463,6 +2484,7 @@ impl McloneSceneHost {
                 elapsed_ms(self.services.clock.elapsed_since(poll_wait_start));
         }
 
+        let actor_rendered_at = self.services.clock.now();
         self.active_world.render_stats.drawn_section_count = stats[0].drawn_section_count;
         self.active_world.render_stats.drawn_face_count = stats[0].drawn_face_count();
         self.active_world.render_stats.drawn_index_count = stats[0].drawn_index_count;
@@ -2487,6 +2509,8 @@ impl McloneSceneHost {
                     actor_draw_ms,
                     stats,
                     resources,
+                    &actors.entity_observations,
+                    actor_rendered_at,
                 );
             }
         }
@@ -3557,8 +3581,28 @@ impl McloneSceneHost {
         }
         let runtime = slot.runtime.as_ref()?;
         let client = runtime.client();
-        let mut instances =
-            actor_instances_from_presentations(&client.actor_presentations(), client);
+        let presentations = client.actor_presentations();
+        let mut instances = actor_instances_from_presentations(&presentations, client);
+        let entity_observations = presentations
+            .iter()
+            .zip(&instances)
+            .filter_map(|(presentation, instance)| {
+                let mclone_client::ActorPresentationId::Entity(entity_id) = presentation.id else {
+                    return None;
+                };
+                let snapshot = client.entity(entity_id)?;
+                Some(EmbeddedWorldPreviewActorObservation {
+                    entity_id,
+                    kind: snapshot.kind,
+                    source_feet_position: snapshot.position,
+                    composition_feet_position: preview
+                        .context
+                        .source_to_composition(snapshot.position),
+                    age_ticks: snapshot.age_ticks,
+                    source_packed_light: instance.packed_light,
+                })
+            })
+            .collect();
         let entity_count = client.entity_count();
         let remote_player_count = client.remote_player_count();
         instances.push(local_player_actor_instance(
@@ -3572,6 +3616,7 @@ impl McloneSceneHost {
             entity_count,
             remote_player_count,
             source_local_player_count: 1,
+            entity_observations,
         })
     }
 
@@ -4171,6 +4216,34 @@ mod tests {
     use mclone_render_session::{
         ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
     };
+
+    #[test]
+    fn authoritative_entity_motion_requires_one_stable_id_and_changed_position() {
+        let snapshot = |id, position, age_ticks| EntitySnapshot {
+            id: mclone_protocol::EntityId(id),
+            kind: mclone_protocol::EntityKind::Cow,
+            item_stack: None,
+            position,
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks,
+        };
+        let from = snapshot(7, Vec3d::new(6.5, 66.0, 8.5), 117);
+        let stationary = snapshot(7, from.position, 118);
+        let moved = snapshot(7, Vec3d::new(6.6, 66.0, 8.5), 118);
+        let unrelated = snapshot(8, Vec3d::new(10.5, 66.0, 8.5), 118);
+
+        assert_eq!(changed_entity_motion(&[from], &[stationary]), None);
+        assert_eq!(changed_entity_motion(&[from], &[unrelated]), None);
+        assert_eq!(
+            changed_entity_motion(&[from], &[unrelated, moved]),
+            Some((from, moved))
+        );
+    }
 
     #[test]
     fn translucent_composition_qualifies_worlds_and_reverses_with_view() {

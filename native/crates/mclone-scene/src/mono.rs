@@ -1501,6 +1501,7 @@ impl McloneSceneHost {
                     )
                 })
         });
+        let actor_rendered_at = self.services.clock.now();
         if let Some(preview) = self.embedded_world_preview.as_mut() {
             let stats = TexturedSectionRenderStats {
                 drawn_section_count: summary.placed_drawn_section_count,
@@ -1535,6 +1536,11 @@ impl McloneSceneHost {
                     timing.placed_actor_ms,
                     summary.placed_actor_stats,
                     resources,
+                    &preview_actor_instances
+                        .as_ref()
+                        .expect("preview actor receipt requires collected actors")
+                        .entity_observations,
+                    actor_rendered_at,
                 );
             }
         }

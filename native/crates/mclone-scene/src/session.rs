@@ -1699,6 +1699,7 @@ impl McloneSceneHost {
         primary.world_behavior_profile = primary_manifest.behavior_profile;
         primary.use_initial_spawn_center = false;
         primary.freeze_scheduled_fluid_ticks = true;
+        primary.debug_passive_showcase = false;
         primary.validated()
     }
 
@@ -1904,6 +1905,7 @@ impl McloneSceneHost {
         scene.world_behavior_profile = destination.destination.world_behavior_profile;
         scene.world_generation_profile = destination.destination.world_generation_profile;
         scene.use_initial_spawn_center = false;
+        scene.debug_passive_showcase = false;
         let scene = scene.validated()?;
         let instance_id = self.allocate_world_instance_id();
         let mut destination = destination;
@@ -2421,6 +2423,7 @@ impl McloneSceneHost {
                 fixed_interest_center: region.center(),
                 preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
                 render: EmbeddedWorldPreviewRenderSnapshot::default(),
+                pending_actor_update: None,
                 mutation_sequence: 0,
                 last_mutation: None,
                 boundary_warning: preview_boundary_warning,
@@ -3998,6 +4001,17 @@ impl McloneSceneHost {
             WarmWorldPresentationRequest::OpaqueGate => slot.camera.snapshot().eye,
         };
         let camera_position = glam_vec3_from_vec3d(priority_position);
+        let preview_entities_before = slot
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .client()
+                    .entity_snapshots()
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut timing = XrTerrainFrameTiming::default();
         let upload = match Self::prepare_world_slot(
             &mut slot,
@@ -4015,6 +4029,44 @@ impl McloneSceneHost {
                 return Ok(());
             }
         };
+        let preview_entities_after = slot
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .client()
+                    .entity_snapshots()
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if let Some((from, to)) =
+            changed_entity_motion(&preview_entities_before, &preview_entities_after)
+            && let Some(preview) = self
+                .embedded_world_preview
+                .as_mut()
+                .filter(|preview| preview.source_world == slot.id)
+        {
+            let source_packed_light = slot
+                .runtime
+                .as_ref()
+                .and_then(|runtime| {
+                    let client = runtime.client();
+                    client
+                        .actor_presentations()
+                        .into_iter()
+                        .find(|presentation| {
+                            presentation.id == mclone_client::ActorPresentationId::Entity(to.id)
+                        })
+                        .map(|presentation| {
+                            client.packed_light_at_world_or_fullbright(
+                                mclone_render_session::actor_light_probe_block_pos(&presentation),
+                            )
+                        })
+                })
+                .unwrap_or(mclone_render::light_texture::FULL_BRIGHT);
+            preview.record_actor_update(from, to, source_packed_light, self.services.clock.now());
+        }
         state.poll_count = state.poll_count.saturating_add(1);
         state.worst_runtime_poll_ms = state.worst_runtime_poll_ms.max(timing.runtime_poll_ms);
         state.accepted_compile_result_count = state

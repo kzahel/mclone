@@ -49,6 +49,14 @@ const WEB_SCENE_HOST: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_scene_host.rs"
 ));
+const WEB_SERVER_WORKER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_server_worker.rs"
+));
+const INTEGRATED_SERVER_WORKER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-integrated-server-worker.ts"
+));
 
 use mclone_app_runtime::scenario_content::{
     ManagedScenarioManifest, ManagedScenarioWorldRole, managed_scenario_payload_fingerprint,
@@ -57,20 +65,40 @@ use mclone_app_runtime::scenario_content::{
 
 #[test]
 fn web_adapter_consumes_the_shared_manifest_and_fixture_receipts() {
-    let manifest = ManagedScenarioManifest::lobby_preview_v1();
+    let manifest = ManagedScenarioManifest::current_lobby_preview();
     manifest.validate().unwrap();
     let primary =
         managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Primary).unwrap();
     let destination =
         managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination).unwrap();
+    assert!(primary.entity_chunk_records.is_empty());
+    assert_eq!(destination.entity_chunk_records.len(), 1);
     assert_eq!(
         managed_scenario_payload_fingerprint(&primary),
-        8_001_097_006_086_081_343
+        644_928_549_022_577_985
     );
     assert_eq!(
         managed_scenario_payload_fingerprint(&destination),
-        8_764_019_107_988_679_539
+        9_938_623_532_332_636_618
     );
+}
+
+#[test]
+fn browser_runtime_honors_the_shared_managed_actor_policy() {
+    let destination_start = SCENE_SESSION
+        .split("fn try_issue_managed_scenario_destination_start(")
+        .nth(1)
+        .expect("shared destination start exists")
+        .split("fn update_managed_scenario_destination_status(")
+        .next()
+        .unwrap();
+    assert!(destination_start.contains("scene.debug_passive_showcase = false;"));
+    assert!(
+        WEB_SCENE_HOST
+            .contains(".with_debug_passive_showcase(pending.scene.debug_passive_showcase)")
+    );
+    assert!(WEB_SERVER_WORKER.contains("\"debugPassiveShowcase\""));
+    assert!(INTEGRATED_SERVER_WORKER.contains("setDebugPassiveShowcaseEnabled"));
 }
 
 #[test]

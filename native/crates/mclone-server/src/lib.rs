@@ -51,6 +51,7 @@ use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
 pub use authored_fixture::{
+    AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID, AUTHORED_LOBBY_COW_PERSISTENT_ID,
     AUTHORED_WORLD_FIXTURE_CENTER, AUTHORED_WORLD_FIXTURE_MARKER_FILE,
     AUTHORED_WORLD_FIXTURE_SCHEMA_VERSION, AUTHORED_WORLD_FIXTURE_VOID_PADDING_RADIUS,
     AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, authored_world_fixture_records,
@@ -78,11 +79,12 @@ pub use loading_progress::{
 pub use persistence::SqliteWorldStore;
 pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
-    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, MemoryWorldStore, NullChunkSnapshotStore,
-    NullWorldStore, PersistenceActor, PersistenceMailbox, PersistenceRequestId, PlayerRecordKey,
-    SaveDurability, ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
-    WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest, decode_chunk_record,
-    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
+    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, EntityPersistentId, EntitySavePayload,
+    EntitySaveRecord, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore, PersistenceActor,
+    PersistenceMailbox, PersistenceRequestId, PlayerRecordKey, SaveDurability, ScheduledTickRecord,
+    StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey, WorldStore,
+    WorldStoreCompletion, WorldStoreRequest, decode_chunk_record, decode_entity_chunk_record,
+    encode_chunk_record, encode_entity_chunk_record,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,

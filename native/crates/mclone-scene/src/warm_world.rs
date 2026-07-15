@@ -18,6 +18,7 @@ use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
+use mclone_protocol::{EntityId, EntityKind, EntitySnapshot};
 use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
 use mclone_render::entity::{ActorDrawResourceSnapshot, ActorRenderStats};
@@ -575,7 +576,50 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
     pub actor_gpu_capacity_bytes: u64,
     pub placed_actor_pipeline_count: usize,
     pub placed_actor_multiview_pipeline_count: usize,
+    pub actor_observation_count: usize,
+    pub first_actor_observation: Option<EmbeddedWorldPreviewActorObservation>,
+    pub second_actor_observation: Option<EmbeddedWorldPreviewActorObservation>,
+    pub actor_motion_sequence: u64,
+    pub last_actor_motion_from: Option<EmbeddedWorldPreviewActorObservation>,
+    pub last_actor_motion_to: Option<EmbeddedWorldPreviewActorObservation>,
+    pub last_actor_update_to_visible_ms: f64,
+    pub last_actor_update_to_visible_frame_count: usize,
     pub last_translucent_order: EmbeddedWorldPreviewTranslucentOrderSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EmbeddedWorldPreviewActorObservation {
+    pub entity_id: EntityId,
+    pub kind: EntityKind,
+    pub source_feet_position: Vec3d,
+    pub composition_feet_position: Vec3d,
+    pub age_ticks: u64,
+    pub source_packed_light: u32,
+}
+
+impl EmbeddedWorldPreviewActorObservation {
+    fn from_snapshot(
+        snapshot: EntitySnapshot,
+        context: WorldCompositionContext,
+        source_packed_light: u32,
+    ) -> Self {
+        Self {
+            entity_id: snapshot.id,
+            kind: snapshot.kind,
+            source_feet_position: snapshot.position,
+            composition_feet_position: context.source_to_composition(snapshot.position),
+            age_ticks: snapshot.age_ticks,
+            source_packed_light,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PendingEmbeddedWorldPreviewActorUpdate {
+    from: EmbeddedWorldPreviewActorObservation,
+    to: EmbeddedWorldPreviewActorObservation,
+    observed_at: MonotonicInstant,
+    observed_after_preview_frame: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -643,6 +687,7 @@ pub(crate) struct EmbeddedWorldPreview {
     pub fixed_interest_center: ChunkPos,
     pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
     pub render: EmbeddedWorldPreviewRenderSnapshot,
+    pub(crate) pending_actor_update: Option<PendingEmbeddedWorldPreviewActorUpdate>,
     pub mutation_sequence: u64,
     pub last_mutation: Option<EmbeddedWorldPreviewMutationState>,
     pub boundary_warning: Option<String>,
@@ -709,6 +754,8 @@ impl EmbeddedWorldPreview {
         draw_ms: f64,
         stats: ActorRenderStats,
         resources: ActorDrawResourceSnapshot,
+        observations: &[EmbeddedWorldPreviewActorObservation],
+        now: MonotonicInstant,
     ) {
         self.render.last_actor_entity_count = entity_count;
         self.render.last_actor_remote_player_count = remote_player_count;
@@ -730,6 +777,58 @@ impl EmbeddedWorldPreview {
         self.render.placed_actor_pipeline_count = resources.placed_pipeline_count;
         self.render.placed_actor_multiview_pipeline_count =
             resources.placed_multiview_pipeline_count;
+        self.render.actor_observation_count = observations.len();
+        self.render.first_actor_observation = observations.first().copied();
+        self.render.second_actor_observation = observations.get(1).copied();
+        if let Some(pending) = self.pending_actor_update
+            && observations.iter().any(|observation| {
+                observation.entity_id == pending.to.entity_id
+                    && observation.source_feet_position == pending.to.source_feet_position
+                    && observation.age_ticks >= pending.to.age_ticks
+            })
+        {
+            self.render.actor_motion_sequence = self.render.actor_motion_sequence.saturating_add(1);
+            self.render.last_actor_motion_from = Some(pending.from);
+            self.render.last_actor_motion_to = Some(pending.to);
+            self.render.last_actor_update_to_visible_ms = now
+                .saturating_duration_since(pending.observed_at)
+                .as_secs_f64()
+                * 1_000.0;
+            self.render.last_actor_update_to_visible_frame_count = self
+                .render
+                .frame_count
+                .saturating_sub(pending.observed_after_preview_frame);
+            self.pending_actor_update = None;
+        }
+    }
+
+    pub(crate) fn record_actor_update(
+        &mut self,
+        from: EntitySnapshot,
+        to: EntitySnapshot,
+        source_packed_light: u32,
+        observed_at: MonotonicInstant,
+    ) {
+        if self.phase != EmbeddedWorldPreviewPhase::Visible
+            || from.id != to.id
+            || from.position == to.position
+        {
+            return;
+        }
+        self.pending_actor_update = Some(PendingEmbeddedWorldPreviewActorUpdate {
+            from: EmbeddedWorldPreviewActorObservation::from_snapshot(
+                from,
+                self.context,
+                source_packed_light,
+            ),
+            to: EmbeddedWorldPreviewActorObservation::from_snapshot(
+                to,
+                self.context,
+                source_packed_light,
+            ),
+            observed_at,
+            observed_after_preview_frame: self.render.frame_count,
+        });
     }
 }
 

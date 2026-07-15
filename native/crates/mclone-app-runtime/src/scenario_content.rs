@@ -7,9 +7,9 @@
 use std::collections::BTreeSet;
 
 use mclone_server::{
-    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, ChunkRecord, WorldBehaviorProfile,
-    authored_world_fixture_records, decode_chunk_record, decode_entity_chunk_record,
-    encode_chunk_record,
+    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, ChunkRecord, EntityChunkRecord,
+    EntityPersistentId, WorldBehaviorProfile, authored_world_fixture_records, decode_chunk_record,
+    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
 };
 use serde::{Deserialize, Serialize};
 
@@ -21,8 +21,10 @@ mod native;
 pub use native::*;
 
 pub const MANAGED_SCENARIO_SCHEMA_VERSION: u32 = 1;
-pub const LOBBY_PREVIEW_CONTENT_VERSION: u32 = 1;
-pub const LOBBY_PREVIEW_DIRECTORY: &str = "lobby-preview-v1";
+pub const LOBBY_PREVIEW_V1_CONTENT_VERSION: u32 = 1;
+pub const LOBBY_PREVIEW_CONTENT_VERSION: u32 = 2;
+pub const LOBBY_PREVIEW_V1_DIRECTORY: &str = "lobby-preview-v1";
+pub const LOBBY_PREVIEW_DIRECTORY: &str = "lobby-preview-v2";
 pub const MANAGED_SCENARIO_MANIFEST_FILE: &str = "scenario.json";
 pub const MANAGED_SCENARIO_LOBBY_DIRECTORY: &str = "lobby";
 pub const MANAGED_SCENARIO_ISLAND_DIRECTORY: &str = "demo-island";
@@ -143,7 +145,7 @@ impl ManagedScenarioManifest {
         Self {
             schema_version: MANAGED_SCENARIO_SCHEMA_VERSION,
             scenario_id: BuiltInScenarioId::LobbyPreview,
-            content_version: LOBBY_PREVIEW_CONTENT_VERSION,
+            content_version: LOBBY_PREVIEW_V1_CONTENT_VERSION,
             primary: ManagedScenarioWorldManifest {
                 content_id: "lobby-v1".to_owned(),
                 content_version: 1,
@@ -161,9 +163,35 @@ impl ManagedScenarioManifest {
         }
     }
 
+    pub fn lobby_preview_v2() -> Self {
+        Self {
+            schema_version: MANAGED_SCENARIO_SCHEMA_VERSION,
+            scenario_id: BuiltInScenarioId::LobbyPreview,
+            content_version: LOBBY_PREVIEW_CONTENT_VERSION,
+            primary: ManagedScenarioWorldManifest {
+                content_id: "lobby-v2".to_owned(),
+                content_version: 2,
+                directory: MANAGED_SCENARIO_LOBBY_DIRECTORY.to_owned(),
+                behavior_profile: WorldBehaviorProfile::ProtectedLobby,
+                fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::LobbyTableV2),
+            },
+            destination: ManagedScenarioWorldManifest {
+                content_id: "demo-island-v2".to_owned(),
+                content_version: 2,
+                directory: MANAGED_SCENARIO_ISLAND_DIRECTORY.to_owned(),
+                behavior_profile: WorldBehaviorProfile::Mutable,
+                fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::LobbyIslandV2),
+            },
+        }
+    }
+
+    pub fn current_lobby_preview() -> Self {
+        Self::lobby_preview_v2()
+    }
+
     pub fn for_intent(intent: ScenarioLaunchIntent) -> Self {
         match intent.id {
-            BuiltInScenarioId::LobbyPreview => Self::lobby_preview_v1(),
+            BuiltInScenarioId::LobbyPreview => Self::current_lobby_preview(),
         }
     }
 
@@ -180,25 +208,30 @@ impl ManagedScenarioManifest {
     ) -> Result<ManagedWorldKey, ManagedScenarioValidationError> {
         ManagedWorldKey::new(format!(
             "managed.{}.{}",
-            scenario_key(self.scenario_id),
+            scenario_key(self.scenario_id, self.content_version)?,
             self.world(role).content_id
         ))
     }
 
     pub fn validate(&self) -> Result<(), ManagedScenarioValidationError> {
-        let expected = match self.scenario_id {
-            BuiltInScenarioId::LobbyPreview => Self::lobby_preview_v1(),
+        let expected = match (self.scenario_id, self.content_version) {
+            (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_V1_CONTENT_VERSION) => {
+                Self::lobby_preview_v1()
+            }
+            (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_CONTENT_VERSION) => {
+                Self::lobby_preview_v2()
+            }
+            (_, actual) => {
+                return Err(ManagedScenarioValidationError::ContentVersion {
+                    expected: LOBBY_PREVIEW_CONTENT_VERSION,
+                    actual,
+                });
+            }
         };
         if self.schema_version != MANAGED_SCENARIO_SCHEMA_VERSION {
             return Err(ManagedScenarioValidationError::SchemaVersion {
                 expected: MANAGED_SCENARIO_SCHEMA_VERSION,
                 actual: self.schema_version,
-            });
-        }
-        if self.content_version != LOBBY_PREVIEW_CONTENT_VERSION {
-            return Err(ManagedScenarioValidationError::ContentVersion {
-                expected: LOBBY_PREVIEW_CONTENT_VERSION,
-                actual: self.content_version,
             });
         }
         for role in [
@@ -220,9 +253,19 @@ impl ManagedScenarioManifest {
     }
 }
 
-fn scenario_key(id: BuiltInScenarioId) -> &'static str {
-    match id {
-        BuiltInScenarioId::LobbyPreview => "lobby-preview-v1",
+fn scenario_key(
+    id: BuiltInScenarioId,
+    content_version: u32,
+) -> Result<&'static str, ManagedScenarioValidationError> {
+    match (id, content_version) {
+        (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_V1_CONTENT_VERSION) => {
+            Ok("lobby-preview-v1")
+        }
+        (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_CONTENT_VERSION) => Ok("lobby-preview-v2"),
+        (_, actual) => Err(ManagedScenarioValidationError::ContentVersion {
+            expected: LOBBY_PREVIEW_CONTENT_VERSION,
+            actual,
+        }),
     }
 }
 
@@ -234,6 +277,7 @@ pub struct ManagedScenarioWorldPayload {
     pub key: ManagedWorldKey,
     pub manifest: ManagedScenarioWorldManifest,
     pub chunk_records: Vec<ManagedScenarioChunkRecord>,
+    pub entity_chunk_records: Vec<ManagedScenarioChunkRecord>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -382,6 +426,19 @@ pub fn validate_managed_scenario_stored_world(
         }
     }
 
+    let expected_entity_ids = payload
+        .entity_chunk_records
+        .iter()
+        .filter_map(|record| decode_entity_chunk_record(&record.bytes).ok())
+        .flat_map(|record| {
+            record
+                .entities
+                .into_iter()
+                .map(|entity| entity.persistent_id)
+        })
+        .collect::<BTreeSet<EntityPersistentId>>();
+    let mut found_entity_positions = BTreeSet::new();
+    let mut found_entity_ids = BTreeSet::new();
     for record in entity_chunk_records {
         let Ok(decoded) = decode_entity_chunk_record(&record.bytes) else {
             return ManagedScenarioStoredWorldValidation::new(
@@ -401,6 +458,23 @@ pub fn validate_managed_scenario_stored_world(
                 ),
             );
         }
+        if !found_entity_positions.insert((record.chunk_x, record.chunk_z)) {
+            return ManagedScenarioStoredWorldValidation::new(
+                ManagedScenarioStoredWorldStatus::Corrupt,
+                format!(
+                    "managed entity chunk ({}, {}) is duplicated",
+                    record.chunk_x, record.chunk_z
+                ),
+            );
+        }
+        for entity in decoded.entities {
+            if !found_entity_ids.insert(entity.persistent_id) {
+                return ManagedScenarioStoredWorldValidation::new(
+                    ManagedScenarioStoredWorldStatus::Corrupt,
+                    format!("managed entity {:?} is duplicated", entity.persistent_id),
+                );
+            }
+        }
     }
 
     let missing_count = expected_positions.difference(&found_positions).count();
@@ -408,6 +482,14 @@ pub fn validate_managed_scenario_stored_world(
         return ManagedScenarioStoredWorldValidation::new(
             ManagedScenarioStoredWorldStatus::Partial,
             format!("managed world is missing {missing_count} authored chunks"),
+        );
+    }
+
+    let missing_entity_count = expected_entity_ids.difference(&found_entity_ids).count();
+    if missing_entity_count != 0 {
+        return ManagedScenarioStoredWorldValidation::new(
+            ManagedScenarioStoredWorldStatus::Partial,
+            format!("managed world is missing {missing_entity_count} authored entities"),
         );
     }
 
@@ -423,16 +505,18 @@ pub fn managed_scenario_world_payload(
 ) -> Result<ManagedScenarioWorldPayload, ManagedScenarioPayloadError> {
     manifest.validate()?;
     let world = manifest.world(role);
-    let (fixture, records) = authored_world_fixture_records(world.fixture.kind)?;
+    let (fixture, records, entity_records) = authored_world_fixture_records(world.fixture.kind)?;
     if fixture != world.fixture {
         return Err(ManagedScenarioValidationError::WorldMismatch { role }.into());
     }
     let chunk_records = encode_records(records)?;
+    let entity_chunk_records = encode_entity_records(entity_records)?;
     Ok(ManagedScenarioWorldPayload {
         role,
         key: manifest.world_key(role)?,
         manifest: world.clone(),
         chunk_records,
+        entity_chunk_records,
     })
 }
 
@@ -452,11 +536,27 @@ fn encode_records(
         .collect()
 }
 
+fn encode_entity_records(
+    records: Vec<EntityChunkRecord>,
+) -> Result<Vec<ManagedScenarioChunkRecord>, ManagedScenarioPayloadError> {
+    records
+        .into_iter()
+        .map(|record| {
+            let pos = record.pos;
+            Ok(ManagedScenarioChunkRecord {
+                chunk_x: pos.x,
+                chunk_z: pos.z,
+                bytes: encode_entity_chunk_record(&record)?,
+            })
+        })
+        .collect()
+}
+
 /// Deterministic receipt over storage identity, chunk coordinates, and the
 /// shared persistence codec bytes. Native and browser tests pin the same
 /// values so a platform-local fixture or codec fork cannot pass unnoticed.
 pub fn managed_scenario_payload_fingerprint(payload: &ManagedScenarioWorldPayload) -> u64 {
-    payload
+    let bytes = payload
         .key
         .as_str()
         .as_bytes()
@@ -470,9 +570,18 @@ pub fn managed_scenario_payload_fingerprint(payload: &ManagedScenarioWorldPayloa
                 .chain(record.chunk_z.to_le_bytes())
                 .chain(record.bytes.iter().copied())
         }))
-        .fold(0xcbf29ce484222325_u64, |hash, byte| {
-            (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-        })
+        .chain((!payload.entity_chunk_records.is_empty()).then_some(0xff))
+        .chain(payload.entity_chunk_records.iter().flat_map(|record| {
+            record
+                .chunk_x
+                .to_le_bytes()
+                .into_iter()
+                .chain(record.chunk_z.to_le_bytes())
+                .chain(record.bytes.iter().copied())
+        }));
+    bytes.fold(0xcbf29ce484222325_u64, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
+    })
 }
 
 #[derive(Debug)]
@@ -535,6 +644,30 @@ mod tests {
     }
 
     #[test]
+    fn current_lobby_manifest_uses_distinct_v2_storage_identity() {
+        let manifest = ManagedScenarioManifest::current_lobby_preview();
+        assert_eq!(manifest, ManagedScenarioManifest::lobby_preview_v2());
+        manifest.validate().unwrap();
+        assert_eq!(manifest.content_version, LOBBY_PREVIEW_CONTENT_VERSION);
+        assert_eq!(manifest.primary.content_version, 2);
+        assert_eq!(manifest.destination.content_version, 2);
+        assert_eq!(
+            manifest
+                .world_key(ManagedScenarioWorldRole::Primary)
+                .unwrap()
+                .as_str(),
+            "managed.lobby-preview-v2.lobby-v2"
+        );
+        assert_eq!(
+            manifest
+                .world_key(ManagedScenarioWorldRole::Destination)
+                .unwrap()
+                .as_str(),
+            "managed.lobby-preview-v2.demo-island-v2"
+        );
+    }
+
+    #[test]
     fn shared_payloads_are_encoded_by_the_server_codec() {
         let manifest = ManagedScenarioManifest::lobby_preview_v1();
         let primary =
@@ -566,14 +699,59 @@ mod tests {
     }
 
     #[test]
+    fn current_payloads_include_shared_authored_entity_codec_bytes() {
+        let manifest = ManagedScenarioManifest::current_lobby_preview();
+        let primary =
+            managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Primary).unwrap();
+        let destination =
+            managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination)
+                .unwrap();
+
+        assert_eq!(primary.chunk_records.len(), 49);
+        assert!(primary.entity_chunk_records.is_empty());
+        assert_eq!(destination.chunk_records.len(), 49);
+        assert_eq!(destination.entity_chunk_records.len(), 1);
+        assert_eq!(
+            managed_scenario_payload_fingerprint(&primary),
+            644_928_549_022_577_985
+        );
+        assert_eq!(
+            managed_scenario_payload_fingerprint(&destination),
+            9_938_623_532_332_636_618
+        );
+        let entities = decode_entity_chunk_record(&destination.entity_chunk_records[0].bytes)
+            .unwrap()
+            .entities;
+        assert_eq!(
+            entities
+                .iter()
+                .map(|entity| entity.persistent_id)
+                .collect::<Vec<_>>(),
+            vec![
+                mclone_server::AUTHORED_LOBBY_COW_PERSISTENT_ID,
+                mclone_server::AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID,
+            ]
+        );
+    }
+
+    #[test]
     fn stored_world_validation_distinguishes_recoverable_and_corrupt_states() {
-        let manifest = ManagedScenarioManifest::lobby_preview_v1();
+        let manifest = ManagedScenarioManifest::current_lobby_preview();
         let payload =
             managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination)
                 .unwrap();
         let metadata = ManagedScenarioStoredWorldMetadata::for_payload(&payload);
         let records = payload
             .chunk_records
+            .iter()
+            .map(|record| ManagedScenarioStoredRecord {
+                chunk_x: record.chunk_x,
+                chunk_z: record.chunk_z,
+                bytes: record.bytes.clone(),
+            })
+            .collect::<Vec<_>>();
+        let entity_records = payload
+            .entity_chunk_records
             .iter()
             .map(|record| ManagedScenarioStoredRecord {
                 chunk_x: record.chunk_x,
@@ -595,7 +773,7 @@ mod tests {
                 &payload,
                 Some(&metadata),
                 &records[..records.len() - 1],
-                &[],
+                &entity_records,
             )
             .status,
             ManagedScenarioStoredWorldStatus::Partial
@@ -604,21 +782,40 @@ mod tests {
         let mut incompatible = metadata.clone();
         incompatible.content_version += 1;
         assert_eq!(
-            validate_managed_scenario_stored_world(&payload, Some(&incompatible), &records, &[],)
-                .status,
+            validate_managed_scenario_stored_world(
+                &payload,
+                Some(&incompatible),
+                &records,
+                &entity_records,
+            )
+            .status,
             ManagedScenarioStoredWorldStatus::Incompatible
         );
 
         let mut corrupt = records.clone();
         corrupt[0].bytes.clear();
         assert_eq!(
-            validate_managed_scenario_stored_world(&payload, Some(&metadata), &corrupt, &[],)
-                .status,
+            validate_managed_scenario_stored_world(
+                &payload,
+                Some(&metadata),
+                &corrupt,
+                &entity_records,
+            )
+            .status,
             ManagedScenarioStoredWorldStatus::Corrupt
         );
         assert_eq!(
-            validate_managed_scenario_stored_world(&payload, Some(&metadata), &records, &[],)
-                .status,
+            validate_managed_scenario_stored_world(&payload, Some(&metadata), &records, &[]).status,
+            ManagedScenarioStoredWorldStatus::Partial
+        );
+        assert_eq!(
+            validate_managed_scenario_stored_world(
+                &payload,
+                Some(&metadata),
+                &records,
+                &entity_records,
+            )
+            .status,
             ManagedScenarioStoredWorldStatus::Valid
         );
     }
