@@ -1,5 +1,7 @@
 # Performance Topic
 
+Topic: `performance`
+
 Status: active living index.
 
 This document is the current map for native performance work. Tactical docs
@@ -12,6 +14,72 @@ counter requirements lives in
 
 Update this file whenever a performance slice changes the priority order,
 invalidates an older recommendation, or establishes a new baseline.
+
+## High-Priority Known Performance Issues
+
+This is the first pickup list for measured, broadly applicable performance
+work. Entries here must distinguish an existing engine cost from the feature
+that happened to expose it, name the current owner, and describe a bounded
+first improvement. Start here when looking for high-value, low-hanging work.
+
+### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
+
+**Priority: high. Status: unclaimed. Scope: general actor rendering, not
+embedded worlds. The first index-reuse slice is low-hanging.**
+
+Tactical 131 already fixed the old per-eye/per-frame GPU allocation defect.
+`ActorMeshCache` now owns reusable CPU scratch plus persistent, grow-only
+vertex and index buffers, and the second eye reuses the first eye's prepared
+geometry. Do not reopen or duplicate that completed resource-lifetime work.
+
+The remaining invalidation is too coarse. `ActorMeshCache::prepare` in
+`native/crates/mclone-render/src/entity.rs` compares the complete
+`[ActorInstance]` list. Any position, rotation, walk-distance, or figure-pose
+change then:
+
+1. CPU-rebuilds the entire combined vertex and index mesh;
+2. serializes the complete vertex and index arrays; and
+3. uploads both arrays to the persistent GPU buffers.
+
+A single moving actor therefore rewrites stationary actors and re-uploads
+unchanged indices. Tactical 179 made this general cost easy to see but did not
+create it: its roughly six-to-seven-second joined-player probes recorded
+105/116 cumulative native and 111/103 desktop/mobile browser mesh rebuilds and
+uploads while GPU capacity stayed bounded at 589,824 bytes. There was no leak,
+queue growth, or feature-off regression. The risk is proportional CPU and
+upload work as visible actor count, animation cadence, browser load, or XR
+refresh rate grows.
+
+The preferred bounded pickup order is:
+
+1. Introduce an actor topology key that excludes pose-only fields while
+   retaining roster, shape/figure, visibility-part, and vertex-layout facts.
+2. On a pose-only change, reuse the existing index data and index buffer;
+   rebuild and upload vertices only. Prove index rebuild/upload counts stay
+   unchanged across movement and walk animation.
+3. Track stable per-actor vertex spans so one changed pose rebuilds and uploads
+   only that actor's vertex range rather than the combined mesh.
+4. Consider GPU part transforms, instancing, or skinning only after the bounded
+   CPU/cache improvements are measured. Those are larger architecture choices,
+   not prerequisites for the first win.
+
+Acceptance evidence should include:
+
+- explicit topology-rebuild, vertex-update, index-update, changed-actor, and
+  uploaded-byte counters;
+- a fixture where one actor moves while multiple actors remain stationary;
+- unchanged direct actor pixels and actor ordering;
+- native flat, per-eye stereo, full-frame multiview where available, and
+  production browser WebGPU coverage; and
+- release comparisons showing that the direct single-world path and idle
+  unchanged-actor frames remain allocation- and upload-free.
+
+Preserve Tactical 179's ownership contract: immutable atlas/figure/pipeline
+resources may be shared, but mutable actor caches remain per drawable world.
+Useful references are Tactical
+[`131`](../tactical/131-quest-cpu-gpu-overlap-and-frame-cost-hygiene.md#finding-2-the-actor-pass-allocates-fresh-gpu-buffers-per-eye-per-frame),
+Tactical [`179`](../tactical/179-composable-world-presentation-and-live-preview-actors.md),
+and [`../entity-architecture.md`](../entity-architecture.md).
 
 ## Current Baseline
 

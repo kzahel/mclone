@@ -59,8 +59,9 @@ series implements the same concern, normally reuse the document slug in its
   162 ordering.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
-- [`performance.md`](performance.md): native performance priority queue,
-  baselines, and Java-shaped render/scheduling follow-ups.
+- [`performance.md`](performance.md): high-priority known performance issues,
+  low-hanging pickup guidance, native baselines, the broader priority queue,
+  and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
 - [`asset-pack-profiles.md`](asset-pack-profiles.md): shared UI asset-pack

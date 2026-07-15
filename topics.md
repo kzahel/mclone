@@ -28,3 +28,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   seams/portals, shrink-and-fall); geometry-first XR composition, fidelity
   ladder, authority/runtime/render seams, and protected single-world fast path.
   Initial dual-integrated-host ownership smoke added; no commit series yet
+- `performance` — high-priority known performance issues, measured pickup
+  queue, baselines, and cross-platform performance follow-ups
