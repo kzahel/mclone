@@ -12,7 +12,8 @@ Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, completed shared Web/WASM lobby
 parity, and a completed composable-world-presentation and live-preview actor
-milestone through Slice 7. Portable scenario content,
+milestone through Slice 7, plus completed configurable catalog-world
+destinations and supported-arrival acceptance. Portable scenario content,
 shared immutable second-slot terrain and actor resources, per-world actor
 presentation/cache state, slot-targeted startup/readiness/activation/swap policy,
 catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
@@ -165,6 +166,37 @@ CPU-baked actor mesh upload storm while the final native/browser feature-off
 controls, direct image hash, Android/Android XR packaging, flat AVD, synthetic
 stereo, and desktop XR compile lanes remain accepted.
 
+The completed destination milestone is
+[`180-configurable-lobby-world-destinations.md`](../tactical/180-configurable-lobby-world-destinations.md).
+The product no longer teleports from the lobby into the single authored island
+fixture. Shared policy selects the most recently actively played compatible
+catalog world without opening it or changing its recency during preview
+warmup. A successful outbound complete-slot activation records play exactly
+once; empty or incompatible catalogs use a persistent app-private ordinary
+Overworld with curated seed `12345`. The old island remains only a retained
+deterministic fixture.
+
+Preview size is now data: an inclusive rectangular chunk/section region
+resolves around the destination runtime's accepted entry independently of
+table placement and activation. The product default executes 2x2 and the same
+path is acceptance-tested at 4x4, with adjustable bounds retained in the
+path-free launch contract. Only that crop is composed on the table; selection
+still exchanges the already-running full destination world, whose normal
+chunk tracking remains unbounded when active.
+
+Arrival admission now requires loaded body clearance and loaded solid support.
+The accepted entry, immediate post-swap camera, first uncovered frame, and
+delayed stability sample are retained in diagnostics. The browser fall was a
+browser adapter relocating the camera after shared accepted-pose reconcile;
+that relocation is gone. A later catalog acceptance lane also found renderer
+shell preparation could race primary-lobby replacement, so shared scene policy
+now prepares the shell at post-lobby destination start. Neither correction
+forks gameplay or rendering by platform. Native flat/stereo and production
+browser WebGPU desktop/mobile lanes prove 2x2/4x4 managed and catalog journeys,
+recency semantics, A-to-B-to-A, persistence, and stable supported landing.
+Direct single-world pixels remain byte-identical and native/browser controls
+remain within the accepted performance envelope.
+
 Boundary-face resolution is now the next bounded renderer problem. Collision
 and one-active-authority handoff remain separate later split-world work.
 
@@ -172,9 +204,9 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-15
-(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-7 complete; the
-current Metal adapter did not expose `MULTIVIEW`, and no headset was attached
-for a new real-device scenario receipt).
+(Tactical 178 Slices 0-8, Tactical 179 Slices 0-7, and Tactical 180 Slices 0-5
+complete; the current Metal adapter did not expose `MULTIVIEW`, and no headset
+was attached for a new real-device scenario receipt).
 
 ## Motivation
 
@@ -814,9 +846,9 @@ bounded simultaneous-geometry plan lives in
 5. Keep Tactical 179's completed terrain normalization, half-space proof,
    per-world actor ownership, and live creature/player diorama green through
    one shared native and web path.
-6. Bind the proven lobby to the most recently *actively played* compatible
-   local world. A background preview open must not itself update catalog
-   recency.
+6. Keep Tactical 180's configurable 2x2/4x4 preview bounds, most-recent
+   compatible catalog selection, read-only warmup, recency-on-activation,
+   managed full-overworld fallback, and supported-arrival receipts green.
 7. Prove the same bounded preview and activation behavior with a remote
    hosted source. Keep the dual-host/root-isolation smokes and materialized
    multiview contract green.

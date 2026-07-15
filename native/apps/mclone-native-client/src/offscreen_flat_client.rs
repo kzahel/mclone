@@ -2238,6 +2238,169 @@ struct LobbyScenarioSmokeState {
     initial_remote_motion_sequence: u64,
     active_actor_counts_before_motion: Option<(usize, usize)>,
     activation_reports: Vec<mclone_scene::EmbeddedWorldActivationReport>,
+    preview_region: Option<mclone_render::placement::EmbeddedChunkRegion>,
+    catalog_acceptance: Option<NativeCatalogScenarioAcceptance>,
+}
+
+#[derive(Clone, Debug)]
+struct NativeCatalogScenarioAcceptance {
+    root: PathBuf,
+    selected_id: mclone_app_runtime::world_catalog::LocalWorldId,
+    selected_seed: i64,
+    other_id: mclone_app_runtime::world_catalog::LocalWorldId,
+    selected_before_warm: u64,
+    other_before_warm: u64,
+    selected_during_warm: Option<u64>,
+    other_during_warm: Option<u64>,
+    selected_after_activation: Option<u64>,
+    other_after_activation: Option<u64>,
+}
+
+impl NativeCatalogScenarioAcceptance {
+    fn current_recency(&self) -> Result<(u64, u64)> {
+        let worlds = mclone_app_runtime::world_catalog::NativeWorldCatalog::new(&self.root)
+            .list_worlds()
+            .map_err(anyhow::Error::msg)?;
+        let recency = |id: &mclone_app_runtime::world_catalog::LocalWorldId| {
+            worlds
+                .iter()
+                .find(|world| &world.id == id)
+                .and_then(|world| world.last_played_unix_millis)
+                .with_context(|| format!("catalog acceptance world `{id}` has no recency"))
+        };
+        Ok((recency(&self.selected_id)?, recency(&self.other_id)?))
+    }
+
+    fn observe_warm_preview(&mut self) -> Result<()> {
+        let (selected, other) = self.current_recency()?;
+        if selected != self.selected_before_warm || other != self.other_before_warm {
+            bail!(
+                "catalog preview warmup changed recency: selected {} -> {}, other {} -> {}",
+                self.selected_before_warm,
+                selected,
+                self.other_before_warm,
+                other,
+            );
+        }
+        self.selected_during_warm = Some(selected);
+        self.other_during_warm = Some(other);
+        Ok(())
+    }
+
+    fn observe_activation(&mut self) -> Result<()> {
+        let (selected, other) = self.current_recency()?;
+        if selected <= self.selected_before_warm || other != self.other_before_warm {
+            bail!(
+                "catalog activation did not update only the selected world's recency: selected {} -> {}, other {} -> {}",
+                self.selected_before_warm,
+                selected,
+                self.other_before_warm,
+                other,
+            );
+        }
+        self.selected_after_activation = Some(selected);
+        self.other_after_activation = Some(other);
+        Ok(())
+    }
+}
+
+fn prepare_native_catalog_scenario_acceptance(
+    root: PathBuf,
+) -> Result<NativeCatalogScenarioAcceptance> {
+    use mclone_app_runtime::world_catalog::{
+        LocalWorldCreateOptions, LocalWorldId, NativeWorldCatalog,
+    };
+
+    let catalog = NativeWorldCatalog::new(&root);
+    let selected_id = LocalWorldId::new("recent-lobby-world").map_err(anyhow::Error::msg)?;
+    let other_id = LocalWorldId::new("older-lobby-world").map_err(anyhow::Error::msg)?;
+    let selected_seed = mclone_app_runtime::scenario_content::LOBBY_PREVIEW_FALLBACK_SEED;
+    catalog
+        .create_world(
+            LocalWorldCreateOptions::new("Recent Lobby World", selected_seed)
+                .map_err(anyhow::Error::msg)?
+                .with_requested_id(selected_id.clone()),
+        )
+        .map_err(anyhow::Error::msg)?;
+    catalog
+        .create_world(
+            LocalWorldCreateOptions::new("Older Lobby World", 67_890)
+                .map_err(anyhow::Error::msg)?
+                .with_requested_id(other_id.clone()),
+        )
+        .map_err(anyhow::Error::msg)?;
+    std::thread::sleep(Duration::from_millis(2));
+    catalog
+        .record_world_played(&selected_id)
+        .map_err(anyhow::Error::msg)?;
+    let worlds = catalog.list_worlds().map_err(anyhow::Error::msg)?;
+    let recency = |id: &LocalWorldId| {
+        worlds
+            .iter()
+            .find(|world| &world.id == id)
+            .and_then(|world| world.last_played_unix_millis)
+            .with_context(|| format!("prepared catalog world `{id}` has no recency"))
+    };
+    let selected_before_warm = recency(&selected_id)?;
+    let other_before_warm = recency(&other_id)?;
+    if selected_before_warm <= other_before_warm {
+        bail!("prepared catalog destination is not the most recent world");
+    }
+    Ok(NativeCatalogScenarioAcceptance {
+        root,
+        selected_id,
+        selected_seed,
+        other_id,
+        selected_before_warm,
+        other_before_warm,
+        selected_during_warm: None,
+        other_during_warm: None,
+        selected_after_activation: None,
+        other_after_activation: None,
+    })
+}
+
+fn begin_lobby_scenario_for_smoke(
+    host: &mut OffscreenFlatClientHost,
+    options: &LobbyScenarioSmokeOptions,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+) -> Result<()> {
+    if options.preview_chunk_span != 2 {
+        let bounds = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(
+            options.preview_chunk_span,
+        )?;
+        host.scene_host_mut().begin_managed_scenario_launch(
+            mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview()
+                .with_preview_bounds(bounds)?,
+        )?;
+        host.scene_host_mut()
+            .set_mono_ui_screen(Some(mclone_ui::GameScreen::PreparingLobby));
+        return Ok(());
+    }
+
+    let widget = host
+        .scene_host_mut()
+        .mono_ui_debug_snapshot()
+        .context("title frame has no UI debug snapshot")?
+        .widgets
+        .into_iter()
+        .find(|widget| widget.label == "Enter Lobby")
+        .context("title frame has no enabled Enter Lobby widget")?;
+    host.run_script(
+        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
+            point: Point {
+                x: widget.rect.center_x(),
+                y: widget.rect.y + widget.rect.height * 0.5,
+            },
+            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
+                mclone_ui::GameScenarioId::LobbyPreview,
+            )),
+        }]),
+        device,
+        queue,
+    )?;
+    Ok(())
 }
 
 pub(crate) fn run_lobby_scenario_smoke(
@@ -2261,6 +2424,21 @@ pub(crate) fn run_lobby_scenario_smoke(
             options.directory.display()
         )
     })?;
+    let catalog_acceptance = if options.catalog_destination {
+        Some(prepare_native_catalog_scenario_acceptance(
+            options
+                .scene
+                .world_root
+                .clone()
+                .context("catalog lobby smoke requires a native world root")?,
+        )?)
+    } else {
+        None
+    };
+    let expected_destination_seed = catalog_acceptance.as_ref().map_or(
+        mclone_app_runtime::scenario_content::LOBBY_PREVIEW_FALLBACK_SEED,
+        |receipt| receipt.selected_seed,
+    );
     let assets = WindowSceneAssets::load()?;
     let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
@@ -2299,6 +2477,8 @@ pub(crate) fn run_lobby_scenario_smoke(
                 initial_remote_motion_sequence: 0,
                 active_actor_counts_before_motion: None,
                 activation_reports: Vec::with_capacity(2),
+                preview_region: None,
+                catalog_acceptance,
             })
         },
         |frame_index, frame, state| {
@@ -2316,29 +2496,7 @@ pub(crate) fn run_lobby_scenario_smoke(
             match state.phase {
                 LobbyScenarioSmokePhase::Title => {
                     state.captures.push(("title", frame_index));
-                    let widget = state
-                        .host
-                        .scene_host_mut()
-                        .mono_ui_debug_snapshot()
-                        .context("title frame has no UI debug snapshot")?
-                        .widgets
-                        .into_iter()
-                        .find(|widget| widget.label == "Enter Lobby")
-                        .context("title frame has no enabled Enter Lobby widget")?;
-                    let point = Point {
-                        x: widget.rect.center_x(),
-                        y: widget.rect.y + widget.rect.height * 0.5,
-                    };
-                    state.host.run_script(
-                        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
-                            point,
-                            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
-                                mclone_ui::GameScenarioId::LobbyPreview,
-                            )),
-                        }]),
-                        device,
-                        queue,
-                    )?;
+                    begin_lobby_scenario_for_smoke(&mut state.host, options, device, queue)?;
                     state.host.apply_ui_action(
                         mclone_ui::GameUiAction::BackToTitle,
                         device,
@@ -2350,28 +2508,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                     if state.host.scene_host().active_world_seed() != options.scene.seed {
                         bail!("cancelled lobby launch replaced the active world");
                     }
-                    let widget = state
-                        .host
-                        .scene_host_mut()
-                        .mono_ui_debug_snapshot()
-                        .context("cancelled lobby launch did not return to the title")?
-                        .widgets
-                        .into_iter()
-                        .find(|widget| widget.label == "Enter Lobby")
-                        .context("cancelled lobby title has no Enter Lobby widget")?;
-                    state.host.run_script(
-                        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
-                            point: Point {
-                                x: widget.rect.center_x(),
-                                y: widget.rect.y + widget.rect.height * 0.5,
-                            },
-                            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
-                                mclone_ui::GameScenarioId::LobbyPreview,
-                            )),
-                        }]),
-                        device,
-                        queue,
-                    )?;
+                    begin_lobby_scenario_for_smoke(&mut state.host, options, device, queue)?;
                     state.phase = LobbyScenarioSmokePhase::WaitingForLobby;
                 }
                 LobbyScenarioSmokePhase::WaitingForLobby => {
@@ -2508,6 +2645,21 @@ pub(crate) fn run_lobby_scenario_smoke(
                             .push(("lobby-with-preview-settled", frame_index));
                         state.actor_receipts.push(("lobby", preview.render));
                         state.motion_receipt = Some(preview.render);
+                        if preview.region.chunk_width() != options.preview_chunk_span
+                            || preview.region.chunk_depth() != options.preview_chunk_span
+                        {
+                            bail!(
+                                "lobby preview resolved {}x{} chunks instead of {}x{}",
+                                preview.region.chunk_width(),
+                                preview.region.chunk_depth(),
+                                options.preview_chunk_span,
+                                options.preview_chunk_span,
+                            );
+                        }
+                        state.preview_region = Some(preview.region);
+                        if let Some(catalog) = state.catalog_acceptance.as_mut() {
+                            catalog.observe_warm_preview()?;
+                        }
                         if preview.render.last_actor_remote_player_count != 0 {
                             state.remote_motion_receipt = Some(preview.render);
                             state.remote_motion_world = Some(preview.source_world);
@@ -2524,8 +2676,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                 }
                 LobbyScenarioSmokePhase::ActivatingIsland => {
                     let activation = state.host.scene_host().embedded_world_activation_snapshot();
-                    if state.host.scene_host().active_world_seed()
-                        == mclone_app_runtime::scenario_content::LOBBY_PREVIEW_FALLBACK_SEED
+                    if state.host.scene_host().active_world_seed() == expected_destination_seed
                         && activation.phase == mclone_scene::EmbeddedWorldActivationPhase::Idle
                         && activation.last_report.is_some()
                     {
@@ -2540,6 +2691,9 @@ pub(crate) fn run_lobby_scenario_smoke(
                             .expect("completed outbound activation has a report");
                         validate_supported_activation_receipt(report)?;
                         state.activation_reports.push(report.clone());
+                        if let Some(catalog) = state.catalog_acceptance.as_mut() {
+                            catalog.observe_activation()?;
+                        }
                         crate::live_diorama_smoke::aim_flat_host_at_embedded_preview(
                             &mut state.host,
                         )?;
@@ -2675,34 +2829,18 @@ pub(crate) fn run_lobby_scenario_smoke(
                     }
                 }
                 LobbyScenarioSmokePhase::WaitingForRelaunchTitle => {
-                    let widget = state
-                        .host
-                        .scene_host_mut()
-                        .mono_ui_debug_snapshot()
-                        .context("quit-to-title did not present the title")?
-                        .widgets
-                        .into_iter()
-                        .find(|widget| widget.label == "Enter Lobby")
-                        .context("relaunch title has no Enter Lobby widget")?;
-                    state.host.run_script(
-                        &OffscreenScript::from_steps([OffscreenScriptStep::UiPointerClick {
-                            point: Point {
-                                x: widget.rect.center_x(),
-                                y: widget.rect.y + widget.rect.height * 0.5,
-                            },
-                            require_action: Some(mclone_ui::GameUiAction::EnterScenario(
-                                mclone_ui::GameScenarioId::LobbyPreview,
-                            )),
-                        }]),
-                        device,
-                        queue,
-                    )?;
+                    begin_lobby_scenario_for_smoke(&mut state.host, options, device, queue)?;
                     state.phase = LobbyScenarioSmokePhase::WaitingForRelaunchPreview;
                 }
                 LobbyScenarioSmokePhase::WaitingForRelaunchPreview => {
                     if state.host.scene_host().active_world_seed()
                         == mclone_server::AuthoredWorldFixtureKind::Table.seed()
                         && state.host.scene_host().local_startup_complete()
+                        && state
+                            .host
+                            .scene_host()
+                            .warm_world_standby_snapshot()
+                            .is_some_and(|standby| standby.seed == expected_destination_seed)
                         && state
                             .host
                             .scene_host()
@@ -2834,6 +2972,17 @@ pub(crate) fn run_lobby_scenario_smoke(
     if scenario_cost.phase != mclone_scene::WarmWorldStandbyPhase::Switchable {
         bail!("reopened lobby destination is not switchable: {scenario_cost:?}");
     }
+    let preview_region = state
+        .preview_region
+        .context("lobby scenario smoke did not retain its resolved preview region")?;
+    if let Some(catalog) = state.catalog_acceptance.as_ref()
+        && (catalog.selected_during_warm.is_none()
+            || catalog.other_during_warm.is_none()
+            || catalog.selected_after_activation.is_none()
+            || catalog.other_after_activation.is_none())
+    {
+        bail!("catalog lobby scenario did not complete every recency checkpoint");
+    }
     let receipt = serde_json::json!({
         "schema": 2,
         "captures": state.captures.iter().map(|(label, frame)| {
@@ -2845,7 +2994,26 @@ pub(crate) fn run_lobby_scenario_smoke(
         "managedRoot": options.scene.world_root.as_ref().map(|root| root.parent().unwrap_or(root).join("scenarios")),
         "lobbyBehavior": "protectedLobby",
         "destinationBehavior": "mutable",
-        "destinationSource": "managed-overworld-fallback",
+        "destinationSource": if options.catalog_destination { "catalog-recent-world" } else { "managed-overworld-fallback" },
+        "previewBounds": {
+            "minChunk": [preview_region.min_chunk().x, preview_region.min_chunk().z],
+            "maxChunk": [preview_region.max_chunk().x, preview_region.max_chunk().z],
+            "chunkWidth": preview_region.chunk_width(),
+            "chunkDepth": preview_region.chunk_depth(),
+            "minSectionY": preview_region.min_section_y(),
+            "maxSectionY": preview_region.max_section_y(),
+        },
+        "catalogRecency": state.catalog_acceptance.as_ref().map(|catalog| serde_json::json!({
+            "selectedId": catalog.selected_id.as_str(),
+            "selectedSeed": catalog.selected_seed,
+            "otherId": catalog.other_id.as_str(),
+            "selectedBeforeWarm": catalog.selected_before_warm,
+            "otherBeforeWarm": catalog.other_before_warm,
+            "selectedDuringWarm": catalog.selected_during_warm,
+            "otherDuringWarm": catalog.other_during_warm,
+            "selectedAfterActivation": catalog.selected_after_activation,
+            "otherAfterActivation": catalog.other_after_activation,
+        })),
         "actorReceipts": state.actor_receipts.iter().map(|(label, receipt)| {
             serde_json::json!({
                 "label": label,

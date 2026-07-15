@@ -1178,7 +1178,13 @@ impl McloneSceneHost {
             }
         }
         if let ExternalSceneStartTarget::ManagedScenario { token, role } = completion_target {
-            self.complete_managed_scenario_world_start(token, role, pending.instance_id)?;
+            self.complete_managed_scenario_world_start(
+                token,
+                role,
+                pending.instance_id,
+                device,
+                queue,
+            )?;
         }
         Ok(())
     }
@@ -1188,6 +1194,8 @@ impl McloneSceneHost {
         token: mclone_app_runtime::platform_operation::PlatformOperationToken,
         role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
         instance_id: WorldInstanceId,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> Result<()> {
         let Some(mut launch) = self.managed_scenario_launch.take() else {
             bail!("managed scenario world completion has no active launch");
@@ -1205,7 +1213,7 @@ impl McloneSceneHost {
                 mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
                     launch.primary_start_token = None;
                     launch.phase = ManagedScenarioLaunchPhase::PrimaryPlayable;
-                    self.try_issue_managed_scenario_destination_start(&mut launch)?;
+                    self.try_issue_managed_scenario_destination_start(&mut launch, device, queue)?;
                 }
                 mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
                     launch.destination_start_token = None;
@@ -1577,7 +1585,7 @@ impl McloneSceneHost {
                         launch.primary_provisioned = Some(value);
                         launch.phase = ManagedScenarioLaunchPhase::StartingPrimary;
                         self.ui.close();
-                        self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
+                        self.try_resolve_managed_scenario_destination(&mut launch)?;
                     }
                     mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
                         let destination = self.prepare_managed_lobby_fallback_destination(
@@ -1585,16 +1593,7 @@ impl McloneSceneHost {
                             value.key.clone(),
                             launch.intent.preview_bounds,
                         )?;
-                        if let Err(error) =
-                            self.prepare_embedded_world_scenario_shell(device, queue, &destination)
-                        {
-                            launch.destination_failure = Some(format!(
-                                "prepare managed fallback destination renderer shell: {error:#}"
-                            ));
-                            self.prepared_warm_world_shell = None;
-                        } else {
-                            launch.destination = Some(destination);
-                        }
+                        launch.destination = Some(destination);
                         launch.destination_provisioned = Some(value);
                     }
                 }
@@ -1625,7 +1624,7 @@ impl McloneSceneHost {
                 return Ok(());
             }
         }
-        self.try_issue_managed_scenario_destination_start(&mut launch)?;
+        self.try_issue_managed_scenario_destination_start(&mut launch, device, queue)?;
         self.managed_scenario_launch = Some(launch);
         Ok(())
     }
@@ -1684,7 +1683,7 @@ impl McloneSceneHost {
             );
         }
         if let Some(mut launch) = self.managed_scenario_launch.take() {
-            self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
+            self.try_resolve_managed_scenario_destination(&mut launch)?;
             self.managed_scenario_launch = Some(launch);
         }
         while let Some(request) = self.take_managed_scenario_provision_request() {
@@ -1860,8 +1859,6 @@ impl McloneSceneHost {
     fn try_resolve_managed_scenario_destination(
         &mut self,
         launch: &mut ManagedScenarioLaunchState,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
     ) -> Result<()> {
         if launch.destination.is_some()
             || launch.destination_provisioned.is_some()
@@ -1879,21 +1876,12 @@ impl McloneSceneHost {
                 &summary,
                 launch.intent.preview_bounds,
             )?;
-            if let Err(error) =
-                self.prepare_embedded_world_scenario_shell(device, queue, &destination)
-            {
-                launch.destination_failure = Some(format!(
-                    "prepare catalog destination renderer shell: {error:#}"
-                ));
-                self.prepared_warm_world_shell = None;
-            } else {
-                log::info!(
-                    "selected recent lobby destination source=catalog id={} seed={}",
-                    summary.id,
-                    summary.seed
-                );
-                launch.destination = Some(destination);
-            }
+            log::info!(
+                "selected recent lobby destination source=catalog id={} seed={}",
+                summary.id,
+                summary.seed
+            );
+            launch.destination = Some(destination);
         } else {
             launch.issue_destination_provision();
             log::info!(
@@ -1989,6 +1977,7 @@ impl McloneSceneHost {
                     return;
                 }
                 mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
+                    log::warn!("managed scenario destination start rejected: {error}");
                     launch.destination_failure = Some(error);
                     launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
                 }
@@ -1997,7 +1986,12 @@ impl McloneSceneHost {
         self.managed_scenario_launch = Some(launch);
     }
 
-    fn advance_managed_scenario_after_primary(&mut self, active_completed: bool) {
+    fn advance_managed_scenario_after_primary(
+        &mut self,
+        active_completed: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) {
         let Some(mut launch) = self.managed_scenario_launch.take() else {
             return;
         };
@@ -2029,7 +2023,9 @@ impl McloneSceneHost {
                 return;
             }
         }
-        if let Err(error) = self.try_issue_managed_scenario_destination_start(&mut launch) {
+        if let Err(error) =
+            self.try_issue_managed_scenario_destination_start(&mut launch, device, queue)
+        {
             launch.destination_failure = Some(format!("prepare destination start: {error:#}"));
         }
         self.managed_scenario_launch = Some(launch);
@@ -2038,11 +2034,14 @@ impl McloneSceneHost {
     fn try_issue_managed_scenario_destination_start(
         &mut self,
         launch: &mut ManagedScenarioLaunchState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
     ) -> Result<()> {
         if launch.phase != ManagedScenarioLaunchPhase::PrimaryPlayable {
             return Ok(());
         }
         if let Some(error) = launch.destination_failure.take() {
+            log::warn!("managed scenario destination startup failed: {error}");
             self.prepared_warm_world_shell = None;
             launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
             self.status_overlay =
@@ -2052,6 +2051,18 @@ impl McloneSceneHost {
         let Some(destination) = launch.destination.take() else {
             return Ok(());
         };
+        if let Err(error) = self.prepare_embedded_world_scenario_shell(device, queue, &destination)
+        {
+            let error =
+                format!("prepare destination renderer shell after lobby startup: {error:#}");
+            log::warn!("managed scenario destination startup failed: {error}");
+            self.prepared_warm_world_shell = None;
+            launch.destination = Some(destination);
+            launch.phase = ManagedScenarioLaunchPhase::DestinationFailed;
+            self.status_overlay =
+                StatusOverlay::new(format!("Lobby preview unavailable: {error}"), false);
+            return Ok(());
+        }
         let storage_source = destination
             .destination
             .storage_source
@@ -5054,7 +5065,7 @@ impl McloneSceneHost {
     ) -> Result<bool> {
         self.poll_managed_scenario_launch(device, queue)?;
         let active_completed = self.advance_active_local_startup(device, queue)?;
-        self.advance_managed_scenario_after_primary(active_completed);
+        self.advance_managed_scenario_after_primary(active_completed, device, queue);
         self.advance_warm_world_standby();
         self.update_managed_scenario_destination_status();
         Ok(active_completed)
@@ -5568,8 +5579,8 @@ impl McloneSceneHost {
         let effects = operations.poll(self.client_experience.catalog_mut());
         self.services.catalog_operations = Some(operations);
         if let Some(mut launch) = self.managed_scenario_launch.take() {
-            self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
-            self.try_issue_managed_scenario_destination_start(&mut launch)?;
+            self.try_resolve_managed_scenario_destination(&mut launch)?;
+            self.try_issue_managed_scenario_destination_start(&mut launch, device, queue)?;
             self.managed_scenario_launch = Some(launch);
         }
         self.apply_xr_catalog_effects(effects, device, queue)
@@ -5590,8 +5601,8 @@ impl McloneSceneHost {
         let effects = operations.poll(self.client_experience.catalog_mut());
         self.services.catalog_operations = Some(operations);
         if let Some(mut launch) = self.managed_scenario_launch.take() {
-            self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
-            self.try_issue_managed_scenario_destination_start(&mut launch)?;
+            self.try_resolve_managed_scenario_destination(&mut launch)?;
+            self.try_issue_managed_scenario_destination_start(&mut launch, device, queue)?;
             self.managed_scenario_launch = Some(launch);
         }
         #[cfg(not(target_arch = "wasm32"))]

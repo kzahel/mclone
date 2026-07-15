@@ -94,6 +94,30 @@ fn cli_lobby_scenario_smoke_uses_an_isolated_managed_root() {
     );
     assert!(options.scene.world_dir.is_none());
     assert!(options.scene.live_diorama.is_none());
+    assert_eq!(options.preview_chunk_span, 2);
+    assert!(!options.catalog_destination);
+}
+
+#[test]
+fn cli_lobby_scenario_catalog_smoke_uses_a_four_chunk_catalog_destination() {
+    let cli = Cli::parse([
+        "--lobby-scenario-catalog-smoke".to_owned(),
+        "/tmp/lobby-catalog".to_owned(),
+    ])
+    .unwrap();
+    let Cli::LobbyScenarioCatalogSmoke { options } = cli else {
+        panic!("expected catalog lobby scenario smoke CLI");
+    };
+    assert_eq!(options.directory, PathBuf::from("/tmp/lobby-catalog"));
+    assert_eq!([options.width, options.height], [640, 400]);
+    assert_eq!(
+        options.scene.world_root,
+        Some(PathBuf::from("/tmp/lobby-catalog/app-data/worlds"))
+    );
+    assert!(options.scene.world_dir.is_none());
+    assert!(options.scene.live_diorama.is_none());
+    assert_eq!(options.preview_chunk_span, 4);
+    assert!(options.catalog_destination);
 }
 
 #[test]
@@ -114,6 +138,8 @@ fn cli_lobby_scenario_stereo_smoke_uses_an_isolated_managed_root() {
     );
     assert!(options.scene.world_dir.is_none());
     assert!(options.scene.live_diorama.is_none());
+    assert_eq!(options.preview_chunk_span, 2);
+    assert!(!options.catalog_destination);
 }
 
 #[test]

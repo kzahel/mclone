@@ -57,13 +57,30 @@ const lobbyScenarioLifecycleProbe = process.argv.includes("--lobby-scenario-life
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_LIFECYCLE_PROBE === "1";
 const lobbyScenarioBoundsProbe = process.argv.includes("--lobby-scenario-bounds-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_BOUNDS_PROBE === "1";
+const lobbyScenarioCatalogProbe = process.argv.includes("--lobby-scenario-catalog-probe")
+  || process.argv.includes("--lobby-scenario-mobile-catalog-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_CATALOG_PROBE === "1";
+const lobbyScenarioMobileCatalogProbe = process.argv.includes(
+  "--lobby-scenario-mobile-catalog-probe",
+) || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_CATALOG_PROBE === "1";
+const lobbyScenarioMobileProbe = process.argv.includes("--lobby-scenario-mobile-probe")
+  || lobbyScenarioMobileCatalogProbe
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_PROBE === "1";
 const lobbyScenarioProbe = process.argv.includes("--lobby-scenario-probe")
   || process.argv.includes("--lobby-scenario-mobile-probe")
   || lobbyScenarioLifecycleProbe
   || lobbyScenarioBoundsProbe
+  || lobbyScenarioCatalogProbe
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE === "1";
-const lobbyScenarioMobileProbe = process.argv.includes("--lobby-scenario-mobile-probe")
-  || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_PROBE === "1";
+const lobbyScenarioProbeLabel = lobbyScenarioLifecycleProbe
+  ? "lifecycle"
+  : lobbyScenarioBoundsProbe
+  ? "bounds-4x4"
+  : lobbyScenarioCatalogProbe
+  ? lobbyScenarioMobileProbe ? "mobile-catalog" : "catalog"
+  : lobbyScenarioMobileProbe
+  ? "mobile"
+  : "desktop";
 const farLodProbe = process.argv.includes("--far-lod-probe")
   || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
 const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
@@ -108,7 +125,7 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
     : lobbyScenarioProbe
-    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioBoundsProbe ? "bounds-4x4" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.png`
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
@@ -132,7 +149,7 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
     : lobbyScenarioProbe
-    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioBoundsProbe ? "bounds-4x4" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview.png`
+    ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-preview.png`
     : farLodProbe
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
@@ -171,15 +188,19 @@ const managedScenarioRuntimeProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-runtime-probe.json";
 const lobbyScenarioProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE_REPORT
-  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioLifecycleProbe ? "lifecycle" : lobbyScenarioBoundsProbe ? "bounds-4x4" : lobbyScenarioMobileProbe ? "mobile" : "desktop"}.json`;
+  ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}.json`;
 const lobbyScenarioTitleScreenshotPath =
-  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-title.png`;
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-title.png`;
 const lobbyScenarioPlayableScreenshotPath =
-  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-playable.png`;
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-playable.png`;
 const lobbyScenarioWarmingScreenshotPath =
-  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-warming.png`;
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-warming.png`;
 const lobbyScenarioMovedScreenshotPath =
-  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioMobileProbe ? "mobile" : "desktop"}-preview-moved.png`;
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-preview-moved.png`;
+const lobbyScenarioDestinationScreenshotPath =
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-destination.png`;
+const lobbyScenarioReturnScreenshotPath =
+  `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-return.png`;
 const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
 const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
   ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
@@ -626,13 +647,22 @@ async function run() {
         return;
       }
       if (lobbyScenarioProbe) {
+        const catalogAcceptance = lobbyScenarioCatalogProbe
+          ? await prepareBrowserCatalogScenarioAcceptance(page)
+          : null;
         const lobbyScenarioProbeResult = lobbyScenarioLifecycleProbe
           ? await runLobbyScenarioLifecycleProbe(page, canvas)
-          : await runLobbyScenarioProbe(
+          : await completeLobbyScenarioProductAcceptance(
             page,
             canvas,
+            await runLobbyScenarioProbe(
+              page,
+              canvas,
+              lobbyScenarioMobileProbe,
+              lobbyScenarioBoundsProbe ? 4 : null,
+            ),
+            catalogAcceptance,
             lobbyScenarioMobileProbe,
-            lobbyScenarioBoundsProbe ? 4 : null,
           );
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         const pageScreenshotCaptured = await page.screenshot({
@@ -1961,6 +1991,8 @@ async function activateBrowserEmbeddedPreview(page, canvas, input, screenshot) {
     const state = globalThis.__mcloneWebApp.state;
     return {
       activeWorldInstanceId: state.activeWorldInstanceId,
+      activeWorldSeedText: state.activeWorldSeedText,
+      activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
       sourceWorld: state.embeddedActivationSourceWorldInstanceId,
       destinationWorld: state.embeddedActivationDestinationWorldInstanceId,
       sequence: state.embeddedActivationSequence,
@@ -2073,6 +2105,180 @@ async function exerciseBrowserScenarioVisibility(page) {
     afterBackgroundSaveCount: after,
     backgroundSaveAdvanced: after > before,
     resumed: true,
+  };
+}
+
+/** @param {Page} page */
+async function prepareBrowserCatalogScenarioAcceptance(page) {
+  await waitForWebAppReady(page);
+  await installIndexedDbCountHelper(page);
+  await clearBrowserIndexedDbCatalogStores(page);
+  const empty = await browserIndexedDbCatalogWorlds(page);
+  if (empty.length !== 0) {
+    throw new Error(`catalog scenario acceptance did not start empty: ${JSON.stringify(empty)}`);
+  }
+
+  await openNativeWorldList(page, 0);
+  await clickWorldListFooterButton(page, 1);
+  await waitForNativeUiScreen(page, "worldCreate");
+  await clickWorldCreateCreate(page);
+  const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
+  const selectedId = String(firstSession.sessionWorldId);
+  await waitForBrowserCatalogWorldIds(page, [selectedId]);
+
+  await openNativeWorldList(page, 1);
+  await clickWorldListFooterButton(page, 1);
+  await waitForNativeUiScreen(page, "worldCreate");
+  await clickWorldCreateCreate(page);
+  const secondSession = await waitForSessionWorldId(page, { notWorldId: selectedId });
+  const otherId = String(secondSession.sessionWorldId);
+  await waitForBrowserCatalogWorldIds(page, [selectedId, otherId]);
+
+  await openNativeWorldList(page, 2);
+  const firstSelection = await clickWorldListRow(page, 1);
+  if (String(firstSelection?.catalogWorldId ?? "") !== selectedId) {
+    await clickWorldListRow(page, 0);
+  }
+  await clickWorldListFooterButton(page, 0);
+  const selectedSession = await waitForSessionWorldId(page, { worldId: selectedId });
+  const beforeWarm = await waitForBrowserCatalogWorldIds(page, [selectedId, otherId]);
+  const selected = beforeWarm.find((/** @type {any} */ world) => world.id === selectedId);
+  const other = beforeWarm.find((/** @type {any} */ world) => world.id === otherId);
+  if (
+    !selected
+    || !other
+    || Number(selected.lastPlayedUnixMillis) <= Number(other.lastPlayedUnixMillis)
+  ) {
+    throw new Error(
+      `catalog scenario acceptance did not establish a unique recent world: ${JSON.stringify(beforeWarm)}`,
+    );
+  }
+  return {
+    selectedId,
+    selectedSeed: Number(selected.seed),
+    otherId,
+    selectedSession,
+    beforeWarm,
+    selectedBeforeWarm: Number(selected.lastPlayedUnixMillis),
+    otherBeforeWarm: Number(other.lastPlayedUnixMillis),
+  };
+}
+
+/**
+ * @param {Page} page
+ * @param {string} selectedId
+ * @param {number} priorRecency
+ */
+async function waitForBrowserCatalogActivationRecency(page, selectedId, priorRecency) {
+  await page.waitForFunction(
+    async ({ selectedId, priorRecency }) => {
+      const root = /** @type {any} */ (globalThis);
+      const worlds = await root.__mcloneBrowserSmokeCatalogWorlds();
+      const selected = worlds.find((/** @type {any} */ world) => world.id === selectedId);
+      return Number(selected?.lastPlayedUnixMillis) > priorRecency;
+    },
+    { selectedId, priorRecency },
+    { timeout: 30_000 },
+  );
+  return browserIndexedDbCatalogWorlds(page);
+}
+
+/**
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {any} preview
+ * @param {any | null} catalog
+ * @param {boolean} mobile
+ */
+async function completeLobbyScenarioProductAcceptance(
+  page,
+  canvas,
+  preview,
+  catalog,
+  mobile,
+) {
+  let duringWarm = null;
+  if (catalog) {
+    duringWarm = await browserIndexedDbCatalogWorlds(page);
+    const selected = duringWarm.find(
+      (/** @type {any} */ world) => world.id === catalog.selectedId,
+    );
+    const other = duringWarm.find(
+      (/** @type {any} */ world) => world.id === catalog.otherId,
+    );
+    if (
+      Number(selected?.lastPlayedUnixMillis) !== catalog.selectedBeforeWarm
+      || Number(other?.lastPlayedUnixMillis) !== catalog.otherBeforeWarm
+      || preview.after.lastManagedRuntimeStart?.storageSourceKind !== "catalog"
+      || preview.after.lastManagedRuntimeStart?.worldId !== catalog.selectedId
+      || Number(preview.after.standbyWorldSeedText) !== catalog.selectedSeed
+    ) {
+      throw new Error(
+        `catalog preview changed recency or selected the wrong source: ${JSON.stringify({ catalog, duringWarm, after: preview.after })}`,
+      );
+    }
+  }
+
+  const input = mobile ? "touch" : "mouse";
+  const outbound = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    input,
+    lobbyScenarioDestinationScreenshotPath,
+  );
+  let afterActivation = null;
+  if (catalog) {
+    afterActivation = await waitForBrowserCatalogActivationRecency(
+      page,
+      catalog.selectedId,
+      catalog.selectedBeforeWarm,
+    );
+    const selected = afterActivation.find(
+      (/** @type {any} */ world) => world.id === catalog.selectedId,
+    );
+    const other = afterActivation.find(
+      (/** @type {any} */ world) => world.id === catalog.otherId,
+    );
+    if (
+      Number(selected?.lastPlayedUnixMillis) <= catalog.selectedBeforeWarm
+      || Number(other?.lastPlayedUnixMillis) !== catalog.otherBeforeWarm
+      || Number(outbound.activeWorldSeedText) !== catalog.selectedSeed
+    ) {
+      throw new Error(
+        `catalog activation did not update only the selected world: ${JSON.stringify({ catalog, afterActivation, outbound })}`,
+      );
+    }
+  }
+  const returned = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    input,
+    lobbyScenarioReturnScreenshotPath,
+  );
+  return {
+    ...preview,
+    ok: preview.ok
+      && outbound.postSwapSupported === true
+      && outbound.firstUncoveredSupported === true
+      && outbound.stabilitySupported === true
+      && returned.postSwapSupported === true
+      && returned.firstUncoveredSupported === true
+      && returned.stabilitySupported === true,
+    outbound,
+    returned,
+    catalogRecency: catalog ? {
+      selectedId: catalog.selectedId,
+      selectedSeed: catalog.selectedSeed,
+      otherId: catalog.otherId,
+      beforeWarm: catalog.beforeWarm,
+      duringWarm,
+      afterActivation,
+    } : null,
+    screenshots: {
+      ...preview.screenshots,
+      destination: lobbyScenarioDestinationScreenshotPath,
+      return: lobbyScenarioReturnScreenshotPath,
+    },
   };
 }
 
@@ -2545,6 +2751,8 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
         p95Ms: percentile(0.95),
       },
       workers: root.__mcloneWorkerStats,
+      lastManagedRuntimeStart: state.lastManagedRuntimeStart ?? null,
+      worldCatalogEntryCount: Number(state.worldCatalogEntryCount) || 0,
       compiler: state.lastCompileReport
         ? {
             workerInitCount: state.lastCompileReport.workerInitCount,

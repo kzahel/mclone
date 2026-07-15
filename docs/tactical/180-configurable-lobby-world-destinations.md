@@ -1,6 +1,6 @@
 # Tactical 180 — Configurable Lobby World Destinations
 
-Status: active
+Status: complete — 2026-07-15; Slices 0-5 landed
 
 Topic: `embedded-worlds`
 
@@ -440,3 +440,79 @@ byte-identical at SHA-256
 `8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
 No performance, support, visual, migration, platform-fork, or architecture
 stop condition fired.
+
+### Slice 5 — 2026-07-15
+
+The product acceptance matrix now has first-class catalog-backed native and
+browser lanes rather than inferring recent-world behavior from policy tests.
+The native 4x4 lane creates two ordinary catalog worlds, makes one uniquely
+most recent, launches the shared lobby scenario, verifies that warmup leaves
+both timestamps unchanged, activates the selected complete world, and proves
+that only its play timestamp advances. Its receipt resolves chunks
+`(2,-9)..(5,-6)`, sections `3..5`, records source
+`catalog-recent-world`, and completes cancellation, persistence, relaunch, and
+A-to-B-to-A with supported stable entry. The existing native lane remains the
+empty-catalog 2x2 managed-overworld fallback proof.
+
+Adding the integrated catalog lane exposed a real lifecycle race: destination
+renderer-shell preparation could precede replacement of the initial primary
+slot, whose transient-state reset then discarded that shell. Both native and
+browser now prepare the shell at the shared post-lobby destination-start
+boundary. The fix is entirely in `McloneSceneHost`; adapters still only resolve
+native directories or browser IndexedDB/Worker starts, and no duplicate
+native/web feature path was introduced.
+
+Production browser WebGPU now runs actual outbound and return activation in
+the desktop, mobile/touch, catalog desktop, catalog mobile/touch, and 4x4
+bounds lanes. Both catalog lanes create two worlds through the native UI and
+IndexedDB catalog path, choose the most recently actively played compatible
+world, preserve both recencies through preview warmup, and advance only the
+selected row after activation. Managed desktop/mobile accept
+`(64.5,72.0,-109.5)`; catalog desktop/mobile accept
+`(-111.5,64.0,-68.5)`; every outbound delayed-stability receipt retains loaded
+clearance, solid support, and `on_ground=true`. Every return retains supported
+`(6.5,64.0,7.5)` without displacement. The adversarial browser lifecycle lane
+also passed after the shell-timing correction, including cancellation, failure,
+relaunch, asset replacement, renderer rebuild, and complete Worker shutdown.
+
+Fresh native lobby, 2x2/4x4 preview, destination, return, and synthetic-stereo
+pixels under `/tmp/mclone-lobby-scenario-*` were inspected. Fresh production
+browser desktop/mobile, managed/catalog, 2x2/4x4, destination, and return pixels
+under `/tmp/mclone-native-web-lobby-scenario-*` were also inspected. They show
+bounded tabletop worlds and fully rendered supported destinations; none repeat
+the below-world Slice 0 failure.
+
+Focused and platform validation passed:
+
+- catalog policy, world-catalog, and catalog-executor tests: 15, 19, and 7
+  passed;
+- scene warm-world tests: 14 passed; the one-world ownership contract passed
+  13 with one GPU characterization ignored;
+- the three native lobby-smoke CLI parser tests passed;
+- native flat fallback, native 4x4 catalog, and native synthetic-stereo smokes
+  each completed two exchanges; the stereo image retained 218,058 differing
+  eye pixels;
+- production browser WebGPU desktop, mobile, catalog desktop, catalog mobile,
+  4x4 bounds, and lifecycle smokes passed;
+- `cargo check -p mclone-native-client`, `pnpm native:web:typecheck`, Node
+  syntax checking, Rust formatting, and `git diff --check` passed;
+- focused no-dependency Clippy passed for `mclone-scene` and the native client;
+  the client invocation allows its two pre-existing denied
+  `lod_settle_probe` extreme-comparison lints, while a broader all-targets
+  audit remains blocked by unrelated pre-existing `mclone-mesh` and
+  `mclone-worldgen` denied lints;
+- flat Android debug and Android XR release APK packaging passed.
+
+Five native direct-path controls measured 2.581/4.409 ms median average/P95,
+versus Slice 4's 2.602/4.416 ms (-0.81%/-0.16%), with zero over-budget frames
+and zero accounting violations. Five production browser controls measured
+11.8/20.5 ms median compile average/nearest-rank P95, versus Slice 4's
+11.8/20.6 ms. Every browser run retained 16 movement compile timings, two of
+two direct actors, one compiler Worker, shared-result transport, one asset
+payload, and zero overflow. Generated compile-byte sequences varied between
+runs, so this closeout does not claim an exact byte-identical browser workload
+pair. The native direct image was inspected and remains byte-identical at
+SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+No performance, support, visual, migration, platform-fork, or architecture
+stop condition fired. Tactical 180 is complete.

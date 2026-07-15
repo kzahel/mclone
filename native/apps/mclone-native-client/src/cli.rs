@@ -81,6 +81,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--live-diorama-smoke",
     "--live-diorama-world-dir",
     "--lobby-scenario-smoke",
+    "--lobby-scenario-catalog-smoke",
     "--lobby-scenario-stereo-smoke",
     "--lod-settle-probe",
     "--lod-settle-script",
@@ -324,6 +325,8 @@ pub(crate) struct LobbyScenarioSmokeOptions {
     pub(crate) height: u32,
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,
+    pub(crate) preview_chunk_span: u32,
+    pub(crate) catalog_destination: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -669,6 +672,9 @@ pub(crate) enum Cli {
     LobbyScenarioSmoke {
         options: LobbyScenarioSmokeOptions,
     },
+    LobbyScenarioCatalogSmoke {
+        options: LobbyScenarioSmokeOptions,
+    },
     LobbyScenarioStereoSmoke {
         options: LobbyScenarioSmokeOptions,
     },
@@ -737,6 +743,7 @@ enum HeadlessMode {
     Screenshot(PathBuf),
     LiveDioramaSmoke(PathBuf),
     LobbyScenarioSmoke(PathBuf),
+    LobbyScenarioCatalogSmoke(PathBuf),
     LobbyScenarioStereoSmoke(PathBuf),
     WarmWorldSwapSmoke(PathBuf),
     XrEmulationScreenshot(PathBuf),
@@ -1131,6 +1138,22 @@ impl Cli {
                         bail!("headless output modes cannot be combined with perf modes");
                     }
                     set_headless_mode(&mut mode, HeadlessMode::LobbyScenarioSmoke(path))?;
+                }
+                "--lobby-scenario-catalog-smoke" => {
+                    let path = args
+                        .next()
+                        .map(PathBuf::from)
+                        .context("--lobby-scenario-catalog-smoke requires an output directory")?;
+                    if movement_perf
+                        || timedemo
+                        || frame_budget_probe
+                        || movement_frame_probe
+                        || startup_streaming_perf
+                        || loading_settle_perf
+                    {
+                        bail!("headless output modes cannot be combined with perf modes");
+                    }
+                    set_headless_mode(&mut mode, HeadlessMode::LobbyScenarioCatalogSmoke(path))?;
                 }
                 "--lobby-scenario-stereo-smoke" => {
                     let path = args
@@ -1778,6 +1801,27 @@ impl Cli {
                     },
                 })
             }
+            Some(HeadlessMode::LobbyScenarioCatalogSmoke(directory)) => {
+                scene.world_root = Some(directory.join("app-data/worlds"));
+                scene.world_dir = None;
+                scene.remote_addr = None;
+                scene.live_diorama = None;
+                scene.warm_world_standby_seed = None;
+                scene.render_distance = 2;
+                scene.debug_passive_showcase = false;
+                scene.debug_auxiliary_player_script = true;
+                Ok(Self::LobbyScenarioCatalogSmoke {
+                    options: LobbyScenarioSmokeOptions {
+                        directory,
+                        width: width.unwrap_or(640),
+                        height: height.unwrap_or(400),
+                        scene,
+                        render_options,
+                        preview_chunk_span: 4,
+                        catalog_destination: true,
+                    },
+                })
+            }
             Some(HeadlessMode::Screenshot(path)) => Ok(Self::HeadlessScreenshot {
                 options: HeadlessScreenshotOptions {
                     path,
@@ -1833,6 +1877,8 @@ impl Cli {
                         height: height.unwrap_or(400),
                         scene,
                         render_options,
+                        preview_chunk_span: 2,
+                        catalog_destination: false,
                     },
                 })
             }
@@ -1852,6 +1898,8 @@ impl Cli {
                         height: height.unwrap_or(640),
                         scene,
                         render_options,
+                        preview_chunk_span: 2,
+                        catalog_destination: false,
                     },
                 })
             }

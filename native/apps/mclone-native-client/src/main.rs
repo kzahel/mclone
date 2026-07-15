@@ -150,6 +150,16 @@ fn main() -> Result<()> {
             );
             Ok(())
         }
+        Cli::LobbyScenarioCatalogSmoke { options } => {
+            let report = run_lobby_scenario_smoke(&options)?;
+            println!(
+                "catalog lobby scenario smoke saved to {} (captures={}, switches={})",
+                report.directory.display(),
+                report.capture_count,
+                report.switch_count,
+            );
+            Ok(())
+        }
         Cli::LobbyScenarioStereoSmoke { options } => {
             let report = run_lobby_scenario_stereo_smoke(&options)?;
             println!(
