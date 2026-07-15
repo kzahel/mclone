@@ -366,3 +366,77 @@ pixel remains byte-identical at SHA-256
 `8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
 No performance, migration, platform-fork, or architecture stop condition
 fired.
+
+### Slice 4 — 2026-07-15
+
+Preview layout now resolves only after each standby runtime accepts its
+authoritative entry pose. The configured horizontal and vertical offsets are
+converted into exact entry-relative regions, including centered even 2x2 and
+4x4 crops, while the safe entry remains a separate activation value. The
+lobby keeps its fixed tabletop anchor. After exchange, the non-invasive return
+preview is rotated from the destination entry's local right/up/forward offset
+without writing a plinth or otherwise mutating either world.
+
+One shared `StandingPoseFacts` collision contract now reports loaded body,
+clear body, loaded support, and solid support using the existing teleport
+probes. Standby switchability requires all four facts at the accepted entry.
+Activation receipts retain the accepted pose, immediate post-swap sample,
+first uncovered sample, and an eight-frame stability sample, and fail before
+or after uncovering if support is lost. Authored-only fixtures use a new
+center-first spawn-column order; ordinary generated Overworld scanning is
+unchanged. The retained authored Table and Island fixtures now accept
+`(6.5, 64.0, 7.5)` and `(7.5, 66.0, 7.5)` respectively.
+
+The browser fall was traced to browser glue relocating the camera again on
+every active world-instance change after the shared scene had already applied
+the accepted pose. That browser-only relocation was removed. Startup now
+reconciles the pending authoritative camera correction before readiness, using
+the same Rust scene/runtime contract as native. No native/web feature
+duplication or platform-specific generated-world anchoring was introduced.
+
+Focused validation passed:
+
+- `cargo test -p mclone-client teleport --lib`: 12 passed;
+- `cargo test -p mclone-server spawn --lib`: 53 passed;
+- `cargo test -p mclone-scene warm_world --lib`: 14 passed;
+- the one-world ownership contract passed 13 tests with one GPU
+  characterization ignored;
+- `cargo check -p mclone-native-client`, `pnpm native:web:typecheck`,
+  `cargo fmt --all -- --check`, and `git diff --check` passed.
+
+Native flat and stereo lobby smokes each completed two world exchanges. The
+flat receipt keeps the generated accepted entry `(64.5, 72.0, -109.5)` and
+the lobby entry `(6.5, 64.0, 7.5)` unchanged through first-uncovered and
+eight-frame stability samples, with loaded clearance and solid support in
+both directions. The stereo capture contains 217,988 differing eye pixels.
+Fresh lobby, destination, return, and stereo pixels under
+`/tmp/mclone-lobby-scenario-smoke` and
+`/tmp/mclone-lobby-scenario-stereo-smoke` were inspected.
+
+Production browser WebGPU
+`pnpm native:web:lobby-scenario-lifecycle-smoke` passed the full failure,
+cancellation, launch, persistence, A-to-B-to-A, reopen, asset replacement,
+and resource-rebuild lifecycle. Its live generated preview resolved the 2x2
+region `(3,-8)..(4,-7)`, drew eight bounded sections and four actors including
+one remote player, and submitted nothing out of region. Outbound and reopened
+generated arrivals preserved `(64.5, 72.0, -109.5)`, support, and `on_ground`
+through delayed stability; return preserved `(6.5, 64.0, 7.5)` with support
+and no displacement. All Workers were gone after shutdown. The new browser
+preview, outbound, return, live-actor, and reopened pixels under `/tmp` were
+inspected and are unambiguous.
+
+Five native direct-path samples measured 2.602/4.416 ms median average/P95,
+versus Slice 3's 2.575/4.376 ms (+1.05%/+0.91%), with no over-budget frames
+or accounting failures. The initial browser comparison was rejected because
+candidate and control compiled different mesh workloads. Five replacement
+interleaved production WebGPU pairs compiled the identical 16-mesh workload
+in every run (SHA-256
+`80d0760340eeb27b96ee34509b2669372c39a6b31add7837097702cb3d615c99`).
+They measured 11.8/20.6 ms candidate median average/P95 versus 13.9/19.7 ms
+control (-15.1%/+4.6%), with one compiler Worker, shared-result transport,
+and zero overflow. The fresh native direct pixel
+`/tmp/mclone-180-slice4-native-direct.png` was inspected and remains
+byte-identical at SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+No performance, support, visual, migration, platform-fork, or architecture
+stop condition fired.

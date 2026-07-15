@@ -11,6 +11,8 @@ const STANDBY_UPLOAD_BUDGET: usize = 1;
 const STANDBY_ACCEPT_BUDGET: usize = 1;
 const STANDBY_COMPILE_REQUEST_BUDGET: usize = 1;
 const STANDBY_PREPARATION_BUDGET: Duration = Duration::from_micros(750);
+const LOBBY_RETURN_PREVIEW_DISPLAY_OFFSET: Vec3d = Vec3d::new(0.0, 2.0, 6.0);
+const WARM_WORLD_ENTRY_GROUND_PROBE_DISTANCE: f64 = 0.01;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SceneCameraConfig {
@@ -1780,7 +1782,12 @@ impl McloneSceneHost {
             )
             .with_descriptor(descriptor)
             .with_world_behavior_profile(destination_manifest.behavior_profile)
-            .with_embedded_preview_regions(region, return_region, placement, return_placement);
+            .with_embedded_preview_regions(region, return_region, placement, return_placement)
+            .with_entry_relative_embedded_preview(
+                preview_bounds,
+                primary_anchor,
+                LOBBY_RETURN_PREVIEW_DISPLAY_OFFSET,
+            )?;
         Ok(PreparedEmbeddedWorldScenario::new(
             manifest.scenario_id,
             destination,
@@ -1838,7 +1845,12 @@ impl McloneSceneHost {
             )
             .with_descriptor(ActiveSessionDescriptor::from_local_world_summary(summary))
             .with_world_behavior_profile(mclone_server::WorldBehaviorProfile::Mutable)
-            .with_embedded_preview_regions(region, return_region, placement, return_placement);
+            .with_embedded_preview_regions(region, return_region, placement, return_placement)
+            .with_entry_relative_embedded_preview(
+                preview_bounds,
+                primary_anchor,
+                LOBBY_RETURN_PREVIEW_DISPLAY_OFFSET,
+            )?;
         Ok(PreparedEmbeddedWorldScenario::new(
             manifest.scenario_id,
             destination,
@@ -2574,6 +2586,7 @@ impl McloneSceneHost {
                     || renderer_multiview_materialized,
                 ..WarmWorldReadiness::default()
             },
+            accepted_entry_pose: None,
             source_endpoint: None,
             destination_endpoint: None,
             failure: None,
@@ -2586,6 +2599,7 @@ impl McloneSceneHost {
                     return_region,
                     placement,
                     return_placement,
+                    ..
                 },
                 Some(renderer),
             ) => Some(EmbeddedWorldPreview {
@@ -2614,6 +2628,7 @@ impl McloneSceneHost {
                 // scenario entry anchor instead of silently biasing it toward
                 // the lower midpoint selected by `region.center()`.
                 fixed_interest_center: request.entry_center,
+                return_interest_center: return_region.center(),
                 preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
                 render: EmbeddedWorldPreviewRenderSnapshot::default(),
                 pending_actor_update: None,
@@ -2710,6 +2725,9 @@ impl McloneSceneHost {
         let Some(standby) = self.standby_world.as_ref() else {
             return false;
         };
+        let accepted_destination_entry_pose = standby
+            .accepted_entry_pose
+            .unwrap_or_else(|| WorldEntryPose::from_camera(&standby.camera));
         self.embedded_world_activation_sequence =
             self.embedded_world_activation_sequence.saturating_add(1);
         self.embedded_world_activation.begin(
@@ -2719,6 +2737,9 @@ impl McloneSceneHost {
             self.rendered_frames,
             volume,
         );
+        if let Some(report) = self.embedded_world_activation.report.as_mut() {
+            report.accepted_destination_entry_pose = Some(accepted_destination_entry_pose);
+        }
         true
     }
 
@@ -2742,6 +2763,8 @@ impl McloneSceneHost {
                 let switch = self.swap_through_embedded_world_activation();
                 match switch {
                     Ok(switch) => {
+                        let post_swap_entry =
+                            Self::world_slot_entry_support_sample(&self.active_world);
                         if let Some(report) = self.embedded_world_activation.report.as_mut() {
                             report.switch_elapsed_ms = Some(switch.switch_elapsed_ms);
                             report.switched_activation_frame = Some(
@@ -2749,6 +2772,33 @@ impl McloneSceneHost {
                                     .activation_frame
                                     .saturating_add(1),
                             );
+                            match post_swap_entry {
+                                Ok(sample) if sample.support.supported() => {
+                                    report.post_swap_entry = Some(sample);
+                                }
+                                Ok(sample) => {
+                                    report.post_swap_entry = Some(sample);
+                                    report.failure = Some(format!(
+                                        "post-swap entry is not supported: {:?}",
+                                        sample.support
+                                    ));
+                                }
+                                Err(error) => {
+                                    report.failure =
+                                        Some(format!("sample post-swap entry support: {error:#}"));
+                                }
+                            }
+                        }
+                        if self
+                            .embedded_world_activation
+                            .report
+                            .as_ref()
+                            .is_some_and(|report| report.failure.is_some())
+                        {
+                            self.embedded_world_activation.phase =
+                                EmbeddedWorldActivationPhase::Failed;
+                            self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                            return true;
                         }
                         if let Err(error) = self.retarget_embedded_world_preview_after_switch() {
                             let failure = format!(
@@ -2802,6 +2852,11 @@ impl McloneSceneHost {
                 self.embedded_world_activation.phase_elapsed_seconds += dt_seconds;
                 if self.embedded_world_activation.phase_elapsed_seconds
                     >= EMBEDDED_ACTIVATION_OPEN_SECONDS
+                    && self
+                        .embedded_world_activation
+                        .report
+                        .as_ref()
+                        .is_some_and(|report| report.stability_entry.is_some())
                 {
                     if let Some(report) = self.embedded_world_activation.report.as_mut() {
                         report.completed_activation_frame = Some(
@@ -2826,7 +2881,7 @@ impl McloneSceneHost {
         let Some(preview) = self.embedded_world_preview.as_mut() else {
             bail!("embedded preview disappeared after its ownership exchange");
         };
-        let fixed_interest_center = preview.return_region.center();
+        let fixed_interest_center = preview.return_interest_center;
         if let Some(runtime) = standby.runtime.as_mut() {
             runtime
                 .set_interest_center(fixed_interest_center)
@@ -2834,6 +2889,10 @@ impl McloneSceneHost {
         }
         std::mem::swap(&mut preview.context, &mut preview.return_context);
         std::mem::swap(&mut preview.region, &mut preview.return_region);
+        std::mem::swap(
+            &mut preview.fixed_interest_center,
+            &mut preview.return_interest_center,
+        );
         preview.source_world = standby.id;
         preview.phase = EmbeddedWorldPreviewPhase::Warming;
         preview.source_anchor_gpu_resident = false;
@@ -2852,10 +2911,18 @@ impl McloneSceneHost {
                 return_region,
                 placement,
                 return_placement,
+                entry_relative,
             } = &mut state.presentation
         {
             std::mem::swap(region, return_region);
             std::mem::swap(placement, return_placement);
+            if let Some(layout) = entry_relative {
+                std::mem::swap(
+                    &mut layout.standby_entry_pose,
+                    &mut layout.active_entry_pose,
+                );
+                layout.standby_uses_primary_anchor = !layout.standby_uses_primary_anchor;
+            }
         }
         self.embedded_world_activation.volume =
             Some(EmbeddedWorldActivationVolume::from_context(preview.context));
@@ -2894,6 +2961,13 @@ impl McloneSceneHost {
             .saturating_add(1);
         let activation_frame = self.embedded_world_activation.activation_frame;
         let alpha = self.embedded_world_activation.alpha();
+        let entry_sample = self
+            .embedded_world_activation
+            .report
+            .as_ref()
+            .is_some_and(|report| report.switch_elapsed_ms.is_some())
+            .then(|| Self::world_slot_entry_support_sample(&self.active_world));
+        let mut support_failure = None;
         let Some(report) = self.embedded_world_activation.report.as_mut() else {
             return;
         };
@@ -2916,7 +2990,67 @@ impl McloneSceneHost {
                 upload.queued_upload_lifecycle_item_count;
             report.first_uncovered_pending_compile_jobs = upload.pending_compile_jobs_after;
             report.first_uncovered_eye_count = eye_count;
+            match entry_sample.as_ref() {
+                Some(Ok(sample)) => {
+                    report.first_uncovered_entry = Some(*sample);
+                    if !sample.support.supported() {
+                        support_failure = Some(format!(
+                            "first uncovered entry is not supported: {:?}",
+                            sample.support
+                        ));
+                    }
+                }
+                Some(Err(error)) => {
+                    support_failure =
+                        Some(format!("sample first-uncovered entry support: {error:#}"));
+                }
+                None => {}
+            }
         }
+        if report.stability_entry.is_none()
+            && report
+                .first_uncovered_activation_frame
+                .is_some_and(|first| {
+                    activation_frame >= first.saturating_add(EMBEDDED_ACTIVATION_STABILITY_FRAMES)
+                })
+        {
+            report.stability_activation_frame = Some(activation_frame);
+            match entry_sample.as_ref() {
+                Some(Ok(sample)) => {
+                    report.stability_entry = Some(*sample);
+                    if !sample.support.supported() {
+                        support_failure = Some(format!(
+                            "delayed entry stability is not supported: {:?}",
+                            sample.support
+                        ));
+                    }
+                }
+                Some(Err(error)) => {
+                    support_failure = Some(format!("sample delayed entry stability: {error:#}"));
+                }
+                None => {}
+            }
+        }
+        if let Some(failure) = support_failure {
+            report.failure = Some(failure);
+            self.embedded_world_activation.phase = EmbeddedWorldActivationPhase::Failed;
+            self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+        }
+    }
+
+    fn world_slot_entry_support_sample(
+        slot: &DrawableWorldSlot,
+    ) -> Result<WorldEntrySupportSample> {
+        let runtime = slot
+            .runtime
+            .as_ref()
+            .context("world entry support sample has no runtime")?;
+        let pose = WorldEntryPose::from_camera(&slot.camera);
+        Ok(WorldEntrySupportSample {
+            pose,
+            on_ground: slot.camera.on_ground(),
+            support: mclone_client::standing_pose_facts(runtime.client(), pose.feet_position),
+        })
     }
 
     /// Launch-smoke diagnostic for proving that the retained preview is a live
@@ -3120,7 +3254,10 @@ impl McloneSceneHost {
         let destination_entry_pose = destination
             .accepted_entry_pose
             .unwrap_or_else(|| WorldEntryPose::from_camera(&destination.camera));
-        let return_entry_pose = WorldEntryPose::from_camera(&self.active_world.camera);
+        let return_entry_pose = self
+            .active_world
+            .accepted_entry_pose
+            .unwrap_or_else(|| WorldEntryPose::from_camera(&self.active_world.camera));
         self.swap_with_switchable_warm_world_using_poses(Some((
             destination_entry_pose,
             return_entry_pose,
@@ -3268,6 +3405,19 @@ impl McloneSceneHost {
                 destination_entry_section,
             );
         }
+        let destination_support = mclone_client::standing_pose_facts(
+            standby
+                .runtime
+                .as_ref()
+                .context("switchable warm-world destination has no runtime")?
+                .client(),
+            destination_entry_pose.feet_position,
+        );
+        if !destination_support.supported() {
+            bail!(
+                "mapped warm-world destination lacks loaded clear support: {destination_support:?}"
+            );
+        }
         let return_entry_pose = selection_entry_poses
             .map(|(_, return_pose)| return_pose)
             .unwrap_or_else(|| {
@@ -3289,6 +3439,19 @@ impl McloneSceneHost {
             bail!(
                 "mapped warm-world return destination is not GPU/traversal ready at section {:?}",
                 return_entry_section,
+            );
+        }
+        let return_support = mclone_client::standing_pose_facts(
+            self.active_world
+                .runtime
+                .as_ref()
+                .context("warm-world source has no runtime")?
+                .client(),
+            return_entry_pose.feet_position,
+        );
+        if !return_support.supported() {
+            bail!(
+                "mapped warm-world return destination lacks loaded clear support: {return_support:?}"
             );
         }
 
@@ -3354,12 +3517,25 @@ impl McloneSceneHost {
                 "warm-world destination corrected the mapped gate-entry pose; readiness must settle again"
             );
         }
+        {
+            let standby = self
+                .standby_world
+                .as_mut()
+                .expect("standby presence checked before entry ground probe");
+            let runtime = standby
+                .runtime
+                .as_ref()
+                .expect("mapped warm-world destination retains its runtime");
+            standby
+                .camera
+                .probe_ground(runtime.client(), WARM_WORLD_ENTRY_GROUND_PROBE_DISTANCE);
+        }
         let camera_commit_ms = elapsed_ms(self.services.clock.elapsed_since(camera_started_at));
 
-        // Camera reconciliation may consume an already-pending authoritative
-        // correction. Save and admit the return pose only after that reconcile
-        // so it describes the source pose we actually leave.
-        let source_entry_pose = WorldEntryPose::from_camera(&self.active_world.camera);
+        // The live camera may have moved to observe or activate the tabletop.
+        // Retain the separately admitted return pose; the next covered switch
+        // reconciles that slot's camera to this safe entry before reveal.
+        let source_entry_pose = return_entry_pose;
         let source_entry_section = entry_support_render_section(source_entry_pose)
             .context("active camera cannot produce return entry coverage")?;
         if !self
@@ -3580,7 +3756,12 @@ impl McloneSceneHost {
         state.readiness.entry_section = None;
         state.readiness.entry_section_gpu_resident = false;
         state.readiness.entry_section_traversal_ready = false;
+        state.readiness.entry_body_loaded = false;
+        state.readiness.entry_body_clear = false;
+        state.readiness.entry_support_loaded = false;
+        state.readiness.entry_solid_support = false;
         state.readiness.switchable = false;
+        state.accepted_entry_pose = None;
     }
 
     fn retarget_warm_world_state_after_switch(
@@ -3602,10 +3783,21 @@ impl McloneSceneHost {
         let renderer_multiview_materialized = standby.draw.multiview_renderer_materialized();
         let renderer_topology_ready =
             !renderer_multiview_required || renderer_multiview_materialized;
-        if !entry_section_gpu_resident || !entry_section_traversal_ready || !renderer_topology_ready
+        let entry_support = mclone_client::standing_pose_facts(
+            standby
+                .runtime
+                .as_ref()
+                .context("return standby lost its runtime")?
+                .client(),
+            entry_pose.feet_position,
+        );
+        if !entry_section_gpu_resident
+            || !entry_section_traversal_ready
+            || !renderer_topology_ready
+            || !entry_support.supported()
         {
             bail!(
-                "ownership exchange produced a non-switchable return slot: gpu={} traversal={} topology={}",
+                "ownership exchange produced a non-switchable return slot: gpu={} traversal={} topology={} support={entry_support:?}",
                 entry_section_gpu_resident,
                 entry_section_traversal_ready,
                 renderer_topology_ready,
@@ -3673,9 +3865,14 @@ impl McloneSceneHost {
             entry_section: Some(entry_section),
             entry_section_gpu_resident,
             entry_section_traversal_ready,
+            entry_body_loaded: entry_support.body_loaded,
+            entry_body_clear: entry_support.body_clear,
+            entry_support_loaded: entry_support.support_loaded,
+            entry_solid_support: entry_support.solid_support,
             renderer_topology_ready,
             switchable: true,
         };
+        state.accepted_entry_pose = Some(entry_pose);
         state.source_endpoint = source_endpoint;
         state.destination_endpoint = destination_endpoint;
         state.failure = None;
@@ -3831,6 +4028,137 @@ impl McloneSceneHost {
                 Ok(false)
             }
         }
+    }
+
+    fn resolve_entry_relative_preview_layout(
+        &mut self,
+        state: &mut WarmWorldStandbyState,
+        slot: &mut DrawableWorldSlot,
+    ) -> Result<()> {
+        let active_entry_pose = self
+            .active_world
+            .accepted_entry_pose
+            .unwrap_or_else(|| WorldEntryPose::from_camera(&self.active_world.camera));
+        let standby_entry_pose = slot
+            .accepted_entry_pose
+            .unwrap_or_else(|| WorldEntryPose::from_camera(&slot.camera));
+        let WarmWorldPresentationRequest::Diorama {
+            region,
+            return_region,
+            placement,
+            return_placement,
+            entry_relative: Some(layout),
+        } = &mut state.presentation
+        else {
+            return Ok(());
+        };
+        if layout.standby_entry_pose == Some(standby_entry_pose)
+            && layout.active_entry_pose == Some(active_entry_pose)
+        {
+            return Ok(());
+        }
+
+        let standby_entry_section = entry_support_render_section(standby_entry_pose)
+            .context("accepted standby entry has no support section")?;
+        let active_entry_section = entry_support_render_section(active_entry_pose)
+            .context("accepted active entry has no support section")?;
+        let standby_entry_chunk =
+            ChunkPos::new(standby_entry_section.chunk_x, standby_entry_section.chunk_z);
+        let active_entry_chunk =
+            ChunkPos::new(active_entry_section.chunk_x, active_entry_section.chunk_z);
+        let resolved_standby = layout
+            .bounds
+            .resolve(standby_entry_chunk, standby_entry_section.section_y)?;
+        let resolved_active = layout
+            .bounds
+            .resolve(active_entry_chunk, active_entry_section.section_y)?;
+        let standby_source_anchor =
+            preview_crop_source_anchor(resolved_standby, standby_entry_pose.feet_position.y);
+        let active_source_anchor =
+            preview_crop_source_anchor(resolved_active, active_entry_pose.feet_position.y);
+        let relative_anchor = entry_relative_composition_anchor(
+            if layout.standby_uses_primary_anchor {
+                standby_entry_pose
+            } else {
+                active_entry_pose
+            },
+            layout.return_display_offset,
+        );
+        let scale = placement.uniform_scale();
+        let (standby_composition_anchor, active_composition_anchor) =
+            if layout.standby_uses_primary_anchor {
+                (layout.primary_composition_anchor, relative_anchor)
+            } else {
+                (relative_anchor, layout.primary_composition_anchor)
+            };
+        let resolved_placement = mclone_render::placement::WorldPlacement::new(
+            standby_source_anchor,
+            standby_composition_anchor,
+            scale,
+        )?;
+        let resolved_return_placement = mclone_render::placement::WorldPlacement::new(
+            active_source_anchor,
+            active_composition_anchor,
+            scale,
+        )?;
+
+        *region = resolved_standby;
+        *return_region = resolved_active;
+        *placement = resolved_placement;
+        *return_placement = resolved_return_placement;
+        layout.standby_entry_pose = Some(standby_entry_pose);
+        layout.active_entry_pose = Some(active_entry_pose);
+        state.accepted_entry_pose = Some(standby_entry_pose);
+        slot.runtime
+            .as_mut()
+            .context("accepted standby preview has no runtime")?
+            .set_interest_center(standby_entry_chunk)
+            .context("pin accepted-entry preview interest")?;
+
+        if let Some(preview) = self
+            .embedded_world_preview
+            .as_mut()
+            .filter(|preview| preview.source_world == slot.id)
+        {
+            preview.region = resolved_standby;
+            preview.return_region = resolved_active;
+            preview.context = mclone_render::placement::WorldCompositionContext::unbounded(
+                resolved_placement,
+                Some(resolved_standby.source_bounds()),
+            );
+            preview.return_context = mclone_render::placement::WorldCompositionContext::unbounded(
+                resolved_return_placement,
+                Some(resolved_active.source_bounds()),
+            );
+            preview.fixed_interest_center = standby_entry_chunk;
+            preview.return_interest_center = active_entry_chunk;
+            preview.phase = EmbeddedWorldPreviewPhase::Warming;
+            preview.source_anchor_gpu_resident = false;
+            preview.source_anchor_traversal_ready = false;
+            preview.bounded_section_count = 0;
+            preview.last_draw = TexturedSectionRenderStats::default();
+            preview.preparation = EmbeddedWorldPreviewPreparationSnapshot::default();
+            preview.render = EmbeddedWorldPreviewRenderSnapshot::default();
+            preview.failure = None;
+        }
+        log::info!(
+            "resolved accepted-entry preview id={} entry=({:.3}, {:.3}, {:.3}) chunks=({}, {})..=({}, {}) sections={}..={} return_chunks=({}, {})..=({}, {})",
+            slot.id.get(),
+            standby_entry_pose.feet_position.x,
+            standby_entry_pose.feet_position.y,
+            standby_entry_pose.feet_position.z,
+            resolved_standby.min_chunk().x,
+            resolved_standby.min_chunk().z,
+            resolved_standby.max_chunk().x,
+            resolved_standby.max_chunk().z,
+            resolved_standby.min_section_y(),
+            resolved_standby.max_section_y(),
+            resolved_active.min_chunk().x,
+            resolved_active.min_chunk().z,
+            resolved_active.max_chunk().x,
+            resolved_active.max_chunk().z,
+        );
+        Ok(())
     }
 
     fn advance_warm_world_standby(&mut self) {
@@ -4004,22 +4332,44 @@ impl McloneSceneHost {
                 WarmWorldPresentationRequest::Diorama { .. }
             )
         {
-            let WarmWorldPresentationRequest::Diorama { placement, .. } = state.presentation else {
-                unreachable!("diorama presentation checked above");
-            };
-            state.phase = WarmWorldStandbyPhase::CpuReady;
-            state.readiness.cpu_ready = true;
-            state.readiness.entry_section = anchor_render_section(placement.source_anchor());
-            log::info!(
-                "warm-world diorama CPU-ready id={} seed={} elapsed_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={}",
-                state.instance_id.get(),
-                state.seed,
-                elapsed_ms(self.services.clock.elapsed_since(state.started_at)),
-                state.loaded_chunks,
-                state.startup_seed_sections,
-                state.startup_seed_drawable_sections,
-                state.startup_seed_owned_bytes,
-            );
+            match self.resolve_entry_relative_preview_layout(&mut state, &mut slot) {
+                Err(error) => {
+                    state.phase = WarmWorldStandbyPhase::Failed;
+                    state.failure =
+                        Some(format!("resolve accepted-entry preview layout: {error:#}"));
+                    retain_slot = false;
+                }
+                Ok(()) => {
+                    let accepted_entry_pose = slot
+                        .accepted_entry_pose
+                        .unwrap_or_else(|| WorldEntryPose::from_camera(&slot.camera));
+                    state.accepted_entry_pose = Some(accepted_entry_pose);
+                    state.phase = WarmWorldStandbyPhase::CpuReady;
+                    state.readiness.cpu_ready = true;
+                    state.readiness.entry_section =
+                        entry_support_render_section(accepted_entry_pose);
+                    if let Some(runtime) = slot.runtime.as_ref() {
+                        let support = mclone_client::standing_pose_facts(
+                            runtime.client(),
+                            accepted_entry_pose.feet_position,
+                        );
+                        state.readiness.entry_body_loaded = support.body_loaded;
+                        state.readiness.entry_body_clear = support.body_clear;
+                        state.readiness.entry_support_loaded = support.support_loaded;
+                        state.readiness.entry_solid_support = support.solid_support;
+                    }
+                    log::info!(
+                        "warm-world diorama CPU-ready id={} seed={} elapsed_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={}",
+                        state.instance_id.get(),
+                        state.seed,
+                        elapsed_ms(self.services.clock.elapsed_since(state.started_at)),
+                        state.loaded_chunks,
+                        state.startup_seed_sections,
+                        state.startup_seed_drawable_sections,
+                        state.startup_seed_owned_bytes,
+                    );
+                }
+            }
         }
 
         if retain_slot
@@ -4045,11 +4395,24 @@ impl McloneSceneHost {
             state.source_endpoint = source_endpoint;
             state.destination_endpoint = destination_endpoint;
             if source_endpoint.is_some() && destination_endpoint.is_some() {
+                let destination_entry_pose = destination_endpoint
+                    .map(world_gate_destination_entry_pose)
+                    .expect("resolved destination endpoint has an entry pose");
                 state.phase = WarmWorldStandbyPhase::CpuReady;
                 state.readiness.cpu_ready = true;
-                state.readiness.entry_section = destination_endpoint
-                    .map(world_gate_destination_entry_pose)
-                    .and_then(entry_support_render_section);
+                state.accepted_entry_pose = Some(destination_entry_pose);
+                state.readiness.entry_section =
+                    entry_support_render_section(destination_entry_pose);
+                if let Some(runtime) = slot.runtime.as_ref() {
+                    let support = mclone_client::standing_pose_facts(
+                        runtime.client(),
+                        destination_entry_pose.feet_position,
+                    );
+                    state.readiness.entry_body_loaded = support.body_loaded;
+                    state.readiness.entry_body_clear = support.body_clear;
+                    state.readiness.entry_support_loaded = support.support_loaded;
+                    state.readiness.entry_solid_support = support.solid_support;
+                }
                 log::info!(
                     "warm-world standby CPU-ready id={} seed={} elapsed_ms={:.3} polls={} poll_ms={:.3} loaded_chunks={} seed_sections={} drawable_sections={} seed_bytes={} worst_startup_step_ms={:.3} worst_runtime_poll_ms={:.3} endpoint_ms={:.3}",
                     state.instance_id.get(),
@@ -4392,9 +4755,16 @@ impl McloneSceneHost {
         };
         if camera_changed {
             slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
+            state.accepted_entry_pose = None;
             state.destination_endpoint = None;
             state.readiness.cpu_ready = false;
             state.readiness.entry_section = None;
+            state.readiness.entry_section_gpu_resident = false;
+            state.readiness.entry_section_traversal_ready = false;
+            state.readiness.entry_body_loaded = false;
+            state.readiness.entry_body_clear = false;
+            state.readiness.entry_support_loaded = false;
+            state.readiness.entry_solid_support = false;
             state.readiness.switchable = false;
             state.phase = WarmWorldStandbyPhase::ResolvingEndpoints;
         }
@@ -4435,11 +4805,26 @@ impl McloneSceneHost {
             .readiness
             .entry_section
             .is_some_and(|key| slot.draw.traversal_ready_contains_section(key));
+        let entry_support = state
+            .accepted_entry_pose
+            .zip(slot.runtime.as_ref())
+            .map(|(pose, runtime)| {
+                mclone_client::standing_pose_facts(runtime.client(), pose.feet_position)
+            })
+            .unwrap_or_default();
+        state.readiness.entry_body_loaded = entry_support.body_loaded;
+        state.readiness.entry_body_clear = entry_support.body_clear;
+        state.readiness.entry_support_loaded = entry_support.support_loaded;
+        state.readiness.entry_solid_support = entry_support.solid_support;
         state.readiness.switchable = state.readiness.cpu_ready
             && state.readiness.startup_seed_enqueued
             && state.readiness.startup_seed_drained
             && state.readiness.entry_section_gpu_resident
             && state.readiness.entry_section_traversal_ready
+            && state.readiness.entry_body_loaded
+            && state.readiness.entry_body_clear
+            && state.readiness.entry_support_loaded
+            && state.readiness.entry_solid_support
             && state.readiness.renderer_topology_ready;
 
         if let Some(preview) = self
@@ -5829,6 +6214,27 @@ pub fn local_integrated_scene_options(
         .with_integrated_world_session_storage(storage)
 }
 
+fn preview_crop_source_anchor(
+    region: mclone_render::placement::EmbeddedChunkRegion,
+    entry_y: f64,
+) -> Vec3d {
+    let bounds = region.source_bounds();
+    Vec3d::new(
+        (bounds.min().x + bounds.max().x) * 0.5,
+        entry_y,
+        (bounds.min().z + bounds.max().z) * 0.5,
+    )
+}
+
+fn entry_relative_composition_anchor(pose: WorldEntryPose, offset: Vec3d) -> Vec3d {
+    let forward = Vec3d::new(pose.yaw_radians.sin(), 0.0, pose.yaw_radians.cos());
+    let right = Vec3d::new(pose.yaw_radians.cos(), 0.0, -pose.yaw_radians.sin());
+    pose.feet_position
+        .add(right.scale(offset.x))
+        .add(Vec3d::new(0.0, offset.y, 0.0))
+        .add(forward.scale(offset.z))
+}
+
 const fn vec3d_from_array([x, y, z]: [f64; 3]) -> Vec3d {
     Vec3d::new(x, y, z)
 }
@@ -5933,6 +6339,32 @@ mod camera_config_tests {
         assert_eq!(
             local_integrated_scene_options(&island).world_behavior_profile,
             mclone_server::WorldBehaviorProfile::Mutable
+        );
+    }
+
+    #[test]
+    fn preview_crop_anchor_centers_even_two_and_four_chunk_bounds() {
+        for (span, expected_xz) in [(2, (112.0, -48.0)), (4, (112.0, -48.0))] {
+            let region = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(span)
+                .unwrap()
+                .resolve(ChunkPos::new(7, -3), 4)
+                .unwrap();
+            let anchor = preview_crop_source_anchor(region, 65.0);
+
+            assert_eq!(anchor, Vec3d::new(expected_xz.0, 65.0, expected_xz.1));
+        }
+    }
+
+    #[test]
+    fn return_preview_offset_rotates_with_accepted_entry_yaw() {
+        let pose = WorldEntryPose {
+            feet_position: Vec3d::new(10.0, 64.0, 20.0),
+            yaw_radians: std::f64::consts::FRAC_PI_2,
+        };
+
+        assert_eq!(
+            entry_relative_composition_anchor(pose, Vec3d::new(2.0, 3.0, 6.0)),
+            Vec3d::new(16.0, 67.0, 18.0),
         );
     }
 }

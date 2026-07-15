@@ -1684,13 +1684,37 @@ impl McloneSceneHost {
         Ok(upload)
     }
 
-    fn advance_external_runtime_startup_admission(&mut self, camera_position: Vec3) {
+    fn advance_external_runtime_startup_admission(&mut self, _camera_position: Vec3) {
         if !self.active_world.external_runtime_startup_pending {
+            return;
+        }
+        let camera_changed = {
+            let Some(runtime) = self.active_world.runtime.as_mut() else {
+                return;
+            };
+            match mclone_app_runtime::apply_pending_engine_camera_position_updates(
+                runtime,
+                &mut self.active_world.camera,
+                XR_CAMERA_COMMIT_CONTEXT,
+            ) {
+                Ok(changed) => changed,
+                Err(error) => {
+                    log::error!("apply authoritative active startup camera correction: {error:#}");
+                    return;
+                }
+            }
+        };
+        if camera_changed {
+            // Observe a subsequent stable frame around the corrected camera
+            // before admitting it as the active slot's retained entry.
+            self.active_world.accepted_entry_pose = None;
             return;
         }
         let Some(runtime) = self.active_world.runtime.as_ref() else {
             return;
         };
+        let eye = self.active_world.camera.snapshot().eye;
+        let camera_position = Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
         let traversal_ready = runtime
             .traversal_ready_render_section_keys(camera_position)
             .len();

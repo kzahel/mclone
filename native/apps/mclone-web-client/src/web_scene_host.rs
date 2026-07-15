@@ -272,8 +272,6 @@ pub struct WebSceneHost {
     render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
-    startup_camera_reconciled: bool,
-    startup_camera_world_instance: Option<u64>,
 }
 
 #[wasm_bindgen]
@@ -565,18 +563,6 @@ impl WebSceneHost {
                 .report(None, false, delta_seconds, first_after_resume)
                 .map_err(JsValue::from);
         };
-        let active_world_instance = host.active_world_instance_id().get();
-        if self.startup_camera_world_instance != Some(active_world_instance) {
-            self.startup_camera_world_instance = Some(active_world_instance);
-            self.startup_camera_reconciled = false;
-        }
-        let gameplay_ready = host.gameplay_startup_complete();
-        if gameplay_ready && !self.startup_camera_reconciled {
-            if let Some(target) = find_interaction_surface(host) {
-                aim_player_host_at_block(host, target);
-                self.startup_camera_reconciled = true;
-            }
-        }
         let input = FlatInputFrame {
             forward,
             backward,
@@ -1910,8 +1896,6 @@ async fn create_scene_host(
         render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
-        startup_camera_reconciled: false,
-        startup_camera_world_instance: None,
     })
 }
 
@@ -2032,7 +2016,6 @@ impl WebSceneHost {
             ));
         }
         self.last_frame = LastFrameStats::default();
-        self.startup_camera_reconciled = false;
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
@@ -2928,11 +2911,81 @@ impl WebSceneHost {
                     "embeddedActivationFirstUncoveredEyeCount",
                     report.first_uncovered_eye_count as f64,
                 )?;
+                if let Some(pose) = report.accepted_destination_entry_pose {
+                    for (suffix, value) in [
+                        ("X", pose.feet_position.x),
+                        ("Y", pose.feet_position.y),
+                        ("Z", pose.feet_position.z),
+                    ] {
+                        report_set_number(
+                            &object,
+                            &format!("embeddedActivationAcceptedEntry{suffix}"),
+                            value,
+                        )?;
+                    }
+                }
+                for (prefix, sample) in [
+                    ("PostSwap", report.post_swap_entry),
+                    ("FirstUncovered", report.first_uncovered_entry),
+                    ("Stability", report.stability_entry),
+                ] {
+                    if let Some(sample) = sample {
+                        for (suffix, value) in [
+                            ("X", sample.pose.feet_position.x),
+                            ("Y", sample.pose.feet_position.y),
+                            ("Z", sample.pose.feet_position.z),
+                        ] {
+                            report_set_number(
+                                &object,
+                                &format!("embeddedActivation{prefix}{suffix}"),
+                                value,
+                            )?;
+                        }
+                        report_set_bool(
+                            &object,
+                            &format!("embeddedActivation{prefix}OnGround"),
+                            sample.on_ground,
+                        )?;
+                        report_set_bool(
+                            &object,
+                            &format!("embeddedActivation{prefix}BodyLoaded"),
+                            sample.support.body_loaded,
+                        )?;
+                        report_set_bool(
+                            &object,
+                            &format!("embeddedActivation{prefix}BodyClear"),
+                            sample.support.body_clear,
+                        )?;
+                        report_set_bool(
+                            &object,
+                            &format!("embeddedActivation{prefix}SupportLoaded"),
+                            sample.support.support_loaded,
+                        )?;
+                        report_set_bool(
+                            &object,
+                            &format!("embeddedActivation{prefix}SolidSupport"),
+                            sample.support.solid_support,
+                        )?;
+                        report_set_bool(
+                            &object,
+                            &format!("embeddedActivation{prefix}Supported"),
+                            sample.support.supported(),
+                        )?;
+                    }
+                }
+                report_set_number(
+                    &object,
+                    "embeddedActivationStabilityFrame",
+                    f64::from(report.stability_activation_frame.unwrap_or(0)),
+                )?;
                 report_set_bool(
                     &object,
                     "embeddedActivationFailed",
                     report.failure.is_some(),
                 )?;
+                if let Some(failure) = report.failure.as_deref() {
+                    report_set_string(&object, "embeddedActivationFailure", failure)?;
+                }
             }
             if let Some(switch) = host.last_warm_world_switch_report() {
                 report_set_number(&object, "warmWorldSwitchSequence", switch.sequence as f64)?;

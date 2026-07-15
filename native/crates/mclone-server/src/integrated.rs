@@ -58,7 +58,7 @@ use crate::player::{MovePlayerApplyResult, ServerPlayerState};
 use crate::player_chunk_tracking::{PlayerChunkTracking, PlayerChunkTrackingPolicy};
 use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
-use crate::spawn::find_safe_surface_spawn;
+use crate::spawn::{SpawnColumnOrder, find_safe_surface_spawn_with_column_order};
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
@@ -1451,7 +1451,15 @@ impl IntegratedServer {
                 return Ok(());
             }
 
-            let anchor = Vec3d::new(8.5, 66.0, 8.5);
+            // Keep the shared validation actor near the authoritative local
+            // player so accepted-entry-relative preview crops can exercise it
+            // for arbitrary generated-world spawn coordinates. The fixed
+            // anchor remains the pre-admission/test fallback.
+            let anchor = if self.local_player_active && self.player.has_accepted_position() {
+                self.player.position()
+            } else {
+                Vec3d::new(8.5, 66.0, 8.5)
+            };
             let to_anchor = anchor.subtract(script.current_position);
             let desired = if to_anchor.length_sqr() > 0.25 * 0.25 {
                 let distance = to_anchor.length_sqr().sqrt();
@@ -2082,11 +2090,20 @@ impl IntegratedServer {
         let Some(center) = self.initial_spawn_center_for_target(target)? else {
             return Ok(None);
         };
-        let Some(position) = find_safe_surface_spawn(
+        let column_order = if matches!(
+            self.scheduler.world_generation_profile(),
+            WorldGenerationProfile::AuthoredOnly { .. }
+        ) {
+            SpawnColumnOrder::CenterFirst
+        } else {
+            SpawnColumnOrder::Scan
+        };
+        let Some(position) = find_safe_surface_spawn_with_column_order(
             center,
             |pos| self.scheduler.block_at_world(pos),
             |x, z| self.biome_source.block_position_biome_definition(x, z),
             |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
+            column_order,
         ) else {
             return Ok(None);
         };

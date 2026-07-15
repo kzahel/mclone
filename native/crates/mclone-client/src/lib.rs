@@ -58,11 +58,12 @@ pub use teleport::{
     NativeTeleportPreviewWorker, TeleportPreviewWorkerError, native_teleport_preview_capability,
 };
 pub use teleport::{
-    TeleportCollisionSnapshot, TeleportCollisionSnapshotBounds, TeleportCollisionWorld,
-    TeleportConfig, TeleportIntent, TeleportPreview, TeleportPreviewCapability,
-    TeleportPreviewRequest, TeleportPreviewRequestId, TeleportPreviewResult,
-    TeleportPreviewService, TeleportPreviewServiceError, TeleportResolverDiagnostics,
-    TeleportValidityReason, resolve_teleport_preview,
+    StandingPoseFacts, TeleportCollisionSnapshot, TeleportCollisionSnapshotBounds,
+    TeleportCollisionWorld, TeleportConfig, TeleportIntent, TeleportPreview,
+    TeleportPreviewCapability, TeleportPreviewRequest, TeleportPreviewRequestId,
+    TeleportPreviewResult, TeleportPreviewService, TeleportPreviewServiceError,
+    TeleportResolverDiagnostics, TeleportValidityReason, resolve_teleport_preview,
+    standing_pose_facts,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,14 +1,16 @@
 use std::collections::VecDeque;
 use std::path::PathBuf;
 
+use anyhow::{Result, bail};
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::monotonic::MonotonicInstant;
 use mclone_app_runtime::platform_operation::{
     PlatformOperation, PlatformOperationCompletion, PlatformOperationLedger,
     PlatformOperationResolution, PlatformOperationToken,
 };
-use mclone_app_runtime::scenario::BuiltInScenarioId;
-use mclone_app_runtime::scenario::ScenarioLaunchIntent;
+use mclone_app_runtime::scenario::{
+    BuiltInScenarioId, ScenarioLaunchIntent, ScenarioPreviewBounds,
+};
 use mclone_app_runtime::scenario_content::{
     ManagedScenarioManifest, ManagedScenarioWorldRole, ManagedWorldKey,
     ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld, ScenarioWorldStorageSource,
@@ -51,6 +53,7 @@ pub(crate) const EMBEDDED_ACTIVATION_CLOSE_SECONDS: f64 = 0.12;
 #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 pub(crate) const EMBEDDED_ACTIVATION_COVERED_SECONDS: f64 = 0.03;
 pub(crate) const EMBEDDED_ACTIVATION_OPEN_SECONDS: f64 = 0.12;
+pub(crate) const EMBEDDED_ACTIVATION_STABILITY_FRAMES: u32 = 8;
 
 /// Stable client-side identity for one retained world instance.
 ///
@@ -154,6 +157,7 @@ impl WarmWorldStandbyRequest {
             return_region: region,
             placement,
             return_placement,
+            entry_relative: None,
         };
         self
     }
@@ -170,9 +174,43 @@ impl WarmWorldStandbyRequest {
             return_region,
             placement,
             return_placement,
+            entry_relative: None,
         };
         self
     }
+
+    pub fn with_entry_relative_embedded_preview(
+        mut self,
+        bounds: ScenarioPreviewBounds,
+        primary_composition_anchor: Vec3d,
+        return_display_offset: Vec3d,
+    ) -> Result<Self> {
+        let validated = bounds.validated()?;
+        let WarmWorldPresentationRequest::Diorama { entry_relative, .. } = &mut self.presentation
+        else {
+            bail!("entry-relative preview layout requires a diorama presentation");
+        };
+        *entry_relative = Some(EntryRelativePreviewLayout {
+            bounds: validated,
+            primary_composition_anchor,
+            return_display_offset,
+            standby_entry_pose: None,
+            active_entry_pose: None,
+            standby_uses_primary_anchor: true,
+        });
+        Ok(self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EntryRelativePreviewLayout {
+    pub bounds: ScenarioPreviewBounds,
+    pub primary_composition_anchor: Vec3d,
+    /// Local `[right, up, forward]` offset from the destination entry pose.
+    pub return_display_offset: Vec3d,
+    pub standby_entry_pose: Option<WorldEntryPose>,
+    pub active_entry_pose: Option<WorldEntryPose>,
+    pub standby_uses_primary_anchor: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -183,6 +221,7 @@ pub enum WarmWorldPresentationRequest {
         return_region: EmbeddedChunkRegion,
         placement: WorldPlacement,
         return_placement: WorldPlacement,
+        entry_relative: Option<EntryRelativePreviewLayout>,
     },
 }
 
@@ -461,6 +500,8 @@ pub struct EmbeddedWorldActivationReport {
     pub open_seconds: f64,
     pub switch_elapsed_ms: Option<f64>,
     pub switched_activation_frame: Option<u32>,
+    pub accepted_destination_entry_pose: Option<WorldEntryPose>,
+    pub post_swap_entry: Option<WorldEntrySupportSample>,
     pub covered_rendered_frames: u32,
     pub first_uncovered_activation_frame: Option<u32>,
     pub first_uncovered_world: Option<WorldInstanceId>,
@@ -471,8 +512,18 @@ pub struct EmbeddedWorldActivationReport {
     pub first_uncovered_queue_lifecycle_items: usize,
     pub first_uncovered_pending_compile_jobs: usize,
     pub first_uncovered_eye_count: usize,
+    pub first_uncovered_entry: Option<WorldEntrySupportSample>,
+    pub stability_activation_frame: Option<u32>,
+    pub stability_entry: Option<WorldEntrySupportSample>,
     pub completed_activation_frame: Option<u32>,
     pub failure: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldEntrySupportSample {
+    pub pose: WorldEntryPose,
+    pub on_ground: bool,
+    pub support: mclone_client::StandingPoseFacts,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -540,6 +591,8 @@ impl EmbeddedWorldActivationState {
             open_seconds: EMBEDDED_ACTIVATION_OPEN_SECONDS,
             switch_elapsed_ms: None,
             switched_activation_frame: None,
+            accepted_destination_entry_pose: None,
+            post_swap_entry: None,
             covered_rendered_frames: 0,
             first_uncovered_activation_frame: None,
             first_uncovered_world: None,
@@ -550,6 +603,9 @@ impl EmbeddedWorldActivationState {
             first_uncovered_queue_lifecycle_items: 0,
             first_uncovered_pending_compile_jobs: 0,
             first_uncovered_eye_count: 0,
+            first_uncovered_entry: None,
+            stability_activation_frame: None,
+            stability_entry: None,
             completed_activation_frame: None,
             failure: None,
         });
@@ -571,6 +627,7 @@ pub struct EmbeddedWorldPreviewSnapshot {
     pub last_drawn_index_count: u32,
     pub source_host_mode: Option<SingleViewHostMode>,
     pub fixed_interest_center: ChunkPos,
+    pub return_interest_center: ChunkPos,
     pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
     pub render: EmbeddedWorldPreviewRenderSnapshot,
     pub last_mutation: Option<EmbeddedWorldPreviewMutationSnapshot>,
@@ -791,6 +848,7 @@ pub(crate) struct EmbeddedWorldPreview {
     pub last_draw: TexturedSectionRenderStats,
     pub source_host_mode: Option<SingleViewHostMode>,
     pub fixed_interest_center: ChunkPos,
+    pub return_interest_center: ChunkPos,
     pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
     pub render: EmbeddedWorldPreviewRenderSnapshot,
     pub(crate) pending_actor_update: Option<PendingEmbeddedWorldPreviewActorUpdate>,
@@ -817,6 +875,7 @@ impl EmbeddedWorldPreview {
             last_drawn_index_count: self.last_draw.drawn_index_count,
             source_host_mode: self.source_host_mode,
             fixed_interest_center: self.fixed_interest_center,
+            return_interest_center: self.return_interest_center,
             preparation: self.preparation,
             render: self.render,
             last_mutation: self
@@ -1364,6 +1423,10 @@ pub struct WarmWorldReadiness {
     pub entry_section: Option<RenderSectionKey>,
     pub entry_section_gpu_resident: bool,
     pub entry_section_traversal_ready: bool,
+    pub entry_body_loaded: bool,
+    pub entry_body_clear: bool,
+    pub entry_support_loaded: bool,
+    pub entry_solid_support: bool,
     pub renderer_topology_ready: bool,
     pub switchable: bool,
 }
@@ -1425,6 +1488,7 @@ pub struct WarmWorldStandbySnapshot {
     pub accepted_compile_result_count: usize,
     pub released_compile_job_count: usize,
     pub readiness: WarmWorldReadiness,
+    pub accepted_entry_pose: Option<WorldEntryPose>,
     pub source_endpoint: Option<WorldGateEndpointCandidate>,
     pub destination_endpoint: Option<WorldGateEndpointCandidate>,
     pub failure: Option<String>,
@@ -1584,6 +1648,7 @@ pub(crate) struct WarmWorldStandbyState {
     pub accepted_compile_result_count: usize,
     pub released_compile_job_count: usize,
     pub readiness: WarmWorldReadiness,
+    pub accepted_entry_pose: Option<WorldEntryPose>,
     pub source_endpoint: Option<WorldGateEndpointCandidate>,
     pub destination_endpoint: Option<WorldGateEndpointCandidate>,
     pub failure: Option<String>,
@@ -1656,6 +1721,7 @@ impl WarmWorldStandbyState {
             accepted_compile_result_count: self.accepted_compile_result_count,
             released_compile_job_count: self.released_compile_job_count,
             readiness: self.readiness,
+            accepted_entry_pose: self.accepted_entry_pose,
             source_endpoint: self.source_endpoint,
             destination_endpoint: self.destination_endpoint,
             failure: self.failure.clone(),

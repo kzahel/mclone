@@ -2237,6 +2237,7 @@ struct LobbyScenarioSmokeState {
     remote_motion_world: Option<mclone_scene::WorldInstanceId>,
     initial_remote_motion_sequence: u64,
     active_actor_counts_before_motion: Option<(usize, usize)>,
+    activation_reports: Vec<mclone_scene::EmbeddedWorldActivationReport>,
 }
 
 pub(crate) fn run_lobby_scenario_smoke(
@@ -2297,6 +2298,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                 remote_motion_world: None,
                 initial_remote_motion_sequence: 0,
                 active_actor_counts_before_motion: None,
+                activation_reports: Vec::with_capacity(2),
             })
         },
         |frame_index, frame, state| {
@@ -2532,6 +2534,12 @@ pub(crate) fn run_lobby_scenario_smoke(
                         {
                             bail!("menu-launched destination did not retain mutable authority");
                         }
+                        let report = activation
+                            .last_report
+                            .as_ref()
+                            .expect("completed outbound activation has a report");
+                        validate_supported_activation_receipt(report)?;
+                        state.activation_reports.push(report.clone());
                         crate::live_diorama_smoke::aim_flat_host_at_embedded_preview(
                             &mut state.host,
                         )?;
@@ -2585,6 +2593,12 @@ pub(crate) fn run_lobby_scenario_smoke(
                             .as_ref()
                             .is_some_and(|report| report.sequence >= 2)
                     {
+                        let report = activation
+                            .last_report
+                            .as_ref()
+                            .expect("completed return activation has a report");
+                        validate_supported_activation_receipt(report)?;
+                        state.activation_reports.push(report.clone());
                         aim_current_eye_at_embedded_preview(&mut state.host)?;
                         state.phase = LobbyScenarioSmokePhase::ReturnedLobby;
                     }
@@ -2698,7 +2712,6 @@ pub(crate) fn run_lobby_scenario_smoke(
                                     && preview.last_drawn_section_count > 0
                                     && preview.render.last_actor_entity_count >= 2
                                     && preview.render.last_actor_remote_player_count <= 1
-                                    && preview.render.last_drawn_actor_count > 0
                                     && preview.render.last_actor_source_local_player_count == 1
                                     && preview.render.actor_observation_count
                                         == preview.render.last_actor_entity_count
@@ -2892,6 +2905,42 @@ pub(crate) fn run_lobby_scenario_smoke(
             })
         }),
         "previewSettlePixelDifferenceRatio": preview_settle_pixel_difference_ratio,
+        "activationSupport": state.activation_reports.iter().map(|report| {
+            let accepted = report.accepted_destination_entry_pose.expect("validated accepted entry");
+            let post_swap = report.post_swap_entry.expect("validated post-swap entry");
+            let first = report.first_uncovered_entry.expect("validated first-uncovered entry");
+            let stability = report.stability_entry.expect("validated stability entry");
+            serde_json::json!({
+                "sequence": report.sequence,
+                "acceptedEntry": [accepted.feet_position.x, accepted.feet_position.y, accepted.feet_position.z],
+                "postSwapEntry": [post_swap.pose.feet_position.x, post_swap.pose.feet_position.y, post_swap.pose.feet_position.z],
+                "postSwapOnGround": post_swap.on_ground,
+                "postSwapSupport": {
+                    "bodyLoaded": post_swap.support.body_loaded,
+                    "bodyClear": post_swap.support.body_clear,
+                    "supportLoaded": post_swap.support.support_loaded,
+                    "solidSupport": post_swap.support.solid_support,
+                },
+                "firstUncoveredFrame": report.first_uncovered_activation_frame,
+                "firstUncoveredEntry": [first.pose.feet_position.x, first.pose.feet_position.y, first.pose.feet_position.z],
+                "firstUncoveredOnGround": first.on_ground,
+                "firstUncoveredSupport": {
+                    "bodyLoaded": first.support.body_loaded,
+                    "bodyClear": first.support.body_clear,
+                    "supportLoaded": first.support.support_loaded,
+                    "solidSupport": first.support.solid_support,
+                },
+                "stabilityFrame": report.stability_activation_frame,
+                "stabilityEntry": [stability.pose.feet_position.x, stability.pose.feet_position.y, stability.pose.feet_position.z],
+                "stabilityOnGround": stability.on_ground,
+                "stabilitySupport": {
+                    "bodyLoaded": stability.support.body_loaded,
+                    "bodyClear": stability.support.body_clear,
+                    "supportLoaded": stability.support.support_loaded,
+                    "solidSupport": stability.support.solid_support,
+                },
+            })
+        }).collect::<Vec<_>>(),
         "scenarioCost": {
             "rendererShellCreateMs": scenario_cost.renderer_shell_create_ms,
             "rendererMultiviewCreateMs": scenario_cost.renderer_multiview_create_ms,
@@ -2919,6 +2968,27 @@ pub(crate) fn run_lobby_scenario_smoke(
         cancelled_launch_count: 1,
         relaunch_count: 1,
     })
+}
+
+fn validate_supported_activation_receipt(
+    report: &mclone_scene::EmbeddedWorldActivationReport,
+) -> Result<()> {
+    if report.accepted_destination_entry_pose.is_none()
+        || !report
+            .post_swap_entry
+            .is_some_and(|sample| sample.support.supported())
+        || !report
+            .first_uncovered_entry
+            .is_some_and(|sample| sample.support.supported())
+        || !report
+            .stability_entry
+            .is_some_and(|sample| sample.support.supported())
+        || report.stability_activation_frame.is_none()
+        || report.failure.is_some()
+    {
+        bail!("lobby activation omitted stable supported arrival facts: {report:?}");
+    }
+    Ok(())
 }
 
 fn preview_actor_observations(

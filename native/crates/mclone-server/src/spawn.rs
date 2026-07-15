@@ -17,18 +17,41 @@ pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
         .unwrap_or(ChunkPos::new(0, 0))
 }
 
+#[cfg(test)]
 pub(crate) fn find_safe_surface_spawn(
     center: ChunkPos,
     mut block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
     mut biome_at: impl FnMut(i32, i32) -> BiomeDefinition,
     mut chunk_ready: impl FnMut(ChunkPos) -> bool,
 ) -> Option<Vec3d> {
+    find_safe_surface_spawn_with_column_order(
+        center,
+        &mut block_at,
+        &mut biome_at,
+        &mut chunk_ready,
+        SpawnColumnOrder::Scan,
+    )
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SpawnColumnOrder {
+    Scan,
+    CenterFirst,
+}
+
+pub(crate) fn find_safe_surface_spawn_with_column_order(
+    center: ChunkPos,
+    mut block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
+    mut biome_at: impl FnMut(i32, i32) -> BiomeDefinition,
+    mut chunk_ready: impl FnMut(ChunkPos) -> bool,
+    column_order: SpawnColumnOrder,
+) -> Option<Vec3d> {
     for chunk in initial_spawn_chunks(center) {
         if !chunk_ready(chunk) {
             continue;
         }
 
-        for (x, z) in chunk_columns(chunk) {
+        for (x, z) in ordered_chunk_columns(chunk, column_order) {
             let biome = biome_at(x, z);
             if let Some(feet_y) = safe_feet_y_at_column(x, z, biome, &mut block_at) {
                 return Some(Vec3d::new(
@@ -129,6 +152,25 @@ fn chunk_columns(chunk: ChunkPos) -> impl Iterator<Item = (i32, i32)> {
     (min_x..min_x + 16).flat_map(move |x| (min_z..min_z + 16).map(move |z| (x, z)))
 }
 
+fn ordered_chunk_columns(chunk: ChunkPos, order: SpawnColumnOrder) -> Vec<(i32, i32)> {
+    let mut columns = chunk_columns(chunk).collect::<Vec<_>>();
+    if order == SpawnColumnOrder::CenterFirst {
+        let min_x = chunk.min_block_x();
+        let min_z = chunk.min_block_z();
+        columns.sort_by_key(|&(x, z)| {
+            let doubled_x_from_center = 2 * (x - min_x) - 15;
+            let doubled_z_from_center = 2 * (z - min_z) - 15;
+            (
+                doubled_x_from_center * doubled_x_from_center
+                    + doubled_z_from_center * doubled_z_from_center,
+                x,
+                z,
+            )
+        });
+    }
+    columns
+}
+
 fn initial_spawn_chunks(center: ChunkPos) -> impl Iterator<Item = ChunkPos> {
     let mut chunks = Vec::new();
     let mut x = 0;
@@ -211,6 +253,32 @@ mod tests {
         .expect("spawn");
 
         assert_eq!(spawn, Vec3d::new(0.5, 64.0, 0.5));
+    }
+
+    #[test]
+    fn authored_center_first_policy_prefers_supported_island_interior() {
+        let mut blocks = BTreeMap::new();
+        blocks.insert(BlockPos::new(1, 64, 8), GRASS_BLOCK);
+        blocks.insert(BlockPos::new(7, 64, 7), GRASS_BLOCK);
+
+        let scan = find_safe_surface_spawn(
+            ChunkPos::new(0, 0),
+            |pos| Some(*blocks.get(&pos).unwrap_or(&AIR)),
+            plains_biome,
+            |_| true,
+        )
+        .expect("scan-order spawn");
+        let center_first = find_safe_surface_spawn_with_column_order(
+            ChunkPos::new(0, 0),
+            |pos| Some(*blocks.get(&pos).unwrap_or(&AIR)),
+            plains_biome,
+            |_| true,
+            SpawnColumnOrder::CenterFirst,
+        )
+        .expect("center-first spawn");
+
+        assert_eq!(scan, Vec3d::new(1.5, 65.0, 8.5));
+        assert_eq!(center_first, Vec3d::new(7.5, 65.0, 7.5));
     }
 
     #[test]

@@ -101,6 +101,17 @@ pub(crate) struct LiveDioramaActivationLegReport {
     pub(crate) first_uncovered_accepted_compile_result_count: usize,
     pub(crate) first_uncovered_queue_lifecycle_items: usize,
     pub(crate) first_uncovered_pending_compile_jobs: usize,
+    pub(crate) accepted_entry: [f64; 3],
+    pub(crate) post_swap_entry: [f64; 3],
+    pub(crate) post_swap_on_ground: bool,
+    pub(crate) post_swap_supported: bool,
+    pub(crate) first_uncovered_entry: [f64; 3],
+    pub(crate) first_uncovered_on_ground: bool,
+    pub(crate) first_uncovered_supported: bool,
+    pub(crate) stability_activation_frame: u32,
+    pub(crate) stability_entry: [f64; 3],
+    pub(crate) stability_on_ground: bool,
+    pub(crate) stability_supported: bool,
     pub(crate) switch_uploaded_section_count: usize,
     pub(crate) switch_submitted_compile_section_count: usize,
     pub(crate) switch_accepted_compile_result_count: usize,
@@ -814,6 +825,16 @@ fn validate_flat_embedded_world_activation(
         || report.first_uncovered_submitted_compile_section_count != 0
         || report.first_uncovered_accepted_compile_result_count != 0
         || report.first_uncovered_eye_count != 1
+        || !report
+            .post_swap_entry
+            .is_some_and(|sample| sample.support.supported())
+        || !report
+            .first_uncovered_entry
+            .is_some_and(|sample| sample.support.supported())
+        || !report
+            .stability_entry
+            .is_some_and(|sample| sample.support.supported())
+        || report.stability_activation_frame.is_none()
         || report.completed_activation_frame.is_none()
         || report.failure.is_some()
         || switch.source_instance_id != report.source_world
@@ -834,6 +855,18 @@ fn activation_leg_report(
     report: &EmbeddedWorldActivationReport,
     switch: Option<&WarmWorldSwitchReport>,
 ) -> Result<LiveDioramaActivationLegReport> {
+    let accepted_entry = report
+        .accepted_destination_entry_pose
+        .context("activation report omitted accepted destination entry")?;
+    let post_swap = report
+        .post_swap_entry
+        .context("activation report omitted post-swap support sample")?;
+    let first_uncovered = report
+        .first_uncovered_entry
+        .context("activation report omitted first-uncovered support sample")?;
+    let stability = report
+        .stability_entry
+        .context("activation report omitted delayed stability sample")?;
     Ok(LiveDioramaActivationLegReport {
         sequence: report.sequence,
         source_world: report.source_world.get(),
@@ -857,6 +890,19 @@ fn activation_leg_report(
             .first_uncovered_accepted_compile_result_count,
         first_uncovered_queue_lifecycle_items: report.first_uncovered_queue_lifecycle_items,
         first_uncovered_pending_compile_jobs: report.first_uncovered_pending_compile_jobs,
+        accepted_entry: vec3d_array(accepted_entry.feet_position),
+        post_swap_entry: vec3d_array(post_swap.pose.feet_position),
+        post_swap_on_ground: post_swap.on_ground,
+        post_swap_supported: post_swap.support.supported(),
+        first_uncovered_entry: vec3d_array(first_uncovered.pose.feet_position),
+        first_uncovered_on_ground: first_uncovered.on_ground,
+        first_uncovered_supported: first_uncovered.support.supported(),
+        stability_activation_frame: report
+            .stability_activation_frame
+            .context("activation report omitted delayed stability frame")?,
+        stability_entry: vec3d_array(stability.pose.feet_position),
+        stability_on_ground: stability.on_ground,
+        stability_supported: stability.support.supported(),
         switch_uploaded_section_count: switch
             .map_or(0, |switch| switch.switch_uploaded_section_count),
         switch_submitted_compile_section_count: switch
@@ -869,6 +915,10 @@ fn activation_leg_report(
         destination_cadence_changed: switch
             .is_some_and(|switch| switch.destination_cadence_changed),
     })
+}
+
+fn vec3d_array(value: mclone_core::Vec3d) -> [f64; 3] {
+    [value.x, value.y, value.z]
 }
 
 fn run_live_diorama_mutation_smoke(

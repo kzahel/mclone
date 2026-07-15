@@ -489,6 +489,16 @@ fn validate_stereo_embedded_world_activation(
         || report.first_uncovered_submitted_compile_section_count != 0
         || report.first_uncovered_accepted_compile_result_count != 0
         || report.first_uncovered_eye_count != 2
+        || !report
+            .post_swap_entry
+            .is_some_and(|sample| sample.support.supported())
+        || !report
+            .first_uncovered_entry
+            .is_some_and(|sample| sample.support.supported())
+        || !report
+            .stability_entry
+            .is_some_and(|sample| sample.support.supported())
+        || report.stability_activation_frame.is_none()
         || report.completed_activation_frame.is_none()
         || report.failure.is_some()
     {

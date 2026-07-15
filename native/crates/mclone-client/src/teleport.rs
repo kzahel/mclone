@@ -204,6 +204,59 @@ pub enum TeleportValidityReason {
     NoReachableCandidate,
 }
 
+/// Loaded collision facts for admitting an already-selected standing pose.
+///
+/// Scene transitions reuse the same body/support probes as teleport instead
+/// of maintaining a second platform- or feature-specific collision test.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct StandingPoseFacts {
+    pub body_loaded: bool,
+    pub body_clear: bool,
+    pub support_loaded: bool,
+    pub solid_support: bool,
+}
+
+impl StandingPoseFacts {
+    pub const fn supported(self) -> bool {
+        self.body_loaded && self.body_clear && self.support_loaded && self.solid_support
+    }
+}
+
+pub fn standing_pose_facts<W>(world: &W, feet: Vec3d) -> StandingPoseFacts
+where
+    W: TeleportCollisionWorld + ?Sized,
+{
+    standing_pose_facts_with_config(world, feet, TeleportConfig::default())
+}
+
+fn standing_pose_facts_with_config<W>(
+    world: &W,
+    feet: Vec3d,
+    config: TeleportConfig,
+) -> StandingPoseFacts
+where
+    W: TeleportCollisionWorld + ?Sized,
+{
+    if !feet.is_finite() {
+        return StandingPoseFacts::default();
+    }
+    let body = player_body_aabb(feet, config);
+    let body_loaded = area_loaded(world, body);
+    let body_clear = body_loaded
+        && mclone_blocks::solid_block_aabbs_in(|pos| world.block_state_at(pos), body).is_empty();
+    let support = support_probe(body, feet.y);
+    let support_loaded = area_loaded(world, support);
+    let solid_support = support_loaded
+        && !mclone_blocks::solid_block_aabbs_in(|pos| world.block_state_at(pos), support)
+            .is_empty();
+    StandingPoseFacts {
+        body_loaded,
+        body_clear,
+        support_loaded,
+        solid_support,
+    }
+}
+
 impl TeleportValidityReason {
     pub const fn is_valid(self) -> bool {
         matches!(self, Self::Valid)
@@ -1060,22 +1113,17 @@ fn validate_standing_pose<W>(
 where
     W: TeleportCollisionWorld + ?Sized,
 {
-    if !feet.is_finite() {
+    let facts = standing_pose_facts_with_config(world, feet, config);
+    if !facts.body_loaded {
         return Err(StandFailure::Unloaded);
     }
-    let body = player_body_aabb(feet, config);
-    if !area_loaded(world, body) {
-        return Err(StandFailure::Unloaded);
-    }
-    if !mclone_blocks::solid_block_aabbs_in(|pos| world.block_state_at(pos), body).is_empty() {
+    if !facts.body_clear {
         return Err(StandFailure::Blocked);
     }
-
-    let support = support_probe(body, feet.y);
-    if !area_loaded(world, support) {
+    if !facts.support_loaded {
         return Err(StandFailure::Unloaded);
     }
-    if mclone_blocks::solid_block_aabbs_in(|pos| world.block_state_at(pos), support).is_empty() {
+    if !facts.solid_support {
         return Err(StandFailure::Unsupported);
     }
 

@@ -73,8 +73,8 @@ impl AuthoredWorldFixtureKind {
 
     pub const fn expected_spawn(self) -> [f64; 3] {
         match self {
-            Self::Table | Self::LobbyTableV2 => [0.5, 64.0, 0.5],
-            Self::Island | Self::LobbyIslandV2 => [1.5, 65.0, 8.5],
+            Self::Table | Self::LobbyTableV2 => [6.5, 64.0, 7.5],
+            Self::Island | Self::LobbyIslandV2 => [7.5, 66.0, 7.5],
         }
     }
 
