@@ -2501,6 +2501,71 @@ impl WebSceneHost {
                     "embeddedPreviewOutOfRegionSubmissionCount",
                     preview.render.out_of_region_submission_count as f64,
                 )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorEntityCount",
+                    preview.render.last_actor_entity_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorRemotePlayerCount",
+                    preview.render.last_actor_remote_player_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorSourceLocalPlayerCount",
+                    preview.render.last_actor_source_local_player_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewSubmittedActorCount",
+                    preview.render.last_submitted_actor_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewDrawnActorCount",
+                    preview.render.last_drawn_actor_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewSourceRejectedActorCount",
+                    preview.render.last_source_rejected_actor_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewClipRejectedActorCount",
+                    preview.render.last_clip_rejected_actor_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewFrustumRejectedActorCount",
+                    preview.render.last_frustum_rejected_actor_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorMeshRebuildCount",
+                    preview.render.actor_mesh_rebuild_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorMeshUploadCount",
+                    preview.render.actor_mesh_upload_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewActorGpuCapacityBytes",
+                    preview.render.actor_gpu_capacity_bytes as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewPlacedActorPipelineCount",
+                    preview.render.placed_actor_pipeline_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewPlacedActorMultiviewPipelineCount",
+                    preview.render.placed_actor_multiview_pipeline_count as f64,
+                )?;
             }
             let activation = host.embedded_world_activation_snapshot();
             report_set_string(

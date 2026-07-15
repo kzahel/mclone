@@ -157,6 +157,7 @@ pub struct FullFrameRenderSummary {
     pub far_lod_uploaded_bytes: usize,
     pub placed_drawn_section_count: usize,
     pub placed_drawn_index_count: u32,
+    pub placed_actor_stats: ActorRenderStats,
 }
 
 #[derive(Clone, Copy)]
@@ -172,6 +173,16 @@ pub struct PlacedTerrainFrame<'a> {
     pub draw: &'a TexturedSectionDrawResources,
     pub renderer: &'a PlacedTexturedSectionRenderer,
     pub prepared: PlacedTerrainPrepared<'a>,
+    pub context: WorldCompositionContext,
+    pub render_options: TexturedSectionRenderOptions,
+}
+
+/// One placed actor submission owned by the same source world as a composed
+/// terrain frame. The scene qualifies world identity and instances; shared
+/// frame orchestration only preserves the opaque/actor/translucent ordering.
+pub struct PlacedActorFrame<'a> {
+    pub draw: &'a mut ActorDrawResources,
+    pub instances: &'a [ActorInstance],
     pub context: WorldCompositionContext,
     pub render_options: TexturedSectionRenderOptions,
 }
@@ -195,13 +206,12 @@ pub struct TerrainTranslucentSubmission {
 
 /// One active world plus one placed source sharing opaque and globally ordered
 /// translucent terrain phases in a single physical frame.
-#[derive(Clone, Copy)]
 pub struct TerrainCompositionFrame<'a> {
     pub placed: PlacedTerrainFrame<'a>,
+    pub actors: Option<PlacedActorFrame<'a>>,
     pub translucent_order: &'a [TerrainTranslucentSubmission],
 }
 
-#[derive(Clone, Copy)]
 enum OpaqueWorldInsertion<'a> {
     Gate(&'a OpaqueWorldGateRenderer, OpaqueWorldGate),
     Composition(TerrainCompositionFrame<'a>),
@@ -223,6 +233,7 @@ pub struct FullFrameRenderTiming {
     pub placed_cull_ms: f64,
     pub placed_draw_ms: f64,
     pub actor_ms: f64,
+    pub placed_actor_ms: f64,
     pub screen_effect_ms: f64,
     pub gui_ms: f64,
 }
@@ -976,7 +987,7 @@ fn render_terrain_phase(
 #[allow(clippy::too_many_arguments)]
 fn render_composed_translucent_terrain(
     active_draw: &TexturedSectionDrawResources,
-    composition: TerrainCompositionFrame<'_>,
+    composition: &TerrainCompositionFrame<'_>,
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     encoder: &mut wgpu::CommandEncoder,
@@ -2096,7 +2107,7 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
-    opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
+    mut opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
     mut timing: Option<&mut FullFrameRenderTiming>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary>
@@ -2110,6 +2121,7 @@ where
         .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day))
         .with_fog(fog);
     let mut actor_stats = ActorRenderStats::default();
+    let mut placed_actor_stats = ActorRenderStats::default();
 
     let mut terrain_stats = TexturedSectionRenderStats::default();
     let mut placed_terrain_stats = TexturedSectionRenderStats::default();
@@ -2208,7 +2220,7 @@ where
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
-        match opaque_world_insertion {
+        match opaque_world_insertion.as_ref() {
             Some(OpaqueWorldInsertion::Gate(gate_renderer, gate)) => {
                 gate_renderer.render_in_slot(
                     frame.queue,
@@ -2216,7 +2228,7 @@ where
                     frame.target,
                     depth,
                     render_view,
-                    Some(gate),
+                    Some(*gate),
                     view_slot,
                 );
             }
@@ -2312,10 +2324,33 @@ where
                 timing.actor_ms += composition_timing_elapsed_ms(start);
             }
         }
+        if let Some(OpaqueWorldInsertion::Composition(composition)) =
+            opaque_world_insertion.as_mut()
+            && let Some(placed) = composition.actors.as_mut()
+            && !placed.instances.is_empty()
+        {
+            let actor_start = timing.is_some().then(composition_timing_now);
+            placed_actor_stats = placed.draw.render_composed_in_slot(
+                frame.device,
+                frame.queue,
+                frame.encoder,
+                frame.target.with_depth(&depth.view),
+                render_view,
+                placed.render_options,
+                placed.instances,
+                placed.context,
+                view_slot,
+            )?;
+            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
+                timing.placed_actor_ms += composition_timing_elapsed_ms(start);
+            }
+        }
         if split_translucent_terrain {
             let translucent_target = render_target.with_loaded_color().with_loaded_depth();
             let translucent_start = timing.is_some().then(composition_timing_now);
-            if let Some(OpaqueWorldInsertion::Composition(composition)) = opaque_world_insertion {
+            if let Some(OpaqueWorldInsertion::Composition(composition)) =
+                opaque_world_insertion.as_ref()
+            {
                 let placed_draw_ms = render_composed_translucent_terrain(
                     draw,
                     composition,
@@ -2423,6 +2458,7 @@ where
         far_lod_uploaded_bytes: render_stats.far_lod_uploaded_bytes,
         placed_drawn_section_count: placed_terrain_stats.drawn_section_count,
         placed_drawn_index_count: placed_terrain_stats.drawn_index_count,
+        placed_actor_stats,
     })
 }
 

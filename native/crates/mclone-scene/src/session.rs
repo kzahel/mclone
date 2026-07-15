@@ -4247,10 +4247,19 @@ impl McloneSceneHost {
                     .as_ref()
                     .expect("active world owns actor draw state")
                     .shared_resources();
-                slot.actors = Some(ActorDrawResources::new_with_shared_resources(
-                    device, shared,
-                ));
+                let mut actors = ActorDrawResources::new_with_shared_resources(device, shared);
+                actors.ensure_composed_topology(device);
+                slot.actors = Some(actors);
             }
+            self.active_world
+                .actors
+                .as_mut()
+                .expect("active world owns actor draw state")
+                .ensure_composed_topology(device);
+            slot.actors
+                .as_mut()
+                .expect("switchable standby owns actor draw state")
+                .ensure_composed_topology(device);
             let actor_snapshot = slot
                 .actors
                 .as_ref()

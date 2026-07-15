@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: active 2026-07-15. Slices 0-4 are complete; Slices 5-7 remain.
+Status: active 2026-07-15. Slices 0-5 are complete; Slices 6-7 remain.
 
 Topic: `embedded-worlds`
 
@@ -1117,6 +1117,72 @@ currently present destination actor, including the destination connection's
 full-body player, standing in correct miniature geometry.
 
 This is the first optional human visual checkpoint.
+
+#### Slice 5 completion record — 2026-07-15
+
+`McloneSceneHost` now owns the real product submission for retained-world
+actors. It collects ordinary entity and remote-player presentations from the
+preview slot's client replica, samples their lighting from that source client,
+and derives exactly one preview-only full-body presentation for the retained
+connection's own accepted player pose. The active slot still uses its existing
+first-/third-person local-body policy and direct actor wrappers. World identity,
+runtime, actor cache, composition context, and local-body state all travel with
+the complete `DrawableWorldSlot` across A-to-B-to-A exchange.
+
+Shared full-frame ordering is now all active and placed opaque/cutout terrain,
+active direct actors, preview composed actors, globally ordered terrain
+translucency, and then active-only later effects. Mono, per-eye, and full-frame
+multiview branches use the same Rust collection and renderer policy. The web
+adapter only exports the resulting diagnostics; it does not collect, place, or
+draw actors. Source-bounds, half-space, and frustum rejection still happen in
+the shared renderer before mesh preparation.
+
+Placed actor pipelines and uniform topology are prepared synchronously before
+a retained slot becomes `Switchable` and before its preview is published
+`Visible`. An empty source therefore cannot stall terrain visibility, and asset
+or slot replacement cannot install asynchronous stale actor resources. The
+preview receipt now exposes entity, remote-player, and source-local counts;
+submission/draw and all three rejection counts; actor indices; draw time;
+mesh rebuild/upload totals; GPU capacity; and placed mono/multiview pipeline
+materialization.
+
+All new product pixels were captured under `/tmp` and inspected. Native flat
+and synthetic-stereo A-to-B-to-A smokes each show the retained source-local
+player correctly scaled, feet-anchored, lit, and depth-occluded on both table
+placements. Their receipts draw one of one submitted preview actors with zero
+source, clip, or frustum rejection; each cache initially rebuilds/uploads once,
+uses 589,824 bytes of GPU actor capacity, and materializes one placed pipeline.
+The returned stereo frame has 210,565 differing eye pixels. The current Metal
+adapter still does not expose `MULTIVIEW`, so the shared full-frame path compiles
+but no device receipt is claimed.
+
+Production browser WebGPU remained a same-slice product gate. The inspected
+desktop and two-times CPU-throttled mobile lobby captures each show two existing
+persisted destination entities plus the retained source-local player on the
+island, while the active cow remains full scale. Both submit and draw all three
+preview actors with zero source, clip, or frustum rejection, 589,824 bytes of
+GPU capacity, and one placed pipeline. Desktop reports three accumulated
+rebuilds/uploads and mobile reports two; there is no native/web feature fork.
+The adversarial browser lifecycle lane also passed with its existing
+late-completion, cancellation, resource, and Worker-shutdown invariants.
+
+The ordinary desktop offscreen image remains byte-identical to Slice 4 with
+SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+Five native no-preview samples measured 2.537/4.378 ms median average/P95 versus
+the accepted exact-parent 2.533/4.381 ms control, a +0.16%/-0.07% difference,
+with zero budget or accounting violations. Five production-browser no-preview
+samples measured 13.0/17.8 ms versus Slice 4's 13.0/18.2 ms baseline, retained
+both direct actor draws, and introduced no composed collection into the direct
+frame.
+
+The complete server, client, app-runtime, render-session, render, scene, and
+web-client suites passed, including 13 executable composition ownership
+contracts. Native and wasm builds, TypeScript checking, native flat/stereo
+lobby smokes, browser desktop/mobile/lifecycle smokes, desktop offscreen,
+adapter-purity gates, web scene-host adoption, formatting, and diff checks also
+passed. The optional visual checkpoint was unambiguous, so the unattended
+protocol proceeds to the authoritative movement witness.
 
 ### Slice 6: Authored Live Entity And Movement Witness
 

@@ -465,6 +465,31 @@ impl ActorDrawResources {
         Arc::ptr_eq(&self.shared, &other.shared)
     }
 
+    /// Materialize the opt-in placed topology before a world slot advertises
+    /// composed-actor capability. Direct one-world construction remains lazy.
+    pub fn ensure_composed_topology(&mut self, device: &wgpu::Device) {
+        let renderer = self.shared.renderer.placed_renderer(device);
+        if self.placed.borrow().is_none() {
+            *self.placed.borrow_mut() = Some(ActorPlacedDrawState::new(
+                device,
+                &renderer.uniform_bind_group_layout,
+            ));
+        }
+        if device.features().contains(wgpu::Features::MULTIVIEW) {
+            let renderer = self
+                .shared
+                .renderer
+                .placed_multiview_renderer(device)
+                .expect("MULTIVIEW feature checked before actor topology materialization");
+            if self.placed_multiview.borrow().is_none() {
+                *self.placed_multiview.borrow_mut() = Some(ActorPlacedMultiviewDrawState::new(
+                    device,
+                    &renderer.uniform_bind_group_layout,
+                ));
+            }
+        }
+    }
+
     pub fn render(
         &mut self,
         device: &wgpu::Device,

@@ -68,7 +68,7 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
     let asset_source = mclone_assets::SharedAssetSource::new(load_asset_source()?);
     let scene = options.scene.clone();
     let render_options = options.render_options;
-    let (capture, (summary, switch_count)) = write_headless_stereo_frame_png(
+    let (capture, (summary, switch_count, actor_receipt)) = write_headless_stereo_frame_png(
         HeadlessStereoFrameOptions {
             path: path.clone(),
             eye_width: options.width,
@@ -172,7 +172,12 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
             views = synthetic_stereo_preview_views(&mut driver, size)?;
             driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
             let summary = driver.render_stereo(device, queue, views, left_view, right_view)?;
-            Ok((summary, switch_reports.len() as u64))
+            let actor_receipt = driver
+                .host()
+                .embedded_world_preview_snapshot()
+                .context("returned synthetic-stereo lobby lost its preview")?
+                .render;
+            Ok((summary, switch_reports.len() as u64, actor_receipt))
         },
     )?;
     if capture.non_clear_rgb_pixel_count == 0 || summary.drawn_section_count == 0 {
@@ -181,6 +186,19 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
     if capture.eye_pixel_difference_count == 0 {
         bail!("synthetic-stereo lobby eyes are pixel-identical");
     }
+    let expected_actor_count = actor_receipt
+        .last_actor_entity_count
+        .saturating_add(actor_receipt.last_actor_remote_player_count)
+        .saturating_add(actor_receipt.last_actor_source_local_player_count);
+    if actor_receipt.last_actor_source_local_player_count != 1
+        || actor_receipt.last_submitted_actor_count != expected_actor_count
+        || actor_receipt.last_drawn_actor_count != expected_actor_count
+        || actor_receipt.last_source_rejected_actor_count != 0
+        || actor_receipt.last_clip_rejected_actor_count != 0
+        || actor_receipt.last_frustum_rejected_actor_count != 0
+    {
+        bail!("synthetic-stereo lobby lost or duplicated a preview actor: {actor_receipt:?}");
+    }
     let receipt = serde_json::json!({
         "schema": 1,
         "capture": path,
@@ -188,6 +206,16 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
         "switchCount": switch_count,
         "lobbyBehavior": "protectedLobby",
         "islandBehavior": "mutable",
+        "previewActors": {
+            "entities": actor_receipt.last_actor_entity_count,
+            "remotePlayers": actor_receipt.last_actor_remote_player_count,
+            "sourceLocalPlayers": actor_receipt.last_actor_source_local_player_count,
+            "submitted": actor_receipt.last_submitted_actor_count,
+            "drawn": actor_receipt.last_drawn_actor_count,
+            "meshRebuilds": actor_receipt.actor_mesh_rebuild_count,
+            "meshUploads": actor_receipt.actor_mesh_upload_count,
+            "gpuCapacityBytes": actor_receipt.actor_gpu_capacity_bytes,
+        },
     });
     std::fs::write(
         options.directory.join("report.json"),

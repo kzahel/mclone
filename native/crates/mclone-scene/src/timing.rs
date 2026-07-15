@@ -217,6 +217,7 @@ pub struct XrTerrainEyeRenderTiming {
     pub placed_cull_ms: f64,
     pub placed_draw_ms: f64,
     pub actor_ms: f64,
+    pub placed_actor_ms: f64,
     pub screen_effect_ms: f64,
     pub gui_ms: f64,
     pub xr_fade_ms: f64,

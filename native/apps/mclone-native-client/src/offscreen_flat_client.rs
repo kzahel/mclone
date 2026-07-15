@@ -2220,6 +2220,10 @@ struct LobbyScenarioSmokeState {
     host: OffscreenFlatClientHost,
     phase: LobbyScenarioSmokePhase,
     captures: Vec<(&'static str, usize)>,
+    actor_receipts: Vec<(
+        &'static str,
+        mclone_scene::EmbeddedWorldPreviewRenderSnapshot,
+    )>,
 }
 
 pub(crate) fn run_lobby_scenario_smoke(
@@ -2271,6 +2275,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                 host,
                 phase: LobbyScenarioSmokePhase::Title,
                 captures: Vec::with_capacity(5),
+                actor_receipts: Vec::with_capacity(3),
             })
         },
         |frame_index, frame, state| {
@@ -2398,9 +2403,16 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .is_some_and(|preview| {
                             preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
                                 && preview.last_drawn_section_count > 0
+                                && preview.render.last_drawn_actor_count > 0
                         })
                     {
                         state.captures.push(("lobby-with-preview", frame_index));
+                        let preview = state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .expect("visible lobby preview checked above");
+                        state.actor_receipts.push(("lobby", preview.render));
                         aim_current_eye_at_embedded_preview(&mut state.host)?;
                         crate::live_diorama_smoke::request_flat_embedded_world_activation(
                             &mut state.host,
@@ -2431,11 +2443,20 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .host
                         .scene_host()
                         .embedded_world_preview_snapshot()
-                        .is_some_and(|preview| preview.last_drawn_section_count > 0)
+                        .is_some_and(|preview| {
+                            preview.last_drawn_section_count > 0
+                                && preview.render.last_drawn_actor_count > 0
+                        })
                     {
                         state
                             .captures
                             .push(("island-with-return-preview", frame_index));
+                        let preview = state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .expect("visible island return preview checked above");
+                        state.actor_receipts.push(("island", preview.render));
                         crate::live_diorama_smoke::request_flat_embedded_world_activation(
                             &mut state.host,
                         )?;
@@ -2461,9 +2482,20 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .host
                         .scene_host()
                         .embedded_world_preview_snapshot()
-                        .is_some_and(|preview| preview.last_drawn_section_count > 0)
+                        .is_some_and(|preview| {
+                            preview.last_drawn_section_count > 0
+                                && preview.render.last_drawn_actor_count > 0
+                        })
                     {
                         state.captures.push(("returned-lobby", frame_index));
+                        let preview = state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .expect("visible returned lobby preview checked above");
+                        state
+                            .actor_receipts
+                            .push(("returned-lobby", preview.render));
                         state.host.apply_ui_action(
                             mclone_ui::GameUiAction::QuitToTitle,
                             device,
@@ -2535,6 +2567,31 @@ pub(crate) fn run_lobby_scenario_smoke(
             state.host.scene_host().warm_world_standby_snapshot()
         );
     }
+    if state.actor_receipts.len() != 3 {
+        bail!(
+            "lobby scenario smoke expected three composed actor receipts, got {:?}",
+            state
+                .actor_receipts
+                .iter()
+                .map(|(label, receipt)| (*label, receipt.last_drawn_actor_count))
+                .collect::<Vec<_>>()
+        );
+    }
+    for (label, receipt) in &state.actor_receipts {
+        let expected_actor_count = receipt
+            .last_actor_entity_count
+            .saturating_add(receipt.last_actor_remote_player_count)
+            .saturating_add(receipt.last_actor_source_local_player_count);
+        if receipt.last_actor_source_local_player_count != 1
+            || receipt.last_submitted_actor_count != expected_actor_count
+            || receipt.last_drawn_actor_count != expected_actor_count
+            || receipt.last_source_rejected_actor_count != 0
+            || receipt.last_clip_rejected_actor_count != 0
+            || receipt.last_frustum_rejected_actor_count != 0
+        {
+            bail!("{label} composed actor receipt lost or duplicated an actor: {receipt:?}");
+        }
+    }
     for (label, frame_index) in &state.captures {
         save_rgba_png(
             &options.directory.join(format!("{label}.png")),
@@ -2570,6 +2627,24 @@ pub(crate) fn run_lobby_scenario_smoke(
         "managedRoot": options.scene.world_root.as_ref().map(|root| root.parent().unwrap_or(root).join("scenarios")),
         "lobbyBehavior": "protectedLobby",
         "islandBehavior": "mutable",
+        "actorReceipts": state.actor_receipts.iter().map(|(label, receipt)| {
+            serde_json::json!({
+                "label": label,
+                "entities": receipt.last_actor_entity_count,
+                "remotePlayers": receipt.last_actor_remote_player_count,
+                "sourceLocalPlayers": receipt.last_actor_source_local_player_count,
+                "submitted": receipt.last_submitted_actor_count,
+                "drawn": receipt.last_drawn_actor_count,
+                "sourceRejected": receipt.last_source_rejected_actor_count,
+                "clipRejected": receipt.last_clip_rejected_actor_count,
+                "frustumRejected": receipt.last_frustum_rejected_actor_count,
+                "meshRebuilds": receipt.actor_mesh_rebuild_count,
+                "meshUploads": receipt.actor_mesh_upload_count,
+                "gpuCapacityBytes": receipt.actor_gpu_capacity_bytes,
+                "placedPipelines": receipt.placed_actor_pipeline_count,
+                "placedMultiviewPipelines": receipt.placed_actor_multiview_pipeline_count,
+            })
+        }).collect::<Vec<_>>(),
         "scenarioCost": {
             "rendererShellCreateMs": scenario_cost.renderer_shell_create_ms,
             "rendererMultiviewCreateMs": scenario_cost.renderer_multiview_create_ms,

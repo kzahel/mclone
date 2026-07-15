@@ -2031,6 +2031,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.embeddedPreviewPhase === "visible"
         && Number(state?.embeddedPreviewDrawnSectionCount) > 0
+        && Number(state?.embeddedPreviewDrawnActorCount) > 0
         && state?.standbySwitchable === true;
     },
     undefined,
@@ -2095,6 +2096,24 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
         state.embeddedPreviewQueuedUploadLifecycleItems,
       embeddedPreviewOutOfRegionSubmissionCount:
         state.embeddedPreviewOutOfRegionSubmissionCount,
+      embeddedPreviewActorEntityCount: state.embeddedPreviewActorEntityCount,
+      embeddedPreviewActorRemotePlayerCount: state.embeddedPreviewActorRemotePlayerCount,
+      embeddedPreviewActorSourceLocalPlayerCount:
+        state.embeddedPreviewActorSourceLocalPlayerCount,
+      embeddedPreviewSubmittedActorCount: state.embeddedPreviewSubmittedActorCount,
+      embeddedPreviewDrawnActorCount: state.embeddedPreviewDrawnActorCount,
+      embeddedPreviewSourceRejectedActorCount:
+        state.embeddedPreviewSourceRejectedActorCount,
+      embeddedPreviewClipRejectedActorCount: state.embeddedPreviewClipRejectedActorCount,
+      embeddedPreviewFrustumRejectedActorCount:
+        state.embeddedPreviewFrustumRejectedActorCount,
+      embeddedPreviewActorMeshRebuildCount: state.embeddedPreviewActorMeshRebuildCount,
+      embeddedPreviewActorMeshUploadCount: state.embeddedPreviewActorMeshUploadCount,
+      embeddedPreviewActorGpuCapacityBytes: state.embeddedPreviewActorGpuCapacityBytes,
+      embeddedPreviewPlacedActorPipelineCount:
+        state.embeddedPreviewPlacedActorPipelineCount,
+      embeddedPreviewPlacedActorMultiviewPipelineCount:
+        state.embeddedPreviewPlacedActorMultiviewPipelineCount,
       frameCount: state.frameCount,
       frameGaps: {
         count: gaps.length,
@@ -2184,6 +2203,22 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       && Number(after.embeddedPreviewBoundedSectionCount) > 0
       && Number(after.embeddedPreviewDrawnSectionCount) > 0
       && Number(after.embeddedPreviewOutOfRegionSubmissionCount) === 0
+      && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 1
+      && Number(after.embeddedPreviewSubmittedActorCount) === (
+        Number(after.embeddedPreviewActorEntityCount)
+        + Number(after.embeddedPreviewActorRemotePlayerCount)
+        + Number(after.embeddedPreviewActorSourceLocalPlayerCount)
+      )
+      && Number(after.embeddedPreviewDrawnActorCount)
+        === Number(after.embeddedPreviewSubmittedActorCount)
+      && Number(after.embeddedPreviewSourceRejectedActorCount) === 0
+      && Number(after.embeddedPreviewClipRejectedActorCount) === 0
+      && Number(after.embeddedPreviewFrustumRejectedActorCount) === 0
+      && Number(after.embeddedPreviewActorMeshRebuildCount) >= 1
+      && Number(after.embeddedPreviewActorMeshUploadCount)
+        === Number(after.embeddedPreviewActorMeshRebuildCount)
+      && Number(after.embeddedPreviewActorGpuCapacityBytes) > 0
+      && Number(after.embeddedPreviewPlacedActorPipelineCount) === 1
       && Number(after.standbyDuplicatedAtlasBaseBytes) === 0
       && Number(after.standbySharedTerrainResourceOwnerCount) === 2
       && after.standbyActorStateMaterialized === true

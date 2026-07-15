@@ -278,10 +278,19 @@ fn current_local_player_body_is_active_view_policy_not_preview_policy() {
     assert!(collect.contains("self.active_world.camera"));
     assert!(!collect.contains("standby_world"));
     assert!(!collect.contains("source-local"));
+
+    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
+    assert!(preview_collect.contains(".standby_world"));
+    assert!(preview_collect.contains("EmbeddedWorldPreviewPhase::Visible"));
+    assert!(preview_collect.contains("actor_instances_from_presentations"));
+    assert!(preview_collect.contains("local_player_actor_instance("));
+    assert!(preview_collect.contains("slot.camera"));
+    assert!(preview_collect.contains("slot.player_model"));
+    assert!(!preview_collect.contains("local_player_actor_instance_for_view"));
 }
 
 #[test]
-fn composition_phase_order_is_active_actors_between_all_opaque_and_translucent() {
+fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
     let frame = read("../mclone-app-runtime/src/frame_render.rs");
     let render = braced_item(&frame, "fn render_full_frame_for_view_inner<BuildGuiDraw>(");
     assert_in_order(
@@ -292,6 +301,8 @@ fn composition_phase_order_is_active_actors_between_all_opaque_and_translucent()
             ".render_placed_prepared_with_options",
             "if !actor_instances.is_empty()",
             ".render_in_slot(",
+            "composition.actors.as_mut()",
+            "render_composed_in_slot(",
             "if split_translucent_terrain",
             "render_composed_translucent_terrain(",
         ],
@@ -309,6 +320,57 @@ fn retained_destination_presentations_exist_below_scene_omission() {
     let collect = braced_item(&scene, "fn current_actor_instances(&self)");
     assert!(!collect.contains("standby_world"));
     assert!(!collect.contains("embedded_world_preview"));
+
+    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
+    assert!(preview_collect.contains("standby_world"));
+    assert!(preview_collect.contains("runtime.client()"));
+    assert!(preview_collect.contains("client.actor_presentations()"));
+    assert!(preview_collect.contains("client.entity_count()"));
+    assert!(preview_collect.contains("client.remote_player_count()"));
+}
+
+#[test]
+fn preview_actor_submission_is_shared_scene_policy_with_portable_diagnostics() {
+    let frame = read("../mclone-app-runtime/src/frame_render.rs");
+    let placed = braced_item(&frame, "pub struct PlacedActorFrame<'a> {");
+    assert!(placed.contains("draw: &'a mut ActorDrawResources"));
+    assert!(placed.contains("instances: &'a [ActorInstance]"));
+    assert!(placed.contains("context: WorldCompositionContext"));
+
+    let scene = read("src/lib.rs");
+    let mono = read("src/mono.rs");
+    let multiview = braced_item(
+        &scene,
+        "fn render_prepared_terrain_multiview_frame_with_upload_inner(",
+    );
+    assert!(mono.contains("PlacedActorFrame"));
+    assert!(mono.contains("preview_actor_instances"));
+    assert!(multiview.contains("render_composed_multiview("));
+    assert!(multiview.contains("record_actor_render("));
+
+    let warm = read("src/warm_world.rs");
+    let diagnostics = braced_item(&warm, "pub struct EmbeddedWorldPreviewRenderSnapshot {");
+    for fact in [
+        "last_actor_entity_count",
+        "last_actor_remote_player_count",
+        "last_actor_source_local_player_count",
+        "last_source_rejected_actor_count",
+        "actor_mesh_rebuild_count",
+        "actor_mesh_upload_count",
+        "actor_gpu_capacity_bytes",
+        "placed_actor_pipeline_count",
+    ] {
+        assert!(
+            diagnostics.contains(fact),
+            "missing preview actor fact {fact}"
+        );
+    }
+
+    let web = read("../../apps/mclone-web-client/src/web_scene_host.rs");
+    assert!(web.contains("embeddedPreviewActorSourceLocalPlayerCount"));
+    assert!(web.contains("embeddedPreviewActorMeshRebuildCount"));
+    assert!(!web.contains("actor_instances_from_presentations"));
+    assert!(!web.contains("local_player_actor_instance("));
 }
 
 #[test]
@@ -321,11 +383,18 @@ fn complete_slot_exchange_carries_actor_state_and_replacement_drops_stale_topolo
     let gpu_advance = braced_item(&session, "pub(crate) fn advance_warm_world_gpu(");
     assert!(gpu_advance.contains("if slot.actors.is_none()"));
     assert!(gpu_advance.contains("ActorDrawResources::new_with_shared_resources"));
+    assert!(
+        gpu_advance
+            .matches("ensure_composed_topology(device)")
+            .count()
+            >= 2
+    );
     assert_in_order(
         gpu_advance,
         &[
             "state.readiness.switchable",
             "if slot.actors.is_none()",
+            "ensure_composed_topology(device)",
             "slot.lifecycle = WorldSlotLifecycle::StandbySwitchable",
         ],
     );

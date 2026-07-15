@@ -12,7 +12,7 @@ Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, and completed shared Web/WASM lobby
 parity, followed by an active composable-world-presentation and live-preview
-actor milestone through completed Slices 0-4. Portable scenario content,
+actor milestone through completed Slices 0-5. Portable scenario content,
 shared immutable second-slot terrain and actor resources, per-world actor
 presentation/cache state, slot-targeted startup/readiness/activation/swap policy,
 catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
@@ -132,9 +132,15 @@ mono/per-eye and full-frame multiview paths. One shared native/browser fixture
 draws a cow, chicken figure, item, remote-player figure, and source-local
 player figure from two independent world-local caches with source, clip, and
 frustum rejection before mesh preparation. Production browser WebGPU uses the
-same Rust fixture through a target-only adapter. The next slice submits those
-portable actor paths from the real product scene for destination entities,
-remote players, and the retained slot's source-local full-body player.
+same Rust fixture through a target-only adapter. The real product scene now
+submits destination entities, remote players, and the retained slot's
+source-local full-body player through those same portable paths after all
+opaque/cutout terrain and before globally ordered translucency. Native
+flat/stereo and production browser desktop/mobile captures show correctly
+scaled, source-lit actors with shared depth; slot exchange keeps the appropriate
+source-local body on both sides. The direct actor path remains byte-identical
+and within its measured noise envelope, while preview diagnostics separately
+expose selection, rejection, cache, GPU-capacity, and placed-pipeline costs.
 Closeout still requires real authoritative creature and joined-player
 movement in the native and browser diorama rather than renderer-only actors.
 Boundary-face resolution, collision, and authority handoff remain later
@@ -144,7 +150,7 @@ Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-15
-(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-4 complete; the
+(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-5 complete; the
 current Metal adapter did not expose `MULTIVIEW`, and no headset was attached
 for a new real-device scenario receipt).
 

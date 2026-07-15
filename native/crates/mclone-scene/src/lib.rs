@@ -39,8 +39,8 @@ use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, FullFrameRenderSummary, PlacedTerrainFrame, PlacedTerrainPrepared,
-    RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
+    FullFrameGui, FullFrameRenderSummary, PlacedActorFrame, PlacedTerrainFrame,
+    PlacedTerrainPrepared, RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
     TerrainTranslucentSubmission, render_full_frame_for_view_with_far_lod_and_opaque_gate,
     render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
@@ -148,7 +148,7 @@ use mclone_render_session::{
     EngineHandPushInput, EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
     RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
     RenderSectionUploadPhaseReport, XrFov, XrRenderView, XrView, XrViewPose,
-    actor_instances_from_presentations, engine_debug_world_lines,
+    actor_instances_from_presentations, engine_debug_world_lines, local_player_actor_instance,
     local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
     render_view_from_world_pose,
 };
@@ -294,6 +294,8 @@ pub struct XrTerrainMultiviewFrameSummary {
     pub right: TexturedSectionRenderStats,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
+    pub placed_actor_count: usize,
+    pub drawn_placed_actor_count: usize,
     pub ui_panel: WorldGuiPanelRenderStats,
     pub ui_draw_cache: UiDrawCacheStats,
     pub upload: XrTerrainUploadSummary,
@@ -398,6 +400,14 @@ struct DrawableWorldSlotInstall {
     render_stats: RenderStreamStats,
     accepted_entry_pose: Option<WorldEntryPose>,
     pending_startup_sections: Vec<TexturedRenderSectionMesh>,
+}
+
+struct PreviewActorInstances {
+    source_world: WorldInstanceId,
+    instances: Vec<ActorInstance>,
+    entity_count: usize,
+    remote_player_count: usize,
+    source_local_player_count: usize,
 }
 
 impl DrawableWorldSlot {
@@ -1346,6 +1356,7 @@ impl McloneSceneHost {
         let sun_angle = self.sun_angle();
         let underwater_overlays = self.underwater_overlays(render_views);
         let actor_instances = self.current_actor_instances();
+        let preview_actor_instances = self.current_preview_actor_instances();
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(|| self.services.clock.now());
         let (prepared_records, record_cache_prepare) =
@@ -1441,6 +1452,7 @@ impl McloneSceneHost {
             render_views[0],
             diagnostic_panel,
             &actor_instances,
+            preview_actor_instances.as_ref(),
             render_options,
             sky_clear_color,
             time_of_day,
@@ -1467,6 +1479,7 @@ impl McloneSceneHost {
             render_views[1],
             diagnostic_panel,
             &actor_instances,
+            preview_actor_instances.as_ref(),
             render_options,
             sky_clear_color,
             time_of_day,
@@ -1528,6 +1541,20 @@ impl McloneSceneHost {
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
         let first_drawn_section_count = left_eye.summary.drawn_section_count;
         let active_world_id = self.active_world.id;
+        let preview_actor_receipt = preview_actor_instances.as_ref().and_then(|actors| {
+            self.standby_world
+                .as_ref()
+                .filter(|slot| slot.id == actors.source_world)
+                .and_then(|slot| slot.actors.as_ref())
+                .map(|resources| {
+                    (
+                        actors.entity_count,
+                        actors.remote_player_count,
+                        actors.source_local_player_count,
+                        resources.resource_snapshot(),
+                    )
+                })
+        });
         if let Some(preview) = self.embedded_world_preview.as_mut() {
             let stats = TexturedSectionRenderStats {
                 drawn_section_count: left_eye.summary.placed_drawn_section_count,
@@ -1557,6 +1584,18 @@ impl McloneSceneHost {
                     },
                 ),
             );
+            if let Some((entities, remote_players, source_local_players, resources)) =
+                preview_actor_receipt
+            {
+                preview.record_actor_render(
+                    entities,
+                    remote_players,
+                    source_local_players,
+                    left_eye.timing.placed_actor_ms + right_eye.timing.placed_actor_ms,
+                    left_eye.summary.placed_actor_stats,
+                    resources,
+                );
+            }
         }
         self.record_eye0_summary(left_eye.summary);
         self.record_warm_world_first_destination_frame(first_drawn_section_count, upload);
@@ -1991,6 +2030,9 @@ impl McloneSceneHost {
         } else {
             Vec::new()
         };
+        let preview_actor_instances = include_actors
+            .then(|| self.current_preview_actor_instances())
+            .flatten();
         let far_lod_config = self.active_world.scene.far_lod;
         let far_lod_seed = self.active_world.scene.seed;
         let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
@@ -2238,6 +2280,50 @@ impl McloneSceneHost {
         } else {
             ActorRenderStats::default()
         };
+        let preview_actor_receipt = if let Some(actors) = preview_actor_instances.as_ref() {
+            let preview = self
+                .embedded_world_preview
+                .as_ref()
+                .filter(|preview| preview.source_world == actors.source_world)
+                .context("preview actor source lost its presentation state")?;
+            let standby = self
+                .standby_world
+                .as_mut()
+                .filter(|slot| slot.id == actors.source_world)
+                .context("preview actor source lost its world slot")?;
+            let preview_time = standby
+                .runtime
+                .as_ref()
+                .map_or(0.0, |runtime| runtime.time_of_day());
+            let options = self
+                .render_options
+                .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
+            let actor_start = self.services.clock.now();
+            let resources = standby
+                .actors
+                .as_mut()
+                .context("visible preview actor capability was not published")?;
+            let stats = resources
+                .render_composed_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    RenderFrameTarget::color(target.color_view, target.size)
+                        .with_depth(&target.depth.view),
+                    terrain_views,
+                    [options; 2],
+                    &actors.instances,
+                    preview.context,
+                )
+                .context("render embedded world preview actors multiview")?;
+            let draw_ms = elapsed_ms(self.services.clock.elapsed_since(actor_start));
+            if let Some(timing) = timing.as_deref_mut() {
+                timing.multiview_actor_ms += draw_ms;
+            }
+            Some((stats, resources.resource_snapshot(), draw_ms))
+        } else {
+            None
+        };
         let mut preview_translucent_order_snapshot =
             EmbeddedWorldPreviewTranslucentOrderSnapshot::default();
         if split_translucent_terrain {
@@ -2391,6 +2477,18 @@ impl McloneSceneHost {
                 preview_stats[0],
                 preview_translucent_order_snapshot,
             );
+            if let (Some(actors), Some((stats, resources, actor_draw_ms))) =
+                (preview_actor_instances.as_ref(), preview_actor_receipt)
+            {
+                preview.record_actor_render(
+                    actors.entity_count,
+                    actors.remote_player_count,
+                    actors.source_local_player_count,
+                    actor_draw_ms,
+                    stats,
+                    resources,
+                );
+            }
         }
         self.last_ui_panel_stats = ui_panel_stats;
         self.last_ui_draw_cache_stats = ui_draw_cache_stats;
@@ -2404,6 +2502,10 @@ impl McloneSceneHost {
             right: stats[1],
             actor_count: actor_instances.len(),
             drawn_actor_count: actor_stats.drawn_actor_count,
+            placed_actor_count: preview_actor_receipt
+                .map_or(0, |(stats, _, _)| stats.submitted_actor_count),
+            drawn_placed_actor_count: preview_actor_receipt
+                .map_or(0, |(stats, _, _)| stats.drawn_actor_count),
             ui_panel: ui_panel_stats,
             ui_draw_cache: ui_draw_cache_stats,
             upload,
@@ -3441,6 +3543,38 @@ impl McloneSceneHost {
             })
     }
 
+    fn current_preview_actor_instances(&self) -> Option<PreviewActorInstances> {
+        let preview = self
+            .embedded_world_preview
+            .as_ref()
+            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
+        let slot = self
+            .standby_world
+            .as_ref()
+            .filter(|slot| slot.id == preview.source_world)?;
+        if slot.scene.skip_actors {
+            return None;
+        }
+        let runtime = slot.runtime.as_ref()?;
+        let client = runtime.client();
+        let mut instances =
+            actor_instances_from_presentations(&client.actor_presentations(), client);
+        let entity_count = client.entity_count();
+        let remote_player_count = client.remote_player_count();
+        instances.push(local_player_actor_instance(
+            &slot.camera,
+            client,
+            actor_figure_id_for_player_model(slot.player_model),
+        ));
+        Some(PreviewActorInstances {
+            source_world: slot.id,
+            instances,
+            entity_count,
+            remote_player_count,
+            source_local_player_count: 1,
+        })
+    }
+
     fn underwater_effect_dt_seconds(&mut self) -> f32 {
         let now = self.services.clock.now();
         let dt_seconds = self
@@ -3464,6 +3598,7 @@ impl McloneSceneHost {
         render_view: ChunkRenderView,
         diagnostic_panel: WorldGuiPanel,
         actor_instances: &[mclone_render::entity::ActorInstance],
+        preview_actor_instances: Option<&PreviewActorInstances>,
         render_options: TexturedSectionRenderOptions,
         sky_clear_color: wgpu::Color,
         time_of_day: f32,
@@ -3536,22 +3671,34 @@ impl McloneSceneHost {
                     .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
                 let standby = self
                     .standby_world
-                    .as_ref()
+                    .as_mut()
                     .filter(|slot| slot.id == preview.source_world)?;
                 let preview_time = standby
                     .runtime
                     .as_ref()
                     .map_or(0.0, |runtime| runtime.time_of_day());
+                let preview_options = self
+                    .render_options
+                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
+                let placed_actors = preview_actor_instances
+                    .filter(|actors| actors.source_world == preview.source_world)
+                    .and_then(|actors| {
+                        standby.actors.as_mut().map(|draw| PlacedActorFrame {
+                            draw,
+                            instances: &actors.instances,
+                            context: preview.context,
+                            render_options: preview_options,
+                        })
+                    });
                 Some(TerrainCompositionFrame {
                     placed: PlacedTerrainFrame {
                         draw: &standby.draw,
                         renderer: &preview.renderer,
                         prepared: PlacedTerrainPrepared::Stereo(prepared),
                         context: preview.context,
-                        render_options: self.render_options.with_sky_darken(
-                            mclone_render::light_texture::sky_darken(preview_time),
-                        ),
+                        render_options: preview_options,
                     },
+                    actors: placed_actors,
                     translucent_order,
                 })
             });
@@ -3917,6 +4064,7 @@ impl McloneSceneHost {
                 placed_cull_ms: frame_timing.placed_cull_ms,
                 placed_draw_ms: frame_timing.placed_draw_ms,
                 actor_ms: frame_timing.actor_ms,
+                placed_actor_ms: frame_timing.placed_actor_ms,
                 screen_effect_ms: frame_timing.screen_effect_ms,
                 gui_ms: frame_timing.gui_ms,
                 xr_fade_ms,

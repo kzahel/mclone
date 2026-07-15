@@ -20,6 +20,7 @@ use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
 use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
+use mclone_render::entity::{ActorDrawResourceSnapshot, ActorRenderStats};
 use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
@@ -558,6 +559,22 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
     pub last_drawn_section_count: usize,
     pub last_drawn_index_count: u32,
     pub out_of_region_submission_count: usize,
+    pub last_actor_entity_count: usize,
+    pub last_actor_remote_player_count: usize,
+    pub last_actor_source_local_player_count: usize,
+    pub last_submitted_actor_count: usize,
+    pub last_drawn_actor_count: usize,
+    pub last_source_rejected_actor_count: usize,
+    pub last_clip_rejected_actor_count: usize,
+    pub last_frustum_rejected_actor_count: usize,
+    pub last_drawn_actor_index_count: u32,
+    pub last_actor_draw_ms: f64,
+    pub total_actor_draw_ms: f64,
+    pub actor_mesh_rebuild_count: u64,
+    pub actor_mesh_upload_count: u64,
+    pub actor_gpu_capacity_bytes: u64,
+    pub placed_actor_pipeline_count: usize,
+    pub placed_actor_multiview_pipeline_count: usize,
     pub last_translucent_order: EmbeddedWorldPreviewTranslucentOrderSnapshot,
 }
 
@@ -682,6 +699,37 @@ impl EmbeddedWorldPreview {
             .render
             .out_of_region_submission_count
             .saturating_add(out_of_region_submission_count);
+    }
+
+    pub(crate) fn record_actor_render(
+        &mut self,
+        entity_count: usize,
+        remote_player_count: usize,
+        source_local_player_count: usize,
+        draw_ms: f64,
+        stats: ActorRenderStats,
+        resources: ActorDrawResourceSnapshot,
+    ) {
+        self.render.last_actor_entity_count = entity_count;
+        self.render.last_actor_remote_player_count = remote_player_count;
+        self.render.last_actor_source_local_player_count = source_local_player_count;
+        self.render.last_submitted_actor_count = stats.submitted_actor_count;
+        self.render.last_drawn_actor_count = stats.drawn_actor_count;
+        self.render.last_source_rejected_actor_count = stats.source_rejected_actor_count;
+        self.render.last_clip_rejected_actor_count = stats.clip_rejected_actor_count;
+        self.render.last_frustum_rejected_actor_count = stats.frustum_rejected_actor_count;
+        self.render.last_drawn_actor_index_count = stats.index_count;
+        self.render.last_actor_draw_ms = draw_ms;
+        self.render.total_actor_draw_ms += draw_ms;
+        self.render.actor_mesh_rebuild_count = resources.mesh.rebuild_count;
+        self.render.actor_mesh_upload_count = resources.mesh.upload_count;
+        self.render.actor_gpu_capacity_bytes = resources
+            .mesh
+            .gpu_vertex_capacity_bytes
+            .saturating_add(resources.mesh.gpu_index_capacity_bytes);
+        self.render.placed_actor_pipeline_count = resources.placed_pipeline_count;
+        self.render.placed_actor_multiview_pipeline_count =
+            resources.placed_multiview_pipeline_count;
     }
 }
 

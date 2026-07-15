@@ -1301,6 +1301,7 @@ impl McloneSceneHost {
         let sun_angle = self.sun_angle();
         let underwater_overlay = self.mono_underwater_overlay(render_view);
         let actor_instances = self.current_actor_instances();
+        let preview_actor_instances = self.current_preview_actor_instances();
 
         let gui_scale = GuiScale::from_pixels(target.size[0], target.size[1]);
         let (full_frame_gui, gui_draw, hud_cache) = self.mono_gui_frame(gui_scale, ui);
@@ -1360,7 +1361,7 @@ impl McloneSceneHost {
                     .expect("visible preview record preparation retains preview state");
                 let standby = self
                     .standby_world
-                    .as_ref()
+                    .as_mut()
                     .expect("visible preview retains its source slot");
                 let preview_time = standby
                     .runtime
@@ -1399,6 +1400,17 @@ impl McloneSceneHost {
                     preview.source_world,
                     &translucent_order,
                 );
+                let placed_actors = preview_actor_instances
+                    .as_ref()
+                    .filter(|actors| actors.source_world == preview.source_world)
+                    .and_then(|actors| {
+                        standby.actors.as_mut().map(|draw| PlacedActorFrame {
+                            draw,
+                            instances: &actors.instances,
+                            context: preview.context,
+                            render_options: preview_options,
+                        })
+                    });
                 let rendered = render_full_frame_for_view_with_far_lod_and_placed_terrain_timed(
                     RenderFrameContext::new(device, queue, encoder, target),
                     depth,
@@ -1414,6 +1426,7 @@ impl McloneSceneHost {
                             context: preview.context,
                             render_options: preview_options,
                         },
+                        actors: placed_actors,
                         translucent_order: &translucent_order,
                     },
                     Some(
@@ -1474,6 +1487,20 @@ impl McloneSceneHost {
                 })
             }
             .context("render mono scene frame")?;
+        let preview_actor_receipt = preview_actor_instances.as_ref().and_then(|actors| {
+            self.standby_world
+                .as_ref()
+                .filter(|slot| slot.id == actors.source_world)
+                .and_then(|slot| slot.actors.as_ref())
+                .map(|resources| {
+                    (
+                        actors.entity_count,
+                        actors.remote_player_count,
+                        actors.source_local_player_count,
+                        resources.resource_snapshot(),
+                    )
+                })
+        });
         if let Some(preview) = self.embedded_world_preview.as_mut() {
             let stats = TexturedSectionRenderStats {
                 drawn_section_count: summary.placed_drawn_section_count,
@@ -1498,6 +1525,18 @@ impl McloneSceneHost {
                 stats,
                 preview_translucent_order,
             );
+            if let Some((entities, remote_players, source_local_players, resources)) =
+                preview_actor_receipt
+            {
+                preview.record_actor_render(
+                    entities,
+                    remote_players,
+                    source_local_players,
+                    timing.placed_actor_ms,
+                    summary.placed_actor_stats,
+                    resources,
+                );
+            }
         }
 
         if !full_frame_gui.covers_world {
