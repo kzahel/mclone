@@ -40,6 +40,19 @@ That path now uses 4/8/16 rings with two-chunk hysteresis and
 replacement-before-suppress transitions. Browser audio and teleport preview
 remain explicit absent service capabilities.
 
+Tactical
+[`179-composable-world-presentation-and-live-preview-actors.md`](tactical/179-composable-world-presentation-and-live-preview-actors.md)
+extends that same product lane with live composed actors. The destination's
+authoritative cow/chicken, source-local full body, and an ordinary dedicated
+remote player all travel through the shared Rust server, client replica, scene,
+and actor renderer. The validation-only auxiliary-player script is shared Rust
+server policy enabled by one query/config boolean; TypeScript does not author
+positions, inject updates, or decide actor visibility. Desktop, CPU-throttled
+mobile, and lifecycle receipts assert stable ids, exact 1:8 movement, walk and
+source-light facts, changed WebGPU pixels, activation/return, shutdown, and
+relaunch. Browser WebGPU was a per-slice acceptance lane, not a post-native
+parity port.
+
 ## Local Commands
 
 ```bash
@@ -65,9 +78,10 @@ pnpm native:web:far-lod-remote-smoke
 # Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke
 
-# Enter the shared protected lobby, wait for its live island preview, and
-# validate desktop, CPU-throttled mobile, activation/persistence, and lifecycle
-# cancellation paths. Reports and screenshots stay under /tmp.
+# Enter the shared protected lobby, wait for its live island preview and
+# authoritative creature/remote-player motion, and validate desktop,
+# CPU-throttled mobile, activation/persistence, and lifecycle cancellation
+# paths. Reports and screenshots stay under /tmp.
 pnpm native:web:lobby-scenario-smoke
 pnpm native:web:lobby-scenario-mobile-smoke
 pnpm native:web:lobby-scenario-lifecycle-smoke

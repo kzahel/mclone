@@ -223,6 +223,10 @@ pub(crate) enum SceneSessionStartOutcome {
 }
 
 impl McloneSceneHost {
+    pub const fn debug_managed_scenario_auxiliary_player_script_enabled(&self) -> bool {
+        self.debug_managed_scenario_auxiliary_player_script
+    }
+
     /// Replace only the platform capability profile while preserving catalog,
     /// asset-pack, and settings controller state.
     pub fn set_client_experience_profile(&mut self, profile: ClientExperienceProfile) {
@@ -374,6 +378,7 @@ impl McloneSceneHost {
             warm_world_standby: None,
             prepared_warm_world_shell: None,
             managed_scenario_launch: None,
+            debug_managed_scenario_auxiliary_player_script: scene.debug_auxiliary_player_script,
             native_managed_scenario_adapter: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
@@ -568,6 +573,7 @@ impl McloneSceneHost {
             warm_world_standby: None,
             prepared_warm_world_shell: None,
             managed_scenario_launch: None,
+            debug_managed_scenario_auxiliary_player_script: scene.debug_auxiliary_player_script,
             native_managed_scenario_adapter: None,
             embedded_world_preview: None,
             embedded_world_activation: EmbeddedWorldActivationState::default(),
@@ -765,6 +771,7 @@ impl McloneSceneHost {
             warm_world_standby: None,
             prepared_warm_world_shell: None,
             managed_scenario_launch: None,
+            debug_managed_scenario_auxiliary_player_script: scene.debug_auxiliary_player_script,
             #[cfg(not(target_arch = "wasm32"))]
             native_managed_scenario_adapter: None,
             embedded_world_preview: None,
@@ -1700,6 +1707,7 @@ impl McloneSceneHost {
         primary.use_initial_spawn_center = false;
         primary.freeze_scheduled_fluid_ticks = true;
         primary.debug_passive_showcase = false;
+        primary.debug_auxiliary_player_script = false;
         primary.validated()
     }
 
@@ -1906,6 +1914,7 @@ impl McloneSceneHost {
         scene.world_generation_profile = destination.destination.world_generation_profile;
         scene.use_initial_spawn_center = false;
         scene.debug_passive_showcase = false;
+        scene.debug_auxiliary_player_script = self.debug_managed_scenario_auxiliary_player_script;
         let scene = scene.validated()?;
         let instance_id = self.allocate_world_instance_id();
         let mut destination = destination;
@@ -2202,6 +2211,7 @@ impl McloneSceneHost {
         scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
         scene.use_initial_spawn_center = false;
+        scene.debug_auxiliary_player_script = self.debug_managed_scenario_auxiliary_player_script;
         let scene = scene.validated()?;
         let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
         let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
@@ -2424,6 +2434,7 @@ impl McloneSceneHost {
                 preparation: EmbeddedWorldPreviewPreparationSnapshot::default(),
                 render: EmbeddedWorldPreviewRenderSnapshot::default(),
                 pending_actor_update: None,
+                pending_remote_player_update: None,
                 mutation_sequence: 0,
                 last_mutation: None,
                 boundary_warning: preview_boundary_warning,
@@ -4012,6 +4023,17 @@ impl McloneSceneHost {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let preview_remote_players_before = slot
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .client()
+                    .remote_player_snapshots()
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         let mut timing = XrTerrainFrameTiming::default();
         let upload = match Self::prepare_world_slot(
             &mut slot,
@@ -4036,6 +4058,17 @@ impl McloneSceneHost {
                 runtime
                     .client()
                     .entity_snapshots()
+                    .copied()
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let preview_remote_players_after = slot
+            .runtime
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .client()
+                    .remote_player_snapshots()
                     .copied()
                     .collect::<Vec<_>>()
             })
@@ -4066,6 +4099,46 @@ impl McloneSceneHost {
                 })
                 .unwrap_or(mclone_render::light_texture::FULL_BRIGHT);
             preview.record_actor_update(from, to, source_packed_light, self.services.clock.now());
+        }
+        if let Some((from, to)) = changed_remote_player_motion(
+            &preview_remote_players_before,
+            &preview_remote_players_after,
+        ) && let Some(preview) = self
+            .embedded_world_preview
+            .as_mut()
+            .filter(|preview| preview.source_world == slot.id)
+        {
+            let (walk_animation_distance, source_packed_light) = slot
+                .runtime
+                .as_ref()
+                .and_then(|runtime| {
+                    let client = runtime.client();
+                    client
+                        .actor_presentations()
+                        .into_iter()
+                        .find(|presentation| {
+                            presentation.id
+                                == mclone_client::ActorPresentationId::RemotePlayer(to.id)
+                        })
+                        .map(|presentation| {
+                            (
+                                presentation.walk_animation_distance,
+                                client.packed_light_at_world_or_fullbright(
+                                    mclone_render_session::actor_light_probe_block_pos(
+                                        &presentation,
+                                    ),
+                                ),
+                            )
+                        })
+                })
+                .unwrap_or((0.0, mclone_render::light_texture::FULL_BRIGHT));
+            preview.record_remote_player_update(
+                from,
+                to,
+                walk_animation_distance,
+                source_packed_light,
+                self.services.clock.now(),
+            );
         }
         state.poll_count = state.poll_count.saturating_add(1);
         state.worst_runtime_poll_ms = state.worst_runtime_poll_ms.max(timing.runtime_poll_ms);
@@ -4208,6 +4281,10 @@ impl McloneSceneHost {
                 .max_queued_upload_mesh_owned_bytes
                 .max(upload.queued_upload_mesh_owned_bytes);
             preparation.source_priority_position = priority_position;
+            let runtime_stats = runtime.stats();
+            preparation.tracked_players = runtime_stats.tracked_players;
+            preparation.client_remote_player_count = runtime.client().remote_player_count();
+            preparation.debug_auxiliary_player_script = slot.scene.debug_auxiliary_player_script;
 
             if let Some(mutation) = preview.last_mutation.as_mut() {
                 if matches!(
@@ -5512,6 +5589,7 @@ pub fn local_integrated_scene_options(
         .with_freeze_time(scene.freeze_time)
         .with_cadence(scene.simulation_cadence)
         .with_debug_passive_showcase(scene.debug_passive_showcase)
+        .with_debug_auxiliary_player_script(scene.debug_auxiliary_player_script)
         .with_lighting_enabled(scene.lighting_enabled)
         .with_light_status_batch_size(scene.light_status_batch_size)
         .with_render_compile_worker_count(scene.render_compile_worker_count)

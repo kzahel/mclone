@@ -87,6 +87,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "warm_world_standby",
     "prepared_warm_world_shell",
     "managed_scenario_launch",
+    "debug_managed_scenario_auxiliary_player_script",
     "native_managed_scenario_adapter",
     "embedded_world_preview",
     "embedded_world_activation",
@@ -175,7 +176,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 22);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 82);
+    assert_eq!(host_fields.len(), 83);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")

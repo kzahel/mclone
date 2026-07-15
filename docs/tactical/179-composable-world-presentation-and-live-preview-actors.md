@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: active 2026-07-15. Slices 0-5 are complete; Slices 6-7 remain.
+Status: complete 2026-07-15. Slices 0-7 landed.
 
 Topic: `embedded-worlds`
 
@@ -1313,6 +1313,76 @@ Deliverables:
 Exit criteria: live authoritative creatures and joined players visibly move in
 the destination diorama through one shared implementation on native and web,
 without changing preview authority or regressing the single-world path.
+
+Completion record (2026-07-15): complete. Shared integrated-server player
+tracking now pairs the local `CommandTarget` and dedicated peers
+symmetrically under the same tracked-chunk policy. Add, update, appearance,
+walk, and removal facts flow through ordinary `RemotePlayerAdd`,
+`RemotePlayerUpdate`, and `RemotePlayerRemove` updates. The checked-in lobby
+fixture enables a shared Rust-authored auxiliary-player script only for its
+destination server. That script admits an ordinary dedicated player, accepts
+its teleport, selects the upright-bear appearance, and sends normal
+`MovePlayer` commands along a deterministic path. Browser TypeScript
+forwards only the enable bit and reports shared diagnostics; ownership locks
+reject TypeScript-authored poses, server updates, or visibility policy.
+
+Native flat rendering submits and draws two authoritative entities, one remote
+player, and the retained source-local player together. Remote player id `1`
+moves `0.725` source blocks from `(8.5, 66, 8.5)` to `(9.225, 66, 8.5)` and
+therefore exactly `0.090625` composition blocks at the `1:8` placement. Its
+walk distance advances from `71.46008` to `72.18508`, source light remains
+`15728640`, and the update is visible in one frame / `2.862 ms`. The frozen
+before/after witness changes about 29 pixels while the active world's direct
+actor counts remain `0 -> 0`. A-to-B-to-A keeps the same world-qualified id,
+the correct source-local body policy, and no duplicate figure. Synthetic
+stereo draws the same four preview actors in both eyes with 210,563 differing
+eye pixels.
+The initial/returned native receipts retain 589,824 actor GPU-capacity bytes
+and record 105 / 116 cumulative pose-driven mesh rebuilds and uploads.
+
+Production browser WebGPU is an equal acceptance lane through the same Rust
+scene, actor renderer, server, and client replica. Desktop and CPU-throttled
+mobile draw the same four actors, observe the same `0.725 -> 0.090625`
+movement and walk/light facts, publish the remote update in one frame / `0 ms`
+at report precision, and change 205 / 1,147 captured pixels. Main-renderer task
+upper bounds are 15.54% / 23.23%, maximum frame gaps are 9.34 / 9.33 ms, and
+the preview retains 589,824 actor GPU-capacity bytes. The desktop/mobile
+receipts record 111 / 103 pose-driven mesh rebuilds and uploads during the
+full probe. That is the characterized CPU-baked interpolation upload storm,
+not feature-off cost; reducing pose uploads without merging world-local mutable
+caches is a follow-up. The lifecycle gate preserves the bear and both creature
+ids through activation, return, edit, complete Worker shutdown, and relaunch,
+while cancellation, destination failure, asset replacement, renderer-resource
+rebuild, visibility suspension, and zero-Worker shutdown remain green.
+
+All new flat, stereo, desktop-browser, mobile-browser, lifecycle, Android, and
+movement images and reports were written under `/tmp` and inspected. The
+ordinary desktop offscreen witness remains byte-identical at SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+The final five native feature-off samples measured 2.271 ms median average and
+3.614 ms median P95, with ranges 2.195-2.276 / 3.333-4.105 ms, zero over-budget
+frames, and zero accounting violations. That improves on Slice 6's
+2.584/4.397 ms. Five browser feature-off samples measured 13.3/18.5 ms versus
+Slice 6's 12.9/18.3 ms. The new average/P95 ranges are 12.8-13.4 /
+18.4-20.9 ms. The +3.1% median-average change crosses the investigation
+trigger by 0.1 ms but remains inside the new average range; P95 changes 1.1%.
+A 92.37%-idle host check, identical two-actor direct
+draw, one compiler Worker, shared-result transport, zero overflow, and the
+exact image hash attribute this to measurement noise rather than a product
+regression.
+
+The final server, client, app-runtime, render-session, render, scene, and web
+suites, adapter-purity gates, wasm build, TypeScript checking, native
+flat/stereo/live-diorama/offscreen/XR-emulation gates, production browser
+thread/app/catalog/mobile/asset/edit/movement/remote and lobby desktop/mobile/
+lifecycle gates, flat Android APK plus both AVD smokes, Android XR release APK,
+desktop XR compile, formatting, and diff checks pass. The macOS Metal adapter
+still lacks `MULTIVIEW`, and no real headset was attached, so this closeout
+does not claim a new capable-device receipt; the shared full-frame path,
+synthetic stereo proof, Android XR package, and prior capable-device gates stay
+intact. No stop condition fired. The next bounded milestone is boundary-aware
+meshing for the renderer-only half-space seam, followed separately by collision
+and one-active-authority handoff.
 
 ## Validation Matrix
 

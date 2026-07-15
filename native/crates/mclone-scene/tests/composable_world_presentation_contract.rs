@@ -359,6 +359,11 @@ fn preview_actor_submission_is_shared_scene_policy_with_portable_diagnostics() {
         "actor_mesh_upload_count",
         "actor_gpu_capacity_bytes",
         "placed_actor_pipeline_count",
+        "remote_player_observation_count",
+        "remote_player_motion_sequence",
+        "last_remote_player_motion_from",
+        "last_remote_player_motion_to",
+        "last_remote_player_update_to_visible_frame_count",
     ] {
         assert!(
             diagnostics.contains(fact),
@@ -369,6 +374,9 @@ fn preview_actor_submission_is_shared_scene_policy_with_portable_diagnostics() {
     let web = read("../../apps/mclone-web-client/src/web_scene_host.rs");
     assert!(web.contains("embeddedPreviewActorSourceLocalPlayerCount"));
     assert!(web.contains("embeddedPreviewActorMeshRebuildCount"));
+    assert!(web.contains("embeddedPreviewRemotePlayerMotionSequence"));
+    assert!(web.contains("(\"SourceX\", observation.source_feet_position.x)"));
+    assert!(web.contains("embeddedPreviewFirstRemotePlayer{suffix}"));
     assert!(!web.contains("actor_instances_from_presentations"));
     assert!(!web.contains("local_player_actor_instance("));
 }
@@ -426,13 +434,17 @@ fn managed_scenario_payload_carries_shared_entity_codec_records() {
 }
 
 #[test]
-fn integrated_remote_player_tracking_currently_excludes_local_pairs() {
+fn integrated_remote_player_tracking_pairs_local_and_dedicated_symmetrically() {
     let server = read("../mclone-server/src/integrated.rs");
     let observer = braced_item(&server, "fn reconcile_remote_players_for_target_observer(");
     let subject = braced_item(&server, "fn reconcile_remote_player_subject(");
     let states = braced_item(&server, "fn remote_player_states(&self)");
-    assert!(observer.contains("target.dedicated_player_id()"));
+    let state = braced_item(&server, "fn remote_player_state(&self");
+    assert!(observer.contains("let observer = target.player_id()"));
+    assert!(!observer.contains("dedicated_player_id"));
+    assert!(subject.contains("subject == ServerPlayerId::LOCAL"));
     assert!(subject.contains("self.dedicated_players.contains(subject)"));
-    assert!(states.contains("self.dedicated_players"));
-    assert!(!states.contains("ServerPlayerId::LOCAL"));
+    assert!(states.contains("self.player_observers()"));
+    assert!(state.contains("player_id == ServerPlayerId::LOCAL"));
+    assert!(state.contains("self.dedicated_players.get(player_id)"));
 }

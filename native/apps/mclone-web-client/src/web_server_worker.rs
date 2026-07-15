@@ -58,6 +58,7 @@ pub struct WebIntegratedServerRunnerConfig {
     pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
     pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
+    pub debug_auxiliary_player_script: bool,
     pub light_status_batch_size: usize,
     pub worker_url: String,
     pub job_worker_url: String,
@@ -91,6 +92,7 @@ impl WebIntegratedServerRunnerConfig {
             world_behavior_profile: mclone_server::WorldBehaviorProfile::default(),
             freeze_scheduled_fluid_ticks: false,
             debug_passive_showcase: true,
+            debug_auxiliary_player_script: false,
             light_status_batch_size: mclone_server::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             worker_url: worker_url.into(),
             job_worker_url: job_worker_url.into(),
@@ -134,6 +136,11 @@ impl WebIntegratedServerRunnerConfig {
 
     pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
         self.debug_passive_showcase = enabled;
+        self
+    }
+
+    pub const fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
+        self.debug_auxiliary_player_script = enabled;
         self
     }
 
@@ -481,6 +488,11 @@ impl WebIntegratedServerRunner {
             &message,
             "debugPassiveShowcase",
             config.debug_passive_showcase,
+        )?;
+        set_bool(
+            &message,
+            "debugAuxiliaryPlayerScript",
+            config.debug_auxiliary_player_script,
         )?;
         set_number(
             &message,
@@ -1833,6 +1845,12 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = setDebugPassiveShowcaseEnabled)]
     pub fn set_debug_passive_showcase_enabled(&mut self, enabled: bool) {
         self.server.set_debug_passive_showcase_enabled(enabled);
+    }
+
+    #[wasm_bindgen(js_name = setDebugAuxiliaryPlayerScriptEnabled)]
+    pub fn set_debug_auxiliary_player_script_enabled(&mut self, enabled: bool) {
+        self.server
+            .set_debug_auxiliary_player_script_enabled(enabled);
     }
 
     #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]

@@ -17,9 +17,9 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    ChunkView, ClientCommand, InteractionHand, MovePlayerCommand, PlayerActionCommand,
-    PlayerActionKind, ServerUpdate, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
-    SetPlayerAppearanceCommand, UseItemOnCommand,
+    AcceptTeleportCommand, ChunkView, ClientCommand, InteractionHand, MovePlayerCommand,
+    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind, ServerUpdate,
+    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -99,8 +99,10 @@ pub struct IntegratedServer {
     initial_spawn_center: Option<ChunkPos>,
     local_player_active: bool,
     player: ServerPlayerState,
+    local_player_appearance: PlayerAppearance,
     inventory: ServerInventory,
     dedicated_players: ServerPlayerList,
+    debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
     chunk_tracking: PlayerChunkTracking,
     remote_players: RemotePlayerTracking,
     entities: ServerEntityStore,
@@ -152,6 +154,30 @@ pub const INITIAL_DAY_TIME: u64 = 1000;
 enum CommandTarget {
     Local,
     Dedicated(ServerPlayerId),
+}
+
+/// Shared Rust-authored validation actor. Platform adapters may only enable or
+/// disable the script; all admission, appearance, and movement facts travel
+/// through ordinary authoritative player commands.
+#[derive(Clone, Copy, Debug)]
+struct DebugAuxiliaryPlayerScript {
+    player_id: ServerPlayerId,
+    view_requested: bool,
+    accepted_position: bool,
+    current_position: Vec3d,
+    move_sequence: u64,
+}
+
+impl DebugAuxiliaryPlayerScript {
+    fn new(player_id: ServerPlayerId) -> Self {
+        Self {
+            player_id,
+            view_requested: false,
+            accepted_position: false,
+            current_position: Vec3d::new(8.5, 66.0, 8.5),
+            move_sequence: 0,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -324,6 +350,8 @@ impl IntegratedServer {
         let mut chunk_tracking = PlayerChunkTracking::new(policy);
         chunk_tracking.add_player(ServerPlayerId::LOCAL);
         let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
+        let mut remote_players = RemotePlayerTracking::default();
+        remote_players.add_player(ServerPlayerId::LOCAL);
         Self {
             seed,
             biome_source: ServerBiomeSource::new(seed),
@@ -340,10 +368,12 @@ impl IntegratedServer {
             initial_spawn_center: None,
             local_player_active: true,
             player: ServerPlayerState::default(),
+            local_player_appearance: PlayerAppearance::default(),
             inventory: ServerInventory::default(),
             dedicated_players: ServerPlayerList::default(),
+            debug_auxiliary_player_script: None,
             chunk_tracking,
-            remote_players: RemotePlayerTracking::default(),
+            remote_players,
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
             dirty_entity_chunks: BTreeSet::new(),
@@ -387,6 +417,28 @@ impl IntegratedServer {
 
     pub fn set_debug_passive_showcase_enabled(&mut self, enabled: bool) {
         self.debug_passive_showcase_enabled = enabled;
+    }
+
+    pub fn set_debug_auxiliary_player_script_enabled(&mut self, enabled: bool) {
+        match (enabled, self.debug_auxiliary_player_script.take()) {
+            (true, Some(script)) => {
+                self.debug_auxiliary_player_script = Some(script);
+            }
+            (true, None) => {
+                let player_id = self.add_dedicated_player();
+                self.debug_auxiliary_player_script =
+                    Some(DebugAuxiliaryPlayerScript::new(player_id));
+            }
+            (false, Some(script)) => {
+                let _ = self.remove_dedicated_player(script.player_id);
+            }
+            (false, None) => {}
+        }
+    }
+
+    pub fn debug_auxiliary_player_id(&self) -> Option<ServerPlayerId> {
+        self.debug_auxiliary_player_script
+            .map(|script| script.player_id)
     }
 
     pub fn set_volatile_natural_spawning_enabled(&mut self, enabled: bool) {
@@ -504,6 +556,8 @@ impl IntegratedServer {
             return;
         }
         self.local_player_active = false;
+        let routes = self.remote_players.remove_player(ServerPlayerId::LOCAL);
+        self.route_remote_player_updates(routes);
         self.entity_tracking.remove_observer(ServerPlayerId::LOCAL);
         self.remove_player_chunk_tracking(ServerPlayerId::LOCAL);
     }
@@ -854,6 +908,7 @@ impl IntegratedServer {
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
         self.mark_player_tick_boundaries();
+        self.advance_debug_auxiliary_player_script()?;
 
         // Advance the day/night clock one tick (Java `ServerLevel.tickTime` with
         // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
@@ -1353,6 +1408,89 @@ impl IntegratedServer {
         Ok(updates)
     }
 
+    fn advance_debug_auxiliary_player_script(&mut self) -> ChunkStoreResult<()> {
+        let Some(mut script) = self.debug_auxiliary_player_script.take() else {
+            return Ok(());
+        };
+        let result = (|| {
+            let updates = if script.view_requested {
+                self.try_drain_updates_for_player(script.player_id)?
+            } else {
+                script.view_requested = true;
+                self.try_handle_command_for_player(
+                    script.player_id,
+                    ClientCommand::SetChunkView(ChunkView {
+                        center: ChunkPos::new(0, 0),
+                        render_distance: 0,
+                        chunk_tracking_radius: 0,
+                    }),
+                )?
+            };
+            if let Some(position_update) = updates.iter().rev().find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(*update),
+                _ => None,
+            }) {
+                script.current_position = position_update.position;
+                self.try_handle_command_for_player(
+                    script.player_id,
+                    ClientCommand::SetPlayerAppearance(SetPlayerAppearanceCommand {
+                        appearance: PlayerAppearance {
+                            model: PlayerModelKind::UprightBear,
+                        },
+                    }),
+                )?;
+                self.try_handle_command_for_player(
+                    script.player_id,
+                    ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                        id: position_update.teleport_id,
+                    }),
+                )?;
+                script.accepted_position = true;
+            }
+            if !script.accepted_position {
+                return Ok(());
+            }
+
+            let anchor = Vec3d::new(8.5, 66.0, 8.5);
+            let to_anchor = anchor.subtract(script.current_position);
+            let desired = if to_anchor.length_sqr() > 0.25 * 0.25 {
+                let distance = to_anchor.length_sqr().sqrt();
+                script
+                    .current_position
+                    .add(to_anchor.scale(1.0_f64.min(distance) / distance))
+            } else {
+                let phase = script.move_sequence % 80;
+                let offset = if phase < 40 {
+                    f64::from(phase as u32) * 0.025
+                } else {
+                    f64::from((80 - phase) as u32) * 0.025
+                };
+                Vec3d::new(anchor.x + offset, anchor.y, anchor.z)
+            };
+            let y_rot_degrees = if desired.x >= script.current_position.x {
+                -90.0
+            } else {
+                90.0
+            };
+            self.try_handle_command_for_player(
+                script.player_id,
+                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                    position: desired,
+                    y_rot_degrees,
+                    x_rot_degrees: 0.0,
+                    on_ground: true,
+                }),
+            )?;
+            script.current_position = self
+                .dedicated_player_position(script.player_id)
+                .unwrap_or(script.current_position);
+            script.move_sequence = script.move_sequence.saturating_add(1);
+            Ok(())
+        })();
+        self.debug_auxiliary_player_script = Some(script);
+        result
+    }
+
     fn handle_accept_teleport_for_target(
         &mut self,
         target: CommandTarget,
@@ -1379,14 +1517,23 @@ impl IntegratedServer {
         target: CommandTarget,
         command: SetPlayerAppearanceCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        let Some(player_id) = target.dedicated_player_id() else {
-            return Ok(Vec::new());
+        let player_id = target.player_id();
+        let changed = match target {
+            CommandTarget::Local => {
+                let changed = self.local_player_appearance != command.appearance;
+                self.local_player_appearance = command.appearance;
+                changed
+            }
+            CommandTarget::Dedicated(player_id) => {
+                let Some(player) = self.dedicated_players.get_mut(player_id) else {
+                    return Err(unknown_player_error(player_id));
+                };
+                let changed = player.appearance != command.appearance;
+                player.appearance = command.appearance;
+                changed
+            }
         };
-        let Some(player) = self.dedicated_players.get_mut(player_id) else {
-            return Err(unknown_player_error(player_id));
-        };
-        if player.appearance != command.appearance {
-            player.appearance = command.appearance;
+        if changed {
             self.reconcile_remote_player_subject(player_id, true);
         }
         Ok(Vec::new())
@@ -1679,9 +1826,10 @@ impl IntegratedServer {
     }
 
     fn reconcile_remote_players_for_target_observer(&mut self, target: CommandTarget) {
-        let Some(observer) = target.dedicated_player_id() else {
+        let observer = target.player_id();
+        if observer == ServerPlayerId::LOCAL && !self.local_player_active {
             return;
-        };
+        }
         let states = self.remote_player_states();
         let chunk_tracking = &self.chunk_tracking;
         let routes = self
@@ -1697,17 +1845,15 @@ impl IntegratedServer {
         subject: ServerPlayerId,
         emit_existing_updates: bool,
     ) {
-        if !self.dedicated_players.contains(subject) {
+        if subject == ServerPlayerId::LOCAL && !self.local_player_active
+            || subject != ServerPlayerId::LOCAL && !self.dedicated_players.contains(subject)
+        {
             return;
         }
         let Some(state) = self.remote_player_state(subject) else {
             return;
         };
-        let observers = self
-            .dedicated_players
-            .iter()
-            .map(|(player_id, _)| player_id)
-            .collect::<Vec<_>>();
+        let observers = self.player_observers();
         let chunk_tracking = &self.chunk_tracking;
         let routes = self.remote_players.reconcile_subject(
             state,
@@ -1719,16 +1865,27 @@ impl IntegratedServer {
     }
 
     fn remote_player_states(&self) -> Vec<RemotePlayerState> {
-        self.dedicated_players
-            .iter()
-            .map(|(player_id, _)| {
+        self.player_observers()
+            .into_iter()
+            .map(|player_id| {
                 self.remote_player_state(player_id)
-                    .expect("iterated dedicated player must have state")
+                    .expect("iterated player observer must have state")
             })
             .collect()
     }
 
     fn remote_player_state(&self, player_id: ServerPlayerId) -> Option<RemotePlayerState> {
+        if player_id == ServerPlayerId::LOCAL {
+            return self.local_player_active.then_some(RemotePlayerState {
+                player_id,
+                appearance: self.local_player_appearance,
+                position: self.player.position(),
+                y_rot_degrees: self.player.y_rot_degrees(),
+                x_rot_degrees: self.player.x_rot_degrees(),
+                on_ground: self.player.on_ground(),
+                publishable: self.player.has_accepted_position(),
+            });
+        }
         let player = self.dedicated_players.get(player_id)?;
         Some(RemotePlayerState {
             player_id,
@@ -2087,13 +2244,6 @@ impl CommandTarget {
         match self {
             CommandTarget::Local => ServerPlayerId::LOCAL,
             CommandTarget::Dedicated(player_id) => player_id,
-        }
-    }
-
-    const fn dedicated_player_id(self) -> Option<ServerPlayerId> {
-        match self {
-            CommandTarget::Local => None,
-            CommandTarget::Dedicated(player_id) => Some(player_id),
         }
     }
 }

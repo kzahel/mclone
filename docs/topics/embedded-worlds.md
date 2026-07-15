@@ -10,9 +10,9 @@ worlds.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
-protected lobby productization milestone, and completed shared Web/WASM lobby
-parity, followed by an active composable-world-presentation and live-preview
-actor milestone through completed Slices 0-6. Portable scenario content,
+protected lobby productization milestone, completed shared Web/WASM lobby
+parity, and a completed composable-world-presentation and live-preview actor
+milestone through Slice 7. Portable scenario content,
 shared immutable second-slot terrain and actor resources, per-world actor
 presentation/cache state, slot-targeted startup/readiness/activation/swap policy,
 catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
@@ -110,9 +110,9 @@ feature-off remains within the attributed noise envelope. Desktop and 2x
 CPU-throttled mobile scenario receipts reached the lobby in 306/315 ms and the
 preview 1.234/1.602 s later, with about 10.3 ms maximum measured frame gaps.
 
-The active next renderer milestone is
+The completed renderer milestone is
 [`179-composable-world-presentation-and-live-preview-actors.md`](../tactical/179-composable-world-presentation-and-live-preview-actors.md).
-Its first six slices have characterized actor ownership, normalized the
+Its first six slices characterized actor ownership, normalized the
 existing placed-terrain path around distinct placement, source-bounds, and
 composition-clip contracts, and landed opt-in portable half-space terrain
 clipping. One shared renderer fixture now draws complementary `x <= 0` and
@@ -149,16 +149,30 @@ source/composed displacement, publish it to a visible frame in one frame, and
 show changed tabletop pixels. A-to-B-to-A and full reopen retain both entity
 ids without duplication, while TypeScript remains only a storage/Worker
 adapter. The native and browser direct paths remain within their measured
-noise envelopes. Closeout still requires joined-player movement in the native
-and browser diorama through ordinary multiplayer updates.
-Boundary-face resolution, collision, and authority handoff remain later
-split-world work.
+noise envelopes. Slice 7 closes the joined-player requirement: shared
+integrated-server tracking pairs local and dedicated players symmetrically,
+and a shared Rust-authored destination script drives one
+ordinary dedicated player through normal appearance, teleport, and
+`MovePlayer` admission. Native and production browser desktop/mobile receipts
+draw the two creatures, remote upright-bear player, and retained source-local
+player together. The remote player moves 0.725 source blocks and exactly
+0.090625 composition blocks at 1:8, advances its walk animation, retains source
+light, and becomes visible in one frame. A-to-B-to-A and full browser shutdown/
+relaunch retain world-qualified identity without duplication. TypeScript only
+forwards the enable bit and shared diagnostic facts; it owns no pose, protocol
+update, or visibility implementation. Feature-on receipts characterize the
+CPU-baked actor mesh upload storm while the final native/browser feature-off
+controls, direct image hash, Android/Android XR packaging, flat AVD, synthetic
+stereo, and desktop XR compile lanes remain accepted.
+
+Boundary-face resolution is now the next bounded renderer problem. Collision
+and one-active-authority handoff remain separate later split-world work.
 
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
 multiview execution remains a named receipt gap. Last reconciled: 2026-07-15
-(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-6 complete; the
+(Tactical 178 Slices 0-8 complete; Tactical 179 Slices 0-7 complete; the
 current Metal adapter did not expose `MULTIVIEW`, and no headset was attached
 for a new real-device scenario receipt).
 
@@ -771,13 +785,14 @@ typed runtime operation. Shutdown leaves zero server, compiler, or
 provisioning Workers. Feature-off native/browser comparisons and scenario-on
 CPU/frame/memory/Worker receipts are recorded in the tactical.
 
-Tactical 179 is the next bounded composition campaign. It keeps that shared
-runtime/platform foundation, extracts one terrain-led placement/bounds/clip
-context without touching the direct path, proves complementary half-space
-coverage through portable WebGPU shaders, and makes actors the second renderer
+Tactical 179 completed the bounded composition campaign. It kept that shared
+runtime/platform foundation, extracted one terrain-led placement/bounds/clip
+context without touching the direct path, proved complementary half-space
+coverage through portable WebGPU shaders, and made actors the second renderer
 consumer. Its product endpoint is live destination creatures and players on the
-table on native and web; its half-space proof deliberately stops before voxel
-boundary faces or traversal.
+table on native and web. Its renderer-only half-space proof deliberately stops
+before voxel boundary faces or traversal, which is now the next focused
+renderer direction.
 
 The warm-swap and opaque-gate proof lives in
 [`174-warm-world-hot-swap.md`](../tactical/174-warm-world-hot-swap.md); the
@@ -796,9 +811,9 @@ bounded simultaneous-geometry plan lives in
 4. Keep Tactical 178's shared web provisioning, dual-runtime compiler
    identity, activation/persistence lifecycle, and feature-off performance
    gates green.
-5. Implement Tactical 179's terrain normalization, half-space proof, per-world
-   actor ownership, and live creature/player diorama through one shared native
-   and web path.
+5. Keep Tactical 179's completed terrain normalization, half-space proof,
+   per-world actor ownership, and live creature/player diorama green through
+   one shared native and web path.
 6. Bind the proven lobby to the most recently *actively played* compatible
    local world. A background preview open must not itself update catalog
    recency.

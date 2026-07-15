@@ -1162,6 +1162,12 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
                 &asset_source,
                 startup_camera,
             )?;
+            if !host
+                .scene_host()
+                .debug_managed_scenario_auxiliary_player_script_enabled()
+            {
+                bail!("scene host lost the lobby auxiliary-player validation option");
+            }
             host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Idle)?;
             let one_world_process =
                 (cost_sample_ms > 0).then(|| sample_idle_process(cost_sample_ms));
@@ -2227,12 +2233,19 @@ struct LobbyScenarioSmokeState {
         mclone_scene::EmbeddedWorldPreviewRenderSnapshot,
     )>,
     motion_receipt: Option<mclone_scene::EmbeddedWorldPreviewRenderSnapshot>,
+    remote_motion_receipt: Option<mclone_scene::EmbeddedWorldPreviewRenderSnapshot>,
+    remote_motion_world: Option<mclone_scene::WorldInstanceId>,
+    initial_remote_motion_sequence: u64,
+    active_actor_counts_before_motion: Option<(usize, usize)>,
 }
 
 pub(crate) fn run_lobby_scenario_smoke(
     options: &LobbyScenarioSmokeOptions,
 ) -> Result<LobbyScenarioSmokeReport> {
     const FRAME_COUNT: usize = 320;
+    if !options.scene.debug_auxiliary_player_script {
+        bail!("lobby scenario smoke requires the shared auxiliary-player script");
+    }
     if options.directory.exists() {
         std::fs::remove_dir_all(&options.directory).with_context(|| {
             format!(
@@ -2280,6 +2293,10 @@ pub(crate) fn run_lobby_scenario_smoke(
                 captures: Vec::with_capacity(6),
                 actor_receipts: Vec::with_capacity(3),
                 motion_receipt: None,
+                remote_motion_receipt: None,
+                remote_motion_world: None,
+                initial_remote_motion_sequence: 0,
+                active_actor_counts_before_motion: None,
             })
         },
         |frame_index, frame, state| {
@@ -2408,10 +2425,36 @@ pub(crate) fn run_lobby_scenario_smoke(
                             preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
                                 && preview.last_drawn_section_count > 0
                                 && preview.render.last_actor_entity_count == 2
-                                && preview.render.last_drawn_actor_count == 3
+                                && preview.render.last_actor_remote_player_count == 1
+                                && preview.render.last_drawn_actor_count == 4
                                 && preview.render.actor_observation_count == 2
+                                && preview.render.remote_player_observation_count == 1
                         })
                     {
+                        let preview = state
+                            .host
+                            .scene_host()
+                            .embedded_world_preview_snapshot()
+                            .expect("visible preview checked above");
+                        let remote = preview
+                            .render
+                            .first_remote_player_observation
+                            .context("live preview omitted auxiliary player observation")?;
+                        if remote.appearance.model != mclone_protocol::PlayerModelKind::UprightBear
+                            || remote.source_packed_light == 0
+                        {
+                            bail!("live preview auxiliary player facts are incomplete: {remote:?}");
+                        }
+                        state.initial_remote_motion_sequence =
+                            preview.render.remote_player_motion_sequence;
+                        let active = state
+                            .host
+                            .driver
+                            .last_summary()
+                            .context("live preview initial frame has no render summary")?
+                            .render;
+                        state.active_actor_counts_before_motion =
+                            Some((active.actor_count, active.drawn_actor_count));
                         state
                             .captures
                             .push(("lobby-with-preview-initial", frame_index));
@@ -2423,7 +2466,11 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .host
                         .scene_host()
                         .embedded_world_preview_snapshot()
-                        .is_some_and(|preview| preview.render.actor_motion_sequence > 0)
+                        .is_some_and(|preview| {
+                            preview.render.actor_motion_sequence > 0
+                                && preview.render.remote_player_motion_sequence
+                                    > state.initial_remote_motion_sequence
+                        })
                     {
                         let preview = state
                             .host
@@ -2466,11 +2513,71 @@ pub(crate) fn run_lobby_scenario_smoke(
                                 "lobby actor composition motion did not preserve placement scale: source={source_distance} composition={composition_distance} expected={expected_composition_distance}"
                             );
                         }
+                        let remote_from = preview
+                            .render
+                            .last_remote_player_motion_from
+                            .context("moving lobby preview has no remote-player source pose")?;
+                        let remote_to = preview.render.last_remote_player_motion_to.context(
+                            "moving lobby preview has no remote-player destination pose",
+                        )?;
+                        if remote_from.player_id != remote_to.player_id
+                            || remote_to.appearance.model
+                                != mclone_protocol::PlayerModelKind::UprightBear
+                            || remote_from.source_feet_position == remote_to.source_feet_position
+                            || remote_from.composition_feet_position
+                                == remote_to.composition_feet_position
+                            || remote_to.walk_animation_distance
+                                <= remote_from.walk_animation_distance
+                            || remote_to.source_packed_light == 0
+                            || preview
+                                .render
+                                .last_remote_player_update_to_visible_frame_count
+                                != 1
+                        {
+                            bail!(
+                                "lobby remote-player motion receipt is incomplete: {:?}",
+                                preview.render
+                            );
+                        }
+                        let remote_source_distance = remote_from
+                            .source_feet_position
+                            .distance_to_sqr(remote_to.source_feet_position)
+                            .sqrt();
+                        let remote_composition_distance = remote_from
+                            .composition_feet_position
+                            .distance_to_sqr(remote_to.composition_feet_position)
+                            .sqrt();
+                        if (remote_composition_distance
+                            - remote_source_distance * preview.placement.uniform_scale())
+                        .abs()
+                            > 1.0e-6
+                        {
+                            bail!(
+                                "remote-player composition motion did not preserve placement scale"
+                            );
+                        }
+                        let active = state
+                            .host
+                            .driver
+                            .last_summary()
+                            .context("live preview moved frame has no render summary")?
+                            .render;
+                        if state.active_actor_counts_before_motion
+                            != Some((active.actor_count, active.drawn_actor_count))
+                        {
+                            bail!(
+                                "destination player motion changed active-world actor counts: before={:?} after={:?}",
+                                state.active_actor_counts_before_motion,
+                                (active.actor_count, active.drawn_actor_count)
+                            );
+                        }
                         state
                             .captures
                             .push(("lobby-with-preview-moved", frame_index));
                         state.actor_receipts.push(("lobby", preview.render));
                         state.motion_receipt = Some(preview.render);
+                        state.remote_motion_receipt = Some(preview.render);
+                        state.remote_motion_world = Some(preview.source_world);
                         state.phase = LobbyScenarioSmokePhase::ActivatingPreview;
                     }
                 }
@@ -2509,6 +2616,18 @@ pub(crate) fn run_lobby_scenario_smoke(
                                 && preview.render.last_drawn_actor_count > 0
                         })
                     {
+                        let active_client = state
+                            .host
+                            .scene_host()
+                            .mono_client()
+                            .context("active island has no client replica")?;
+                        if active_client.entity_count() != 2
+                            || active_client.remote_player_count() != 1
+                        {
+                            bail!(
+                                "activation did not preserve one ordinary remote peer beside island entities"
+                            );
+                        }
                         state
                             .captures
                             .push(("island-with-return-preview", frame_index));
@@ -2546,8 +2665,10 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .is_some_and(|preview| {
                             preview.last_drawn_section_count > 0
                                 && preview.render.last_actor_entity_count == 2
-                                && preview.render.last_drawn_actor_count == 3
+                                && preview.render.last_actor_remote_player_count == 1
+                                && preview.render.last_drawn_actor_count == 4
                                 && preview.render.actor_observation_count == 2
+                                && preview.render.remote_player_observation_count == 1
                         })
                     {
                         state.captures.push(("returned-lobby", frame_index));
@@ -2567,6 +2688,24 @@ pub(crate) fn run_lobby_scenario_smoke(
                         }) {
                             bail!(
                                 "A-to-B-to-A return duplicated or reset the moving actor: {:?}",
+                                preview.render
+                            );
+                        }
+                        let moved_remote = state
+                            .remote_motion_receipt
+                            .and_then(|receipt| receipt.last_remote_player_motion_to)
+                            .context("returned lobby has no remote-player movement witness")?;
+                        let returned_remote = preview
+                            .render
+                            .first_remote_player_observation
+                            .context("returned lobby omitted its remote player")?;
+                        if returned_remote.player_id != moved_remote.player_id
+                            || returned_remote.appearance != moved_remote.appearance
+                            || preview.render.last_actor_remote_player_count != 1
+                            || preview.render.last_actor_source_local_player_count != 1
+                        {
+                            bail!(
+                                "A-to-B-to-A duplicated or collided source-local and remote player figures: {:?}",
                                 preview.render
                             );
                         }
@@ -2618,8 +2757,10 @@ pub(crate) fn run_lobby_scenario_smoke(
                                 preview.phase == mclone_scene::EmbeddedWorldPreviewPhase::Visible
                                     && preview.last_drawn_section_count > 0
                                     && preview.render.last_actor_entity_count == 2
-                                    && preview.render.last_drawn_actor_count == 3
+                                    && preview.render.last_actor_remote_player_count == 1
+                                    && preview.render.last_drawn_actor_count == 4
                                     && preview.render.actor_observation_count == 2
+                                    && preview.render.remote_player_observation_count == 1
                             })
                     {
                         if state.host.scene_host().active_world_behavior_profile()
@@ -2665,10 +2806,11 @@ pub(crate) fn run_lobby_scenario_smoke(
 
     if state.phase != LobbyScenarioSmokePhase::Complete || state.captures.len() != 6 {
         bail!(
-            "lobby scenario smoke did not complete in {FRAME_COUNT} frames: phase={:?} captures={:?} standby={:?}",
+            "lobby scenario smoke did not complete in {FRAME_COUNT} frames: phase={:?} captures={:?} standby={:?} preview={:?}",
             state.phase,
             state.captures,
-            state.host.scene_host().warm_world_standby_snapshot()
+            state.host.scene_host().warm_world_standby_snapshot(),
+            state.host.scene_host().embedded_world_preview_snapshot()
         );
     }
     if state.actor_receipts.len() != 3 {
@@ -2736,7 +2878,7 @@ pub(crate) fn run_lobby_scenario_smoke(
         bail!("reopened lobby destination is not switchable: {scenario_cost:?}");
     }
     let receipt = serde_json::json!({
-        "schema": 1,
+        "schema": 2,
         "captures": state.captures.iter().map(|(label, frame)| {
             serde_json::json!({ "label": label, "frame": frame })
         }).collect::<Vec<_>>(),
@@ -2779,6 +2921,27 @@ pub(crate) fn run_lobby_scenario_smoke(
                     "sourcePackedLight": to.source_packed_light,
                     "updateToVisibleMs": receipt.last_actor_update_to_visible_ms,
                     "updateToVisibleFrames": receipt.last_actor_update_to_visible_frame_count,
+                    "pixelDifferenceRatio": actor_motion_pixel_difference_ratio,
+                })
+            })
+        }),
+        "remotePlayerMotion": state.remote_motion_receipt.and_then(|receipt| {
+            receipt.last_remote_player_motion_from.zip(receipt.last_remote_player_motion_to).map(|(from, to)| {
+                serde_json::json!({
+                    "sequence": receipt.remote_player_motion_sequence,
+                    "worldInstanceId": state.remote_motion_world.map(|world| world.get().to_string()),
+                    "playerId": to.player_id.0.to_string(),
+                    "model": format!("{:?}", to.appearance.model),
+                    "fromSource": [from.source_feet_position.x, from.source_feet_position.y, from.source_feet_position.z],
+                    "toSource": [to.source_feet_position.x, to.source_feet_position.y, to.source_feet_position.z],
+                    "fromComposition": [from.composition_feet_position.x, from.composition_feet_position.y, from.composition_feet_position.z],
+                    "toComposition": [to.composition_feet_position.x, to.composition_feet_position.y, to.composition_feet_position.z],
+                    "fromWalkDistance": from.walk_animation_distance,
+                    "toWalkDistance": to.walk_animation_distance,
+                    "sourcePackedLight": to.source_packed_light,
+                    "updateToVisibleMs": receipt.last_remote_player_update_to_visible_ms,
+                    "updateToVisibleFrames": receipt.last_remote_player_update_to_visible_frame_count,
+                    "activeActorCountsBeforeAndAfter": state.active_actor_counts_before_motion,
                     "pixelDifferenceRatio": actor_motion_pixel_difference_ratio,
                 })
             })

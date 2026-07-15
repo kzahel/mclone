@@ -632,6 +632,7 @@ mod native {
         pub day_time_frozen: bool,
         pub scheduled_fluid_ticks_frozen: bool,
         pub debug_passive_showcase: bool,
+        pub debug_auxiliary_player_script: bool,
         pub tick_interval: Duration,
         pub cadence: SimulationCadenceConfig,
         pub publication_budget: ChunkPublicationBudgetConfig,
@@ -651,6 +652,7 @@ mod native {
                 day_time_frozen: false,
                 scheduled_fluid_ticks_frozen: false,
                 debug_passive_showcase: true,
+                debug_auxiliary_player_script: false,
                 tick_interval: Duration::from_millis(50),
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
                 publication_budget: ChunkPublicationBudgetConfig::disabled(),
@@ -696,6 +698,11 @@ mod native {
 
         pub fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
             self.debug_passive_showcase = enabled;
+            self
+        }
+
+        pub fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
+            self.debug_auxiliary_player_script = enabled;
             self
         }
 
@@ -1098,6 +1105,7 @@ mod native {
         server.set_day_time_frozen(config.day_time_frozen);
         server.set_scheduled_fluid_ticks_frozen(config.scheduled_fluid_ticks_frozen);
         server.set_debug_passive_showcase_enabled(config.debug_passive_showcase);
+        server.set_debug_auxiliary_player_script_enabled(config.debug_auxiliary_player_script);
         if let Some(day_time) = config.day_time {
             server.set_day_time(day_time);
         }

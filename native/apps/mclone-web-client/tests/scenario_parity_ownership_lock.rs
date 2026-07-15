@@ -102,6 +102,40 @@ fn browser_runtime_honors_the_shared_managed_actor_policy() {
 }
 
 #[test]
+fn browser_auxiliary_player_control_only_enables_the_shared_rust_script() {
+    assert!(SCENE_SESSION.contains("scene.debug_auxiliary_player_script ="));
+    assert!(WEB_SCENE_HOST.contains(
+        ".with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)"
+    ));
+    assert!(WEB_SERVER_WORKER.contains("\"debugAuxiliaryPlayerScript\""));
+    assert!(INTEGRATED_SERVER_WORKER.contains("setDebugAuxiliaryPlayerScriptEnabled"));
+    for forwarded_fact in [
+        "embeddedPreviewRemotePlayerObservationCount",
+        "embeddedPreviewFirstRemotePlayerId",
+        "embeddedPreviewFirstRemotePlayerSourceX",
+        "embeddedPreviewRemotePlayerMotionSequence",
+        "embeddedPreviewRemotePlayerMotionFromSourceX",
+        "embeddedPreviewRemotePlayerMotionToCompositionX",
+    ] {
+        assert!(
+            WEB_APP.contains(forwarded_fact),
+            "browser app must forward shared Rust receipt {forwarded_fact}"
+        );
+    }
+    for forbidden in [
+        "MovePlayer",
+        "RemotePlayerAdd",
+        "RemotePlayerUpdate",
+        "ServerUpdate",
+    ] {
+        assert!(
+            !INTEGRATED_SERVER_WORKER.contains(forbidden),
+            "TypeScript integrated-server Worker must not author {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
     assert!(APP_RUNTIME_LIB.contains("pub mod scenario_content;"));
     assert!(!APP_RUNTIME_LIB.contains(

@@ -89,6 +89,7 @@ pub const QUERY_FREEZE_TIME: &str = "freezeTime";
 pub const QUERY_MOVEMENT_SPEED_MULTIPLIER: &str = "movementSpeedMultiplier";
 pub const QUERY_MOVEMENT_MODE: &str = "movementMode";
 pub const QUERY_DEBUG_PASSIVE_SHOWCASE: &str = "debugPassiveShowcase";
+pub const QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT: &str = "debugAuxiliaryPlayerScript";
 pub const QUERY_LIGHTING: &str = "lighting";
 pub const QUERY_LIGHT_STATUS_BATCH_SIZE: &str = "lightStatusBatchSize";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
@@ -112,6 +113,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_MOVEMENT_SPEED_MULTIPLIER,
     QUERY_MOVEMENT_MODE,
     QUERY_DEBUG_PASSIVE_SHOWCASE,
+    QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT,
     QUERY_LIGHTING,
     QUERY_LIGHT_STATUS_BATCH_SIZE,
     QUERY_SECTION_OCCLUSION,
@@ -154,6 +156,7 @@ pub struct StartupSceneOptions {
     pub movement_speed_multiplier: f32,
     pub movement_mode: GameMovementMode,
     pub debug_passive_showcase: bool,
+    pub debug_auxiliary_player_script: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
     /// Shared far-terrain LOD startup config. Disabled by default on every
@@ -179,6 +182,7 @@ impl Default for StartupSceneOptions {
             movement_speed_multiplier: ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER as f32,
             movement_mode: GameMovementMode::Walk,
             debug_passive_showcase: true,
+            debug_auxiliary_player_script: false,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             far_lod: FarTerrainLodConfig::default(),
@@ -547,6 +551,10 @@ impl StartupArgState {
                 self.scene.debug_passive_showcase =
                     parse_bool_arg(QUERY_DEBUG_PASSIVE_SHOWCASE, value)?;
             }
+            QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT => {
+                self.scene.debug_auxiliary_player_script =
+                    parse_bool_arg(QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT, value)?;
+            }
             QUERY_LIGHTING => {
                 self.scene.lighting_enabled = parse_bool_arg(QUERY_LIGHTING, value)?;
             }
@@ -822,6 +830,7 @@ mod tests {
                 movement_speed_multiplier: 1.0,
                 movement_mode: GameMovementMode::Walk,
                 debug_passive_showcase: true,
+                debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 far_lod: FarTerrainLodConfig::default(),
@@ -963,6 +972,7 @@ mod tests {
                 movement_speed_multiplier: 2.5,
                 movement_mode: GameMovementMode::Fly,
                 debug_passive_showcase: false,
+                debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
                 far_lod: FarTerrainLodConfig::enabled().with_detail_mode(FarLodDetailMode::Fixed16),
@@ -1218,6 +1228,7 @@ mod tests {
             (QUERY_FREEZE_TIME, ""),
             (QUERY_MOVEMENT_SPEED_MULTIPLIER, "0.5"),
             (QUERY_DEBUG_PASSIVE_SHOWCASE, "false"),
+            (QUERY_DEBUG_AUXILIARY_PLAYER_SCRIPT, "true"),
             (QUERY_LIGHTING, "false"),
             (QUERY_LIGHT_STATUS_BATCH_SIZE, "5"),
             (QUERY_SECTION_OCCLUSION, "false"),
@@ -1256,6 +1267,7 @@ mod tests {
                 movement_speed_multiplier: 0.5,
                 movement_mode: GameMovementMode::Walk,
                 debug_passive_showcase: false,
+                debug_auxiliary_player_script: true,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
                 far_lod: FarTerrainLodConfig::default(),

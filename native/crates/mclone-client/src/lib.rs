@@ -272,6 +272,10 @@ impl ClientRuntime {
         self.remote_players.len()
     }
 
+    pub fn remote_player_snapshots(&self) -> impl Iterator<Item = &RemotePlayerUpdate> {
+        self.remote_players.values()
+    }
+
     pub fn entity(&self, id: EntityId) -> Option<&EntitySnapshot> {
         self.entities.get(&id)
     }

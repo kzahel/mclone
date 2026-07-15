@@ -18,7 +18,9 @@ use mclone_app_runtime::session::ActiveSessionDescriptor;
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
-use mclone_protocol::{EntityId, EntityKind, EntitySnapshot};
+use mclone_protocol::{
+    EntityId, EntityKind, EntitySnapshot, PlayerAppearance, RemotePlayerId, RemotePlayerUpdate,
+};
 use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
 use mclone_render::entity::{ActorDrawResourceSnapshot, ActorRenderStats};
@@ -547,6 +549,9 @@ pub struct EmbeddedWorldPreviewPreparationSnapshot {
     pub queued_upload_mesh_owned_bytes: usize,
     pub max_queued_upload_mesh_owned_bytes: usize,
     pub source_priority_position: Vec3d,
+    pub tracked_players: usize,
+    pub client_remote_player_count: usize,
+    pub debug_auxiliary_player_script: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -579,11 +584,18 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
     pub actor_observation_count: usize,
     pub first_actor_observation: Option<EmbeddedWorldPreviewActorObservation>,
     pub second_actor_observation: Option<EmbeddedWorldPreviewActorObservation>,
+    pub remote_player_observation_count: usize,
+    pub first_remote_player_observation: Option<EmbeddedWorldPreviewRemotePlayerObservation>,
     pub actor_motion_sequence: u64,
     pub last_actor_motion_from: Option<EmbeddedWorldPreviewActorObservation>,
     pub last_actor_motion_to: Option<EmbeddedWorldPreviewActorObservation>,
     pub last_actor_update_to_visible_ms: f64,
     pub last_actor_update_to_visible_frame_count: usize,
+    pub remote_player_motion_sequence: u64,
+    pub last_remote_player_motion_from: Option<EmbeddedWorldPreviewRemotePlayerObservation>,
+    pub last_remote_player_motion_to: Option<EmbeddedWorldPreviewRemotePlayerObservation>,
+    pub last_remote_player_update_to_visible_ms: f64,
+    pub last_remote_player_update_to_visible_frame_count: usize,
     pub last_translucent_order: EmbeddedWorldPreviewTranslucentOrderSnapshot,
 }
 
@@ -595,6 +607,40 @@ pub struct EmbeddedWorldPreviewActorObservation {
     pub composition_feet_position: Vec3d,
     pub age_ticks: u64,
     pub source_packed_light: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EmbeddedWorldPreviewRemotePlayerObservation {
+    pub player_id: RemotePlayerId,
+    pub appearance: PlayerAppearance,
+    pub source_feet_position: Vec3d,
+    pub composition_feet_position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
+    pub walk_animation_distance: f32,
+    pub source_packed_light: u32,
+}
+
+impl EmbeddedWorldPreviewRemotePlayerObservation {
+    fn from_update(
+        update: RemotePlayerUpdate,
+        context: WorldCompositionContext,
+        walk_animation_distance: f32,
+        source_packed_light: u32,
+    ) -> Self {
+        Self {
+            player_id: update.id,
+            appearance: update.appearance,
+            source_feet_position: update.position,
+            composition_feet_position: context.source_to_composition(update.position),
+            y_rot_degrees: update.y_rot_degrees,
+            x_rot_degrees: update.x_rot_degrees,
+            on_ground: update.on_ground,
+            walk_animation_distance,
+            source_packed_light,
+        }
+    }
 }
 
 impl EmbeddedWorldPreviewActorObservation {
@@ -618,6 +664,14 @@ impl EmbeddedWorldPreviewActorObservation {
 pub(crate) struct PendingEmbeddedWorldPreviewActorUpdate {
     from: EmbeddedWorldPreviewActorObservation,
     to: EmbeddedWorldPreviewActorObservation,
+    observed_at: MonotonicInstant,
+    observed_after_preview_frame: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PendingEmbeddedWorldPreviewRemotePlayerUpdate {
+    from: EmbeddedWorldPreviewRemotePlayerObservation,
+    to: EmbeddedWorldPreviewRemotePlayerObservation,
     observed_at: MonotonicInstant,
     observed_after_preview_frame: usize,
 }
@@ -688,6 +742,7 @@ pub(crate) struct EmbeddedWorldPreview {
     pub preparation: EmbeddedWorldPreviewPreparationSnapshot,
     pub render: EmbeddedWorldPreviewRenderSnapshot,
     pub(crate) pending_actor_update: Option<PendingEmbeddedWorldPreviewActorUpdate>,
+    pub(crate) pending_remote_player_update: Option<PendingEmbeddedWorldPreviewRemotePlayerUpdate>,
     pub mutation_sequence: u64,
     pub last_mutation: Option<EmbeddedWorldPreviewMutationState>,
     pub boundary_warning: Option<String>,
@@ -755,6 +810,7 @@ impl EmbeddedWorldPreview {
         stats: ActorRenderStats,
         resources: ActorDrawResourceSnapshot,
         observations: &[EmbeddedWorldPreviewActorObservation],
+        remote_player_observations: &[EmbeddedWorldPreviewRemotePlayerObservation],
         now: MonotonicInstant,
     ) {
         self.render.last_actor_entity_count = entity_count;
@@ -780,6 +836,10 @@ impl EmbeddedWorldPreview {
         self.render.actor_observation_count = observations.len();
         self.render.first_actor_observation = observations.first().copied();
         self.render.second_actor_observation = observations.get(1).copied();
+        self.render.remote_player_observation_count = remote_player_observations.len();
+        let previous_remote_player_observation = self.render.first_remote_player_observation;
+        let current_remote_player_observation = remote_player_observations.first().copied();
+        self.render.first_remote_player_observation = current_remote_player_observation;
         if let Some(pending) = self.pending_actor_update
             && observations.iter().any(|observation| {
                 observation.entity_id == pending.to.entity_id
@@ -799,6 +859,48 @@ impl EmbeddedWorldPreview {
                 .frame_count
                 .saturating_sub(pending.observed_after_preview_frame);
             self.pending_actor_update = None;
+        }
+        let mut recorded_pending_remote_player_update = false;
+        if let Some(pending) = self.pending_remote_player_update
+            && remote_player_observations.iter().any(|observation| {
+                observation.player_id == pending.to.player_id
+                    && observation.source_feet_position == pending.to.source_feet_position
+                    && observation.walk_animation_distance >= pending.to.walk_animation_distance
+            })
+        {
+            self.render.remote_player_motion_sequence =
+                self.render.remote_player_motion_sequence.saturating_add(1);
+            self.render.last_remote_player_motion_from = Some(pending.from);
+            self.render.last_remote_player_motion_to = Some(pending.to);
+            self.render.last_remote_player_update_to_visible_ms = now
+                .saturating_duration_since(pending.observed_at)
+                .as_secs_f64()
+                * 1_000.0;
+            self.render.last_remote_player_update_to_visible_frame_count = self
+                .render
+                .frame_count
+                .saturating_sub(pending.observed_after_preview_frame);
+            self.pending_remote_player_update = None;
+            recorded_pending_remote_player_update = true;
+        }
+        if !recorded_pending_remote_player_update
+            && let (Some(from), Some(to)) = (
+                previous_remote_player_observation,
+                current_remote_player_observation,
+            )
+            && from.player_id == to.player_id
+            && from.source_feet_position != to.source_feet_position
+        {
+            // Browser runner updates can be folded into the retained client
+            // before the GPU preparation call captures its before-snapshot.
+            // The rendered authoritative observations are the portable
+            // fallback: this source pose was already visible in this frame.
+            self.render.remote_player_motion_sequence =
+                self.render.remote_player_motion_sequence.saturating_add(1);
+            self.render.last_remote_player_motion_from = Some(from);
+            self.render.last_remote_player_motion_to = Some(to);
+            self.render.last_remote_player_update_to_visible_ms = 0.0;
+            self.render.last_remote_player_update_to_visible_frame_count = 1;
         }
     }
 
@@ -830,6 +932,45 @@ impl EmbeddedWorldPreview {
             observed_after_preview_frame: self.render.frame_count,
         });
     }
+
+    pub(crate) fn record_remote_player_update(
+        &mut self,
+        from: RemotePlayerUpdate,
+        to: RemotePlayerUpdate,
+        walk_animation_distance: f32,
+        source_packed_light: u32,
+        observed_at: MonotonicInstant,
+    ) {
+        if self.phase != EmbeddedWorldPreviewPhase::Visible
+            || from.id != to.id
+            || from.position == to.position
+        {
+            return;
+        }
+        self.pending_remote_player_update = Some(PendingEmbeddedWorldPreviewRemotePlayerUpdate {
+            from: EmbeddedWorldPreviewRemotePlayerObservation::from_update(
+                from,
+                self.context,
+                (walk_animation_distance - horizontal_distance(from.position, to.position))
+                    .max(0.0),
+                source_packed_light,
+            ),
+            to: EmbeddedWorldPreviewRemotePlayerObservation::from_update(
+                to,
+                self.context,
+                walk_animation_distance,
+                source_packed_light,
+            ),
+            observed_at,
+            observed_after_preview_frame: self.render.frame_count,
+        });
+    }
+}
+
+fn horizontal_distance(from: Vec3d, to: Vec3d) -> f32 {
+    let dx = to.x - from.x;
+    let dz = to.z - from.z;
+    (dx.mul_add(dx, dz * dz).sqrt()) as f32
 }
 
 /// Shared scene command for atomically selecting the retained warm world.

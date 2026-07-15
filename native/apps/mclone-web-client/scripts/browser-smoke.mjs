@@ -401,9 +401,12 @@ async function run() {
       const farLodQuery = farLodIndexedDb
         ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(farLodWorldId)}&clearWorldStorage=1`
         : "";
+      const lobbyScenarioQuery = lobbyScenarioProbe
+        ? "?debugAuxiliaryPlayerScript=1"
+        : "";
       const appUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-        : `${baseUrl}/app.html${indexedDbReloadQuery || farLodQuery}`;
+        : `${baseUrl}/app.html${indexedDbReloadQuery || farLodQuery || lobbyScenarioQuery}`;
       await page.goto(appUrl, { waitUntil: "load" });
       await page.waitForFunction(
         () => typeof globalThis.__mcloneWebApp !== "undefined",
@@ -1344,7 +1347,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
         return state?.embeddedPreviewPhase === "visible"
           && Number(state?.embeddedPreviewActorEntityCount) === 2
           && Number(state?.embeddedPreviewActorObservationCount) === 2
-          && Number(state?.embeddedPreviewDrawnActorCount) === 3;
+          && Number(state?.embeddedPreviewDrawnActorCount) === 4;
       },
       undefined,
       { timeout: 45_000 },
@@ -1358,6 +1361,13 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     return {
       entityCount: state.embeddedPreviewActorEntityCount,
       observationCount: state.embeddedPreviewActorObservationCount,
+      remotePlayerCount: state.embeddedPreviewActorRemotePlayerCount,
+      sourceLocalPlayerCount: state.embeddedPreviewActorSourceLocalPlayerCount,
+      remotePlayer: {
+        id: state.embeddedPreviewFirstRemotePlayerId,
+        model: state.embeddedPreviewFirstRemotePlayerModel,
+        walkDistance: state.embeddedPreviewFirstRemotePlayerWalkDistance,
+      },
       first: {
         id: state.embeddedPreviewFirstActorEntityId,
         kind: state.embeddedPreviewFirstActorKind,
@@ -1433,8 +1443,13 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
   const relaunchedPersistenceOk = relaunched.after.embeddedPreviewPhase === "visible"
     && Number(relaunched.after.embeddedPreviewActorEntityCount) === 2
     && Number(relaunched.after.embeddedPreviewActorObservationCount) === 2
-    && Number(relaunched.after.embeddedPreviewSubmittedActorCount) === 3
-    && Number(relaunched.after.embeddedPreviewDrawnActorCount) === 3
+    && Number(relaunched.after.embeddedPreviewActorRemotePlayerCount) === 1
+    && Number(relaunched.after.embeddedPreviewRemotePlayerObservationCount) === 1
+    && Number(relaunched.after.embeddedPreviewActorSourceLocalPlayerCount) === 1
+    && Number(relaunched.after.embeddedPreviewSubmittedActorCount) === 4
+    && Number(relaunched.after.embeddedPreviewDrawnActorCount) === 4
+    && relaunched.after.embeddedPreviewFirstRemotePlayerId === "1"
+    && relaunched.after.embeddedPreviewFirstRemotePlayerModel === "uprightBear"
     && relaunched.after.embeddedPreviewFirstActorEntityId === "1"
     && relaunched.after.embeddedPreviewFirstActorKind === "cow"
     && relaunched.after.embeddedPreviewSecondActorEntityId === "2"
@@ -1482,6 +1497,13 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && returned.destinationWorld === firstSourceWorld
       && Number(returnedActors.entityCount) === 2
       && Number(returnedActors.observationCount) === 2
+      && Number(returnedActors.remotePlayerCount) === 1
+      && Number(returnedActors.sourceLocalPlayerCount) === 1
+      && returnedActors.remotePlayer.id
+        === firstLaunch.after.embeddedPreviewFirstRemotePlayerId
+      && returnedActors.remotePlayer.model === "uprightBear"
+      && Number(returnedActors.remotePlayer.walkDistance)
+        >= Number(firstLaunch.after.embeddedPreviewFirstRemotePlayerWalkDistance)
       && returnedActorPixels.nonClearInteriorPixelCount > 128
       && mutationLeg.destinationWorld === firstDestinationWorld
       && mutationLeg.firstUncoveredUploadedSectionCount === 0
@@ -2109,7 +2131,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
           && Number(state?.embeddedPreviewDrawnSectionCount) > 0
           && Number(state?.embeddedPreviewActorEntityCount) === 2
           && Number(state?.embeddedPreviewActorObservationCount) === 2
-          && Number(state?.embeddedPreviewDrawnActorCount) === 3
+          && Number(state?.embeddedPreviewDrawnActorCount) === 4
           && state?.standbySwitchable === true;
       },
       undefined,
@@ -2118,7 +2140,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
   } catch (error) {
     const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
     throw new Error(
-      `browser lobby preview did not expose two authored actors: ${String(error)}\n`
+      `browser lobby preview did not expose authored actors and joined player: ${String(error)}\n`
       + JSON.stringify(state, null, 2),
     );
   }
@@ -2144,26 +2166,120 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
   const initialActorMotionSequence = await page.evaluate(
     () => Number(globalThis.__mcloneWebApp?.state?.embeddedPreviewActorMotionSequence) || 0,
   );
-  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
-  await page.waitForFunction(
-    (baseline) => {
-      const state = globalThis.__mcloneWebApp?.state;
-      const sourceDistance = Math.hypot(
-        Number(state?.embeddedPreviewActorMotionToSourceX)
-          - Number(state?.embeddedPreviewActorMotionFromSourceX),
-        Number(state?.embeddedPreviewActorMotionToSourceY)
-          - Number(state?.embeddedPreviewActorMotionFromSourceY),
-        Number(state?.embeddedPreviewActorMotionToSourceZ)
-          - Number(state?.embeddedPreviewActorMotionFromSourceZ),
-      );
-      return Number(state?.embeddedPreviewActorMotionSequence) > baseline
-        && String(state?.embeddedPreviewActorMotionEntityId ?? "").length > 0
-        && sourceDistance > 1e-5
-        && Number(state?.embeddedPreviewActorUpdateToVisibleFrameCount) === 1;
-    },
-    initialActorMotionSequence,
-    { timeout: 45_000 },
+  const initialRemotePlayerMotionSequence = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.embeddedPreviewRemotePlayerMotionSequence) || 0,
   );
+  const initialRemotePlayerObservation = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state;
+    return {
+      id: state?.embeddedPreviewFirstRemotePlayerId ?? null,
+      source: [
+        Number(state?.embeddedPreviewFirstRemotePlayerSourceX),
+        Number(state?.embeddedPreviewFirstRemotePlayerSourceY),
+        Number(state?.embeddedPreviewFirstRemotePlayerSourceZ),
+      ],
+      composition: [
+        Number(state?.embeddedPreviewFirstRemotePlayerCompositionX),
+        Number(state?.embeddedPreviewFirstRemotePlayerCompositionY),
+        Number(state?.embeddedPreviewFirstRemotePlayerCompositionZ),
+      ],
+      walkDistance: Number(state?.embeddedPreviewFirstRemotePlayerWalkDistance),
+    };
+  });
+  const initialActiveActorCounts = await page.evaluate(() => ({
+    submitted: Number(globalThis.__mcloneWebApp?.state?.actorCount) || 0,
+    drawn: Number(globalThis.__mcloneWebApp?.state?.drawnActorCount) || 0,
+  }));
+  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+  try {
+    await page.waitForFunction(
+      ({ actorBaseline, remoteBaseline, remoteObservationBaseline }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const sourceDistance = Math.hypot(
+          Number(state?.embeddedPreviewActorMotionToSourceX)
+            - Number(state?.embeddedPreviewActorMotionFromSourceX),
+          Number(state?.embeddedPreviewActorMotionToSourceY)
+            - Number(state?.embeddedPreviewActorMotionFromSourceY),
+          Number(state?.embeddedPreviewActorMotionToSourceZ)
+            - Number(state?.embeddedPreviewActorMotionFromSourceZ),
+        );
+        const remoteSourceDistance = Math.hypot(
+          Number(state?.embeddedPreviewRemotePlayerMotionToSourceX)
+            - Number(state?.embeddedPreviewRemotePlayerMotionFromSourceX),
+          Number(state?.embeddedPreviewRemotePlayerMotionToSourceY)
+            - Number(state?.embeddedPreviewRemotePlayerMotionFromSourceY),
+          Number(state?.embeddedPreviewRemotePlayerMotionToSourceZ)
+            - Number(state?.embeddedPreviewRemotePlayerMotionFromSourceZ),
+        );
+        const remoteObservationDistance = Math.hypot(
+          Number(state?.embeddedPreviewFirstRemotePlayerSourceX)
+            - remoteObservationBaseline.source[0],
+          Number(state?.embeddedPreviewFirstRemotePlayerSourceY)
+            - remoteObservationBaseline.source[1],
+          Number(state?.embeddedPreviewFirstRemotePlayerSourceZ)
+            - remoteObservationBaseline.source[2],
+        );
+        return Number(state?.embeddedPreviewActorMotionSequence) > actorBaseline
+          && String(state?.embeddedPreviewActorMotionEntityId ?? "").length > 0
+          && sourceDistance > 0
+          && Number(state?.embeddedPreviewActorUpdateToVisibleFrameCount) === 1
+          && (
+            Number(state?.embeddedPreviewRemotePlayerMotionSequence) > remoteBaseline
+              && String(state?.embeddedPreviewRemotePlayerMotionId ?? "").length > 0
+              && remoteSourceDistance > 1e-5
+              && Number(state?.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount) === 1
+            || remoteObservationDistance > 1e-5
+          );
+      },
+      {
+        actorBaseline: initialActorMotionSequence,
+        remoteBaseline: initialRemotePlayerMotionSequence,
+        remoteObservationBaseline: initialRemotePlayerObservation,
+      },
+      { timeout: 45_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return {
+        actorSequence: state?.embeddedPreviewActorMotionSequence,
+        actorId: state?.embeddedPreviewActorMotionEntityId,
+        actorFrom: [
+          state?.embeddedPreviewActorMotionFromSourceX,
+          state?.embeddedPreviewActorMotionFromSourceY,
+          state?.embeddedPreviewActorMotionFromSourceZ,
+        ],
+        actorTo: [
+          state?.embeddedPreviewActorMotionToSourceX,
+          state?.embeddedPreviewActorMotionToSourceY,
+          state?.embeddedPreviewActorMotionToSourceZ,
+        ],
+        actorVisibleFrames: state?.embeddedPreviewActorUpdateToVisibleFrameCount,
+        remoteSequence: state?.embeddedPreviewRemotePlayerMotionSequence,
+        remoteId: state?.embeddedPreviewRemotePlayerMotionId,
+        remoteFrom: [
+          state?.embeddedPreviewRemotePlayerMotionFromSourceX,
+          state?.embeddedPreviewRemotePlayerMotionFromSourceY,
+          state?.embeddedPreviewRemotePlayerMotionFromSourceZ,
+        ],
+        remoteTo: [
+          state?.embeddedPreviewRemotePlayerMotionToSourceX,
+          state?.embeddedPreviewRemotePlayerMotionToSourceY,
+          state?.embeddedPreviewRemotePlayerMotionToSourceZ,
+        ],
+        remoteVisibleFrames: state?.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount,
+      };
+    });
+    throw new Error(
+      `browser lobby actor motion did not settle: ${String(error)}\n`
+      + JSON.stringify({
+        initialActorMotionSequence,
+        initialRemotePlayerMotionSequence,
+        initialRemotePlayerObservation,
+        state,
+      }, null, 2),
+    );
+  }
   await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
   await page.evaluate(() => globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.());
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => resolve(null))));
@@ -2236,6 +2352,26 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       embeddedPreviewPlacedActorMultiviewPipelineCount:
         state.embeddedPreviewPlacedActorMultiviewPipelineCount,
       embeddedPreviewActorObservationCount: state.embeddedPreviewActorObservationCount,
+      embeddedPreviewRemotePlayerObservationCount:
+        state.embeddedPreviewRemotePlayerObservationCount,
+      embeddedPreviewFirstRemotePlayerId: state.embeddedPreviewFirstRemotePlayerId,
+      embeddedPreviewFirstRemotePlayerModel: state.embeddedPreviewFirstRemotePlayerModel,
+      embeddedPreviewFirstRemotePlayerWalkDistance:
+        state.embeddedPreviewFirstRemotePlayerWalkDistance,
+      embeddedPreviewFirstRemotePlayerSourcePackedLight:
+        state.embeddedPreviewFirstRemotePlayerSourcePackedLight,
+      embeddedPreviewFirstRemotePlayerSourceX:
+        state.embeddedPreviewFirstRemotePlayerSourceX,
+      embeddedPreviewFirstRemotePlayerSourceY:
+        state.embeddedPreviewFirstRemotePlayerSourceY,
+      embeddedPreviewFirstRemotePlayerSourceZ:
+        state.embeddedPreviewFirstRemotePlayerSourceZ,
+      embeddedPreviewFirstRemotePlayerCompositionX:
+        state.embeddedPreviewFirstRemotePlayerCompositionX,
+      embeddedPreviewFirstRemotePlayerCompositionY:
+        state.embeddedPreviewFirstRemotePlayerCompositionY,
+      embeddedPreviewFirstRemotePlayerCompositionZ:
+        state.embeddedPreviewFirstRemotePlayerCompositionZ,
       embeddedPreviewFirstActorEntityId: state.embeddedPreviewFirstActorEntityId,
       embeddedPreviewFirstActorKind: state.embeddedPreviewFirstActorKind,
       embeddedPreviewFirstActorAgeTicks: state.embeddedPreviewFirstActorAgeTicks,
@@ -2274,6 +2410,46 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       embeddedPreviewActorUpdateToVisibleMs: state.embeddedPreviewActorUpdateToVisibleMs,
       embeddedPreviewActorUpdateToVisibleFrameCount:
         state.embeddedPreviewActorUpdateToVisibleFrameCount,
+      embeddedPreviewRemotePlayerMotionSequence:
+        state.embeddedPreviewRemotePlayerMotionSequence,
+      embeddedPreviewRemotePlayerMotionId: state.embeddedPreviewRemotePlayerMotionId,
+      embeddedPreviewRemotePlayerMotionModel: state.embeddedPreviewRemotePlayerMotionModel,
+      embeddedPreviewRemotePlayerMotionFromWalkDistance:
+        state.embeddedPreviewRemotePlayerMotionFromWalkDistance,
+      embeddedPreviewRemotePlayerMotionToWalkDistance:
+        state.embeddedPreviewRemotePlayerMotionToWalkDistance,
+      embeddedPreviewRemotePlayerMotionSourcePackedLight:
+        state.embeddedPreviewRemotePlayerMotionSourcePackedLight,
+      embeddedPreviewRemotePlayerMotionFromSourceX:
+        state.embeddedPreviewRemotePlayerMotionFromSourceX,
+      embeddedPreviewRemotePlayerMotionFromSourceY:
+        state.embeddedPreviewRemotePlayerMotionFromSourceY,
+      embeddedPreviewRemotePlayerMotionFromSourceZ:
+        state.embeddedPreviewRemotePlayerMotionFromSourceZ,
+      embeddedPreviewRemotePlayerMotionToSourceX:
+        state.embeddedPreviewRemotePlayerMotionToSourceX,
+      embeddedPreviewRemotePlayerMotionToSourceY:
+        state.embeddedPreviewRemotePlayerMotionToSourceY,
+      embeddedPreviewRemotePlayerMotionToSourceZ:
+        state.embeddedPreviewRemotePlayerMotionToSourceZ,
+      embeddedPreviewRemotePlayerMotionFromCompositionX:
+        state.embeddedPreviewRemotePlayerMotionFromCompositionX,
+      embeddedPreviewRemotePlayerMotionFromCompositionY:
+        state.embeddedPreviewRemotePlayerMotionFromCompositionY,
+      embeddedPreviewRemotePlayerMotionFromCompositionZ:
+        state.embeddedPreviewRemotePlayerMotionFromCompositionZ,
+      embeddedPreviewRemotePlayerMotionToCompositionX:
+        state.embeddedPreviewRemotePlayerMotionToCompositionX,
+      embeddedPreviewRemotePlayerMotionToCompositionY:
+        state.embeddedPreviewRemotePlayerMotionToCompositionY,
+      embeddedPreviewRemotePlayerMotionToCompositionZ:
+        state.embeddedPreviewRemotePlayerMotionToCompositionZ,
+      embeddedPreviewRemotePlayerUpdateToVisibleMs:
+        state.embeddedPreviewRemotePlayerUpdateToVisibleMs,
+      embeddedPreviewRemotePlayerUpdateToVisibleFrameCount:
+        state.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount,
+      activeActorCount: state.actorCount,
+      activeDrawnActorCount: state.drawnActorCount,
       frameCount: state.frameCount,
       frameGaps: {
         count: gaps.length,
@@ -2359,6 +2535,24 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
   );
   const actorMotionExpectedCompositionDistance =
     actorMotionSourceDistance * Number(after.embeddedPreviewScale);
+  const remotePlayerMotionSourceDistance = Math.hypot(
+    Number(after.embeddedPreviewRemotePlayerMotionToSourceX)
+      - Number(after.embeddedPreviewRemotePlayerMotionFromSourceX),
+    Number(after.embeddedPreviewRemotePlayerMotionToSourceY)
+      - Number(after.embeddedPreviewRemotePlayerMotionFromSourceY),
+    Number(after.embeddedPreviewRemotePlayerMotionToSourceZ)
+      - Number(after.embeddedPreviewRemotePlayerMotionFromSourceZ),
+  );
+  const remotePlayerMotionCompositionDistance = Math.hypot(
+    Number(after.embeddedPreviewRemotePlayerMotionToCompositionX)
+      - Number(after.embeddedPreviewRemotePlayerMotionFromCompositionX),
+    Number(after.embeddedPreviewRemotePlayerMotionToCompositionY)
+      - Number(after.embeddedPreviewRemotePlayerMotionFromCompositionY),
+    Number(after.embeddedPreviewRemotePlayerMotionToCompositionZ)
+      - Number(after.embeddedPreviewRemotePlayerMotionFromCompositionZ),
+  );
+  const remotePlayerMotionExpectedCompositionDistance =
+    remotePlayerMotionSourceDistance * Number(after.embeddedPreviewScale);
   const maxAllowedFrameGapMs = mobile ? 750 : 500;
   return {
     ok: titlePixels.nonClearInteriorPixelCount > 128
@@ -2383,6 +2577,12 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       && Number(after.embeddedPreviewOutOfRegionSubmissionCount) === 0
       && Number(after.embeddedPreviewActorEntityCount) === 2
       && Number(after.embeddedPreviewActorObservationCount) === 2
+      && Number(after.embeddedPreviewActorRemotePlayerCount) === 1
+      && Number(after.embeddedPreviewRemotePlayerObservationCount) === 1
+      && String(after.embeddedPreviewFirstRemotePlayerId ?? "").length > 0
+      && after.embeddedPreviewFirstRemotePlayerModel === "uprightBear"
+      && Number(after.embeddedPreviewFirstRemotePlayerWalkDistance) > 0
+      && Number(after.embeddedPreviewFirstRemotePlayerSourcePackedLight) > 0
       && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 1
       && Number(after.embeddedPreviewSubmittedActorCount) === (
         Number(after.embeddedPreviewActorEntityCount)
@@ -2411,6 +2611,24 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       ) <= 1e-6
       && Number(after.embeddedPreviewActorUpdateToVisibleMs) >= 0
       && Number(after.embeddedPreviewActorUpdateToVisibleFrameCount) === 1
+      && Number(after.embeddedPreviewRemotePlayerMotionSequence)
+        > initialRemotePlayerMotionSequence
+      && after.embeddedPreviewRemotePlayerMotionId
+        === after.embeddedPreviewFirstRemotePlayerId
+      && after.embeddedPreviewRemotePlayerMotionModel === "uprightBear"
+      && Number(after.embeddedPreviewRemotePlayerMotionToWalkDistance)
+        > Number(after.embeddedPreviewRemotePlayerMotionFromWalkDistance)
+      && Number(after.embeddedPreviewRemotePlayerMotionSourcePackedLight) > 0
+      && remotePlayerMotionSourceDistance > 0
+      && remotePlayerMotionCompositionDistance > 0
+      && Math.abs(
+        remotePlayerMotionCompositionDistance
+          - remotePlayerMotionExpectedCompositionDistance,
+      ) <= 1e-6
+      && Number(after.embeddedPreviewRemotePlayerUpdateToVisibleMs) >= 0
+      && Number(after.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount) === 1
+      && Number(after.activeActorCount) === initialActiveActorCounts.submitted
+      && Number(after.activeDrawnActorCount) === initialActiveActorCounts.drawn
       && actorMotionPixelDifference.differentPixelCount > 0
       && Number(after.standbyDuplicatedAtlasBaseBytes) === 0
       && Number(after.standbySharedTerrainResourceOwnerCount) === 2
@@ -2437,6 +2655,20 @@ async function runLobbyScenarioProbe(page, canvas, mobile) {
       sourceDistance: actorMotionSourceDistance,
       compositionDistance: actorMotionCompositionDistance,
       expectedCompositionDistance: actorMotionExpectedCompositionDistance,
+      pixelDifference: actorMotionPixelDifference,
+    },
+    remotePlayerMotion: {
+      initialSequence: initialRemotePlayerMotionSequence,
+      worldInstanceId: after.embeddedPreviewWorldInstanceId,
+      playerId: after.embeddedPreviewRemotePlayerMotionId,
+      sourceDistance: remotePlayerMotionSourceDistance,
+      compositionDistance: remotePlayerMotionCompositionDistance,
+      expectedCompositionDistance: remotePlayerMotionExpectedCompositionDistance,
+      initialActiveActorCounts,
+      finalActiveActorCounts: {
+        submitted: Number(after.activeActorCount),
+        drawn: Number(after.activeDrawnActorCount),
+      },
       pixelDifference: actorMotionPixelDifference,
     },
     timing: {

@@ -60,6 +60,23 @@ records the completed parity refactor and performance receipts. A new
 capable-device multiview scenario receipt remains pending because no headset
 was attached at closeout.
 
+That scenario now has one shared live-actor and multiplayer acceptance shape.
+The destination server publishes its persisted cow/chicken, the retained
+connection's source-local body, and an ordinary dedicated remote player through
+the same client replica and placed actor renderer on native and WebGPU. The
+checked-in validation-only auxiliary-player script is authored in shared Rust
+and drives normal server admission plus `MovePlayer`; browser TypeScript only
+forwards its enable bit. `native:lobby-scenario:smoke`,
+`native:lobby-scenario:stereo-smoke`, and the three browser lobby commands
+assert stable world-qualified identity, exact source-to-composition movement,
+walk/light facts, changed pixels, unchanged active actors, activation/return,
+and relaunch. Final flat Android APK/AVD, Android XR APK, desktop XR compile,
+synthetic stereo, and browser desktop/mobile gates pass. The current Metal
+adapter still lacks `MULTIVIEW`, and no headset was attached for a new
+capable-device receipt. Tactical
+[`179-composable-world-presentation-and-live-preview-actors.md`](tactical/179-composable-world-presentation-and-live-preview-actors.md)
+records the completed shared composition and cost evidence.
+
 Linux native/offscreen bring-up was validated on headless Ubuntu 24.04 on
 2026-07-12. The native client builds and the full-frame offscreen smoke renders
 without X11, Wayland, or a window manager, using either Mesa llvmpipe or a real

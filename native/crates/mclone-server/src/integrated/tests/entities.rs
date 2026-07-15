@@ -1,6 +1,133 @@
 use super::*;
 
 #[test]
+fn local_and_dedicated_players_pair_symmetrically() {
+    let mut server = IntegratedServer::new(12_345);
+    load_center_chunk(&mut server);
+    server
+        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            position: Vec3d::new(8.5, 80.0, 8.5),
+            y_rot_degrees: 15.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        }))
+        .expect("move local player into tracked chunk");
+
+    let dedicated = server.add_dedicated_player();
+    let dedicated_updates =
+        set_dedicated_chunk_view_and_poll(&mut server, dedicated, ChunkPos::new(0, 0), 0);
+    let local_for_dedicated = remote_player_add(&dedicated_updates, ServerPlayerId::LOCAL)
+        .expect("dedicated player should observe the local integrated player");
+    assert_eq!(local_for_dedicated.id, RemotePlayerId(0));
+
+    let local_updates = server.try_drain_updates().expect("drain local pair add");
+    let dedicated_for_local = remote_player_add(&local_updates, dedicated)
+        .expect("local integrated player should observe the dedicated peer");
+    assert_eq!(dedicated_for_local.id, RemotePlayerId(dedicated.as_u64()));
+
+    let local_moved = Vec3d::new(9.0, 80.0, 8.5);
+    server
+        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            position: local_moved,
+            y_rot_degrees: 30.0,
+            x_rot_degrees: 5.0,
+            on_ground: true,
+        }))
+        .expect("move paired local player");
+    let dedicated_updates = server
+        .try_drain_updates_for_player(dedicated)
+        .expect("drain local movement for dedicated observer");
+    let local_update = remote_player_update(&dedicated_updates, ServerPlayerId::LOCAL)
+        .expect("dedicated observer should receive local movement");
+    assert_eq!(local_update.position, local_moved);
+
+    let dedicated_moved = Vec3d::new(9.5, 80.0, 8.5);
+    server
+        .try_handle_command_for_player(
+            dedicated,
+            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                position: dedicated_moved,
+                y_rot_degrees: -45.0,
+                x_rot_degrees: 0.0,
+                on_ground: true,
+            }),
+        )
+        .expect("move paired dedicated player");
+    let local_updates = server
+        .try_drain_updates()
+        .expect("drain dedicated movement");
+    let dedicated_update = remote_player_update(&local_updates, dedicated)
+        .expect("local observer should receive dedicated movement");
+    assert_eq!(dedicated_update.position, dedicated_moved);
+
+    server
+        .try_handle_command(ClientCommand::SetPlayerAppearance(
+            SetPlayerAppearanceCommand {
+                appearance: PlayerAppearance {
+                    model: PlayerModelKind::UprightBear,
+                },
+            },
+        ))
+        .expect("change local appearance");
+    let dedicated_updates = server
+        .try_drain_updates_for_player(dedicated)
+        .expect("drain local appearance");
+    assert_eq!(
+        remote_player_update(&dedicated_updates, ServerPlayerId::LOCAL)
+            .expect("dedicated observer should receive local appearance")
+            .appearance
+            .model,
+        PlayerModelKind::UprightBear
+    );
+
+    server.disable_local_player();
+    let dedicated_updates = server
+        .try_drain_updates_for_player(dedicated)
+        .expect("drain local removal");
+    assert!(has_remote_player_remove(
+        &dedicated_updates,
+        ServerPlayerId::LOCAL
+    ));
+}
+
+#[test]
+fn shared_auxiliary_player_script_uses_authoritative_commands() {
+    let mut server = IntegratedServer::new(12_345);
+    load_center_chunk(&mut server);
+    server.set_debug_auxiliary_player_script_enabled(true);
+    let player_id = server
+        .debug_auxiliary_player_id()
+        .expect("auxiliary script should join one dedicated player");
+    let mut add = None;
+    let mut positions = Vec::new();
+    for _ in 0..240 {
+        let updates = server.try_tick().expect("tick auxiliary player script");
+        if add.is_none() {
+            add = remote_player_add(&updates, player_id);
+        }
+        positions.extend(updates.iter().filter_map(|update| match update {
+            ServerUpdate::RemotePlayerUpdate(update)
+                if update.id == RemotePlayerId(player_id.as_u64()) =>
+            {
+                Some(update.position)
+            }
+            _ => None,
+        }));
+        if add.is_some() && positions.windows(2).any(|pair| pair.first() != pair.get(1)) {
+            break;
+        }
+    }
+    let add = add.expect("local source client should receive auxiliary add");
+    assert_eq!(add.appearance.model, PlayerModelKind::UprightBear);
+    assert!(positions.windows(2).any(|pair| pair[0] != pair[1]));
+
+    server.set_debug_auxiliary_player_script_enabled(false);
+    let updates = server.try_drain_updates().expect("drain auxiliary removal");
+    assert!(has_remote_player_remove(&updates, player_id));
+    assert_eq!(server.dedicated_player_count(), 0);
+}
+
+#[test]
 fn dedicated_players_publish_remote_state_when_visible() {
     let mut server = IntegratedServer::new(12_345);
     server.set_lighting_enabled(false);

@@ -108,6 +108,7 @@ pub struct LocalIntegratedSceneOptions {
     pub freeze_time: bool,
     pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
+    pub debug_auxiliary_player_script: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
     pub adaptive_chunk_publication_budget: bool,
@@ -178,6 +179,7 @@ impl LocalIntegratedSceneOptions {
             freeze_time: false,
             freeze_scheduled_fluid_ticks: false,
             debug_passive_showcase: true,
+            debug_auxiliary_player_script: false,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             adaptive_chunk_publication_budget: false,
@@ -221,6 +223,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_debug_passive_showcase(mut self, enabled: bool) -> Self {
         self.debug_passive_showcase = enabled;
+        self
+    }
+
+    pub const fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
+        self.debug_auxiliary_player_script = enabled;
         self
     }
 
@@ -3353,6 +3360,7 @@ fn native_runner_config(
         .with_lighting_enabled(options.lighting_enabled)
         .with_light_status_batch_size(options.light_status_batch_size)
         .with_debug_passive_showcase(options.debug_passive_showcase)
+        .with_debug_auxiliary_player_script(options.debug_auxiliary_player_script)
         .with_day_time(options.day_time_override)
         .with_day_time_frozen(options.freeze_time)
         .with_scheduled_fluid_ticks_frozen(options.freeze_scheduled_fluid_ticks)

@@ -1540,6 +1540,10 @@ impl McloneSceneHost {
                         .as_ref()
                         .expect("preview actor receipt requires collected actors")
                         .entity_observations,
+                    &preview_actor_instances
+                        .as_ref()
+                        .expect("preview actor receipt requires collected actors")
+                        .remote_player_observations,
                     actor_rendered_at,
                 );
             }

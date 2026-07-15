@@ -106,7 +106,7 @@ use mclone_input::{
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
-use mclone_protocol::EntitySnapshot;
+use mclone_protocol::{EntitySnapshot, RemotePlayerUpdate};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -410,12 +410,40 @@ struct PreviewActorInstances {
     remote_player_count: usize,
     source_local_player_count: usize,
     entity_observations: Vec<EmbeddedWorldPreviewActorObservation>,
+    remote_player_observations: Vec<EmbeddedWorldPreviewRemotePlayerObservation>,
 }
 
 fn changed_entity_motion(
     before: &[EntitySnapshot],
     after: &[EntitySnapshot],
 ) -> Option<(EntitySnapshot, EntitySnapshot)> {
+    before
+        .iter()
+        .filter_map(|before| {
+            after
+                .iter()
+                .find(|after| after.id == before.id && after.position != before.position)
+                .copied()
+                .map(|after| (*before, after))
+        })
+        .max_by(|(left_before, left_after), (right_before, right_after)| {
+            left_after
+                .position
+                .subtract(left_before.position)
+                .length_sqr()
+                .total_cmp(
+                    &right_after
+                        .position
+                        .subtract(right_before.position)
+                        .length_sqr(),
+                )
+        })
+}
+
+fn changed_remote_player_motion(
+    before: &[RemotePlayerUpdate],
+    after: &[RemotePlayerUpdate],
+) -> Option<(RemotePlayerUpdate, RemotePlayerUpdate)> {
     before.iter().find_map(|before| {
         after
             .iter()
@@ -517,6 +545,7 @@ pub struct McloneSceneHost {
     warm_world_standby: Option<WarmWorldStandbyState>,
     prepared_warm_world_shell: Option<PreparedWarmWorldRendererShell>,
     managed_scenario_launch: Option<ManagedScenarioLaunchState>,
+    debug_managed_scenario_auxiliary_player_script: bool,
     #[cfg(not(target_arch = "wasm32"))]
     native_managed_scenario_adapter: Option<NativeManagedScenarioProvisionAdapter>,
     embedded_world_preview: Option<EmbeddedWorldPreview>,
@@ -1614,6 +1643,10 @@ impl McloneSceneHost {
                         .as_ref()
                         .expect("preview actor receipt requires collected actors")
                         .entity_observations,
+                    &preview_actor_instances
+                        .as_ref()
+                        .expect("preview actor receipt requires collected actors")
+                        .remote_player_observations,
                     actor_rendered_at,
                 );
             }
@@ -2510,6 +2543,7 @@ impl McloneSceneHost {
                     stats,
                     resources,
                     &actors.entity_observations,
+                    &actors.remote_player_observations,
                     actor_rendered_at,
                 );
             }
@@ -3603,6 +3637,30 @@ impl McloneSceneHost {
                 })
             })
             .collect();
+        let remote_player_observations = presentations
+            .iter()
+            .zip(&instances)
+            .filter_map(|(presentation, instance)| {
+                let mclone_client::ActorPresentationId::RemotePlayer(player_id) = presentation.id
+                else {
+                    return None;
+                };
+                let update = *client.remote_player(player_id)?;
+                Some(EmbeddedWorldPreviewRemotePlayerObservation {
+                    player_id,
+                    appearance: update.appearance,
+                    source_feet_position: update.position,
+                    composition_feet_position: preview
+                        .context
+                        .source_to_composition(update.position),
+                    y_rot_degrees: update.y_rot_degrees,
+                    x_rot_degrees: update.x_rot_degrees,
+                    on_ground: update.on_ground,
+                    walk_animation_distance: presentation.walk_animation_distance,
+                    source_packed_light: instance.packed_light,
+                })
+            })
+            .collect();
         let entity_count = client.entity_count();
         let remote_player_count = client.remote_player_count();
         instances.push(local_player_actor_instance(
@@ -3617,6 +3675,7 @@ impl McloneSceneHost {
             remote_player_count,
             source_local_player_count: 1,
             entity_observations,
+            remote_player_observations,
         })
     }
 
@@ -4236,11 +4295,42 @@ mod tests {
         let stationary = snapshot(7, from.position, 118);
         let moved = snapshot(7, Vec3d::new(6.6, 66.0, 8.5), 118);
         let unrelated = snapshot(8, Vec3d::new(10.5, 66.0, 8.5), 118);
+        let drifted = snapshot(7, Vec3d::new(6.500_000_1, 66.0, 8.5), 118);
+        let meaningful = snapshot(8, Vec3d::new(10.6, 66.0, 8.5), 119);
 
         assert_eq!(changed_entity_motion(&[from], &[stationary]), None);
         assert_eq!(changed_entity_motion(&[from], &[unrelated]), None);
         assert_eq!(
             changed_entity_motion(&[from], &[unrelated, moved]),
+            Some((from, moved))
+        );
+        assert_eq!(
+            changed_entity_motion(&[from, unrelated], &[drifted, meaningful]),
+            Some((unrelated, meaningful))
+        );
+    }
+
+    #[test]
+    fn authoritative_remote_player_motion_requires_one_stable_id_and_changed_position() {
+        let update = |id, position| RemotePlayerUpdate {
+            id: mclone_protocol::RemotePlayerId(id),
+            appearance: mclone_protocol::PlayerAppearance {
+                model: mclone_protocol::PlayerModelKind::UprightBear,
+            },
+            position,
+            y_rot_degrees: -90.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        };
+        let from = update(7, Vec3d::new(8.5, 66.0, 8.5));
+        let stationary = update(7, from.position);
+        let moved = update(7, Vec3d::new(8.6, 66.0, 8.5));
+        let unrelated = update(8, Vec3d::new(10.5, 66.0, 8.5));
+
+        assert_eq!(changed_remote_player_motion(&[from], &[stationary]), None);
+        assert_eq!(changed_remote_player_motion(&[from], &[unrelated]), None);
+        assert_eq!(
+            changed_remote_player_motion(&[from], &[unrelated, moved]),
             Some((from, moved))
         );
     }

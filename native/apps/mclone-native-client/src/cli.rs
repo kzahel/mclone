@@ -1825,6 +1825,7 @@ impl Cli {
                 scene.warm_world_standby_seed = None;
                 scene.render_distance = 2;
                 scene.debug_passive_showcase = false;
+                scene.debug_auxiliary_player_script = true;
                 Ok(Self::LobbyScenarioSmoke {
                     options: LobbyScenarioSmokeOptions {
                         directory,
@@ -1843,6 +1844,7 @@ impl Cli {
                 scene.warm_world_standby_seed = None;
                 scene.render_distance = 2;
                 scene.debug_passive_showcase = false;
+                scene.debug_auxiliary_player_script = true;
                 Ok(Self::LobbyScenarioStereoSmoke {
                     options: LobbyScenarioSmokeOptions {
                         directory,

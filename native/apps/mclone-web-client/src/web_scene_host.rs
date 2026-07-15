@@ -1341,7 +1341,8 @@ impl WebSceneHost {
         .with_world_generation_profile(pending.scene.world_generation_profile)
         .with_world_behavior_profile(pending.scene.world_behavior_profile)
         .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
-        .with_debug_passive_showcase(pending.scene.debug_passive_showcase);
+        .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
+        .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script);
         Ok(WebManagedScenarioRuntimeStart {
             pending: Some(pending),
             config: Some(config),
@@ -1666,6 +1667,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     )
     .with_world_generation_profile(scene_startup.world_generation_profile)
     .with_debug_passive_showcase(scene_startup.debug_passive_showcase)
+    .with_debug_auxiliary_player_script(scene_startup.debug_auxiliary_player_script)
     .with_light_status_batch_size(scene_startup.light_status_batch_size);
     if storage.world_storage == "indexeddb" {
         config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
@@ -1938,6 +1940,7 @@ impl WebSceneHost {
         config.world_behavior_profile = pending.scene.world_behavior_profile;
         config.freeze_scheduled_fluid_ticks = pending.scene.freeze_scheduled_fluid_ticks;
         config.debug_passive_showcase = pending.scene.debug_passive_showcase;
+        config.debug_auxiliary_player_script = pending.scene.debug_auxiliary_player_script;
         match crate::WebRuntime::web_worker_integrated_at(config, center).await {
             Ok(mut runtime) => {
                 runtime
@@ -2574,6 +2577,11 @@ impl WebSceneHost {
                     "embeddedPreviewActorObservationCount",
                     preview.render.actor_observation_count as f64,
                 )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewRemotePlayerObservationCount",
+                    preview.render.remote_player_observation_count as f64,
+                )?;
                 for (prefix, observation) in [
                     ("First", preview.render.first_actor_observation),
                     ("Second", preview.render.second_actor_observation),
@@ -2606,6 +2614,45 @@ impl WebSceneHost {
                         &format!("embeddedPreview{prefix}ActorSourcePackedLight"),
                         observation.source_packed_light as f64,
                     )?;
+                }
+                if let Some(observation) = preview.render.first_remote_player_observation {
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewFirstRemotePlayerId",
+                        &observation.player_id.0.to_string(),
+                    )?;
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewFirstRemotePlayerModel",
+                        match observation.appearance.model {
+                            mclone_protocol::PlayerModelKind::Player => "player",
+                            mclone_protocol::PlayerModelKind::UprightBear => "uprightBear",
+                        },
+                    )?;
+                    report_set_number(
+                        &object,
+                        "embeddedPreviewFirstRemotePlayerWalkDistance",
+                        f64::from(observation.walk_animation_distance),
+                    )?;
+                    report_set_number(
+                        &object,
+                        "embeddedPreviewFirstRemotePlayerSourcePackedLight",
+                        observation.source_packed_light as f64,
+                    )?;
+                    for (suffix, value) in [
+                        ("SourceX", observation.source_feet_position.x),
+                        ("SourceY", observation.source_feet_position.y),
+                        ("SourceZ", observation.source_feet_position.z),
+                        ("CompositionX", observation.composition_feet_position.x),
+                        ("CompositionY", observation.composition_feet_position.y),
+                        ("CompositionZ", observation.composition_feet_position.z),
+                    ] {
+                        report_set_number(
+                            &object,
+                            &format!("embeddedPreviewFirstRemotePlayer{suffix}"),
+                            value,
+                        )?;
+                    }
                 }
                 report_set_number(
                     &object,
@@ -2673,6 +2720,77 @@ impl WebSceneHost {
                         report_set_number(
                             &object,
                             &format!("embeddedPreviewActorMotion{suffix}"),
+                            value,
+                        )?;
+                    }
+                }
+                report_set_number(
+                    &object,
+                    "embeddedPreviewRemotePlayerMotionSequence",
+                    preview.render.remote_player_motion_sequence as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewRemotePlayerUpdateToVisibleMs",
+                    preview.render.last_remote_player_update_to_visible_ms,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewRemotePlayerUpdateToVisibleFrameCount",
+                    preview
+                        .render
+                        .last_remote_player_update_to_visible_frame_count
+                        as f64,
+                )?;
+                if let (Some(from), Some(to)) = (
+                    preview.render.last_remote_player_motion_from,
+                    preview.render.last_remote_player_motion_to,
+                ) {
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewRemotePlayerMotionId",
+                        &to.player_id.0.to_string(),
+                    )?;
+                    report_set_string(
+                        &object,
+                        "embeddedPreviewRemotePlayerMotionModel",
+                        match to.appearance.model {
+                            mclone_protocol::PlayerModelKind::Player => "player",
+                            mclone_protocol::PlayerModelKind::UprightBear => "uprightBear",
+                        },
+                    )?;
+                    report_set_number(
+                        &object,
+                        "embeddedPreviewRemotePlayerMotionFromWalkDistance",
+                        f64::from(from.walk_animation_distance),
+                    )?;
+                    report_set_number(
+                        &object,
+                        "embeddedPreviewRemotePlayerMotionToWalkDistance",
+                        f64::from(to.walk_animation_distance),
+                    )?;
+                    report_set_number(
+                        &object,
+                        "embeddedPreviewRemotePlayerMotionSourcePackedLight",
+                        to.source_packed_light as f64,
+                    )?;
+                    for (suffix, value) in [
+                        ("FromSourceX", from.source_feet_position.x),
+                        ("FromSourceY", from.source_feet_position.y),
+                        ("FromSourceZ", from.source_feet_position.z),
+                        ("ToSourceX", to.source_feet_position.x),
+                        ("ToSourceY", to.source_feet_position.y),
+                        ("ToSourceZ", to.source_feet_position.z),
+                        ("FromCompositionX", from.composition_feet_position.x),
+                        ("FromCompositionY", from.composition_feet_position.y),
+                        ("FromCompositionZ", from.composition_feet_position.z),
+                        ("ToCompositionX", to.composition_feet_position.x),
+                        ("ToCompositionY", to.composition_feet_position.y),
+                        ("ToCompositionZ", to.composition_feet_position.z),
+                    ] {
+                        report_set_number(
+                            &object,
+                            &format!("embeddedPreviewRemotePlayerMotion{suffix}"),
                             value,
                         )?;
                     }
