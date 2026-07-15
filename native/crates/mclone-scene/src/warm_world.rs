@@ -11,7 +11,7 @@ use mclone_app_runtime::scenario::BuiltInScenarioId;
 use mclone_app_runtime::scenario::ScenarioLaunchIntent;
 use mclone_app_runtime::scenario_content::{
     ManagedScenarioManifest, ManagedScenarioWorldRole, ManagedWorldKey,
-    ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld,
+    ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld, ScenarioWorldStorageSource,
 };
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::session::ActiveSessionDescriptor;
@@ -76,7 +76,8 @@ pub struct WarmWorldStandbyRequest {
     pub seed: i64,
     pub entry_center: ChunkPos,
     pub standby_cadence: Option<SimulationCadenceConfig>,
-    pub managed_world_key: Option<ManagedWorldKey>,
+    pub storage_source: Option<ScenarioWorldStorageSource>,
+    pub descriptor: Option<ActiveSessionDescriptor>,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub world_generation_profile: WorldGenerationProfile,
     pub presentation: WarmWorldPresentationRequest,
@@ -89,7 +90,8 @@ impl WarmWorldStandbyRequest {
             seed,
             entry_center,
             standby_cadence: None,
-            managed_world_key: None,
+            storage_source: None,
+            descriptor: None,
             world_behavior_profile: WorldBehaviorProfile::Mutable,
             world_generation_profile: WorldGenerationProfile::Overworld,
             presentation: WarmWorldPresentationRequest::OpaqueGate,
@@ -111,13 +113,28 @@ impl WarmWorldStandbyRequest {
         managed_world_key: ManagedWorldKey,
         world_generation_profile: WorldGenerationProfile,
     ) -> Self {
-        self.managed_world_key = Some(managed_world_key);
+        self.storage_source = Some(ScenarioWorldStorageSource::Managed(managed_world_key));
+        self.world_generation_profile = world_generation_profile;
+        self
+    }
+
+    pub fn with_storage_source(
+        mut self,
+        storage_source: ScenarioWorldStorageSource,
+        world_generation_profile: WorldGenerationProfile,
+    ) -> Self {
+        self.storage_source = Some(storage_source);
         self.world_generation_profile = world_generation_profile;
         self
     }
 
     pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
         self.world_behavior_profile = profile;
+        self
+    }
+
+    pub fn with_descriptor(mut self, descriptor: ActiveSessionDescriptor) -> Self {
+        self.descriptor = Some(descriptor);
         self
     }
 
@@ -134,6 +151,23 @@ impl WarmWorldStandbyRequest {
     ) -> Self {
         self.presentation = WarmWorldPresentationRequest::Diorama {
             region,
+            return_region: region,
+            placement,
+            return_placement,
+        };
+        self
+    }
+
+    pub const fn with_embedded_preview_regions(
+        mut self,
+        region: EmbeddedChunkRegion,
+        return_region: EmbeddedChunkRegion,
+        placement: WorldPlacement,
+        return_placement: WorldPlacement,
+    ) -> Self {
+        self.presentation = WarmWorldPresentationRequest::Diorama {
+            region,
+            return_region,
             placement,
             return_placement,
         };
@@ -146,6 +180,7 @@ pub enum WarmWorldPresentationRequest {
     OpaqueGate,
     Diorama {
         region: EmbeddedChunkRegion,
+        return_region: EmbeddedChunkRegion,
         placement: WorldPlacement,
         return_placement: WorldPlacement,
     },
@@ -179,7 +214,7 @@ pub(crate) enum ManagedScenarioLaunchPhase {
 pub struct ManagedScenarioWorldStart {
     pub instance_id: WorldInstanceId,
     pub role: ManagedScenarioWorldRole,
-    pub managed_world_key: ManagedWorldKey,
+    pub storage_source: ScenarioWorldStorageSource,
     pub scene: McloneSceneHostOptions,
     pub descriptor: ActiveSessionDescriptor,
     pub destination: Option<PreparedEmbeddedWorldScenario>,
@@ -197,6 +232,7 @@ pub(crate) struct ManagedScenarioLaunchState {
     pending_start_requests: VecDeque<PlatformOperation<ManagedScenarioWorldStart>>,
     pub(crate) primary_provisioned: Option<ProvisionedManagedScenarioWorld>,
     pub(crate) destination_provisioned: Option<ProvisionedManagedScenarioWorld>,
+    destination_provision_requested: bool,
     pub(crate) primary_start_token: Option<PlatformOperationToken>,
     pub(crate) destination_start_token: Option<PlatformOperationToken>,
     pub(crate) destination: Option<PreparedEmbeddedWorldScenario>,
@@ -208,14 +244,13 @@ impl ManagedScenarioLaunchState {
         let manifest = ManagedScenarioManifest::for_intent(intent);
         let mut provision_operations = PlatformOperationLedger::new();
         let mut pending_provision_requests = VecDeque::new();
-        for role in [
-            ManagedScenarioWorldRole::Primary,
-            ManagedScenarioWorldRole::Destination,
-        ] {
-            pending_provision_requests.push_back(
-                provision_operations.issue(ProvisionManagedScenarioWorld { intent, role }, intent),
-            );
-        }
+        pending_provision_requests.push_back(provision_operations.issue(
+            ProvisionManagedScenarioWorld {
+                intent,
+                role: ManagedScenarioWorldRole::Primary,
+            },
+            intent,
+        ));
         Self {
             intent,
             manifest,
@@ -226,6 +261,7 @@ impl ManagedScenarioLaunchState {
             pending_start_requests: VecDeque::new(),
             primary_provisioned: None,
             destination_provisioned: None,
+            destination_provision_requested: false,
             primary_start_token: None,
             destination_start_token: None,
             destination: None,
@@ -237,6 +273,21 @@ impl ManagedScenarioLaunchState {
         &mut self,
     ) -> Option<PlatformOperation<ProvisionManagedScenarioWorld>> {
         self.pending_provision_requests.pop_front()
+    }
+
+    pub(crate) fn issue_destination_provision(&mut self) {
+        if self.destination_provision_requested {
+            return;
+        }
+        self.destination_provision_requested = true;
+        self.pending_provision_requests
+            .push_back(self.provision_operations.issue(
+                ProvisionManagedScenarioWorld {
+                    intent: self.intent,
+                    role: ManagedScenarioWorldRole::Destination,
+                },
+                self.intent,
+            ));
     }
 
     pub(crate) fn complete_provision(
@@ -726,6 +777,7 @@ pub(crate) struct EmbeddedWorldPreviewMutationState {
 pub(crate) struct EmbeddedWorldPreview {
     pub source_world: WorldInstanceId,
     pub region: EmbeddedChunkRegion,
+    pub return_region: EmbeddedChunkRegion,
     pub context: WorldCompositionContext,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub return_context: WorldCompositionContext,
@@ -1823,6 +1875,8 @@ mod tests {
         let intent = ScenarioLaunchIntent::lobby_preview();
         let mut launch = ManagedScenarioLaunchState::new(intent);
         let primary = launch.take_provision_request().unwrap();
+        assert!(launch.take_provision_request().is_none());
+        launch.issue_destination_provision();
         let destination = launch.take_provision_request().unwrap();
         assert_eq!(primary.kind.role, ManagedScenarioWorldRole::Primary);
         assert_eq!(destination.kind.role, ManagedScenarioWorldRole::Destination);
@@ -1866,7 +1920,7 @@ mod tests {
         let start = ManagedScenarioWorldStart {
             instance_id: WorldInstanceId::new(41),
             role: ManagedScenarioWorldRole::Primary,
-            managed_world_key: key,
+            storage_source: ScenarioWorldStorageSource::Managed(key),
             descriptor: ActiveSessionDescriptor::new_seed_local_world(scene.seed),
             scene,
             destination: None,
@@ -1886,7 +1940,7 @@ mod tests {
             ManagedScenarioWorldRole::Destination,
             WorldInstanceId::new(41),
         ));
-        assert_eq!(launch.cancel(), 3);
+        assert_eq!(launch.cancel(), 2);
         assert!(!launch.owns_start(
             token,
             ManagedScenarioWorldRole::Primary,

@@ -14,7 +14,7 @@ use std::thread::{self, JoinHandle};
 
 use anyhow::{Context, Result, anyhow, bail};
 use mclone_server::{
-    AUTHORED_WORLD_FIXTURE_MARKER_FILE, AuthoredWorldFixtureManifest, SqliteWorldStore,
+    AUTHORED_WORLD_FIXTURE_MARKER_FILE, AuthoredWorldFixtureManifest, SqliteWorldStore, WorldStore,
     write_authored_world_fixture_dir,
 };
 
@@ -26,9 +26,10 @@ use crate::platform_operation::{
 use crate::scenario::{BuiltInScenarioId, ScenarioLaunchIntent};
 
 use super::{
-    LOBBY_PREVIEW_DIRECTORY, MANAGED_SCENARIO_MANIFEST_FILE, ManagedScenarioManifest,
-    ManagedScenarioWorldManifest, ManagedScenarioWorldRole, ManagedWorldKey,
-    ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld,
+    LOBBY_PREVIEW_DIRECTORY, MANAGED_SCENARIO_MANIFEST_FILE, MANAGED_SCENARIO_WORLD_MANIFEST_FILE,
+    ManagedScenarioManifest, ManagedScenarioWorldContent, ManagedScenarioWorldManifest,
+    ManagedScenarioWorldRole, ManagedWorldKey, ProvisionManagedScenarioWorld,
+    ProvisionedManagedScenarioWorld,
 };
 
 const SQLITE_HEADER: &[u8; 16] = b"SQLite format 3\0";
@@ -387,15 +388,34 @@ pub fn native_managed_scenario_root_from_world_root(world_root: &Path) -> PathBu
 fn build_staged_scenario(root: &Path, expected: &ManagedScenarioManifest) -> Result<()> {
     let primary_root = root.join(&expected.primary.directory);
     let destination_root = root.join(&expected.destination.directory);
-    write_authored_world_fixture_dir(&primary_root, expected.primary.fixture.kind)
-        .context("build managed lobby content")?;
-    write_authored_world_fixture_dir(&destination_root, expected.destination.fixture.kind)
-        .context("build managed demo-island content")?;
+    build_managed_world(&primary_root, &expected.primary).context("build managed lobby content")?;
+    build_managed_world(&destination_root, &expected.destination)
+        .context("build managed destination content")?;
 
     let bytes = serde_json::to_vec_pretty(expected).context("encode managed scenario manifest")?;
     fs::write(root.join(MANAGED_SCENARIO_MANIFEST_FILE), bytes)
         .context("write staged managed scenario manifest")?;
     validate_published_scenario(root, expected).map(|_| ())
+}
+
+fn build_managed_world(root: &Path, expected: &ManagedScenarioWorldManifest) -> Result<()> {
+    match &expected.content {
+        ManagedScenarioWorldContent::AuthoredFixture { fixture } => {
+            write_authored_world_fixture_dir(root, fixture.kind)?;
+        }
+        ManagedScenarioWorldContent::GeneratedOverworld { .. } => {
+            fs::create_dir_all(root)
+                .with_context(|| format!("create generated managed world `{}`", root.display()))?;
+            let mut store = SqliteWorldStore::open_world_dir(root)?;
+            store.flush()?;
+            store.close()?;
+            let bytes = serde_json::to_vec_pretty(expected)
+                .context("encode generated managed-world manifest")?;
+            fs::write(root.join(MANAGED_SCENARIO_WORLD_MANIFEST_FILE), bytes)
+                .context("write generated managed-world manifest")?;
+        }
+    }
+    Ok(())
 }
 
 fn validate_published_scenario(
@@ -449,17 +469,41 @@ fn validate_managed_world(
             root.display()
         );
     }
-    let marker_path = root.join(AUTHORED_WORLD_FIXTURE_MARKER_FILE);
-    let marker_bytes = fs::read(&marker_path)
-        .with_context(|| format!("read managed content marker `{}`", marker_path.display()))?;
-    let marker: AuthoredWorldFixtureManifest = serde_json::from_slice(&marker_bytes)
-        .with_context(|| format!("decode managed content marker `{}`", marker_path.display()))?;
-    if marker != expected.fixture {
-        bail!(
-            "managed content marker `{}` does not match `{}`",
-            marker_path.display(),
-            expected.content_id
-        );
+    match &expected.content {
+        ManagedScenarioWorldContent::AuthoredFixture { fixture } => {
+            let marker_path = root.join(AUTHORED_WORLD_FIXTURE_MARKER_FILE);
+            let marker_bytes = fs::read(&marker_path).with_context(|| {
+                format!("read managed content marker `{}`", marker_path.display())
+            })?;
+            let marker: AuthoredWorldFixtureManifest = serde_json::from_slice(&marker_bytes)
+                .with_context(|| {
+                    format!("decode managed content marker `{}`", marker_path.display())
+                })?;
+            if &marker != fixture {
+                bail!(
+                    "managed content marker `{}` does not match `{}`",
+                    marker_path.display(),
+                    expected.content_id
+                );
+            }
+        }
+        ManagedScenarioWorldContent::GeneratedOverworld { .. } => {
+            let marker_path = root.join(MANAGED_SCENARIO_WORLD_MANIFEST_FILE);
+            let marker_bytes = fs::read(&marker_path).with_context(|| {
+                format!("read generated world marker `{}`", marker_path.display())
+            })?;
+            let marker: ManagedScenarioWorldManifest = serde_json::from_slice(&marker_bytes)
+                .with_context(|| {
+                    format!("decode generated world marker `{}`", marker_path.display())
+                })?;
+            if &marker != expected {
+                bail!(
+                    "generated world marker `{}` does not match `{}`",
+                    marker_path.display(),
+                    expected.content_id
+                );
+            }
+        }
     }
 
     let database = SqliteWorldStore::database_path_for_world_dir(&root);
@@ -496,21 +540,17 @@ fn remove_owned_staging(staging: &Path) {
 mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
 
-    use mclone_core::{
-        AIR_BLOCK_STATE_ID, ChunkPos, block_to_section_coord, chunk_section_index,
-        local_block_coord, local_section_block_coord,
-    };
     use mclone_server::WorldBehaviorProfile;
     use mclone_server::WorldStore;
 
     use super::*;
-    use crate::scenario_content::LOBBY_PREVIEW_V1_DIRECTORY;
+    use crate::scenario_content::{LOBBY_PREVIEW_V1_DIRECTORY, LOBBY_PREVIEW_V2_DIRECTORY};
     use crate::world_catalog::NativeWorldCatalog;
 
     static TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
     #[test]
-    fn managed_lobby_is_versioned_reused_and_preserves_destination_edits() {
+    fn managed_lobby_is_versioned_reused_and_preserves_generated_destination_store() {
         let root = unique_test_root("reuse");
         let managed_root = root.join("scenarios");
         let service = NativeManagedScenarioContentService::new(&managed_root);
@@ -519,7 +559,10 @@ mod tests {
             .unwrap();
         assert_eq!(first.root, managed_root.join(LOBBY_PREVIEW_DIRECTORY));
         assert_eq!(first.primary.root, first.root.join("lobby"));
-        assert_eq!(first.destination.root, first.root.join("demo-island"));
+        assert_eq!(
+            first.destination.root,
+            first.root.join("fallback-overworld")
+        );
         assert_eq!(
             first.primary.manifest.behavior_profile,
             WorldBehaviorProfile::ProtectedLobby
@@ -529,55 +572,37 @@ mod tests {
             WorldBehaviorProfile::Mutable
         );
 
-        let mutation = first.destination.manifest.fixture.mutation_block;
-        let chunk = ChunkPos::from_block_coords(mutation[0], mutation[2]);
-        let mut store = SqliteWorldStore::open_world_dir(&first.destination.root).unwrap();
-        let mut record = store.load_chunk(chunk).unwrap().unwrap();
-        assert!(record.snapshot.patch_section_block(
-            block_to_section_coord(mutation[1]),
-            local_block_coord(mutation[0]),
-            local_section_block_coord(mutation[1]),
-            local_block_coord(mutation[2]),
-            AIR_BLOCK_STATE_ID,
+        assert!(matches!(
+            first.destination.manifest.content,
+            ManagedScenarioWorldContent::GeneratedOverworld { .. }
         ));
-        store.save_chunk(&record).unwrap();
+        let mut store = SqliteWorldStore::open_world_dir(&first.destination.root).unwrap();
         store.flush().unwrap();
         store.close().unwrap();
         let database = SqliteWorldStore::database_path_for_world_dir(&first.destination.root);
-        let edited_database = fs::read(&database).unwrap();
+        let original_database = fs::read(&database).unwrap();
+        let retained = first.destination.root.join("retained-runtime-edit.txt");
+        fs::write(&retained, b"runtime-owned").unwrap();
 
         let second = service
             .resolve(ScenarioLaunchIntent::lobby_preview())
             .unwrap();
         assert_eq!(second, first);
-        assert_eq!(fs::read(&database).unwrap(), edited_database);
-        let mut store = SqliteWorldStore::open_world_dir(&second.destination.root).unwrap();
-        let record = store.load_chunk(chunk).unwrap().unwrap();
-        let state = record
-            .snapshot
-            .sections
-            .iter()
-            .find(|section| section.section_y == block_to_section_coord(mutation[1]))
-            .map(|section| {
-                section.unpack_block_state_ids()[chunk_section_index(
-                    local_block_coord(mutation[0]),
-                    local_section_block_coord(mutation[1]),
-                    local_block_coord(mutation[2]),
-                )]
-            })
-            .unwrap_or(AIR_BLOCK_STATE_ID);
-        assert_eq!(state, AIR_BLOCK_STATE_ID);
-        store.close().unwrap();
+        assert_eq!(fs::read(&database).unwrap(), original_database);
+        assert_eq!(fs::read(retained).unwrap(), b"runtime-owned");
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn current_lobby_publication_leaves_v1_content_untouched() {
-        let root = unique_test_root("v1-preservation");
+    fn current_lobby_publication_leaves_v1_and_v2_content_untouched() {
+        let root = unique_test_root("old-version-preservation");
         let managed_root = root.join("scenarios");
         let v1 = managed_root.join(LOBBY_PREVIEW_V1_DIRECTORY);
+        let v2 = managed_root.join(LOBBY_PREVIEW_V2_DIRECTORY);
         fs::create_dir_all(&v1).unwrap();
+        fs::create_dir_all(&v2).unwrap();
         fs::write(v1.join("keep.txt"), b"v1 remains owned by its old recipe").unwrap();
+        fs::write(v2.join("keep.txt"), b"v2 remains owned by its old recipe").unwrap();
 
         let content = NativeManagedScenarioContentService::new(&managed_root)
             .resolve(ScenarioLaunchIntent::lobby_preview())
@@ -586,11 +611,15 @@ mod tests {
         assert_eq!(content.root, managed_root.join(LOBBY_PREVIEW_DIRECTORY));
         assert_eq!(
             content.manifest,
-            ManagedScenarioManifest::lobby_preview_v2()
+            ManagedScenarioManifest::lobby_preview_v3()
         );
         assert_eq!(
             fs::read(v1.join("keep.txt")).unwrap(),
             b"v1 remains owned by its old recipe"
+        );
+        assert_eq!(
+            fs::read(v2.join("keep.txt")).unwrap(),
+            b"v2 remains owned by its old recipe"
         );
         fs::remove_dir_all(root).unwrap();
     }

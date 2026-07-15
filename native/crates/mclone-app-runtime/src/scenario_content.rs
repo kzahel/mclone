@@ -8,12 +8,14 @@ use std::collections::BTreeSet;
 
 use mclone_server::{
     AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, ChunkRecord, EntityChunkRecord,
-    EntityPersistentId, WorldBehaviorProfile, authored_world_fixture_records, decode_chunk_record,
-    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
+    EntityPersistentId, WorldBehaviorProfile, WorldGenerationProfile,
+    authored_world_fixture_records, decode_chunk_record, decode_entity_chunk_record,
+    encode_chunk_record, encode_entity_chunk_record, initial_spawn_center_for_seed,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::scenario::{BuiltInScenarioId, ScenarioLaunchIntent};
+use crate::world_catalog::LocalWorldId;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
@@ -22,12 +24,17 @@ pub use native::*;
 
 pub const MANAGED_SCENARIO_SCHEMA_VERSION: u32 = 1;
 pub const LOBBY_PREVIEW_V1_CONTENT_VERSION: u32 = 1;
-pub const LOBBY_PREVIEW_CONTENT_VERSION: u32 = 2;
+pub const LOBBY_PREVIEW_V2_CONTENT_VERSION: u32 = 2;
+pub const LOBBY_PREVIEW_CONTENT_VERSION: u32 = 3;
 pub const LOBBY_PREVIEW_V1_DIRECTORY: &str = "lobby-preview-v1";
-pub const LOBBY_PREVIEW_DIRECTORY: &str = "lobby-preview-v2";
+pub const LOBBY_PREVIEW_V2_DIRECTORY: &str = "lobby-preview-v2";
+pub const LOBBY_PREVIEW_DIRECTORY: &str = "lobby-preview-v3";
 pub const MANAGED_SCENARIO_MANIFEST_FILE: &str = "scenario.json";
+pub const MANAGED_SCENARIO_WORLD_MANIFEST_FILE: &str = "scenario-world.json";
 pub const MANAGED_SCENARIO_LOBBY_DIRECTORY: &str = "lobby";
 pub const MANAGED_SCENARIO_ISLAND_DIRECTORY: &str = "demo-island";
+pub const MANAGED_SCENARIO_OVERWORLD_DIRECTORY: &str = "fallback-overworld";
+pub const LOBBY_PREVIEW_FALLBACK_SEED: i64 = 12_345;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +58,39 @@ pub struct ProvisionManagedScenarioWorld {
 pub struct ProvisionedManagedScenarioWorld {
     pub role: ManagedScenarioWorldRole,
     pub key: ManagedWorldKey,
+}
+
+/// Path-free storage route selected by shared scene policy.
+///
+/// Platform adapters resolve either identity to their own filesystem or
+/// IndexedDB representation; they never choose which destination is used.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum ScenarioWorldStorageSource {
+    Managed(ManagedWorldKey),
+    Catalog(LocalWorldId),
+}
+
+impl ScenarioWorldStorageSource {
+    pub fn world_id(&self) -> &str {
+        match self {
+            Self::Managed(key) => key.as_str(),
+            Self::Catalog(id) => id.as_str(),
+        }
+    }
+
+    pub const fn kind_label(&self) -> &'static str {
+        match self {
+            Self::Managed(_) => "managed",
+            Self::Catalog(_) => "catalog",
+        }
+    }
+
+    pub fn managed_world_key(&self) -> Option<&ManagedWorldKey> {
+        match self {
+            Self::Managed(key) => Some(key),
+            Self::Catalog(_) => None,
+        }
+    }
 }
 
 /// Stable storage identity. This is deliberately unrelated to the live scene
@@ -86,7 +126,76 @@ pub struct ManagedScenarioWorldManifest {
     pub content_version: u32,
     pub directory: String,
     pub behavior_profile: WorldBehaviorProfile,
-    pub fixture: AuthoredWorldFixtureManifest,
+    pub content: ManagedScenarioWorldContent,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ManagedScenarioWorldContent {
+    AuthoredFixture {
+        fixture: AuthoredWorldFixtureManifest,
+    },
+    GeneratedOverworld {
+        seed: i64,
+        center_chunk: [i32; 2],
+        preview_anchor: [f64; 3],
+        preview_display_anchor: [f64; 3],
+    },
+}
+
+impl ManagedScenarioWorldManifest {
+    pub fn authored_fixture(&self) -> Option<&AuthoredWorldFixtureManifest> {
+        match &self.content {
+            ManagedScenarioWorldContent::AuthoredFixture { fixture } => Some(fixture),
+            ManagedScenarioWorldContent::GeneratedOverworld { .. } => None,
+        }
+    }
+
+    pub fn seed(&self) -> i64 {
+        match &self.content {
+            ManagedScenarioWorldContent::AuthoredFixture { fixture } => fixture.seed,
+            ManagedScenarioWorldContent::GeneratedOverworld { seed, .. } => *seed,
+        }
+    }
+
+    pub fn center_chunk(&self) -> [i32; 2] {
+        match &self.content {
+            ManagedScenarioWorldContent::AuthoredFixture { fixture } => fixture.center_chunk,
+            ManagedScenarioWorldContent::GeneratedOverworld { center_chunk, .. } => *center_chunk,
+        }
+    }
+
+    pub fn preview_anchor(&self) -> [f64; 3] {
+        match &self.content {
+            ManagedScenarioWorldContent::AuthoredFixture { fixture } => fixture.preview_anchor,
+            ManagedScenarioWorldContent::GeneratedOverworld { preview_anchor, .. } => {
+                *preview_anchor
+            }
+        }
+    }
+
+    pub fn preview_display_anchor(&self) -> [f64; 3] {
+        match &self.content {
+            ManagedScenarioWorldContent::AuthoredFixture { fixture } => {
+                fixture.kind.preview_display_anchor()
+            }
+            ManagedScenarioWorldContent::GeneratedOverworld {
+                preview_display_anchor,
+                ..
+            } => *preview_display_anchor,
+        }
+    }
+
+    pub fn world_generation_profile(&self) -> WorldGenerationProfile {
+        match &self.content {
+            ManagedScenarioWorldContent::AuthoredFixture { fixture } => {
+                fixture.world_generation_profile
+            }
+            ManagedScenarioWorldContent::GeneratedOverworld { .. } => {
+                WorldGenerationProfile::Overworld
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -151,14 +260,18 @@ impl ManagedScenarioManifest {
                 content_version: 1,
                 directory: MANAGED_SCENARIO_LOBBY_DIRECTORY.to_owned(),
                 behavior_profile: WorldBehaviorProfile::ProtectedLobby,
-                fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::Table),
+                content: ManagedScenarioWorldContent::AuthoredFixture {
+                    fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::Table),
+                },
             },
             destination: ManagedScenarioWorldManifest {
                 content_id: "demo-island-v1".to_owned(),
                 content_version: 1,
                 directory: MANAGED_SCENARIO_ISLAND_DIRECTORY.to_owned(),
                 behavior_profile: WorldBehaviorProfile::Mutable,
-                fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::Island),
+                content: ManagedScenarioWorldContent::AuthoredFixture {
+                    fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::Island),
+                },
             },
         }
     }
@@ -167,26 +280,71 @@ impl ManagedScenarioManifest {
         Self {
             schema_version: MANAGED_SCENARIO_SCHEMA_VERSION,
             scenario_id: BuiltInScenarioId::LobbyPreview,
-            content_version: LOBBY_PREVIEW_CONTENT_VERSION,
+            content_version: LOBBY_PREVIEW_V2_CONTENT_VERSION,
             primary: ManagedScenarioWorldManifest {
                 content_id: "lobby-v2".to_owned(),
                 content_version: 2,
                 directory: MANAGED_SCENARIO_LOBBY_DIRECTORY.to_owned(),
                 behavior_profile: WorldBehaviorProfile::ProtectedLobby,
-                fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::LobbyTableV2),
+                content: ManagedScenarioWorldContent::AuthoredFixture {
+                    fixture: AuthoredWorldFixtureManifest::new(
+                        AuthoredWorldFixtureKind::LobbyTableV2,
+                    ),
+                },
             },
             destination: ManagedScenarioWorldManifest {
                 content_id: "demo-island-v2".to_owned(),
                 content_version: 2,
                 directory: MANAGED_SCENARIO_ISLAND_DIRECTORY.to_owned(),
                 behavior_profile: WorldBehaviorProfile::Mutable,
-                fixture: AuthoredWorldFixtureManifest::new(AuthoredWorldFixtureKind::LobbyIslandV2),
+                content: ManagedScenarioWorldContent::AuthoredFixture {
+                    fixture: AuthoredWorldFixtureManifest::new(
+                        AuthoredWorldFixtureKind::LobbyIslandV2,
+                    ),
+                },
+            },
+        }
+    }
+
+    pub fn lobby_preview_v3() -> Self {
+        let center = initial_spawn_center_for_seed(LOBBY_PREVIEW_FALLBACK_SEED);
+        let center_block_x = f64::from(center.x * 16 + 8);
+        let center_block_z = f64::from(center.z * 16 + 8);
+        Self {
+            schema_version: MANAGED_SCENARIO_SCHEMA_VERSION,
+            scenario_id: BuiltInScenarioId::LobbyPreview,
+            content_version: LOBBY_PREVIEW_CONTENT_VERSION,
+            primary: ManagedScenarioWorldManifest {
+                content_id: "lobby-v3".to_owned(),
+                content_version: 3,
+                directory: MANAGED_SCENARIO_LOBBY_DIRECTORY.to_owned(),
+                behavior_profile: WorldBehaviorProfile::ProtectedLobby,
+                content: ManagedScenarioWorldContent::AuthoredFixture {
+                    fixture: AuthoredWorldFixtureManifest::new(
+                        AuthoredWorldFixtureKind::LobbyTableV2,
+                    ),
+                },
+            },
+            destination: ManagedScenarioWorldManifest {
+                content_id: "overworld-v3".to_owned(),
+                content_version: 3,
+                directory: MANAGED_SCENARIO_OVERWORLD_DIRECTORY.to_owned(),
+                behavior_profile: WorldBehaviorProfile::Mutable,
+                content: ManagedScenarioWorldContent::GeneratedOverworld {
+                    seed: LOBBY_PREVIEW_FALLBACK_SEED,
+                    center_chunk: [center.x, center.z],
+                    // Curated against the seed-derived initial-spawn center.
+                    // Slice 4 replaces this recipe hint with the accepted
+                    // authoritative entry pose for every destination source.
+                    preview_anchor: [center_block_x, 72.0, center_block_z],
+                    preview_display_anchor: [center_block_x, 72.0, center_block_z],
+                },
             },
         }
     }
 
     pub fn current_lobby_preview() -> Self {
-        Self::lobby_preview_v2()
+        Self::lobby_preview_v3()
     }
 
     pub fn for_intent(intent: ScenarioLaunchIntent) -> Self {
@@ -218,8 +376,11 @@ impl ManagedScenarioManifest {
             (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_V1_CONTENT_VERSION) => {
                 Self::lobby_preview_v1()
             }
-            (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_CONTENT_VERSION) => {
+            (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_V2_CONTENT_VERSION) => {
                 Self::lobby_preview_v2()
+            }
+            (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_CONTENT_VERSION) => {
+                Self::lobby_preview_v3()
             }
             (_, actual) => {
                 return Err(ManagedScenarioValidationError::ContentVersion {
@@ -261,7 +422,10 @@ fn scenario_key(
         (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_V1_CONTENT_VERSION) => {
             Ok("lobby-preview-v1")
         }
-        (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_CONTENT_VERSION) => Ok("lobby-preview-v2"),
+        (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_V2_CONTENT_VERSION) => {
+            Ok("lobby-preview-v2")
+        }
+        (BuiltInScenarioId::LobbyPreview, LOBBY_PREVIEW_CONTENT_VERSION) => Ok("lobby-preview-v3"),
         (_, actual) => Err(ManagedScenarioValidationError::ContentVersion {
             expected: LOBBY_PREVIEW_CONTENT_VERSION,
             actual,
@@ -505,12 +669,19 @@ pub fn managed_scenario_world_payload(
 ) -> Result<ManagedScenarioWorldPayload, ManagedScenarioPayloadError> {
     manifest.validate()?;
     let world = manifest.world(role);
-    let (fixture, records, entity_records) = authored_world_fixture_records(world.fixture.kind)?;
-    if fixture != world.fixture {
-        return Err(ManagedScenarioValidationError::WorldMismatch { role }.into());
-    }
-    let chunk_records = encode_records(records)?;
-    let entity_chunk_records = encode_entity_records(entity_records)?;
+    let (chunk_records, entity_chunk_records) = match &world.content {
+        ManagedScenarioWorldContent::AuthoredFixture { fixture } => {
+            let (actual, records, entity_records) = authored_world_fixture_records(fixture.kind)?;
+            if &actual != fixture {
+                return Err(ManagedScenarioValidationError::WorldMismatch { role }.into());
+            }
+            (
+                encode_records(records)?,
+                encode_entity_records(entity_records)?,
+            )
+        }
+        ManagedScenarioWorldContent::GeneratedOverworld { .. } => (Vec::new(), Vec::new()),
+    };
     Ok(ManagedScenarioWorldPayload {
         role,
         key: manifest.world_key(role)?,
@@ -644,26 +815,42 @@ mod tests {
     }
 
     #[test]
-    fn current_lobby_manifest_uses_distinct_v2_storage_identity() {
+    fn current_lobby_manifest_uses_distinct_v3_generated_storage_identity() {
         let manifest = ManagedScenarioManifest::current_lobby_preview();
-        assert_eq!(manifest, ManagedScenarioManifest::lobby_preview_v2());
+        assert_eq!(manifest, ManagedScenarioManifest::lobby_preview_v3());
         manifest.validate().unwrap();
         assert_eq!(manifest.content_version, LOBBY_PREVIEW_CONTENT_VERSION);
-        assert_eq!(manifest.primary.content_version, 2);
-        assert_eq!(manifest.destination.content_version, 2);
+        assert_eq!(manifest.primary.content_version, 3);
+        assert_eq!(manifest.destination.content_version, 3);
         assert_eq!(
             manifest
                 .world_key(ManagedScenarioWorldRole::Primary)
                 .unwrap()
                 .as_str(),
-            "managed.lobby-preview-v2.lobby-v2"
+            "managed.lobby-preview-v3.lobby-v3"
         );
         assert_eq!(
             manifest
                 .world_key(ManagedScenarioWorldRole::Destination)
                 .unwrap()
                 .as_str(),
-            "managed.lobby-preview-v2.demo-island-v2"
+            "managed.lobby-preview-v3.overworld-v3"
+        );
+        assert_eq!(
+            manifest.destination.world_generation_profile(),
+            WorldGenerationProfile::Overworld
+        );
+        assert!(manifest.destination.authored_fixture().is_none());
+    }
+
+    #[test]
+    fn retained_v2_manifest_remains_valid_and_readable() {
+        let manifest = ManagedScenarioManifest::lobby_preview_v2();
+        manifest.validate().unwrap();
+        let json = serde_json::to_string(&manifest).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ManagedScenarioManifest>(&json).unwrap(),
+            manifest
         );
     }
 
@@ -699,8 +886,8 @@ mod tests {
     }
 
     #[test]
-    fn current_payloads_include_shared_authored_entity_codec_bytes() {
-        let manifest = ManagedScenarioManifest::current_lobby_preview();
+    fn retained_v2_payloads_include_shared_authored_entity_codec_bytes() {
+        let manifest = ManagedScenarioManifest::lobby_preview_v2();
         let primary =
             managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Primary).unwrap();
         let destination =
@@ -735,8 +922,25 @@ mod tests {
     }
 
     #[test]
-    fn stored_world_validation_distinguishes_recoverable_and_corrupt_states() {
+    fn current_generated_fallback_payload_starts_persistently_empty() {
         let manifest = ManagedScenarioManifest::current_lobby_preview();
+        let destination =
+            managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination)
+                .unwrap();
+
+        assert!(destination.chunk_records.is_empty());
+        assert!(destination.entity_chunk_records.is_empty());
+        let metadata = ManagedScenarioStoredWorldMetadata::for_payload(&destination);
+        assert_eq!(metadata.content_id, "overworld-v3");
+        assert_eq!(
+            validate_managed_scenario_stored_world(&destination, Some(&metadata), &[], &[],).status,
+            ManagedScenarioStoredWorldStatus::Valid
+        );
+    }
+
+    #[test]
+    fn stored_world_validation_distinguishes_recoverable_and_corrupt_states() {
+        let manifest = ManagedScenarioManifest::lobby_preview_v2();
         let payload =
             managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination)
                 .unwrap();

@@ -309,3 +309,60 @@ zero result overflow. The direct native witness remains byte-identical at
 SHA-256
 `8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
 No performance or architecture stop condition fired.
+
+### Slice 3 — 2026-07-15
+
+Managed lobby content is now v3 under a new `lobby-preview-v3` root. Its
+fallback destination is a persistent empty store for seed `12345` with the
+ordinary `Overworld` generation profile; it contains no authored chunk or
+entity payload. The v1 and v2 authored recipes remain readable and untouched.
+Native publication reuses the destination SQLite store without replacing
+generated world data, browser publication accepts an intentionally empty
+IndexedDB payload, and neither managed identity enters the user catalog.
+
+Scenario starts now carry one neutral `ScenarioWorldStorageSource`. Shared
+scene policy selects either a catalog id or a managed key, while native maps
+those ids to catalog or app-private directories and browser maps both to the
+existing IndexedDB `worldId` Worker route. Destination provisioning is lazy
+and occurs only when catalog selection resolves to fallback. Independent
+outbound and return regions preserve the same bounds configuration when the
+two sources occupy unrelated chunk coordinates. The next slice replaces the
+remaining recipe entry hint with each runtime's accepted entry pose.
+
+Focused validation passed:
+
+- `cargo test -p mclone-app-runtime scenario_content`: 18 passed;
+- `cargo test -p mclone-scene --test one_world_ownership_contract`: 13 passed,
+  one GPU characterization ignored;
+- `cargo check -p mclone-native-client`, `pnpm native:web:typecheck`, and
+  `git diff --check` passed;
+- `pnpm native:web:managed-scenario-storage-smoke` proved zero destination
+  records, reuse, primary repair/refusal behavior, catalog exclusion, and
+  complete Worker shutdown.
+
+Native `pnpm native:lobby-scenario:smoke` completed six captures, two slot
+switches, Quit/relaunch persistence, protected lobby authority, mutable
+destination authority, and the full generated-world A-to-B-to-A route. The
+receipt names `managed-overworld-fallback`, reports 49 loaded destination
+chunks, and retains separate 2x2 regions across both coordinate spaces.
+Production browser WebGPU `pnpm native:web:lobby-scenario-smoke` passed through
+the same Rust scene path with `storageSourceKind=managed`, an empty provisioned
+destination payload, two integrated-server Workers, one compiler Worker, live
+generated terrain/actors, and zero Workers after shutdown. New native pixels
+under `/tmp/mclone-lobby-scenario-smoke`, browser pixels under
+`/tmp/mclone-native-web-lobby-scenario-desktop*`, and the fresh direct witness
+`/tmp/mclone-180-slice3-native-direct.png` were inspected. The arbitrary
+generated crop visibly demonstrates the already-documented hard-edge boundary
+limitation and reports its explicit boundary warning; it is not mistaken for
+boundary-aware remeshing.
+
+Five native feature-off samples measured 2.575/4.376 ms median average/P95,
+versus Slice 2's 2.582/4.514 ms (-0.27%/-3.06%), with zero over-budget frames
+or accounting violations. Five production browser feature-off samples measured
+13.6/18.8 ms median compile average/P95, versus 13.4/18.6 ms in Slice 2
+(+1.49%/+1.08%). Every browser control retained two of two direct actors, one
+compiler Worker, shared-result transport, and zero overflow. The native direct
+pixel remains byte-identical at SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+No performance, migration, platform-fork, or architecture stop condition
+fired.

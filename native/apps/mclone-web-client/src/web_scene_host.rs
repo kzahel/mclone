@@ -1249,18 +1249,18 @@ impl WebSceneHost {
                 }
             };
             let request_id = platform_operation_key("start", token);
-            let world_id = start
-                .managed_world_key
-                .as_ref()
-                .ok_or_else(|| JsValue::from_str("managed world start omitted its storage key"))?
-                .as_str()
-                .to_owned();
+            let storage_source = start.storage_source.as_ref().ok_or_else(|| {
+                JsValue::from_str("scenario world start omitted its storage source")
+            })?;
+            let world_id = storage_source.world_id().to_owned();
             let object = js_sys::Object::new();
             report_set_string(&object, "kind", "start").map_err(JsValue::from)?;
             report_set_string(&object, "requestId", &request_id).map_err(JsValue::from)?;
             report_set_string(&object, "role", managed_world_role_label(role))
                 .map_err(JsValue::from)?;
             report_set_string(&object, "worldId", &world_id).map_err(JsValue::from)?;
+            report_set_string(&object, "storageSourceKind", storage_source.kind_label())
+                .map_err(JsValue::from)?;
             report_set_string(&object, "seedText", &start.scene.seed.to_string())
                 .map_err(JsValue::from)?;
             report_set_string(
@@ -1337,10 +1337,10 @@ impl WebSceneHost {
             .ok_or_else(|| JsValue::from_str("unknown managed world start request"))?;
         let seed = pending.scene.seed;
         let world_id = pending
-            .managed_world_key
+            .storage_source
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("managed world start omitted its storage key"))?
-            .as_str()
+            .ok_or_else(|| JsValue::from_str("scenario world start omitted its storage source"))?
+            .world_id()
             .to_owned();
         let config = WebIntegratedServerRunnerConfig::new(
             seed,

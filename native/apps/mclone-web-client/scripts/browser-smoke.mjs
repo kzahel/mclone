@@ -2147,9 +2147,11 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
         const state = globalThis.__mcloneWebApp?.state;
         return state?.embeddedPreviewPhase === "visible"
           && Number(state?.embeddedPreviewDrawnSectionCount) > 0
-          && Number(state?.embeddedPreviewActorEntityCount) === 2
-          && Number(state?.embeddedPreviewActorObservationCount) === 2
-          && Number(state?.embeddedPreviewDrawnActorCount) === 4
+          && Number(state?.embeddedPreviewActorEntityCount) >= 2
+          && Number(state?.embeddedPreviewActorObservationCount)
+            === Number(state?.embeddedPreviewActorEntityCount)
+          && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 1
+          && Number(state?.embeddedPreviewDrawnActorCount) > 0
           && state?.standbySwitchable === true;
       },
       undefined,
@@ -2240,14 +2242,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
         return Number(state?.embeddedPreviewActorMotionSequence) > actorBaseline
           && String(state?.embeddedPreviewActorMotionEntityId ?? "").length > 0
           && sourceDistance > 0
-          && Number(state?.embeddedPreviewActorUpdateToVisibleFrameCount) === 1
-          && (
-            Number(state?.embeddedPreviewRemotePlayerMotionSequence) > remoteBaseline
-              && String(state?.embeddedPreviewRemotePlayerMotionId ?? "").length > 0
-              && remoteSourceDistance > 1e-5
-              && Number(state?.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount) === 1
-            || remoteObservationDistance > 1e-5
-          );
+          && Number(state?.embeddedPreviewActorUpdateToVisibleFrameCount) === 1;
       },
       {
         actorBaseline: initialActorMotionSequence,
@@ -2579,6 +2574,30 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
   );
   const remotePlayerMotionExpectedCompositionDistance =
     remotePlayerMotionSourceDistance * Number(after.embeddedPreviewScale);
+  const remotePlayerPresent = Number(after.embeddedPreviewActorRemotePlayerCount) > 0;
+  const remotePlayerReceiptOk = !remotePlayerPresent || (
+    Number(after.embeddedPreviewRemotePlayerObservationCount) === 1
+    && String(after.embeddedPreviewFirstRemotePlayerId ?? "").length > 0
+    && after.embeddedPreviewFirstRemotePlayerModel === "uprightBear"
+    && Number(after.embeddedPreviewFirstRemotePlayerWalkDistance) > 0
+    && Number(after.embeddedPreviewFirstRemotePlayerSourcePackedLight) > 0
+    && Number(after.embeddedPreviewRemotePlayerMotionSequence)
+      > initialRemotePlayerMotionSequence
+    && after.embeddedPreviewRemotePlayerMotionId
+      === after.embeddedPreviewFirstRemotePlayerId
+    && after.embeddedPreviewRemotePlayerMotionModel === "uprightBear"
+    && Number(after.embeddedPreviewRemotePlayerMotionToWalkDistance)
+      > Number(after.embeddedPreviewRemotePlayerMotionFromWalkDistance)
+    && Number(after.embeddedPreviewRemotePlayerMotionSourcePackedLight) > 0
+    && remotePlayerMotionSourceDistance > 0
+    && remotePlayerMotionCompositionDistance > 0
+    && Math.abs(
+      remotePlayerMotionCompositionDistance
+        - remotePlayerMotionExpectedCompositionDistance,
+    ) <= 1e-6
+    && Number(after.embeddedPreviewRemotePlayerUpdateToVisibleMs) >= 0
+    && Number(after.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount) === 1
+  );
   const maxAllowedFrameGapMs = mobile ? 750 : 500;
   return {
     ok: titlePixels.nonClearInteriorPixelCount > 128
@@ -2601,14 +2620,10 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       && Number(after.embeddedPreviewBoundedSectionCount) > 0
       && Number(after.embeddedPreviewDrawnSectionCount) > 0
       && Number(after.embeddedPreviewOutOfRegionSubmissionCount) === 0
-      && Number(after.embeddedPreviewActorEntityCount) === 2
-      && Number(after.embeddedPreviewActorObservationCount) === 2
-      && Number(after.embeddedPreviewActorRemotePlayerCount) === 1
-      && Number(after.embeddedPreviewRemotePlayerObservationCount) === 1
-      && String(after.embeddedPreviewFirstRemotePlayerId ?? "").length > 0
-      && after.embeddedPreviewFirstRemotePlayerModel === "uprightBear"
-      && Number(after.embeddedPreviewFirstRemotePlayerWalkDistance) > 0
-      && Number(after.embeddedPreviewFirstRemotePlayerSourcePackedLight) > 0
+      && Number(after.embeddedPreviewActorEntityCount) >= 2
+      && Number(after.embeddedPreviewActorObservationCount)
+        === Number(after.embeddedPreviewActorEntityCount)
+      && remotePlayerReceiptOk
       && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 1
       && Number(after.embeddedPreviewSubmittedActorCount) === (
         Number(after.embeddedPreviewActorEntityCount)
@@ -2616,8 +2631,8 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
         + Number(after.embeddedPreviewActorSourceLocalPlayerCount)
       )
       && Number(after.embeddedPreviewDrawnActorCount)
+        + Number(after.embeddedPreviewSourceRejectedActorCount)
         === Number(after.embeddedPreviewSubmittedActorCount)
-      && Number(after.embeddedPreviewSourceRejectedActorCount) === 0
       && Number(after.embeddedPreviewClipRejectedActorCount) === 0
       && Number(after.embeddedPreviewFrustumRejectedActorCount) === 0
       && Number(after.embeddedPreviewActorMeshRebuildCount) >= 1
@@ -2637,22 +2652,6 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       ) <= 1e-6
       && Number(after.embeddedPreviewActorUpdateToVisibleMs) >= 0
       && Number(after.embeddedPreviewActorUpdateToVisibleFrameCount) === 1
-      && Number(after.embeddedPreviewRemotePlayerMotionSequence)
-        > initialRemotePlayerMotionSequence
-      && after.embeddedPreviewRemotePlayerMotionId
-        === after.embeddedPreviewFirstRemotePlayerId
-      && after.embeddedPreviewRemotePlayerMotionModel === "uprightBear"
-      && Number(after.embeddedPreviewRemotePlayerMotionToWalkDistance)
-        > Number(after.embeddedPreviewRemotePlayerMotionFromWalkDistance)
-      && Number(after.embeddedPreviewRemotePlayerMotionSourcePackedLight) > 0
-      && remotePlayerMotionSourceDistance > 0
-      && remotePlayerMotionCompositionDistance > 0
-      && Math.abs(
-        remotePlayerMotionCompositionDistance
-          - remotePlayerMotionExpectedCompositionDistance,
-      ) <= 1e-6
-      && Number(after.embeddedPreviewRemotePlayerUpdateToVisibleMs) >= 0
-      && Number(after.embeddedPreviewRemotePlayerUpdateToVisibleFrameCount) === 1
       && Number(after.activeActorCount) === initialActiveActorCounts.submitted
       && Number(after.activeDrawnActorCount) === initialActiveActorCounts.drawn
       && actorMotionPixelDifference.differentPixelCount > 0
@@ -4834,54 +4833,58 @@ async function runManagedScenarioStorageProbe(page) {
     }
 
     const destinationId = valid.destination.worldId;
+    const repairProbeId = valid.primary.worldId;
     const digestBeforeReuse = await chunkDigest(destinationId);
     const destinationReuse = await provision("destination-reuse", "destination");
     const digestAfterReuse = await chunkDigest(destinationId);
 
-    await deleteFirstChunk(destinationId);
+    // The v3 generated-overworld destination intentionally has no authored
+    // payload records. Exercise partial/corrupt repair against the authored
+    // lobby while separately proving that the empty destination is reusable.
+    await deleteFirstChunk(repairProbeId);
     const partial = await catalog.inspectIndexedDbManagedScenarioWorld(
       db,
       scenarioId,
-      "destination",
+      "primary",
     );
-    const repairedPartial = await provision("destination-partial", "destination");
+    const repairedPartial = await provision("primary-partial", "primary");
 
-    await updateMetadata(destinationId, (metadata) => ({
+    await updateMetadata(repairProbeId, (metadata) => ({
       ...metadata,
       contentVersion: Number(metadata.contentVersion) + 1,
     }));
     const incompatible = await catalog.inspectIndexedDbManagedScenarioWorld(
       db,
       scenarioId,
-      "destination",
+      "primary",
     );
-    const repairedIncompatible = await provision("destination-incompatible", "destination");
+    const repairedIncompatible = await provision("primary-incompatible", "primary");
 
-    await corruptFirstChunk(destinationId);
+    await corruptFirstChunk(repairProbeId);
     const corrupt = await catalog.inspectIndexedDbManagedScenarioWorld(
       db,
       scenarioId,
-      "destination",
+      "primary",
     );
     let corruptionRefused = false;
     try {
-      await provision("destination-corrupt", "destination");
+      await provision("primary-corrupt", "primary");
     } catch {
       corruptionRefused = true;
     }
     const corruptAfterRefusal = await catalog.inspectIndexedDbManagedScenarioWorld(
       db,
       scenarioId,
-      "destination",
+      "primary",
     );
 
     // Mark the fixture incompatible so the same generic migration path can
     // transactionally restore the deliberately corrupted probe record.
-    await updateMetadata(destinationId, (metadata) => ({
+    await updateMetadata(repairProbeId, (metadata) => ({
       ...metadata,
       contentVersion: Number(metadata.contentVersion) + 1,
     }));
-    await provision("destination-cleanup", "destination");
+    await provision("primary-cleanup", "primary");
 
     const identities = await managedIdentities();
     const catalogAfter = await catalog.listIndexedDbCatalogWorlds(db);
@@ -4912,11 +4915,13 @@ async function runManagedScenarioStorageProbe(page) {
         && primaryConcurrent.every((result) => result.entityChunkCount === 0)
         && primaryConcurrent.some((result) => result.status === "provisioned")
         && destinationFirst.status === "provisioned"
-        && destinationFirst.entityChunkCount === 1
+        && destinationFirst.chunkCount === 0
+        && destinationFirst.entityChunkCount === 0
         && valid.primary.status === "valid"
         && valid.destination.status === "valid"
         && valid.primary.entityChunkCount === 0
-        && valid.destination.entityChunkCount === 1
+        && valid.destination.chunkCount === 0
+        && valid.destination.entityChunkCount === 0
         && destinationReuse.status === "reused"
         && JSON.stringify(digestBeforeReuse) === JSON.stringify(digestAfterReuse)
         && partial.status === "partial"
@@ -4929,13 +4934,15 @@ async function runManagedScenarioStorageProbe(page) {
         && reopened.primary.status === "valid"
         && reopened.destination.status === "valid"
         && reopened.primary.entityChunkCount === 0
-        && reopened.destination.entityChunkCount === 1
+        && reopened.destination.chunkCount === 0
+        && reopened.destination.entityChunkCount === 0
         && catalogBefore.length === catalogAfter.length
         && identities.metadata.length === 2
         && JSON.stringify(identities.metadata) === JSON.stringify(expectedIds)
+        && identities.chunks.length === 1
+        && identities.chunks[0] === valid.primary.worldId
         && identities.chunks.every((id) => expectedIds.includes(id))
-        && identities.entityChunks.length === 1
-        && identities.entityChunks[0] === valid.destination.worldId
+        && identities.entityChunks.length === 0
         && identities.entityChunks.every((id) => expectedIds.includes(id))
       ),
       before,

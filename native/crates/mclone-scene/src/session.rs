@@ -207,7 +207,7 @@ pub enum ExternalSceneStartTarget {
 pub struct ExternalSceneSessionStart {
     pub target: ExternalSceneStartTarget,
     pub instance_id: WorldInstanceId,
-    pub managed_world_key: Option<ManagedWorldKey>,
+    pub storage_source: Option<mclone_app_runtime::scenario_content::ScenarioWorldStorageSource>,
     pub request: SessionStartRequest,
     pub runtime_kind: SessionRuntimeKind,
     pub scene: McloneSceneHostOptions,
@@ -990,7 +990,7 @@ impl McloneSceneHost {
         Some(ExternalSceneSessionStart {
             target: ExternalSceneStartTarget::ActiveSession,
             instance_id: self.allocate_world_instance_id(),
-            managed_world_key: None,
+            storage_source: None,
             request: pending.request,
             runtime_kind: pending.payload.runtime_kind,
             scene: pending.payload.options,
@@ -1004,7 +1004,7 @@ impl McloneSceneHost {
         Some(ExternalSceneSessionStart {
             target: ExternalSceneStartTarget::ActiveSession,
             instance_id: WorldInstanceId::new(self.next_world_instance_id),
-            managed_world_key: None,
+            storage_source: None,
             request: pending.request.clone(),
             runtime_kind: pending.payload.runtime_kind,
             scene: pending.payload.options.clone(),
@@ -1126,7 +1126,11 @@ impl McloneSceneHost {
                 );
                 self.active_world.install(DrawableWorldSlotInstall {
                     id: pending.instance_id,
-                    managed_world_key: pending.managed_world_key.clone(),
+                    managed_world_key: pending
+                        .storage_source
+                        .as_ref()
+                        .and_then(|source| source.managed_world_key())
+                        .cloned(),
                     descriptor: Some(active.clone()),
                     lifecycle: WorldSlotLifecycle::Starting,
                     asset_epoch: self.active_assets.epoch,
@@ -1553,30 +1557,15 @@ impl McloneSceneHost {
                     mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
                         let primary = self
                             .prepare_managed_lobby_primary(&launch.manifest, value.key.clone())?;
-                        let destination_key = launch.manifest.world_key(
-                            mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
-                        )?;
-                        let shell_definition = self.prepare_managed_lobby_destination(
-                            &launch.manifest,
-                            destination_key,
-                            launch.intent.preview_bounds,
-                        )?;
-                        if let Err(error) = self.prepare_embedded_world_scenario_shell(
-                            device,
-                            queue,
-                            &shell_definition,
-                        ) {
-                            launch.destination_failure = Some(format!(
-                                "prepare managed lobby destination renderer shell: {error:#}"
-                            ));
-                            self.prepared_warm_world_shell = None;
-                        }
                         let descriptor =
                             ActiveSessionDescriptor::new_seed_local_world(primary.seed);
                         let start = ManagedScenarioWorldStart {
                             instance_id: self.allocate_world_instance_id(),
                             role: kind.role,
-                            managed_world_key: value.key.clone(),
+                            storage_source:
+                                mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Managed(
+                                    value.key.clone(),
+                                ),
                             scene: primary,
                             descriptor,
                             destination: None,
@@ -1586,13 +1575,24 @@ impl McloneSceneHost {
                         launch.primary_provisioned = Some(value);
                         launch.phase = ManagedScenarioLaunchPhase::StartingPrimary;
                         self.ui.close();
+                        self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
                     }
                     mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
-                        launch.destination = Some(self.prepare_managed_lobby_destination(
+                        let destination = self.prepare_managed_lobby_fallback_destination(
                             &launch.manifest,
                             value.key.clone(),
                             launch.intent.preview_bounds,
-                        )?);
+                        )?;
+                        if let Err(error) =
+                            self.prepare_embedded_world_scenario_shell(device, queue, &destination)
+                        {
+                            launch.destination_failure = Some(format!(
+                                "prepare managed fallback destination renderer shell: {error:#}"
+                            ));
+                            self.prepared_warm_world_shell = None;
+                        } else {
+                            launch.destination = Some(destination);
+                        }
                         launch.destination_provisioned = Some(value);
                     }
                 }
@@ -1634,14 +1634,20 @@ impl McloneSceneHost {
             .as_mut()
             .and_then(ManagedScenarioLaunchState::take_start_request)?;
         let start = operation.kind;
+        let request = start
+            .descriptor
+            .local_world_id()
+            .cloned()
+            .map(SessionStartRequest::open_local_world)
+            .unwrap_or_else(|| SessionStartRequest::new_seed_local_world(start.scene.seed));
         Some(ExternalSceneSessionStart {
             target: ExternalSceneStartTarget::ManagedScenario {
                 token: operation.token,
                 role: start.role,
             },
             instance_id: start.instance_id,
-            managed_world_key: Some(start.managed_world_key),
-            request: SessionStartRequest::new_seed_local_world(start.scene.seed),
+            storage_source: Some(start.storage_source),
+            request,
             runtime_kind: SessionRuntimeKind::Local,
             scene: start.scene,
             descriptor: start.descriptor,
@@ -1675,6 +1681,10 @@ impl McloneSceneHost {
                 ),
             );
         }
+        if let Some(mut launch) = self.managed_scenario_launch.take() {
+            self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
+            self.managed_scenario_launch = Some(launch);
+        }
         while let Some(request) = self.take_managed_scenario_provision_request() {
             if let Some(adapter) = self.native_managed_scenario_adapter.as_mut() {
                 adapter.submit(request);
@@ -1698,7 +1708,9 @@ impl McloneSceneHost {
         _managed_world_key: mclone_app_runtime::scenario_content::ManagedWorldKey,
     ) -> Result<McloneSceneHostOptions> {
         let primary_manifest = &manifest.primary;
-        let primary_fixture = &primary_manifest.fixture;
+        let primary_fixture = primary_manifest
+            .authored_fixture()
+            .context("managed lobby primary must remain an authored fixture")?;
 
         let mut primary = self.active_world.scene.clone();
         primary.seed = primary_fixture.seed;
@@ -1715,20 +1727,20 @@ impl McloneSceneHost {
         primary.validated()
     }
 
-    fn prepare_managed_lobby_destination(
+    fn prepare_managed_lobby_fallback_destination(
         &self,
         manifest: &mclone_app_runtime::scenario_content::ManagedScenarioManifest,
         managed_world_key: mclone_app_runtime::scenario_content::ManagedWorldKey,
         preview_bounds: mclone_app_runtime::scenario::ScenarioPreviewBounds,
     ) -> Result<PreparedEmbeddedWorldScenario> {
-        let primary_fixture = &manifest.primary.fixture;
+        let primary_fixture = manifest
+            .primary
+            .authored_fixture()
+            .context("managed lobby primary must remain an authored fixture")?;
         let destination_manifest = &manifest.destination;
-        let destination_fixture = &destination_manifest.fixture;
-        let center = ChunkPos::new(
-            destination_fixture.center_chunk[0],
-            destination_fixture.center_chunk[1],
-        );
-        let preview_anchor = vec3d_from_array(destination_fixture.preview_anchor);
+        let center_chunk = destination_manifest.center_chunk();
+        let center = ChunkPos::new(center_chunk[0], center_chunk[1]);
+        let preview_anchor = vec3d_from_array(destination_manifest.preview_anchor());
         let anchor_section_y = mclone_core::block_to_section_coord(
             preview_anchor
                 .y
@@ -1736,27 +1748,148 @@ impl McloneSceneHost {
                 .clamp(i32::MIN as f64, i32::MAX as f64) as i32,
         );
         let region = preview_bounds.resolve(center, anchor_section_y)?;
+        let primary_anchor = vec3d_from_array(primary_fixture.preview_anchor);
+        let primary_anchor_section_y = mclone_core::block_to_section_coord(
+            primary_anchor
+                .y
+                .floor()
+                .clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        );
+        let return_region = preview_bounds.resolve(
+            ChunkPos::new(
+                primary_fixture.center_chunk[0],
+                primary_fixture.center_chunk[1],
+            ),
+            primary_anchor_section_y,
+        )?;
         let placement = mclone_render::placement::WorldPlacement::new(
             preview_anchor,
-            vec3d_from_array(primary_fixture.preview_anchor),
+            primary_anchor,
             1.0 / 8.0,
         )?;
         let return_placement = mclone_render::placement::WorldPlacement::new(
-            vec3d_from_array(primary_fixture.preview_anchor),
-            vec3d_from_array(destination_fixture.kind.preview_display_anchor()),
+            primary_anchor,
+            vec3d_from_array(destination_manifest.preview_display_anchor()),
             1.0 / 8.0,
         )?;
-        let destination = WarmWorldStandbyRequest::new(destination_fixture.seed, center)
+        let descriptor = ActiveSessionDescriptor::new_seed_local_world(destination_manifest.seed());
+        let destination = WarmWorldStandbyRequest::new(destination_manifest.seed(), center)
             .with_managed_world_key(
                 managed_world_key,
-                destination_fixture.world_generation_profile,
+                destination_manifest.world_generation_profile(),
             )
+            .with_descriptor(descriptor)
             .with_world_behavior_profile(destination_manifest.behavior_profile)
-            .with_embedded_preview(region, placement, return_placement);
+            .with_embedded_preview_regions(region, return_region, placement, return_placement);
         Ok(PreparedEmbeddedWorldScenario::new(
             manifest.scenario_id,
             destination,
         ))
+    }
+
+    fn prepare_catalog_lobby_destination(
+        &self,
+        manifest: &mclone_app_runtime::scenario_content::ManagedScenarioManifest,
+        summary: &LocalWorldSummary,
+        preview_bounds: mclone_app_runtime::scenario::ScenarioPreviewBounds,
+    ) -> Result<PreparedEmbeddedWorldScenario> {
+        let primary_fixture = manifest
+            .primary
+            .authored_fixture()
+            .context("managed lobby primary must remain an authored fixture")?;
+        let center = mclone_server::initial_spawn_center_for_seed(summary.seed);
+        let preview_anchor = Vec3d::new(
+            f64::from(center.x * 16 + 8),
+            96.0,
+            f64::from(center.z * 16 + 8),
+        );
+        let anchor_section_y = mclone_core::block_to_section_coord(96);
+        let region = preview_bounds.resolve(center, anchor_section_y)?;
+        let primary_anchor = vec3d_from_array(primary_fixture.preview_anchor);
+        let primary_anchor_section_y = mclone_core::block_to_section_coord(
+            primary_anchor
+                .y
+                .floor()
+                .clamp(i32::MIN as f64, i32::MAX as f64) as i32,
+        );
+        let return_region = preview_bounds.resolve(
+            ChunkPos::new(
+                primary_fixture.center_chunk[0],
+                primary_fixture.center_chunk[1],
+            ),
+            primary_anchor_section_y,
+        )?;
+        let placement = mclone_render::placement::WorldPlacement::new(
+            preview_anchor,
+            primary_anchor,
+            1.0 / 8.0,
+        )?;
+        let return_placement = mclone_render::placement::WorldPlacement::new(
+            primary_anchor,
+            preview_anchor,
+            1.0 / 8.0,
+        )?;
+        let destination = WarmWorldStandbyRequest::new(summary.seed, center)
+            .with_storage_source(
+                mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(
+                    summary.id.clone(),
+                ),
+                summary.world_generation_profile,
+            )
+            .with_descriptor(ActiveSessionDescriptor::from_local_world_summary(summary))
+            .with_world_behavior_profile(mclone_server::WorldBehaviorProfile::Mutable)
+            .with_embedded_preview_regions(region, return_region, placement, return_placement);
+        Ok(PreparedEmbeddedWorldScenario::new(
+            manifest.scenario_id,
+            destination,
+        ))
+    }
+
+    fn try_resolve_managed_scenario_destination(
+        &mut self,
+        launch: &mut ManagedScenarioLaunchState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<()> {
+        if launch.destination.is_some()
+            || launch.destination_provisioned.is_some()
+            || launch.destination_failure.is_some()
+        {
+            return Ok(());
+        }
+        let catalog = self.client_experience.catalog();
+        if catalog.world_list_pending() {
+            return Ok(());
+        }
+        if let Some(summary) = catalog.most_recent_compatible_world().cloned() {
+            let destination = self.prepare_catalog_lobby_destination(
+                &launch.manifest,
+                &summary,
+                launch.intent.preview_bounds,
+            )?;
+            if let Err(error) =
+                self.prepare_embedded_world_scenario_shell(device, queue, &destination)
+            {
+                launch.destination_failure = Some(format!(
+                    "prepare catalog destination renderer shell: {error:#}"
+                ));
+                self.prepared_warm_world_shell = None;
+            } else {
+                log::info!(
+                    "selected recent lobby destination source=catalog id={} seed={}",
+                    summary.id,
+                    summary.seed
+                );
+                launch.destination = Some(destination);
+            }
+        } else {
+            launch.issue_destination_provision();
+            log::info!(
+                "selected lobby destination source=managed-fallback seed={}",
+                mclone_app_runtime::scenario_content::LOBBY_PREVIEW_FALLBACK_SEED
+            );
+        }
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1772,9 +1905,10 @@ impl McloneSceneHost {
             match role {
                 mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => {
                     let key = start
-                        .managed_world_key
+                        .storage_source
                         .as_ref()
-                        .context("native managed primary start omitted its storage key")?;
+                        .and_then(|source| source.managed_world_key())
+                        .context("native managed primary start omitted its managed storage key")?;
                     start.scene.world_dir = Some(
                         self.native_managed_scenario_adapter
                             .as_ref()
@@ -1788,7 +1922,7 @@ impl McloneSceneHost {
                             .to_owned(),
                     );
                     self.active_world.id = start.instance_id;
-                    self.active_world.managed_world_key = start.managed_world_key.clone();
+                    self.active_world.managed_world_key = Some(key.clone());
                     self.session.request_start(
                         start.request.clone(),
                         ScenePendingSessionStart {
@@ -1906,11 +2040,11 @@ impl McloneSceneHost {
         let Some(destination) = launch.destination.take() else {
             return Ok(());
         };
-        let key = destination
+        let storage_source = destination
             .destination
-            .managed_world_key
+            .storage_source
             .clone()
-            .context("managed destination start omitted its storage key")?;
+            .context("scenario destination start omitted its storage source")?;
         let mut scene = self.active_world.scene.clone();
         scene.seed = destination.destination.seed;
         scene.chunk_x = destination.destination.entry_center.x;
@@ -1919,18 +2053,24 @@ impl McloneSceneHost {
         scene.world_dir = None;
         scene.world_behavior_profile = destination.destination.world_behavior_profile;
         scene.world_generation_profile = destination.destination.world_generation_profile;
-        scene.use_initial_spawn_center = false;
-        scene.debug_passive_showcase = false;
+        scene.use_initial_spawn_center =
+            scene.world_generation_profile == WorldGenerationProfile::Overworld;
+        scene.debug_passive_showcase = self.debug_managed_scenario_auxiliary_player_script;
         scene.debug_auxiliary_player_script = self.debug_managed_scenario_auxiliary_player_script;
         let scene = scene.validated()?;
         let instance_id = self.allocate_world_instance_id();
         let mut destination = destination;
         destination.destination.instance_id = Some(instance_id);
+        let descriptor = destination
+            .destination
+            .descriptor
+            .clone()
+            .unwrap_or_else(|| ActiveSessionDescriptor::new_seed_local_world(scene.seed));
         let start = ManagedScenarioWorldStart {
             instance_id,
             role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
-            managed_world_key: key,
-            descriptor: ActiveSessionDescriptor::new_seed_local_world(scene.seed),
+            storage_source,
+            descriptor,
             scene,
             destination: Some(destination),
         };
@@ -2194,14 +2334,20 @@ impl McloneSceneHost {
             bail!("warm-world standby seed must differ from the active seed");
         }
         let mut scene = self.active_world.scene.clone();
+        let catalog_world_root = scene.world_root.clone();
         scene.seed = request.seed;
         scene.chunk_x = request.entry_center.x;
         scene.chunk_z = request.entry_center.z;
         scene.remote_addr = None;
         scene.world_root = None;
-        scene.world_dir = match (native_world_dir, request.managed_world_key.as_ref()) {
+        scene.world_dir = match (native_world_dir, request.storage_source.as_ref()) {
             (Some(world_dir), _) => Some(world_dir.to_owned()),
-            (None, Some(key)) => Some(
+            (
+                None,
+                Some(mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Managed(
+                    key,
+                )),
+            ) => Some(
                 self.native_managed_scenario_adapter
                     .as_ref()
                     .and_then(|adapter| adapter.world_dir(key))
@@ -2213,15 +2359,35 @@ impl McloneSceneHost {
                     })?
                     .to_owned(),
             ),
+            (
+                None,
+                Some(mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(id)),
+            ) => Some(
+                mclone_app_runtime::world_catalog::NativeWorldCatalog::new(
+                    catalog_world_root
+                        .as_deref()
+                        .context("catalog destination requires a native world root")?,
+                )
+                .world_dir(id),
+            ),
             (None, None) => None,
         };
         scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
-        scene.use_initial_spawn_center = false;
+        scene.use_initial_spawn_center =
+            scene.world_generation_profile == WorldGenerationProfile::Overworld;
+        scene.debug_passive_showcase = self.debug_managed_scenario_auxiliary_player_script;
         scene.debug_auxiliary_player_script = self.debug_managed_scenario_auxiliary_player_script;
         let scene = scene.validated()?;
-        let descriptor = ActiveSessionDescriptor::new_seed_local_world(request.seed);
-        let startup_request = SessionStartRequest::new_seed_local_world(request.seed);
+        let descriptor = request
+            .descriptor
+            .clone()
+            .unwrap_or_else(|| ActiveSessionDescriptor::new_seed_local_world(request.seed));
+        let startup_request = descriptor
+            .local_world_id()
+            .cloned()
+            .map(SessionStartRequest::open_local_world)
+            .unwrap_or_else(|| SessionStartRequest::new_seed_local_world(request.seed));
         let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
 
         let pump = LocalIntegratedStartupPump::with_mesh_assets(
@@ -2316,7 +2482,11 @@ impl McloneSceneHost {
         self.standby_world = Some(DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
                 id: instance_id,
-                managed_world_key: request.managed_world_key.clone(),
+                managed_world_key: request
+                    .storage_source
+                    .as_ref()
+                    .and_then(|source| source.managed_world_key())
+                    .cloned(),
                 descriptor: Some(descriptor.clone()),
                 lifecycle: WorldSlotLifecycle::Starting,
                 asset_epoch,
@@ -2413,6 +2583,7 @@ impl McloneSceneHost {
             (
                 WarmWorldPresentationRequest::Diorama {
                     region,
+                    return_region,
                     placement,
                     return_placement,
                 },
@@ -2420,13 +2591,14 @@ impl McloneSceneHost {
             ) => Some(EmbeddedWorldPreview {
                 source_world: instance_id,
                 region,
+                return_region,
                 context: mclone_render::placement::WorldCompositionContext::unbounded(
                     placement,
                     Some(region.source_bounds()),
                 ),
                 return_context: mclone_render::placement::WorldCompositionContext::unbounded(
                     return_placement,
-                    Some(region.source_bounds()),
+                    Some(return_region.source_bounds()),
                 ),
                 asset_epoch,
                 phase: EmbeddedWorldPreviewPhase::Warming,
@@ -2654,13 +2826,14 @@ impl McloneSceneHost {
         let Some(preview) = self.embedded_world_preview.as_mut() else {
             bail!("embedded preview disappeared after its ownership exchange");
         };
-        let fixed_interest_center = preview.region.center();
+        let fixed_interest_center = preview.return_region.center();
         if let Some(runtime) = standby.runtime.as_mut() {
             runtime
                 .set_interest_center(fixed_interest_center)
                 .context("retarget retained preview interest after ownership exchange")?;
         }
         std::mem::swap(&mut preview.context, &mut preview.return_context);
+        std::mem::swap(&mut preview.region, &mut preview.return_region);
         preview.source_world = standby.id;
         preview.phase = EmbeddedWorldPreviewPhase::Warming;
         preview.source_anchor_gpu_resident = false;
@@ -2675,11 +2848,13 @@ impl McloneSceneHost {
         preview.failure = None;
         if let Some(state) = self.warm_world_standby.as_mut()
             && let WarmWorldPresentationRequest::Diorama {
+                region,
+                return_region,
                 placement,
                 return_placement,
-                ..
             } = &mut state.presentation
         {
+            std::mem::swap(region, return_region);
             std::mem::swap(placement, return_placement);
         }
         self.embedded_world_activation.volume =
@@ -4033,6 +4208,11 @@ impl McloneSceneHost {
             defer_sync_after_pre_drain: true,
         };
         let priority_position = match state.presentation {
+            WarmWorldPresentationRequest::Diorama { .. }
+                if !state.readiness.entry_section_gpu_resident =>
+            {
+                slot.camera.snapshot().eye
+            }
             WarmWorldPresentationRequest::Diorama {
                 region, placement, ..
             } => bounded_preview_source_priority(
@@ -5002,6 +5182,11 @@ impl McloneSceneHost {
         operations.submit(request, active_world);
         let effects = operations.poll(self.client_experience.catalog_mut());
         self.services.catalog_operations = Some(operations);
+        if let Some(mut launch) = self.managed_scenario_launch.take() {
+            self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
+            self.try_issue_managed_scenario_destination_start(&mut launch)?;
+            self.managed_scenario_launch = Some(launch);
+        }
         self.apply_xr_catalog_effects(effects, device, queue)
     }
 
@@ -5019,6 +5204,11 @@ impl McloneSceneHost {
         };
         let effects = operations.poll(self.client_experience.catalog_mut());
         self.services.catalog_operations = Some(operations);
+        if let Some(mut launch) = self.managed_scenario_launch.take() {
+            self.try_resolve_managed_scenario_destination(&mut launch, device, queue)?;
+            self.try_issue_managed_scenario_destination_start(&mut launch)?;
+            self.managed_scenario_launch = Some(launch);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.apply_xr_catalog_effects(effects, device, queue)
