@@ -1878,6 +1878,243 @@ fn fs_main() -> @location(0) vec4<f32> {
     }
 
     #[test]
+    #[ignore = "GPU acceptance proof for Tactical 179 Slice 4"]
+    fn placed_actor_fixture_renders_mono_stereo_and_multiview() -> Result<()> {
+        use crate::actor_composition_fixture::ActorCompositionFixture;
+        use crate::composition_fixture::ComplementaryHalfSpaceTerrainFixture;
+
+        const WIDTH: u32 = 960;
+        const HEIGHT: u32 = 640;
+        let (device, queue) = create_headless_device()?;
+        let mut fixture = ActorCompositionFixture::new(&device, &queue, HEADLESS_FORMAT)?;
+        assert!(fixture.shares_immutable_resources());
+
+        let mono_target = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let mono_depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        let mono_view = ActorCompositionFixture::render_view([WIDTH, HEIGHT], 0.0);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_actor_composition_fixture_mono_encoder"),
+        });
+        let report = fixture.render_mono(
+            &device,
+            &queue,
+            &mut encoder,
+            ChunkRenderTarget::new(
+                &mono_target.view,
+                &mono_depth.view,
+                mono_target.size,
+                ActorCompositionFixture::clear_color(),
+            ),
+            mono_view,
+            SINGLE_VIEW_SLOT,
+        )?;
+        queue.submit(std::iter::once(encoder.finish()));
+        assert_eq!(report.terrain.left.drawn_section_count, 1);
+        assert_eq!(report.terrain.right.drawn_section_count, 1);
+        assert_eq!(report.unbounded.submitted_actor_count, 3);
+        assert_eq!(report.unbounded.drawn_actor_count, 3);
+        assert_eq!(report.left.submitted_actor_count, 6);
+        assert_eq!(report.left.drawn_actor_count, 3);
+        assert_eq!(report.left.source_rejected_actor_count, 1);
+        assert_eq!(report.left.clip_rejected_actor_count, 1);
+        assert_eq!(report.left.frustum_rejected_actor_count, 1);
+        assert_eq!(report.right.submitted_actor_count, 2);
+        assert_eq!(report.right.drawn_actor_count, 2);
+        assert_eq!(report.left_resources.mesh.cached_actor_count, 3);
+        assert_eq!(report.left_resources.mesh.rebuild_count, 1);
+        assert_eq!(report.left_resources.mesh.upload_count, 1);
+        assert_eq!(report.right_resources.mesh.cached_actor_count, 2);
+        assert_eq!(report.right_resources.mesh.rebuild_count, 1);
+        assert_eq!(report.right_resources.mesh.upload_count, 1);
+        assert_eq!(report.left_resources.placed_pipeline_count, 1);
+        assert_eq!(report.left_resources.clipped_placed_pipeline_count, 1);
+        assert_eq!(report.left_resources.placed_multiview_pipeline_count, 0);
+
+        let mono_pixels = read_rgba8(&device, &queue, &mono_target.texture, WIDTH, HEIGHT)?;
+        save_rgba_png(
+            Path::new("/tmp/mclone-179-slice4-actor-composition-mono.png"),
+            WIDTH,
+            HEIGHT,
+            &mono_pixels,
+        )?;
+        let terrain_target = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let terrain_depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        let terrain = ComplementaryHalfSpaceTerrainFixture::new(&device, &queue, HEADLESS_FORMAT)?;
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_actor_composition_terrain_control_encoder"),
+        });
+        terrain.render_mono(
+            &device,
+            &queue,
+            &mut encoder,
+            ChunkRenderTarget::new(
+                &terrain_target.view,
+                &terrain_depth.view,
+                terrain_target.size,
+                ActorCompositionFixture::clear_color(),
+            ),
+            mono_view,
+            SINGLE_VIEW_SLOT,
+        )?;
+        queue.submit(std::iter::once(encoder.finish()));
+        let terrain_pixels = read_rgba8(&device, &queue, &terrain_target.texture, WIDTH, HEIGHT)?;
+        let actor_pixel_differences = mono_pixels
+            .chunks_exact(4)
+            .zip(terrain_pixels.chunks_exact(4))
+            .filter(|(actors, terrain)| actors != terrain)
+            .count();
+        assert!(
+            actor_pixel_differences > 1_000,
+            "placed actors did not materially change pixels: {actor_pixel_differences}"
+        );
+
+        let stereo_views = [
+            ActorCompositionFixture::render_view([640, 640], -0.12),
+            ActorCompositionFixture::render_view([640, 640], 0.12),
+        ];
+        let prepared = fixture.prepare_stereo(stereo_views);
+        let left_target = OffscreenTarget::new(&device, 640, 640, HEADLESS_FORMAT);
+        let right_target = OffscreenTarget::new(&device, 640, 640, HEADLESS_FORMAT);
+        let left_depth = ChunkDepthTarget::new(&device, 640, 640);
+        let right_depth = ChunkDepthTarget::new(&device, 640, 640);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_actor_composition_fixture_stereo_encoder"),
+        });
+        for (target, depth, render_view, view_slot) in [
+            (
+                &left_target,
+                &left_depth,
+                stereo_views[0],
+                LEFT_EYE_VIEW_SLOT,
+            ),
+            (
+                &right_target,
+                &right_depth,
+                stereo_views[1],
+                RIGHT_EYE_VIEW_SLOT,
+            ),
+        ] {
+            let report = fixture.render_stereo_eye(
+                &prepared,
+                &device,
+                &queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &target.view,
+                    &depth.view,
+                    target.size,
+                    ActorCompositionFixture::clear_color(),
+                ),
+                render_view,
+                view_slot,
+            )?;
+            assert_eq!(report.left_resources.mesh.rebuild_count, 1);
+            assert_eq!(report.left_resources.mesh.upload_count, 1);
+            assert_eq!(report.right_resources.mesh.rebuild_count, 1);
+            assert_eq!(report.right_resources.mesh.upload_count, 1);
+        }
+        queue.submit(std::iter::once(encoder.finish()));
+        let left_pixels = read_rgba8(&device, &queue, &left_target.texture, 640, 640)?;
+        let right_pixels = read_rgba8(&device, &queue, &right_target.texture, 640, 640)?;
+        let eye_differences = left_pixels
+            .chunks_exact(4)
+            .zip(right_pixels.chunks_exact(4))
+            .filter(|(left, right)| left != right)
+            .count();
+        assert!(eye_differences > 1_000);
+        let stereo_pixels = stitch_rgba8_side_by_side(640, 640, &left_pixels, &right_pixels)?;
+        save_rgba_png(
+            Path::new("/tmp/mclone-179-slice4-actor-composition-stereo.png"),
+            1280,
+            640,
+            &stereo_pixels,
+        )?;
+
+        if device.features().contains(wgpu::Features::MULTIVIEW) {
+            let color = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("mclone_actor_composition_fixture_multiview_color"),
+                size: wgpu::Extent3d {
+                    width: 640,
+                    height: 640,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: HEADLESS_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            let color_view = color.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                array_layer_count: Some(2),
+                ..Default::default()
+            });
+            let depth = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("mclone_actor_composition_fixture_multiview_depth"),
+                size: wgpu::Extent3d {
+                    width: 640,
+                    height: 640,
+                    depth_or_array_layers: 2,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: crate::chunk::DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let depth_view = depth.create_view(&wgpu::TextureViewDescriptor {
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                array_layer_count: Some(2),
+                ..Default::default()
+            });
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mclone_actor_composition_fixture_multiview_encoder"),
+            });
+            let report = fixture.render_multiview(
+                &prepared,
+                &device,
+                &queue,
+                &mut encoder,
+                crate::chunk::ChunkMultiviewRenderTarget::new(
+                    &color_view,
+                    &depth_view,
+                    [640, 640],
+                    ActorCompositionFixture::clear_color(),
+                ),
+                stereo_views,
+            )?;
+            queue.submit(std::iter::once(encoder.finish()));
+            assert_eq!(report.left_resources.mesh.rebuild_count, 1);
+            assert_eq!(report.left_resources.mesh.upload_count, 1);
+            assert_eq!(report.left_resources.placed_multiview_pipeline_count, 1);
+            assert_eq!(
+                report
+                    .left_resources
+                    .clipped_placed_multiview_pipeline_count,
+                1
+            );
+            let multiview_left = read_rgba8_layer(&device, &queue, &color, 640, 640, 0)?;
+            let multiview_right = read_rgba8_layer(&device, &queue, &color, 640, 640, 1)?;
+            assert_eq!(multiview_left, left_pixels);
+            assert_eq!(multiview_right, right_pixels);
+        } else {
+            eprintln!("placed actor multiview proof unavailable: adapter lacks MULTIVIEW");
+        }
+
+        eprintln!(
+            "placed actor proof: actor-pixel-differences={actor_pixel_differences} \
+             eye-differences={eye_differences} left={}/{} right={}/{}",
+            report.left.drawn_actor_count,
+            report.left.submitted_actor_count,
+            report.right.drawn_actor_count,
+            report.right.submitted_actor_count,
+        );
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "GPU validation proof for 107 Slice E; run on hosts with wgpu MULTIVIEW support"]
     fn multiview_renders_distinct_view_index_layers() -> Result<()> {
         const SHADER: &str = r#"

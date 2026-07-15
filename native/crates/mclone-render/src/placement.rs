@@ -266,6 +266,25 @@ impl WorldPlacement {
         )
     }
 
+    /// Apply the exact rebased `f32` mapping used by placed shaders.
+    ///
+    /// Renderer CPU rejection uses this instead of casting the completed
+    /// `f64` result so far-away source anchors agree with shader arithmetic.
+    pub(crate) fn source_to_composition_f32(self, source: Vec3) -> Vec3 {
+        let (source_anchor_scale, composition_anchor) = self.shader_values();
+        Vec3::from_array([
+            composition_anchor[0],
+            composition_anchor[1],
+            composition_anchor[2],
+        ]) + (source
+            - Vec3::from_array([
+                source_anchor_scale[0],
+                source_anchor_scale[1],
+                source_anchor_scale[2],
+            ]))
+            * source_anchor_scale[3]
+    }
+
     pub(crate) fn source_to_composition_matrix_f32(self) -> Mat4 {
         let (source, composition) = self.shader_values();
         let scale = source[3];

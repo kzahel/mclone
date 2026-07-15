@@ -33,6 +33,7 @@ use mclone_input::{
     FlatInputAction, FlatInputFrame, InputPromptKind, LookDelta, MovementImpulse,
     ResolvedFlatInput, TouchControlsMode,
 };
+use mclone_render::actor_composition_fixture::ActorCompositionFixture;
 use mclone_render::chunk::{ChunkDepthTarget, ChunkRenderTarget, TexturedSectionRenderOptions};
 use mclone_render::composition_fixture::ComplementaryHalfSpaceTerrainFixture;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
@@ -405,6 +406,118 @@ impl WebSceneHost {
             report.right_translucent_section_count as f64,
         )
         .map_err(JsValue::from)?;
+        Ok(object.into())
+    }
+
+    /// Present the shared renderer-owned placed/clipped actor fixture.
+    /// The browser adapter supplies only its WebGPU target and presentation.
+    #[wasm_bindgen(js_name = renderActorCompositionProof)]
+    pub fn render_actor_composition_proof(&mut self) -> Result<JsValue, JsValue> {
+        let mut fixture = ActorCompositionFixture::new(
+            &self.context.device,
+            &self.context.queue,
+            self.context.format,
+        )
+        .map_err(js_error)?;
+        let surface_texture = self
+            .context
+            .surface
+            .get_current_texture()
+            .map_err(|error| {
+                JsValue::from_str(&format!("acquire actor composition proof surface: {error}"))
+            })?;
+        let view = surface_texture.texture.create_view(&Default::default());
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mclone_web_actor_composition_proof_encoder"),
+                });
+        let size = [self.context.width, self.context.height];
+        let report = fixture
+            .render_mono(
+                &self.context.device,
+                &self.context.queue,
+                &mut encoder,
+                ChunkRenderTarget::new(
+                    &view,
+                    &self.depth.view,
+                    size,
+                    ActorCompositionFixture::clear_color(),
+                ),
+                ActorCompositionFixture::render_view(size, 0.0),
+                SINGLE_VIEW_SLOT,
+            )
+            .map_err(js_error)?;
+        self.context.queue.submit(std::iter::once(encoder.finish()));
+        surface_texture.present();
+
+        let object = js_sys::Object::new();
+        report_set_bool(&object, "ok", true).map_err(JsValue::from)?;
+        report_set_string(&object, "backend", "browser-webgpu").map_err(JsValue::from)?;
+        report_set_bool(
+            &object,
+            "sharedImmutableResources",
+            fixture.shares_immutable_resources(),
+        )
+        .map_err(JsValue::from)?;
+        for (name, value) in [
+            (
+                "leftTerrainSections",
+                report.terrain.left.drawn_section_count,
+            ),
+            (
+                "rightTerrainSections",
+                report.terrain.right.drawn_section_count,
+            ),
+            (
+                "unboundedSubmittedActors",
+                report.unbounded.submitted_actor_count,
+            ),
+            ("unboundedDrawnActors", report.unbounded.drawn_actor_count),
+            ("leftSubmittedActors", report.left.submitted_actor_count),
+            ("leftDrawnActors", report.left.drawn_actor_count),
+            (
+                "leftSourceRejectedActors",
+                report.left.source_rejected_actor_count,
+            ),
+            (
+                "leftClipRejectedActors",
+                report.left.clip_rejected_actor_count,
+            ),
+            (
+                "leftFrustumRejectedActors",
+                report.left.frustum_rejected_actor_count,
+            ),
+            ("rightSubmittedActors", report.right.submitted_actor_count),
+            ("rightDrawnActors", report.right.drawn_actor_count),
+            (
+                "leftMeshRebuilds",
+                report.left_resources.mesh.rebuild_count as usize,
+            ),
+            (
+                "leftMeshUploads",
+                report.left_resources.mesh.upload_count as usize,
+            ),
+            (
+                "rightMeshRebuilds",
+                report.right_resources.mesh.rebuild_count as usize,
+            ),
+            (
+                "rightMeshUploads",
+                report.right_resources.mesh.upload_count as usize,
+            ),
+            (
+                "placedPipelines",
+                report.left_resources.placed_pipeline_count,
+            ),
+            (
+                "clippedPlacedPipelines",
+                report.left_resources.clipped_placed_pipeline_count,
+            ),
+        ] {
+            report_set_number(&object, name, value as f64).map_err(JsValue::from)?;
+        }
         Ok(object.into())
     }
 

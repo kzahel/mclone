@@ -1,6 +1,6 @@
 # 179: Composable World Presentation And Live Preview Actors
 
-Status: active 2026-07-14. Slices 0-3 are complete; Slices 4-7 remain.
+Status: active 2026-07-15. Slices 0-4 are complete; Slices 5-7 remain.
 
 Topic: `embedded-worlds`
 
@@ -1018,6 +1018,72 @@ Deliverables:
 
 Exit criteria: actors are a second renderer leaf consuming the same world
 composition semantics as terrain, with no scene policy or platform fork.
+
+#### Slice 4 completion record — 2026-07-15
+
+`ActorRenderer` now has opt-in placed-unbounded and placed-half-space paths
+for mono/per-eye and full-frame multiview. Both consume the existing
+`WorldCompositionContext`: source vertices are rebased with
+`WorldPlacement` in the vertex stage, composition position drives fog and the
+optional fragment clip, and B-local packed light remains unchanged. The
+ordinary direct uniforms, shaders, serializers, and draw entry points are
+unchanged and do not construct a composition context. The placed topology and
+per-world placed uniform state remain lazy.
+
+Placed actor selection happens before mesh preparation. Source-world feet
+membership, a conservative transformed actor bound, composition half-space
+rejection, and union-of-views frustum rejection are distinct counters. Input
+order is preserved for every surviving actor. Each world keeps its own mesh
+cache while compatible immutable atlas, figure, layout, and pipeline resources
+remain shared, so drawing A and B in one frame does not alternate lists or
+rebuild/reupload either cache.
+
+One shared Rust fixture now provides complementary terrain plus a cow, a
+flapping chicken figure, a low-light item, an animated remote-player figure,
+and an animated source-local player figure. It covers non-origin source
+anchors, 0.75 scale, feet anchoring, orientation, pose, source lighting,
+shared-depth terrain occlusion, and complementary clipping. The left actor
+list draws three of six after exactly one source, clip, and frustum rejection;
+the right draws two of two. An initial unbounded draw of the same three left
+actors proves both placed pipeline variants without a cache alternation.
+Each world reports one mesh rebuild and one upload.
+
+Fresh native mono and synthetic-stereo captures were inspected under
+`/tmp/mclone-179-slice4-actor-composition-*.png`. They differ from the
+terrain-only control in 2,466 actor pixels and the stereo eyes differ in 1,692
+pixels. The current Metal adapter does not expose `MULTIVIEW`, so the shared
+multiview shader and Rust path compile but could not be materialized in this
+run. Production browser WebGPU consumed the same Rust fixture through a thin
+target/presentation adapter. Its inspected
+`/tmp/mclone-179-slice4-web-actor-composition-canvas.png` reports 1,816
+actor-like pixels, the same 3/6 and 2/2 actor draws and rejection counts, one
+rebuild/upload per cache, both placed pipelines, no page errors, and zero live
+Workers after shutdown. No native/web actor feature fork was introduced.
+
+The ordinary desktop offscreen capture remains byte-identical to Slice 3 with
+SHA-256
+`8ba561d8ef4dc376ec535cb224387c0bf41b04411485dd98943bee3c7110bc3b`.
+Its active cow and chicken still submit and draw through the direct path. The
+inspected XR-emulation product capture reports 249,679 differing eye pixels,
+42 resident sections, 8 drawn sections, and two eye UI composites.
+
+Five initial native feature-off samples were faster than the historical
+baseline by more than the attribution threshold, so the exact Slice 3 parent
+and Slice 4 candidate were run as five interleaved release pairs. Candidate
+median average/P95 was 2.527/4.391 ms versus control 2.533/4.381 ms; mean
+paired deltas were +0.20%/+1.31%, with zero budget or frame-accounting
+violations. Five production browser WebGPU feature-off samples measured
+13.0/18.2 ms median compile average/P95 versus the accepted Slice 3
+13.2/18.4 ms baseline; all samples drew both active actors with the shared
+result-buffer transport and zero overflow. Reports, captures, and binaries
+remain under `/tmp/mclone-179-slice4-*`.
+
+Focused native GPU, actor selection/serialization, composition-contract,
+render, scene, and web-client tests passed. Native and wasm checks/builds,
+TypeScript checking, desktop offscreen, XR emulation, both adapter-purity
+gates, web scene-host adoption, formatting, and diff checks also passed.
+Browser WebGPU was the Slice 4 product acceptance lane, not deferred parity
+work.
 
 ### Slice 5: Scene-Composed Diorama Actors And Player Bodies
 

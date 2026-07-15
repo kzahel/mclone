@@ -47,6 +47,8 @@ const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
 const halfSpaceTerrainProbe = process.argv.includes("--half-space-terrain-probe")
   || process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE === "1";
+const actorCompositionProbe = process.argv.includes("--actor-composition-probe")
+  || process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE === "1";
 const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-storage-probe")
   || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
 const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-runtime-probe")
@@ -71,6 +73,7 @@ const appLoop = movementPerf
   || catalogUiProbe
   || assetPackUiProbe
   || halfSpaceTerrainProbe
+  || actorCompositionProbe
   || managedScenarioStorageProbe
   || managedScenarioRuntimeProbe
   || lobbyScenarioProbe
@@ -97,6 +100,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
+    : actorCompositionProbe
+    ? "/tmp/mclone-native-web-actor-composition-probe.png"
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
     : lobbyScenarioProbe
@@ -119,6 +124,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
+    : actorCompositionProbe
+    ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
     : managedScenarioRuntimeProbe
     ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
     : lobbyScenarioProbe
@@ -152,6 +159,8 @@ const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_P
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
 const halfSpaceTerrainProbeReportPath = process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE_REPORT
   ?? "/tmp/mclone-native-web-half-space-terrain-probe.json";
+const actorCompositionProbeReportPath = process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-actor-composition-probe.json";
 const managedScenarioStorageProbeReportPath =
   process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE_REPORT
   ?? "/tmp/mclone-native-web-managed-scenario-storage-probe.json";
@@ -249,7 +258,12 @@ async function run() {
         };
       });
     }
-    if (managedScenarioRuntimeProbe || lobbyScenarioProbe || halfSpaceTerrainProbe) {
+    if (
+      managedScenarioRuntimeProbe
+      || lobbyScenarioProbe
+      || halfSpaceTerrainProbe
+      || actorCompositionProbe
+    ) {
       await page.addInitScript(() => {
         const root = /** @type {any} */ (globalThis);
         const NativeWorker = root.Worker;
@@ -450,6 +464,77 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (actorCompositionProbe) {
+        const actorCompositionProbeResult = await page.evaluate(
+          async () => await globalThis.__mcloneWebApp.renderActorCompositionProof?.() ?? null,
+        );
+        await page.waitForTimeout(250);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const pixels = analyzeActorCompositionPng(canvasPng);
+        const shutdownResult = await page.evaluate(
+          () => globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const workerStatsAfterShutdown = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          actorCompositionProbeReportPath,
+          actorCompositionProbeResult,
+          pixels,
+          shutdownResult,
+          workerStatsAfterShutdown,
+          pageErrors,
+        };
+        await writeFile(
+          actorCompositionProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          actorCompositionProbeResult?.ok !== true
+          || actorCompositionProbeResult?.backend !== "browser-webgpu"
+          || actorCompositionProbeResult?.sharedImmutableResources !== true
+          || Number(actorCompositionProbeResult?.leftTerrainSections) !== 1
+          || Number(actorCompositionProbeResult?.rightTerrainSections) !== 1
+          || Number(actorCompositionProbeResult?.unboundedSubmittedActors) !== 3
+          || Number(actorCompositionProbeResult?.unboundedDrawnActors) !== 3
+          || Number(actorCompositionProbeResult?.leftSubmittedActors) !== 6
+          || Number(actorCompositionProbeResult?.leftDrawnActors) !== 3
+          || Number(actorCompositionProbeResult?.leftSourceRejectedActors) !== 1
+          || Number(actorCompositionProbeResult?.leftClipRejectedActors) !== 1
+          || Number(actorCompositionProbeResult?.leftFrustumRejectedActors) !== 1
+          || Number(actorCompositionProbeResult?.rightSubmittedActors) !== 2
+          || Number(actorCompositionProbeResult?.rightDrawnActors) !== 2
+          || Number(actorCompositionProbeResult?.leftMeshRebuilds) !== 1
+          || Number(actorCompositionProbeResult?.leftMeshUploads) !== 1
+          || Number(actorCompositionProbeResult?.rightMeshRebuilds) !== 1
+          || Number(actorCompositionProbeResult?.rightMeshUploads) !== 1
+          || Number(actorCompositionProbeResult?.placedPipelines) !== 1
+          || Number(actorCompositionProbeResult?.clippedPlacedPipelines) !== 1
+          || pixels.actorLikePixels <= 500
+          || shutdownResult?.shutdownComplete !== true
+          || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
+          || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
+          || pageErrors.length > 0
+        ) {
+          throw new Error(
+            `browser actor composition probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (halfSpaceTerrainProbe) {
         const halfSpaceTerrainProbeResult = await page.evaluate(
           async () => await globalThis.__mcloneWebApp.renderHalfSpaceTerrainProof?.() ?? null,
@@ -6564,6 +6649,37 @@ function analyzePng(bytes) {
     nearBlackInteriorPixelCount,
     transparentInteriorPixelCount,
     expectedClearColor: expected,
+  };
+}
+
+/** @param {Buffer} bytes */
+function analyzeActorCompositionPng(bytes) {
+  const png = decodePngRgba(bytes);
+  let actorLikePixels = 0;
+  let darkLitPixels = 0;
+  for (let offset = 0; offset < png.rgba.length; offset += 4) {
+    const r = png.rgba[offset];
+    const g = png.rgba[offset + 1];
+    const b = png.rgba[offset + 2];
+    const a = png.rgba[offset + 3];
+    if (
+      a > 200
+      && r > 50
+      && g > 35
+      && b > 25
+      && Math.max(r, g, b) - Math.min(r, g, b) < 180
+    ) {
+      actorLikePixels += 1;
+    }
+    if (a > 200 && r < 18 && g < 18 && b < 18) {
+      darkLitPixels += 1;
+    }
+  }
+  return {
+    width: png.width,
+    height: png.height,
+    actorLikePixels,
+    darkLitPixels,
   };
 }
 

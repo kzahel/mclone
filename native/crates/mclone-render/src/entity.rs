@@ -5,11 +5,15 @@ use std::sync::{Arc, OnceLock};
 use anyhow::{Context, Result, bail};
 use glam::{EulerRot, Mat4, Quat, Vec3};
 use mclone_assets::{ActorFigureId, default_player_figure_id};
+use mclone_core::Vec3d;
 use mclone_diagnostics::GpuPassId;
 
 use crate::asset_lab_figure::{CompiledFigureClip, CompiledFigureTransform};
-use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions};
+use crate::chunk::{
+    ChunkRenderView, DEPTH_FORMAT, TexturedSectionRenderOptions, render_view_aabb_visible,
+};
 use crate::light_texture::FULL_BRIGHT;
+use crate::placement::{CompositionClip, WorldCompositionContext};
 use crate::target::RenderFrameTarget;
 use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
@@ -28,6 +32,13 @@ const UNIFORM_BYTE_SIZE: wgpu::BufferAddress = UNIFORM_BYTE_LEN as wgpu::BufferA
 const MULTIVIEW_UNIFORM_BYTE_LEN: usize = UNIFORM_BYTE_LEN * 2;
 const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
     MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const PLACED_UNIFORM_FLOAT_COUNT: usize = UNIFORM_FLOAT_COUNT + 12;
+const PLACED_UNIFORM_BYTE_LEN: usize = PLACED_UNIFORM_FLOAT_COUNT * std::mem::size_of::<f32>();
+const PLACED_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    PLACED_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const PLACED_MULTIVIEW_UNIFORM_BYTE_LEN: usize = PLACED_UNIFORM_BYTE_LEN * 2;
+const PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    PLACED_MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const ACTOR_MESH_MIN_VERTEX_CAPACITY: usize = 8192;
 const ACTOR_MESH_MIN_INDEX_CAPACITY: usize = 12_288;
 const ACTOR_VERTEX_BUFFER_MIN_BYTE_SIZE: wgpu::BufferAddress =
@@ -283,6 +294,9 @@ impl ActorInstance {
 pub struct ActorRenderStats {
     pub submitted_actor_count: usize,
     pub drawn_actor_count: usize,
+    pub source_rejected_actor_count: usize,
+    pub clip_rejected_actor_count: usize,
+    pub frustum_rejected_actor_count: usize,
     pub vertex_count: u32,
     pub index_count: u32,
 }
@@ -328,6 +342,9 @@ pub struct ActorDrawResources {
     uniforms: PerViewUniformBuffer,
     bind_group: wgpu::BindGroup,
     multiview: RefCell<Option<ActorMultiviewDrawState>>,
+    placed: RefCell<Option<ActorPlacedDrawState>>,
+    placed_multiview: RefCell<Option<ActorPlacedMultiviewDrawState>>,
+    composed_actor_scratch: Vec<ActorInstance>,
     mesh_cache: ActorMeshCache,
 }
 
@@ -356,6 +373,12 @@ pub struct ActorDrawResourceSnapshot {
     pub direct_uniform_allocated_bytes: u64,
     pub multiview_pipeline_count: usize,
     pub multiview_uniform_allocated_bytes: u64,
+    pub placed_pipeline_count: usize,
+    pub clipped_placed_pipeline_count: usize,
+    pub placed_uniform_allocated_bytes: u64,
+    pub placed_multiview_pipeline_count: usize,
+    pub clipped_placed_multiview_pipeline_count: usize,
+    pub placed_multiview_uniform_allocated_bytes: u64,
     pub mesh: ActorMeshCacheSnapshot,
 }
 
@@ -427,6 +450,9 @@ impl ActorDrawResources {
             uniforms,
             bind_group,
             multiview: RefCell::new(None),
+            placed: RefCell::new(None),
+            placed_multiview: RefCell::new(None),
+            composed_actor_scratch: Vec::new(),
             mesh_cache: ActorMeshCache::new(device),
         }
     }
@@ -536,7 +562,128 @@ impl ActorDrawResources {
             drawn_actor_count: actors.len(),
             vertex_count: prepared.vertex_count,
             index_count: prepared.index_count,
+            ..ActorRenderStats::default()
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_composed(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        context: WorldCompositionContext,
+    ) -> Result<ActorRenderStats> {
+        self.render_composed_in_slot(
+            device,
+            queue,
+            encoder,
+            target,
+            physical_render_view,
+            render_options,
+            actors,
+            context,
+            SINGLE_VIEW_SLOT,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_composed_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        context: WorldCompositionContext,
+        view_slot: PerViewSlot,
+    ) -> Result<ActorRenderStats> {
+        if actors.is_empty() {
+            return Ok(ActorRenderStats::default());
+        }
+        let selection = select_composed_actors(
+            &mut self.composed_actor_scratch,
+            actors,
+            context,
+            &[physical_render_view],
+        );
+        let mut stats = selection.render_stats(actors.len());
+        if self.composed_actor_scratch.is_empty() {
+            return Ok(stats);
+        }
+        let depth_view = target
+            .depth_view
+            .context("placed actor render pass requires a depth attachment")?;
+        let prepared = self.mesh_cache.prepare(
+            device,
+            queue,
+            &self.composed_actor_scratch,
+            self.shared.texture_layout,
+            self.shared.atlas_size,
+            &self.shared.actor_figures,
+        );
+        let Some(prepared) = prepared else {
+            return Ok(stats);
+        };
+
+        let renderer = self.shared.renderer.placed_renderer(device);
+        if self.placed.borrow().is_none() {
+            *self.placed.borrow_mut() = Some(ActorPlacedDrawState::new(
+                device,
+                &renderer.uniform_bind_group_layout,
+            ));
+        }
+        let placed = self.placed.borrow();
+        let placed = placed
+            .as_ref()
+            .expect("placed actor draw state initialized above");
+        let uniform_offset = placed.uniforms.write_slot(
+            queue,
+            view_slot,
+            &placed_uniform_bytes(physical_render_view, render_options, context),
+        );
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_actor_placed_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+            ..Default::default()
+        });
+        pass.set_pipeline(renderer.pipeline(context.clip()));
+        pass.set_bind_group(0, &placed.bind_group, &[uniform_offset]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+        pass.set_index_buffer(
+            prepared.index_buffer.slice(..prepared.index_byte_len),
+            wgpu::IndexFormat::Uint32,
+        );
+        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
+
+        stats.drawn_actor_count = self.composed_actor_scratch.len();
+        stats.vertex_count = prepared.vertex_count;
+        stats.index_count = prepared.index_count;
+        Ok(stats)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -620,12 +767,120 @@ impl ActorDrawResources {
             drawn_actor_count: actors.len(),
             vertex_count: prepared.vertex_count,
             index_count: prepared.index_count,
+            ..ActorRenderStats::default()
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_composed_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        physical_render_views: [ChunkRenderView; 2],
+        render_options: [TexturedSectionRenderOptions; 2],
+        actors: &[ActorInstance],
+        context: WorldCompositionContext,
+    ) -> Result<ActorRenderStats> {
+        if actors.is_empty() {
+            return Ok(ActorRenderStats::default());
+        }
+        let selection = select_composed_actors(
+            &mut self.composed_actor_scratch,
+            actors,
+            context,
+            &physical_render_views,
+        );
+        let mut stats = selection.render_stats(actors.len());
+        if self.composed_actor_scratch.is_empty() {
+            return Ok(stats);
+        }
+        let depth_view = target
+            .depth_view
+            .context("placed actor multiview render pass requires a depth attachment")?;
+        let prepared = self.mesh_cache.prepare(
+            device,
+            queue,
+            &self.composed_actor_scratch,
+            self.shared.texture_layout,
+            self.shared.atlas_size,
+            &self.shared.actor_figures,
+        );
+        let Some(prepared) = prepared else {
+            return Ok(stats);
+        };
+
+        let renderer = self.shared.renderer.placed_multiview_renderer(device)?;
+        if self.placed_multiview.borrow().is_none() {
+            *self.placed_multiview.borrow_mut() = Some(ActorPlacedMultiviewDrawState::new(
+                device,
+                &renderer.uniform_bind_group_layout,
+            ));
+        }
+        let placed = self.placed_multiview.borrow();
+        let placed = placed
+            .as_ref()
+            .expect("placed actor multiview draw state initialized above");
+        queue.write_buffer(
+            &placed.uniform_buffer,
+            0,
+            &placed_multiview_uniform_bytes(physical_render_views, render_options, context),
+        );
+
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_actor_placed_multiview_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+            ..Default::default()
+        });
+        pass.set_pipeline(renderer.pipeline(context.clip()));
+        pass.set_bind_group(0, &placed.bind_group, &[]);
+        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+        pass.set_index_buffer(
+            prepared.index_buffer.slice(..prepared.index_byte_len),
+            wgpu::IndexFormat::Uint32,
+        );
+        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
+
+        stats.drawn_actor_count = self.composed_actor_scratch.len();
+        stats.vertex_count = prepared.vertex_count;
+        stats.index_count = prepared.index_count;
+        Ok(stats)
     }
 
     pub fn resource_snapshot(&self) -> ActorDrawResourceSnapshot {
         let multiview_pipeline_materialized = self.shared.renderer.multiview.get().is_some();
         let multiview_uniform_materialized = self.multiview.borrow().is_some();
+        let placed_pipeline_materialized = self.shared.renderer.placed.get().is_some();
+        let placed_multiview_pipeline_materialized =
+            self.shared.renderer.placed_multiview.get().is_some();
+        let placed_uniform_allocated_bytes = self
+            .placed
+            .borrow()
+            .as_ref()
+            .map_or(0, |state| state.uniforms.allocated_byte_size());
+        let placed_multiview_uniform_allocated_bytes = if self.placed_multiview.borrow().is_some() {
+            PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE
+        } else {
+            0
+        };
         let atlas_base_bytes =
             self.shared.atlas_size[0] as usize * self.shared.atlas_size[1] as usize * 4;
         let direct_uniform_allocated_bytes = self.uniforms.allocated_byte_size();
@@ -640,6 +895,8 @@ impl ActorDrawResources {
             shared_known_retained_bytes: atlas_base_bytes,
             mutable_state_allocated_bytes: direct_uniform_allocated_bytes
                 .saturating_add(multiview_uniform_allocated_bytes)
+                .saturating_add(placed_uniform_allocated_bytes)
+                .saturating_add(placed_multiview_uniform_allocated_bytes)
                 .saturating_add(mesh.cpu_vertex_capacity_bytes as u64)
                 .saturating_add(mesh.cpu_index_capacity_bytes as u64)
                 .saturating_add(mesh.cpu_vertex_staging_capacity_bytes as u64)
@@ -656,6 +913,14 @@ impl ActorDrawResources {
             direct_uniform_allocated_bytes,
             multiview_pipeline_count: usize::from(multiview_pipeline_materialized),
             multiview_uniform_allocated_bytes,
+            placed_pipeline_count: usize::from(placed_pipeline_materialized),
+            clipped_placed_pipeline_count: usize::from(placed_pipeline_materialized),
+            placed_uniform_allocated_bytes,
+            placed_multiview_pipeline_count: usize::from(placed_multiview_pipeline_materialized),
+            clipped_placed_multiview_pipeline_count: usize::from(
+                placed_multiview_pipeline_materialized,
+            ),
+            placed_multiview_uniform_allocated_bytes,
             mesh,
         }
     }
@@ -667,6 +932,8 @@ struct ActorRenderer {
     texture_bind_group_layout: wgpu::BindGroupLayout,
     color_format: wgpu::TextureFormat,
     multiview: OnceLock<ActorMultiviewRenderer>,
+    placed: OnceLock<ActorPlacedRenderer>,
+    placed_multiview: OnceLock<ActorPlacedMultiviewRenderer>,
 }
 
 impl ActorRenderer {
@@ -721,6 +988,7 @@ impl ActorRenderer {
             &shader,
             color_format,
             "mclone_actor_pipeline",
+            "fs_main",
             None,
         );
 
@@ -730,6 +998,8 @@ impl ActorRenderer {
             texture_bind_group_layout,
             color_format,
             multiview: OnceLock::new(),
+            placed: OnceLock::new(),
+            placed_multiview: OnceLock::new(),
         }
     }
 
@@ -739,6 +1009,28 @@ impl ActorRenderer {
         }
         Ok(self.multiview.get_or_init(|| {
             ActorMultiviewRenderer::new(device, self.color_format, &self.texture_bind_group_layout)
+        }))
+    }
+
+    fn placed_renderer(&self, device: &wgpu::Device) -> &ActorPlacedRenderer {
+        self.placed.get_or_init(|| {
+            ActorPlacedRenderer::new(device, self.color_format, &self.texture_bind_group_layout)
+        })
+    }
+
+    fn placed_multiview_renderer(
+        &self,
+        device: &wgpu::Device,
+    ) -> Result<&ActorPlacedMultiviewRenderer> {
+        if !device.features().contains(wgpu::Features::MULTIVIEW) {
+            bail!("placed actor multiview render requires wgpu MULTIVIEW");
+        }
+        Ok(self.placed_multiview.get_or_init(|| {
+            ActorPlacedMultiviewRenderer::new(
+                device,
+                self.color_format,
+                &self.texture_bind_group_layout,
+            )
         }))
     }
 }
@@ -785,11 +1077,206 @@ impl ActorMultiviewRenderer {
             &shader,
             color_format,
             "mclone_actor_multiview_pipeline",
+            "fs_main",
             NonZeroU32::new(2),
         );
         Self {
             pipeline,
             uniform_bind_group_layout,
+        }
+    }
+}
+
+struct ActorPlacedRenderer {
+    unbounded_pipeline: wgpu::RenderPipeline,
+    clipped_pipeline: wgpu::RenderPipeline,
+    uniform_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl ActorPlacedRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_actor_placed_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/entity_actor_placed.wgsl").into(),
+            ),
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_actor_placed_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: NonZeroU64::new(PLACED_UNIFORM_BYTE_SIZE),
+                    },
+                    count: None,
+                }],
+            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_actor_placed_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let unbounded_pipeline = create_actor_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_actor_placed_pipeline",
+            "fs_unbounded",
+            None,
+        );
+        let clipped_pipeline = create_actor_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_actor_clipped_placed_pipeline",
+            "fs_half_space",
+            None,
+        );
+        Self {
+            unbounded_pipeline,
+            clipped_pipeline,
+            uniform_bind_group_layout,
+        }
+    }
+
+    fn pipeline(&self, clip: CompositionClip) -> &wgpu::RenderPipeline {
+        match clip {
+            CompositionClip::Unbounded => &self.unbounded_pipeline,
+            CompositionClip::HalfSpace(_) => &self.clipped_pipeline,
+        }
+    }
+}
+
+struct ActorPlacedMultiviewRenderer {
+    unbounded_pipeline: wgpu::RenderPipeline,
+    clipped_pipeline: wgpu::RenderPipeline,
+    uniform_bind_group_layout: wgpu::BindGroupLayout,
+}
+
+impl ActorPlacedMultiviewRenderer {
+    fn new(
+        device: &wgpu::Device,
+        color_format: wgpu::TextureFormat,
+        texture_bind_group_layout: &wgpu::BindGroupLayout,
+    ) -> Self {
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_actor_placed_multiview_shader"),
+            source: wgpu::ShaderSource::Wgsl(
+                include_str!("shaders/entity_actor_placed_multiview.wgsl").into(),
+            ),
+        });
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_actor_placed_multiview_uniform_bind_group_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE),
+                    },
+                    count: None,
+                }],
+            });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_actor_placed_multiview_pipeline_layout"),
+            bind_group_layouts: &[&uniform_bind_group_layout, texture_bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let multiview = NonZeroU32::new(2);
+        let unbounded_pipeline = create_actor_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_actor_placed_multiview_pipeline",
+            "fs_unbounded",
+            multiview,
+        );
+        let clipped_pipeline = create_actor_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_actor_clipped_placed_multiview_pipeline",
+            "fs_half_space",
+            multiview,
+        );
+        Self {
+            unbounded_pipeline,
+            clipped_pipeline,
+            uniform_bind_group_layout,
+        }
+    }
+
+    fn pipeline(&self, clip: CompositionClip) -> &wgpu::RenderPipeline {
+        match clip {
+            CompositionClip::Unbounded => &self.unbounded_pipeline,
+            CompositionClip::HalfSpace(_) => &self.clipped_pipeline,
+        }
+    }
+}
+
+struct ActorPlacedDrawState {
+    uniforms: PerViewUniformBuffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl ActorPlacedDrawState {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+        let uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_actor_placed_uniforms",
+            PLACED_UNIFORM_BYTE_SIZE,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
+        );
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_actor_placed_bind_group"),
+            layout,
+            entries: &[uniforms.bind_group_entry(0)],
+        });
+        Self {
+            uniforms,
+            bind_group,
+        }
+    }
+}
+
+struct ActorPlacedMultiviewDrawState {
+    uniform_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl ActorPlacedMultiviewDrawState {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_actor_placed_multiview_uniforms"),
+            size: PLACED_MULTIVIEW_UNIFORM_BYTE_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_actor_placed_multiview_bind_group"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform_buffer.as_entire_binding(),
+            }],
+        });
+        Self {
+            uniform_buffer,
+            bind_group,
         }
     }
 }
@@ -841,6 +1328,7 @@ fn create_actor_pipeline(
     shader: &wgpu::ShaderModule,
     color_format: wgpu::TextureFormat,
     label: &'static str,
+    fragment_entry_point: &'static str,
     multiview: Option<NonZeroU32>,
 ) -> wgpu::RenderPipeline {
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -879,7 +1367,7 @@ fn create_actor_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry_point),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
@@ -2388,6 +2876,126 @@ fn multiview_uniform_bytes(
     bytes
 }
 
+fn placed_uniform_bytes(
+    render_view: ChunkRenderView,
+    render_options: TexturedSectionRenderOptions,
+    context: WorldCompositionContext,
+) -> [u8; PLACED_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0u8; PLACED_UNIFORM_BYTE_LEN];
+    bytes[..UNIFORM_BYTE_LEN].copy_from_slice(&uniform_bytes(render_view, render_options));
+    let (source_anchor_scale, composition_anchor) = context.placement().shader_values();
+    let clip_plane = match context.clip() {
+        CompositionClip::Unbounded => [0.0; 4],
+        CompositionClip::HalfSpace(half_space) => [
+            half_space.normal().x,
+            half_space.normal().y,
+            half_space.normal().z,
+            half_space.offset(),
+        ],
+    };
+    for (index, value) in source_anchor_scale
+        .into_iter()
+        .chain(composition_anchor)
+        .chain(clip_plane)
+        .enumerate()
+    {
+        let offset = UNIFORM_BYTE_LEN + index * 4;
+        bytes[offset..offset + 4].copy_from_slice(&value.to_ne_bytes());
+    }
+    bytes
+}
+
+fn placed_multiview_uniform_bytes(
+    render_views: [ChunkRenderView; 2],
+    render_options: [TexturedSectionRenderOptions; 2],
+    context: WorldCompositionContext,
+) -> [u8; PLACED_MULTIVIEW_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0u8; PLACED_MULTIVIEW_UNIFORM_BYTE_LEN];
+    bytes[..PLACED_UNIFORM_BYTE_LEN].copy_from_slice(&placed_uniform_bytes(
+        render_views[0],
+        render_options[0],
+        context,
+    ));
+    bytes[PLACED_UNIFORM_BYTE_LEN..].copy_from_slice(&placed_uniform_bytes(
+        render_views[1],
+        render_options[1],
+        context,
+    ));
+    bytes
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ActorCompositionSelection {
+    source_rejected_actor_count: usize,
+    clip_rejected_actor_count: usize,
+    frustum_rejected_actor_count: usize,
+}
+
+impl ActorCompositionSelection {
+    fn render_stats(self, submitted_actor_count: usize) -> ActorRenderStats {
+        ActorRenderStats {
+            submitted_actor_count,
+            source_rejected_actor_count: self.source_rejected_actor_count,
+            clip_rejected_actor_count: self.clip_rejected_actor_count,
+            frustum_rejected_actor_count: self.frustum_rejected_actor_count,
+            ..ActorRenderStats::default()
+        }
+    }
+}
+
+fn select_composed_actors(
+    selected: &mut Vec<ActorInstance>,
+    actors: &[ActorInstance],
+    context: WorldCompositionContext,
+    physical_render_views: &[ChunkRenderView],
+) -> ActorCompositionSelection {
+    selected.clear();
+    let mut report = ActorCompositionSelection::default();
+    for actor in actors {
+        if context.source_bounds().is_some_and(|bounds| {
+            !bounds.contains(Vec3d::new(
+                f64::from(actor.feet_position.x),
+                f64::from(actor.feet_position.y),
+                f64::from(actor.feet_position.z),
+            ))
+        }) {
+            report.source_rejected_actor_count += 1;
+            continue;
+        }
+        let (source_min, source_max) = actor_source_rejection_aabb(*actor);
+        let placement = context.placement();
+        let composition_min = placement.source_to_composition_f32(source_min);
+        let composition_max = placement.source_to_composition_f32(source_max);
+        if context
+            .clip()
+            .rejects_aabb(composition_min, composition_max)
+        {
+            report.clip_rejected_actor_count += 1;
+            continue;
+        }
+        if !physical_render_views.iter().copied().any(|render_view| {
+            render_view_aabb_visible(render_view, composition_min, composition_max)
+        }) {
+            report.frustum_rejected_actor_count += 1;
+            continue;
+        }
+        selected.push(*actor);
+    }
+    report
+}
+
+fn actor_source_rejection_aabb(actor: ActorInstance) -> (Vec3, Vec3) {
+    // A sphere-derived AABB is conservative for yaw, pitch, arbitrary
+    // orientation, animated limbs, wings, and cuboid overlays. Exact clipping
+    // remains fragment work; CPU rejection must never remove an intersecting
+    // actor before mesh preparation.
+    let half_width = actor.width.max(0.1) * 0.5;
+    let half_height = actor.height.max(0.1) * 0.5;
+    let radius = Vec3::new(half_width, half_height, half_width).length();
+    let center = actor.feet_position + Vec3::Y * half_height;
+    (center - Vec3::splat(radius), center + Vec3::splat(radius))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2941,6 +3549,101 @@ mod tests {
             uniform_bytes(right, options[1]).as_slice()
         );
         assert_ne!(&bytes[..UNIFORM_BYTE_LEN], &bytes[UNIFORM_BYTE_LEN..]);
+    }
+
+    #[test]
+    fn placed_actor_uniforms_append_rebased_placement_and_clip_plane() {
+        use crate::placement::{CompositionHalfSpace, WorldPlacement};
+
+        let render_view = crate::chunk::ChunkCamera {
+            eye: [1.0, 2.0, 8.0],
+            target: [0.0, 1.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 60.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        }
+        .render_view(640, 480);
+        let placement = WorldPlacement::new(
+            Vec3d::new(1_000.0, 64.0, -2_000.0),
+            Vec3d::new(4.0, 0.5, -3.0),
+            0.125,
+        )
+        .unwrap();
+        let clip = CompositionHalfSpace::new(Vec3::X, -2.0).unwrap();
+        let context =
+            WorldCompositionContext::new(placement, None, CompositionClip::HalfSpace(clip));
+        let bytes = placed_uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default(),
+            context,
+        );
+
+        assert_eq!(bytes.len(), PLACED_UNIFORM_BYTE_LEN);
+        assert_eq!(
+            &bytes[..UNIFORM_BYTE_LEN],
+            uniform_bytes(render_view, TexturedSectionRenderOptions::default()).as_slice()
+        );
+        let appended = bytes[UNIFORM_BYTE_LEN..]
+            .chunks_exact(4)
+            .map(|value| f32::from_ne_bytes(value.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            appended,
+            vec![
+                1_000.0, 64.0, -2_000.0, 0.125, 4.0, 0.5, -3.0, 0.0, 1.0, 0.0, 0.0, -2.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn composed_actor_selection_preserves_order_and_rejects_before_mesh_build() {
+        use crate::placement::{CompositionHalfSpace, WorldPlacement, WorldSourceBounds};
+
+        let render_view = crate::chunk::ChunkCamera {
+            eye: [0.0, 3.0, 18.0],
+            target: [0.0, 2.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 55.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 100.0,
+        }
+        .render_view(960, 640);
+        let placement =
+            WorldPlacement::new(Vec3d::new(1_000.0, 64.0, 1_000.0), Vec3d::ZERO, 0.5).unwrap();
+        let bounds = WorldSourceBounds::new(
+            Vec3d::new(900.0, 0.0, 900.0),
+            Vec3d::new(1_100.0, 400.0, 1_100.0),
+        )
+        .unwrap();
+        let context = WorldCompositionContext::new(
+            placement,
+            Some(bounds),
+            CompositionClip::HalfSpace(CompositionHalfSpace::new(-Vec3::X, 0.0).unwrap()),
+        );
+        let visible_first =
+            ActorInstance::item_egg(Vec3::new(998.0, 64.0, 1_000.0), 0.0, 0.25, 0.25);
+        let source_rejected =
+            ActorInstance::item_egg(Vec3::new(1_200.0, 64.0, 1_000.0), 0.0, 0.25, 0.25);
+        let visible_second = ActorInstance::remote_player(Vec3::new(1_000.0, 64.0, 1_000.0), 0.0);
+        let clip_rejected =
+            ActorInstance::debug_cube(Vec3::new(1_010.0, 64.0, 1_000.0), 0.0, 0.0, None, 1.0, 1.0);
+        let frustum_rejected =
+            ActorInstance::debug_cube(Vec3::new(995.0, 300.0, 1_000.0), 0.0, 0.0, None, 1.0, 1.0);
+        let actors = [
+            visible_first,
+            source_rejected,
+            visible_second,
+            clip_rejected,
+            frustum_rejected,
+        ];
+        let mut selected = Vec::new();
+        let report = select_composed_actors(&mut selected, &actors, context, &[render_view]);
+
+        assert_eq!(selected, vec![visible_first, visible_second]);
+        assert_eq!(report.source_rejected_actor_count, 1);
+        assert_eq!(report.clip_rejected_actor_count, 1);
+        assert_eq!(report.frustum_rejected_actor_count, 1);
     }
 
     #[test]

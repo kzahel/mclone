@@ -190,6 +190,61 @@ fn actor_renderer_shared_topology_and_per_world_state_are_exact() {
 }
 
 #[test]
+fn actor_composition_is_opt_in_shared_and_portable() {
+    let actor = read("../mclone-render/src/entity.rs");
+    let direct = braced_item(&actor, "pub fn render_in_slot(");
+    let composed = braced_item(&actor, "pub fn render_composed_in_slot(");
+    let composed_multiview = braced_item(&actor, "pub fn render_composed_multiview(");
+    let direct_uniforms = braced_item(&actor, "fn uniform_bytes(");
+    let placed_uniforms = braced_item(&actor, "fn placed_uniform_bytes(");
+    let direct_shader = read("../mclone-render/src/shaders/entity_actor.wgsl");
+    let direct_multiview_shader = read("../mclone-render/src/shaders/entity_actor_multiview.wgsl");
+    let placed_shader = read("../mclone-render/src/shaders/entity_actor_placed.wgsl");
+    let placed_multiview_shader =
+        read("../mclone-render/src/shaders/entity_actor_placed_multiview.wgsl");
+
+    assert!(!direct.contains("WorldCompositionContext"));
+    assert!(!direct.contains("select_composed_actors"));
+    assert!(!direct_uniforms.contains("WorldCompositionContext"));
+    assert!(!direct_uniforms.contains("placement"));
+    assert!(composed.contains("context: WorldCompositionContext"));
+    assert!(composed.contains("select_composed_actors"));
+    assert!(composed.contains("renderer.pipeline(context.clip())"));
+    assert!(composed_multiview.contains("context: WorldCompositionContext"));
+    assert!(composed_multiview.contains("select_composed_actors"));
+    assert!(placed_uniforms.contains("context: WorldCompositionContext"));
+    for unchanged_shader in [direct_shader, direct_multiview_shader] {
+        assert!(!unchanged_shader.contains("source_anchor_scale"));
+        assert!(!unchanged_shader.contains("composition_anchor"));
+        assert!(!unchanged_shader.contains("clip_plane"));
+    }
+    for composition_shader in [placed_shader, placed_multiview_shader] {
+        assert!(composition_shader.contains("source_anchor_scale"));
+        assert!(composition_shader.contains("composition_anchor"));
+        assert!(composition_shader.contains("clip_plane"));
+        assert!(composition_shader.contains("fs_unbounded"));
+        assert!(composition_shader.contains("fs_half_space"));
+        assert!(composition_shader.contains("discard;"));
+    }
+
+    let fixture = read("../mclone-render/src/actor_composition_fixture.rs");
+    let web = read("../../apps/mclone-web-client/src/web_scene_host.rs");
+    let web_proof = braced_item(&web, "pub fn render_actor_composition_proof(");
+    assert!(fixture.contains("pub struct ActorCompositionFixture"));
+    assert!(fixture.contains("ActorInstance::cow_model"));
+    assert!(fixture.contains("chicken_figure_id()"));
+    assert!(fixture.contains("ActorInstance::item_egg"));
+    assert!(fixture.contains("ActorInstance::remote_player("));
+    assert!(fixture.contains("ActorInstance::local_player("));
+    assert!(fixture.contains("with_walk_animation_distance"));
+    assert!(fixture.contains("with_chicken_wing_flap_radians"));
+    assert!(web_proof.contains("ActorCompositionFixture::new"));
+    assert!(!web_proof.contains("ActorInstance"));
+    assert!(!web_proof.contains("WorldCompositionContext"));
+    assert!(!web_proof.contains("CompositionHalfSpace"));
+}
+
+#[test]
 fn scene_current_actor_path_is_raw_active_only_and_slot_cached() {
     let scene = read("src/lib.rs");
     let host = braced_item(&scene, "pub struct McloneSceneHost {");

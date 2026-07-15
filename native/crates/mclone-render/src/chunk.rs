@@ -1671,35 +1671,21 @@ impl RenderSectionFrustum for ClipFrustum {
 #[derive(Clone, Copy, Debug)]
 struct PlacedClipFrustum {
     physical_view_projection: Mat4,
-    source_anchor_scale: [f32; 4],
-    composition_anchor: [f32; 4],
+    placement: WorldPlacement,
     clip: CompositionClip,
 }
 
 impl PlacedClipFrustum {
     fn new(physical_render_view: ChunkRenderView, context: WorldCompositionContext) -> Self {
-        let placement = context.placement();
-        let (source_anchor_scale, composition_anchor) = placement.shader_values();
         Self {
             physical_view_projection: physical_render_view.view_projection,
-            source_anchor_scale,
-            composition_anchor,
+            placement: context.placement(),
             clip: context.clip(),
         }
     }
 
     fn source_to_composition(self, source: Vec3) -> Vec3 {
-        let source_anchor = Vec3::from_array([
-            self.source_anchor_scale[0],
-            self.source_anchor_scale[1],
-            self.source_anchor_scale[2],
-        ]);
-        let composition_anchor = Vec3::from_array([
-            self.composition_anchor[0],
-            self.composition_anchor[1],
-            self.composition_anchor[2],
-        ]);
-        composition_anchor + (source - source_anchor) * self.source_anchor_scale[3]
+        self.placement.source_to_composition_f32(source)
     }
 }
 
@@ -1763,6 +1749,12 @@ fn clip_aabb_visible(min: Vec3, max: Vec3, mut clip_position: impl FnMut(Vec3) -
     }
 
     !(outside_left || outside_right || outside_bottom || outside_top || outside_near || outside_far)
+}
+
+pub(crate) fn render_view_aabb_visible(render_view: ChunkRenderView, min: Vec3, max: Vec3) -> bool {
+    clip_aabb_visible(min, max, |corner| {
+        render_view.view_projection * corner.extend(1.0)
+    })
 }
 
 pub struct GpuChunkMesh {

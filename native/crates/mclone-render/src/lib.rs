@@ -6,6 +6,7 @@ mod gpu_util;
 mod asset_lab_figure;
 
 pub mod actor_assets;
+pub mod actor_composition_fixture;
 pub mod chunk;
 pub mod color_profile;
 pub mod composition_fixture;
