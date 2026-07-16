@@ -2,9 +2,9 @@ use std::collections::{BTreeMap, HashMap};
 use std::error::Error;
 use std::fmt;
 
-use glam::{EulerRot, Mat4, Quat, Vec3};
+use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 
-use crate::{AssetError, AssetPath, AssetResult, AssetSource, FigureAsset, FigureClip, FigurePart};
+use crate::{AssetError, AssetPath, AssetResult, AssetSource, FigureAsset, FigurePart};
 
 pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-box-v0";
 
@@ -20,9 +20,11 @@ pub struct PreparedFigure {
     pub vertices: Vec<PreparedFigureVertex>,
     pub indices: Vec<u16>,
     pub parts: Vec<PreparedFigurePart>,
+    pub evaluation_order: Vec<u16>,
     pub draw_ranges: Vec<PreparedFigureDrawRange>,
     pub atlas: PreparedFigureAtlas,
-    pub clips: BTreeMap<String, FigureClip>,
+    pub clips: BTreeMap<String, PreparedFigureClip>,
+    pub normalization_matrix: [[f32; 4]; 4],
     pub bounds: PreparedFigureBounds,
     pub diagnostics: PreparedFigureDiagnostics,
 }
@@ -41,8 +43,59 @@ pub struct PreparedFigurePart {
     pub name: String,
     pub parent: Option<u16>,
     pub first_person_visible: bool,
+    /// Semantic source-space group position (`part.at + pivot`).
+    pub source_base_position: [f32; 3],
+    /// Semantic source-space base Euler rotation in XYZ radians.
+    pub source_base_rotation_radians: [f32; 3],
+    /// Semantic source-space pivot inherited by the part content and children.
+    pub source_pivot: [f32; 3],
     /// Global rest-pose content transform in normalized actor-local space.
     pub rest_matrix: [[f32; 4]; 4],
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedFigureClip {
+    pub duration_seconds: f32,
+    pub source_fps: Option<f32>,
+    pub looped: bool,
+    pub tracks: BTreeMap<u16, Vec<PreparedFigureClipKey>>,
+    pub locomotion: Option<PreparedFigureClipLocomotion>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PreparedFigureClipKey {
+    pub time_seconds: f32,
+    pub translation: Option<[f32; 3]>,
+    pub rotation_radians: Option<[f32; 3]>,
+    pub scale: Option<[f32; 3]>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedFigureClipLocomotion {
+    pub kind: String,
+    pub cycle_distance: f32,
+    pub contacts: Vec<PreparedFigureClipContact>,
+    pub direction: Option<[f32; 3]>,
+    pub speed: Option<f32>,
+    pub units: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreparedFigureClipContact {
+    pub part_id: u16,
+    pub phase_start: f32,
+    pub phase_end: f32,
+    pub role: Option<String>,
+    pub stance_ratio: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreparedFigurePoseSample {
+    pub requested_time_seconds: f64,
+    pub local_time_seconds: f64,
+    pub duration_seconds: f64,
+    pub evaluated_part_count: usize,
+    pub sampled_track_count: usize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -101,6 +154,27 @@ impl fmt::Display for FigurePrepareError {
 
 impl Error for FigurePrepareError {}
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FigurePoseError {
+    message: String,
+}
+
+impl FigurePoseError {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for FigurePoseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl Error for FigurePoseError {}
+
 pub fn load_prepared_figure(
     source: &impl AssetSource,
     path: &AssetPath,
@@ -120,6 +194,200 @@ pub fn prepare_figure_asset(asset: &FigureAsset) -> Result<PreparedFigure, Figur
     prepare_figure_asset_with_crc(asset, None)
 }
 
+/// Recompose the prepared rest pose through the same local hierarchy used by
+/// animation. The caller-owned palette retains capacity across frames.
+pub fn evaluate_prepared_figure_rest_pose_into(
+    figure: &PreparedFigure,
+    palette: &mut Vec<[[f32; 4]; 4]>,
+) -> Result<(), FigurePoseError> {
+    evaluate_prepared_figure_pose_into(figure, None, 0.0, palette).map(|_| ())
+}
+
+/// Evaluate one prepared clip at an arbitrary presentation timestamp.
+///
+/// This function has no fixed update cadence. Looped clips wrap continuous
+/// time, non-looped clips clamp it, and the final actor-local part matrices are
+/// written into caller-owned storage without rebuilding figure topology.
+pub fn evaluate_prepared_figure_clip_into(
+    figure: &PreparedFigure,
+    clip_name: &str,
+    presentation_time_seconds: f64,
+    palette: &mut Vec<[[f32; 4]; 4]>,
+) -> Result<PreparedFigurePoseSample, FigurePoseError> {
+    let clip = figure.clips.get(clip_name).ok_or_else(|| {
+        FigurePoseError::new(format!(
+            "prepared figure '{}' has no clip '{}'",
+            figure.name, clip_name
+        ))
+    })?;
+    evaluate_prepared_figure_pose_into(figure, Some(clip), presentation_time_seconds, palette)
+}
+
+fn evaluate_prepared_figure_pose_into(
+    figure: &PreparedFigure,
+    clip: Option<&PreparedFigureClip>,
+    presentation_time_seconds: f64,
+    palette: &mut Vec<[[f32; 4]; 4]>,
+) -> Result<PreparedFigurePoseSample, FigurePoseError> {
+    if !presentation_time_seconds.is_finite() {
+        return Err(FigurePoseError::new(format!(
+            "prepared figure '{}' pose time must be finite",
+            figure.name
+        )));
+    }
+    if figure.evaluation_order.len() != figure.parts.len() {
+        return Err(FigurePoseError::new(format!(
+            "prepared figure '{}' has an incomplete part evaluation order",
+            figure.name
+        )));
+    }
+    let duration_seconds = clip.map_or(0.0, |clip| f64::from(clip.duration_seconds));
+    let local_time_seconds = match clip {
+        Some(clip) if clip.looped && duration_seconds > 0.0 => {
+            presentation_time_seconds.rem_euclid(duration_seconds)
+        }
+        Some(_) => presentation_time_seconds.clamp(0.0, duration_seconds),
+        None => 0.0,
+    };
+    let local_time = local_time_seconds as f32;
+    let normalization = Mat4::from_cols_array_2d(&figure.normalization_matrix);
+    palette.clear();
+    palette.resize(figure.parts.len(), Mat4::IDENTITY.to_cols_array_2d());
+
+    for &part_id in &figure.evaluation_order {
+        let part_index = usize::from(part_id);
+        let part = figure.parts.get(part_index).ok_or_else(|| {
+            FigurePoseError::new(format!(
+                "prepared figure '{}' evaluation order references part {}",
+                figure.name, part_index
+            ))
+        })?;
+        let track = clip.and_then(|clip| clip.tracks.get(&part_id));
+        let local_content = prepared_part_local_content_matrix(part, track, local_time);
+        let content = match part.parent {
+            Some(parent_id) => {
+                let parent_index = usize::from(parent_id);
+                if parent_index >= palette.len() {
+                    return Err(FigurePoseError::new(format!(
+                        "prepared figure '{}' part '{}' has invalid parent {}",
+                        figure.name, part.name, parent_index
+                    )));
+                }
+                Mat4::from_cols_array_2d(&palette[parent_index]) * local_content
+            }
+            None => normalization * local_content,
+        };
+        if !content.is_finite() {
+            return Err(FigurePoseError::new(format!(
+                "prepared figure '{}' part '{}' produced a non-finite pose matrix",
+                figure.name, part.name
+            )));
+        }
+        palette[part_index] = content.to_cols_array_2d();
+    }
+
+    Ok(PreparedFigurePoseSample {
+        requested_time_seconds: presentation_time_seconds,
+        local_time_seconds,
+        duration_seconds,
+        evaluated_part_count: figure.parts.len(),
+        sampled_track_count: clip.map_or(0, |clip| clip.tracks.len()),
+    })
+}
+
+fn prepared_part_local_content_matrix(
+    part: &PreparedFigurePart,
+    track: Option<&Vec<PreparedFigureClipKey>>,
+    local_time: f32,
+) -> Mat4 {
+    let sampled = track
+        .filter(|keys| !keys.is_empty())
+        .map(|keys| sample_prepared_track(part, keys, local_time));
+    let (translation, rotation, scale) = sampled.unwrap_or_else(|| {
+        (
+            Vec3::ZERO,
+            mirrored_source_rotation(Vec3::from_array(part.source_base_rotation_radians)),
+            Vec3::ONE,
+        )
+    });
+    let base_position = Vec3::from_array(part.source_base_position);
+    let source_position = base_position + translation;
+    let engine_position = mirror_source_vector(source_position);
+    let engine_pivot = mirror_source_vector(Vec3::from_array(part.source_pivot));
+    Mat4::from_scale_rotation_translation(scale, rotation, engine_position)
+        * Mat4::from_translation(-engine_pivot)
+}
+
+fn sample_prepared_track(
+    part: &PreparedFigurePart,
+    keys: &[PreparedFigureClipKey],
+    local_time: f32,
+) -> (Vec3, Quat, Vec3) {
+    let translation = prepared_channel_span(keys, local_time, |key| key.translation)
+        .map_or(Vec3::ZERO, |(left, right, alpha)| left.lerp(right, alpha));
+    let base_rotation = Vec3::from_array(part.source_base_rotation_radians);
+    let rotation = prepared_channel_span(keys, local_time, |key| key.rotation_radians).map_or_else(
+        || mirrored_source_rotation(base_rotation),
+        |(left, right, alpha)| {
+            shortest_path_slerp(
+                mirrored_source_rotation(base_rotation + left),
+                mirrored_source_rotation(base_rotation + right),
+                alpha,
+            )
+        },
+    );
+    let scale = prepared_channel_span(keys, local_time, |key| key.scale)
+        .map_or(Vec3::ONE, |(left, right, alpha)| left.lerp(right, alpha));
+    (translation, rotation, scale)
+}
+
+fn prepared_channel_span(
+    keys: &[PreparedFigureClipKey],
+    local_time: f32,
+    channel: impl Fn(&PreparedFigureClipKey) -> Option<[f32; 3]>,
+) -> Option<(Vec3, Vec3, f32)> {
+    let mut keyed = keys
+        .iter()
+        .filter_map(|key| channel(key).map(|value| (key.time_seconds, Vec3::from_array(value))));
+    let first = keyed.next()?;
+    let mut left = first;
+    let mut right = first;
+    for current in keyed {
+        if local_time < current.0 {
+            right = current;
+            break;
+        }
+        left = current;
+        right = current;
+    }
+    let alpha = if (right.0 - left.0).abs() <= f32::EPSILON {
+        0.0
+    } else {
+        ((local_time - left.0) / (right.0 - left.0)).clamp(0.0, 1.0)
+    };
+    Some((left.1, right.1, alpha))
+}
+
+fn shortest_path_slerp(left: Quat, right: Quat, alpha: f32) -> Quat {
+    let right = if left.dot(right) < 0.0 { -right } else { right };
+    left.slerp(right, alpha).normalize()
+}
+
+fn mirrored_source_rotation(source_euler_radians: Vec3) -> Quat {
+    let source = Mat3::from_quat(Quat::from_euler(
+        EulerRot::XYZ,
+        source_euler_radians.x,
+        source_euler_radians.y,
+        source_euler_radians.z,
+    ));
+    let mirror = Mat3::from_diagonal(Vec3::new(1.0, 1.0, -1.0));
+    Quat::from_mat3(&(mirror * source * mirror)).normalize()
+}
+
+fn mirror_source_vector(value: Vec3) -> Vec3 {
+    Vec3::new(value.x, value.y, -value.z)
+}
+
 fn prepare_figure_asset_with_crc(
     asset: &FigureAsset,
     semantic_crc32: Option<u32>,
@@ -129,6 +397,7 @@ fn prepare_figure_asset_with_crc(
     validate_clips(asset, &part_names)?;
     let raw_parts = build_raw_parts(asset, &part_names)?;
     let content_matrices = content_matrices(&raw_parts)?;
+    let evaluation_order = part_evaluation_order(&raw_parts)?;
     let raw_bounds = raw_figure_bounds(asset, &content_matrices)?;
     let height = raw_bounds.max.y - raw_bounds.min.y;
     if !height.is_finite() || height <= 0.0 {
@@ -155,9 +424,13 @@ fn prepare_figure_asset_with_crc(
             name: part.name.clone(),
             parent: part.parent.map(|index| index as u16),
             first_person_visible: part.first_person_visible,
+            source_base_position: part.base_position.to_array(),
+            source_base_rotation_radians: part.base_rotation.to_array(),
+            source_pivot: part.pivot.to_array(),
             rest_matrix: (normalization * mirror * *content * mirror).to_cols_array_2d(),
         })
         .collect::<Vec<_>>();
+    let clips = prepare_clips(asset, &part_names)?;
 
     let (atlas, atlas_regions) = build_atlas(asset)?;
     let materials = material_colors(asset)?;
@@ -193,15 +466,12 @@ fn prepare_figure_asset_with_crc(
         min: ((actor_raw_min - actor_origin) * inv_height).to_array(),
         max: ((actor_raw_max - actor_origin) * inv_height).to_array(),
     };
-    let clips = asset
-        .clips
-        .iter()
-        .map(|(name, clip)| (name.clone(), clip.clone()))
-        .collect::<BTreeMap<_, _>>();
     let prepared_cpu_bytes = vertices.len() * PREPARED_VERTEX_BYTE_LEN
         + indices.len() * std::mem::size_of::<u16>()
         + atlas.rgba.len()
-        + parts.len() * std::mem::size_of::<PreparedFigurePart>();
+        + parts.len() * std::mem::size_of::<PreparedFigurePart>()
+        + evaluation_order.len() * std::mem::size_of::<u16>()
+        + prepared_clip_bytes(&clips);
     let diagnostics = PreparedFigureDiagnostics {
         compiler_id: PREPARED_FIGURE_COMPILER_ID,
         semantic_crc32,
@@ -218,9 +488,11 @@ fn prepare_figure_asset_with_crc(
         vertices,
         indices,
         parts,
+        evaluation_order,
         draw_ranges,
         atlas,
         clips,
+        normalization_matrix: normalization.to_cols_array_2d(),
         bounds,
         diagnostics,
     })
@@ -307,8 +579,151 @@ fn validate_clips(
                 }
             }
         }
+        if let Some(locomotion) = &clip.locomotion {
+            if !locomotion.cycle_distance.is_finite() || locomotion.cycle_distance <= 0.0 {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' clip '{}' locomotion cycleDistance must be positive",
+                    asset.name, clip_name
+                )));
+            }
+            if let Some(speed) = locomotion.speed
+                && (!speed.is_finite() || speed <= 0.0)
+            {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' clip '{}' locomotion speed must be positive",
+                    asset.name, clip_name
+                )));
+            }
+            if let Some(direction) = locomotion.direction {
+                let direction = Vec3::from_array(direction);
+                if !direction.is_finite() || direction.length_squared() <= f32::EPSILON {
+                    return Err(FigurePrepareError::new(format!(
+                        "figure '{}' clip '{}' locomotion direction must be finite and nonzero",
+                        asset.name, clip_name
+                    )));
+                }
+            }
+            for contact in &locomotion.contacts {
+                if !part_names.contains_key(contact.part.as_str()) {
+                    return Err(FigurePrepareError::new(format!(
+                        "figure '{}' clip '{}' contact references unknown part '{}'",
+                        asset.name, clip_name, contact.part
+                    )));
+                }
+                if !contact.phase_start.is_finite()
+                    || !contact.phase_end.is_finite()
+                    || !contact.stance_ratio.is_finite()
+                    || !(0.0..=1.0).contains(&contact.stance_ratio)
+                {
+                    return Err(FigurePrepareError::new(format!(
+                        "figure '{}' clip '{}' contact '{}' has invalid phase metadata",
+                        asset.name, clip_name, contact.part
+                    )));
+                }
+            }
+        }
     }
     Ok(())
+}
+
+fn prepare_clips(
+    asset: &FigureAsset,
+    part_names: &HashMap<&str, usize>,
+) -> Result<BTreeMap<String, PreparedFigureClip>, FigurePrepareError> {
+    let mut prepared = BTreeMap::new();
+    for (clip_name, clip) in &asset.clips {
+        let mut duration_seconds = 0.0_f32;
+        let mut tracks = BTreeMap::<u16, Vec<PreparedFigureClipKey>>::new();
+        for key in &clip.keys {
+            let part_id = *part_names.get(key.0.as_str()).ok_or_else(|| {
+                FigurePrepareError::new(format!(
+                    "figure '{}' clip '{}' references unknown part '{}'",
+                    asset.name, clip_name, key.0
+                ))
+            })? as u16;
+            duration_seconds = duration_seconds.max(key.1);
+            tracks
+                .entry(part_id)
+                .or_default()
+                .push(PreparedFigureClipKey {
+                    time_seconds: key.1,
+                    translation: key.2.at,
+                    rotation_radians: key
+                        .2
+                        .rot
+                        .map(|rotation| rotation.map(|component| component.to_radians())),
+                    scale: key.2.scale,
+                });
+        }
+        for keys in tracks.values_mut() {
+            keys.sort_by(|left, right| left.time_seconds.total_cmp(&right.time_seconds));
+        }
+        let locomotion = clip
+            .locomotion
+            .as_ref()
+            .map(|locomotion| {
+                let contacts = locomotion
+                    .contacts
+                    .iter()
+                    .map(|contact| {
+                        let part_id = *part_names.get(contact.part.as_str()).ok_or_else(|| {
+                            FigurePrepareError::new(format!(
+                                "figure '{}' clip '{}' contact references unknown part '{}'",
+                                asset.name, clip_name, contact.part
+                            ))
+                        })? as u16;
+                        Ok(PreparedFigureClipContact {
+                            part_id,
+                            phase_start: contact.phase_start,
+                            phase_end: contact.phase_end,
+                            role: contact.role.clone(),
+                            stance_ratio: contact.stance_ratio,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, FigurePrepareError>>()?;
+                Ok(PreparedFigureClipLocomotion {
+                    kind: locomotion.kind.clone(),
+                    cycle_distance: locomotion.cycle_distance,
+                    contacts,
+                    direction: locomotion.direction,
+                    speed: locomotion.speed,
+                    units: locomotion.units.clone(),
+                })
+            })
+            .transpose()?;
+        prepared.insert(
+            clip_name.clone(),
+            PreparedFigureClip {
+                duration_seconds,
+                source_fps: clip.fps,
+                looped: clip.r#loop,
+                tracks,
+                locomotion,
+            },
+        );
+    }
+    Ok(prepared)
+}
+
+fn prepared_clip_bytes(clips: &BTreeMap<String, PreparedFigureClip>) -> usize {
+    clips
+        .iter()
+        .map(|(name, clip)| {
+            name.len()
+                + std::mem::size_of::<PreparedFigureClip>()
+                + clip
+                    .tracks
+                    .values()
+                    .map(|keys| keys.len() * std::mem::size_of::<PreparedFigureClipKey>())
+                    .sum::<usize>()
+                + clip.locomotion.as_ref().map_or(0, |locomotion| {
+                    locomotion.kind.len()
+                        + locomotion.units.as_ref().map_or(0, String::len)
+                        + locomotion.contacts.len()
+                            * std::mem::size_of::<PreparedFigureClipContact>()
+                })
+        })
+        .sum()
 }
 
 #[derive(Clone, Debug)]
@@ -465,6 +880,42 @@ fn content_matrices(parts: &[RawPart]) -> Result<Vec<Mat4>, FigurePrepareError> 
         matrices.push(content_matrix(index, parts, &mut cache, &mut visiting)?);
     }
     Ok(matrices)
+}
+
+fn part_evaluation_order(parts: &[RawPart]) -> Result<Vec<u16>, FigurePrepareError> {
+    let mut order = Vec::with_capacity(parts.len());
+    let mut complete = vec![false; parts.len()];
+    let mut visiting = vec![false; parts.len()];
+    for index in 0..parts.len() {
+        append_part_evaluation_order(index, parts, &mut complete, &mut visiting, &mut order)?;
+    }
+    Ok(order)
+}
+
+fn append_part_evaluation_order(
+    index: usize,
+    parts: &[RawPart],
+    complete: &mut [bool],
+    visiting: &mut [bool],
+    order: &mut Vec<u16>,
+) -> Result<(), FigurePrepareError> {
+    if complete[index] {
+        return Ok(());
+    }
+    if visiting[index] {
+        return Err(FigurePrepareError::new(format!(
+            "figure has a parent cycle at part '{}'",
+            parts[index].name
+        )));
+    }
+    visiting[index] = true;
+    if let Some(parent) = parts[index].parent {
+        append_part_evaluation_order(parent, parts, complete, visiting, order)?;
+    }
+    visiting[index] = false;
+    complete[index] = true;
+    order.push(index as u16);
+    Ok(())
 }
 
 fn content_matrix(
@@ -1026,6 +1477,211 @@ mod tests {
     }
 
     #[test]
+    fn recomposed_rest_pose_matches_prepared_rest_matrices() {
+        let asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let mut palette = Vec::new();
+
+        evaluate_prepared_figure_rest_pose_into(&prepared, &mut palette).unwrap();
+
+        assert_eq!(palette.len(), prepared.parts.len());
+        for (part, evaluated) in prepared.parts.iter().zip(&palette) {
+            assert_matrix_close(part.rest_matrix, *evaluated, 2.0e-5);
+        }
+        for &part_id in &prepared.evaluation_order {
+            if let Some(parent) = prepared.parts[usize::from(part_id)].parent {
+                let parent_position = prepared
+                    .evaluation_order
+                    .iter()
+                    .position(|candidate| *candidate == parent)
+                    .unwrap();
+                let part_position = prepared
+                    .evaluation_order
+                    .iter()
+                    .position(|candidate| *candidate == part_id)
+                    .unwrap();
+                assert!(parent_position < part_position);
+            }
+        }
+    }
+
+    #[test]
+    fn player_walk_evaluates_continuously_at_arbitrary_presentation_times() {
+        let asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let walk = prepared.clips.get("walk").unwrap();
+        assert!((walk.duration_seconds - 0.9).abs() < 1.0e-6);
+        assert_eq!(walk.source_fps, Some(12.0));
+        assert_eq!(walk.tracks.len(), 6);
+        assert_eq!(walk.locomotion.as_ref().unwrap().contacts.len(), 2);
+
+        let mut first = Vec::with_capacity(prepared.parts.len());
+        let first_stats =
+            evaluate_prepared_figure_clip_into(&prepared, "walk", 0.123, &mut first).unwrap();
+        let capacity = first.capacity();
+        let mut adjacent = Vec::with_capacity(prepared.parts.len());
+        let adjacent_stats = evaluate_prepared_figure_clip_into(
+            &prepared,
+            "walk",
+            0.123 + 1.0 / 500.0,
+            &mut adjacent,
+        )
+        .unwrap();
+        assert!((first_stats.duration_seconds - 0.9).abs() < 1.0e-6);
+        assert!((first_stats.local_time_seconds - 0.123).abs() < 1.0e-12);
+        assert_eq!(first_stats.evaluated_part_count, 12);
+        assert_eq!(first_stats.sampled_track_count, 6);
+        assert!(adjacent_stats.local_time_seconds > first_stats.local_time_seconds);
+        assert_ne!(first, adjacent);
+
+        let first_copy = first.clone();
+        evaluate_prepared_figure_clip_into(&prepared, "walk", 0.123, &mut first).unwrap();
+        assert_eq!(first, first_copy);
+        assert_eq!(first.capacity(), capacity);
+
+        let mut wrapped = Vec::new();
+        evaluate_prepared_figure_clip_into(&prepared, "walk", 1.023, &mut wrapped).unwrap();
+        for (expected, actual) in first_copy.into_iter().zip(wrapped) {
+            assert_matrix_close(expected, actual, 2.0e-5);
+        }
+    }
+
+    #[test]
+    fn pose_evaluator_clamps_and_uses_shortest_quaternion_path() {
+        let asset: FigureAsset = serde_json::from_str(
+            r##"{
+              "schemaVersion": 1,
+              "name": "shortest_rotation",
+              "materials": {},
+              "textures": {},
+              "parts": [
+                { "name": "root", "primitive": { "kind": "box", "size": [1, 1, 1] } }
+              ],
+              "clips": {
+                "turn": {
+                  "loop": false,
+                  "keys": [
+                    ["root", 0, { "rot": [0, 170, 0], "at": [0.25, 0, 0] }],
+                    ["root", 1, { "rot": [0, -170, 0] }]
+                  ]
+                }
+              }
+            }"##,
+        )
+        .unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let mut before = Vec::new();
+        let mut start = Vec::new();
+        let mut midpoint = Vec::new();
+        let mut end = Vec::new();
+        let mut after = Vec::new();
+        evaluate_prepared_figure_clip_into(&prepared, "turn", -10.0, &mut before).unwrap();
+        evaluate_prepared_figure_clip_into(&prepared, "turn", 0.0, &mut start).unwrap();
+        evaluate_prepared_figure_clip_into(&prepared, "turn", 0.5, &mut midpoint).unwrap();
+        evaluate_prepared_figure_clip_into(&prepared, "turn", 1.0, &mut end).unwrap();
+        evaluate_prepared_figure_clip_into(&prepared, "turn", 10.0, &mut after).unwrap();
+        assert_eq!(before, start);
+        assert_eq!(end, after);
+
+        let midpoint = Mat4::from_cols_array_2d(&midpoint[0]);
+        let rotated_x = midpoint.transform_vector3(Vec3::X).normalize();
+        assert!(rotated_x.dot(-Vec3::X) > 0.999);
+        let start_translation = Mat4::from_cols_array_2d(&start[0]).w_axis.x;
+        let end_translation = Mat4::from_cols_array_2d(&end[0]).w_axis.x;
+        assert!((start_translation - end_translation).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn pose_evaluator_interpolates_scale_before_composing_children() {
+        let asset: FigureAsset = serde_json::from_str(
+            r##"{
+              "schemaVersion": 1,
+              "name": "scaled_hierarchy",
+              "materials": {},
+              "textures": {},
+              "parts": [
+                { "name": "child", "parent": "root", "at": [1, 0, 0],
+                  "primitive": { "kind": "box", "size": [0.5, 0.5, 0.5] } },
+                { "name": "root", "primitive": { "kind": "box", "size": [1, 1, 1] } }
+              ],
+              "clips": {
+                "grow": {
+                  "loop": true,
+                  "keys": [
+                    ["root", 0, { "scale": [1, 1, 1] }],
+                    ["root", 1, { "scale": [2, 2, 2] }]
+                  ]
+                }
+              }
+            }"##,
+        )
+        .unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let root = prepared
+            .parts
+            .iter()
+            .position(|part| part.name == "root")
+            .unwrap();
+        let child = prepared
+            .parts
+            .iter()
+            .position(|part| part.name == "child")
+            .unwrap();
+        let mut start = Vec::new();
+        let mut midpoint = Vec::new();
+        let mut wrapped = Vec::new();
+        evaluate_prepared_figure_clip_into(&prepared, "grow", 0.0, &mut start).unwrap();
+        evaluate_prepared_figure_clip_into(&prepared, "grow", 0.5, &mut midpoint).unwrap();
+        evaluate_prepared_figure_clip_into(&prepared, "grow", 1.5, &mut wrapped).unwrap();
+
+        let start_root = Mat4::from_cols_array_2d(&start[root]);
+        let midpoint_root = Mat4::from_cols_array_2d(&midpoint[root]);
+        let root_scale_ratio =
+            midpoint_root.x_axis.truncate().length() / start_root.x_axis.truncate().length();
+        assert!((root_scale_ratio - 1.5).abs() < 1.0e-5);
+        assert_ne!(start[child], midpoint[child]);
+        assert_matrix_close(midpoint[child], wrapped[child], 2.0e-5);
+    }
+
+    #[test]
+    fn pose_evaluator_rejects_unknown_clip_and_non_finite_time() {
+        let asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let mut palette = Vec::new();
+        assert!(
+            evaluate_prepared_figure_clip_into(&prepared, "missing", 0.0, &mut palette)
+                .unwrap_err()
+                .to_string()
+                .contains("no clip")
+        );
+        assert!(
+            evaluate_prepared_figure_clip_into(&prepared, "walk", f64::NAN, &mut palette)
+                .unwrap_err()
+                .to_string()
+                .contains("finite")
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_prepared_locomotion_metadata() {
+        let mut asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
+        asset
+            .clips
+            .get_mut("walk")
+            .unwrap()
+            .locomotion
+            .as_mut()
+            .unwrap()
+            .speed = Some(-1.0);
+        assert!(
+            prepare_figure_asset(&asset)
+                .unwrap_err()
+                .to_string()
+                .contains("speed must be positive")
+        );
+    }
+
+    #[test]
     fn repeated_player_preparation_is_equal() {
         let asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
         assert_eq!(
@@ -1230,5 +1886,14 @@ mod tests {
         .unwrap();
         let error = prepare_figure_asset(&asset).unwrap_err().to_string();
         assert!(error.contains("limit is 256"));
+    }
+
+    fn assert_matrix_close(left: [[f32; 4]; 4], right: [[f32; 4]; 4], tolerance: f32) {
+        for (left, right) in left.into_iter().flatten().zip(right.into_iter().flatten()) {
+            assert!(
+                (left - right).abs() <= tolerance,
+                "matrix component mismatch: {left} vs {right}"
+            );
+        }
     }
 }

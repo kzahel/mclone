@@ -9,10 +9,13 @@ visually approved Three.js/native comparison, inspected native per-eye stereo,
 and inspected production browser WebGPU pixels are landed. The simpler native
 proof lighting was accepted for this stage. Multiview execution remains
 capability-skipped on the current Mac with shader/contract validation pending a
-capable adapter. Semantic JSON remains the only persisted runtime format. The
-next bounded work is continuously interpolated CPU-palette animation and human
-walk-clip review; production migration, curved primitives, instancing, LOD,
-GPU pose evaluation, and a disk cache remain deferred.
+capable adapter. Semantic JSON remains the only persisted runtime format.
+Tactical
+[`186`](../tactical/186-prepared-figure-continuous-animation-proof.md) Slice 0
+now owns startup-compiled indexed tracks and cadence-independent local TRS/
+hierarchy evaluation; mutable-palette pixels and human walk-clip review are
+next. Production migration, curved primitives, instancing, LOD, GPU pose
+evaluation, and a disk cache remain deferred.
 
 ## Scope
 
