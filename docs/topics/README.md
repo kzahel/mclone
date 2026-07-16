@@ -44,6 +44,13 @@ series implements the same concern, normally reuse the document slug in its
   previews, and warm transfer as client presentation. Tactical
   [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) begins with
   the topology cleanup before adding dimension or statistics features.
+- [`world-generation-profiles.md`](world-generation-profiles.md): accepted
+  direction for stable, versioned procedural generator profiles; current
+  overworld/authored-only truth, the flat-grass and seeded-island proofs, and
+  the later frozen-vanilla versus original-mclone biome/decoration fork.
+  Tactical
+  [`187`](../tactical/187-generator-profile-flat-grass-and-seeded-island.md)
+  owns the bounded refactor and first two generators.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   vanilla-shaped client-authoritative interim, planned server validation
   checks, the preserved sequenced-input-replay path, and remote-actor

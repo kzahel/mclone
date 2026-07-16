@@ -4808,6 +4808,33 @@ mod tests {
     }
 
     #[test]
+    fn binary_world_generation_profile_discriminants_are_stable() {
+        let mut overworld = Vec::new();
+        write_world_generation_profile(&mut overworld, WorldGenerationProfile::Overworld).unwrap();
+        assert_eq!(overworld, [0]);
+        assert_eq!(
+            read_world_generation_profile(&mut overworld.as_slice()).unwrap(),
+            WorldGenerationProfile::Overworld
+        );
+
+        let mut authored_only = Vec::new();
+        write_world_generation_profile(&mut authored_only, WorldGenerationProfile::authored_only())
+            .unwrap();
+        assert_eq!(authored_only, [1]);
+        assert_eq!(
+            read_world_generation_profile(&mut authored_only.as_slice()).unwrap(),
+            WorldGenerationProfile::authored_only()
+        );
+
+        assert!(
+            read_world_generation_profile(&mut [2].as_slice())
+                .unwrap_err()
+                .to_string()
+                .contains("unknown world generation profile tag 2")
+        );
+    }
+
+    #[test]
     fn binary_dimension_record_roundtrips_validated_definition() {
         let mut record = DimensionRecord::overworld(44, WorldGenerationProfile::Overworld);
         record.key = DimensionKey::parse("mclone:moon").unwrap();

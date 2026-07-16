@@ -1,5 +1,10 @@
 # Structures
 
+Status: reference architecture and future native plan. No true structure
+runtime is implemented in the live native Rust tree. Earlier claims that
+structure starts/references and buried treasure were landed described the
+retired TypeScript engine and are retained only in Git history.
+
 Durable architecture notes for Minecraft Java 1.17.1 overworld structures in `mclone`.
 
 This document is about vanilla `StructureFeature` generation, not every worldgen feature that looks structure-like. It should be read with:
@@ -93,7 +98,7 @@ Vanilla 1.17.1 registers more structure types than the overworld target needs. T
 | Ocean monument | large custom ocean structure | [`StructureFeature.java:86`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`OceanMonumentFeature.java`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/OceanMonumentFeature.java) |
 | Ocean ruin | warm/cold template-backed variants | [`StructureFeature.java:89`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`StructureFeatures.java:58`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java) |
 | Shipwreck | normal + beached template-backed variants | [`StructureFeature.java:77`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`StructureFeatures.java:43`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java) |
-| Buried treasure | small underground structure with chest/loot semantics; the smallest true proof target and the first one now landed | [`StructureFeature.java:98`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`StructureFeatures.java:74`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java) |
+| Buried treasure | small underground structure with chest/loot semantics; a possible early vanilla proof after the native foundation exists | [`StructureFeature.java:98`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`StructureFeatures.java:74`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java) |
 | Ruined portal | overworld standard/desert/jungle/swamp/mountain/ocean variants; exclude nether variant | [`StructureFeature.java:74`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), [`StructureFeatures.java:95`](../reference/minecraft-1.17.1/src/net/minecraft/data/worldgen/StructureFeatures.java) |
 
 Out of scope for the overworld target:
@@ -114,7 +119,11 @@ Several vanilla worldgen features look like structures but do not use the start/
 
 Implement these through the existing configured-feature/decorator path, not through `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES`.
 
-For sequencing: that ordinary-feature lane is now complete. Desert wells, monster rooms, and overworld fossils are already covered through the configured-feature/decorator path and should stay outside true `StructureFeature` work.
+The retired TypeScript engine implemented these ordinary-feature families, but
+the live native Rust `ConfiguredFeature` set does not currently include desert
+wells, monster rooms, or overworld fossils. When ported or replaced, they
+should remain on the ordinary configured-feature/decorator path rather than
+being modeled as structure starts/references.
 
 ## Scheduling And Finality Implications
 
@@ -133,23 +142,35 @@ For a `vanilla17` profile, structure work must be status-aware even if the runti
 Do not start with villages. They combine jigsaw pools, templates, processors, terrain blending, and settlement-specific interactions.
 
 1. **Keep the ordinary configured-feature oddities out of structure work**
-   - Desert wells, monster rooms, and overworld fossils are already landed through the normal feature/decorator path.
+   - Desert wells, monster rooms, and overworld fossils remain absent from the
+     live native path; port or replace them separately if they are still wanted.
    - Do not reimplement them as `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES` work just because they look structure-like.
-   - Do not regress back into configured-feature backfill now that real `StructureFeature` work has started.
+   - Do not make their absence block the profile-neutral true-structure
+     foundation.
 
 2. **Status and metadata foundation**
-   - This is now landed: `STRUCTURE_STARTS`, `STRUCTURE_REFERENCES`, `StructureStart`, `StructurePiece`, `BoundingBox`, starts-by-feature, and references-by-feature all exist in the generated runtime model.
-   - Keep future structure work on this status-aware path rather than introducing decoration shortcuts.
-   - The remaining gap in this layer is durability: metadata persistence/resume compatibility and broader structure-specific fixtures still need to be added.
+   - Add native `STRUCTURE_STARTS`, `STRUCTURE_REFERENCES`, `StructureStart`,
+     `StructurePiece`, `BoundingBox`, starts-by-feature, and
+     references-by-feature ownership.
+   - Include metadata persistence/resume compatibility and focused fixtures in
+     the foundation rather than treating durability as a distant tail.
+   - Keep future structure work on this status-aware path instead of
+     introducing decoration shortcuts.
 
 3. **Per-chunk clipped placement skeleton**
-   - This is now landed for the first non-noise-affecting structure path: `Biome.generate(...)` places referenced structures before ordinary configured features, and `StructureStart.placeInChunk(...)` only emits the intersecting piece slice for the current chunk.
-   - Keep proving later structures on this same clipped placement path before adding templates or jigsaw.
+   - Place referenced structures before ordinary configured features, and make
+     each target chunk emit only its intersecting piece slice.
+   - Prove cross-chunk deterministic placement and save/reopen before adding
+     templates or jigsaw.
 
-4. **Simple custom overworld structures**
-   - Buried treasure was the right first proof structure because it exercises start selection, references, clipped placement, and chest placement with the smallest piece surface. It is now landed.
-   - Next in this lane should be desert pyramid, then jungle temple and swamp hut.
-   - These validate the remaining custom-piece post-processing, chest/block-entity data, and larger multi-block footprints without requiring the full template or jigsaw stacks yet.
+4. **First original and vanilla proof structures**
+   - Start with a small original mclone ruin, shrine, campsite, or tower. This
+     proves profile-neutral candidate selection, references, and clipped block
+     placement without importing vanilla content complexity.
+   - If vanilla structure parity remains desired, buried treasure is a small
+     follow-up proof once container/block-entity ownership exists.
+   - Desert pyramid, jungle temple, and swamp hut can then validate larger
+     custom-piece footprints before template or jigsaw work.
 
 5. **Mineshafts**
    - Mineshafts are structure starts, not carvers. They randomly decide starts, create an initial room, recursively add corridor/crossing/stair pieces, then place those pieces in `UNDERGROUND_STRUCTURES` ([`MineshaftFeature.java:29`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/MineshaftFeature.java), [`MineshaftFeature.java:55`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/MineshaftFeature.java), [`MineShaftPieces.java:70`](../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/MineShaftPieces.java)).

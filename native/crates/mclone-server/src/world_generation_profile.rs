@@ -62,9 +62,26 @@ mod tests {
             WorldGenerationProfile::default(),
             WorldGenerationProfile::Overworld
         );
+        assert_eq!(WorldGenerationProfile::Overworld.label(), "overworld");
+        assert_eq!(
+            WorldGenerationProfile::authored_only().label(),
+            "authored-only"
+        );
+        assert_eq!(
+            WorldGenerationProfile::parse_label("default").unwrap(),
+            WorldGenerationProfile::Overworld
+        );
         assert_eq!(
             WorldGenerationProfile::parse_label("authored-only").unwrap(),
             WorldGenerationProfile::authored_only()
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::Overworld).unwrap(),
+            r#""overworld""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::authored_only()).unwrap(),
+            r#"{"authoredOnly":{"missingChunk":"void"}}"#
         );
         assert_eq!(
             serde_json::from_str::<WorldGenerationProfile>("\"overworld\"").unwrap(),

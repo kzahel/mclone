@@ -37,3 +37,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   concurrent dimension ownership, realm-scoped players/statistics,
   dimension-local persistence and interest, observer previews, and warm
   player transfer; Tactical 185
+- `world-generation-profiles` — stable versioned generator identity, shared
+  dispatch, flat-grass and seeded-island proofs, and the later frozen-vanilla
+  versus original-mclone worldgen fork; Tactical 187

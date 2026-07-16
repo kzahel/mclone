@@ -1,8 +1,19 @@
 # Native Worldgen Status
 
-Living status page for the native Rust Minecraft Java 1.17.1 overworld worldgen port.
+Living status page for native Rust world generation. The only live procedural
+generator is currently the Minecraft Java 1.17.1-shaped overworld path.
 
-The durable target is seed parity against vanilla 1.17.1 overworld output. The implementation lives primarily in `native/crates/mclone-worldgen`, with scheduler/publication integration in `native/crates/mclone-server` and shared chunk data in `native/crates/mclone-core`.
+The current `overworld` profile's durable target is seed parity against vanilla
+1.17.1 overworld output. The accepted follow-up direction is to preserve that
+profile while adding versioned flat-grass, seeded-island, and later original
+mclone generation profiles. See
+[`topics/world-generation-profiles.md`](topics/world-generation-profiles.md)
+and
+[`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
+
+The implementation lives primarily in `native/crates/mclone-worldgen`, with
+scheduler/publication integration in `native/crates/mclone-server` and shared
+chunk data in `native/crates/mclone-core`.
 
 ## Current Shape
 
@@ -13,9 +24,14 @@ Landed native coverage:
 - `OverworldBiomeSource` and sampled biome fixtures.
 - Terrain density fill, bedrock, and current surface material path.
 - Classic overworld AIR and LIQUID carvers, including committed carved-stage oracle fixtures.
-- First decoration/feature framework slices, including tree/vegetation/ore/fossil/monster-room follow-through where current native tacticals record it.
+- Broad first decoration/feature framework slices, including trees,
+  vegetation, ores, lakes, springs, ice, ocean plants, dripstone, and related
+  biome palette coverage.
 - Scheduler-owned `FEATURES` publication and clean fixture comparisons for the current target chunks.
 - Generated scheduled tick carry-through for fluids.
+- A stored `WorldGenerationProfile` boundary with `Overworld` and
+  `AuthoredOnly`; the latter maps true persistence misses to void, but there is
+  not yet a second procedural generator.
 
 Important native entry points:
 
@@ -51,7 +67,13 @@ Still not full vanilla parity:
 
 - full decorated chunk parity remains an active gauntlet rather than a finished guarantee
 - broad biome/decorator confidence still needs more targeted fixtures
-- most structure families are still missing or skeletal
+- no true native structure-start/reference/piece runtime exists yet; the
+  former buried-treasure implementation and the former desert-well,
+  monster-room, and fossil feature work belonged to the retired TypeScript
+  engine
+- no selectable procedural flat or island generator exists yet; flat grass
+  and bounded island/table content currently appear only in tests or authored
+  persisted fixtures
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes
@@ -79,3 +101,4 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`003-native-ts-parity-roadmap.md`](tactical/003-native-ts-parity-roadmap.md) for the broad native parity horizon.
 - [`015-decoration-framework-foundation.md`](tactical/015-decoration-framework-foundation.md) through the later worldgen tacticals for feature/decorator progress.
 - [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md) for the current full decorated chunk parity target.
+- [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
