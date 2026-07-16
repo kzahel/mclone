@@ -9,10 +9,11 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 23;
+pub const PROTOCOL_VERSION: u32 = 24;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
+pub const MAX_DISCONNECT_DETAIL_BYTES: usize = 512;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
     Some(BlockStateId(1)),
     Some(BlockStateId(5)),
@@ -34,6 +35,8 @@ const CLIENT_COMMAND_ACCEPT_TELEPORT: u8 = 6;
 const CLIENT_COMMAND_SET_DEBUG_HOTBAR_SLOT: u8 = 7;
 const CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE: u8 = 8;
 const CLIENT_COMMAND_SET_PLAYER_APPEARANCE: u8 = 9;
+const CLIENT_COMMAND_KEEP_ALIVE: u8 = 10;
+const CLIENT_COMMAND_DISCONNECT: u8 = 11;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -47,6 +50,115 @@ const SERVER_UPDATE_ENTITY_UPDATE: u8 = 10;
 const SERVER_UPDATE_ENTITY_REMOVE: u8 = 11;
 const SERVER_UPDATE_WORLD_INFO: u8 = 12;
 const SERVER_UPDATE_PLAYER_EXPERIENCE: u8 = 13;
+const SERVER_UPDATE_SESSION_CONFIGURATION: u8 = 14;
+const SERVER_UPDATE_SESSION_READY: u8 = 15;
+const SERVER_UPDATE_KEEP_ALIVE: u8 = 16;
+const SERVER_UPDATE_DISCONNECT: u8 = 17;
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub struct SessionCapabilities(u64);
+
+impl SessionCapabilities {
+    pub const NONE: Self = Self(0);
+    pub const DEBUG_ACTIONS: Self = Self(1 << 0);
+    pub const KNOWN: Self = Self(Self::DEBUG_ACTIONS.0);
+    pub const DEVELOPMENT_DEFAULT: Self = Self::KNOWN;
+
+    pub const fn from_bits_retain(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    pub const fn bits(self) -> u64 {
+        self.0
+    }
+
+    pub const fn contains(self, capability: Self) -> bool {
+        self.0 & capability.0 == capability.0
+    }
+
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    pub const fn known(self) -> Self {
+        self.intersection(Self::KNOWN)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SessionConfiguration {
+    pub gameplay_rate_hz: u32,
+    pub publication_rate_hz: u32,
+    pub max_render_distance: u32,
+    pub max_chunk_tracking_radius: u32,
+    pub capabilities: SessionCapabilities,
+}
+
+impl SessionConfiguration {
+    pub const fn fixed_vanilla(
+        max_render_distance: u32,
+        max_chunk_tracking_radius: u32,
+        capabilities: SessionCapabilities,
+    ) -> Self {
+        Self {
+            gameplay_rate_hz: 20,
+            publication_rate_hz: 20,
+            max_render_distance,
+            max_chunk_tracking_radius,
+            capabilities,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientDisconnectReason {
+    Quit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DisconnectReasonCode {
+    Timeout,
+    DuplicateProfile,
+    ProtocolViolation,
+    ServerShutdown,
+    Kicked,
+    InternalError,
+    EndOfStream,
+    TransportError,
+    ClientQuit,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisconnectReason {
+    pub code: DisconnectReasonCode,
+    pub detail: String,
+}
+
+impl DisconnectReason {
+    pub fn new(code: DisconnectReasonCode, detail: impl Into<String>) -> Self {
+        let mut detail = detail.into();
+        if detail.len() > MAX_DISCONNECT_DETAIL_BYTES {
+            let mut boundary = MAX_DISCONNECT_DETAIL_BYTES;
+            while boundary > 0 && !detail.is_char_boundary(boundary) {
+                boundary -= 1;
+            }
+            detail.truncate(boundary);
+        }
+        Self { code, detail }
+    }
+
+    pub fn timeout(detail: impl Into<String>) -> Self {
+        Self::new(DisconnectReasonCode::Timeout, detail)
+    }
+
+    pub fn end_of_stream(detail: impl Into<String>) -> Self {
+        Self::new(DisconnectReasonCode::EndOfStream, detail)
+    }
+
+    pub fn transport_error(detail: impl Into<String>) -> Self {
+        Self::new(DisconnectReasonCode::TransportError, detail)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PlayerProfileId(pub [u8; 16]);
@@ -128,7 +240,7 @@ pub struct ChunkView {
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClientCommand {
     SetChunkView(ChunkView),
-    MovePlayer(MovePlayerCommand),
+    MovePlayer(SequencedMovePlayerCommand),
     AcceptTeleport(AcceptTeleportCommand),
     SetCarriedItem(SetCarriedItemCommand),
     SetDebugHotbarSlot(SetDebugHotbarSlotCommand),
@@ -136,6 +248,20 @@ pub enum ClientCommand {
     PlayerAction(PlayerActionCommand),
     UseItemOn(UseItemOnCommand),
     ShootDebugPhysicsCube,
+    KeepAlive { id: u64 },
+    Disconnect(ClientDisconnectReason),
+}
+
+impl ClientCommand {
+    /// Fixture/internal compatibility helper. Production movement should use
+    /// [`Self::sequenced_move_player`] with a nonzero sequence.
+    pub const fn move_player(movement: MovePlayerCommand) -> Self {
+        Self::MovePlayer(SequencedMovePlayerCommand::fixture(movement))
+    }
+
+    pub const fn sequenced_move_player(sequence: u32, movement: MovePlayerCommand) -> Self {
+        Self::MovePlayer(SequencedMovePlayerCommand::new(sequence, movement))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -175,6 +301,22 @@ pub enum MovePlayerCommand {
     StatusOnly {
         on_ground: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SequencedMovePlayerCommand {
+    pub sequence: u32,
+    pub movement: MovePlayerCommand,
+}
+
+impl SequencedMovePlayerCommand {
+    pub const fn new(sequence: u32, movement: MovePlayerCommand) -> Self {
+        Self { sequence, movement }
+    }
+
+    pub const fn fixture(movement: MovePlayerCommand) -> Self {
+        Self::new(0, movement)
+    }
 }
 
 impl MovePlayerCommand {
@@ -262,6 +404,8 @@ pub enum InteractionHand {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ServerUpdate {
+    SessionConfiguration(SessionConfiguration),
+    SessionReady,
     WorldInfo {
         biome_zoom_seed: i64,
     },
@@ -298,6 +442,10 @@ pub enum ServerUpdate {
     PlayerExperience {
         total_experience: u64,
     },
+    KeepAlive {
+        id: u64,
+    },
+    Disconnect(DisconnectReason),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -385,6 +533,7 @@ pub struct PlayerPositionUpdate {
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
     pub relative: PlayerPositionRelativeFlags,
+    pub last_applied_move_sequence: u32,
     pub teleport_id: u32,
     pub dismount_vehicle: bool,
 }
@@ -551,6 +700,14 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
         ClientCommand::ShootDebugPhysicsCube => {
             writer.write_u8(CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE);
         }
+        ClientCommand::KeepAlive { id } => {
+            writer.write_u8(CLIENT_COMMAND_KEEP_ALIVE);
+            writer.write_u64(*id);
+        }
+        ClientCommand::Disconnect(reason) => {
+            writer.write_u8(CLIENT_COMMAND_DISCONNECT);
+            writer.write_client_disconnect_reason(*reason);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -585,6 +742,12 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
         CLIENT_COMMAND_PLAYER_ACTION => ClientCommand::PlayerAction(reader.read_player_action()?),
         CLIENT_COMMAND_USE_ITEM_ON => ClientCommand::UseItemOn(reader.read_use_item_on()?),
         CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE => ClientCommand::ShootDebugPhysicsCube,
+        CLIENT_COMMAND_KEEP_ALIVE => ClientCommand::KeepAlive {
+            id: reader.read_u64()?,
+        },
+        CLIENT_COMMAND_DISCONNECT => {
+            ClientCommand::Disconnect(reader.read_client_disconnect_reason()?)
+        }
         _ => return Err(ProtocolCodecError::UnknownClientCommandTag(tag)),
     };
     reader.finish()?;
@@ -594,6 +757,14 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
 pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8>> {
     let mut writer = ByteWriter::new();
     match update {
+        ServerUpdate::SessionConfiguration(configuration) => {
+            validate_session_configuration(configuration)?;
+            writer.write_u8(SERVER_UPDATE_SESSION_CONFIGURATION);
+            writer.write_session_configuration(*configuration);
+        }
+        ServerUpdate::SessionReady => {
+            writer.write_u8(SERVER_UPDATE_SESSION_READY);
+        }
         ServerUpdate::WorldInfo { biome_zoom_seed } => {
             writer.write_u8(SERVER_UPDATE_WORLD_INFO);
             writer.write_i64(*biome_zoom_seed);
@@ -672,6 +843,15 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_PLAYER_EXPERIENCE);
             writer.write_u64(*total_experience);
         }
+        ServerUpdate::KeepAlive { id } => {
+            writer.write_u8(SERVER_UPDATE_KEEP_ALIVE);
+            writer.write_u64(*id);
+        }
+        ServerUpdate::Disconnect(reason) => {
+            validate_disconnect_reason(reason)?;
+            writer.write_u8(SERVER_UPDATE_DISCONNECT);
+            writer.write_disconnect_reason(reason)?;
+        }
     }
     Ok(writer.into_inner())
 }
@@ -680,6 +860,10 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
     let mut reader = ByteReader::new(bytes);
     let tag = reader.read_u8()?;
     let update = match tag {
+        SERVER_UPDATE_SESSION_CONFIGURATION => {
+            ServerUpdate::SessionConfiguration(reader.read_session_configuration()?)
+        }
+        SERVER_UPDATE_SESSION_READY => ServerUpdate::SessionReady,
         SERVER_UPDATE_WORLD_INFO => ServerUpdate::WorldInfo {
             biome_zoom_seed: reader.read_i64()?,
         },
@@ -731,6 +915,10 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_PLAYER_EXPERIENCE => ServerUpdate::PlayerExperience {
             total_experience: reader.read_u64()?,
         },
+        SERVER_UPDATE_KEEP_ALIVE => ServerUpdate::KeepAlive {
+            id: reader.read_u64()?,
+        },
+        SERVER_UPDATE_DISCONNECT => ServerUpdate::Disconnect(reader.read_disconnect_reason()?),
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
     reader.finish()?;
@@ -746,6 +934,34 @@ fn validate_section_block_update(update: &SectionBlockUpdate) -> ProtocolCodecRe
     }
     if update.local_z as i32 >= CHUNK_WIDTH {
         return Err(ProtocolCodecError::InvalidData("section update local_z"));
+    }
+    Ok(())
+}
+
+fn validate_session_configuration(configuration: &SessionConfiguration) -> ProtocolCodecResult<()> {
+    if configuration.gameplay_rate_hz == 0 {
+        return Err(ProtocolCodecError::InvalidData(
+            "session gameplay rate must be nonzero",
+        ));
+    }
+    if configuration.publication_rate_hz == 0 {
+        return Err(ProtocolCodecError::InvalidData(
+            "session publication rate must be nonzero",
+        ));
+    }
+    if configuration.max_render_distance > configuration.max_chunk_tracking_radius {
+        return Err(ProtocolCodecError::InvalidData(
+            "session render distance exceeds tracking radius",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_disconnect_reason(reason: &DisconnectReason) -> ProtocolCodecResult<()> {
+    if reason.detail.len() > MAX_DISCONNECT_DETAIL_BYTES {
+        return Err(ProtocolCodecError::InvalidData(
+            "disconnect detail exceeds the protocol maximum",
+        ));
     }
     Ok(())
 }
@@ -913,6 +1129,12 @@ impl ByteWriter {
         Ok(())
     }
 
+    fn write_string(&mut self, field: &'static str, value: &str) -> ProtocolCodecResult<()> {
+        self.write_len(field, value.len())?;
+        self.bytes.extend_from_slice(value.as_bytes());
+        Ok(())
+    }
+
     fn write_chunk_pos(&mut self, pos: ChunkPos) {
         self.write_i32(pos.x);
         self.write_i32(pos.z);
@@ -957,8 +1179,9 @@ impl ByteWriter {
         self.write_bool(hit.inside);
     }
 
-    fn write_move_player(&mut self, command: &MovePlayerCommand) {
-        match *command {
+    fn write_move_player(&mut self, command: &SequencedMovePlayerCommand) {
+        self.write_u32(command.sequence);
+        match command.movement {
             MovePlayerCommand::Pos {
                 position,
                 on_ground,
@@ -994,6 +1217,35 @@ impl ByteWriter {
                 self.write_bool(on_ground);
             }
         }
+    }
+
+    fn write_client_disconnect_reason(&mut self, reason: ClientDisconnectReason) {
+        self.write_u8(match reason {
+            ClientDisconnectReason::Quit => 0,
+        });
+    }
+
+    fn write_session_configuration(&mut self, configuration: SessionConfiguration) {
+        self.write_u32(configuration.gameplay_rate_hz);
+        self.write_u32(configuration.publication_rate_hz);
+        self.write_u32(configuration.max_render_distance);
+        self.write_u32(configuration.max_chunk_tracking_radius);
+        self.write_u64(configuration.capabilities.bits());
+    }
+
+    fn write_disconnect_reason(&mut self, reason: &DisconnectReason) -> ProtocolCodecResult<()> {
+        self.write_u8(match reason.code {
+            DisconnectReasonCode::Timeout => 0,
+            DisconnectReasonCode::DuplicateProfile => 1,
+            DisconnectReasonCode::ProtocolViolation => 2,
+            DisconnectReasonCode::ServerShutdown => 3,
+            DisconnectReasonCode::Kicked => 4,
+            DisconnectReasonCode::InternalError => 5,
+            DisconnectReasonCode::EndOfStream => 6,
+            DisconnectReasonCode::TransportError => 7,
+            DisconnectReasonCode::ClientQuit => 8,
+        });
+        self.write_string("disconnect detail", &reason.detail)
     }
 
     fn write_accept_teleport(&mut self, command: &AcceptTeleportCommand) {
@@ -1115,6 +1367,7 @@ impl ByteWriter {
         self.write_f32(update.y_rot_degrees);
         self.write_f32(update.x_rot_degrees);
         self.write_u8(update.relative.bits());
+        self.write_u32(update.last_applied_move_sequence);
         self.write_u32(update.teleport_id);
         self.write_bool(update.dismount_vehicle);
     }
@@ -1277,6 +1530,32 @@ impl<'a> ByteReader<'a> {
         Ok(self.read_u32()? as usize)
     }
 
+    fn read_string(
+        &mut self,
+        field: &'static str,
+        max_bytes: usize,
+    ) -> ProtocolCodecResult<String> {
+        let len = self.read_len()?;
+        if len > max_bytes {
+            return Err(ProtocolCodecError::InvalidData(match field {
+                "disconnect detail" => "disconnect detail exceeds the protocol maximum",
+                _ => "protocol string exceeds its maximum",
+            }));
+        }
+        let remaining = self.bytes.len() - self.offset;
+        if remaining < len {
+            return Err(ProtocolCodecError::UnexpectedEof {
+                needed: len,
+                remaining,
+            });
+        }
+        let bytes = &self.bytes[self.offset..self.offset + len];
+        self.offset += len;
+        std::str::from_utf8(bytes)
+            .map(str::to_owned)
+            .map_err(|_| ProtocolCodecError::InvalidData("protocol string is not UTF-8"))
+    }
+
     fn read_chunk_pos(&mut self) -> ProtocolCodecResult<ChunkPos> {
         Ok(ChunkPos::new(self.read_i32()?, self.read_i32()?))
     }
@@ -1336,37 +1615,85 @@ impl<'a> ByteReader<'a> {
         })
     }
 
-    fn read_move_player(&mut self) -> ProtocolCodecResult<MovePlayerCommand> {
-        match self.read_u8()? {
-            0 => Ok(MovePlayerCommand::Pos {
+    fn read_move_player(&mut self) -> ProtocolCodecResult<SequencedMovePlayerCommand> {
+        let sequence = self.read_u32()?;
+        let movement = match self.read_u8()? {
+            0 => MovePlayerCommand::Pos {
                 position: self.read_vec3d()?,
                 on_ground: self.read_bool()?,
-            }),
+            },
             1 => {
                 let position = self.read_vec3d()?;
                 let (y_rot_degrees, x_rot_degrees) = self.read_move_player_rotation()?;
-                Ok(MovePlayerCommand::PosRot {
+                MovePlayerCommand::PosRot {
                     position,
                     y_rot_degrees,
                     x_rot_degrees,
                     on_ground: self.read_bool()?,
-                })
+                }
             }
             2 => {
                 let (y_rot_degrees, x_rot_degrees) = self.read_move_player_rotation()?;
-                Ok(MovePlayerCommand::Rot {
+                MovePlayerCommand::Rot {
                     y_rot_degrees,
                     x_rot_degrees,
                     on_ground: self.read_bool()?,
-                })
+                }
             }
-            3 => Ok(MovePlayerCommand::StatusOnly {
+            3 => MovePlayerCommand::StatusOnly {
                 on_ground: self.read_bool()?,
-            }),
+            },
+            _ => {
+                return Err(ProtocolCodecError::InvalidData(
+                    "unknown move player packet variant",
+                ));
+            }
+        };
+        Ok(SequencedMovePlayerCommand::new(sequence, movement))
+    }
+
+    fn read_client_disconnect_reason(&mut self) -> ProtocolCodecResult<ClientDisconnectReason> {
+        match self.read_u8()? {
+            0 => Ok(ClientDisconnectReason::Quit),
             _ => Err(ProtocolCodecError::InvalidData(
-                "unknown move player packet variant",
+                "unknown client disconnect reason",
             )),
         }
+    }
+
+    fn read_session_configuration(&mut self) -> ProtocolCodecResult<SessionConfiguration> {
+        let configuration = SessionConfiguration {
+            gameplay_rate_hz: self.read_u32()?,
+            publication_rate_hz: self.read_u32()?,
+            max_render_distance: self.read_u32()?,
+            max_chunk_tracking_radius: self.read_u32()?,
+            capabilities: SessionCapabilities::from_bits_retain(self.read_u64()?).known(),
+        };
+        validate_session_configuration(&configuration)?;
+        Ok(configuration)
+    }
+
+    fn read_disconnect_reason(&mut self) -> ProtocolCodecResult<DisconnectReason> {
+        let code = match self.read_u8()? {
+            0 => DisconnectReasonCode::Timeout,
+            1 => DisconnectReasonCode::DuplicateProfile,
+            2 => DisconnectReasonCode::ProtocolViolation,
+            3 => DisconnectReasonCode::ServerShutdown,
+            4 => DisconnectReasonCode::Kicked,
+            5 => DisconnectReasonCode::InternalError,
+            6 => DisconnectReasonCode::EndOfStream,
+            7 => DisconnectReasonCode::TransportError,
+            8 => DisconnectReasonCode::ClientQuit,
+            _ => {
+                return Err(ProtocolCodecError::InvalidData(
+                    "unknown server disconnect reason",
+                ));
+            }
+        };
+        Ok(DisconnectReason::new(
+            code,
+            self.read_string("disconnect detail", MAX_DISCONNECT_DETAIL_BYTES)?,
+        ))
     }
 
     fn read_move_player_rotation(&mut self) -> ProtocolCodecResult<(f32, f32)> {
@@ -1552,6 +1879,7 @@ impl<'a> ByteReader<'a> {
             y_rot_degrees,
             x_rot_degrees,
             relative,
+            last_applied_move_sequence: self.read_u32()?,
             teleport_id: self.read_u32()?,
             dismount_vehicle: self.read_bool()?,
         })
@@ -1741,25 +2069,39 @@ mod tests {
     #[test]
     fn client_command_codec_round_trips_move_player() {
         for command in [
-            ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            ClientCommand::move_player(MovePlayerCommand::Pos {
                 position: Vec3d::new(-1.25, 63.0, 12.5),
                 on_ground: true,
             }),
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-                position: Vec3d::new(-1.25, 63.0, 12.5),
-                y_rot_degrees: -181.5,
-                x_rot_degrees: 45.25,
-                on_ground: true,
-            }),
-            ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+            ClientCommand::sequenced_move_player(
+                7,
+                MovePlayerCommand::PosRot {
+                    position: Vec3d::new(-1.25, 63.0, 12.5),
+                    y_rot_degrees: -181.5,
+                    x_rot_degrees: 45.25,
+                    on_ground: true,
+                },
+            ),
+            ClientCommand::move_player(MovePlayerCommand::Rot {
                 y_rot_degrees: -181.5,
                 x_rot_degrees: 45.25,
                 on_ground: false,
             }),
-            ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly { on_ground: true }),
+            ClientCommand::move_player(MovePlayerCommand::StatusOnly { on_ground: true }),
         ] {
             let bytes = encode_client_command(&command).unwrap();
 
+            assert_eq!(decode_client_command(&bytes).unwrap(), command);
+        }
+    }
+
+    #[test]
+    fn client_control_commands_round_trip() {
+        for command in [
+            ClientCommand::KeepAlive { id: 0x1234_5678 },
+            ClientCommand::Disconnect(ClientDisconnectReason::Quit),
+        ] {
+            let bytes = encode_client_command(&command).unwrap();
             assert_eq!(decode_client_command(&bytes).unwrap(), command);
         }
     }
@@ -1910,6 +2252,7 @@ mod tests {
                 y_rot: true,
                 x_rot: false,
             },
+            last_applied_move_sequence: 41,
             teleport_id: 42,
             dismount_vehicle: true,
         });
@@ -1928,6 +2271,69 @@ mod tests {
         let bytes = encode_server_update(&update).unwrap();
 
         assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_session_updates_round_trip() {
+        let capabilities = SessionCapabilities::DEVELOPMENT_DEFAULT;
+        for update in [
+            ServerUpdate::SessionConfiguration(SessionConfiguration::fixed_vanilla(
+                10,
+                11,
+                capabilities,
+            )),
+            ServerUpdate::SessionReady,
+            ServerUpdate::KeepAlive { id: 9_876 },
+            ServerUpdate::Disconnect(DisconnectReason::new(
+                DisconnectReasonCode::DuplicateProfile,
+                "profile is already connected",
+            )),
+        ] {
+            let bytes = encode_server_update(&update).unwrap();
+            assert_eq!(decode_server_update(&bytes).unwrap(), update);
+        }
+    }
+
+    #[test]
+    fn session_capability_intersection_ignores_unknown_bits() {
+        let client = SessionCapabilities::from_bits_retain(
+            SessionCapabilities::DEBUG_ACTIONS.bits() | (1 << 63),
+        );
+        assert_eq!(
+            client
+                .intersection(SessionCapabilities::DEVELOPMENT_DEFAULT)
+                .known(),
+            SessionCapabilities::DEBUG_ACTIONS
+        );
+    }
+
+    #[test]
+    fn disconnect_detail_is_bounded_on_construction() {
+        let reason = DisconnectReason::transport_error("é".repeat(300));
+        assert!(reason.detail.len() <= MAX_DISCONNECT_DETAIL_BYTES);
+        assert!(reason.detail.is_char_boundary(reason.detail.len()));
+        let bytes = encode_server_update(&ServerUpdate::Disconnect(reason.clone())).unwrap();
+        assert_eq!(
+            decode_server_update(&bytes).unwrap(),
+            ServerUpdate::Disconnect(reason)
+        );
+    }
+
+    #[test]
+    fn invalid_session_configuration_is_rejected() {
+        let update = ServerUpdate::SessionConfiguration(SessionConfiguration {
+            gameplay_rate_hz: 0,
+            publication_rate_hz: 20,
+            max_render_distance: 10,
+            max_chunk_tracking_radius: 11,
+            capabilities: SessionCapabilities::NONE,
+        });
+        assert_eq!(
+            encode_server_update(&update),
+            Err(ProtocolCodecError::InvalidData(
+                "session gameplay rate must be nonzero"
+            ))
+        );
     }
 
     #[test]

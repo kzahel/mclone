@@ -6,8 +6,8 @@ use std::fmt;
 
 use mclone_protocol::{
     ClientCommand, ClientIdentity, PROTOCOL_VERSION, PlayerProfileId, ProtocolCodecError,
-    ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
-    encode_server_update, validate_client_identity,
+    ServerUpdate, SessionCapabilities, decode_client_command, decode_server_update,
+    encode_client_command, encode_server_update, validate_client_identity,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -16,7 +16,9 @@ pub use native_tcp::{
     NativeClientIoDiagnostics, NativeClientIoSession, NativeServerUpdateBatch,
     NativeServerUpdateEnvelope, NativeTransportError, NativeTransportResult,
     complete_client_handshake, complete_client_handshake_with_identity,
-    complete_client_handshake_with_version, complete_server_handshake, read_client_command_frame,
+    complete_client_handshake_with_identity_and_capabilities,
+    complete_client_handshake_with_version, complete_server_handshake,
+    complete_server_handshake_with_capabilities, read_client_command_frame,
     read_client_command_frames, read_server_update_batch, try_read_client_command_frame,
     write_client_command_frame, write_server_update_batch,
 };
@@ -92,7 +94,14 @@ pub type WebSocketTransportResult<T> = Result<T, WebSocketTransportError>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClientHandshake {
     pub protocol_version: u32,
+    pub capabilities: SessionCapabilities,
     pub identity: ClientIdentity,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AcceptedClientHandshake {
+    pub identity: ClientIdentity,
+    pub capabilities: SessionCapabilities,
 }
 
 pub fn encode_websocket_client_handshake(
@@ -108,11 +117,24 @@ pub fn encode_websocket_client_handshake_with_identity(
     protocol_version: u32,
     identity: &ClientIdentity,
 ) -> WebSocketTransportResult<Vec<u8>> {
+    encode_websocket_client_handshake_with_identity_and_capabilities(
+        protocol_version,
+        identity,
+        SessionCapabilities::DEVELOPMENT_DEFAULT,
+    )
+}
+
+pub fn encode_websocket_client_handshake_with_identity_and_capabilities(
+    protocol_version: u32,
+    identity: &ClientIdentity,
+    capabilities: SessionCapabilities,
+) -> WebSocketTransportResult<Vec<u8>> {
     validate_client_identity(identity)?;
     let name = identity.display_name.as_bytes();
-    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 21 + name.len());
+    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 29 + name.len());
     payload.extend_from_slice(WEBSOCKET_HANDSHAKE_MAGIC);
     payload.extend_from_slice(&protocol_version.to_le_bytes());
+    payload.extend_from_slice(&capabilities.bits().to_le_bytes());
     payload.extend_from_slice(&identity.profile_id.bytes());
     payload.push(name.len() as u8);
     payload.extend_from_slice(name);
@@ -128,7 +150,7 @@ pub fn decode_websocket_client_handshake(
     payload: &[u8],
 ) -> WebSocketTransportResult<ClientHandshake> {
     checked_websocket_message_len("client handshake", payload.len())?;
-    let fixed_len = WEBSOCKET_HANDSHAKE_MAGIC.len() + 21;
+    let fixed_len = WEBSOCKET_HANDSHAKE_MAGIC.len() + 29;
     if payload.len() < fixed_len {
         return Err(WebSocketTransportError::InvalidHandshake(
             "client handshake had invalid length",
@@ -145,7 +167,13 @@ pub fn decode_websocket_client_handshake(
             .try_into()
             .expect("websocket handshake version length checked"),
     );
-    let profile_offset = version_offset + 4;
+    let capabilities_offset = version_offset + 4;
+    let capabilities = SessionCapabilities::from_bits_retain(u64::from_le_bytes(
+        payload[capabilities_offset..capabilities_offset + 8]
+            .try_into()
+            .expect("websocket handshake capabilities length checked"),
+    ));
+    let profile_offset = capabilities_offset + 8;
     let profile_id = PlayerProfileId::new(
         payload[profile_offset..profile_offset + 16]
             .try_into()
@@ -166,6 +194,7 @@ pub fn decode_websocket_client_handshake(
     let identity = ClientIdentity::new(profile_id, display_name)?;
     Ok(ClientHandshake {
         protocol_version,
+        capabilities,
         identity,
     })
 }
@@ -173,10 +202,21 @@ pub fn decode_websocket_client_handshake(
 pub fn encode_websocket_server_handshake_accept(
     protocol_version: u32,
 ) -> WebSocketTransportResult<Vec<u8>> {
+    encode_websocket_server_handshake_accept_with_capabilities(
+        protocol_version,
+        SessionCapabilities::DEVELOPMENT_DEFAULT,
+    )
+}
+
+pub fn encode_websocket_server_handshake_accept_with_capabilities(
+    protocol_version: u32,
+    capabilities: SessionCapabilities,
+) -> WebSocketTransportResult<Vec<u8>> {
     encode_websocket_server_handshake(
         WEBSOCKET_HANDSHAKE_ACCEPT,
         protocol_version,
         protocol_version,
+        capabilities,
     )
 }
 
@@ -184,15 +224,20 @@ pub fn encode_websocket_server_handshake_reject(
     expected: u32,
     received: u32,
 ) -> WebSocketTransportResult<Vec<u8>> {
-    encode_websocket_server_handshake(WEBSOCKET_HANDSHAKE_REJECT, expected, received)
+    encode_websocket_server_handshake(
+        WEBSOCKET_HANDSHAKE_REJECT,
+        expected,
+        received,
+        SessionCapabilities::NONE,
+    )
 }
 
 pub fn decode_websocket_server_handshake(
     payload: &[u8],
     client_version: u32,
-) -> WebSocketTransportResult<()> {
+) -> WebSocketTransportResult<SessionCapabilities> {
     checked_websocket_message_len("server handshake", payload.len())?;
-    if payload.len() != WEBSOCKET_HANDSHAKE_MAGIC.len() + 9 {
+    if payload.len() != WEBSOCKET_HANDSHAKE_MAGIC.len() + 17 {
         return Err(WebSocketTransportError::InvalidHandshake(
             "server handshake had invalid length",
         ));
@@ -206,6 +251,7 @@ pub fn decode_websocket_server_handshake(
     let status_offset = WEBSOCKET_HANDSHAKE_MAGIC.len();
     let expected_offset = status_offset + 1;
     let received_offset = expected_offset + 4;
+    let capabilities_offset = received_offset + 4;
     let status = payload[status_offset];
     let expected = u32::from_le_bytes(
         payload[expected_offset..expected_offset + 4]
@@ -217,6 +263,12 @@ pub fn decode_websocket_server_handshake(
             .try_into()
             .expect("server handshake received version length checked"),
     );
+    let capabilities = SessionCapabilities::from_bits_retain(u64::from_le_bytes(
+        payload[capabilities_offset..capabilities_offset + 8]
+            .try_into()
+            .expect("server handshake capabilities length checked"),
+    ))
+    .known();
 
     match status {
         WEBSOCKET_HANDSHAKE_ACCEPT => {
@@ -226,7 +278,7 @@ pub fn decode_websocket_server_handshake(
                     received: client_version,
                 });
             }
-            Ok(())
+            Ok(capabilities)
         }
         WEBSOCKET_HANDSHAKE_REJECT => {
             Err(WebSocketTransportError::ProtocolVersionMismatch { expected, received })
@@ -312,12 +364,14 @@ fn encode_websocket_server_handshake(
     status: u8,
     expected: u32,
     received: u32,
+    capabilities: SessionCapabilities,
 ) -> WebSocketTransportResult<Vec<u8>> {
-    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 9);
+    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 17);
     payload.extend_from_slice(WEBSOCKET_HANDSHAKE_MAGIC);
     payload.push(status);
     payload.extend_from_slice(&expected.to_le_bytes());
     payload.extend_from_slice(&received.to_le_bytes());
+    payload.extend_from_slice(&capabilities.bits().to_le_bytes());
     checked_websocket_message_len("server handshake", payload.len())?;
     Ok(payload)
 }
@@ -407,8 +461,8 @@ mod native_tcp {
 
     use mclone_protocol::{
         ClientCommand, ClientIdentity, PROTOCOL_VERSION, PlayerProfileId, ProtocolCodecError,
-        ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
-        encode_server_update, validate_client_identity,
+        ServerUpdate, SessionCapabilities, decode_client_command, decode_server_update,
+        encode_client_command, encode_server_update, validate_client_identity,
     };
 
     pub type NativeTransportResult<T> = Result<T, NativeTransportError>;
@@ -733,6 +787,7 @@ mod native_tcp {
         shutdown_stream: TcpStream,
         writer_join_handle: Option<JoinHandle<()>>,
         reader_join_handle: Option<JoinHandle<()>>,
+        negotiated_capabilities: SessionCapabilities,
     }
 
     #[derive(Debug)]
@@ -750,7 +805,11 @@ mod native_tcp {
             identity: &ClientIdentity,
         ) -> NativeTransportResult<Self> {
             let mut stream = TcpStream::connect(addr)?;
-            complete_client_handshake_with_identity(&mut stream, identity)?;
+            let negotiated_capabilities = complete_client_handshake_with_identity_and_capabilities(
+                &mut stream,
+                identity,
+                SessionCapabilities::DEVELOPMENT_DEFAULT,
+            )?;
             let shutdown_stream = stream.try_clone()?;
             let reader_stream = stream.try_clone()?;
             let (command_tx, command_rx) = mpsc::sync_channel(NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY);
@@ -785,7 +844,12 @@ mod native_tcp {
                 shutdown_stream,
                 writer_join_handle: Some(writer_join_handle),
                 reader_join_handle: Some(reader_join_handle),
+                negotiated_capabilities,
             })
+        }
+
+        pub const fn negotiated_capabilities(&self) -> SessionCapabilities {
+            self.negotiated_capabilities
         }
 
         pub fn send_command_only(&mut self, command: ClientCommand) -> NativeTransportResult<()> {
@@ -996,7 +1060,20 @@ mod native_tcp {
         stream: &mut T,
         identity: &ClientIdentity,
     ) -> NativeTransportResult<()> {
-        write_client_handshake(stream, PROTOCOL_VERSION, identity)?;
+        complete_client_handshake_with_identity_and_capabilities(
+            stream,
+            identity,
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        )
+        .map(|_| ())
+    }
+
+    pub fn complete_client_handshake_with_identity_and_capabilities<T: Read + Write>(
+        stream: &mut T,
+        identity: &ClientIdentity,
+        capabilities: SessionCapabilities,
+    ) -> NativeTransportResult<SessionCapabilities> {
+        write_client_handshake(stream, PROTOCOL_VERSION, identity, capabilities)?;
         stream.flush()?;
         read_server_handshake(stream, PROTOCOL_VERSION)
     }
@@ -1005,14 +1082,30 @@ mod native_tcp {
         stream: &mut T,
         protocol_version: u32,
     ) -> NativeTransportResult<()> {
-        write_client_handshake(stream, protocol_version, &ClientIdentity::test_default())?;
+        write_client_handshake(
+            stream,
+            protocol_version,
+            &ClientIdentity::test_default(),
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        )?;
         stream.flush()?;
-        read_server_handshake(stream, protocol_version)
+        read_server_handshake(stream, protocol_version).map(|_| ())
     }
 
     pub fn complete_server_handshake<T: Read + Write>(
         stream: &mut T,
     ) -> NativeTransportResult<ClientIdentity> {
+        complete_server_handshake_with_capabilities(
+            stream,
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        )
+        .map(|accepted| accepted.identity)
+    }
+
+    pub fn complete_server_handshake_with_capabilities<T: Read + Write>(
+        stream: &mut T,
+        server_capabilities: SessionCapabilities,
+    ) -> NativeTransportResult<super::AcceptedClientHandshake> {
         let received = read_client_handshake(stream)?;
         if received.protocol_version != PROTOCOL_VERSION {
             write_server_handshake_reject(stream, PROTOCOL_VERSION, received.protocol_version)?;
@@ -1021,8 +1114,15 @@ mod native_tcp {
                 received: received.protocol_version,
             });
         }
-        write_server_handshake_accept(stream, PROTOCOL_VERSION)?;
-        Ok(received.identity)
+        let capabilities = received
+            .capabilities
+            .intersection(server_capabilities)
+            .known();
+        write_server_handshake_accept(stream, PROTOCOL_VERSION, capabilities)?;
+        Ok(super::AcceptedClientHandshake {
+            identity: received.identity,
+            capabilities,
+        })
     }
 
     pub fn write_client_command_frame(
@@ -1091,12 +1191,14 @@ mod native_tcp {
         writer: &mut impl Write,
         protocol_version: u32,
         identity: &ClientIdentity,
+        capabilities: SessionCapabilities,
     ) -> NativeTransportResult<()> {
         validate_client_identity(identity)?;
         let name = identity.display_name.as_bytes();
-        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 21 + name.len());
+        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 29 + name.len());
         payload.extend_from_slice(HANDSHAKE_MAGIC);
         payload.extend_from_slice(&protocol_version.to_le_bytes());
+        payload.extend_from_slice(&capabilities.bits().to_le_bytes());
         payload.extend_from_slice(&identity.profile_id.bytes());
         payload.push(name.len() as u8);
         payload.extend_from_slice(name);
@@ -1107,7 +1209,7 @@ mod native_tcp {
         reader: &mut impl Read,
     ) -> NativeTransportResult<super::ClientHandshake> {
         let payload = read_frame(reader, "client handshake")?;
-        let fixed_len = HANDSHAKE_MAGIC.len() + 21;
+        let fixed_len = HANDSHAKE_MAGIC.len() + 29;
         if payload.len() < fixed_len {
             return Err(NativeTransportError::InvalidHandshake(
                 "client handshake had invalid length",
@@ -1125,7 +1227,13 @@ mod native_tcp {
                 .try_into()
                 .expect("handshake version length checked"),
         );
-        let profile_offset = version_offset + 4;
+        let capabilities_offset = version_offset + 4;
+        let capabilities = SessionCapabilities::from_bits_retain(u64::from_le_bytes(
+            payload[capabilities_offset..capabilities_offset + 8]
+                .try_into()
+                .expect("handshake capabilities length checked"),
+        ));
+        let profile_offset = capabilities_offset + 8;
         let profile_id = PlayerProfileId::new(
             payload[profile_offset..profile_offset + 16]
                 .try_into()
@@ -1148,6 +1256,7 @@ mod native_tcp {
         let identity = ClientIdentity::new(profile_id, display_name)?;
         Ok(super::ClientHandshake {
             protocol_version,
+            capabilities,
             identity,
         })
     }
@@ -1155,12 +1264,14 @@ mod native_tcp {
     fn write_server_handshake_accept(
         writer: &mut impl Write,
         protocol_version: u32,
+        capabilities: SessionCapabilities,
     ) -> NativeTransportResult<()> {
         write_server_handshake(
             writer,
             SERVER_HANDSHAKE_ACCEPT,
             protocol_version,
             protocol_version,
+            capabilities,
         )
     }
 
@@ -1169,7 +1280,13 @@ mod native_tcp {
         expected: u32,
         received: u32,
     ) -> NativeTransportResult<()> {
-        write_server_handshake(writer, SERVER_HANDSHAKE_REJECT, expected, received)
+        write_server_handshake(
+            writer,
+            SERVER_HANDSHAKE_REJECT,
+            expected,
+            received,
+            SessionCapabilities::NONE,
+        )
     }
 
     fn write_server_handshake(
@@ -1177,12 +1294,14 @@ mod native_tcp {
         status: u8,
         expected: u32,
         received: u32,
+        capabilities: SessionCapabilities,
     ) -> NativeTransportResult<()> {
-        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 9);
+        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 17);
         payload.extend_from_slice(HANDSHAKE_MAGIC);
         payload.push(status);
         payload.extend_from_slice(&expected.to_le_bytes());
         payload.extend_from_slice(&received.to_le_bytes());
+        payload.extend_from_slice(&capabilities.bits().to_le_bytes());
         write_frame(writer, "server handshake", &payload)?;
         writer.flush()?;
         Ok(())
@@ -1191,9 +1310,9 @@ mod native_tcp {
     fn read_server_handshake(
         reader: &mut impl Read,
         client_version: u32,
-    ) -> NativeTransportResult<()> {
+    ) -> NativeTransportResult<SessionCapabilities> {
         let payload = read_frame(reader, "server handshake")?;
-        if payload.len() != HANDSHAKE_MAGIC.len() + 9 {
+        if payload.len() != HANDSHAKE_MAGIC.len() + 17 {
             return Err(NativeTransportError::InvalidHandshake(
                 "server handshake had invalid length",
             ));
@@ -1207,6 +1326,7 @@ mod native_tcp {
         let status_offset = HANDSHAKE_MAGIC.len();
         let expected_offset = status_offset + 1;
         let received_offset = expected_offset + 4;
+        let capabilities_offset = received_offset + 4;
         let status = payload[status_offset];
         let expected = u32::from_le_bytes(
             payload[expected_offset..expected_offset + 4]
@@ -1218,6 +1338,12 @@ mod native_tcp {
                 .try_into()
                 .expect("server handshake received version length checked"),
         );
+        let capabilities = SessionCapabilities::from_bits_retain(u64::from_le_bytes(
+            payload[capabilities_offset..capabilities_offset + 8]
+                .try_into()
+                .expect("server handshake capabilities length checked"),
+        ))
+        .known();
 
         match status {
             SERVER_HANDSHAKE_ACCEPT => {
@@ -1227,7 +1353,7 @@ mod native_tcp {
                         received: client_version,
                     });
                 }
-                Ok(())
+                Ok(capabilities)
             }
             SERVER_HANDSHAKE_REJECT => {
                 Err(NativeTransportError::ProtocolVersionMismatch { expected, received })
@@ -1355,10 +1481,45 @@ mod tests {
         let client = encode_current_websocket_client_handshake().unwrap();
         let decoded = decode_websocket_client_handshake(&client).unwrap();
         assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
+        assert_eq!(
+            decoded.capabilities,
+            SessionCapabilities::DEVELOPMENT_DEFAULT
+        );
         assert_eq!(decoded.identity, ClientIdentity::test_default());
 
         let server = encode_websocket_server_handshake_accept(PROTOCOL_VERSION).unwrap();
-        decode_websocket_server_handshake(&server, PROTOCOL_VERSION).unwrap();
+        assert_eq!(
+            decode_websocket_server_handshake(&server, PROTOCOL_VERSION).unwrap(),
+            SessionCapabilities::DEVELOPMENT_DEFAULT
+        );
+    }
+
+    #[test]
+    fn websocket_handshake_carries_negotiated_capabilities() {
+        let client = encode_websocket_client_handshake_with_identity_and_capabilities(
+            PROTOCOL_VERSION,
+            &ClientIdentity::test_default(),
+            SessionCapabilities::from_bits_retain(
+                SessionCapabilities::DEBUG_ACTIONS.bits() | (1 << 63),
+            ),
+        )
+        .unwrap();
+        let decoded = decode_websocket_client_handshake(&client).unwrap();
+        assert!(
+            decoded
+                .capabilities
+                .contains(SessionCapabilities::DEBUG_ACTIONS)
+        );
+
+        let server = encode_websocket_server_handshake_accept_with_capabilities(
+            PROTOCOL_VERSION,
+            decoded.capabilities.intersection(SessionCapabilities::NONE),
+        )
+        .unwrap();
+        assert_eq!(
+            decode_websocket_server_handshake(&server, PROTOCOL_VERSION).unwrap(),
+            SessionCapabilities::NONE
+        );
     }
 
     #[test]
@@ -1908,5 +2069,30 @@ mod tests {
             } if received == mismatched_version
         ));
         assert!(err.to_string().contains("protocol version mismatch"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_handshake_negotiates_capability_intersection() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake_with_capabilities(&mut stream, SessionCapabilities::NONE)
+                .unwrap()
+        });
+
+        let mut stream = std::net::TcpStream::connect(addr).unwrap();
+        let negotiated = complete_client_handshake_with_identity_and_capabilities(
+            &mut stream,
+            &ClientIdentity::test_default(),
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        )
+        .unwrap();
+        let accepted = server.join().unwrap();
+
+        assert_eq!(negotiated, SessionCapabilities::NONE);
+        assert_eq!(accepted.capabilities, SessionCapabilities::NONE);
+        assert_eq!(accepted.identity, ClientIdentity::test_default());
     }
 }

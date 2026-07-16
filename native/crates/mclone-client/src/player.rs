@@ -914,6 +914,7 @@ struct LocalPlayerMoveSync {
     last_x_rot_degrees: f32,
     last_on_ground: bool,
     position_reminder: u32,
+    next_sequence: u32,
 }
 
 impl LocalPlayerMoveSync {
@@ -975,6 +976,14 @@ impl LocalPlayerMoveSync {
             x_rot_degrees,
             on_ground,
         }
+    }
+
+    fn sequence_command(&mut self, movement: MovePlayerCommand) -> ClientCommand {
+        self.next_sequence = self.next_sequence.wrapping_add(1);
+        if self.next_sequence == 0 {
+            self.next_sequence = 1;
+        }
+        ClientCommand::sequenced_move_player(self.next_sequence, movement)
     }
 
     fn record_position(&mut self, position: Vec3d) {
@@ -1068,13 +1077,13 @@ impl LocalPlayerController {
     }
 
     pub fn next_move_player_command(&mut self) -> Option<ClientCommand> {
-        self.move_sync
-            .next_command(self.pose, self.on_ground)
-            .map(ClientCommand::MovePlayer)
+        let movement = self.move_sync.next_command(self.pose, self.on_ground)?;
+        Some(self.move_sync.sequence_command(movement))
     }
 
     pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
-        ClientCommand::MovePlayer(self.move_sync.pos_rot_command(self.pose, self.on_ground))
+        let movement = self.move_sync.pos_rot_command(self.pose, self.on_ground);
+        self.move_sync.sequence_command(movement)
     }
 
     pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
@@ -2558,12 +2567,15 @@ mod tests {
 
         assert_eq!(
             controller.next_move_player_command(),
-            Some(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-                position: Vec3d::new(1.25, 63.0, -4.5),
-                y_rot_degrees: -181.5,
-                x_rot_degrees: 45.25,
-                on_ground: false,
-            }))
+            Some(ClientCommand::sequenced_move_player(
+                1,
+                MovePlayerCommand::PosRot {
+                    position: Vec3d::new(1.25, 63.0, -4.5),
+                    y_rot_degrees: -181.5,
+                    x_rot_degrees: 45.25,
+                    on_ground: false,
+                }
+            ))
         );
         assert_eq!(controller.next_move_player_command(), None);
 
@@ -2573,20 +2585,24 @@ mod tests {
         });
         assert_eq!(
             controller.next_move_player_command(),
-            Some(ClientCommand::MovePlayer(MovePlayerCommand::Rot {
-                y_rot_degrees: -90.0,
-                x_rot_degrees: 45.25,
-                on_ground: false,
-            }))
+            Some(ClientCommand::sequenced_move_player(
+                2,
+                MovePlayerCommand::Rot {
+                    y_rot_degrees: -90.0,
+                    x_rot_degrees: 45.25,
+                    on_ground: false,
+                }
+            ))
         );
         assert_eq!(controller.next_move_player_command(), None);
 
         controller.on_ground = true;
         assert_eq!(
             controller.next_move_player_command(),
-            Some(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
-                on_ground: true,
-            }))
+            Some(ClientCommand::sequenced_move_player(
+                3,
+                MovePlayerCommand::StatusOnly { on_ground: true }
+            ))
         );
         assert_eq!(controller.next_move_player_command(), None);
 
@@ -2596,10 +2612,13 @@ mod tests {
         });
         assert_eq!(
             controller.next_move_player_command(),
-            Some(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
-                position: Vec3d::new(1.31, 63.0, -4.5),
-                on_ground: true,
-            }))
+            Some(ClientCommand::sequenced_move_player(
+                4,
+                MovePlayerCommand::Pos {
+                    position: Vec3d::new(1.31, 63.0, -4.5),
+                    on_ground: true,
+                }
+            ))
         );
     }
 
@@ -2616,10 +2635,13 @@ mod tests {
         }
         assert_eq!(
             controller.next_move_player_command(),
-            Some(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
-                position: Vec3d::new(0.01, 0.0, 0.0),
-                on_ground: false,
-            }))
+            Some(ClientCommand::sequenced_move_player(
+                1,
+                MovePlayerCommand::Pos {
+                    position: Vec3d::new(0.01, 0.0, 0.0),
+                    on_ground: false,
+                }
+            ))
         );
         assert_eq!(controller.next_move_player_command(), None);
     }
@@ -2636,12 +2658,15 @@ mod tests {
 
         assert_eq!(
             controller.pos_rot_move_player_command(),
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
-                position: Vec3d::new(1.25, 63.0, -4.5),
-                y_rot_degrees: -181.5,
-                x_rot_degrees: 45.25,
-                on_ground: false,
-            })
+            ClientCommand::sequenced_move_player(
+                1,
+                MovePlayerCommand::PosRot {
+                    position: Vec3d::new(1.25, 63.0, -4.5),
+                    y_rot_degrees: -181.5,
+                    x_rot_degrees: 45.25,
+                    on_ground: false,
+                }
+            )
         );
         assert_eq!(controller.next_move_player_command(), None);
     }
@@ -2663,6 +2688,7 @@ mod tests {
             y_rot_degrees: 90.0,
             x_rot_degrees: 30.0,
             relative: PlayerPositionRelativeFlags::ABSOLUTE,
+            last_applied_move_sequence: 3,
             teleport_id: 12,
             dismount_vehicle: false,
         });
@@ -2699,6 +2725,7 @@ mod tests {
                 y_rot: true,
                 x_rot: false,
             },
+            last_applied_move_sequence: 4,
             teleport_id: 13,
             dismount_vehicle: false,
         });

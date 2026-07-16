@@ -19,7 +19,8 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, InteractionHand,
     MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind,
-    PlayerProfileId, ServerUpdate, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    PlayerProfileId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
+    SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
     SetPlayerAppearanceCommand, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
@@ -85,6 +86,18 @@ const DEBUG_PHYSICS_CUBE_HALF_EXTENT: f64 = 0.5;
 const DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK: u32 = 3;
 const DEFAULT_PHYSICS_STEP_DT_SECONDS: f64 = 1.0 / 60.0;
 const NATURAL_SPAWN_TICK_SEED_MULTIPLIER: i64 = 6_364_136_223_846_793_005;
+
+fn session_configuration(
+    policy: PlayerChunkTrackingPolicy,
+    capabilities: SessionCapabilities,
+) -> SessionConfiguration {
+    let (max_render_distance, max_chunk_tracking_radius) = policy.session_limits();
+    SessionConfiguration::fixed_vanilla(
+        max_render_distance,
+        max_chunk_tracking_radius,
+        capabilities,
+    )
+}
 
 #[derive(Debug)]
 pub struct IntegratedServer {
@@ -363,6 +376,12 @@ impl IntegratedServer {
     ) -> Self {
         let mut chunk_tracking = PlayerChunkTracking::new(policy);
         chunk_tracking.add_player(ServerPlayerId::LOCAL);
+        let configuration = session_configuration(policy, SessionCapabilities::DEVELOPMENT_DEFAULT);
+        chunk_tracking.queue_update_for_player(
+            ServerPlayerId::LOCAL,
+            ServerUpdate::SessionConfiguration(configuration),
+        );
+        chunk_tracking.queue_update_for_player(ServerPlayerId::LOCAL, ServerUpdate::SessionReady);
         let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
         let mut remote_players = RemotePlayerTracking::default();
         remote_players.add_player(ServerPlayerId::LOCAL);
@@ -698,10 +717,22 @@ impl IntegratedServer {
     }
 
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
+        self.add_dedicated_player_with_capabilities(SessionCapabilities::DEVELOPMENT_DEFAULT)
+    }
+
+    pub fn add_dedicated_player_with_capabilities(
+        &mut self,
+        capabilities: SessionCapabilities,
+    ) -> ServerPlayerId {
         let player_id = self.dedicated_players.add();
+        let configuration = session_configuration(self.chunk_tracking.policy(), capabilities);
         let world_info = self.world_info_update();
         let time_update = self.time_update();
         self.chunk_tracking.add_player(player_id);
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::SessionConfiguration(configuration));
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::SessionReady);
         self.chunk_tracking
             .queue_update_for_player(player_id, world_info);
         self.chunk_tracking
@@ -714,9 +745,20 @@ impl IntegratedServer {
         &mut self,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<ServerPlayerId> {
+        self.add_dedicated_player_with_identity_and_capabilities(
+            identity,
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        )
+    }
+
+    pub fn add_dedicated_player_with_identity_and_capabilities(
+        &mut self,
+        identity: ClientIdentity,
+        capabilities: SessionCapabilities,
+    ) -> ChunkStoreResult<ServerPlayerId> {
         let key = player_record_key(identity.profile_id);
         let record = self.scheduler.load_player_record_blocking(key)?;
-        let player_id = self.add_dedicated_player();
+        let player_id = self.add_dedicated_player_with_capabilities(capabilities);
         let player = self
             .dedicated_players
             .get_mut(player_id)
@@ -966,6 +1008,7 @@ impl IntegratedServer {
             ClientCommand::ShootDebugPhysicsCube => {
                 self.handle_shoot_debug_physics_cube_for_target(target)
             }
+            ClientCommand::KeepAlive { .. } | ClientCommand::Disconnect(_) => Ok(Vec::new()),
         }
     }
 
@@ -1671,7 +1714,7 @@ impl IntegratedServer {
     fn handle_move_player_for_target(
         &mut self,
         target: CommandTarget,
-        command: MovePlayerCommand,
+        command: SequencedMovePlayerCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
         let jump_demo_enabled = self.persistence_demo_jump_experience_enabled
@@ -1683,12 +1726,13 @@ impl IntegratedServer {
             let before_position = player.position();
             let before_on_ground = player.on_ground();
             let before_position_accepted = player.has_accepted_position();
-            let result = player.apply_move_player(command);
+            let movement = command.movement;
+            let result = player.apply_sequenced_move_player(command);
             let recognized_jump = jump_demo_enabled
                 && result == MovePlayerApplyResult::Accepted
                 && before_position_accepted
                 && before_on_ground
-                && command.has_position()
+                && movement.has_position()
                 && !player.on_ground()
                 && player.position().y > before_position.y;
             let pending_correction = (result == MovePlayerApplyResult::AwaitingTeleport)
@@ -1805,7 +1849,7 @@ impl IntegratedServer {
             };
             self.try_handle_command_for_player(
                 script.player_id,
-                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                ClientCommand::move_player(MovePlayerCommand::PosRot {
                     position: desired,
                     y_rot_degrees,
                     x_rot_degrees: 0.0,

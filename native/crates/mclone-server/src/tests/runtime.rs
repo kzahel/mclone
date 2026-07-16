@@ -46,6 +46,12 @@ fn integrated_server_publishes_interested_chunks() {
         }),
     );
 
+    assert!(matches!(
+        updates.first(),
+        Some(ServerUpdate::SessionConfiguration(_))
+    ));
+    assert!(matches!(updates.get(1), Some(ServerUpdate::SessionReady)));
+
     assert_eq!(
         updates
             .iter()
@@ -327,7 +333,7 @@ fn integrated_server_publishes_interested_chunks() {
             Some(job.id)
         );
     }
-    assert!(updates.iter().all(|update| {
+    assert!(updates.iter().skip(2).all(|update| {
         matches!(
             update,
             ServerUpdate::ChunkSnapshot(_) | ServerUpdate::EntitySnapshot(_)

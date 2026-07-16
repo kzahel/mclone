@@ -185,7 +185,7 @@ fn block_delta_routing_sends_only_to_players_tracking_changed_chunk() {
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: Vec3d::new(8.5, 80.0, 8.5),
                 y_rot_degrees: 0.0,
                 x_rot_degrees: 0.0,

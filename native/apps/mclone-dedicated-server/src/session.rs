@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use anyhow::Result;
 #[cfg(test)]
 use anyhow::{Context, bail};
-use mclone_protocol::{ClientCommand, MovePlayerCommand};
+use mclone_protocol::{ClientCommand, SequencedMovePlayerCommand};
 use mclone_server::{
     ChunkSchedulerPublicationDiagnostics, IntegratedServer, ServerPlayerId,
     ServerSimulationTickReport,
@@ -122,7 +122,7 @@ impl DedicatedSessionDiagnostics {
 
 #[derive(Debug, Default)]
 struct DedicatedConnectionState {
-    pending_movement: VecDeque<MovePlayerCommand>,
+    pending_movement: VecDeque<SequencedMovePlayerCommand>,
     received_move_packet_count: u32,
     known_move_packet_count: u32,
 }
@@ -147,7 +147,7 @@ impl DedicatedConnectionState {
         }
     }
 
-    fn stage_movement(&mut self, command: MovePlayerCommand) {
+    fn stage_movement(&mut self, command: SequencedMovePlayerCommand) {
         self.received_move_packet_count = self.received_move_packet_count.saturating_add(1);
         self.pending_movement.push_back(command);
     }
@@ -273,7 +273,7 @@ mod tests {
             .handle_command(
                 &mut server,
                 player_id,
-                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                ClientCommand::move_player(MovePlayerCommand::Pos {
                     position: Vec3d::new(1.0, 64.0, 1.0),
                     on_ground: true,
                 }),
@@ -308,7 +308,7 @@ mod tests {
             .handle_command(
                 &mut server,
                 player_id,
-                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                ClientCommand::move_player(MovePlayerCommand::Pos {
                     position: Vec3d::new(1.0, 64.0, 1.0),
                     on_ground: true,
                 }),
@@ -335,7 +335,7 @@ mod tests {
         session_a
             .handle_client_command(
                 &mut server,
-                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                ClientCommand::move_player(MovePlayerCommand::Pos {
                     position: Vec3d::new(1.0, 64.0, 1.0),
                     on_ground: true,
                 }),
@@ -344,7 +344,7 @@ mod tests {
         session_b
             .handle_client_command(
                 &mut server,
-                ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                ClientCommand::move_player(MovePlayerCommand::Pos {
                     position: Vec3d::new(-2.0, 70.0, 3.0),
                     on_ground: false,
                 }),
@@ -436,7 +436,7 @@ mod tests {
         let mut request = Vec::new();
         write_client_command_frame(
             &mut request,
-            &ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            &ClientCommand::move_player(MovePlayerCommand::Pos {
                 position: Vec3d::new(1.0, 64.0, 1.0),
                 on_ground: true,
             }),
@@ -444,7 +444,7 @@ mod tests {
         .unwrap();
         write_client_command_frame(
             &mut request,
-            &ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+            &ClientCommand::move_player(MovePlayerCommand::Rot {
                 y_rot_degrees: 90.0,
                 x_rot_degrees: 15.0,
                 on_ground: true,
@@ -454,12 +454,17 @@ mod tests {
         let mut stream = ScriptedStream::new(request);
         let mut server = IntegratedServer::new(DEFAULT_SEED);
 
-        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 3);
+        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 5);
 
         let written = stream.written();
         let mut publications = std::io::Cursor::new(written);
         let first = read_server_update_batch(&mut publications).unwrap();
         let second = read_server_update_batch(&mut publications).unwrap();
+        assert!(matches!(
+            first.first(),
+            Some(ServerUpdate::SessionConfiguration(_))
+        ));
+        assert!(matches!(first.get(1), Some(ServerUpdate::SessionReady)));
         assert!(
             first
                 .iter()

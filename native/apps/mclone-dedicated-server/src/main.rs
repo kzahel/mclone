@@ -1051,7 +1051,7 @@ mod tests {
                 .unwrap()
                 .handle_client_command(
                     &mut server,
-                    ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                    ClientCommand::move_player(MovePlayerCommand::Pos {
                         position: Vec3d::new(f64::from(index), 64.0, 0.0),
                         on_ground: true,
                     }),
@@ -1184,7 +1184,7 @@ mod tests {
             .unwrap()
             .handle_client_command(
                 &mut server,
-                ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+                ClientCommand::move_player(MovePlayerCommand::PosRot {
                     position: moved,
                     y_rot_degrees: 90.0,
                     x_rot_degrees: -15.0,
@@ -1414,14 +1414,14 @@ mod tests {
                 }))
                 .unwrap();
             session
-                .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                .send_command_only(ClientCommand::move_player(MovePlayerCommand::Pos {
                     position: spawn.position,
                     on_ground: true,
                 }))
                 .unwrap();
             let saved_position = spawn.position.add(Vec3d::new(0.0, 0.42, 0.0));
             session
-                .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                .send_command_only(ClientCommand::move_player(MovePlayerCommand::Pos {
                     position: saved_position,
                     on_ground: false,
                 }))
@@ -1643,7 +1643,7 @@ mod tests {
     }
 
     fn move_near_block_command(pos: BlockPos) -> ClientCommand {
-        ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: Vec3d::new(pos.x as f64 + 0.5, pos.y as f64, pos.z as f64 + 0.5),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

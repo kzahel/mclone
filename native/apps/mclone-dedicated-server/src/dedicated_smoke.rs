@@ -1089,7 +1089,7 @@ fn snapshot_block_state(snapshot: &ChunkSnapshot, pos: BlockPos) -> BlockStateId
 }
 
 fn move_near_block_command(pos: BlockPos) -> ClientCommand {
-    ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+    ClientCommand::move_player(MovePlayerCommand::PosRot {
         position: Vec3d::new(pos.x as f64 + 0.5, pos.y as f64, pos.z as f64 + 0.5),
         y_rot_degrees: 0.0,
         x_rot_degrees: 0.0,
@@ -1098,7 +1098,7 @@ fn move_near_block_command(pos: BlockPos) -> ClientCommand {
 }
 
 fn move_far_from_block_command() -> ClientCommand {
-    ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+    ClientCommand::move_player(MovePlayerCommand::PosRot {
         position: Vec3d::new(2048.0, 128.0, 2048.0),
         y_rot_degrees: 0.0,
         x_rot_degrees: 0.0,

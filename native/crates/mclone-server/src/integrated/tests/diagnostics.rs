@@ -11,7 +11,7 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: Vec3d::new(8.5, 80.0, 8.5),
                 y_rot_degrees: 0.0,
                 x_rot_degrees: 0.0,
@@ -38,7 +38,8 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
     let diagnostics = server.chunk_tracking_diagnostics();
     assert_eq!(diagnostics.aggregate_player_ticket_chunks, 1);
     assert_eq!(diagnostics.total_player_visible_chunks, 2);
-    assert_eq!(diagnostics.total_outbound_queue_depth, 2);
+    // The local player has not drained its ordered configuration/ready pair.
+    assert_eq!(diagnostics.total_outbound_queue_depth, 4);
     assert_eq!(diagnostics.max_outbound_queue_depth, 2);
     assert_eq!(
         diagnostics
@@ -59,7 +60,7 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
         server
             .chunk_tracking_diagnostics()
             .total_outbound_queue_depth,
-        0
+        2
     );
 }
 

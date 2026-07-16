@@ -134,7 +134,7 @@ fn first_non_air_block(host: &WarmIntegratedHost) -> Option<BlockPos> {
 
 fn break_block(host: &mut WarmIntegratedHost, target: BlockPos) -> Result<()> {
     host.connection
-        .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        .send_command_only(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: Vec3d::new(
                 f64::from(target.x) + 0.5,
                 f64::from(target.y),

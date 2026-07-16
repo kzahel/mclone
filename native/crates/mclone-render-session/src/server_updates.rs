@@ -53,7 +53,11 @@ impl EngineServerUpdateReport {
                 ServerUpdate::PlayerPosition(_) => {
                     report.changed = true;
                 }
-                ServerUpdate::WorldInfo { .. }
+                ServerUpdate::SessionConfiguration(_)
+                | ServerUpdate::SessionReady
+                | ServerUpdate::KeepAlive { .. }
+                | ServerUpdate::Disconnect(_)
+                | ServerUpdate::WorldInfo { .. }
                 | ServerUpdate::TimeUpdate { .. }
                 | ServerUpdate::PlayerExperience { .. }
                 | ServerUpdate::RemotePlayerAdd(_)
@@ -110,7 +114,11 @@ impl EngineServerUpdateDirtyBatch {
                         }
                     }
                 }
-                ServerUpdate::WorldInfo { .. } => {}
+                ServerUpdate::SessionConfiguration(_)
+                | ServerUpdate::SessionReady
+                | ServerUpdate::KeepAlive { .. }
+                | ServerUpdate::Disconnect(_)
+                | ServerUpdate::WorldInfo { .. } => {}
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerExperience { .. } => {}
                 ServerUpdate::PlayerPosition(_) => {}

@@ -126,7 +126,7 @@ fn prepare_debug_physics_floor(server: &mut IntegratedServer) {
         }
     }
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: Vec3d::new(8.0, 3.0, 6.0),
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -347,7 +347,7 @@ fn sync_player(server: &mut IntegratedServer, position: Vec3d) {
 
 fn send_player_move(server: &mut IntegratedServer, position: Vec3d) {
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position,
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,

@@ -1,5 +1,9 @@
 use mclone_core::Vec3d;
-use mclone_protocol::{MovePlayerCommand, PlayerPositionRelativeFlags, PlayerPositionUpdate};
+#[cfg(test)]
+use mclone_protocol::MovePlayerCommand;
+use mclone_protocol::{
+    PlayerPositionRelativeFlags, PlayerPositionUpdate, SequencedMovePlayerCommand,
+};
 
 const JAVA_HORIZONTAL_MOVE_BOUND: f64 = 3.0e7;
 const JAVA_VERTICAL_MOVE_BOUND: f64 = 2.0e7;
@@ -18,6 +22,7 @@ pub(crate) struct ServerPlayerState {
     awaiting_teleport: Option<AwaitingTeleport>,
     teleport_id_counter: u32,
     has_accepted_position: bool,
+    last_applied_move_sequence: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -55,15 +60,29 @@ impl Default for ServerPlayerState {
             awaiting_teleport: None,
             teleport_id_counter: 0,
             has_accepted_position: false,
+            last_applied_move_sequence: 0,
         }
     }
 }
 
 impl ServerPlayerState {
+    #[cfg(test)]
     pub(crate) fn apply_move_player(
         &mut self,
         command: MovePlayerCommand,
     ) -> MovePlayerApplyResult {
+        self.apply_sequenced_move_player(SequencedMovePlayerCommand {
+            sequence: 0,
+            movement: command,
+        })
+    }
+
+    pub(crate) fn apply_sequenced_move_player(
+        &mut self,
+        command: SequencedMovePlayerCommand,
+    ) -> MovePlayerApplyResult {
+        let sequence = command.sequence;
+        let command = command.movement;
         let position = command.position_or(self.position);
         let y_rot_degrees = command.y_rot_degrees_or(self.y_rot_degrees);
         let x_rot_degrees = command.x_rot_degrees_or(self.x_rot_degrees);
@@ -91,6 +110,7 @@ impl ServerPlayerState {
             self.has_accepted_position = true;
         }
         self.last_good_position = self.position;
+        self.last_applied_move_sequence = sequence;
         MovePlayerApplyResult::Accepted
     }
 
@@ -106,6 +126,7 @@ impl ServerPlayerState {
             y_rot_degrees: self.y_rot_degrees,
             x_rot_degrees: self.x_rot_degrees,
             relative: PlayerPositionRelativeFlags::ABSOLUTE,
+            last_applied_move_sequence: self.last_applied_move_sequence,
             teleport_id: id,
             dismount_vehicle: false,
         }
@@ -483,12 +504,15 @@ mod tests {
         let mut player = ServerPlayerState::default();
         assert!(
             player
-                .apply_move_player(MovePlayerCommand::PosRot {
-                    position: Vec3d::new(1.0, 64.0, 2.0),
-                    y_rot_degrees: 90.0,
-                    x_rot_degrees: 10.0,
-                    on_ground: true,
-                })
+                .apply_sequenced_move_player(SequencedMovePlayerCommand::new(
+                    17,
+                    MovePlayerCommand::PosRot {
+                        position: Vec3d::new(1.0, 64.0, 2.0),
+                        y_rot_degrees: 90.0,
+                        x_rot_degrees: 10.0,
+                        on_ground: true,
+                    },
+                ))
                 .is_accepted()
         );
 
@@ -501,6 +525,7 @@ mod tests {
                 y_rot_degrees: 90.0,
                 x_rot_degrees: 10.0,
                 relative: PlayerPositionRelativeFlags::ABSOLUTE,
+                last_applied_move_sequence: 17,
                 teleport_id: 1,
                 dismount_vehicle: false,
             }
@@ -563,6 +588,7 @@ mod tests {
                 y_rot_degrees: 90.0,
                 x_rot_degrees: 10.0,
                 relative: PlayerPositionRelativeFlags::ABSOLUTE,
+                last_applied_move_sequence: 0,
                 teleport_id: 2,
                 dismount_vehicle: false,
             }

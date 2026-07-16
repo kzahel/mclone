@@ -5,7 +5,7 @@ fn local_and_dedicated_players_pair_symmetrically() {
     let mut server = IntegratedServer::new(12_345);
     load_center_chunk(&mut server);
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: Vec3d::new(8.5, 80.0, 8.5),
             y_rot_degrees: 15.0,
             x_rot_degrees: 0.0,
@@ -27,7 +27,7 @@ fn local_and_dedicated_players_pair_symmetrically() {
 
     let local_moved = Vec3d::new(9.0, 80.0, 8.5);
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: local_moved,
             y_rot_degrees: 30.0,
             x_rot_degrees: 5.0,
@@ -45,7 +45,7 @@ fn local_and_dedicated_players_pair_symmetrically() {
     server
         .try_handle_command_for_player(
             dedicated,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: dedicated_moved,
                 y_rot_degrees: -45.0,
                 x_rot_degrees: 0.0,
@@ -137,7 +137,7 @@ fn dedicated_players_publish_remote_state_when_visible() {
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: Vec3d::new(8.5, 80.0, 8.5),
                 y_rot_degrees: 0.0,
                 x_rot_degrees: 0.0,
@@ -162,7 +162,7 @@ fn dedicated_players_publish_remote_state_when_visible() {
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: moved,
                 y_rot_degrees: 90.0,
                 x_rot_degrees: -15.0,
@@ -182,7 +182,7 @@ fn dedicated_players_publish_remote_state_when_visible() {
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+            ClientCommand::move_player(MovePlayerCommand::Rot {
                 y_rot_degrees: 135.0,
                 x_rot_degrees: 20.0,
                 on_ground: true,
@@ -228,7 +228,7 @@ fn dedicated_remote_players_are_removed_when_the_observer_view_stops_tracking_th
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: Vec3d::new(8.5, 80.0, 8.5),
                 y_rot_degrees: 0.0,
                 x_rot_degrees: 0.0,
@@ -256,7 +256,7 @@ fn dedicated_remote_players_are_removed_on_disconnect() {
     server
         .try_handle_command_for_player(
             player_a,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: Vec3d::new(8.5, 80.0, 8.5),
                 y_rot_degrees: 0.0,
                 x_rot_degrees: 0.0,

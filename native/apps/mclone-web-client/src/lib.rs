@@ -95,6 +95,7 @@ pub fn mclone_web_validate_remote_handshake(frame: js_sys::Uint8Array) -> Result
         &frame.to_vec(),
         mclone_protocol::PROTOCOL_VERSION,
     )
+    .map(|_| ())
     .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
@@ -1015,7 +1016,7 @@ mod tests {
             .unwrap();
 
         let report = runtime
-            .send_gameplay_command(ClientCommand::MovePlayer(
+            .send_gameplay_command(ClientCommand::move_player(
                 mclone_protocol::MovePlayerCommand::PosRot {
                     position: mclone_core::Vec3d::new(8.0, 104.0, 8.0),
                     y_rot_degrees: 0.0,

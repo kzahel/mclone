@@ -867,11 +867,15 @@ fn engine_camera_controller_reports_pose_sync_command() {
         .expect("rotation should produce pose sync");
 
     assert_eq!(report.kind, EnginePoseSyncCommandKind::Movement);
-    let ClientCommand::MovePlayer(mclone_protocol::MovePlayerCommand::Rot {
+    let ClientCommand::MovePlayer(command) = report.command else {
+        panic!("stationary mouse look must publish a movement command");
+    };
+    assert_eq!(command.sequence, 2);
+    let mclone_protocol::MovePlayerCommand::Rot {
         y_rot_degrees,
         x_rot_degrees,
         ..
-    }) = report.command
+    } = command.movement
     else {
         panic!("stationary mouse look must publish a rotation-only command");
     };
@@ -896,6 +900,7 @@ fn engine_camera_controller_reports_correction_acceptance_and_resync() {
         y_rot_degrees: 90.0,
         x_rot_degrees: 30.0,
         relative: mclone_protocol::PlayerPositionRelativeFlags::ABSOLUTE,
+        last_applied_move_sequence: 17,
         teleport_id: 42,
         dismount_vehicle: false,
     };

@@ -24,8 +24,9 @@ use mclone_core::{
     SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
-    ChunkView, ClientCommand, EntityId, EntitySnapshot, EntityUpdate, PlayerPositionUpdate,
-    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate,
+    ChunkView, ClientCommand, DisconnectReason, DisconnectReasonCode, EntityId, EntitySnapshot,
+    EntityUpdate, PlayerPositionUpdate, RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate,
+    ServerUpdate, SessionConfiguration,
 };
 
 pub use actor::{
@@ -72,9 +73,20 @@ pub enum ClientHost {
     RemoteDedicated,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientSessionPhase {
+    Connecting,
+    Configuring,
+    Playing,
+    Disconnected,
+}
+
 #[derive(Clone, Debug)]
 pub struct ClientRuntime {
     host: ClientHost,
+    session_phase: ClientSessionPhase,
+    session_configuration: Option<SessionConfiguration>,
+    disconnect_reason: Option<DisconnectReason>,
     biome_zoom_seed: Option<i64>,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
@@ -96,6 +108,9 @@ impl ClientRuntime {
     pub fn new(host: ClientHost) -> Self {
         Self {
             host,
+            session_phase: ClientSessionPhase::Connecting,
+            session_configuration: None,
+            disconnect_reason: None,
             biome_zoom_seed: None,
             chunk_view: None,
             chunks: BTreeMap::new(),
@@ -131,6 +146,18 @@ impl ClientRuntime {
         self.host
     }
 
+    pub const fn session_phase(&self) -> ClientSessionPhase {
+        self.session_phase
+    }
+
+    pub const fn session_configuration(&self) -> Option<SessionConfiguration> {
+        self.session_configuration
+    }
+
+    pub fn disconnect_reason(&self) -> Option<&DisconnectReason> {
+        self.disconnect_reason.as_ref()
+    }
+
     pub const fn biome_zoom_seed(&self) -> Option<i64> {
         self.biome_zoom_seed
     }
@@ -146,6 +173,24 @@ impl ClientRuntime {
 
     pub fn apply_update(&mut self, update: ServerUpdate) {
         match update {
+            ServerUpdate::SessionConfiguration(configuration) => {
+                if self.session_phase != ClientSessionPhase::Disconnected {
+                    self.session_configuration = Some(configuration);
+                    self.session_phase = ClientSessionPhase::Configuring;
+                }
+            }
+            ServerUpdate::SessionReady => {
+                if self.session_phase != ClientSessionPhase::Disconnected {
+                    if self.session_configuration.is_some() {
+                        self.session_phase = ClientSessionPhase::Playing;
+                    } else {
+                        self.apply_disconnect(DisconnectReason::new(
+                            DisconnectReasonCode::ProtocolViolation,
+                            "server marked the session ready before configuration",
+                        ));
+                    }
+                }
+            }
             ServerUpdate::WorldInfo { biome_zoom_seed } => {
                 self.biome_zoom_seed = Some(biome_zoom_seed);
             }
@@ -211,6 +256,15 @@ impl ClientRuntime {
             ServerUpdate::PlayerExperience { total_experience } => {
                 self.total_experience = total_experience;
             }
+            ServerUpdate::KeepAlive { .. } => {}
+            ServerUpdate::Disconnect(reason) => self.apply_disconnect(reason),
+        }
+    }
+
+    fn apply_disconnect(&mut self, reason: DisconnectReason) {
+        if self.disconnect_reason.is_none() {
+            self.disconnect_reason = Some(reason);
+            self.session_phase = ClientSessionPhase::Disconnected;
         }
     }
 
@@ -615,6 +669,50 @@ mod tests {
     use mclone_protocol::{PlayerAppearance, PlayerModelKind};
 
     #[test]
+    fn client_runtime_enters_play_only_after_configuration_and_ready() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let configuration = SessionConfiguration::fixed_vanilla(
+            11,
+            11,
+            mclone_protocol::SessionCapabilities::DEBUG_ACTIONS,
+        );
+
+        assert_eq!(runtime.session_phase(), ClientSessionPhase::Connecting);
+        runtime.apply_update(ServerUpdate::SessionConfiguration(configuration));
+        assert_eq!(runtime.session_phase(), ClientSessionPhase::Configuring);
+        assert_eq!(runtime.session_configuration(), Some(configuration));
+
+        runtime.apply_update(ServerUpdate::SessionReady);
+        assert_eq!(runtime.session_phase(), ClientSessionPhase::Playing);
+    }
+
+    #[test]
+    fn client_runtime_keeps_first_disconnect_reason() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let first = DisconnectReason::timeout("keepalive expired");
+        runtime.apply_update(ServerUpdate::Disconnect(first.clone()));
+        runtime.apply_update(ServerUpdate::Disconnect(DisconnectReason::transport_error(
+            "socket closed",
+        )));
+
+        assert_eq!(runtime.session_phase(), ClientSessionPhase::Disconnected);
+        assert_eq!(runtime.disconnect_reason(), Some(&first));
+    }
+
+    #[test]
+    fn client_runtime_rejects_ready_before_configuration() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+
+        runtime.apply_update(ServerUpdate::SessionReady);
+
+        assert_eq!(runtime.session_phase(), ClientSessionPhase::Disconnected);
+        assert_eq!(
+            runtime.disconnect_reason().map(|reason| reason.code),
+            Some(DisconnectReasonCode::ProtocolViolation)
+        );
+    }
+
+    #[test]
     fn distinguishes_local_and_remote_hosts() {
         assert_ne!(ClientHost::LocalIntegrated, ClientHost::RemoteDedicated);
     }
@@ -831,6 +929,7 @@ mod tests {
             y_rot_degrees: 90.0,
             x_rot_degrees: 10.0,
             relative: mclone_protocol::PlayerPositionRelativeFlags::ABSOLUTE,
+            last_applied_move_sequence: 6,
             teleport_id: 7,
             dismount_vehicle: false,
         }));
@@ -931,6 +1030,7 @@ mod tests {
             y_rot_degrees: 90.0,
             x_rot_degrees: 10.0,
             relative: mclone_protocol::PlayerPositionRelativeFlags::ABSOLUTE,
+            last_applied_move_sequence: 6,
             teleport_id: 7,
             dismount_vehicle: false,
         };

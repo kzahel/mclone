@@ -513,7 +513,7 @@ fn run_remote_actor_client(
 
     let updates = exchange_remote_actor_command(
         &mut session,
-        ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: current_position,
             y_rot_degrees: 180.0,
             x_rot_degrees: 0.0,
@@ -542,7 +542,7 @@ fn run_remote_actor_client(
         );
         let updates = exchange_remote_actor_command(
             &mut session,
-            ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+            ClientCommand::move_player(MovePlayerCommand::PosRot {
                 position: next_position,
                 y_rot_degrees: 180.0,
                 x_rot_degrees: 0.0,

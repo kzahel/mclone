@@ -326,7 +326,7 @@ fn move_player_command_updates_server_player_state_without_world_updates() {
     let mut server = IntegratedServer::new(0);
 
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::PosRot {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position: Vec3d::new(1.25, 63.0, -4.5),
             y_rot_degrees: 181.0,
             x_rot_degrees: -181.0,
@@ -348,7 +348,7 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
     send_player_move(&mut server, Vec3d::new(1.0, 64.0, 1.0));
 
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(1.0, 64.42, 1.0),
             on_ground: false,
         }))
@@ -361,7 +361,7 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
     );
 
     let duplicate = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(1.0, 64.42, 1.0),
             on_ground: false,
         }))
@@ -369,7 +369,7 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
     assert!(duplicate.is_empty());
     assert!(
         server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::StatusOnly {
                 on_ground: true
             }))
             .unwrap()
@@ -377,7 +377,7 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
     );
     assert!(
         server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Rot {
                 y_rot_degrees: 90.0,
                 x_rot_degrees: 0.0,
                 on_ground: false,
@@ -394,7 +394,7 @@ fn persistence_demo_is_explicit_and_protected_worlds_never_award_jump_experience
     send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
     assert!(
         server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
                 position: Vec3d::new(0.0, 64.42, 0.0),
                 on_ground: false,
             }))
@@ -405,13 +405,13 @@ fn persistence_demo_is_explicit_and_protected_worlds_never_award_jump_experience
     server.set_persistence_demo_jump_experience_enabled(true);
     server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::StatusOnly {
             on_ground: true,
         }))
         .unwrap();
     assert!(
         server
-            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
                 position: Vec3d::new(0.0, 64.84, 0.0),
                 on_ground: false,
             }))
@@ -432,7 +432,7 @@ fn awarded_demo_experience_is_written_to_the_identity_player_record() {
     server.set_persistence_demo_jump_experience_enabled(true);
     send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(0.0, 64.42, 0.0),
             on_ground: false,
         }))
@@ -454,13 +454,13 @@ fn simulation_tick_records_java_shaped_movement_packet_boundary() {
     let mut server = IntegratedServer::new(0);
 
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(1.0, 64.0, 1.0),
             on_ground: true,
         }))
         .expect("move player");
     server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Rot {
             y_rot_degrees: 90.0,
             x_rot_degrees: 10.0,
             on_ground: false,
@@ -500,7 +500,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
     assert_eq!(first.teleport_id, 1);
 
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(32.0, 64.0, 0.0),
             on_ground: true,
         }))
@@ -521,7 +521,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
             .expect("pending teleport tick");
     }
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(32.0, 64.0, 0.0),
             on_ground: true,
         }))
@@ -532,7 +532,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
         .try_simulation_tick_report()
         .expect("pending teleport resend tick");
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(32.0, 64.0, 0.0),
             on_ground: true,
         }))
@@ -576,7 +576,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
     assert_eq!(server.player.awaiting_teleport(), None);
 
     let updates = server
-        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
             position: Vec3d::new(32.0, 64.0, 0.0),
             on_ground: true,
         }))

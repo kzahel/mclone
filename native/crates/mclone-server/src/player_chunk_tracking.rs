@@ -56,6 +56,13 @@ impl PlayerChunkTrackingPolicy {
         self
     }
 
+    pub(crate) fn session_limits(self) -> (u32, u32) {
+        (
+            self.max_render_distance.min(JAVA_MAX_VIEW_DISTANCE),
+            self.max_chunk_tracking_radius.min(JAVA_MAX_VIEW_DISTANCE),
+        )
+    }
+
     #[cfg(test)]
     pub(crate) const fn unload_hysteresis_chunks(self) -> u32 {
         self.unload_hysteresis_chunks
@@ -140,6 +147,10 @@ impl PlayerChunkTracking {
             aggregate_player_ticket_positions: BTreeSet::new(),
             pending_updates: BTreeMap::new(),
         }
+    }
+
+    pub(crate) const fn policy(&self) -> PlayerChunkTrackingPolicy {
+        self.policy
     }
 
     pub(crate) fn add_player(&mut self, player_id: ServerPlayerId) {
