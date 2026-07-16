@@ -1,7 +1,7 @@
 # Tactical 187: Generator Profiles, Flat Grass, and Seeded Island
 
-Status: active parent; product direction accepted 2026-07-16. Slice 0 locks
-the pre-refactor compatibility and ownership baseline.
+Status: active parent; product direction accepted 2026-07-16. Slices 0 through
+3 are complete; cross-platform product adoption is next.
 
 Topic: `world-generation-profiles`
 
@@ -529,7 +529,7 @@ Execution record:
 
 ### Slice 3: Seeded small-island generator core
 
-Status: planned.
+Status: complete 2026-07-16.
 
 - Implement and document the exact v1 seeded world-coordinate field.
 - Lock material, biome, sea-level, support-radius, and guaranteed-spawn
@@ -546,6 +546,53 @@ Status: planned.
 Gate: one seed visibly produces a coherent grass/sand island in ocean, a
 second produces a materially different but valid island, both guarantee safe
 spawn, and all deterministic/seam/profile gates pass.
+
+Frozen `small-island-v1` field:
+
+- build range is `0..256`, sea level is Y `63`, and the exact open-ocean floor
+  is Y `48`;
+- three SplitMix64-hashed lattice value-noise domains use cubic smoothstep
+  interpolation at scales `64`, `24`, and `32`;
+- distorted radial distance is
+  `radius - 20 * shore_noise - 7 * detail_noise`;
+- the principal envelope is `smoothstep(clamp(1 - distance / 152, 0, 1))`;
+- pre-spawn-blend surface height is rounded from
+  `48 + 36 * envelope + 5 * relief_noise * envelope`;
+- all columns at radial distance `>= 192` use the exact Y `48` floor;
+- world X/Z `-8..8` forms an exact 16-by-16 grass spawn patch at Y `80`,
+  blended into the radial field with smoothstep over the next `20` blocks;
+- Y `59..=66` surface columns use four sand layers, higher dry columns use
+  two dirt layers and grass, deeper columns use stone, and submerged columns
+  fill with water through Y `63`;
+- biome IDs are ocean `0` through surface Y `61`, beach `16` through Y `66`,
+  and plains `1` above that.
+
+Execution record:
+
+- added stable label `small-island-v1` and binary tag `3` together with the
+  shared-Rust generator, target-only scheduler dispatch, center-first safe
+  spawn, and dedicated-server support;
+- pinned seed fingerprints `14357595377438549354` for seed `12345` and
+  `12105951125863982310` for seed `-98765`; repeated, reversed, and
+  independently partitioned jobs are exact, while the two seeds differ;
+- X and Z border tests cover positive and negative chunk seams; the bounded
+  support, material/biome families, exact central patch, empty tick payloads,
+  scheduler dependency counts, persistence hit/reopen, and remote TCP spawn
+  are locked;
+- inspected the normally lit elevated view
+  `/tmp/mclone-small-island-v1-seed-12345-lit.png`: 421 streamed sections
+  produced one coherent asymmetric island with continuous grass terraces,
+  sand beach, shallow water, and ocean and no chunk or lighting seams;
+- inspected `/tmp/mclone-small-island-v1-shoreline-lit.png` with its streaming
+  center moved to the east shore: the grass/dirt, four-layer sand, stone
+  shelf, and waterline remain continuous across independently published
+  chunks;
+- inspected `/tmp/mclone-small-island-v1-seed-neg98765.png`: the same camera
+  and compatibility rules produce a materially different shoreline and
+  relief field;
+- fixed the offscreen diagnostic camera to reapply an explicit requested
+  eye/target through the whole warmup; authoritative spawn reconciliation had
+  previously replaced it before the final capture.
 
 ### Slice 4: Cross-platform/product selection and lifecycle proof
 

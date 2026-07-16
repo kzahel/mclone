@@ -1684,6 +1684,16 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         |index, frame, host| {
             let device = frame.device;
             let queue = frame.queue;
+            // A requested diagnostic camera is an override for the whole
+            // capture, not only the setup frame. Runtime spawn reconciliation
+            // may update the scene camera while warmup frames stream; reapply
+            // the explicit eye/target immediately before every rendered frame.
+            if let Some(eye) = options.eye {
+                host.set_eye_override(eye);
+            }
+            if let Some(target) = options.target {
+                host.set_camera_look_at(host.camera.position, Vec3::from_array(target));
+            }
             host.render_frame(frame, OffscreenFlatClientFrameOptions { hud: options.hud })?;
             host.advance_asset_replacement_smoke(index)?;
             host.advance_asset_pack_ui_smoke(device, queue)?;

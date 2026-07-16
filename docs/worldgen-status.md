@@ -1,8 +1,9 @@
 # Native Worldgen Status
 
 Living status page for native Rust world generation. Live procedural profiles
-are the Minecraft Java 1.17.1-shaped overworld and the deliberately minimal
-`flat-grass-v1` proof generator.
+are the Minecraft Java 1.17.1-shaped overworld, the deliberately minimal
+`flat-grass-v1` proof generator, and the original seeded
+`small-island-v1` proof generator.
 
 The current `overworld` profile's durable target is seed parity against vanilla
 1.17.1 overworld output. The accepted follow-up direction is to preserve that
@@ -31,11 +32,15 @@ Landed native coverage:
 - Scheduler-owned `FEATURES` publication and clean fixture comparisons for the current target chunks.
 - Generated scheduled tick carry-through for fluids.
 - A stored, descriptor-driven `WorldGenerationProfile` boundary with
-  `Overworld`, `FlatGrassV1`, and `AuthoredOnly`; flat grass is target-only and
-  authored-only maps true persistence misses to void.
+  `Overworld`, `FlatGrassV1`, `SmallIslandV1`, and `AuthoredOnly`; flat grass
+  and small island are target-only, while authored-only maps true persistence
+  misses to void.
 - Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
   payloads, origin spawn policy, native/dedicated publication, and save/reopen
   coverage.
+- Bounded `small-island-v1` world-coordinate terrain with seeded shoreline and
+  relief, a guaranteed central spawn patch, plains/beach/ocean biomes,
+  native/dedicated publication, seam/partition locks, and save/reopen coverage.
 
 Important native entry points:
 

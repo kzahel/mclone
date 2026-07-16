@@ -21,9 +21,9 @@ pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
 pub fn initial_spawn_center_for_profile(seed: i64, profile: WorldGenerationProfile) -> ChunkPos {
     match profile {
         WorldGenerationProfile::Overworld => initial_spawn_center_for_seed(seed),
-        WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
-            ChunkPos::new(0, 0)
-        }
+        WorldGenerationProfile::FlatGrassV1
+        | WorldGenerationProfile::SmallIslandV1
+        | WorldGenerationProfile::AuthoredOnly { .. } => ChunkPos::new(0, 0),
     }
 }
 
@@ -40,7 +40,9 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
 ) -> Option<Vec3d> {
     let column_order = if matches!(
         profile,
-        WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. }
+        WorldGenerationProfile::FlatGrassV1
+            | WorldGenerationProfile::SmallIslandV1
+            | WorldGenerationProfile::AuthoredOnly { .. }
     ) {
         SpawnColumnOrder::CenterFirst
     } else {
@@ -51,7 +53,9 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
         center,
         block_at,
         |x, z| match profile {
-            WorldGenerationProfile::FlatGrassV1 => get_layered_biome_by_id(1),
+            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::SmallIslandV1 => {
+                get_layered_biome_by_id(1)
+            }
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
                 biome_source.get_block_position_biome_definition(seed, x, z)
             }

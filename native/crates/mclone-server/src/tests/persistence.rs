@@ -423,6 +423,60 @@ fn flat_grass_persistence_hit_wins_and_survives_reopen() {
 }
 
 #[test]
+fn small_island_persistence_hit_wins_and_survives_reopen() {
+    let store = SharedMemoryWorldStore::new();
+    let center = ChunkPos::new(0, 0);
+    let interest = ChunkView {
+        center,
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    };
+    let edited = WorldBlockPos::new(0, 80, 0);
+
+    let mut scheduler = ChunkScheduler::with_world_store(12_345, Box::new(store.clone()));
+    scheduler
+        .set_world_generation_profile(WorldGenerationProfile::SmallIslandV1)
+        .unwrap();
+    scheduler.set_lighting_enabled(false);
+    apply_interest_and_poll(&mut scheduler, interest.clone());
+    assert_eq!(
+        scheduler.block_at_world(edited),
+        Some(mclone_worldgen::block::GRASS_BLOCK)
+    );
+    assert!(scheduler.set_block_at_world(edited, STONE));
+
+    scheduler
+        .apply_interest(ChunkView {
+            center: ChunkPos::new(100, 100),
+            render_distance: 0,
+            chunk_tracking_radius: 0,
+        })
+        .unwrap();
+    scheduler.process_pending_unloads(usize::MAX).unwrap();
+    poll_scheduler_until_persistence_idle(&mut scheduler);
+    scheduler.process_pending_unloads(usize::MAX).unwrap();
+    assert!(scheduler.holder(center).is_none());
+
+    let mut reopened = ChunkScheduler::with_world_store(12_345, Box::new(store));
+    reopened
+        .set_world_generation_profile(WorldGenerationProfile::SmallIslandV1)
+        .unwrap();
+    reopened.set_lighting_enabled(false);
+    apply_interest_and_poll(&mut reopened, interest);
+
+    assert_eq!(reopened.block_at_world(edited), Some(STONE));
+    assert_eq!(
+        reopened.holder(center).map(ChunkHolder::residency),
+        Some(ChunkResidency::LoadedFromStore)
+    );
+    assert_eq!(
+        reopened.job_count(),
+        0,
+        "stored island chunk must bypass worldgen"
+    );
+}
+
+#[test]
 fn clean_generated_cache_miss_regenerates_without_store_error() {
     let mut scheduler =
         ChunkScheduler::with_world_store(12_345, Box::new(SharedMemoryWorldStore::new()));

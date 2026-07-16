@@ -193,7 +193,7 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
          The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
@@ -1655,6 +1655,44 @@ mod tests {
         assert_eq!(spawn.y, 4.0);
         assert!((0.0..16.0).contains(&spawn.x));
         assert!((0.0..16.0).contains(&spawn.z));
+
+        drop(session);
+        server.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn dedicated_server_serves_small_island_profile_and_safe_origin_spawn() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let (server, addr) = spawn_serve_once_server_with_profile(
+            12_345,
+            WorldGenerationProfile::SmallIslandV1,
+            DedicatedWorldSelection::Transient,
+        );
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+        let updates = wait_for_remote_updates(&mut session, |updates| {
+            chunk_snapshot_opt(updates, ChunkPos::new(0, 0)).is_some()
+                && player_position_update_opt(updates).is_some()
+        });
+        let snapshot = chunk_snapshot(&updates, ChunkPos::new(0, 0));
+        assert_ne!(
+            snapshot_block_state(snapshot, BlockPos::new(0, 80, 0)),
+            AIR_BLOCK_STATE_ID
+        );
+        assert_eq!(
+            snapshot_block_state(snapshot, BlockPos::new(0, 81, 0)),
+            AIR_BLOCK_STATE_ID
+        );
+        assert!(snapshot.biomes.contains(&1));
+        let spawn = player_position_update_opt(&updates).unwrap().position;
+        assert_eq!(spawn, Vec3d::new(0.5, 81.0, 0.5));
 
         drop(session);
         server.join().unwrap().unwrap();

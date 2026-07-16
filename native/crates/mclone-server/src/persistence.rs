@@ -4829,11 +4829,20 @@ mod tests {
             WorldGenerationProfile::FlatGrassV1
         );
 
+        let mut small_island = Vec::new();
+        write_world_generation_profile(&mut small_island, WorldGenerationProfile::SmallIslandV1)
+            .unwrap();
+        assert_eq!(small_island, [3]);
+        assert_eq!(
+            read_world_generation_profile(&mut small_island.as_slice()).unwrap(),
+            WorldGenerationProfile::SmallIslandV1
+        );
+
         assert!(
-            read_world_generation_profile(&mut [3].as_slice())
+            read_world_generation_profile(&mut [4].as_slice())
                 .unwrap_err()
                 .to_string()
-                .contains("unknown world generation profile tag 3")
+                .contains("unknown world generation profile tag 4")
         );
     }
 

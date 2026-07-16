@@ -2,9 +2,10 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tactical 187 is active through Slice 2. `flat-grass-v1` is a live,
-persisted, target-only shared-Rust generator beside the unchanged Overworld;
-authored-only misses still produce void. Seeded island is next.**
+Status: **Tactical 187 is active through Slice 3. `flat-grass-v1` and
+`small-island-v1` are live, persisted, target-only shared-Rust generators
+beside the unchanged Overworld; authored-only misses still produce void.
+Cross-platform product adoption is next.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -28,11 +29,13 @@ The first alternate generators are intentionally smaller:
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has three values:
+The stored server-owned `WorldGenerationProfile` has four values:
 
 - `Overworld`: current procedural vanilla-1.17-shaped generation;
 - `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
   decoration, ticks, or generator neighbors;
+- `SmallIslandV1`: a bounded original seeded radial/noise field with a safe
+  central grass patch, sand shoreline, ocean, and no generator neighbors;
 - `AuthoredOnly`: persistence-backed content whose true misses become void.
 
 The profile already crosses world catalogs, realm/dimension metadata,
@@ -41,8 +44,9 @@ It is fixed before chunk scheduling starts.
 
 Scheduler and worker requests now carry an immutable profile-plus-seed
 descriptor through native messages, WASM codecs, responses, and diagnostics.
-The closed shared-Rust dispatcher selects either the unchanged overworld cache
-or flat grass, and resident state resets when either descriptor fact changes.
+The closed shared-Rust dispatcher selects the unchanged overworld cache, flat
+grass, or seeded island, and resident state resets when either descriptor fact
+changes.
 
 The overworld implementation itself remains concrete:
 
@@ -53,8 +57,8 @@ The overworld implementation itself remains concrete:
   to `OverworldBiomeSource` and the current Overworld case.
 
 The generic `NoiseBiomeSource` used by terrain sampling is only a partial seam.
-Flat grass intentionally bypasses that machinery. Seeded island does not yet
-exist; island/table content remains pre-authored persisted fixtures.
+Flat grass and seeded island intentionally bypass that machinery. Authored
+island/table fixtures remain a separate persistence-backed content path.
 
 There is also no live native true-structure system. The old buried treasure,
 desert well, monster room, and fossil history belonged to the retired
@@ -109,9 +113,10 @@ native status.
 - target-only generation with exact seam and batch-order determinism
 - at least two pinned seeds with materially different valid islands
 
-Exact island constants and formulas become compatibility facts only after the
-first implementation's deterministic tests and inspected captures establish a
-good v1 shape.
+The exact island constants and formulas are frozen in Tactical 187's Slice 3
+execution record. Two pinned seeds, X/Z seam checks, partition invariance,
+save/reopen, dedicated spawn, and inspected overview/shoreline captures now
+establish the v1 compatibility shape.
 
 ## Architecture Direction
 

@@ -9,7 +9,7 @@ use mclone_worldgen::levelgen::{
     GeneratedChunk, MutableChunkBlockBuffer, OverworldDependencyGenerationTiming,
     OverworldFeatureBatchResult, OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, ScheduledTick, SurfaceFillTiming,
-    generate_flat_grass_chunk,
+    generate_flat_grass_chunk, generate_small_island_chunk,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -131,6 +131,30 @@ pub(crate) fn generate_chunks_with_dependencies(
                 .iter()
                 .copied()
                 .map(|pos| (pos, generate_flat_grass_chunk(pos.x, pos.z)))
+                .collect();
+            Ok(OverworldFeatureBatchResult {
+                chunks,
+                retained_dependencies: BTreeMap::new(),
+                cache_report: OverworldFeatureDependencyCacheReport::default(),
+                timing: OverworldFeatureBatchTiming::default(),
+            })
+        }
+        WorldGenerationProfile::SmallIslandV1 => {
+            if !dependencies.is_empty() {
+                return Err(format!(
+                    "small-island-v1 is target-only but received {} dependency chunks",
+                    dependencies.len()
+                ));
+            }
+            let chunks = targets
+                .iter()
+                .copied()
+                .map(|pos| {
+                    (
+                        pos,
+                        generate_small_island_chunk(descriptor.seed, pos.x, pos.z),
+                    )
+                })
                 .collect();
             Ok(OverworldFeatureBatchResult {
                 chunks,
@@ -1407,6 +1431,60 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![1_024, 1_024]
         );
+    }
+
+    #[test]
+    fn small_island_frames_are_target_only_partition_and_order_independent() {
+        let descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, -98_765);
+        let targets = [
+            ChunkPos::new(1, -2),
+            ChunkPos::new(-3, 4),
+            ChunkPos::new(0, 0),
+        ];
+        let batch = encode_worldgen_request(ChunkJobId(1), descriptor, &targets, Vec::new())
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        let reversed_targets = [targets[2], targets[1], targets[0]];
+        let reversed =
+            encode_worldgen_request(ChunkJobId(2), descriptor, &reversed_targets, Vec::new())
+                .and_then(|frame| compute_worldgen_job_frame(&frame))
+                .and_then(|frame| decode_worldgen_response(&frame))
+                .unwrap();
+        let partitioned = targets
+            .iter()
+            .copied()
+            .enumerate()
+            .flat_map(|(index, target)| {
+                encode_worldgen_request(
+                    ChunkJobId(index as u64 + 3),
+                    descriptor,
+                    &[target],
+                    Vec::new(),
+                )
+                .and_then(|frame| compute_worldgen_job_frame(&frame))
+                .and_then(|frame| decode_worldgen_response(&frame))
+                .unwrap()
+                .generated_chunks
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(batch.descriptor, descriptor);
+        assert_eq!(batch.generated_chunks, reversed.generated_chunks);
+        assert_eq!(batch.generated_chunks, partitioned);
+        assert!(batch.retained_dependencies.is_empty());
+        assert!(batch.retained_dependency_positions.is_empty());
+
+        let other_seed = WorldGenerationDescriptor::new(
+            WorldGenerationProfile::SmallIslandV1,
+            descriptor.seed + 1,
+        );
+        let changed = encode_worldgen_request(ChunkJobId(9), other_seed, &targets, Vec::new())
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        assert_ne!(batch.generated_chunks, changed.generated_chunks);
     }
 
     #[test]

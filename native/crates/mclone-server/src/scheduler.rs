@@ -3451,7 +3451,9 @@ impl ChunkScheduler {
             .world_generation_profile
         {
             WorldGenerationProfile::Overworld => feature_job_positions(targets, priority_centers),
-            WorldGenerationProfile::FlatGrassV1 => (targets.to_vec(), targets.to_vec(), Vec::new()),
+            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::SmallIslandV1 => {
+                (targets.to_vec(), targets.to_vec(), Vec::new())
+            }
             WorldGenerationProfile::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
             }
@@ -4776,6 +4778,64 @@ mod tests {
         assert_eq!(
             job.generation_descriptor,
             WorldGenerationDescriptor::new(WorldGenerationProfile::FlatGrassV1, 12_345)
+        );
+        assert!(job.dependency_chunks.is_empty());
+        assert_eq!(job.seeded_dependency_chunks, 0);
+        assert_eq!(job.retained_dependency_chunks, 0);
+    }
+
+    #[test]
+    fn small_island_profile_uses_target_only_generation_and_safe_origin_patch() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::SmallIslandV1)
+            .unwrap();
+        scheduler.set_lighting_enabled(false);
+        let center = ChunkPos::new(0, 0);
+        scheduler
+            .apply_interest(ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+
+        let mut ready = None;
+        for _ in 0..100 {
+            for event in scheduler.poll().unwrap() {
+                if let ChunkSchedulerEvent::SnapshotReady(snapshot) = event {
+                    ready = Some(snapshot);
+                }
+            }
+            if ready.is_some() {
+                break;
+            }
+            if scheduler.worldgen_mailbox_pending_count() > 0 {
+                assert!(scheduler.wait_for_worldgen_completion(Duration::from_secs(5)));
+            }
+            std::thread::yield_now();
+        }
+
+        let snapshot = ready.expect("small island should publish through the scheduler");
+        assert_eq!(snapshot.pos, center);
+        assert_eq!(snapshot.status, ChunkStatus::Features);
+        assert!(snapshot.biomes.contains(&1));
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(0, 80, 0)),
+            Some(GRASS_BLOCK)
+        );
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(0, 81, 0)),
+            Some(AIR)
+        );
+
+        let job = scheduler
+            .jobs()
+            .next()
+            .expect("small island generation job");
+        assert_eq!(
+            job.generation_descriptor,
+            WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, 12_345)
         );
         assert!(job.dependency_chunks.is_empty());
         assert_eq!(job.seeded_dependency_chunks, 0);
