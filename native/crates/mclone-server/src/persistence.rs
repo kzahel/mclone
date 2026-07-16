@@ -18,7 +18,7 @@ use std::{
 use rusqlite::{Connection, OptionalExtension, params};
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
-use mclone_protocol::{EntityRotation, ItemStackSnapshot};
+use mclone_protocol::{DimensionKey, EntityRotation, ItemStackSnapshot};
 
 use crate::{WorldBehaviorProfile, WorldGenerationProfile};
 
@@ -39,6 +39,7 @@ pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
 pub const PLAYER_RECORD_VERSION: u32 = 1;
+pub const DIMENSION_RECORD_VERSION: u32 = 1;
 pub const WORLD_METADATA_VERSION: u32 = 1;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
@@ -351,6 +352,69 @@ impl PlayerRecord {
             selected_hotbar_slot: 0,
             total_experience: 0,
         }
+    }
+}
+
+/// Persistent generation and environment facts for one dimension instance.
+///
+/// The first record vocabulary intentionally describes the current Overworld
+/// exactly. Slice 3 adds its durable codec and registry migration; Slice 4
+/// moves the corresponding live scheduler/state into `DimensionRuntime`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimensionDefinition {
+    pub seed: i64,
+    pub generation_profile: WorldGenerationProfile,
+    pub min_y: i32,
+    pub height: i32,
+    pub coordinate_scale: f64,
+    pub has_sky_light: bool,
+    pub has_ceiling: bool,
+    pub ultrawarm: bool,
+}
+
+impl DimensionDefinition {
+    pub const fn overworld(seed: i64, generation_profile: WorldGenerationProfile) -> Self {
+        Self {
+            seed,
+            generation_profile,
+            min_y: 0,
+            height: 256,
+            coordinate_scale: 1.0,
+            has_sky_light: true,
+            has_ceiling: false,
+            ultrawarm: false,
+        }
+    }
+}
+
+impl Default for DimensionDefinition {
+    fn default() -> Self {
+        Self::overworld(0, WorldGenerationProfile::default())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct DimensionRecord {
+    pub key: DimensionKey,
+    pub codec_version: u32,
+    pub revision: u64,
+    pub definition: DimensionDefinition,
+}
+
+impl DimensionRecord {
+    pub fn overworld(seed: i64, generation_profile: WorldGenerationProfile) -> Self {
+        Self {
+            key: DimensionKey::overworld(),
+            codec_version: DIMENSION_RECORD_VERSION,
+            revision: 1,
+            definition: DimensionDefinition::overworld(seed, generation_profile),
+        }
+    }
+}
+
+impl Default for DimensionRecord {
+    fn default() -> Self {
+        Self::overworld(0, WorldGenerationProfile::default())
     }
 }
 

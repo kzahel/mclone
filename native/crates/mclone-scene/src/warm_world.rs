@@ -58,7 +58,15 @@ pub(crate) const EMBEDDED_ACTIVATION_STABILITY_FRAMES: u32 = 8;
 /// Stable client-side identity for one retained world instance.
 ///
 /// Section and entity keys stay unqualified inside the slot. This identity is
-/// for scene-level ownership, diagnostics, and later selection only.
+/// for scene-level ownership, diagnostics, and later selection only. It is not
+/// convertible into durable realm identity:
+///
+/// ```compile_fail
+/// use mclone_protocol::RealmId;
+/// use mclone_scene::WorldInstanceId;
+///
+/// let realm_id: RealmId = WorldInstanceId::new(1).into();
+/// ```
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct WorldInstanceId(u64);
 

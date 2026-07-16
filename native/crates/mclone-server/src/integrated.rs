@@ -16,9 +16,9 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, InteractionHand,
+    AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DimensionKey, InteractionHand,
     MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind,
-    PlayerProfileId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
+    PlayerProfileId, RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
     SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
     SetPlayerAppearanceCommand, UseItemOnCommand,
 };
@@ -67,8 +67,8 @@ use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
     ChunkPublicationBudgetConfig, ChunkRecord, ChunkScheduler, ChunkSchedulerEvent,
-    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, FluidKind, FluidTickList,
-    NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
+    ChunkSnapshotStore, ChunkStoreError, ChunkStoreResult, DimensionRegistry, FluidKind,
+    FluidTickList, NullChunkSnapshotStore, PlayerChunkTrackingDiagnostics, ServerPhysicsStepReport,
     ServerPhysicsStepTiming, ServerPhysicsTickDiagnostics, ServerSimulationTickReport,
     ServerSimulationTickTiming, ServerTickReport, ServerTickTiming, WorldBehaviorProfile,
     WorldBlockPos, WorldGenerationProfile, WorldStore,
@@ -100,6 +100,8 @@ fn session_configuration(
 
 #[derive(Debug)]
 pub struct RealmServer {
+    realm_id: RealmId,
+    dimensions: DimensionRegistry,
     seed: i64,
     biome_source: ServerBiomeSource,
     scheduler: ChunkScheduler,
@@ -218,20 +220,45 @@ impl RealmServer {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
     }
 
+    pub fn new_in_realm(realm_id: RealmId, seed: i64) -> Self {
+        Self::with_chunk_store_in_realm(realm_id, seed, Box::<NullChunkSnapshotStore>::default())
+    }
+
     pub fn local_integrated(seed: i64) -> Self {
         Self::with_player_chunk_tracking_policy(seed, PlayerChunkTrackingPolicy::java_max())
     }
 
     pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
-        Self::with_scheduler(seed, ChunkScheduler::with_store(seed, store))
+        Self::with_chunk_store_in_realm(RealmId::LEGACY_SINGLE_REALM, seed, store)
+    }
+
+    pub fn with_chunk_store_in_realm(
+        realm_id: RealmId,
+        seed: i64,
+        store: Box<dyn ChunkSnapshotStore>,
+    ) -> Self {
+        Self::with_scheduler_in_realm(realm_id, seed, ChunkScheduler::with_store(seed, store))
     }
 
     pub fn with_world_store(seed: i64, store: Box<dyn WorldStore>) -> Self {
-        Self::with_scheduler(seed, ChunkScheduler::with_world_store(seed, store))
+        Self::with_world_store_in_realm(RealmId::LEGACY_SINGLE_REALM, seed, store)
+    }
+
+    pub fn with_world_store_in_realm(
+        realm_id: RealmId,
+        seed: i64,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        Self::with_scheduler_in_realm(
+            realm_id,
+            seed,
+            ChunkScheduler::with_world_store(seed, store),
+        )
     }
 
     pub fn local_integrated_with_world_store(seed: i64, store: Box<dyn WorldStore>) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::with_world_store(seed, store),
             PlayerChunkTrackingPolicy::java_max(),
@@ -243,6 +270,7 @@ impl RealmServer {
         store: Box<dyn WorldStore>,
     ) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::with_external_load_world_store(seed, store),
             PlayerChunkTrackingPolicy::java_max(),
@@ -277,6 +305,7 @@ impl RealmServer {
     ) -> ChunkStoreResult<Self> {
         let store = crate::persistence::SqliteWorldStore::open_world_dir(world_dir)?;
         Ok(Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::try_with_threaded_world_store(seed, Box::new(store))?,
             policy,
@@ -288,6 +317,7 @@ impl RealmServer {
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::new(seed),
             policy,
@@ -312,6 +342,7 @@ impl RealmServer {
         config: WasmServerJobWorkerConfig,
     ) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::with_wasm_job_workers(
                 seed,
@@ -329,6 +360,7 @@ impl RealmServer {
         config: WasmServerJobWorkerConfig,
     ) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::with_world_store_and_wasm_job_workers(seed, store, config),
             PlayerChunkTrackingPolicy::java_max(),
@@ -342,6 +374,7 @@ impl RealmServer {
         config: WasmServerJobWorkerConfig,
     ) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
             seed,
             ChunkScheduler::with_external_load_world_store_and_wasm_job_workers(
                 seed, store, config,
@@ -351,7 +384,12 @@ impl RealmServer {
     }
 
     fn with_scheduler(seed: i64, scheduler: ChunkScheduler) -> Self {
+        Self::with_scheduler_in_realm(RealmId::LEGACY_SINGLE_REALM, seed, scheduler)
+    }
+
+    fn with_scheduler_in_realm(realm_id: RealmId, seed: i64, scheduler: ChunkScheduler) -> Self {
         Self::with_scheduler_and_player_chunk_tracking_policy(
+            realm_id,
             seed,
             scheduler,
             PlayerChunkTrackingPolicy::default(),
@@ -359,6 +397,7 @@ impl RealmServer {
     }
 
     fn with_scheduler_and_player_chunk_tracking_policy(
+        realm_id: RealmId,
         seed: i64,
         scheduler: ChunkScheduler,
         policy: PlayerChunkTrackingPolicy,
@@ -366,6 +405,11 @@ impl RealmServer {
         let chunk_tracking = PlayerChunkTracking::new(policy);
         let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
         Self {
+            realm_id,
+            dimensions: DimensionRegistry::single_overworld(
+                seed,
+                WorldGenerationProfile::default(),
+            ),
             seed,
             biome_source: ServerBiomeSource::new(seed),
             scheduler,
@@ -400,6 +444,18 @@ impl RealmServer {
 
     pub const fn seed(&self) -> i64 {
         self.seed
+    }
+
+    pub const fn realm_id(&self) -> RealmId {
+        self.realm_id
+    }
+
+    pub fn dimensions(&self) -> &DimensionRegistry {
+        &self.dimensions
+    }
+
+    pub fn dimension_definition(&self, key: &DimensionKey) -> Option<&crate::DimensionDefinition> {
+        self.dimensions.get(key)
     }
 
     pub const fn simulation_tick(&self) -> u64 {
@@ -1453,7 +1509,9 @@ impl RealmServer {
         &mut self,
         profile: WorldGenerationProfile,
     ) -> ChunkStoreResult<()> {
-        self.scheduler.set_world_generation_profile(profile)
+        self.scheduler.set_world_generation_profile(profile)?;
+        self.dimensions.set_overworld_generation_profile(profile);
+        Ok(())
     }
 
     pub fn scheduler(&self) -> &ChunkScheduler {
@@ -2555,6 +2613,10 @@ impl LocalRealmSession {
 
     pub fn new(seed: i64) -> Self {
         Self::from_server(RealmServer::new(seed))
+    }
+
+    pub fn new_in_realm(realm_id: RealmId, seed: i64) -> Self {
+        Self::from_server(RealmServer::new_in_realm(realm_id, seed))
     }
 
     pub fn local_integrated(seed: i64) -> Self {

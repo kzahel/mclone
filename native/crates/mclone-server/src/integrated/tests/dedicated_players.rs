@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn existing_single_world_construction_is_one_overworld_realm() {
+    let realm_id = RealmId::new([0x42; 16]).unwrap();
+    let mut server = RealmServer::new_in_realm(realm_id, 12_345);
+
+    assert_eq!(server.realm_id(), realm_id);
+    assert_eq!(server.dimensions().len(), 1);
+    let definition = server
+        .dimension_definition(&DimensionKey::overworld())
+        .expect("Overworld definition");
+    assert_eq!(definition.seed, 12_345);
+    assert_eq!(
+        definition.generation_profile,
+        WorldGenerationProfile::Overworld
+    );
+
+    server
+        .set_world_generation_profile(WorldGenerationProfile::authored_only())
+        .unwrap();
+    assert_eq!(
+        server
+            .dimension_definition(&DimensionKey::overworld())
+            .unwrap()
+            .generation_profile,
+        WorldGenerationProfile::authored_only()
+    );
+}
+
+#[test]
 fn realm_server_has_no_implicit_player_and_local_session_joins_normally() {
     let server = RealmServer::new(0);
     assert_eq!(server.player_count(), 0);

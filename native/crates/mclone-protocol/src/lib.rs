@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod realm_dimension;
+
 use std::error::Error;
 use std::fmt;
 
@@ -7,6 +9,11 @@ use mclone_core::{
     BlockHitResult, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot,
     ChunkStatus, Direction, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
     SECTION_HEIGHT, Vec3d,
+};
+
+pub use realm_dimension::{
+    DimensionChunkPos, DimensionKey, DimensionKeyError, MAX_DIMENSION_KEY_BYTES,
+    OVERWORLD_DIMENSION_KEY, RealmId, RealmIdError,
 };
 
 pub const PROTOCOL_VERSION: u32 = 24;

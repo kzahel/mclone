@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-1 complete; neutral realm/dimension
-identities are next in Slice 2
+Status: active 2026-07-16; Slices 0-2 complete; dimension-qualified
+persistence is next in Slice 3
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -586,12 +586,36 @@ there is no server-owned special local player or local-only persistence path.
 
 ### Slice 2: Neutral realm/dimension identities
 
+Status: complete 2026-07-16.
+
 - Add validated namespaced `DimensionKey` and stable `RealmId` contracts.
 - Add `DimensionDefinition`/record vocabulary with an Overworld default.
 - Wrap existing single-world construction as one realm with one dimension.
 - Keep hot scheduler internals dimension-scoped rather than mechanically
   qualifying every `ChunkPos`.
 - Ensure `WorldInstanceId` cannot enter persistence/server identity APIs.
+
+Evidence:
+
+- `mclone-protocol` owns opaque non-nil `RealmId`, validated namespaced
+  `DimensionKey`, and cross-boundary `DimensionChunkPos`; no platform or scene
+  type participates in those contracts;
+- dimension keys require an explicit namespace and vanilla-shaped lowercase
+  namespace/path characters, while realm ids round-trip canonical UUID text;
+- `mclone-server::persistence` owns `DimensionDefinition` and
+  `DimensionRecord` vocabulary with an exact 1.17.1-height Overworld default;
+- `RealmServer` owns its realm id and a `DimensionRegistry`; every compatibility
+  constructor resolves exactly one `minecraft:overworld` definition, and an
+  explicit `new_in_realm` path accepts the durable id supplied by its host;
+- pre-Slice 3 stores use the named `RealmId::LEGACY_SINGLE_REALM` compatibility
+  identity. Slice 3 replaces that fallback with persisted per-realm metadata;
+- generation-profile changes update both the live scheduler and its Overworld
+  definition, while scheduler/chunk hot paths continue using plain `ChunkPos`;
+- a compile-fail `WorldInstanceId` contract proves there is no implicit scene
+  id to realm id conversion;
+- the protocol suite (37 tests), server suite (420 tests), scene compile-fail
+  doctest, and native workspace check pass. No wire tag, gameplay, renderer, or
+  presentation path changed.
 
 Exit: no gameplay or pixels change; existing worlds resolve exactly one
 `minecraft:overworld` definition.

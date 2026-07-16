@@ -2,10 +2,10 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-1 are
-complete. Every host now uses one `RealmServer` core and the integrated player
-is ordinary. Slice 2 neutral realm/dimension identities are next, before
-dimension, observer, or statistics features.**
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-2 are
+complete. Every host uses one `RealmServer`, the integrated player is ordinary,
+and neutral realm/dimension identities plus the one-Overworld registry are
+live. Slice 3 dimension-qualified persistence is next.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -116,6 +116,12 @@ The host topology is unified, while dimension ownership is still singleton:
   players;
 - the server still owns one scheduler/entity/time/store domain and therefore
   exactly one current dimension;
+- `RealmServer` owns an explicit `RealmId` and one-entry `DimensionRegistry`;
+  compatibility stores use a named legacy id until Slice 3 persists a unique
+  id in realm metadata;
+- `mclone-protocol` owns validated `DimensionKey` and `DimensionChunkPos`
+  boundary types, while hot scheduler code remains scoped by runtime and uses
+  plain `ChunkPos`;
 - player records already key by profile UUID but currently hard-code
   `minecraft:overworld` on write/resume;
 - SQLite and IndexedDB chunk/entity record keys have no dimension component;
@@ -315,7 +321,7 @@ Do not start with the statistics feature simply because its record is small.
 Its purpose is to prove the scope above, and implementing it before the scope
 would encode accidental singleton behavior.
 
-Steps 1-2 are complete. Step 3 is the active next boundary.
+Steps 1-3 are complete. Step 4 is the active next boundary.
 
 ## Related
 

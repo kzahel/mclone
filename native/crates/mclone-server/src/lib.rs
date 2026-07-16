@@ -4,6 +4,7 @@ mod authored_fixture;
 #[cfg(test)]
 mod block_light_bridge;
 mod cadence;
+mod dimension;
 mod distance_manager;
 mod entity;
 mod falling_block;
@@ -66,6 +67,7 @@ pub use cadence::{
     DEFAULT_PHYSICS_RATE_HZ, SimulationCadence, SimulationCadenceAdvance, SimulationCadenceConfig,
     SimulationCadenceFrame,
 };
+pub use dimension::DimensionRegistry;
 pub use holder::{ChunkHolder, ChunkStatusSlot};
 pub use integrated::{INITIAL_DAY_TIME, LocalRealmSession, RealmServer};
 pub use job_codec::{
@@ -79,14 +81,15 @@ pub use loading_progress::{
 pub use persistence::SqliteWorldStore;
 pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
-    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, EntityPersistentId, EntitySavePayload,
-    EntitySaveRecord, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore, PersistenceActor,
-    PersistenceMailbox, PersistenceRequestId, PlayerRecord, PlayerRecordKey, SaveDurability,
-    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
-    WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION, WorldMetadata,
-    WorldMetadataLoad, WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest,
-    decode_chunk_record, decode_entity_chunk_record, decode_player_record, decode_world_metadata,
-    encode_chunk_record, encode_entity_chunk_record, encode_player_record, encode_world_metadata,
+    ChunkStoreError, ChunkStoreResult, DIMENSION_RECORD_VERSION, DimensionDefinition,
+    DimensionRecord, EntityChunkRecord, EntityPersistentId, EntitySavePayload, EntitySaveRecord,
+    MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore, PersistenceActor, PersistenceMailbox,
+    PersistenceRequestId, PlayerRecord, PlayerRecordKey, SaveDurability, ScheduledTickRecord,
+    StoreWriteOutcome, SynchronousPersistenceFacade, WORLD_METADATA_TARGET_MINECRAFT_VERSION,
+    WORLD_METADATA_VERSION, WorldMetadata, WorldMetadataLoad, WorldRecordKey, WorldStore,
+    WorldStoreCompletion, WorldStoreRequest, decode_chunk_record, decode_entity_chunk_record,
+    decode_player_record, decode_world_metadata, encode_chunk_record, encode_entity_chunk_record,
+    encode_player_record, encode_world_metadata,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,
