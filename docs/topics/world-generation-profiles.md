@@ -2,10 +2,10 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tactical 187 is active. Slice 0 locks legacy encodings, ownership,
-and the current Overworld fixture baseline; runtime dispatch work has not yet
-started. The live procedural path remains the vanilla-1.17-shaped overworld;
-authored-only misses produce void.**
+Status: **Tactical 187 is active through Slice 1. Scheduler and worker paths
+now carry an immutable profile-plus-seed descriptor through closed shared-Rust
+dispatch, while the only procedural case remains the unchanged
+vanilla-1.17-shaped Overworld; authored-only misses still produce void.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation

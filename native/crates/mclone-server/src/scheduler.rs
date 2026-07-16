@@ -71,7 +71,8 @@ use crate::{
     ChunkResidency, ChunkStatusStep, ChunkTicketKey, ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ,
     FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, LightStatusMailboxKind,
     LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics,
-    WorldBlockPos, WorldGenerationProfile, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    WorldBlockPos, WorldGenerationDescriptor, WorldGenerationProfile, WorldgenMailboxKind,
+    full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -82,6 +83,7 @@ type SimulationTimingStart = Option<()>;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkStatusJob {
     pub id: ChunkJobId,
+    pub generation_descriptor: WorldGenerationDescriptor,
     pub status: ChunkStatus,
     pub state: ChunkJobState,
     pub target_chunks: Vec<ChunkPos>,
@@ -858,6 +860,10 @@ impl ChunkScheduler {
 
     pub const fn world_generation_profile(&self) -> WorldGenerationProfile {
         self.world_generation_profile
+    }
+
+    pub const fn world_generation_descriptor(&self) -> WorldGenerationDescriptor {
+        WorldGenerationDescriptor::new(self.world_generation_profile, self.seed)
     }
 
     pub fn set_world_generation_profile(
@@ -2926,7 +2932,7 @@ impl ChunkScheduler {
         self.mark_job_state(job_id, ChunkJobState::Running);
         self.worldgen_mailbox.enqueue_features(
             job_id,
-            self.seed,
+            self.world_generation_descriptor(),
             &job_targets,
             seeded_dependencies,
         );
@@ -3059,6 +3065,16 @@ impl ChunkScheduler {
         grant: PublicationGrant,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let completed = self.worldgen_mailbox.drain_completed();
+        let expected_descriptor = self.world_generation_descriptor();
+        if let Some(mismatch) = completed
+            .iter()
+            .find(|job| job.descriptor != expected_descriptor)
+        {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "worldgen job {:?} returned descriptor {:?}; expected {:?}",
+                mismatch.job_id, mismatch.descriptor, expected_descriptor
+            )));
+        }
         diagnostics.completed_feature_jobs_drained = diagnostics
             .completed_feature_jobs_drained
             .saturating_add(completed.len());
@@ -3441,6 +3457,7 @@ impl ChunkScheduler {
             id,
             ChunkStatusJob {
                 id,
+                generation_descriptor: self.world_generation_descriptor(),
                 status: ChunkStatus::Features,
                 state: ChunkJobState::Queued,
                 target_chunks,

@@ -44,6 +44,42 @@ impl WorldGenerationProfile {
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
         }
     }
+
+    pub(crate) const fn codec_tag(self) -> u8 {
+        match self {
+            Self::Overworld => 0,
+            Self::AuthoredOnly { .. } => 1,
+        }
+    }
+
+    pub(crate) const fn from_codec_tag(tag: u8) -> Option<Self> {
+        match tag {
+            0 => Some(Self::Overworld),
+            1 => Some(Self::authored_only()),
+            _ => None,
+        }
+    }
+}
+
+/// Complete immutable identity for one procedural generation session.
+///
+/// The profile is the persisted behavior/version identity. The seed remains a
+/// separate stored world fact, but workers treat the pair as one descriptor so
+/// resident generator state can never leak across either change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorldGenerationDescriptor {
+    pub profile: WorldGenerationProfile,
+    pub seed: i64,
+}
+
+impl WorldGenerationDescriptor {
+    pub const fn new(profile: WorldGenerationProfile, seed: i64) -> Self {
+        Self { profile, seed }
+    }
+
+    pub const fn overworld(seed: i64) -> Self {
+        Self::new(WorldGenerationProfile::Overworld, seed)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

@@ -4180,22 +4180,16 @@ fn write_world_generation_profile(
     writer: &mut impl Write,
     profile: WorldGenerationProfile,
 ) -> ChunkStoreResult<()> {
-    match profile {
-        WorldGenerationProfile::Overworld => write_u8(writer, 0),
-        WorldGenerationProfile::AuthoredOnly { .. } => write_u8(writer, 1),
-    }
+    write_u8(writer, profile.codec_tag())
 }
 
 fn read_world_generation_profile(
     reader: &mut impl Read,
 ) -> ChunkStoreResult<WorldGenerationProfile> {
-    match read_u8(reader)? {
-        0 => Ok(WorldGenerationProfile::Overworld),
-        1 => Ok(WorldGenerationProfile::authored_only()),
-        tag => Err(ChunkStoreError::InvalidData(format!(
-            "unknown world generation profile tag {tag}"
-        ))),
-    }
+    let tag = read_u8(reader)?;
+    WorldGenerationProfile::from_codec_tag(tag).ok_or_else(|| {
+        ChunkStoreError::InvalidData(format!("unknown world generation profile tag {tag}"))
+    })
 }
 
 fn write_world_behavior_profile(

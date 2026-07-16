@@ -457,10 +457,11 @@ Execution record:
 
 ### Slice 1: Descriptor propagation and closed generator dispatch
 
-Status: planned.
+Status: complete 2026-07-16.
 
-- Append the new stable profile values without changing existing serialized
-  meanings.
+- Reserve the new stable profile values without changing existing serialized
+  meanings. Add each public enum value in the same slice as its working
+  generator so no selectable intermediate profile has placeholder behavior.
 - Carry the selected descriptor through scheduler jobs, native mailbox
   requests, Web Worker request/delta codecs, worker session resets, responses,
   and diagnostics.
@@ -474,6 +475,20 @@ Status: planned.
 Gate: `Overworld` remains byte-exact on all committed oracle fixtures and has
 no material target/dependency/performance regression; legacy catalog/world
 records still open; native and Web Worker reset tests pass.
+
+Execution record:
+
+- added the immutable shared `WorldGenerationDescriptor { profile, seed }` and
+  carried it through scheduler jobs, native messages, full/delta worker frames,
+  responses, and public job diagnostics;
+- bumped the internal worker-frame codec to v3 and made the closed dispatcher
+  reject `authored-only`, which retains its direct persistence-miss path;
+- made the resident Web Worker session adopt a descriptor only on reset and
+  reject seed/profile changes without one; the WASM mailbox likewise forces a
+  new mirror generation when its descriptor changes;
+- kept the Overworld dependency cache and planning path unchanged. The full
+  438-test server suite, descriptor/reset codec tests, exact seed-0 terrain
+  fixture, and server/web WASM library checks pass.
 
 ### Slice 2: Flat grass generator
 

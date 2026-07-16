@@ -129,7 +129,8 @@ pub use types::{
 };
 pub use world_behavior_profile::WorldBehaviorProfile;
 pub use world_generation_profile::{
-    AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredMissingChunk, WorldGenerationProfile,
+    AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredMissingChunk, WorldGenerationDescriptor,
+    WorldGenerationProfile,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
