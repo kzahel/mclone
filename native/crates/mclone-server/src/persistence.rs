@@ -20,6 +20,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
 use mclone_protocol::{EntityRotation, ItemStackSnapshot};
 
+use crate::{WorldBehaviorProfile, WorldGenerationProfile};
+
 use mclone_core::{
     BlockStateId, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
 };
@@ -28,6 +30,7 @@ const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
 const PLAYER_RECORD_MAGIC: &[u8; 12] = b"MCLONEPLYR\0\0";
+const WORLD_METADATA_MAGIC: &[u8; 12] = b"MCLONEWRLD\0\0";
 #[cfg(not(target_arch = "wasm32"))]
 const SQLITE_WORLD_SCHEMA_VERSION: i64 = 1;
 #[cfg(not(target_arch = "wasm32"))]
@@ -36,6 +39,8 @@ pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
 pub const PLAYER_RECORD_VERSION: u32 = 1;
+pub const WORLD_METADATA_VERSION: u32 = 1;
+pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
 pub type PersistenceRequestId = u64;
 
@@ -218,6 +223,24 @@ pub fn decode_player_record(bytes: &[u8]) -> ChunkStoreResult<PlayerRecord> {
     read_player_record(&mut reader)
 }
 
+pub fn encode_world_metadata(record: &WorldMetadata) -> ChunkStoreResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_world_metadata(&mut bytes, record)?;
+    Ok(bytes)
+}
+
+pub fn decode_world_metadata(bytes: &[u8]) -> ChunkStoreResult<WorldMetadata> {
+    let mut reader = bytes;
+    let record = read_world_metadata(&mut reader)?;
+    if !reader.is_empty() {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "world metadata had {} trailing bytes",
+            reader.len()
+        )));
+    }
+    Ok(record)
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EntityPersistentId {
     pub most: u64,
@@ -331,8 +354,70 @@ impl PlayerRecord {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorldMetadata {
+    pub codec_version: u32,
+    pub revision: u64,
+    pub target_minecraft_version: String,
+    pub seed: i64,
+    pub world_generation_profile: WorldGenerationProfile,
+    pub world_behavior_profile: WorldBehaviorProfile,
+    pub created_unix_millis: u64,
+    pub last_played_unix_millis: u64,
+    pub game_time: u64,
+    pub day_time: u64,
+    pub do_daylight_cycle: bool,
+}
+
+impl WorldMetadata {
+    pub fn new(
+        seed: i64,
+        world_generation_profile: WorldGenerationProfile,
+        world_behavior_profile: WorldBehaviorProfile,
+        now_unix_millis: u64,
+    ) -> Self {
+        Self {
+            codec_version: WORLD_METADATA_VERSION,
+            revision: 1,
+            target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
+            seed,
+            world_generation_profile,
+            world_behavior_profile,
+            created_unix_millis: now_unix_millis,
+            last_played_unix_millis: now_unix_millis,
+            game_time: 0,
+            day_time: 0,
+            do_daylight_cycle: true,
+        }
+    }
+
+    pub fn legacy_mclone(
+        seed: i64,
+        world_generation_profile: WorldGenerationProfile,
+        world_behavior_profile: WorldBehaviorProfile,
+        now_unix_millis: u64,
+        legacy_day_time: u64,
+    ) -> Self {
+        let mut record = Self::new(
+            seed,
+            world_generation_profile,
+            world_behavior_profile,
+            now_unix_millis,
+        );
+        record.day_time = legacy_day_time;
+        record
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct WorldMetadataLoad {
+    pub record: Option<WorldMetadata>,
+    pub legacy_records_present: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum WorldRecordKey {
+    WorldMetadata,
     Chunk(ChunkPos),
     EntityChunk(ChunkPos),
     Player(PlayerRecordKey),
@@ -341,6 +426,13 @@ pub enum WorldRecordKey {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WorldStoreRequest {
+    LoadWorldMetadata {
+        request_id: PersistenceRequestId,
+    },
+    SaveWorldMetadata {
+        request_id: PersistenceRequestId,
+        record: WorldMetadata,
+    },
     LoadChunk {
         request_id: PersistenceRequestId,
         pos: ChunkPos,
@@ -382,7 +474,9 @@ pub enum WorldStoreRequest {
 impl WorldStoreRequest {
     pub const fn request_id(&self) -> PersistenceRequestId {
         match self {
-            Self::LoadChunk { request_id, .. }
+            Self::LoadWorldMetadata { request_id }
+            | Self::SaveWorldMetadata { request_id, .. }
+            | Self::LoadChunk { request_id, .. }
             | Self::SaveChunk { request_id, .. }
             | Self::LoadEntityChunk { request_id, .. }
             | Self::SaveEntityChunk { request_id, .. }
@@ -397,6 +491,17 @@ impl WorldStoreRequest {
     #[cfg(not(target_arch = "wasm32"))]
     fn into_closed_completion(self) -> WorldStoreCompletion {
         match self {
+            Self::LoadWorldMetadata { request_id } => WorldStoreCompletion::WorldMetadataLoaded {
+                request_id,
+                result: Err(closed_error()),
+            },
+            Self::SaveWorldMetadata { request_id, record } => {
+                WorldStoreCompletion::WorldMetadataSaved {
+                    request_id,
+                    revision: record.revision,
+                    result: Err(closed_error()),
+                }
+            }
             Self::LoadChunk { request_id, pos } => WorldStoreCompletion::ChunkLoaded {
                 request_id,
                 pos,
@@ -457,6 +562,15 @@ pub enum StoreWriteOutcome {
 
 #[derive(Debug)]
 pub enum WorldStoreCompletion {
+    WorldMetadataLoaded {
+        request_id: PersistenceRequestId,
+        result: ChunkStoreResult<WorldMetadataLoad>,
+    },
+    WorldMetadataSaved {
+        request_id: PersistenceRequestId,
+        revision: u64,
+        result: ChunkStoreResult<StoreWriteOutcome>,
+    },
     ChunkLoaded {
         request_id: PersistenceRequestId,
         pos: ChunkPos,
@@ -505,7 +619,9 @@ pub enum WorldStoreCompletion {
 impl WorldStoreCompletion {
     pub const fn request_id(&self) -> PersistenceRequestId {
         match self {
-            Self::ChunkLoaded { request_id, .. }
+            Self::WorldMetadataLoaded { request_id, .. }
+            | Self::WorldMetadataSaved { request_id, .. }
+            | Self::ChunkLoaded { request_id, .. }
             | Self::ChunkSaved { request_id, .. }
             | Self::EntityChunkLoaded { request_id, .. }
             | Self::EntityChunkSaved { request_id, .. }
@@ -526,6 +642,16 @@ pub trait ChunkSnapshotStore: fmt::Debug {
 pub trait WorldStore: fmt::Debug {
     fn supports_entity_chunks(&self) -> bool {
         false
+    }
+
+    fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
+        Ok(WorldMetadataLoad::default())
+    }
+
+    fn save_world_metadata(&mut self, _record: &WorldMetadata) -> ChunkStoreResult<()> {
+        Err(ChunkStoreError::InvalidData(
+            "world metadata storage is not supported".to_owned(),
+        ))
     }
 
     fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>>;
@@ -582,6 +708,10 @@ impl ChunkSnapshotStore for NullChunkSnapshotStore {
 pub struct NullWorldStore;
 
 impl WorldStore for NullWorldStore {
+    fn save_world_metadata(&mut self, _record: &WorldMetadata) -> ChunkStoreResult<()> {
+        Ok(())
+    }
+
     fn load_chunk(&mut self, _pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
         Ok(None)
     }
@@ -605,6 +735,7 @@ impl WorldStore for NullWorldStore {
 
 #[derive(Debug, Default)]
 pub struct MemoryWorldStore {
+    world_metadata: Option<WorldMetadata>,
     chunks: BTreeMap<ChunkPos, ChunkRecord>,
     entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
     players: BTreeMap<PlayerRecordKey, PlayerRecord>,
@@ -626,9 +757,34 @@ impl MemoryWorldStore {
     pub fn player(&self, key: &PlayerRecordKey) -> Option<&PlayerRecord> {
         self.players.get(key)
     }
+
+    pub fn world_metadata(&self) -> Option<&WorldMetadata> {
+        self.world_metadata.as_ref()
+    }
 }
 
 impl WorldStore for MemoryWorldStore {
+    fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
+        Ok(WorldMetadataLoad {
+            record: self.world_metadata.clone(),
+            legacy_records_present: !self.chunks.is_empty()
+                || !self.entity_chunks.is_empty()
+                || !self.players.is_empty(),
+        })
+    }
+
+    fn save_world_metadata(&mut self, record: &WorldMetadata) -> ChunkStoreResult<()> {
+        if self
+            .world_metadata
+            .as_ref()
+            .is_some_and(|stored| stored.revision > record.revision)
+        {
+            return Ok(());
+        }
+        self.world_metadata = Some(record.clone());
+        Ok(())
+    }
+
     fn supports_entity_chunks(&self) -> bool {
         true
     }
@@ -761,6 +917,33 @@ impl PersistenceActor {
 
     pub fn entity_chunks_supported(&self) -> bool {
         self.store.supports_entity_chunks()
+    }
+
+    pub fn load_world_metadata(&mut self, request_id: PersistenceRequestId) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store.load_world_metadata()
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::WorldMetadataLoaded { request_id, result });
+    }
+
+    pub fn save_world_metadata(&mut self, request_id: PersistenceRequestId, record: WorldMetadata) {
+        let revision = record.revision;
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_world_metadata(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::WorldMetadataSaved {
+                request_id,
+                revision,
+                result,
+            });
     }
 
     pub fn load_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
@@ -1191,6 +1374,12 @@ impl ExternalLoadPersistenceActor {
 
     fn send_request(&mut self, request: WorldStoreRequest) {
         match request {
+            WorldStoreRequest::LoadWorldMetadata { request_id } => {
+                self.load_world_metadata(request_id);
+            }
+            WorldStoreRequest::SaveWorldMetadata { request_id, record } => {
+                self.save_world_metadata(request_id, record);
+            }
             WorldStoreRequest::LoadChunk { request_id, pos } => {
                 self.load_chunk(request_id, pos);
             }
@@ -1227,6 +1416,33 @@ impl ExternalLoadPersistenceActor {
                 self.close(request_id);
             }
         }
+    }
+
+    fn load_world_metadata(&mut self, request_id: PersistenceRequestId) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store.load_world_metadata()
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::WorldMetadataLoaded { request_id, result });
+    }
+
+    fn save_world_metadata(&mut self, request_id: PersistenceRequestId, record: WorldMetadata) {
+        let revision = record.revision;
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_world_metadata(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::WorldMetadataSaved {
+                request_id,
+                revision,
+                result,
+            });
     }
 
     fn load_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
@@ -1568,6 +1784,10 @@ impl ExternalLoadPersistenceActor {
         completion: WorldStoreCompletion,
     ) -> ChunkStoreResult<()> {
         match completion {
+            WorldStoreCompletion::WorldMetadataLoaded { .. }
+            | WorldStoreCompletion::WorldMetadataSaved { .. } => Err(ChunkStoreError::InvalidData(
+                "world metadata is preloaded by the external persistence adapter".to_owned(),
+            )),
             WorldStoreCompletion::ChunkLoaded {
                 request_id,
                 pos,
@@ -1732,6 +1952,12 @@ impl ExternalLoadPersistenceActor {
 
 fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreRequest) {
     match request {
+        WorldStoreRequest::LoadWorldMetadata { request_id } => {
+            actor.load_world_metadata(request_id);
+        }
+        WorldStoreRequest::SaveWorldMetadata { request_id, record } => {
+            actor.save_world_metadata(request_id, record);
+        }
         WorldStoreRequest::LoadChunk { request_id, pos } => {
             actor.load_chunk(request_id, pos);
         }
@@ -2118,6 +2344,20 @@ impl PersistenceMailbox {
         Self::new(Box::<NullWorldStore>::default())
     }
 
+    pub fn load_world_metadata(&mut self) -> PersistenceRequestId {
+        let request_id = self.next_request_id();
+        self.backend
+            .send_request(WorldStoreRequest::LoadWorldMetadata { request_id });
+        request_id
+    }
+
+    pub fn save_world_metadata(&mut self, record: WorldMetadata) -> PersistenceRequestId {
+        let request_id = self.next_request_id();
+        self.backend
+            .send_request(WorldStoreRequest::SaveWorldMetadata { request_id, record });
+        request_id
+    }
+
     pub fn memory() -> Self {
         Self::new(Box::<MemoryWorldStore>::default())
     }
@@ -2243,6 +2483,29 @@ impl PersistenceMailbox {
             WorldStoreCompletion::ChunkLoaded { result, .. } => result,
             completion => Err(ChunkStoreError::InvalidData(format!(
                 "load_chunk completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn load_world_metadata_blocking(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
+        let request_id = self.load_world_metadata();
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::WorldMetadataLoaded { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "load_world_metadata completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn save_world_metadata_blocking(
+        &mut self,
+        record: WorldMetadata,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        let request_id = self.save_world_metadata(record);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::WorldMetadataSaved { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "save_world_metadata completed with unexpected persistence completion {completion:?}"
             ))),
         }
     }
@@ -2554,6 +2817,58 @@ impl WorldStore for SqliteWorldStore {
         true
     }
 
+    fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
+        let blob = self
+            .connection
+            .query_row(
+                "SELECT record_blob FROM world_metadata WHERE singleton_id = 1",
+                [],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let record = blob.as_deref().map(decode_world_metadata).transpose()?;
+        let legacy_records_present = if record.is_some() {
+            false
+        } else {
+            self.connection
+                .query_row(
+                    "SELECT EXISTS(SELECT 1 FROM chunk_records LIMIT 1)
+                        OR EXISTS(SELECT 1 FROM entity_chunk_records LIMIT 1)
+                        OR EXISTS(SELECT 1 FROM player_records LIMIT 1)",
+                    [],
+                    |row| row.get::<_, bool>(0),
+                )
+                .map_err(sqlite_error)?
+        };
+        Ok(WorldMetadataLoad {
+            record,
+            legacy_records_present,
+        })
+    }
+
+    fn save_world_metadata(&mut self, record: &WorldMetadata) -> ChunkStoreResult<()> {
+        if let Some(stored) = self.load_world_metadata()?.record
+            && stored.revision > record.revision
+        {
+            return Ok(());
+        }
+        let blob = encode_world_metadata(record)?;
+        self.connection
+            .execute(
+                "INSERT INTO world_metadata
+                    (singleton_id, codec_version, revision, record_blob)
+                 VALUES (1, ?1, ?2, ?3)
+                 ON CONFLICT(singleton_id) DO UPDATE SET
+                    codec_version = excluded.codec_version,
+                    revision = excluded.revision,
+                    record_blob = excluded.record_blob",
+                params![record.codec_version, record.revision.to_string(), blob],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
         let blob = self
             .connection
@@ -2725,6 +3040,12 @@ fn initialize_sqlite_world_schema(connection: &Connection) -> ChunkStoreResult<(
              CREATE TABLE IF NOT EXISTS metadata (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS world_metadata (
+                singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                codec_version INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                record_blob BLOB NOT NULL
              );
              CREATE TABLE IF NOT EXISTS chunk_records (
                 x INTEGER NOT NULL,
@@ -2970,6 +3291,120 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_u64(writer, record.total_experience)?;
     writer.flush()?;
     Ok(())
+}
+
+fn write_world_metadata(writer: &mut impl Write, record: &WorldMetadata) -> ChunkStoreResult<()> {
+    if record.codec_version != WORLD_METADATA_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported world metadata codec version {}",
+            record.codec_version
+        )));
+    }
+    if record.target_minecraft_version != WORLD_METADATA_TARGET_MINECRAFT_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported world metadata target {}; expected {}",
+            record.target_minecraft_version, WORLD_METADATA_TARGET_MINECRAFT_VERSION
+        )));
+    }
+    writer.write_all(WORLD_METADATA_MAGIC)?;
+    write_u32(writer, WORLD_METADATA_VERSION)?;
+    write_u64(writer, record.revision)?;
+    write_string(
+        writer,
+        &record.target_minecraft_version,
+        "target Minecraft version",
+    )?;
+    write_i64(writer, record.seed)?;
+    write_world_generation_profile(writer, record.world_generation_profile)?;
+    write_world_behavior_profile(writer, record.world_behavior_profile)?;
+    write_u64(writer, record.created_unix_millis)?;
+    write_u64(writer, record.last_played_unix_millis)?;
+    write_u64(writer, record.game_time)?;
+    write_u64(writer, record.day_time)?;
+    write_bool(writer, record.do_daylight_cycle)?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata> {
+    let mut magic = [0_u8; WORLD_METADATA_MAGIC.len()];
+    reader.read_exact(&mut magic)?;
+    if &magic != WORLD_METADATA_MAGIC {
+        return Err(ChunkStoreError::InvalidData(
+            "world metadata had invalid magic".to_owned(),
+        ));
+    }
+    let codec_version = read_u32(reader)?;
+    if codec_version != WORLD_METADATA_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported world metadata codec version {codec_version}"
+        )));
+    }
+    let record = WorldMetadata {
+        codec_version,
+        revision: read_u64(reader)?,
+        target_minecraft_version: read_string(reader)?,
+        seed: read_i64(reader)?,
+        world_generation_profile: read_world_generation_profile(reader)?,
+        world_behavior_profile: read_world_behavior_profile(reader)?,
+        created_unix_millis: read_u64(reader)?,
+        last_played_unix_millis: read_u64(reader)?,
+        game_time: read_u64(reader)?,
+        day_time: read_u64(reader)?,
+        do_daylight_cycle: read_bool(reader)?,
+    };
+    if record.target_minecraft_version != WORLD_METADATA_TARGET_MINECRAFT_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported world metadata target {}; expected {}",
+            record.target_minecraft_version, WORLD_METADATA_TARGET_MINECRAFT_VERSION
+        )));
+    }
+    Ok(record)
+}
+
+fn write_world_generation_profile(
+    writer: &mut impl Write,
+    profile: WorldGenerationProfile,
+) -> ChunkStoreResult<()> {
+    match profile {
+        WorldGenerationProfile::Overworld => write_u8(writer, 0),
+        WorldGenerationProfile::AuthoredOnly { .. } => write_u8(writer, 1),
+    }
+}
+
+fn read_world_generation_profile(
+    reader: &mut impl Read,
+) -> ChunkStoreResult<WorldGenerationProfile> {
+    match read_u8(reader)? {
+        0 => Ok(WorldGenerationProfile::Overworld),
+        1 => Ok(WorldGenerationProfile::authored_only()),
+        tag => Err(ChunkStoreError::InvalidData(format!(
+            "unknown world generation profile tag {tag}"
+        ))),
+    }
+}
+
+fn write_world_behavior_profile(
+    writer: &mut impl Write,
+    profile: WorldBehaviorProfile,
+) -> ChunkStoreResult<()> {
+    write_u8(
+        writer,
+        match profile {
+            WorldBehaviorProfile::Mutable => 0,
+            WorldBehaviorProfile::ProtectedLobby => 1,
+        },
+    )
+}
+
+fn read_world_behavior_profile(reader: &mut impl Read) -> ChunkStoreResult<WorldBehaviorProfile> {
+    match read_u8(reader)? {
+        0 => Ok(WorldBehaviorProfile::Mutable),
+        1 => Ok(WorldBehaviorProfile::ProtectedLobby),
+        tag => Err(ChunkStoreError::InvalidData(format!(
+            "unknown world behavior profile tag {tag}"
+        ))),
+    }
 }
 
 fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> {
@@ -3402,6 +3837,17 @@ fn read_u64(reader: &mut impl Read) -> ChunkStoreResult<u64> {
     Ok(u64::from_le_bytes(bytes))
 }
 
+fn write_i64(writer: &mut impl Write, value: i64) -> ChunkStoreResult<()> {
+    writer.write_all(&value.to_le_bytes())?;
+    Ok(())
+}
+
+fn read_i64(reader: &mut impl Read) -> ChunkStoreResult<i64> {
+    let mut bytes = [0_u8; 8];
+    reader.read_exact(&mut bytes)?;
+    Ok(i64::from_le_bytes(bytes))
+}
+
 fn write_f32(writer: &mut impl Write, value: f32) -> ChunkStoreResult<()> {
     writer.write_all(&value.to_le_bytes())?;
     Ok(())
@@ -3533,6 +3979,57 @@ mod tests {
         let decoded = decode_player_record(&bytes).unwrap();
 
         assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn binary_world_metadata_roundtrips_all_authoritative_facts() {
+        let record = test_world_metadata(44);
+
+        let bytes = encode_world_metadata(&record).unwrap();
+        let decoded = decode_world_metadata(&bytes).unwrap();
+
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn binary_world_metadata_rejects_unknown_versions_and_trailing_bytes() {
+        let mut unknown_version = encode_world_metadata(&test_world_metadata(1)).unwrap();
+        unknown_version[WORLD_METADATA_MAGIC.len()] = 2;
+        assert!(
+            decode_world_metadata(&unknown_version)
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported world metadata codec version 2")
+        );
+
+        let mut trailing = encode_world_metadata(&test_world_metadata(1)).unwrap();
+        trailing.push(0xFF);
+        assert!(
+            decode_world_metadata(&trailing)
+                .unwrap_err()
+                .to_string()
+                .contains("trailing bytes")
+        );
+    }
+
+    #[test]
+    fn actor_world_metadata_save_is_immediately_visible() {
+        let mut mailbox = PersistenceMailbox::memory();
+        let record = test_world_metadata(7);
+
+        assert_eq!(
+            mailbox
+                .save_world_metadata_blocking(record.clone())
+                .unwrap(),
+            StoreWriteOutcome::Written
+        );
+        assert_eq!(
+            mailbox.load_world_metadata_blocking().unwrap(),
+            WorldMetadataLoad {
+                record: Some(record),
+                legacy_records_present: false,
+            }
+        );
     }
 
     #[test]
@@ -3992,6 +4489,7 @@ mod tests {
         let chunk = test_record(chunk_pos, 14);
         let entity_chunk = test_entity_chunk_record(entity_pos, 15);
         let player = test_player_record(16);
+        let metadata = test_world_metadata(17);
 
         {
             let mut store = SqliteWorldStore::new(&path).unwrap();
@@ -3999,6 +4497,14 @@ mod tests {
             store.save_chunk(&chunk).unwrap();
             store.save_entity_chunk(&entity_chunk).unwrap();
             store.save_player(&player).unwrap();
+            assert_eq!(
+                store.load_world_metadata().unwrap(),
+                WorldMetadataLoad {
+                    record: None,
+                    legacy_records_present: true,
+                }
+            );
+            store.save_world_metadata(&metadata).unwrap();
             store.flush().unwrap();
             store.close().unwrap();
         }
@@ -4012,6 +4518,13 @@ mod tests {
                 Some(entity_chunk)
             );
             assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
+            assert_eq!(
+                reopened.load_world_metadata().unwrap(),
+                WorldMetadataLoad {
+                    record: Some(metadata),
+                    legacy_records_present: false,
+                }
+            );
             assert_eq!(reopened.load_chunk(ChunkPos::new(99, 99)).unwrap(), None);
             assert_eq!(
                 reopened.load_entity_chunk(ChunkPos::new(99, 99)).unwrap(),
@@ -4032,6 +4545,7 @@ mod tests {
         let chunk = test_record(chunk_pos, 16);
         let entity_chunk = test_entity_chunk_record(entity_pos, 17);
         let player = test_player_record(18);
+        let metadata = test_world_metadata(19);
 
         {
             let store = SqliteWorldStore::new(&path).unwrap();
@@ -4040,6 +4554,7 @@ mod tests {
             let entity_save_id =
                 mailbox.save_entity_chunk(entity_chunk.clone(), SaveDurability::Durable);
             let player_save_id = mailbox.save_player(player.clone());
+            let metadata_save_id = mailbox.save_world_metadata(metadata.clone());
             let close_id = mailbox.close();
 
             assert_eq!(
@@ -4054,6 +4569,10 @@ mod tests {
                 take_saved_player_wait(&mut mailbox, player_save_id),
                 StoreWriteOutcome::Written
             );
+            assert_eq!(
+                take_saved_world_metadata_wait(&mut mailbox, metadata_save_id),
+                StoreWriteOutcome::Written
+            );
             take_close_complete_wait(&mut mailbox, close_id);
         }
 
@@ -4065,6 +4584,10 @@ mod tests {
                 Some(entity_chunk)
             );
             assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
+            assert_eq!(
+                reopened.load_world_metadata().unwrap().record,
+                Some(metadata)
+            );
         }
 
         fs::remove_dir_all(root).unwrap();
@@ -4120,6 +4643,22 @@ mod tests {
             on_ground: false,
             selected_hotbar_slot: 4,
             total_experience: 987,
+        }
+    }
+
+    fn test_world_metadata(revision: u64) -> WorldMetadata {
+        WorldMetadata {
+            codec_version: WORLD_METADATA_VERSION,
+            revision,
+            target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
+            seed: -9_223_372_036_854_775,
+            world_generation_profile: WorldGenerationProfile::authored_only(),
+            world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,
+            created_unix_millis: 1_784_203_200_000,
+            last_played_unix_millis: 1_784_203_260_000,
+            game_time: 98_765,
+            day_time: 54_321,
+            do_daylight_cycle: false,
         }
     }
 
@@ -4255,6 +4794,17 @@ mod tests {
     ) -> StoreWriteOutcome {
         match take_completion_wait(mailbox, request_id) {
             WorldStoreCompletion::PlayerSaved { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_saved_world_metadata_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> StoreWriteOutcome {
+        match take_completion_wait(mailbox, request_id) {
+            WorldStoreCompletion::WorldMetadataSaved { result, .. } => result.unwrap(),
             completion => panic!("unexpected completion: {completion:?}"),
         }
     }

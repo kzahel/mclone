@@ -57,8 +57,8 @@ use crate::loading_progress::{
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
     EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, PlayerRecord, PlayerRecordKey,
-    SaveDurability, ScheduledTickRecord, StoreWriteOutcome, WorldStore, WorldStoreCompletion,
-    WorldStoreRequest,
+    SaveDurability, ScheduledTickRecord, StoreWriteOutcome, WorldMetadata, WorldMetadataLoad,
+    WorldStore, WorldStoreCompletion, WorldStoreRequest,
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -1268,6 +1268,17 @@ impl ChunkScheduler {
         self.pending_chunk_saves.len()
             + self.pending_entity_chunk_saves.len()
             + self.pending_player_saves.len()
+    }
+
+    pub fn load_world_metadata_blocking(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
+        self.store.load_world_metadata_blocking()
+    }
+
+    pub fn save_world_metadata_blocking(
+        &mut self,
+        record: WorldMetadata,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        self.store.save_world_metadata_blocking(record)
     }
 
     pub fn load_player_record(&mut self, player: PlayerRecordKey) -> PersistenceRequestId {
@@ -3507,6 +3518,14 @@ impl ChunkScheduler {
         completion: WorldStoreCompletion,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         match completion {
+            WorldStoreCompletion::WorldMetadataLoaded { result, .. } => {
+                result?;
+                Ok(Vec::new())
+            }
+            WorldStoreCompletion::WorldMetadataSaved { result, .. } => {
+                result?;
+                Ok(Vec::new())
+            }
             WorldStoreCompletion::ChunkLoaded {
                 request_id,
                 pos,

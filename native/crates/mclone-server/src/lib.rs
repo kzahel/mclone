@@ -82,10 +82,11 @@ pub use persistence::{
     ChunkStoreError, ChunkStoreResult, EntityChunkRecord, EntityPersistentId, EntitySavePayload,
     EntitySaveRecord, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore, PersistenceActor,
     PersistenceMailbox, PersistenceRequestId, PlayerRecord, PlayerRecordKey, SaveDurability,
-    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey,
-    WorldStore, WorldStoreCompletion, WorldStoreRequest, decode_chunk_record,
-    decode_entity_chunk_record, decode_player_record, encode_chunk_record,
-    encode_entity_chunk_record, encode_player_record,
+    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
+    WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION, WorldMetadata,
+    WorldMetadataLoad, WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    decode_chunk_record, decode_entity_chunk_record, decode_player_record, decode_world_metadata,
+    encode_chunk_record, encode_entity_chunk_record, encode_player_record, encode_world_metadata,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,
