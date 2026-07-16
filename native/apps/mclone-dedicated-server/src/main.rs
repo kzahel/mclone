@@ -825,6 +825,18 @@ mod tests {
         AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, MovePlayerCommand,
         PlayerActionCommand, PlayerActionKind, PlayerProfileId, RemotePlayerId, ServerUpdate,
     };
+    use mclone_server::{SqliteWorldStore, WorldStore};
+
+    fn latest_time_update(updates: &[ServerUpdate]) -> Option<(u64, u64, bool)> {
+        updates.iter().rev().find_map(|update| match update {
+            ServerUpdate::TimeUpdate {
+                game_time,
+                day_time,
+                daylight_cycle_running,
+            } => Some((*game_time, *day_time, *daylight_cycle_running)),
+            _ => None,
+        })
+    }
 
     #[test]
     fn cli_defaults_to_localhost_server() {
@@ -1304,7 +1316,7 @@ mod tests {
         let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
         let root = unique_temp_dir("dedicated-persistent-world-restart");
         let world = DedicatedWorldSelection::Persistent { dir: root.clone() };
-        let target = {
+        let (target, saved_time) = {
             let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world.clone());
             let mut session = NativeClientIoSession::connect(addr).unwrap();
             session
@@ -1342,7 +1354,13 @@ mod tests {
             ));
             drop(session);
             server.join().unwrap().unwrap();
-            target
+            let mut store = SqliteWorldStore::open_world_dir(&root).unwrap();
+            let metadata = store
+                .load_world_metadata()
+                .unwrap()
+                .record
+                .expect("dedicated shutdown should save world metadata");
+            (target, (metadata.game_time, metadata.day_time))
         };
 
         let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world.clone());
@@ -1356,9 +1374,14 @@ mod tests {
             .unwrap();
         let updates = wait_for_remote_updates(&mut session, |updates| {
             chunk_snapshot_opt(updates, target.chunk_pos()).is_some()
+                && latest_time_update(updates).is_some()
         });
         let snapshot = chunk_snapshot(&updates, target.chunk_pos());
         assert_eq!(snapshot_block_state(snapshot, target), AIR_BLOCK_STATE_ID);
+        let resumed_time = latest_time_update(&updates).unwrap();
+        assert!(resumed_time.0 >= saved_time.0);
+        assert!(resumed_time.1 >= saved_time.1);
+        assert!(resumed_time.2);
         drop(session);
         server.join().unwrap().unwrap();
         let _ = std::fs::remove_dir_all(root);
