@@ -113,6 +113,7 @@ interface AppRuntime {
   setNativeTouchControlsMode?: (mode: TouchControlsMode, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
   beginManagedScenarioSmoke?: (chunkSpan?: number) => WasmReport | null;
+  backgroundSaveForSmoke?: () => WasmReport | null;
   shutdownForSmoke?: () => Promise<WasmReport | null>;
 }
 
@@ -311,6 +312,7 @@ async function boot(): Promise<WasmReport> {
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
   runtime.beginManagedScenarioSmoke = (chunkSpan = 2) =>
     app.beginManagedScenarioSmoke(chunkSpan);
+  runtime.backgroundSaveForSmoke = () => app.backgroundSaveForSmoke();
   runtime.shutdownForSmoke = () => app.shutdownForSmoke();
   try {
     await app.init();
@@ -714,6 +716,15 @@ class WebFrameDriver {
       runtime.state.shutdownComplete = Boolean(report.shutdownComplete);
       publishRuntimeState(runtime.state);
     }
+    return report;
+  }
+
+  backgroundSaveForSmoke(): WasmReport | null {
+    const report = this.session?.setHidden(true) ?? null;
+    this.applyNativeUiReport(report);
+    const resumed = this.session?.setHidden(false) ?? null;
+    this.applyNativeUiReport(resumed);
+    this.lastFrameTime = performance.now();
     return report;
   }
 

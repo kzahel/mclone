@@ -1,9 +1,10 @@
 export const WORLD_DB_NAME = "mclone-web-worlds";
-export const WORLD_DB_VERSION = 4;
+export const WORLD_DB_VERSION = 5;
 export const WORLD_CATALOG_STORE = "worlds";
 export const WORLD_CHUNK_STORE = "chunks";
 export const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
 export const WORLD_PLAYER_STORE = "players";
+export const WORLD_METADATA_STORE = "worldMetadata";
 export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
 export const WORLD_ID_INDEX = "worldId";
 
@@ -127,6 +128,7 @@ export function openWorldDb(): Promise<IDBDatabase> {
       ensureWorldRecordStore(db, request.transaction, WORLD_CHUNK_STORE);
       ensureWorldRecordStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
       ensureWorldPlayerStore(db, request.transaction);
+      ensureWorldMetadataStore(db, request.transaction);
       ensureWorldCatalogStore(db);
       ensureManagedWorldMetadataStore(db);
     };
@@ -244,6 +246,7 @@ export async function factoryResetIndexedDbLocalData(
     WORLD_CHUNK_STORE,
     WORLD_ENTITY_CHUNK_STORE,
     WORLD_PLAYER_STORE,
+    WORLD_METADATA_STORE,
   ].filter((storeName) => db.objectStoreNames.contains(storeName));
   if (stores.length > 0) {
     const transaction = db.transaction(stores, "readwrite");
@@ -263,6 +266,7 @@ export async function clearIndexedDbWorldRecords(
     clearIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_PLAYER_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, WORLD_METADATA_STORE, worldId),
   ]);
 }
 
@@ -424,6 +428,21 @@ function ensureWorldPlayerStore(
     keyPath: ["worldId", "playerKey"],
   });
   store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+}
+
+function ensureWorldMetadataStore(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null,
+): void {
+  if (db.objectStoreNames.contains(WORLD_METADATA_STORE)) {
+    const store = transaction?.objectStore(WORLD_METADATA_STORE);
+    if (store && !store.indexNames.contains(WORLD_ID_INDEX)) {
+      store.createIndex(WORLD_ID_INDEX, "worldId", { unique: true });
+    }
+    return;
+  }
+  const store = db.createObjectStore(WORLD_METADATA_STORE, { keyPath: "worldId" });
+  store.createIndex(WORLD_ID_INDEX, "worldId", { unique: true });
 }
 
 function ensureWorldCatalogStore(db: IDBDatabase): void {

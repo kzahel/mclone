@@ -3381,6 +3381,7 @@ async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
     throw new Error(`indexeddb world did not become targetable: ${String(error)}\n${JSON.stringify(state, null, 2)}`);
   }
   await installIndexedDbCountHelper(page);
+  const initialMetadata = await waitForBrowserIndexedDbWorldMetadata(page, worldId);
 
   await page.keyboard.press("2");
   await page.waitForFunction(
@@ -3402,6 +3403,17 @@ async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
     (candidate) => candidate?.blockStateId === DIRT_BLOCK_STATE_ID,
   ) ?? beforeReloadCandidates[0];
   await waitForBrowserIndexedDbChunkRecords(page, worldId, 1);
+  const beforeReloadDayTime = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
+  );
+  const backgroundSaveResult = await page.evaluate(
+    () => globalThis.__mcloneWebApp.backgroundSaveForSmoke?.() ?? null,
+  );
+  const savedMetadata = await waitForBrowserIndexedDbWorldMetadata(
+    page,
+    worldId,
+    initialMetadata.worldMetadataBytes,
+  );
 
   const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
   await page.goto(reloadUrl, { waitUntil: "load" });
@@ -3410,17 +3422,27 @@ async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
   await waitForWebAppStreamingSettled(page, 60_000);
   const afterReload = await waitForBlockStateAt(page, placedBlock, DIRT_BLOCK_STATE_ID);
   const afterReloadRecordCounts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  const afterReloadDayTime = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
+  );
   return {
     ok: placement?.ok === true
       && placedBlock?.blockStateId === DIRT_BLOCK_STATE_ID
       && afterReload?.blockStateId === DIRT_BLOCK_STATE_ID
-      && afterReloadRecordCounts.chunks > 0,
+      && afterReloadRecordCounts.chunks > 0
+      && afterReloadRecordCounts.worldMetadata === 1
+      && afterReloadDayTime >= beforeReloadDayTime,
     worldId,
     reloadUrl,
     placement,
     placedCandidates,
     beforeReloadCandidates,
     placedBlock,
+    beforeReloadDayTime,
+    afterReloadDayTime,
+    initialMetadata,
+    savedMetadata,
+    backgroundSaveResult,
     afterReload,
     afterReloadRecordCounts,
   };
@@ -4599,6 +4621,28 @@ function browserIndexedDbWorldRecordCounts(page, worldId) {
 /**
  * @param {Page} page
  * @param {string} worldId
+ * @param {number[] | null} [differentFrom]
+ */
+async function waitForBrowserIndexedDbWorldMetadata(page, worldId, differentFrom = null) {
+  const deadline = Date.now() + 30_000;
+  let counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  while (Date.now() < deadline) {
+    const bytesChanged = differentFrom === null
+      || JSON.stringify(counts.worldMetadataBytes) !== JSON.stringify(differentFrom);
+    if (counts.worldMetadata === 1 && bytesChanged) {
+      return counts;
+    }
+    await page.waitForTimeout(100);
+    counts = await browserIndexedDbWorldRecordCounts(page, worldId);
+  }
+  throw new Error(
+    `timed out waiting for IndexedDB world ${worldId} metadata save:\n${JSON.stringify(counts, null, 2)}`,
+  );
+}
+
+/**
+ * @param {Page} page
+ * @param {string} worldId
  */
 async function seedBrowserIndexedDbWorldRecords(page, worldId) {
   await installIndexedDbCatalogHelper(page);
@@ -4631,7 +4675,7 @@ async function waitForBrowserIndexedDbRecordsAtLeast(page, worldId, minRecords) 
 async function installIndexedDbCountHelper(page) {
   await page.evaluate(() => {
     const global = /** @type {any} */ (globalThis);
-    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, total: number }>} */
+    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, worldMetadata: number, worldMetadataBytes: number[] | null, total: number }>} */
     const countIndexedDbRecords = async (worldId) => {
       const db = await /** @type {Promise<IDBDatabase>} */ (new Promise((resolve, reject) => {
         const request = indexedDB.open("mclone-web-worlds");
@@ -4653,13 +4697,31 @@ async function installIndexedDbCountHelper(page) {
           request.onsuccess = () => resolve(Number(request.result) || 0);
           request.onerror = () => reject(request.error ?? new Error(`failed to count ${storeName}`));
         });
-        const [chunks, entityChunks] = await Promise.all([
+        const [chunks, entityChunks, worldMetadataRecord] = await Promise.all([
           countStore("chunks"),
           countStore("entityChunks"),
+          new Promise((resolve, reject) => {
+            if (!db.objectStoreNames.contains("worldMetadata")) {
+              resolve(null);
+              return;
+            }
+            const transaction = db.transaction("worldMetadata", "readonly");
+            const request = transaction.objectStore("worldMetadata").get(worldId);
+            request.onsuccess = () => resolve(request.result ?? null);
+            request.onerror = () => reject(
+              request.error ?? new Error("failed to read worldMetadata"),
+            );
+          }),
         ]);
+        const metadata = /** @type {any} */ (worldMetadataRecord);
+        const metadataBytes = metadata?.record instanceof Uint8Array
+          ? Array.from(metadata.record)
+          : null;
         return {
           chunks: Number(chunks) || 0,
           entityChunks: Number(entityChunks) || 0,
+          worldMetadata: metadataBytes ? 1 : 0,
+          worldMetadataBytes: metadataBytes,
           total: (Number(chunks) || 0) + (Number(entityChunks) || 0),
         };
       } finally {
@@ -6802,6 +6864,18 @@ function assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels) {
   }
   if (Number(probe.afterReloadRecordCounts?.chunks) <= 0) {
     throw new Error(`native web IndexedDB reload probe did not write chunk records:\n${JSON.stringify(probe, null, 2)}`);
+  }
+  if (
+    Number(probe.afterReloadRecordCounts?.worldMetadata) !== 1
+    || !Array.isArray(probe.initialMetadata?.worldMetadataBytes)
+    || !Array.isArray(probe.savedMetadata?.worldMetadataBytes)
+    || JSON.stringify(probe.initialMetadata.worldMetadataBytes)
+      === JSON.stringify(probe.savedMetadata.worldMetadataBytes)
+    || !Number.isFinite(probe.beforeReloadDayTime)
+    || !Number.isFinite(probe.afterReloadDayTime)
+    || probe.afterReloadDayTime < probe.beforeReloadDayTime
+  ) {
+    throw new Error(`native web IndexedDB reload probe did not persist world time metadata:\n${JSON.stringify(probe, null, 2)}`);
   }
   if (!report.result?.ok || !report.result?.ready) {
     throw new Error(`native web IndexedDB reload probe ended with an unhealthy app state:\n${JSON.stringify(report.result, null, 2)}`);

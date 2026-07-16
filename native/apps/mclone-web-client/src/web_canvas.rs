@@ -2513,9 +2513,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
     }
 
     fn flush_persistence(&mut self) -> anyhow::Result<usize> {
-        // IndexedDB writes are already owned by the integrated-server worker;
-        // graceful shutdown is a separate typed browser operation.
-        Ok(0)
+        self.runtime.flush_persistence().map_err(anyhow::Error::msg)
     }
 
     fn refresh_startup_diagnostics(&mut self) -> anyhow::Result<()> {

@@ -12,6 +12,7 @@ import {
 import {
   WORLD_CHUNK_STORE,
   WORLD_ENTITY_CHUNK_STORE,
+  WORLD_METADATA_STORE,
   WORLD_PLAYER_STORE,
   WORLD_ID_INDEX,
   clearIndexedDbWorldRecords,
@@ -85,6 +86,13 @@ interface IndexedDbRecord {
 interface IndexedDbWorldRecords {
   chunks: IndexedDbRecord[];
   entityChunks: IndexedDbRecord[];
+  worldMetadataRecord?: Uint8Array;
+  legacyRecordsPresent: boolean;
+}
+
+interface IndexedDbWorldMetadata {
+  worldMetadataRecord?: Uint8Array;
+  legacyRecordsPresent: boolean;
 }
 
 interface IndexedDbLoadRequest {
@@ -144,6 +152,9 @@ workerSelf.onmessage = async (event: MessageEvent) => {
       case "shutdown":
         await shutdown(message);
         break;
+      case "flush-persistence":
+        await flushPersistence(message);
+        break;
       default:
         postFailure(
           message.requestId,
@@ -175,16 +186,22 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
       hasJobWorkers
       && typeof workerConstructor.withJobWorkersAndIndexedDbExternalLoads === "function"
     ) {
-      await prepareIndexedDbWorldForStart(message);
+      const metadata = await prepareIndexedDbWorldForStart(message);
       server = workerConstructor.withJobWorkersAndIndexedDbExternalLoads(
         seed,
         String(message.jobWorkerUrl),
         String(message.bindgenJsUrl),
         String(message.bindgenWasmUrl),
+        metadata.worldMetadataRecord,
+        metadata.legacyRecordsPresent,
       );
     } else if (typeof workerConstructor.withIndexedDbExternalLoads === "function") {
-      await prepareIndexedDbWorldForStart(message);
-      server = workerConstructor.withIndexedDbExternalLoads(seed);
+      const metadata = await prepareIndexedDbWorldForStart(message);
+      server = workerConstructor.withIndexedDbExternalLoads(
+        seed,
+        metadata.worldMetadataRecord,
+        metadata.legacyRecordsPresent,
+      );
     } else {
       const indexedRecords = await loadIndexedDbWorldForStart(message);
       if (
@@ -198,12 +215,16 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
           String(message.bindgenWasmUrl),
           indexedRecords.chunks,
           indexedRecords.entityChunks,
+          indexedRecords.worldMetadataRecord,
+          indexedRecords.legacyRecordsPresent,
         );
       } else if (typeof workerConstructor.withIndexedDbRecords === "function") {
         server = workerConstructor.withIndexedDbRecords(
           seed,
           indexedRecords.chunks,
           indexedRecords.entityChunks,
+          indexedRecords.worldMetadataRecord,
+          indexedRecords.legacyRecordsPresent,
         );
       } else {
         throw new Error("wasm module does not expose IndexedDB integrated-server constructors");
@@ -224,15 +245,21 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   if (typeof (server as any).setWorldGenerationProfile === "function") {
     (server as any).setWorldGenerationProfile(generationProfile);
   }
+  const behaviorProfile = String(message.behaviorProfile ?? "mutable");
+  if (typeof (server as any).setWorldBehaviorProfile === "function") {
+    (server as any).setWorldBehaviorProfile(behaviorProfile);
+  }
+  if (indexedDbMode) {
+    if (typeof (server as any).initializeWorldMetadata !== "function") {
+      throw new Error("wasm module does not expose IndexedDB world metadata initialization");
+    }
+    (server as any).initializeWorldMetadata();
+  }
   if (typeof (server as any).setLocalPlayerIdentity === "function") {
     if (!message.profileId || !message.displayName) {
       throw new Error("integrated server start is missing local player identity");
     }
     (server as any).setLocalPlayerIdentity(message.profileId, message.displayName);
-  }
-  const behaviorProfile = String(message.behaviorProfile ?? "mutable");
-  if (typeof (server as any).setWorldBehaviorProfile === "function") {
-    (server as any).setWorldBehaviorProfile(behaviorProfile);
   }
   if (typeof (server as any).setScheduledFluidTicksFrozen === "function") {
     (server as any).setScheduledFluidTicksFrozen(Boolean(message.freezeScheduledFluidTicks));
@@ -342,6 +369,26 @@ async function shutdown(message: IntegratedServerWorkerMessage): Promise<void> {
     updates: [],
     diagnostics: result.diagnostics,
   });
+  workerSelf.close();
+}
+
+async function flushPersistence(message: IntegratedServerWorkerMessage): Promise<void> {
+  if (!server || typeof (server as any).flushPersistence !== "function") {
+    postFailure(message.requestId, "integrated server worker cannot flush persistence");
+    return;
+  }
+  const activeServer = server;
+  const serviced = await serviceIndexedDbResultForCurrentWorld(
+    activeServer,
+    (activeServer as any).flushPersistence(),
+  );
+  postUpdates({
+    ok: true,
+    kind: "flush-complete",
+    requestId: Number(message.requestId) || 0,
+    updates: serviced.updates,
+    diagnostics: serviced.diagnostics,
+  });
 }
 
 async function serviceIndexedDbResultForCurrentWorld(
@@ -373,7 +420,7 @@ async function serviceIndexedDbResultForCurrentWorld(
 
 async function prepareIndexedDbWorldForStart(
   message: IntegratedServerWorkerMessage,
-): Promise<void> {
+): Promise<IndexedDbWorldMetadata> {
   const worldId = indexedDbWorldIdFromMessage(message);
   indexedDbWorldId = worldId;
   const db = await openWorldDb();
@@ -381,6 +428,7 @@ async function prepareIndexedDbWorldForStart(
     if (message.clearWorldStorage) {
       await clearIndexedDbWorldRecords(db, worldId);
     }
+    return await loadIndexedDbWorldMetadata(db, worldId);
   } finally {
     db.close();
   }
@@ -396,14 +444,58 @@ async function loadIndexedDbWorldForStart(
     if (message.clearWorldStorage) {
       await clearIndexedDbWorldRecords(db, worldId);
     }
-    const [chunks, entityChunks] = await Promise.all([
+    const [chunks, entityChunks, metadata] = await Promise.all([
       loadIndexedDbRecords(db, WORLD_CHUNK_STORE, worldId),
       loadIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+      loadIndexedDbWorldMetadata(db, worldId),
     ]);
-    return { chunks, entityChunks };
+    return { chunks, entityChunks, ...metadata };
   } finally {
     db.close();
   }
+}
+
+async function loadIndexedDbWorldMetadata(
+  db: IDBDatabase,
+  worldId: string,
+): Promise<IndexedDbWorldMetadata> {
+  const [stored, chunkCount, entityChunkCount, playerCount] = await Promise.all([
+    loadIndexedDbWorldMetadataRecord(db, worldId),
+    countIndexedDbRecords(db, WORLD_CHUNK_STORE, worldId),
+    countIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+    countIndexedDbRecords(db, WORLD_PLAYER_STORE, worldId),
+  ]);
+  return {
+    worldMetadataRecord: stored,
+    legacyRecordsPresent: chunkCount + entityChunkCount + playerCount > 0,
+  };
+}
+
+async function loadIndexedDbWorldMetadataRecord(
+  db: IDBDatabase,
+  worldId: string,
+): Promise<Uint8Array | undefined> {
+  const transaction = db.transaction(WORLD_METADATA_STORE, "readonly");
+  const value = await idbRequest<unknown>(
+    transaction.objectStore(WORLD_METADATA_STORE).get(worldId),
+  );
+  await transactionDone(transaction);
+  if (!value) return undefined;
+  const record = (value ?? {}) as Record<string, unknown>;
+  return uint8ArrayFromUnknown(record.record);
+}
+
+async function countIndexedDbRecords(
+  db: IDBDatabase,
+  storeName: string,
+  worldId: string,
+): Promise<number> {
+  const transaction = db.transaction(storeName, "readonly");
+  const count = await idbRequest<number>(
+    transaction.objectStore(storeName).index(WORLD_ID_INDEX).count(IDBKeyRange.only(worldId)),
+  );
+  await transactionDone(transaction);
+  return count;
 }
 
 function indexedDbWorldIdFromMessage(message: IntegratedServerWorkerMessage): string {
@@ -433,7 +525,16 @@ async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string,
   const chunks = indexedDbRecordsFromResult(worldId, result.indexedDbChunks);
   const entityChunks = indexedDbRecordsFromResult(worldId, result.indexedDbEntityChunks);
   const players = indexedDbPlayerRecordsFromResult(worldId, result.indexedDbPlayers);
-  if (chunks.length === 0 && entityChunks.length === 0 && players.length === 0) {
+  const worldMetadata = indexedDbWorldMetadataFromResult(
+    worldId,
+    result.indexedDbWorldMetadata,
+  );
+  if (
+    chunks.length === 0
+    && entityChunks.length === 0
+    && players.length === 0
+    && !worldMetadata
+  ) {
     return;
   }
   const db = await openWorldDb();
@@ -442,10 +543,34 @@ async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string,
       putIndexedDbRecords(db, WORLD_CHUNK_STORE, chunks),
       putIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, entityChunks),
       putIndexedDbPlayerRecords(db, players),
+      putIndexedDbWorldMetadata(db, worldMetadata),
     ]);
   } finally {
     db.close();
   }
+}
+
+interface IndexedDbWorldMetadataRecord {
+  worldId: string;
+  record: Uint8Array;
+}
+
+function indexedDbWorldMetadataFromResult(
+  worldId: string,
+  value: unknown,
+): IndexedDbWorldMetadataRecord | null {
+  if (value === null || value === undefined) return null;
+  return { worldId, record: uint8ArrayFromUnknown(value) };
+}
+
+async function putIndexedDbWorldMetadata(
+  db: IDBDatabase,
+  metadata: IndexedDbWorldMetadataRecord | null,
+): Promise<void> {
+  if (!metadata) return;
+  const transaction = db.transaction(WORLD_METADATA_STORE, "readwrite");
+  transaction.objectStore(WORLD_METADATA_STORE).put(metadata);
+  await transactionDone(transaction);
 }
 
 async function saveIndexedDbDirtyRecordsForCurrentWorld(result: Record<string, any>): Promise<void> {

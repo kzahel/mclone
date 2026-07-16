@@ -21,7 +21,7 @@ use mclone_protocol::{
 use mclone_render::RenderBackend;
 use mclone_server::IntegratedServer;
 #[cfg(target_arch = "wasm32")]
-use mclone_server::{ServerRunnerDiagnostics, ServerRunnerKind};
+use mclone_server::{IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerKind};
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
@@ -410,6 +410,11 @@ impl WebRuntime {
     pub fn request_shutdown(&mut self) {
         self.host.request_shutdown();
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn flush_persistence(&mut self) -> Result<usize, String> {
+        self.host.flush_persistence()
+    }
 }
 
 pub(crate) type WebRuntimeStepReport = RuntimeStepReport;
@@ -503,6 +508,16 @@ impl WebRuntimeHost {
             Self::Worker(host) => host.request_shutdown(),
             #[cfg(target_arch = "wasm32")]
             Self::RemoteWebSocket(host) => host.request_shutdown(),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn flush_persistence(&mut self) -> Result<usize, String> {
+        match self {
+            Self::Inline(_) | Self::RemoteWebSocket(_) => Ok(0),
+            Self::Worker(host) => {
+                IntegratedServerRunner::flush_persistence(host).map_err(|error| error.to_string())
+            }
         }
     }
 }
