@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/figure-json.test.ts && pnpm figures:check",
+    "test": "tsx --test tests/figure-json.test.ts tests/scene-animation.test.ts && pnpm figures:check",
     "figures:check": "tsx src/sync-first-party.ts --check",
     "figures:write": "tsx src/sync-first-party.ts --write",
     "preview": "vite --host 127.0.0.1",

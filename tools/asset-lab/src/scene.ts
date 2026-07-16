@@ -18,6 +18,7 @@ interface PartObject {
   content: THREE.Group;
   basePosition: THREE.Vector3;
   baseRotation: THREE.Euler;
+  baseScale: THREE.Vector3;
 }
 
 export function createFigureScene(asset: FigureAsset, clipName?: string, options: FigureSceneOptions = {}): FigureScene {
@@ -79,6 +80,7 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
       content,
       basePosition: group.position.clone(),
       baseRotation: group.rotation.clone(),
+      baseScale: group.scale.clone(),
     });
   }
 
@@ -103,6 +105,7 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
       for (const part of parts.values()) {
         part.group.position.copy(part.basePosition);
         part.group.rotation.copy(part.baseRotation);
+        part.group.scale.copy(part.baseScale);
       }
       if (clip) {
         applyClip(parts, clip, timeSeconds);
@@ -284,8 +287,13 @@ function createLabel(text: string): THREE.Object3D {
 }
 
 function applyClip(parts: Map<string, PartObject>, clip: ClipSpec, timeSeconds: number): void {
-  const duration = Math.max(0, ...clip.keys.map(([, time]) => time));
-  const localTime = clip.loop && duration > 0 ? timeSeconds % duration : Math.min(timeSeconds, duration);
+  if (!Number.isFinite(timeSeconds)) {
+    throw new Error("Animation presentation time must be finite");
+  }
+  const duration = clipDuration(clip);
+  const localTime = clip.loop && duration > 0
+    ? ((timeSeconds % duration) + duration) % duration
+    : THREE.MathUtils.clamp(timeSeconds, 0, duration);
   const byPart = new Map<string, ClipSpec["keys"]>();
 
   for (const key of clip.keys) {
@@ -300,67 +308,87 @@ function applyClip(parts: Map<string, PartObject>, clip: ClipSpec, timeSeconds: 
       continue;
     }
     const sorted = [...keys].sort((left, right) => left[1] - right[1]);
-    const [left, right] = surroundingKeys(sorted, localTime);
-    const alpha = right[1] === left[1] ? 0 : (localTime - left[1]) / (right[1] - left[1]);
-    const transform = mixTransform(left[2], right[2], alpha);
+    const translation = sampleChannel(sorted, localTime, (key) => key[2].at);
+    if (translation) {
+      part.group.position.copy(part.basePosition).add(toVector(translation));
+    }
 
-    if (transform.at) {
-      part.group.position.copy(part.basePosition.clone().add(toVector(transform.at)));
+    const rotation = channelSpan(sorted, localTime, (key) => key[2].rot);
+    if (rotation) {
+      const left = additiveRotation(part.baseRotation, rotation.left);
+      const right = additiveRotation(part.baseRotation, rotation.right);
+      part.group.quaternion.slerpQuaternions(left, right, rotation.alpha).normalize();
     }
-    if (transform.rot) {
-      part.group.rotation.set(
-        part.baseRotation.x + degToRad(transform.rot[0]),
-        part.baseRotation.y + degToRad(transform.rot[1]),
-        part.baseRotation.z + degToRad(transform.rot[2]),
-      );
-    }
-    if (transform.scale) {
-      part.group.scale.set(transform.scale[0], transform.scale[1], transform.scale[2]);
+
+    const scale = sampleChannel(sorted, localTime, (key) => key[2].scale);
+    if (scale) {
+      part.group.scale.fromArray(scale);
     }
   }
 }
 
-function surroundingKeys(keys: ClipSpec["keys"], time: number): [ClipSpec["keys"][number], ClipSpec["keys"][number]] {
-  const first = keys[0];
-  const last = keys[keys.length - 1];
-  if (!first || !last) {
-    throw new Error("Animation clip has no keys for part");
+interface ChannelSpan {
+  left: Vec3;
+  right: Vec3;
+  alpha: number;
+}
+
+function sampleChannel(
+  keys: ClipSpec["keys"],
+  time: number,
+  channel: (key: ClipSpec["keys"][number]) => Vec3 | undefined,
+): Vec3 | undefined {
+  const span = channelSpan(keys, time, channel);
+  return span ? mixVec(span.left, span.right, span.alpha) : undefined;
+}
+
+function channelSpan(
+  keys: ClipSpec["keys"],
+  time: number,
+  channel: (key: ClipSpec["keys"][number]) => Vec3 | undefined,
+): ChannelSpan | undefined {
+  const keyed = keys.flatMap((key) => {
+    const value = channel(key);
+    return value ? [{ time: key[1], value }] : [];
+  });
+  const first = keyed[0];
+  if (!first) {
+    return undefined;
   }
 
   let left = first;
-  let right = last;
+  let right = first;
 
-  for (let index = 0; index < keys.length; index += 1) {
-    const current = keys[index];
-    const next = keys[index + 1];
-    if (!current) {
-      continue;
-    }
-    if (!next || time < next[1]) {
-      left = current;
-      right = next ?? current;
+  for (const current of keyed.slice(1)) {
+    if (time < current.time) {
+      right = current;
       break;
     }
+    left = current;
+    right = current;
   }
 
-  return [left, right];
+  const alpha = right.time === left.time
+    ? 0
+    : THREE.MathUtils.clamp((time - left.time) / (right.time - left.time), 0, 1);
+  return { left: left.value, right: right.value, alpha };
 }
 
-function mixTransform(left: ClipSpec["keys"][number][2], right: ClipSpec["keys"][number][2], alpha: number) {
-  return {
-    at: mixVec(left.at, right.at, alpha),
-    rot: mixVec(left.rot, right.rot, alpha),
-    scale: mixVec(left.scale, right.scale, alpha),
-  };
+function mixVec(left: Vec3, right: Vec3, alpha: number): Vec3 {
+  return [
+    lerp(left[0], right[0], alpha),
+    lerp(left[1], right[1], alpha),
+    lerp(left[2], right[2], alpha),
+  ];
 }
 
-function mixVec(left: Vec3 | undefined, right: Vec3 | undefined, alpha: number): Vec3 | undefined {
-  if (!left && !right) {
-    return undefined;
-  }
-  const a = left ?? right ?? [0, 0, 0];
-  const b = right ?? left ?? [0, 0, 0];
-  return [lerp(a[0], b[0], alpha), lerp(a[1], b[1], alpha), lerp(a[2], b[2], alpha)];
+function additiveRotation(base: THREE.Euler, delta: Vec3): THREE.Quaternion {
+  return new THREE.Quaternion().setFromEuler(new THREE.Euler(
+    base.x + degToRad(delta[0]),
+    base.y + degToRad(delta[1]),
+    base.z + degToRad(delta[2]),
+    "XYZ",
+  ));
 }
 
 function lerp(left: number, right: number, alpha: number): number {
