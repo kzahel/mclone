@@ -39,7 +39,7 @@ over every carrier.
 | World authority | local integrated host (native runner or browser worker), native dedicated server, future browser P2P host |
 | Transport carrier | in-process `LocalTransport`, worker channel, native TCP, WebSocket, future WebRTC data channels |
 | Asset hosting | local packed assets, dedicated-server static hosting (future), CDN/static host |
-| Persistence | filesystem chunk store (native), browser storage for browser singleplayer (future), export/import adapters (future) |
+| Persistence | SQLite world store (native/Android), IndexedDB world store (browser singleplayer), export/import adapters (future) |
 
 ## Current Implementation
 
@@ -57,20 +57,26 @@ the same protocol/client/server boundary as singleplayer.
   not clock world time, worldgen publication, entity tracking, or autosave.
 - Without a world argument, or with `--transient`, the server uses transient
   storage. `--world-dir PATH` opens a persistent SQLite-backed world;
-  `--world-root ROOT --world-name NAME` selects a named directory. Dirty chunks
-  autosave every 6000 gameplay ticks and save again during graceful shutdown.
-  The seed is still supplied per launch and is not yet protected by persisted
-  world metadata, so operators must reuse the same seed.
+  `--world-root ROOT --world-name NAME` selects a named directory. Dirty chunks,
+  players, and typed world metadata autosave every 6000 gameplay ticks and save
+  again during graceful shutdown. The first open stores the seed,
+  generation/behavior profiles, target, clocks, and daylight rule; later opens
+  validate supplied launch facts before generation and reject mismatches.
 - Every peer has a nonblocking 64-publication-frame / 64 MiB exact-byte
   outbound queue. A saturated slow consumer is disconnected without delaying
   the authority loop; summary markers report queue high-water marks and
   pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION = 22` is negotiated with strict equality. The handshake
+- `PROTOCOL_VERSION = 23` is negotiated with strict equality. The handshake
   also carries the client's unauthenticated stable local UUID/display name;
-  persistent worlds save pose, selected slot, and XP under that UUID (see
+  persistent worlds save pose, selected slot, and XP under that UUID. Time
+  updates carry durable game/day clocks plus daylight running state (see
   [`protocol.md`](./protocol.md)).
+- Browser singleplayer uses IndexedDB v5 with catalog, chunk, entity, player,
+  and singleton world-metadata stores. Metadata is preloaded and validated
+  before generation; background lifecycle and graceful worker shutdown queue
+  the same completion-driven flush used by other records.
 
 Client connect status (full grid in
 [`topics/platform-parity.md`](./topics/platform-parity.md)):
@@ -105,8 +111,7 @@ the dedicated server also serve the built web client and asset pack alongside th
 WebSocket endpoint. Graceful, admin-only config reload/restart is a later server
 lifecycle feature, not a client debug shortcut.
 
-The next hosting lifecycle gaps are persistent world metadata (seed,
-generation profile, and day time), broader player state such as inventory,
+The next hosting lifecycle gaps are broader player state such as inventory,
 authenticated login/capability negotiation, keepalive/timeouts, and explicit
 disconnect reasons.
 Those belong in the shared session/persistence layers rather than app-specific

@@ -131,6 +131,8 @@ WorldCatalog requests/completions
   delete_inactive_world(world_id)
 
 WorldStore requests
+  load_world_metadata()
+  save_world_metadata(record, durability)
   load_chunk(pos)
   save_chunk(record, durability)
   load_entity_chunk(pos)
@@ -180,17 +182,23 @@ supports it.
 
 ### World Metadata
 
-World metadata should include:
+The implemented typed metadata v1 singleton includes:
 
-- save id and display name
-- target Minecraft version and mclone storage schema
-- seed and preset/world type
-- min build height and world height
-- content/registry version
-- generation algorithm version
-- optional light algorithm version
-- game time/day time once world time is durable
-- spawn position once player spawning is durable
+- an explicit codec version and monotonically coalesced revision;
+- target Minecraft version (`1.17.1`);
+- seed plus world-generation and behavior profiles;
+- creation and last-played Unix timestamps;
+- durable game time and day time; and
+- the durable daylight-cycle rule.
+
+The opened store owns these facts. A new store writes them before generation;
+later opens validate target, seed, and profiles before scheduling chunks.
+Legacy mclone stores with records but no singleton migrate once using the old
+day-time 1000 convention. Catalog save ids/display names remain container/list
+metadata rather than simulation authority.
+
+Later versions should add min build height/world height, content/registry and
+algorithm versions, optional light compatibility, and resolved world spawn.
 
 Metadata compatibility controls reset/migration. Incompatible generated cache
 records can be dropped. Incompatible durable records require a migration,
@@ -401,6 +409,7 @@ Use logical object stores such as:
 
 ```text
 worlds
+worldMetadata
 chunks
 entity_chunks
 players
@@ -410,9 +419,16 @@ saved_data
 OPFS remains a possible later backend, but IndexedDB is the most practical first
 portable browser path.
 
-The current browser adapter uses `players` records keyed by world id plus the
-stable local profile UUID, parallel to native SQLite. The client-global UUID
-itself is not a world record: it lives in
+The current IndexedDB v5 adapter stores one Rust-codec-owned `worldMetadata`
+byte record keyed by world id and preloads it before the worker starts world
+generation. Autosave, page-background lifecycle, and graceful worker shutdown
+queue metadata through the completion-driven store bridge. Per-world deletion,
+delete-all local worlds, and factory reset remove the singleton with the other
+world records.
+
+The browser adapter uses `players` records keyed by world id plus the stable
+local profile UUID, parallel to native SQLite. The client-global UUID itself is
+not a world record: it lives in
 `localStorage["mclone.playerProfile.v1"]` and may be reset without deleting
 local or remote world rows. Catalog worlds and managed scenario content remain
 separate deletion domains.

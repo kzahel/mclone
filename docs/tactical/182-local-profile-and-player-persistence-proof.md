@@ -2,9 +2,11 @@
 
 Status: core identity/player-persistence proof implemented 2026-07-16.
 Slices 1, 2, the player-record portion of 3, the identity-bearing portion of
-4, 5, and 6 are complete. World metadata/day-time durability, movement
-sequence fields, keepalive/disconnect protocol, and physical-device lifecycle
-closeout remain follow-ups rather than being implied complete.
+4, 5, and 6 are complete. Tactical
+[`183`](183-authoritative-world-time-persistence.md) completed world metadata,
+seed/profile validation, and game/day-time durability. Movement sequence
+fields, keepalive/disconnect protocol, and physical-device lifecycle closeout
+remain follow-ups rather than being implied complete.
 
 Topic: `multiplayer-networking`
 
@@ -384,8 +386,10 @@ until the user can inspect and reset it.
 
 ### Slice 3: World metadata and player-record persistence
 
-Status: player-record portion complete 2026-07-16 (`836530a8`); the broader
-world metadata/seed/day-time portion remains open.
+Status: complete 2026-07-16. The player-record portion landed in `836530a8`;
+Tactical [`183`](183-authoritative-world-time-persistence.md) completed typed
+world metadata, seed/profile validation, durable two-clock semantics, SQLite,
+IndexedDB, and lifecycle persistence in a follow-up series.
 
 - Activate world metadata and player load/save request/completion variants in
   the shared persistence actor.
@@ -485,8 +489,9 @@ Validation:
 ### Slice 7: Cross-platform lifecycle and closeout
 
 Status: shared native/web code and desktop offscreen evidence complete;
-Android/Quest physical lifecycle evidence and the broader metadata/session
-follow-ups remain open.
+Android/Quest physical lifecycle evidence and the remaining session follow-ups
+remain open. World metadata/page-lifecycle persistence is complete under
+Tactical [`183`](183-authoritative-world-time-persistence.md).
 
 - Prove the full UI/profile/join/save/resume flow on desktop local and remote,
   browser IndexedDB local and remote WebSocket, flat Android, desktop XR, and
@@ -580,6 +585,12 @@ Evidence captured during the closeout:
 - native UI/app-runtime suites, native scene/client checks, wasm32 Rust check,
   and TypeScript web build/typecheck pass. Existing wasm-only warnings remain
   unrelated to this slice.
+
+The world-metadata follow-up landed in Tactical
+[`183`](183-authoritative-world-time-persistence.md): commits `7b01b78e`,
+`6915a8c9`, `82fd11b7`, `23534737`, and `2b9d121c` add the shared metadata
+codec/store contract, restore and validation policy, protocol v23 replication,
+IndexedDB lifecycle persistence, and dedicated TCP/SQLite restart proof.
 
 ## Explicit Non-Goals
 

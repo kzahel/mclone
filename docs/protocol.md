@@ -42,7 +42,7 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `22`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `23`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
@@ -94,7 +94,7 @@ commands are intents, not client-owned state mutations.
 | `ChunkSnapshot` | baseline chunk facts; **packed sky/block light rides inside the snapshot** (no separate light message) |
 | `ChunkUnload` | release a chunk from client view/cache |
 | `SectionBlockUpdates` | block mutations within a loaded section after the baseline |
-| `TimeUpdate` | authoritative world day-time (ticks) for the day/night cycle |
+| `TimeUpdate` | authoritative game time, day time, and daylight-cycle-running state; the client advances both 20 Hz between join/tick-1/20-tick corrections, conditionally advancing day time |
 | `PlayerPosition` | authoritative local-player position/rotation correction with relative flags and a teleport id |
 | `PlayerExperience` | owner-only authoritative total experience restored from and dirtied into the world-scoped player record |
 | `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |

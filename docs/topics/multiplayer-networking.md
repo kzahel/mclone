@@ -14,6 +14,10 @@ and compatibility cleanup. Tactical
 records the first session/persistence vertical slice: inspectable/resettable
 client-global UUID identity, explicit local-data controls, durable world/player
 records, identity-bearing join, safe resume, and a gated experience proof.
+Tactical
+[`183`](../tactical/183-authoritative-world-time-persistence.md) completed the
+authoritative world-metadata and two-clock persistence/replication follow-up on
+2026-07-16.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -33,10 +37,20 @@ second live connection claiming the same UUID. World-scoped player records
 persist accepted pose/rotation, selected slot, display name, and total
 experience in memory, SQLite, and IndexedDB. Valid saved poses resume exactly,
 including airborne poses, while blocked poses reuse the deterministic safe
-surface search. Protocol v22 publishes owner-only experience, and an explicit
+surface search. Protocol v23 publishes owner-only experience, and an explicit
 non-vanilla behavior flag awards one point for one accepted grounded-to-upward
 jump transition. A dedicated TCP restart test proves the same UUID resumes its
 exact saved airborne pose and XP.
+
+The opened world store now owns typed metadata v1: target version, seed,
+generation/behavior profiles, creation/last-played timestamps, revision, both
+world clocks, and the daylight-cycle rule. New worlds start both clocks at
+zero; legacy mclone stores preserve the prior day-time 1000 convention once.
+SQLite and IndexedDB load and validate those facts before generation, reject
+later seed/profile reinterpretation, autosave every 6000 game ticks, and flush
+on normal lifecycle close. Protocol v23 carries `game_time`, `day_time`, and
+daylight running state; the shared client advances its replica at 20 Hz between
+join/tick-1/20-tick authoritative corrections.
 
 The shared Storage & Profile title panel exposes the UUID, profile backend,
 and local-world count. Reset Identity preserves worlds and old server rows;
@@ -85,8 +99,7 @@ reaches `LocalPlayerMoveSync` and emits the existing vanilla-shaped `Rot`
 variant, while the 20-publication-attempt position reminder corresponds to
 about one second at the default rate. Immediate interaction, teleport, and
 offscreen-diagnostic reconciles remain explicit scene-owned operations. The
-identity and experience additions moved the coordinated wire to protocol
-version 22.
+world-time additions moved the coordinated wire to protocol version 23.
 
 This cadence controls when a pose is selected and enqueued; it does not define
 what XR pose means. Current XR behavior still publishes the existing combined
@@ -99,11 +112,11 @@ intended production shape, but broader session and world durability work
 remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, strict
-  `PROTOCOL_VERSION = 22` equality check. The transport handshake now carries
+  `PROTOCOL_VERSION = 23` equality check. The transport handshake now carries
   the local profile UUID/display name, and `PlayerExperience` is an owner-only
   update alongside chunk view/snapshots/unloads, section block deltas,
-  vanilla-shaped move/teleport-ack, remote players, entities, time, and
-  obfuscated-seed world info. No serde; every decode validates and rejects
+  vanilla-shaped move/teleport-ack, remote players, entities, two-clock time,
+  and obfuscated-seed world info. No serde; every decode validates and rejects
   trailing bytes. No compression, no varints.
 - **Transports**: in-process mpsc channels (native local integrated,
   `mclone-server/src/runner.rs:830-991`), length-prefixed TCP
@@ -135,11 +148,11 @@ remain:
    identity and duplicate-live-UUID rejection, but there is no authenticated
    login, capability negotiation, keepalive/read timeout, in-band disconnect,
    or reconnect-without-rebuilding-the-client-replica flow.
-2. **World durability is still incomplete.** Player pose/rotation, selected
-   slot, display name, and XP persist, but inventory contents do not. The
-   **seed is not stored in the authoritative world save** (the dedicated
-   server still takes `--seed` per launch), and `day_time` still resets on
-   process start.
+2. **World/player durability is still incomplete.** Authoritative metadata,
+   seed/profiles, game/day clocks, the daylight rule, player pose/rotation,
+   selected slot, display name, and XP persist. Inventory contents, spawn/bed
+   state, health, hunger, abilities, effects, and advancement/statistic state
+   do not yet persist.
 3. **Debug surface baked into the protocol**: `ShootDebugPhysicsCube`,
    `SetDebugHotbarSlot`, `PlayerActionKind::DebugInstantBreak`,
    `EntityKind::DebugCube`, `debug_passive_showcase` defaulting on
@@ -257,12 +270,11 @@ first?":
   only cheap pre-cleanup is quarantining debug protocol variants behind a
   handshake capability (or compile feature) so the protocol surface stops
   accreting debug tags.
-- **Persistence is a parallel track, not a blocker** for the wire work, but
-  two pieces should land before the session layer (phase 3) makes identity
-  real: seed + world metadata in the save (correctness bug today), and
-  player records keyed by a durable id (`player_records` table already
-  exists as a placeholder). `day_time` durability rides along.
-- **Documentation cleanup is current.** `protocol.md` records version 22 and
+- **The first persistence prerequisites are complete.** Player records are
+  keyed by the durable local profile UUID. Typed world metadata owns and
+  validates the seed/profiles before generation, and durable game/day clocks
+  plus the daylight rule ride through SQLite and IndexedDB lifecycle saves.
+- **Documentation cleanup is current.** `protocol.md` records version 23 and
   autonomous publication framing; `multiplayer-hosting.md` records persistent
   worlds and direct WebSocket hosting; platform docs record the one shared
   native/browser semantic boundary.

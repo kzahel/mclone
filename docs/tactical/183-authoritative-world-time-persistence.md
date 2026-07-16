@@ -1,6 +1,6 @@
 # 183: Authoritative World Time Persistence
 
-Status: active 2026-07-16
+Status: complete 2026-07-16
 
 Topic: `multiplayer-networking`
 
@@ -308,6 +308,46 @@ git diff --check
 Rendered-output validation is not required unless this slice changes celestial
 render math or presentation. If pixels change, capture and inspect frozen dawn,
 noon, dusk, and midnight images under `/tmp` before continuing.
+
+## Implementation Record
+
+The implementation landed as six reviewable commits:
+
+- `5c55b85e Plan authoritative world time persistence`: this tactical and its
+  vanilla receipts, ownership boundaries, migration rules, and evidence plan.
+- `7b01b78e Add typed world metadata persistence`: the explicit metadata v1
+  codec, completion-based store messages, memory/null/SQLite backends, legacy
+  detection, coalescing, and corruption/reopen tests.
+- `6915a8c9 Persist authoritative world clocks`: load-or-initialize before
+  generation, stored-fact validation, durable game/day clocks and daylight
+  rule, legacy initialization, 6000-tick autosave, and clean native/dedicated
+  flush/shutdown.
+- `82fd11b7 Synchronize vanilla world clocks`: protocol v23, both-clock time
+  samples with running state, join/tick-1/20-tick publication, and the shared
+  client replica's 20 Hz advancement between authoritative corrections.
+- `23534737 Persist world clocks in browser storage`: IndexedDB v5
+  `worldMetadata`, preload-before-generation, Rust-codec bytes, lifecycle and
+  graceful worker flushes, deletion-domain coverage, and a real reload smoke.
+- `2b9d121c Prove dedicated world time restart`: a real dedicated TCP/SQLite
+  restart asserts that the rejoined client receives non-regressing restored
+  game and day clocks.
+
+Evidence collected during closeout:
+
+- native protocol, net, client, app-runtime, scene, dedicated, and server
+  suites passed; the server suite covered 413 tests;
+- `cargo test --workspace --no-run` passed after the native slices;
+- the web Rust library and ABI tests passed, as did the wasm build and
+  TypeScript typecheck;
+- `pnpm native:web:indexeddb-smoke` reopened the same real IndexedDB world,
+  observed metadata revision `1 -> 2`, restored clocks without day-time
+  regression, and preserved a block edit;
+- `/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png` was inspected at
+  1280x720 and showed the expected healthy terrain, sky, HUD, entity, and
+  persisted edit; and
+- one broad `mclone-web-client` package run still reports three pre-existing
+  source-string ownership locks in `scenario_parity_ownership_lock`; the
+  world-time library/ABI, wasm, typecheck, and real IndexedDB paths are green.
 
 ## Related
 
