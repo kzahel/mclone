@@ -3,11 +3,12 @@
 Topic: `realm-dimension-runtime`
 
 Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-6 are
-complete. Every host uses one `RealmServer`, the integrated player is ordinary,
-realm/dimension persistence is qualified, and one realm can concurrently tick
-players in multiple isolated `DimensionRuntime`s. Source-owned player and
-non-player observer interest and A-to-B-to-A player transfer are live; Slice 7
-diorama observer adoption is next.**
+complete and Slice 7 is in progress. Every host uses one `RealmServer`, the
+integrated player is ordinary, realm/dimension persistence is qualified, and
+one realm can concurrently tick players in multiple isolated
+`DimensionRuntime`s. Source-owned player and non-player observer interest,
+A-to-B-to-A player transfer, and a promotable integrated-observer connection
+are live; scene-level diorama adoption is next.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -149,7 +150,12 @@ unified:
   inventory, experience, and one realm-root record;
 - the current warm diorama starts a full second joined runtime with a real
   server-side local player. Input suppression makes it non-interactive, not an
-  observer.
+  observer;
+- the native and browser integrated-runner boundary can now start that second
+  independent realm as a non-player observer and explicitly promote the same
+  connection to one ordinary identity player. Scene startup does not yet
+  select that mode, so this is an available lifecycle rather than current
+  product behavior.
 
 The next work can therefore replace the diorama's synthetic player session
 with the proven observer contract and activate it through the same transfer

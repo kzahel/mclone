@@ -9,9 +9,11 @@
 use std::error::Error;
 use std::fmt;
 
-use mclone_protocol::{ClientCommand, ProtocolCodecError, ServerUpdate};
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_protocol::{decode_client_command, encode_client_command, encode_server_update};
+use mclone_protocol::{
+    ChunkView, DimensionKey, decode_client_command, encode_client_command, encode_server_update,
+};
+use mclone_protocol::{ClientCommand, ProtocolCodecError, ServerUpdate};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ChunkPublicationBudgetConfig;
@@ -514,6 +516,12 @@ pub trait IntegratedServerRunner {
     fn flush_persistence(&mut self) -> ServerRunnerResult<usize> {
         Ok(0)
     }
+
+    /// Promote a preview-only local observer into the realm's ordinary player
+    /// lifecycle without replacing the hosted realm runtime.
+    fn promote_observer_to_player(&mut self) -> ServerRunnerResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -640,6 +648,7 @@ mod native {
         pub publication_budget: ChunkPublicationBudgetConfig,
         pub world_storage: NativeIntegratedServerWorldStorage,
         pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
+        pub observer_only: bool,
         player_chunk_tracking_policy: PlayerChunkTrackingPolicy,
     }
 
@@ -662,6 +671,7 @@ mod native {
                 publication_budget: ChunkPublicationBudgetConfig::disabled(),
                 world_storage: NativeIntegratedServerWorldStorage::Transient,
                 local_player_identity: None,
+                observer_only: false,
                 player_chunk_tracking_policy: PlayerChunkTrackingPolicy::dedicated_default(),
             }
         }
@@ -721,6 +731,11 @@ mod native {
             identity: mclone_protocol::ClientIdentity,
         ) -> Self {
             self.local_player_identity = Some(identity);
+            self
+        }
+
+        pub const fn with_observer_only(mut self, observer_only: bool) -> Self {
+            self.observer_only = observer_only;
             self
         }
 
@@ -810,6 +825,9 @@ mod native {
         /// has been committed (tactical 168 Slice 0).
         FlushPersistence {
             ack: mpsc::Sender<ServerRunnerResult<usize>>,
+        },
+        PromoteObserver {
+            ack: mpsc::Sender<ServerRunnerResult<()>>,
         },
         Shutdown,
     }
@@ -996,6 +1014,26 @@ mod native {
                 .map_err(|_| ServerRunnerError::CommandChannelClosed)?
         }
 
+        fn promote_observer_to_player(&mut self) -> ServerRunnerResult<()> {
+            if self.shutdown_requested {
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            let (ack_tx, ack_rx) = mpsc::channel();
+            self.command_queue_depth.fetch_add(1, Ordering::SeqCst);
+            let send_result = self
+                .command_tx
+                .as_ref()
+                .ok_or(ServerRunnerError::CommandChannelClosed)?
+                .send(NativeRunnerControl::PromoteObserver { ack: ack_tx });
+            if send_result.is_err() {
+                self.command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            ack_rx
+                .recv()
+                .map_err(|_| ServerRunnerError::CommandChannelClosed)?
+        }
+
         fn send_command(&mut self, command: ClientCommand) -> ServerRunnerResult<()> {
             if self.shutdown_requested {
                 return Err(ServerRunnerError::CommandChannelClosed);
@@ -1115,6 +1153,20 @@ mod native {
             &config.world_storage,
             NativeIntegratedServerWorldStorage::Persistent { .. }
         ) && let Err(error) = server.initialize_world_metadata_blocking()
+        {
+            let _ = ready_tx.send(Err(error.to_string()));
+            return Ok(());
+        }
+        if config.observer_only
+            && let Err(error) = server.begin_observing(
+                DimensionKey::overworld(),
+                ChunkView {
+                    center: mclone_core::ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                },
+                crate::ObserverSimulationInterest::BlockAndEntityTicking,
+            )
         {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
@@ -1427,6 +1479,15 @@ mod native {
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 // The caller may have gone away (e.g. the process is being
                 // killed); dropping the ack is not a runner error.
+                let _ = ack.send(result);
+                Ok(true)
+            }
+            NativeRunnerControl::PromoteObserver { ack } => {
+                let result = server
+                    .promote_observer_to_player_blocking()
+                    .map(|_| ())
+                    .map_err(ServerRunnerError::from);
+                command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 let _ = ack.send(result);
                 Ok(true)
             }
@@ -1792,6 +1853,34 @@ mod native {
                 std::thread::sleep(Duration::from_millis(1));
             }
 
+            runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn native_runner_observer_stream_promotes_before_player_position_publication() {
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(12_345).with_observer_only(true),
+            )
+            .unwrap();
+            let (_snapshot, preview_updates) =
+                load_chunk_snapshot(&mut runner, ChunkPos::new(0, 0));
+            assert!(preview_updates.iter().all(|update| !matches!(
+                update,
+                ServerUpdate::PlayerPosition(_) | ServerUpdate::PlayerExperience { .. }
+            )));
+
+            runner.promote_observer_to_player().unwrap();
+            let joined_updates = drain_until(&mut runner, |updates| {
+                updates
+                    .iter()
+                    .any(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
+            });
+
+            assert!(
+                joined_updates
+                    .iter()
+                    .any(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
+            );
             runner.join_shutdown().unwrap();
         }
 

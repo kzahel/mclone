@@ -71,8 +71,8 @@ pub use dimension::DimensionRegistry;
 pub use holder::{ChunkHolder, ChunkStatusSlot};
 pub use integrated::{
     DimensionInterestDiagnostics, DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession,
-    PlayerDimensionTransferDiagnostics, PlayerDimensionTransferPhase, RealmInterestDiagnostics,
-    RealmServer,
+    LocalRealmSessionRole, PlayerDimensionTransferDiagnostics, PlayerDimensionTransferPhase,
+    RealmInterestDiagnostics, RealmServer,
 };
 pub use job_codec::{
     WorldgenJobSession, compute_light_status_job_frame, compute_worldgen_job_frame,

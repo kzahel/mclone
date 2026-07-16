@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-6 complete; diorama observer adoption is
-next in Slice 7
+Status: active 2026-07-16; Slices 0-6 complete; Slice 7 is in progress with
+the promotable integrated-observer session boundary landed
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -805,6 +805,8 @@ duplicates the player entity.
 
 ### Slice 7: Diorama observer adoption
 
+Status: in progress 2026-07-16.
+
 - Replace preview-only full-player startup with observer subscriptions for
   same-realm dimensions first.
 - Add explicit independent-realm observer-to-join activation without sharing
@@ -814,6 +816,27 @@ duplicates the player entity.
   A-to-B-to-A cover/readiness, persistence, mono, stereo, and multiview.
 - Land native and production browser paths together behind the same shared
   policy.
+
+Evidence so far:
+
+- `LocalRealmSession` now has explicit player and observer roles. Observer
+  startup retains the eventual client identity without loading a player
+  record, owns bounded source interest, and rejects gameplay commands;
+- one promotion operation removes that observer, creates exactly one ordinary
+  player in the observed dimension, loads the realm-local profile record, and
+  resumes the ordinary view/position publication path;
+- native threaded and browser Worker integrated runners expose the same
+  promotion contract. Browser promotion services any resulting IndexedDB
+  player-record requests before publishing the joined-player updates;
+- focused shared-server tests prove preview startup has zero players and zero
+  player records, then promotion has one identified player and no observer.
+  A native runner test also proves no player position or XP is published
+  before promotion and an authoritative position is published afterward;
+- the browser WASM build and TypeScript check pass with the new Worker ABI.
+
+Scene standby adoption, activation-covered promotion, removal of the
+synthetic preview-local actor, and the native/browser visual receipts remain
+before this slice is complete.
 
 Exit: inspection and tests prove no preview-only player exists server-side.
 

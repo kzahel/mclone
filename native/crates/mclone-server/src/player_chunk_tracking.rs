@@ -369,7 +369,6 @@ impl PlayerChunkTracking {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn accepted_observer_view(&self, observer_id: ObserverId) -> Option<&ChunkView> {
         self.observers
             .get(&observer_id)

@@ -171,6 +171,10 @@ impl<R: IntegratedServerRunner> IntegratedRunnerConnection<R> {
         self.runner.flush_persistence()
     }
 
+    pub fn promote_observer_to_player(&mut self) -> ServerRunnerResult<()> {
+        self.runner.promote_observer_to_player()
+    }
+
     pub const fn runner(&self) -> &R {
         &self.runner
     }

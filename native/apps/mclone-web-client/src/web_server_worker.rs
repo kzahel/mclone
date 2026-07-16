@@ -19,8 +19,8 @@ use mclone_protocol::{
 use mclone_server::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
     ChunkStoreError, ChunkStoreResult, DimensionRecord, EntityChunkRecord, INITIAL_DAY_TIME,
-    IntegratedServerRunner, LightStatusMailboxKind, LocalRealmSession, PlayerRecord,
-    PlayerRecordKey, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
+    IntegratedServerRunner, LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest,
+    PlayerRecord, PlayerRecordKey, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
     ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
     WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
     WorldGenerationProfile, WorldMetadata, WorldMetadataLoad, WorldStore, WorldStoreCompletion,
@@ -72,6 +72,7 @@ pub struct WebIntegratedServerRunnerConfig {
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
     pub runner_initial_inbound_bytes: u32,
     pub local_player_identity: ClientIdentity,
+    pub observer_only: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -107,7 +108,13 @@ impl WebIntegratedServerRunnerConfig {
             runner_transport_kind: None,
             runner_initial_inbound_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
             local_player_identity: ClientIdentity::test_default(),
+            observer_only: false,
         }
+    }
+
+    pub const fn with_observer_only(mut self, observer_only: bool) -> Self {
+        self.observer_only = observer_only;
+        self
     }
 
     pub fn with_indexed_db_world(
@@ -506,6 +513,7 @@ impl WebIntegratedServerRunner {
             "debugAuxiliaryPlayerScript",
             config.debug_auxiliary_player_script,
         )?;
+        set_bool(&message, "observerOnly", config.observer_only)?;
         set_number(
             &message,
             "lightStatusBatchSize",
@@ -649,6 +657,18 @@ impl WebIntegratedServerRunner {
         self.worker.post_message(&message).map_err(|error| {
             format!("failed to post persistence flush to server worker: {error:?}")
         })
+    }
+
+    fn post_promote_observer(&mut self) -> Result<(), String> {
+        let request_id = self.next_request_id();
+        let message = Object::new();
+        set_string(&message, "kind", "promote-observer")?;
+        set_number(&message, "requestId", f64::from(request_id))?;
+        self.worker
+            .post_message(&message)
+            .map_err(|error| format!("failed to post observer promotion: {error:?}"))?;
+        self.record_runner_request(request_id, 0);
+        Ok(())
     }
 
     fn shared_command_message(&mut self, request_id: u32, frame: &[u8]) -> Result<Object, String> {
@@ -905,6 +925,14 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
         self.post_flush_persistence()
             .map_err(ServerRunnerError::ThreadStart)?;
         Ok(0)
+    }
+
+    fn promote_observer_to_player(&mut self) -> ServerRunnerResult<()> {
+        if self.shutdown_requested {
+            return Err(ServerRunnerError::CommandChannelClosed);
+        }
+        self.post_promote_observer()
+            .map_err(ServerRunnerError::ThreadStart)
     }
 
     fn request_shutdown(&mut self) {
@@ -2010,8 +2038,38 @@ impl McloneWebIntegratedServerWorker {
             .map_err(|_| JsValue::from_str("local profile UUID must contain 16 bytes"))?;
         let identity = ClientIdentity::new(PlayerProfileId::new(bytes), display_name)
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
-        self.server.configure_local_player_identity(identity);
-        Ok(())
+        self.server
+            .configure_local_player_identity(identity)
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = enableObserverMode)]
+    pub fn enable_observer_mode(&mut self) -> Result<(), JsValue> {
+        self.server
+            .begin_observing(
+                DimensionKey::overworld(),
+                ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                },
+                ObserverSimulationInterest::BlockAndEntityTicking,
+            )
+            .map(|_| ())
+            .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = promoteObserverToPlayer)]
+    pub fn promote_observer_to_player(&mut self) -> Result<JsValue, JsValue> {
+        self.server
+            .promote_observer_to_player()
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let updates = self
+            .server
+            .try_drain_updates()
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.refresh_diagnostics(None, false, None);
+        self.worker_response(updates).map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = setWorldBehaviorProfile)]

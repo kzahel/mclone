@@ -119,6 +119,7 @@ pub struct LocalIntegratedSceneOptions {
     pub render_compile_worker_timing_enabled: bool,
     pub startup_lod_prewarm: StartupLodPrewarmConfig,
     pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
+    pub observer_only: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -192,6 +193,7 @@ impl LocalIntegratedSceneOptions {
             render_compile_worker_timing_enabled: true,
             startup_lod_prewarm: StartupLodPrewarmConfig::disabled(),
             local_player_identity: None,
+            observer_only: false,
         }
     }
 
@@ -242,6 +244,11 @@ impl LocalIntegratedSceneOptions {
 
     pub fn with_local_player_identity(mut self, identity: mclone_protocol::ClientIdentity) -> Self {
         self.local_player_identity = Some(identity);
+        self
+    }
+
+    pub const fn with_observer_only(mut self, observer_only: bool) -> Self {
+        self.observer_only = observer_only;
         self
     }
 
@@ -1244,6 +1251,12 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
 
     pub const fn client(&self) -> &ClientRuntime {
         self.core.client()
+    }
+
+    pub fn promote_observer_to_player(&mut self) -> Result<()> {
+        self.connection
+            .promote_observer_to_player()
+            .context("failed to promote local observer to player")
     }
 
     pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
@@ -3384,6 +3397,7 @@ fn native_runner_config(
         .with_local_integrated_chunk_tracking()
         .with_adaptive_chunk_publication_budget(options.adaptive_chunk_publication_budget)
         .with_world_storage(options.world_storage.clone())
+        .with_observer_only(options.observer_only)
         .with_cadence_derived_tick_interval(options.cadence);
     if let Some(identity) = options.local_player_identity.clone() {
         config = config.with_local_player_identity(identity);

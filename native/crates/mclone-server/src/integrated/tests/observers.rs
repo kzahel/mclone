@@ -271,3 +271,47 @@ fn observers_are_dimension_local_cancel_cleanly_and_gate_idle_unload() {
     assert_eq!(diagnostics.aggregate_resident_chunks, 0);
     assert!(server.unload_dimension(&moon).unwrap());
 }
+
+#[test]
+fn local_observer_promotes_to_one_identity_player_without_preview_persistence() {
+    let mut session =
+        LocalRealmSession::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    session
+        .set_world_generation_profile(WorldGenerationProfile::authored_only())
+        .unwrap();
+    session.set_lighting_enabled(false);
+    let observer = session
+        .begin_observing(
+            DimensionKey::overworld(),
+            zero_radius_view(ChunkPos::new(0, 0)),
+            ObserverSimulationInterest::ResidencyOnly,
+        )
+        .unwrap();
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x74; 16]), "Traveler").unwrap();
+    session
+        .configure_local_player_identity(identity.clone())
+        .unwrap();
+
+    assert_eq!(session.role(), LocalRealmSessionRole::Observer(observer));
+    assert_eq!(session.player_count(), 0);
+    assert_eq!(session.observer_count(), 1);
+    assert_eq!(session.save_all_player_records().unwrap(), 0);
+    assert!(
+        session
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::StatusOnly {
+                on_ground: true
+            }))
+            .is_err()
+    );
+
+    let player = session.promote_observer_to_player_blocking().unwrap();
+
+    assert_eq!(session.role(), LocalRealmSessionRole::Player(player));
+    assert_eq!(session.player_count(), 1);
+    assert_eq!(session.observer_count(), 0);
+    assert_eq!(
+        session.players.get(player).unwrap().identity.as_ref(),
+        Some(&identity)
+    );
+    assert_eq!(session.save_all_player_records().unwrap(), 0);
+}

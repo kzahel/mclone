@@ -3434,22 +3434,34 @@ impl RealmServer {
     }
 }
 
-/// In-memory integrated-host adapter for one ordinary realm player.
+/// Current authority role of one in-memory integrated-host connection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalRealmSessionRole {
+    Player(ServerPlayerId),
+    Observer(ObserverId),
+}
+
+/// In-memory integrated-host adapter for one ordinary realm player or a
+/// bounded non-player observer that may be promoted into that player.
 ///
 /// The authoritative state remains entirely in [`RealmServer`]. This adapter
-/// only remembers which ordinary `ServerPlayerId` belongs to the owning local
-/// connection and supplies that id to the same command, publication, save, and
-/// disconnect paths used by remote transports.
+/// only remembers which ordinary player or observer belongs to the owning
+/// local connection and supplies that id to the shared publication paths.
 #[derive(Debug)]
 pub struct LocalRealmSession {
     server: RealmServer,
-    player_id: ServerPlayerId,
+    role: LocalRealmSessionRole,
+    pending_player_identity: Option<ClientIdentity>,
 }
 
 impl LocalRealmSession {
     pub fn from_server(mut server: RealmServer) -> Self {
         let player_id = server.add_player();
-        Self { server, player_id }
+        Self {
+            server,
+            role: LocalRealmSessionRole::Player(player_id),
+            pending_player_identity: None,
+        }
     }
 
     pub fn new(seed: i64) -> Self {
@@ -3564,8 +3576,29 @@ impl LocalRealmSession {
         )
     }
 
+    pub const fn role(&self) -> LocalRealmSessionRole {
+        self.role
+    }
+
+    pub const fn player_id_opt(&self) -> Option<ServerPlayerId> {
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => Some(player_id),
+            LocalRealmSessionRole::Observer(_) => None,
+        }
+    }
+
+    pub const fn observer_id(&self) -> Option<ObserverId> {
+        match self.role {
+            LocalRealmSessionRole::Player(_) => None,
+            LocalRealmSessionRole::Observer(observer_id) => Some(observer_id),
+        }
+    }
+
     pub const fn player_id(&self) -> ServerPlayerId {
-        self.player_id
+        match self.player_id_opt() {
+            Some(player_id) => player_id,
+            None => panic!("local realm observer has not been promoted to a player"),
+        }
     }
 
     pub fn server(&self) -> &RealmServer {
@@ -3580,16 +3613,108 @@ impl LocalRealmSession {
         &mut self,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<()> {
-        self.server
-            .configure_player_identity(self.player_id, identity)
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                self.server.configure_player_identity(player_id, identity)
+            }
+            LocalRealmSessionRole::Observer(_) => {
+                self.pending_player_identity = Some(identity);
+                Ok(())
+            }
+        }
     }
 
     pub fn configure_local_player_identity_blocking(
         &mut self,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<()> {
-        self.server
-            .configure_player_identity_blocking(self.player_id, identity)
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => self
+                .server
+                .configure_player_identity_blocking(player_id, identity),
+            LocalRealmSessionRole::Observer(_) => {
+                self.pending_player_identity = Some(identity);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn begin_observing(
+        &mut self,
+        dimension: DimensionKey,
+        view: ChunkView,
+        simulation: ObserverSimulationInterest,
+    ) -> ChunkStoreResult<ObserverId> {
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                if self
+                    .server
+                    .players
+                    .get(player_id)
+                    .is_some_and(|player| player.identity.is_some())
+                {
+                    return Err(ChunkStoreError::InvalidData(
+                        "cannot demote an identified local player to an observer".to_owned(),
+                    ));
+                }
+                self.server.remove_player(player_id);
+            }
+            LocalRealmSessionRole::Observer(observer_id) => {
+                self.server.remove_observer(observer_id)?;
+            }
+        }
+        let observer_id = self.server.add_observer(dimension, view, simulation)?;
+        self.role = LocalRealmSessionRole::Observer(observer_id);
+        Ok(observer_id)
+    }
+
+    pub fn promote_observer_to_player(&mut self) -> ChunkStoreResult<ServerPlayerId> {
+        self.promote_observer_to_player_with_identity_load(false)
+    }
+
+    pub fn promote_observer_to_player_blocking(&mut self) -> ChunkStoreResult<ServerPlayerId> {
+        self.promote_observer_to_player_with_identity_load(true)
+    }
+
+    fn promote_observer_to_player_with_identity_load(
+        &mut self,
+        blocking_identity_load: bool,
+    ) -> ChunkStoreResult<ServerPlayerId> {
+        let LocalRealmSessionRole::Observer(observer_id) = self.role else {
+            return Ok(self.player_id());
+        };
+        let dimension = self
+            .server
+            .observer_dimension(observer_id)
+            .cloned()
+            .ok_or_else(|| unknown_observer_error(observer_id))?;
+        let view = self.server.activate_dimension(&dimension).and_then(|_| {
+            self.server
+                .chunk_tracking
+                .accepted_observer_view(observer_id)
+                .cloned()
+                .ok_or_else(|| unknown_observer_error(observer_id))
+        })?;
+        self.server.remove_observer(observer_id)?;
+        let player_id = self.server.add_player_in_dimension(dimension)?;
+        self.role = LocalRealmSessionRole::Player(player_id);
+        if let Some(identity) = self.pending_player_identity.take() {
+            if blocking_identity_load {
+                self.server
+                    .configure_player_identity_blocking(player_id, identity)?;
+            } else {
+                self.server.configure_player_identity(player_id, identity)?;
+            }
+        }
+        let updates = self
+            .server
+            .try_handle_command_for_player(player_id, ClientCommand::SetChunkView(view))?;
+        for update in updates {
+            self.server
+                .chunk_tracking
+                .queue_update_for_player(player_id, update);
+        }
+        Ok(player_id)
     }
 
     pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
@@ -3601,8 +3726,29 @@ impl LocalRealmSession {
         &mut self,
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.server
-            .try_handle_command_for_player(self.player_id, command)
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => self
+                .server
+                .try_handle_command_for_player(player_id, command),
+            LocalRealmSessionRole::Observer(observer_id) => match command {
+                ClientCommand::SetChunkView(view) => {
+                    self.server.set_observer_interest(
+                        observer_id,
+                        view,
+                        ObserverSimulationInterest::BlockAndEntityTicking,
+                    )?;
+                    self.server.try_drain_updates_for_observer(observer_id)
+                }
+                ClientCommand::KeepAlive { .. } => Ok(Vec::new()),
+                ClientCommand::Disconnect(_) => {
+                    self.server.remove_observer(observer_id)?;
+                    Ok(Vec::new())
+                }
+                _ => Err(ChunkStoreError::InvalidData(
+                    "non-player observer cannot issue gameplay commands".to_owned(),
+                )),
+            },
+        }
     }
 
     pub fn poll(&mut self) -> Vec<ServerUpdate> {
@@ -3610,11 +3756,31 @@ impl LocalRealmSession {
     }
 
     pub fn try_poll(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.server.try_poll_for_player(self.player_id)
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => self.server.try_poll_for_player(player_id),
+            LocalRealmSessionRole::Observer(observer_id) => {
+                let dimension = self
+                    .server
+                    .observer_dimension(observer_id)
+                    .cloned()
+                    .ok_or_else(|| unknown_observer_error(observer_id))?;
+                self.server.activate_dimension(&dimension)?;
+                let events = self.server.scheduler.poll()?;
+                self.server.route_scheduler_events(events)?;
+                self.server.try_drain_updates_for_observer(observer_id)
+            }
+        }
     }
 
     pub fn try_drain_updates(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.server.try_drain_updates_for_player(self.player_id)
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                self.server.try_drain_updates_for_player(player_id)
+            }
+            LocalRealmSessionRole::Observer(observer_id) => {
+                self.server.try_drain_updates_for_observer(observer_id)
+            }
+        }
     }
 
     pub fn tick(&mut self) -> Vec<ServerUpdate> {
@@ -3631,8 +3797,17 @@ impl LocalRealmSession {
     }
 
     pub fn try_tick_report(&mut self) -> ChunkStoreResult<ServerTickReport> {
-        self.server
-            .try_tick_report_for_target(CommandTarget::Player(self.player_id))
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => self
+                .server
+                .try_tick_report_for_target(CommandTarget::Player(player_id)),
+            LocalRealmSessionRole::Observer(observer_id) => {
+                self.activate_observer_dimension(observer_id)?;
+                let mut report = self.server.try_tick_report_global()?;
+                report.updates = self.server.try_drain_updates_for_observer(observer_id)?;
+                Ok(report)
+            }
+        }
     }
 
     pub fn simulation_tick_report(&mut self) -> ServerSimulationTickReport {
@@ -3641,8 +3816,10 @@ impl LocalRealmSession {
     }
 
     pub fn try_simulation_tick_report(&mut self) -> ChunkStoreResult<ServerSimulationTickReport> {
-        self.server
-            .try_simulation_tick_report_for_player(self.player_id)
+        self.try_simulation_tick_report_with_physics_steps_and_step_dt(
+            DEFAULT_PHYSICS_STEPS_PER_GAMEPLAY_TICK,
+            DEFAULT_PHYSICS_STEP_DT_SECONDS,
+        )
     }
 
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
@@ -3662,12 +3839,26 @@ impl LocalRealmSession {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
-        self.server
-            .try_simulation_tick_report_for_target_with_physics_steps(
-                CommandTarget::Player(self.player_id),
-                physics_steps,
-                physics_step_dt_seconds,
-            )
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => self
+                .server
+                .try_simulation_tick_report_for_target_with_physics_steps(
+                    CommandTarget::Player(player_id),
+                    physics_steps,
+                    physics_step_dt_seconds,
+                ),
+            LocalRealmSessionRole::Observer(observer_id) => {
+                self.activate_observer_dimension(observer_id)?;
+                let mut report = self
+                    .server
+                    .try_simulation_tick_report_global_with_physics_steps(
+                        physics_steps,
+                        physics_step_dt_seconds,
+                    )?;
+                report.updates = self.server.try_drain_updates_for_observer(observer_id)?;
+                Ok(report)
+            }
+        }
     }
 
     #[allow(dead_code)]
@@ -3675,8 +3866,7 @@ impl LocalRealmSession {
         &mut self,
         physics_steps: u32,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
-        self.server
-            .try_physics_step_report_for_player(self.player_id, physics_steps)
+        self.try_physics_step_report_with_step_dt(physics_steps, DEFAULT_PHYSICS_STEP_DT_SECONDS)
     }
 
     pub(crate) fn try_physics_step_report_with_step_dt(
@@ -3684,31 +3874,64 @@ impl LocalRealmSession {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
-        self.server.try_physics_step_report_for_player_with_step_dt(
-            self.player_id,
-            physics_steps,
-            physics_step_dt_seconds,
-        )
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                self.server.try_physics_step_report_for_player_with_step_dt(
+                    player_id,
+                    physics_steps,
+                    physics_step_dt_seconds,
+                )
+            }
+            LocalRealmSessionRole::Observer(observer_id) => {
+                self.activate_observer_dimension(observer_id)?;
+                let mut report = self.server.try_physics_step_report_global_with_step_dt(
+                    physics_steps,
+                    physics_step_dt_seconds,
+                )?;
+                report.updates = self.server.try_drain_updates_for_observer(observer_id)?;
+                Ok(report)
+            }
+        }
     }
 
     pub fn view_readiness_snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
-        self.server.view_readiness_snapshot(self.player_id)
+        match self.role {
+            LocalRealmSessionRole::Player(player_id) => {
+                self.server.view_readiness_snapshot(player_id)
+            }
+            LocalRealmSessionRole::Observer(observer_id) => {
+                let dimension = self.server.observer_dimension(observer_id)?;
+                let runtime = self.server.dimension_runtime(dimension)?;
+                let view = runtime.chunk_tracking.accepted_observer_view(observer_id)?;
+                Some(runtime.scheduler.view_readiness_snapshot(view))
+            }
+        }
+    }
+
+    fn activate_observer_dimension(&mut self, observer_id: ObserverId) -> ChunkStoreResult<()> {
+        let dimension = self
+            .server
+            .observer_dimension(observer_id)
+            .cloned()
+            .ok_or_else(|| unknown_observer_error(observer_id))?;
+        self.server.activate_dimension(&dimension)
     }
 
     #[cfg(test)]
     pub(crate) fn player(&self) -> &ServerPlayerState {
         self.server
             .players
-            .get(self.player_id)
+            .get(self.player_id())
             .map(|player| &player.state)
             .expect("local realm session player must exist")
     }
 
     #[cfg(test)]
     pub(crate) fn player_mut(&mut self) -> &mut ServerPlayerState {
+        let player_id = self.player_id();
         self.server
             .players
-            .get_mut(self.player_id)
+            .get_mut(player_id)
             .map(|player| &mut player.state)
             .expect("local realm session player must exist")
     }
@@ -3717,7 +3940,7 @@ impl LocalRealmSession {
     pub(crate) fn inventory(&self) -> &ServerInventory {
         self.server
             .players
-            .get(self.player_id)
+            .get(self.player_id())
             .map(|player| &player.inventory)
             .expect("local realm session player must exist")
     }
@@ -3726,7 +3949,7 @@ impl LocalRealmSession {
     pub(crate) fn total_experience(&self) -> u64 {
         self.server
             .players
-            .get(self.player_id)
+            .get(self.player_id())
             .map(|player| player.total_experience)
             .expect("local realm session player must exist")
     }
@@ -3735,7 +3958,7 @@ impl LocalRealmSession {
     pub(crate) fn resume_record(&self) -> Option<&PlayerRecord> {
         self.server
             .players
-            .get(self.player_id)
+            .get(self.player_id())
             .and_then(|player| player.resume_record.as_ref())
     }
 }

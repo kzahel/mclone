@@ -46,6 +46,7 @@ interface IntegratedServerWorkerMessage {
   freezeScheduledFluidTicks?: boolean;
   debugPassiveShowcase?: boolean;
   debugAuxiliaryPlayerScript?: boolean;
+  observerOnly?: boolean;
   frame?: Uint8Array;
   profileId?: Uint8Array;
   displayName?: string;
@@ -158,6 +159,9 @@ workerSelf.onmessage = async (event: MessageEvent) => {
       case "flush-persistence":
         await flushPersistence(message);
         break;
+      case "promote-observer":
+        await promoteObserver(message);
+        break;
       default:
         postFailure(
           message.requestId,
@@ -257,6 +261,12 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
       throw new Error("wasm module does not expose IndexedDB world metadata initialization");
     }
     (server as any).initializeWorldMetadata();
+  }
+  if (message.observerOnly) {
+    if (typeof (server as any).enableObserverMode !== "function") {
+      throw new Error("wasm module does not expose observer-only local sessions");
+    }
+    (server as any).enableObserverMode();
   }
   if (typeof (server as any).setLocalPlayerIdentity === "function") {
     if (!message.profileId || !message.displayName) {
@@ -392,6 +402,25 @@ async function flushPersistence(message: IntegratedServerWorkerMessage): Promise
     updates: serviced.updates,
     diagnostics: serviced.diagnostics,
   });
+}
+
+async function promoteObserver(message: IntegratedServerWorkerMessage): Promise<void> {
+  if (!server || typeof (server as any).promoteObserverToPlayer !== "function") {
+    postFailure(message.requestId, "integrated server worker cannot promote its observer");
+    return;
+  }
+  const activeServer = server;
+  const serviced = await serviceIndexedDbResultForCurrentWorld(
+    activeServer,
+    (activeServer as any).promoteObserverToPlayer(),
+  );
+  postUpdates({
+    ok: true,
+    kind: "observer-promoted",
+    requestId: Number(message.requestId) || 0,
+    updates: serviced.updates,
+    diagnostics: serviced.diagnostics,
+  }, null);
 }
 
 async function serviceIndexedDbResultForCurrentWorld(
