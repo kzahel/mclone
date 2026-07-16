@@ -8,6 +8,7 @@ export interface FigureScene {
 
 export interface FigureSceneOptions {
   debug?: boolean;
+  jointMarkers?: boolean;
   labels?: boolean;
 }
 
@@ -68,7 +69,7 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
       if (options.labels) {
         content.add(createLabel(part.name));
       }
-    } else if (part.joint?.pivot) {
+    } else if (options.jointMarkers !== false && part.joint?.pivot) {
       group.add(createPivotMarker());
     }
 

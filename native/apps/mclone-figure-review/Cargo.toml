@@ -1,18 +1,19 @@
 [package]
-name = "mclone-assets"
+name = "mclone-figure-review"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-crc32fast.workspace = true
-flate2.workspace = true
+anyhow.workspace = true
 glam.workspace = true
-mclone-core.workspace = true
+mclone-assets.workspace = true
+mclone-render.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+wgpu.workspace = true
 
-[lib]
-name = "mclone_assets"
-path = "src/lib.rs"
+[[bin]]
+name = "mclone-figure-review"
+path = "src/main.rs"

@@ -1486,6 +1486,7 @@ version = "0.0.0"
 dependencies = [
  "crc32fast",
  "flate2",
+ "glam 0.30.10",
  "mclone-core",
  "serde",
  "serde_json",
@@ -1549,6 +1550,19 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "mclone-figure-review"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "glam 0.30.10",
+ "mclone-assets",
+ "mclone-render",
+ "serde",
+ "serde_json",
+ "wgpu",
 ]
 
 [[package]]

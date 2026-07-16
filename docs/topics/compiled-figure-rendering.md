@@ -2,13 +2,14 @@
 
 Topic: `compiled-figure-rendering`
 
-Status: target direction selected 2026-07-16. The canonical semantic-JSON
-handoff and first-party source drift gate are implemented as Tactical
-[`181`](../tactical/181-compiled-figure-static-box-proof.md) Slice 0; the
-static-box startup-compilation proof has not started. Semantic JSON remains
-the persisted runtime format; a prepared-figure disk format or cache is
-explicitly deferred. Instancing, LOD, and GPU pose evaluation remain later
-measured stages.
+Status: target direction selected 2026-07-16. Tactical
+[`181`](../tactical/181-compiled-figure-static-box-proof.md) Slices 0-3 now
+cover the canonical semantic handoff, shared startup compiler, immutable mono
+proof renderer, and visually approved Three.js/native comparison. The simpler
+native proof lighting was accepted for this stage. Stereo/browser portability
+is the remaining proof work. Semantic JSON remains the only persisted runtime
+format; production migration, animation, curved primitives, instancing, LOD,
+GPU pose evaluation, and a disk cache remain deferred.
 
 ## Scope
 
@@ -22,8 +23,8 @@ presentation, and `mclone-render`. It does not change authoritative entity
 simulation, protocol identity, AI, or spawning. Those remain owned by the
 entity/runtime architecture.
 
-The architectural target is selected, while the exact shared compiler owner,
-optimization thresholds, and later LOD policy remain open. The purpose of
+The architectural target and `mclone-assets` compiler ownership are selected,
+while optimization thresholds and later LOD policy remain open. The purpose of
 this document is to preserve current evidence and decisions, identify the
 tradeoffs that need measurement, and keep small actor-cache work from
 accidentally hardening an interim representation into the long-term figure
@@ -187,11 +188,11 @@ figure.ts
 ```
 
 The shared Rust engine implementation is the natural runtime authority because
-native, web/WASM, Android, and XR already consume that code. The exact crate
-boundary remains a Tactical 181 decision. Asset Lab continues rendering its
-parsed semantic JSON with Three.js; comparison fixtures, a native diagnostic,
-or a later Rust/WASM bridge may expose prepared output for review without
-creating a production file format.
+native, web/WASM, Android, and XR already consume that code. `mclone-assets`
+now owns renderer-neutral preparation beside semantic loading, while
+`mclone-render` owns GPU residency and drawing. Asset Lab continues rendering
+its parsed semantic JSON with Three.js; the native comparison diagnostic
+exposes prepared output for review without creating a production file format.
 
 `PreparedFigure` is an internal CPU representation, not a compatibility
 format. It can evolve with the renderer while semantic JSON stays small,
@@ -251,6 +252,35 @@ canonical authored animation data. Semantic JSON retains the clip tracks and
 their semantics. A renderer may build GPU-resident sampled clips from them,
 while a CPU evaluator can continue using the same tracks exactly. This avoids
 making every actor count and every supported GPU pay for the crowd path.
+
+## Static-Box Proof Evidence
+
+The first box-only proof is now concrete rather than only architectural:
+
+- `mclone-assets` loads the normal semantic JSON through `AssetSource` and
+  deterministically prepares an internal `PreparedFigure`; there is no second
+  persisted input, byte format, header, cache key, or compatibility promise.
+- The semantic player hash is
+  `3e5f885ed57fa86051e647cb98ca8c2238285e2fc14b511159601acb33f300fc`.
+  It prepares as 12 parts, 288 local vertices, 432 `u16` indices, 72 face
+  ranges, and one 13x10 atlas containing the 8x8 face texture without the old
+  64-cuboid texture-cell expansion.
+- `mclone-render` retains one immutable vertex buffer, index buffer, atlas,
+  and rest palette. A three-view run reports four immutable uploads total and
+  three view-uniform writes, rather than rebuilding topology for each panel.
+- The one-command `pnpm asset-lab:compare` lane asks the semantic Three.js
+  renderer to derive framing, passes that exact ephemeral contract to the
+  native offscreen renderer, and emits raw panels, receipts, and a labeled
+  paired sheet under `/tmp`.
+- The inspected front, right, and three-quarter projections agree on scale,
+  grounding, silhouette, box placement, and face orientation. First-draw
+  inspection exposed and fixed incorrect mirrored winding. The native proof
+  is darker because it intentionally uses a simpler fixed light/material
+  approximation; exact RGB equality is not claimed.
+
+This evidence makes the source/compiler/local-space/residency shape ready for
+human review. It does not yet approve production actor replacement, animation,
+stereo/multiview, browser WebGPU, or curved primitives.
 
 ## Candidate Prepared-Figure Contract
 
@@ -646,14 +676,16 @@ decision.
 - add representative per-figure geometry and pose-cost reports; and
 - retain current pixels and all platform paths.
 
-### Phase 1: startup-prepared static box proof
+### Phase 1: startup-prepared static box proof (mono proof approved)
 
 - establish the shared Rust startup compiler and in-memory `PreparedFigure`
   through Tactical
   [`181`](../tactical/181-compiled-figure-static-box-proof.md);
 - compile one box-only figure with positions, normals, UVs, indices, part IDs,
   materials, and a real ASCII-derived texture atlas;
-- upload and draw the prepared result through shared native/web rendering;
+- upload and draw the prepared result through shared rendering; native mono is
+  implemented and inspected, while stereo/multiview and production browser
+  WebGPU remain Tactical 181 Slice 4;
 - compare runtime pixels, bounds, winding, UVs, and counts against the
   semantic Three.js baseline; and
 - record startup preparation time without creating a persisted geometry file.
@@ -902,6 +934,14 @@ drawable milestone. The eventual campaign should include:
   [`../../tools/asset-lab/examples/upright_bear/figure.ts`](../../tools/asset-lab/examples/upright_bear/figure.ts)
 - Figure source loading:
   [`../../native/crates/mclone-assets/src/figure.rs`](../../native/crates/mclone-assets/src/figure.rs)
+- Prepared-figure startup compiler:
+  [`../../native/crates/mclone-assets/src/prepared_figure.rs`](../../native/crates/mclone-assets/src/prepared_figure.rs)
+- Prepared-figure GPU proof:
+  [`../../native/crates/mclone-render/src/prepared_figure.rs`](../../native/crates/mclone-render/src/prepared_figure.rs)
+- Native offscreen figure review:
+  [`../../native/apps/mclone-figure-review/src/main.rs`](../../native/apps/mclone-figure-review/src/main.rs)
+- Paired semantic/native comparison:
+  [`../../tools/asset-lab/src/compare.ts`](../../tools/asset-lab/src/compare.ts)
 - Current runtime figure compiler:
   [`asset_lab_figure.rs`](../../native/crates/mclone-render/src/asset_lab_figure.rs)
 - Current actor cache/draw path:
@@ -911,13 +951,12 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Run Tactical [`181`](../tactical/181-compiled-figure-static-box-proof.md):
-with its semantic handoff prerequisite complete, capture the existing player
-baseline, select the shared Rust compiler owner, prepare the exact box/UV data
-in memory at figure residency, and draw the frozen result through a shared
-opt-in runtime proof. Record preparation count, time, and memory, but do not
-add another persisted figure representation or cache. Stop before animation,
-production actor migration, instancing, curved primitives, or LOD.
+Finish Tactical [`181`](../tactical/181-compiled-figure-static-box-proof.md)'s
+stereo/multiview and production browser WebGPU portability gate now that the
+paired mono geometry, framing, grounding, face orientation, and simpler native
+proof lighting are approved. Do not start animation, production actor
+migration, instancing, curved primitives, LOD, or a persisted prepared format
+as part of that portability step.
 
 After that proof, select the next capability from actual production needs:
 presentation-rate rigid-part animation, another box-only migration, or true

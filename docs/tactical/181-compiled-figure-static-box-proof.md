@@ -1,7 +1,9 @@
 # 181: Startup-Prepared Figure Static-Box Proof
 
-Status: active 2026-07-16. Slice 0 is complete; startup figure preparation has
-not started.
+Status: active 2026-07-16. Slices 0-3 are implemented; the first paired pixels
+and the proof's simpler native lighting were visually approved. Work is paused
+before stereo/browser portability, animation, production migration, curved
+primitives, instancing, or LOD.
 
 Topic: `compiled-figure-rendering`
 
@@ -83,9 +85,8 @@ tactical so implementation can be evaluated coherently.
 
 ### Compiler authority
 
-- Add a deterministic renderer-neutral compiler under shared Rust engine
-  ownership. Decide its exact crate boundary before the first implementation
-  edit; it must not become app-local.
+- `mclone-assets` owns the deterministic renderer-neutral compiler beside the
+  semantic loader. It remains reusable without an app or GPU dependency.
 - Produce an in-memory `PreparedFigure` at startup or first asset residency.
 - The compiler owns box tessellation directly. A test asserts equality with
   the repository-pinned Three.js `BoxGeometry` attributes/groups, so Three.js
@@ -150,10 +151,10 @@ tactical so implementation can be evaluated coherently.
   world_position = actor_world * rest_part_matrix[part_id] * local_position
   ```
 
-- Light the prepared figure from one per-actor packed light value sampled at
-  the actor position, not per-vertex baked light. Comparison against the
-  CPU-baked bridge treats any resulting gradient difference as a deliberate
-  lighting-model change.
+- A production prepared actor will use one per-actor packed light value sampled
+  at the actor position, not per-vertex baked light. The isolated Slice 3
+  review fixture instead uses fixed comparison lighting; RGB differences from
+  Three.js are not a geometry failure.
 - Draw one proof actor at a time. Do not add instance buckets, sampled phase
   palettes, compute, or dynamic part uploads.
 - Keep the current CPU-baked `ActorMeshCache` as the default production actor
@@ -209,7 +210,7 @@ checked JSON files pass the drift check; deterministic player sheets from the
 TypeScript-round-trip and direct-JSON routes are byte-identical. Captures live
 under `/tmp/mclone-asset-lab/` and were inspected.
 
-### Slice 1: freeze baseline and acceptance data
+### Slice 1: freeze baseline and acceptance data (complete 2026-07-16)
 
 - Capture current Asset Lab player sheet and native actor review sheet under
   `/tmp` with exact commands and dependency revisions recorded here.
@@ -233,7 +234,27 @@ Gate: the baseline must reproduce 12 parts, 288 intended box vertices, 432
 indices, one 8x8 source texture, and the current 12+64-cuboid runtime
 approximation. If it does not, update the topic evidence before coding.
 
-### Slice 2: shared Rust startup compiler
+Gate evidence:
+
+- The canonical semantic player is 17,365 bytes with SHA-256
+  `3e5f885ed57fa86051e647cb98ca8c2238285e2fc14b511159601acb33f300fc`.
+  The inspected clean semantic sheet is
+  `/tmp/mclone-prepared-figure-baseline/three-player-sheet.png`.
+- The frozen semantic result is 12 box parts, 288 vertices, 432 indices, 144
+  triangles, and one 8x8 face texture. Existing direct bridge tests still pin
+  the legacy expansion at 76 cuboids, 1,824 vertices, and 2,736 indices.
+- The semantic renderer owns framing once: 360x480 panels, 35-degree vertical
+  FOV, normalized target `[0, 0.5, 0]`, distance `2.793428`, background
+  `#edf1f4`, rest pose, and `front`, `right`, and `three-quarter` views. The
+  engine consumes the emitted ephemeral review contract rather than
+  auto-framing independently.
+- A fresh legacy actor-review PNG could not be regenerated in this dirty
+  development tree because an unrelated in-flight sequenced-movement change
+  leaves `mclone-native-client` uncompilable. Tactical 112's inspected legacy
+  capture and the focused bridge count/winding/face tests remain the baseline;
+  no protocol/client files were changed for this proof.
+
+### Slice 2: shared Rust startup compiler (complete 2026-07-16)
 
 - Decide and document the shared renderer-neutral owner before the first code
   edit. It must be reusable by native, web/WASM, Android, XR, and offscreen
@@ -261,7 +282,17 @@ Gate: two clean preparations agree exactly; the player result has 12 parts,
 bounds, and an atlas whose face texels match the ASCII palette and orientation.
 No additional persisted figure file is created.
 
-### Slice 3: first shared mono pixels
+Gate evidence: `mclone-assets::prepared_figure` is the shared, GPU-neutral
+owner. `mclone-prepared-figure-box-v0` consumes the normal `FigureAsset` and
+produces an internal `PreparedFigure` with stable hierarchy, normalized rest
+matrices, local vertices, `u16` indices, face draw ranges, clips, bounds, and a
+deterministic 13x10 RGBA atlas. The player prepares to 12 parts, 288 vertices,
+432 indices, 72 face ranges, 520 atlas bytes, and 17,512 accounted CPU bytes.
+Repeated preparation, pinned Three.js face order/attributes, textured north
+orientation, hierarchy-cycle rejection, part-budget rejection, and explicit
+curved-primitive rejection pass. No prepared bytes are persisted.
+
+### Slice 3: first shared mono pixels (complete 2026-07-16)
 
 - Load semantic JSON through the ordinary `AssetSource`/provenance chain and
   prepare it once when the proof figure becomes resident.
@@ -295,6 +326,32 @@ expansion, and reuses immutable GPU buffers across unchanged proof frames.
 The side-by-side sheet contains corresponding front, side, and three-quarter
 panels from Three.js and the engine without resampling. Feature-off actor
 review and gameplay captures remain unchanged.
+
+Gate evidence:
+
+- `mclone-render::prepared_figure` owns a distinct 52-byte local-space vertex
+  layout, immutable vertex/index/atlas/rest-palette resources, a rest-palette
+  shader, and the mono proof draw. The three review panels report one resource
+  setup (four immutable uploads), three view-uniform writes, and one indexed
+  draw per panel. GPU payload is 14,976 vertex bytes, 864 index bytes, 520
+  atlas bytes, and a 4,096-byte fixed proof palette.
+- `pnpm asset-lab:compare -- --out-dir
+  /tmp/mclone-figure-compare/final-player` generates both renderers, raw panels,
+  contracts, receipts, and the labeled comparison. The sheet reflects engine
+  panels horizontally only for semantic-view alignment across the deliberate
+  Asset Lab `-Z`-front to engine `+Z`-front conversion; raw engine captures are
+  retained unchanged.
+- First-pixel inspection found diagonal holes caused by the mirrored triangle
+  order. Correcting the indices to outward winding removed them. The final
+  front, right, and three-quarter panels have matching scale, grounding,
+  silhouette, part placement, and face orientation. Native fixed proof
+  lighting remains visibly darker than Three.js and is the main current RGB
+  difference.
+- The comparison receipt records semantic SHA-256 and CRC-32, compiler ID,
+  exact shared camera, geometry/atlas counts, preparation time, and residency
+  counters. It is ephemeral diagnostic output under `/tmp`, not an asset.
+- Human review approved the geometry and accepted the simpler native proof
+  lighting without requesting material or lighting parity work in this slice.
 
 ### Slice 4: stereo, multiview, and browser portability
 
@@ -423,6 +480,15 @@ requirement for affected figures, not a reason to add a persisted format.
   [`../../tools/asset-lab/examples/upright_bear/figure.ts`](../../tools/asset-lab/examples/upright_bear/figure.ts)
 - Current semantic Rust loader:
   [`../../native/crates/mclone-assets/src/figure.rs`](../../native/crates/mclone-assets/src/figure.rs)
+- Shared in-memory compiler:
+  [`../../native/crates/mclone-assets/src/prepared_figure.rs`](../../native/crates/mclone-assets/src/prepared_figure.rs)
+- Shared proof GPU resources and draw:
+  [`../../native/crates/mclone-render/src/prepared_figure.rs`](../../native/crates/mclone-render/src/prepared_figure.rs)
+- Native offscreen proof orchestration:
+  [`../../native/apps/mclone-figure-review/src/main.rs`](../../native/apps/mclone-figure-review/src/main.rs)
+- Semantic review page and paired comparison command:
+  [`../../tools/asset-lab/src/review-page.ts`](../../tools/asset-lab/src/review-page.ts),
+  [`../../tools/asset-lab/src/compare.ts`](../../tools/asset-lab/src/compare.ts)
 - Current runtime approximation:
   [`../../native/crates/mclone-render/src/asset_lab_figure.rs`](../../native/crates/mclone-render/src/asset_lab_figure.rs)
 - Current actor cache and draw path:

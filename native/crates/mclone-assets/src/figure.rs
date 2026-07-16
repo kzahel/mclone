@@ -61,6 +61,7 @@ pub struct FigurePart {
     pub parent: Option<String>,
     pub at: Option<[f32; 3]>,
     pub rot: Option<[f32; 3]>,
+    pub pivot: Option<[f32; 3]>,
     pub material: Option<String>,
     pub texture: Option<String>,
     pub joint: Option<FigureJoint>,

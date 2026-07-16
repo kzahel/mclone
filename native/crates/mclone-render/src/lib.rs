@@ -18,6 +18,7 @@ pub mod gui;
 pub mod light_texture;
 pub mod opaque_world_gate;
 pub mod placement;
+pub mod prepared_figure;
 pub mod screen_effect;
 pub mod selection_outline;
 pub mod sky;

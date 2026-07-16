@@ -25,6 +25,7 @@ members = [
   "crates/mclone-xr-host",
   "crates/mclone-scene",
   "apps/mclone-dedicated-server",
+  "apps/mclone-figure-review",
   "apps/mclone-android-client",
   "apps/mclone-android-xr-client",
   "apps/mclone-native-client",

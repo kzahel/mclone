@@ -7,6 +7,7 @@ mod first_party;
 mod inventory;
 mod model;
 mod pack;
+mod prepared_figure;
 mod profile;
 mod resource;
 mod source;
@@ -46,6 +47,11 @@ pub use model::{
 pub use pack::{
     AssetPackManifest, DEFAULT_PACK_MANIFEST_PATH, PACK_FORMAT_VERSION, PackedAssetSource,
 };
+pub use prepared_figure::{
+    FigurePrepareError, PREPARED_FIGURE_COMPILER_ID, PreparedFigure, PreparedFigureAtlas,
+    PreparedFigureBounds, PreparedFigureDiagnostics, PreparedFigureDrawRange, PreparedFigurePart,
+    PreparedFigureVertex, load_prepared_figure, prepare_figure_asset,
+};
 pub use profile::{
     AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor, AssetPackDiscovery, AssetPackId,
     AssetPackOrigin, AssetPackRole, AssetPackSelection, AssetProvenanceEntry,
@@ -69,6 +75,7 @@ pub enum AssetError {
     InvalidBlockState(String),
     InvalidModel(String),
     InvalidTexture(String),
+    InvalidFigure(String),
     InvalidAssetPack(String),
     MissingAsset(AssetPath),
     Io(std::io::Error),
@@ -88,6 +95,7 @@ impl fmt::Display for AssetError {
             Self::InvalidBlockState(message) => write!(f, "invalid block state: {message}"),
             Self::InvalidModel(message) => write!(f, "invalid model: {message}"),
             Self::InvalidTexture(message) => write!(f, "invalid texture: {message}"),
+            Self::InvalidFigure(message) => write!(f, "invalid figure: {message}"),
             Self::InvalidAssetPack(message) => write!(f, "invalid asset pack: {message}"),
             Self::MissingAsset(path) => write!(f, "missing asset {}", path.as_str()),
             Self::Io(error) => write!(f, "{error}"),

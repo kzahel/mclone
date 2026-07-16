@@ -14,6 +14,7 @@
     "sheet": "tsx src/sheet.ts examples/piglet/figure.ts --out /tmp/mclone-asset-lab/piglet-sheet.png",
     "video": "tsx src/video.ts examples/piglet/figure.ts --out /tmp/mclone-asset-lab/piglet-walk.mp4",
     "batch": "tsx src/batch.ts",
+    "compare": "tsx src/compare.ts",
     "install:browsers": "playwright install chromium"
   },
   "dependencies": {
