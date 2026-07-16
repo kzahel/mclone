@@ -12,6 +12,8 @@ mclone generation profiles. See
 [`topics/world-generation-profiles.md`](topics/world-generation-profiles.md)
 and
 [`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
+The bounded biome and decoration fork is planned in
+[`tactical/188-mclone-overworld-v1-biome-decoration-fork.md`](tactical/188-mclone-overworld-v1-biome-decoration-fork.md).
 
 The implementation lives primarily in `native/crates/mclone-worldgen`, with
 scheduler/publication integration in `native/crates/mclone-server` and shared
@@ -41,6 +43,9 @@ Landed native coverage:
 - Bounded `small-island-v1` world-coordinate terrain with seeded shoreline and
   relief, a guaranteed central spawn patch, plains/beach/ocean biomes,
   native/dedicated publication, seam/partition locks, and save/reopen coverage.
+- Profile-qualified worker results: dependency-cache and generation-timing
+  diagnostics are explicitly optional and exist only for the Overworld path;
+  target-only flat and island jobs do not synthesize Overworld reports.
 
 Important native entry points:
 
@@ -111,3 +116,4 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`015-decoration-framework-foundation.md`](tactical/015-decoration-framework-foundation.md) through the later worldgen tacticals for feature/decorator progress.
 - [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md) for the current full decorated chunk parity target.
 - [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
+- [`188-mclone-overworld-v1-biome-decoration-fork.md`](tactical/188-mclone-overworld-v1-biome-decoration-fork.md) for the planned frozen-overworld/original-mclone biome and decoration fork.

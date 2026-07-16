@@ -29,8 +29,7 @@ use mclone_worldgen::block::{
 };
 use mclone_worldgen::feature::{FEATURES_BLOCK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming,
-    OverworldFeatureDependencyCacheReport, ScheduledTick,
+    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming, ScheduledTick,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -43,6 +42,7 @@ use crate::fluid::{
     target_fluid_can_be_replaced_with,
 };
 use crate::holder::ChunkHolder;
+use crate::job_codec::OverworldGenerationDiagnostics;
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{
@@ -3080,11 +3080,7 @@ impl ChunkScheduler {
             .saturating_add(completed.len());
         if self.publication_budget.enabled() {
             for completed_job in &completed {
-                self.mark_job_complete(
-                    completed_job.job_id,
-                    completed_job.cache_report,
-                    completed_job.timing,
-                );
+                self.mark_job_complete(completed_job.job_id, completed_job.overworld_diagnostics);
                 diagnostics.feature_jobs_pipeline_completed = diagnostics
                     .feature_jobs_pipeline_completed
                     .saturating_add(1);
@@ -3270,7 +3266,7 @@ impl ChunkScheduler {
             self.mark_dependency_ready(dependency);
         }
         if !self.publication_budget.enabled() {
-            self.mark_job_complete(completed.job_id, completed.cache_report, completed.timing);
+            self.mark_job_complete(completed.job_id, completed.overworld_diagnostics);
         }
         diagnostics.feature_jobs_completed = diagnostics.feature_jobs_completed.saturating_add(1);
         if !pending_light_statuses.is_empty() {
@@ -3491,18 +3487,19 @@ impl ChunkScheduler {
     fn mark_job_complete(
         &mut self,
         id: ChunkJobId,
-        cache_report: OverworldFeatureDependencyCacheReport,
-        timing: OverworldFeatureBatchTiming,
+        overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
     ) {
         let job = self
             .jobs
             .get_mut(&id)
             .expect("job must exist before state transition");
-        job.dependency_cache_hits = cache_report.cache_hits;
-        job.dependency_cache_misses = cache_report.generated_dependency_chunks;
-        job.retained_dependency_chunks = cache_report.retained_dependency_chunks;
+        if let Some(diagnostics) = overworld_diagnostics {
+            job.dependency_cache_hits = diagnostics.cache_report.cache_hits;
+            job.dependency_cache_misses = diagnostics.cache_report.generated_dependency_chunks;
+            job.retained_dependency_chunks = diagnostics.cache_report.retained_dependency_chunks;
+            self.job_timings.insert(id, diagnostics.timing);
+        }
         job.state = ChunkJobState::Complete;
-        self.job_timings.insert(id, timing);
     }
 
     fn runtime_chunk_target_status(&self) -> ChunkStatus {
@@ -4782,6 +4779,7 @@ mod tests {
         assert!(job.dependency_chunks.is_empty());
         assert_eq!(job.seeded_dependency_chunks, 0);
         assert_eq!(job.retained_dependency_chunks, 0);
+        assert!(scheduler.job_timing(job.id).is_none());
     }
 
     #[test]
@@ -4840,6 +4838,7 @@ mod tests {
         assert!(job.dependency_chunks.is_empty());
         assert_eq!(job.seeded_dependency_chunks, 0);
         assert_eq!(job.retained_dependency_chunks, 0);
+        assert!(scheduler.job_timing(job.id).is_none());
     }
 
     #[test]
@@ -4879,8 +4878,10 @@ mod tests {
         let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
         scheduler.mark_job_complete(
             first_job_id,
-            OverworldFeatureDependencyCacheReport::default(),
-            OverworldFeatureBatchTiming::default(),
+            Some(OverworldGenerationDiagnostics {
+                cache_report: Default::default(),
+                timing: Default::default(),
+            }),
         );
 
         scheduler.enqueue_next_pending_feature_job();

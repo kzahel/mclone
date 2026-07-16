@@ -21,13 +21,12 @@ use std::{
 
 use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming,
-    OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport,
+    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureDependencyCache,
 };
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
-use crate::job_codec::generate_chunks_with_dependencies;
+use crate::job_codec::{OverworldGenerationDiagnostics, generate_chunks_with_dependencies};
 #[cfg(target_arch = "wasm32")]
 use crate::job_codec::{decode_worldgen_response, encode_worldgen_delta_request};
 #[cfg(target_arch = "wasm32")]
@@ -40,8 +39,7 @@ pub(crate) struct WorldgenCompletedJob {
     pub(crate) descriptor: WorldGenerationDescriptor,
     pub(crate) generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     pub(crate) retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
-    pub(crate) cache_report: OverworldFeatureDependencyCacheReport,
-    pub(crate) timing: OverworldFeatureBatchTiming,
+    pub(crate) overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
 }
 
 #[derive(Debug)]
@@ -248,8 +246,7 @@ impl WorldgenMailboxBackend {
             descriptor,
             generated_chunks: result.chunks,
             retained_dependencies: result.retained_dependencies,
-            cache_report: result.cache_report,
-            timing: result.timing,
+            overworld_diagnostics: result.overworld_diagnostics,
         });
     }
 
@@ -280,8 +277,7 @@ impl WorldgenMailboxBackend {
                 descriptor: decoded.descriptor,
                 generated_chunks: decoded.generated_chunks,
                 retained_dependencies: decoded.retained_dependencies,
-                cache_report: decoded.cache_report,
-                timing: decoded.timing,
+                overworld_diagnostics: decoded.overworld_diagnostics,
             });
         }
         self.completed.drain(..).collect()
@@ -350,8 +346,7 @@ impl WorldgenMailboxBackend {
                                 descriptor,
                                 generated_chunks: result.chunks,
                                 retained_dependencies: result.retained_dependencies,
-                                cache_report: result.cache_report,
-                                timing: result.timing,
+                                overworld_diagnostics: result.overworld_diagnostics,
                             };
                             if let Ok(mut metrics) = worker_metrics.lock() {
                                 metrics.record_inbound(0);

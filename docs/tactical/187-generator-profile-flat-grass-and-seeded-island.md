@@ -1,7 +1,8 @@
 # Tactical 187: Generator Profiles, Flat Grass, and Seeded Island
 
-Status: active parent; product direction accepted 2026-07-16. Slices 0 through
-4 are complete; the bounded fork-readiness inventory is next.
+Status: complete 2026-07-17. Product direction accepted 2026-07-16; all six
+slices and cross-platform gates are complete. Tactical 188 owns the actual
+vanilla/mclone biome and decoration fork.
 
 Topic: `world-generation-profiles`
 
@@ -648,7 +649,7 @@ Execution record:
 
 ### Slice 5: Fork-readiness cleanup
 
-Status: planned; do only evidence-backed extraction.
+Status: complete 2026-07-17; only evidence-backed extraction was performed.
 
 - Inventory the remaining concrete `OverworldBiomeSource` and
   overworld-feature-table dependencies after flat/island land.
@@ -663,6 +664,32 @@ Status: planned; do only evidence-backed extraction.
 Gate: adding a future mclone profile has a named owner and bounded seams, while
 the current flat/island implementations remain simple and the overworld path
 retains exact parity gates.
+
+Execution record:
+
+- inventoried 270 concrete references across production, tests, and tools.
+  `OverworldBiomeSource` is still legitimately owned by Overworld terrain,
+  surface, carver, decoration, server-biome lookup, and spawn search code;
+  `OverworldFeatureDependencyCache` is likewise the resident state of only the
+  Overworld dispatch case;
+- did not introduce a biome-source trait, generic carver/surface hierarchy, or
+  feature-table registry because Flat and Island do not call those paths. A
+  second ruleset caller is the evidence required before extracting them;
+- replaced the generic server/worker batch result with
+  `WorldGenerationBatchResult`, whose optional
+  `OverworldGenerationDiagnostics` carries the concrete dependency-cache
+  report and timing only for `overworld`. Flat and Island frames now encode no
+  fake zero-valued Overworld report, and their scheduler jobs expose no
+  Overworld timing sample;
+- bumped the ephemeral worker frame to version 4 and added full/delta codec
+  tests proving Overworld diagnostics remain present while both target-only
+  profiles omit them;
+- passed the three-crate WASM library check and the real flat/island browser
+  Worker smoke after the frame change. The library-only qualifier deliberately
+  excludes native fixture binaries from the cross-target check;
+- defined the original-profile identity, seed-domain, fixture vocabulary, and
+  evidence-driven extraction order in
+  [`188-mclone-overworld-v1-biome-decoration-fork.md`](188-mclone-overworld-v1-biome-decoration-fork.md).
 
 ## Validation Matrix
 
@@ -692,6 +719,7 @@ Add focused tests for:
 
 ```bash
 cargo check --manifest-path native/Cargo.toml \
+  --lib \
   -p mclone-worldgen -p mclone-server -p mclone-web-client \
   --target wasm32-unknown-unknown
 pnpm native:web:build

@@ -2,12 +2,12 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tactical 187 is active through Slice 4. `flat-grass-v1` and
+Status: **Tactical 187 is complete. `flat-grass-v1` and
 `small-island-v1` are live, persisted, target-only shared-Rust generators
 beside the unchanged Overworld; authored-only misses still produce void.
 Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
 multi-dimension, and stored-reopen paths now carry the same profile contract.
-Fork-readiness cleanup is next.**
+Tactical 188 owns the later `mclone-overworld-v1` biome/decoration fork.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -59,7 +59,9 @@ changes.
 
 The overworld implementation itself remains concrete:
 
-- shared batch timing/report types still retain Overworld-specific names;
+- Overworld batch timing/cache types remain concrete inside optional
+  `OverworldGenerationDiagnostics`; Flat and Island do not publish fake
+  zero-valued Overworld counters;
 - resident worker state contains `OverworldFeatureDependencyCache` for the
   Overworld dispatch case;
 - surface, carver, feature-biome, and feature-table internals remain specific
@@ -162,10 +164,10 @@ adding profile branches.
 
 ## Next Work
 
-Tactical 187 has completed steps 1 through 5; the remaining step is:
-
-1. extract only the biome/rules seams demonstrated necessary for the later
-   vanilla/mclone fork.
+Execute
+[`Tactical 188`](../tactical/188-mclone-overworld-v1-biome-decoration-fork.md)
+when beginning the original overworld. It adds the versioned profile and a
+second real biome/decoration ruleset caller before extracting shared seams.
 
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. The generator plan must accommodate their future
@@ -181,3 +183,4 @@ dependencies and metadata, but Tactical 187 does not implement them.
 - [`../tactical/103-decorated-biome-fixture-matrix.md`](../tactical/103-decorated-biome-fixture-matrix.md)
 - [`../tactical/135-overworld-biome-palette-matrix.md`](../tactical/135-overworld-biome-palette-matrix.md)
 - [`../tactical/146-overworld-macro-terrain-geometry-parity.md`](../tactical/146-overworld-macro-terrain-geometry-parity.md)
+- [`../tactical/188-mclone-overworld-v1-biome-decoration-fork.md`](../tactical/188-mclone-overworld-v1-biome-decoration-fork.md)

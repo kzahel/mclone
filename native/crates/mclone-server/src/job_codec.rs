@@ -7,7 +7,7 @@ use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
     GeneratedChunk, MutableChunkBlockBuffer, OverworldDependencyGenerationTiming,
-    OverworldFeatureBatchResult, OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
+    OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, ScheduledTick, SurfaceFillTiming,
     generate_flat_grass_chunk, generate_small_island_chunk,
 };
@@ -33,7 +33,22 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 3;
+const JOB_FRAME_VERSION: u32 = 4;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct OverworldGenerationDiagnostics {
+    pub(crate) cache_report: OverworldFeatureDependencyCacheReport,
+    pub(crate) timing: OverworldFeatureBatchTiming,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct WorldGenerationBatchResult {
+    pub(crate) chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    pub(crate) retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    /// Present only for the Overworld implementation. Target-only profiles do
+    /// not manufacture zero-valued Overworld cache or timing diagnostics.
+    pub(crate) overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
+}
 
 pub(crate) fn encode_worldgen_request(
     job_id: ChunkJobId,
@@ -71,8 +86,14 @@ pub(crate) fn decode_worldgen_response(bytes: &[u8]) -> Result<WorldgenJobFrame,
     })?;
     let retained_dependency_positions =
         reader.read_vec("retained dependency positions", FrameReader::read_chunk_pos)?;
-    let cache_report = reader.read_feature_cache_report()?;
-    let timing = reader.read_feature_batch_timing()?;
+    let overworld_diagnostics = if reader.read_bool()? {
+        Some(OverworldGenerationDiagnostics {
+            cache_report: reader.read_feature_cache_report()?,
+            timing: reader.read_feature_batch_timing()?,
+        })
+    } else {
+        None
+    };
     reader.finish()?;
     Ok(WorldgenJobFrame {
         job_id,
@@ -80,8 +101,7 @@ pub(crate) fn decode_worldgen_response(bytes: &[u8]) -> Result<WorldgenJobFrame,
         generated_chunks,
         retained_dependencies,
         retained_dependency_positions,
-        cache_report,
-        timing,
+        overworld_diagnostics,
     })
 }
 
@@ -112,14 +132,23 @@ pub(crate) fn generate_chunks_with_dependencies(
     descriptor: WorldGenerationDescriptor,
     targets: &[ChunkPos],
     dependencies: Vec<MutableChunkBlockBuffer>,
-) -> Result<OverworldFeatureBatchResult, String> {
+) -> Result<WorldGenerationBatchResult, String> {
     match descriptor.profile {
-        WorldGenerationProfile::Overworld => Ok(overworld_cache
-            .generate_features_chunks_with_dependencies(
+        WorldGenerationProfile::Overworld => {
+            let result = overworld_cache.generate_features_chunks_with_dependencies(
                 descriptor.seed,
                 targets.iter().copied(),
                 dependencies,
-            )),
+            );
+            Ok(WorldGenerationBatchResult {
+                chunks: result.chunks,
+                retained_dependencies: result.retained_dependencies,
+                overworld_diagnostics: Some(OverworldGenerationDiagnostics {
+                    cache_report: result.cache_report,
+                    timing: result.timing,
+                }),
+            })
+        }
         WorldGenerationProfile::FlatGrassV1 => {
             if !dependencies.is_empty() {
                 return Err(format!(
@@ -132,11 +161,10 @@ pub(crate) fn generate_chunks_with_dependencies(
                 .copied()
                 .map(|pos| (pos, generate_flat_grass_chunk(pos.x, pos.z)))
                 .collect();
-            Ok(OverworldFeatureBatchResult {
+            Ok(WorldGenerationBatchResult {
                 chunks,
                 retained_dependencies: BTreeMap::new(),
-                cache_report: OverworldFeatureDependencyCacheReport::default(),
-                timing: OverworldFeatureBatchTiming::default(),
+                overworld_diagnostics: None,
             })
         }
         WorldGenerationProfile::SmallIslandV1 => {
@@ -156,11 +184,10 @@ pub(crate) fn generate_chunks_with_dependencies(
                     )
                 })
                 .collect();
-            Ok(OverworldFeatureBatchResult {
+            Ok(WorldGenerationBatchResult {
                 chunks,
                 retained_dependencies: BTreeMap::new(),
-                cache_report: OverworldFeatureDependencyCacheReport::default(),
-                timing: OverworldFeatureBatchTiming::default(),
+                overworld_diagnostics: None,
             })
         }
         WorldGenerationProfile::AuthoredOnly { .. } => Err(
@@ -235,7 +262,7 @@ fn worldgen_response_subset_positions(
 fn encode_worldgen_response(
     job_id: ChunkJobId,
     descriptor: WorldGenerationDescriptor,
-    result: OverworldFeatureBatchResult,
+    result: WorldGenerationBatchResult,
     resident_before: &BTreeSet<ChunkPos>,
     targets: &[ChunkPos],
 ) -> Result<Vec<u8>, String> {
@@ -269,8 +296,11 @@ fn encode_worldgen_response(
     for pos in result.retained_dependencies.keys() {
         writer.write_chunk_pos(*pos);
     }
-    writer.write_feature_cache_report(result.cache_report);
-    writer.write_feature_batch_timing(result.timing)?;
+    writer.write_bool(result.overworld_diagnostics.is_some());
+    if let Some(diagnostics) = result.overworld_diagnostics {
+        writer.write_feature_cache_report(diagnostics.cache_report);
+        writer.write_feature_batch_timing(diagnostics.timing)?;
+    }
     Ok(writer.into_bytes())
 }
 
@@ -433,8 +463,7 @@ pub(crate) struct WorldgenJobFrame {
     /// correct its mirror shadow to the worker's authoritative retained set even
     /// though the buffers above are only a subset.
     pub(crate) retained_dependency_positions: Vec<ChunkPos>,
-    pub(crate) cache_report: OverworldFeatureDependencyCacheReport,
-    pub(crate) timing: OverworldFeatureBatchTiming,
+    pub(crate) overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
 }
 
 struct FrameWriter {
@@ -1164,6 +1193,7 @@ impl<'a> FrameReader<'a> {
 mod tests {
     use super::*;
     use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_worldgen::levelgen::OverworldFeatureBatchResult;
 
     #[test]
     fn worldgen_job_frame_crosses_command_update_boundary() {
@@ -1183,11 +1213,35 @@ mod tests {
             WorldGenerationDescriptor::overworld(12_345)
         );
         assert!(decoded.generated_chunks.contains_key(&ChunkPos::new(0, 0)));
+        let diagnostics = decoded
+            .overworld_diagnostics
+            .expect("overworld response diagnostics");
         assert_eq!(
-            decoded.cache_report.retained_dependency_chunks,
-            decoded.cache_report.requested_dependency_chunks
+            diagnostics.cache_report.retained_dependency_chunks,
+            diagnostics.cache_report.requested_dependency_chunks
         );
-        assert!(decoded.cache_report.retained_dependency_chunks > 0);
+        assert!(diagnostics.cache_report.retained_dependency_chunks > 0);
+    }
+
+    #[test]
+    fn target_only_worldgen_frames_omit_overworld_diagnostics() {
+        for profile in [
+            WorldGenerationProfile::FlatGrassV1,
+            WorldGenerationProfile::SmallIslandV1,
+        ] {
+            let request = encode_worldgen_request(
+                ChunkJobId(8),
+                WorldGenerationDescriptor::new(profile, 12_345),
+                &[ChunkPos::new(0, 0)],
+                Vec::new(),
+            )
+            .unwrap();
+            let response = compute_worldgen_job_frame(&request).unwrap();
+            let decoded = decode_worldgen_response(&response).unwrap();
+
+            assert_eq!(decoded.descriptor.profile, profile);
+            assert!(decoded.overworld_diagnostics.is_none());
+        }
     }
 
     fn stateless_reference(seed: i64, targets: &[ChunkPos]) -> OverworldFeatureBatchResult {
@@ -1278,7 +1332,12 @@ mod tests {
         // Generation parity: the target chunks are byte-identical to a cold generation.
         assert_eq!(decoded2.generated_chunks, reference2.chunks);
         assert!(
-            decoded2.cache_report.cache_hits > 0,
+            decoded2
+                .overworld_diagnostics
+                .expect("overworld response diagnostics")
+                .cache_report
+                .cache_hits
+                > 0,
             "warm job should reuse resident dependency columns"
         );
         assert_eq!(session.last_delta_upsert_count(), 0);
