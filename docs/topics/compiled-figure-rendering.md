@@ -1,29 +1,33 @@
-# Compiled Figure Rendering
+# Prepared Figure Rendering
 
 Topic: `compiled-figure-rendering`
 
 Status: target direction selected 2026-07-16. The canonical semantic-JSON
 handoff and first-party source drift gate are implemented as Tactical
 [`181`](../tactical/181-compiled-figure-static-box-proof.md) Slice 0; the
-static-box artifact proof has not started. Instancing, LOD, and GPU pose
-evaluation remain later measured stages.
+static-box startup-compilation proof has not started. Semantic JSON remains
+the persisted runtime format; a prepared-figure disk format or cache is
+explicitly deferred. Instancing, LOD, and GPU pose evaluation remain later
+measured stages.
 
 ## Scope
 
 This topic tracks the evolution from the current CPU-baked combined
-actor mesh to a compiled figure pipeline with static GPU geometry, rigid-part
-animation, shared instances, and generated figure LODs.
+actor mesh to a startup-prepared figure pipeline with static GPU geometry,
+rigid-part animation, shared instances, and generated figure LODs.
 
-It covers the contract between the Asset Lab authoring format, derived asset
-artifacts, `mclone-assets`, actor presentation, and `mclone-render`. It does not
-change authoritative entity simulation, protocol identity, AI, or spawning.
-Those remain owned by the entity/runtime architecture.
+It covers the contract between the Asset Lab authoring format, persisted
+semantic JSON, startup figure preparation, `mclone-assets`, actor
+presentation, and `mclone-render`. It does not change authoritative entity
+simulation, protocol identity, AI, or spawning. Those remain owned by the
+entity/runtime architecture.
 
-The architectural target is selected, while artifact details, optimization
-thresholds, and later LOD policy remain open. The purpose of this document is
-to preserve current evidence and decisions, identify the tradeoffs that need
-measurement, and keep small actor-cache work from accidentally hardening an
-interim representation into the long-term figure architecture.
+The architectural target is selected, while the exact shared compiler owner,
+optimization thresholds, and later LOD policy remain open. The purpose of
+this document is to preserve current evidence and decisions, identify the
+tradeoffs that need measurement, and keep small actor-cache work from
+accidentally hardening an interim representation into the long-term figure
+architecture.
 
 ## Motivation
 
@@ -98,7 +102,7 @@ The native bridge was intentionally narrower:
 - figure animation is sampled on the CPU and immediately baked into every
   affected vertex; and
 - authored clip scale is parsed as source data but is not part of the current
-  compiled runtime transform;
+  prepared/runtime transform;
 - all visible actors share one mutable combined mesh per drawable world.
 
 These choices proved asset ownership, figure selection, networked appearance,
@@ -145,16 +149,16 @@ An inventory taken on 2026-07-16 from the loaded semantic assets found:
 
 | Fact | Count |
 |---|---:|
-| figures | 18 |
-| total parts | 516 |
-| boxes | 333 |
+| figures | 19 |
+| total parts | 531 |
+| boxes | 348 |
 | spheres / capsules / cylinders | 73 / 89 / 21 |
-| ASCII textures | 29 |
-| parts with any texture reference | 29 |
-| individual texture applications | 33 |
+| ASCII textures | 30 |
+| parts with any texture reference | 30 |
+| individual texture applications | 34 |
 | texture applications on curved primitives | 0 |
 
-All 33 applications target an explicit face of a box. Most are a single
+All 34 applications target an explicit face of a box. Most are a single
 front/north face for eyes or a muzzle. The only broader uses are the top and
 bottom faces of the two butterfly wings and the east, west, and top faces of
 the tiger body. No part uses a whole-primitive texture, and all 183 curved
@@ -168,54 +172,60 @@ general character UV editor or continuity across parts.
 ## North Star
 
 Keep the TypeScript DSL or another compact semantic representation as the
-editable source, but introduce one deterministic compiled-figure artifact
-consumed by both review tooling and every runtime lane:
+editable source. Keep its generated semantic JSON as the persisted runtime
+contract, and compile it once at startup or first asset residency into an
+in-memory prepared figure shared by actors and drawable worlds:
 
 ```text
 figure.ts
   -> canonical semantic figure JSON
   -> parse and validate
-  -> deterministic figure compiler
-  -> logical CompiledFigure
-  -> compiled figure artifact
+  -> shared renderer-neutral startup compiler
+  -> in-memory PreparedFigure
        static geometry + rig + materials + textures + clips + LODs
-  -> Asset Lab compiled preview
-  -> native / web / Android / XR runtime asset loading
+  -> immutable GPU resources shared by actor instances
 ```
 
-The long-term compiler owner and promoted artifact encoding remain
-revisitable; Tactical 181 makes a provisional choice for the first proof. The
-invariant is more important than the implementation language: Asset Lab and
-the runtime should not independently interpret primitive tessellation, UVs,
-winding, or material slots and then rely on screenshot luck to remain aligned.
+The shared Rust engine implementation is the natural runtime authority because
+native, web/WASM, Android, and XR already consume that code. The exact crate
+boundary remains a Tactical 181 decision. Asset Lab continues rendering its
+parsed semantic JSON with Three.js; comparison fixtures, a native diagnostic,
+or a later Rust/WASM bridge may expose prepared output for review without
+creating a production file format.
 
-The semantic source remains reviewable and regenerable. Semantic JSON and any
-compiled artifact are generated forms, not additional authoring formats. The
-logical `CompiledFigure` contract should be proven in memory and in Asset Lab
-before its durable binary container is frozen. If the compiled artifact is
-promoted as the production runtime input, checked semantic JSON may remain an
-inspection/test product rather than a second shipped runtime asset.
+`PreparedFigure` is an internal CPU representation, not a compatibility
+format. It can evolve with the renderer while semantic JSON stays small,
+typed, diffable, and pack-replaceable. Preparation happens once per resident
+figure, never once per actor or presentation frame. A later disk cache is a
+discardable optimization keyed by semantic content and compiler version, and
+is justified only by measured startup, streaming, or compiler-size cost.
 
 Three.js retains semantic authority in this pipeline even where it loses
-byte-production duty. Asset Lab exists so that AI agents and humans can author
+runtime-production duty. Asset Lab exists so that AI agents and humans can author
 figures fluently, and that fluency comes from Three.js scene semantics being
 deeply familiar: an author writing `figure.ts` knows what `CapsuleGeometry`
 parameters produce without running anything. "What a figure looks like" is
 therefore defined as what Three.js renders for the semantic description, the
-authoring preview stays Three.js-shaped, and the compiler's job is to
-reproduce those semantics deterministically — never to invent its own
-primitive interpretation that authors would have to learn. Dropping the
-Three.js dependency outright is not a goal of this direction.
+authoring preview stays Three.js-shaped, and the startup compiler's job is to
+reproduce those semantics deterministically. Pinned cross-language fixtures
+guard the result; dropping the Three.js authoring dependency is not a goal.
+
+Curved primitives are orthogonal to persistence. Spheres, capsules, and
+cylinders make the startup compiler more involved than boxes, but the same
+work is required whether its output remains in memory or is serialized. Their
+support therefore belongs to a later compiler-feature slice, not to the
+decision about adding another persisted format.
 
 ## Selected Direction And Deliberate Flexibility
 
-The durable contract is the compiled figure, not a particular pose evaluator
-or batching strategy:
+The durable persisted contract is semantic figure JSON. Prepared geometry is
+an internal runtime product, independent of a particular pose evaluator or
+batching strategy:
 
 - semantic Asset Lab source crosses the canonical JSON/validation boundary
-  before compiling offline into one canonical, versioned artifact;
-- Asset Lab compiled preview and every runtime lane consume the same geometry,
-  UV, material, rig, clip, and LOD data;
+  before startup compilation;
+- every runtime lane uses the same shared compiler and prepared-figure
+  contract;
 - geometry stays in local part space and is uploaded once per resident figure
   and LOD;
 - actor records and final part palettes remain the small mutable payload;
@@ -224,37 +234,28 @@ or batching strategy:
 - the runtime may choose exact CPU pose evaluation or a measured GPU crowd
   path without changing the asset contract.
 
-For the first proof, a deterministic compiler module under
-`tools/asset-lab` is the provisional authority. For boxes the compiler owns
-the trivial tessellation directly, and Three.js is a test oracle: an equality
-test against the repository-pinned `BoxGeometry` output guards drift without
-making artifact bytes depend on a dependency's internals. That test is also
-the semantic-authority guarantee — it pins compiler output to what the author
-targeted and previewed. Extracting topology from the pinned Three.js
-constructors remains the plan for spheres, capsules, and cylinders in
-Phase 2, where reimplementing tessellation is genuinely expensive and where
-extraction is the most direct implementation of the Three.js-semantics
-contract; there the artifact must record compiler and Three.js versions or
-hashes so a dependency change fails loudly instead of silently altering
-output. In both modes the compiler serializes the result and makes
-compiled-output preview the acceptance surface. Runtime Rust must validate
-and consume those bytes rather than independently retessellating the same
-primitives.
+For the first proof, a renderer-neutral shared Rust compiler prepares boxes at
+asset load. Three.js is a test oracle: equality fixtures against the
+repository-pinned `BoxGeometry` output guard drift. Runtime preparation owns
+coordinate conversion, topology, normals, UVs, material ranges, atlas data,
+part indices, and bounds. `mclone-render` uploads that prepared data without
+performing a second semantic compilation.
 
-That choice is intentionally revisitable. Moving a renderer-neutral compiler
-core to Rust/WASM is justified later only if offline replacement-pack
-compilation, deterministic maintenance, or duplicated tooling work makes it
-valuable. It is not a prerequisite for proving the contract.
+Spheres, capsules, and cylinders later extend the same compiler and fixtures.
+They do not trigger a persistence decision. If interactive prepared-output
+review becomes valuable, expose the shared compiler to Asset Lab through a
+native diagnostic or Rust/WASM rather than creating a second implementation.
 
 Likewise, a shared sampled phase palette is a runtime-derived cache, not
-canonical authored animation data. The artifact retains the clip tracks and
+canonical authored animation data. Semantic JSON retains the clip tracks and
 their semantics. A renderer may build GPU-resident sampled clips from them,
 while a CPU evaluator can continue using the same tracks exactly. This avoids
 making every actor count and every supported GPU pay for the crowd path.
 
-## Candidate Compiled Contract
+## Candidate Prepared-Figure Contract
 
-This is a capability sketch, not a frozen binary layout.
+This is an in-memory capability sketch, not a frozen binary layout or public
+compatibility format.
 
 ### Static geometry per LOD
 
@@ -278,7 +279,7 @@ one part.
 - stable part names and indices;
 - parent indices;
 - base translation, rotation, pivot, and optional scale;
-- compiled clip tracks and locomotion/contact metadata;
+- validated clip tracks and locomotion/contact metadata;
 - part identity preserved across every LOD; and
 - an explicit policy for parts omitted from a coarse LOD.
 
@@ -314,23 +315,24 @@ authoring is justified only by a real asset that cannot be expressed by these
 simpler choices.
 
 Asset Lab currently previews roughness and metalness through Three.js while
-the native actor path uses simpler baked face colors. The compiled contract
+the native actor path uses simpler baked face colors. The prepared contract
 must either support a shared material interpretation or explicitly narrow the
 preview to the runtime-supported subset. Silent material divergence should not
 remain the default.
 
-### Provenance and compatibility
+### Determinism and diagnostics
 
 - semantic schema version;
-- compiler/artifact schema version;
-- source and compiler-input hash;
+- compiler implementation/version identity in diagnostics;
+- semantic content hash;
 - build settings, including LOD reduction settings;
 - bounds and geometry statistics; and
-- enough provenance for asset-pack lock checking and stale-artifact rejection.
+- deterministic repeated preparation for the same semantic input and compiler
+  version.
 
 ## Candidate Runtime Shape
 
-Immutable compiled figure resources should be shareable across compatible
+Immutable prepared figure resources should be shareable across compatible
 drawable worlds:
 
 - static vertex and index buffers for each resident LOD;
@@ -359,17 +361,17 @@ Normal transformation follows the same rigid transforms. View/projection
 remains per view, preserving the existing mono, per-eye, and full-frame
 multiview ownership rules.
 
-Compiled figures take one packed light value per actor, sampled at the
+Prepared figures take one packed light value per actor, sampled at the
 actor's position, instead of the current per-vertex baked world light. A
 large figure straddling a light gradient will shade slightly differently
 than the CPU-baked bridge; migration pixel comparisons must treat that as a
 deliberate lighting-model change, not a regression.
 
 Actors sharing a figure can later be instanced by indexing an actor record and
-that actor's part-palette base. Instancing is desirable, but a first compiled
+that actor's part-palette base. Instancing is desirable, but a first prepared
 figure proof may issue one draw per actor or figure/material group while the
 static-geometry and transform contracts settle. Do not couple correctness of
-the compiled asset format to the first batching strategy.
+the prepared renderer contract to the first batching strategy.
 
 ### Presentation-rate pose evaluation
 
@@ -421,7 +423,7 @@ capping ordinary pose evaluation to a lower fixed frequency. After a missed
 frame, evaluation samples the current presentation time rather than advancing
 one fixed animation step.
 
-The first animated compiled path evaluates final part matrices on the CPU each
+The first animated prepared path evaluates final part matrices on the CPU each
 presentation frame. If crowd measurements justify a GPU path, a compute pass
 samples and blends the shared clip data, composes the hierarchy once per
 actor/part, and writes final matrices for the instanced vertex pass. Sampling
@@ -429,7 +431,7 @@ and hierarchy work should not be repeated independently for every vertex.
 
 ## Performance Model
 
-Static compiled figures and LOD solve different costs:
+Startup-prepared figures and LOD solve different costs:
 
 - static geometry plus part palettes reduces CPU vertex baking, serialization,
   and CPU-to-GPU upload;
@@ -442,7 +444,7 @@ As an illustration only, the current actor vertex is 40 bytes. Re-uploading
 the Asset Lab chicken's 2,209 preview vertices would be about 88 KB before
 indices, while 21 rigid 3x4 `f32` part matrices are about 1 KB. The tiger's
 3,648 vertices would be about 146 KB, while 86 such matrices are about 4 KB.
-The future compiled vertex layout and actor payload will differ, but the order
+The future prepared vertex layout and actor payload will differ, but the order
 of magnitude explains the opportunity.
 
 GPU part transforms do not reduce the number of vertices the GPU executes.
@@ -476,7 +478,7 @@ actor/part counts and capabilities make them a win.
 
 The implementation should expose at least:
 
-- compiled vertices, indices, bytes, parts, materials, and texture bytes per
+- prepared vertices, indices, bytes, parts, materials, and texture bytes per
   figure and LOD;
 - retained immutable GPU bytes and strong-owner count;
 - actor and part-matrix bytes uploaded per frame;
@@ -492,10 +494,14 @@ The implementation should expose at least:
 This direction trades a coarse but simple runtime bridge for a real asset and
 rendering subsystem:
 
-- **Compiler ownership:** Asset Lab gains deterministic tessellation,
-  box-face projection, atlas, versioning, budget, and error-reporting
-  responsibilities. Compiled preview, golden counts, dependency provenance,
-  and stale-artifact rejection are required to keep that cost controlled.
+- **Compiler ownership:** the shared Rust engine gains deterministic
+  tessellation, box-face projection, atlas, budget, and error-reporting
+  responsibilities. Three.js fixtures, golden counts, and prepared-output
+  diagnostics keep that cost controlled.
+- **Startup work:** every newly resident semantic figure must be prepared once.
+  Current meshes are small, so this is expected to be cheap, but startup and
+  streaming time must be measured on low-end targets before dismissing a
+  discardable cache.
 - **Sampled-animation approximation:** interpolation prevents temporal pose
   holds but sparse samples can still flatten fast or curved motion. Error-based
   sampling, loop tests, and preservation of canonical clip tracks keep the
@@ -513,7 +519,7 @@ rendering subsystem:
 - **Vertex indirection:** every vertex fetches its rigid-part transform. The
   upload and CPU savings are expected to dominate, but GPU time must be
   measured independently on low-end and XR hardware.
-- **LOD artifacts:** generated variants can pop, change silhouettes, or move
+- **LOD variants:** generated variants can pop, change silhouettes, or move
   grounding. Projected-error thresholds, hysteresis, stable part identity,
   conservative XR selection, and visual transition sheets are required.
 - **Movement smoothness versus latency:** remote interpolation is smooth by
@@ -521,8 +527,8 @@ rendering subsystem:
   Figure animation cannot paper over an undefined actor-motion contract.
 - **Rigid-part ceiling:** this design fits current Minecraft-like figures but
   does not provide weighted skinning, morphs, cloth, or facial deformation.
-  Those remain explicit future format extensions rather than hidden special
-  cases.
+  Those remain explicit future semantic/runtime extensions rather than hidden
+  special cases.
 - **CPU/GPU agreement:** floating-point ordering, quaternion interpolation,
   hierarchy composition, and transition timing can diverge. Shared semantic
   tests and tolerant pose/pixel comparisons must gate a GPU evaluator.
@@ -552,7 +558,7 @@ selection invariants are:
   primarily spatial simplification, not permission to hold poses for several
   display frames;
 - never regenerate or upload topology every frame because selection changed;
-  variants should already be compiled and resident or admitted through an
+  variants should already be prepared and resident or admitted through an
   explicit bounded residency path; and
 - keep selection and residency policy shared across host adapters.
 
@@ -566,17 +572,21 @@ critical features.
 ## Asset Lab Evolution
 
 With this direction selected, Asset Lab grows from a disposable semantic
-preview into an authoring and compilation review surface. Useful additions
+preview into an authoring and runtime-preparation review surface. Useful additions
 include:
 
 - the completed canonical serialize/reparse path for every semantic preview;
 - direct JSON preview, sheet, smoke, and video input;
 - checked first-party source/output mappings and deterministic drift checks;
-- a `compile` command that emits the exact runtime artifact;
-- compiled-mesh preview using the same positions, normals, UVs, indices,
-  materials, and LODs consumed by the runtime;
-- optional semantic-Three.js versus compiled-output comparison while the
-  compiler is brought up;
+- optional prepared-mesh diagnostics from the shared Rust compiler, exposed
+  through a native review command or a later Rust/WASM Asset Lab bridge;
+- a one-command, labeled side-by-side sheet pairing semantic Three.js and
+  prepared engine views at the same camera, projection, dimensions, and pose;
+- comparison framing derived once and shared by both renderers rather than
+  independent auto-framing that could hide bounds, scale, or grounding drift;
+- an optional aligned silhouette/edge overlay for geometry debugging, without
+  treating raw RGB differences as failures while lighting and material models
+  intentionally differ;
 - box-face atlas/UV orientation visualization;
 - inspection of compiler-preserved Three.js default coordinates on curved
   primitives without implying a curved-texture authoring workflow;
@@ -584,17 +594,18 @@ include:
 - atlas and material-slot review;
 - per-LOD static sheets and animated transition review;
 - geometry/texture/part/clip budget reports with actionable part names;
-- deterministic-output and stale-artifact checks; and
-- batch compilation integrated with first-party asset packing.
+- deterministic repeated-preparation checks; and
+- measured startup/residency accounting before any disk-cache proposal.
 
 The tool should continue making semantic source easy for agents and humans to
 edit, targeting the familiar Three.js scene semantics described in the North
-Star. Compiled data can be binary and optimized; authored source should remain
-small, typed, diffable, and regenerable.
+Star. Prepared data remains internal and may be optimized freely; authored
+source and generated semantic JSON remain small, typed, diffable, and
+regenerable.
 
 ## Relationship To The Immediate Actor-Cache Issue
 
-The following bounded cleanup remains useful regardless of the compiled path:
+The following bounded cleanup remains useful regardless of the prepared path:
 
 1. distinguish topology, vertex, and index updates in diagnostics;
 2. stop rebuilding and uploading unchanged indices on pose-only changes; and
@@ -602,24 +613,21 @@ The following bounded cleanup remains useful regardless of the compiled path:
 
 Stable per-actor CPU vertex spans may remain valuable for legacy cows, debug
 cubes, item actors, unsupported figure features, and an incremental fallback.
-They should not be treated as a prerequisite for compiled Asset Lab figures,
+They should not be treated as a prerequisite for prepared Asset Lab figures,
 and the project should avoid a large CPU span-cache campaign before deciding
-the compiled-figure contract.
+the prepared-figure contract.
 
-The existing `ActorMeshCache` remains the production path until a compiled
+The existing `ActorMeshCache` remains the production path until a prepared
 path passes visual and performance gates. A migration must allow old and new
 actor shapes to coexist without merging mutable caches across drawable worlds.
 
 ## Staged Implementation Campaign
 
-This ordering is the current staged direction. Each phase should become a
-bounded tactical only when its contract and evidence are clear.
-
-The ordering between curved primitives and animation is settled: the Phase 1
-proof already draws through `rest_part_matrix[part_id]`, so the vertex
-layout, palette indexing, and shader contract are exercised statically.
-Phase 3 adds evaluation semantics, not layout, and Phase 2 does not need to
-wait on an animation de-risk.
+This is the current staged direction. Each phase should become a bounded
+tactical only when its contract and evidence are clear. After Phase 1,
+curved-primitive parity and animation are independent capability slices whose
+order should follow the next production proof. Neither changes the persistence
+decision.
 
 ### Semantic source/output prerequisite (complete)
 
@@ -638,18 +646,19 @@ wait on an animation de-risk.
 - add representative per-figure geometry and pose-cost reports; and
 - retain current pixels and all platform paths.
 
-### Phase 1: compiled static box proof
+### Phase 1: startup-prepared static box proof
 
-- establish the provisional offline Asset Lab compiler authority and artifact
-  versioning through Tactical
+- establish the shared Rust startup compiler and in-memory `PreparedFigure`
+  through Tactical
   [`181`](../tactical/181-compiled-figure-static-box-proof.md);
 - compile one box-only figure with positions, normals, UVs, indices, part IDs,
   materials, and a real ASCII-derived texture atlas;
-- render the exact compiled artifact in Asset Lab;
-- load and draw the frozen artifact in shared native/web rendering; and
-- compare compiled preview and runtime pixels, bounds, winding, and counts.
+- upload and draw the prepared result through shared native/web rendering;
+- compare runtime pixels, bounds, winding, UVs, and counts against the
+  semantic Three.js baseline; and
+- record startup preparation time without creating a persisted geometry file.
 
-### Phase 2: true primitive and material parity
+### Capability 2A: true primitive and material parity
 
 - compile spheres, capsules, and cylinders with deterministic segments;
 - preserve Three.js positions, normals, indices, and default UV attributes;
@@ -657,9 +666,9 @@ wait on an animation de-risk.
   textures unless a later concrete asset opens that separate contract;
 - define the supported non-texture material subset;
 - prove a rounded animal against Asset Lab; and
-- add compiler budgets and deterministic pack validation.
+- add compiler budgets and deterministic repeated-preparation validation.
 
-### Phase 3: rigid-part animation
+### Capability 2B: rigid-part animation
 
 - retain static local-space figure buffers;
 - evaluate existing clips into per-actor part palettes continuously at every
@@ -670,7 +679,7 @@ wait on an animation de-risk.
 - support mono, per-eye stereo, and full-frame multiview; and
 - validate first-person body filtering and world-local cache ownership.
 
-### Phase 4: migration and removal of approximations
+### Phase 3: migration and removal of approximations
 
 - migrate player, upright bear, and chicken one at a time;
 - preserve figure selection, remote appearance, walk review, and browser/XR
@@ -679,7 +688,7 @@ wait on an animation de-risk.
   after the promoted assets no longer depend on them; and
 - retain a deliberate fallback for non-figure debug/item actors.
 
-### Phase 5: instancing and LOD
+### Phase 4: instancing and LOD
 
 - batch actors sharing compatible figure/material/LOD state;
 - generate and review bounded primitive LOD variants;
@@ -688,11 +697,11 @@ wait on an animation de-risk.
   transitions; and
 - measure CPU, upload, GPU, memory, and draw-count effects independently.
 
-### Optional Phase 6: measured GPU crowd pose evaluation
+### Optional Phase 5: measured GPU crowd pose evaluation
 
 - establish a reproducible high-count crowd lane, including the thousand-
   chicken design point and lower-count controls;
-- derive GPU-resident sampled clips from canonical artifact tracks with
+- derive GPU-resident sampled clips from canonical semantic clip tracks with
   explicit error and loop-continuity bounds;
 - retain per-actor phase, rate, blend, transform, light, and override state;
 - expand final part matrices once per actor/part per presentation frame before
@@ -705,22 +714,24 @@ wait on an animation de-risk.
 ## Invariants
 
 - Promoted `figure.ts` files are the only human/AI-authored figure source;
-  semantic JSON and compiled artifacts are generated and never hand-edited.
+  semantic JSON is generated and never hand-edited.
 - Asset Lab semantic display consumes only parsed, validated JSON, including
   when its input was TypeScript source.
-- The semantic source and compiled artifact remain platform-neutral.
-- Desktop, web, Android, XR, and offscreen consume the same figure contract.
+- Semantic JSON and the in-memory prepared-figure contract remain
+  platform-neutral.
+- Desktop, web, Android, XR, and offscreen use the same startup compiler.
 - No figure compilation, animation, material, or LOD policy moves into an app
   crate or TypeScript browser adapter.
-- `mclone-assets` owns source/compiled asset loading and provenance;
-  `mclone-render` owns GPU compilation/drawing contracts; presentation mapping
-  remains in `mclone-render-session` and client/runtime owners.
+- `mclone-assets` owns semantic asset loading and validation; a shared Rust
+  asset/figure owner prepares renderer-neutral geometry; `mclone-render` owns
+  GPU resources and drawing contracts. Presentation mapping remains in
+  `mclone-render-session` and client/runtime owners.
 - Immutable figure geometry may be shared; mutable actor/pose state remains
   per drawable world as established by Tactical 179.
 - Actor world motion, animation phase, and clip blending are evaluated
   continuously at presentation cadence with no fixed maximum rate: every
   rendered frame samples its own presentation time, independent of
-  authoritative update or compiled clip-sample cadence.
+  authoritative update or derived clip-sample cadence.
 - Pose interpolation operates on local translation/quaternion/scale and
   composes the hierarchy afterward; CPU and GPU evaluators implement the same
   semantics.
@@ -731,8 +742,10 @@ wait on an animation de-risk.
 - Ordinary LOD selection does not reduce temporal pose cadence. Any later
   extreme-distance held-pose or impostor policy requires separate evidence and
   an explicit visual-quality decision.
-- Compiled output is deterministic, bounded, versioned, and attributable to
-  its semantic source.
+- Startup preparation is deterministic, bounded, and attributable to its
+  semantic source and compiler version.
+- No prepared geometry, atlas, or LOD file is persisted in the initial
+  campaign. Any later disk cache is discardable and measurement-gated.
 - The current production path is removed only after direct pixels, animation,
   asset replacement, browser WebGPU, and relevant XR paths pass.
 
@@ -751,7 +764,7 @@ wait on an animation de-risk.
 - changing authoritative entity or collision shape from render LOD.
 
 These can be revisited by later phases. They should not expand Tactical 181's
-compiled static-box proof.
+startup-prepared static-box proof.
 
 ## Closed Decisions
 
@@ -761,47 +774,56 @@ Closed 2026-07-16 during the pre-landing design review.
    authored representation. Schema-v1 JSON is its deterministic generated
    semantic snapshot, all Asset Lab displays consume the parsed snapshot, and
    the first-party drift gate covers every promoted JSON asset.
-2. **Schema evolution.** Semantic `FigureAsset` remains schema v1; the
-   compiled artifact starts at its own independent v1. Semantic v2 is
-   revisited only when a concrete curved-texture, material, or LOD authoring
-   need appears — the triggers tracked by the curved-surface texture and
-   material-expansion questions below.
+2. **Persistence.** Semantic `FigureAsset` JSON remains the persisted runtime
+   contract. `PreparedFigure` is internal startup output, not an independent
+   schema. No prepared-geometry file or cache is introduced until measurement
+   justifies it. This deliberately accepts startup CPU work and shipping the
+   shared compiler in exchange for avoiding another versioned representation,
+   drift gate, and pack/replacement contract.
 3. **Preview authority.** Authoring and acceptance are different roles. The
    semantic Three.js preview remains the authoring surface indefinitely, but
    it renders only the serialized/reparsed semantic snapshot. It serves as a
-   comparison oracle through Phase 2. Compiled-output preview becomes the
-   default acceptance/verification surface once curved-primitive and material
-   parity land.
+   comparison oracle through primitive/material parity. Runtime
+   prepared-output diagnostics and native pixel captures become the acceptance
+   surface as those paths land.
 4. **Texture ownership.** One deterministic atlas per figure is the promoted
-   answer. Pack-time shared atlas pages are demoted to a Phase 5 optimization
-   taken only if draw/bind profiling justifies them. Replacement packs follow
-   the ordinary artifact provenance and pack-lock rules.
+   answer in prepared memory. Pack-time shared atlas pages are demoted to an
+   instancing/LOD optimization taken only if draw/bind profiling justifies
+   them.
+   Replacement packs continue supplying semantic JSON.
 5. **First-person filtering.** Palette-level culling: a hidden part's matrix
    collapses to zero (or a per-part visibility bit read by the shader). This
-   is topology-stable and needs no artifact change beyond the part
-   classification already stored. Separate compiled index ranges remain a
+   is topology-stable and needs no persisted change beyond the semantic part
+   classification already stored. Separate prepared index ranges remain a
    later optimization only if the wasted vertex work measures.
 6. **CPU span cache.** Phase 0's index-reuse cleanup is the ceiling for
    fallback optimization. No per-actor span-cache campaign happens unless the
-   compiled path fails its gates.
+   prepared path fails its gates.
 7. **Sparse texture policy.** The initial campaign supports solid materials
    plus automatic planar mapping for explicit box-face decals. It does not
    introduce whole-character unwraps, cross-part continuity, or manual curved-
    surface UV controls. Curved primitives preserve Three.js default UV
    attributes mechanically but use solid materials unless a real asset opens
    a focused extension.
+8. **Cross-renderer visual oracle.** Tactical 181 adds one command that renders
+   corresponding semantic Three.js and prepared engine views and emits a
+   labeled side-by-side sheet under `/tmp`. Both sides use one renderer-neutral
+   review-camera and pose contract. This is a diagnostic product, not another
+   persisted figure representation. Initial acceptance is human review of
+   projection, silhouette, grounding, face placement, and UV orientation;
+   exact RGB equality is not required across different lighting pipelines.
 
 ## Open Decisions
 
-1. **Long-term compiler owner.** Does the provisional offline Asset Lab
-   compiler remain sufficient, or does later replacement-pack or maintenance
-   evidence justify a shared Rust/WASM compiler core?
-2. **Promoted artifact form after the proof.** Does Tactical 181's
-   self-contained header/binary container become the packed schema, or should
-   pack-time layout change after its evidence? Which derived artifacts are
-   committed versus generated reproducibly during packing, and which gate
-   (pack validation, CI, or a commit-time script) enforces byte
-   reproducibility on every change?
+1. **Shared compiler crate boundary.** Does renderer-neutral startup
+   preparation belong in `mclone-assets`, a focused shared figure crate, or a
+   neighboring asset/compiler crate? It must not become app-local or require
+   Three.js at runtime.
+2. **Optional cache trigger.** What measured startup, streaming, compiler-size,
+   or replacement-pack cost would justify a discardable prepared-figure cache?
+   If that trigger is reached, define invalidation from semantic content,
+   compiler version, settings, and platform-neutral representation then—not
+   before.
 3. **Curved-surface texture policy.** If a future asset cannot use solid color,
    figure/object-space procedural variation, generated vertex color,
    triplanar mapping, or a small decal patch, what is the smallest additional
@@ -820,7 +842,7 @@ Closed 2026-07-16 during the pre-landing design review.
    per-figure instancing and material/LOD buckets?
 7. **LOD generation.** Fixed compiler tiers, authored overrides, screen-error
    targets, or a combination? Which variants stay resident?
-8. **Legacy actors.** When do cow/debug/item shapes join compiled figures, and
+8. **Legacy actors.** When do cow/debug/item shapes join prepared figures, and
    how long does the CPU-baked fallback remain supported?
 9. **Animation curves.** Are linear key tracks plus quaternion interpolation
    sufficient, or do authored tangents/interpolation modes become necessary
@@ -834,10 +856,12 @@ Each pixel-producing slice must capture and inspect output at its first
 drawable milestone. The eventual campaign should include:
 
 - compiler determinism and malformed/budget-exceeding asset tests;
-- exact compiled counts, bounds, part indices, winding, and normals, plus UV
+- exact prepared counts, bounds, part indices, winding, and normals, plus UV
   tests for explicitly textured box faces and compiler-preserved default
   curved attributes;
-- Asset Lab compiled-preview sheets and animation videos;
+- Asset Lab semantic baseline sheets and native prepared-output captures;
+- labeled side-by-side Three.js/engine sheets using the same review camera,
+  projection, dimensions, grounding, and pose time;
 - native actor review sheets and direct gameplay screenshots;
 - frozen and animated pixel comparisons for every migrated figure;
 - first-person body filtering;
@@ -889,13 +913,15 @@ drawable milestone. The eventual campaign should include:
 
 Run Tactical [`181`](../tactical/181-compiled-figure-static-box-proof.md):
 with its semantic handoff prerequisite complete, capture the existing player
-baseline, define the logical compiled box/UV data, make Asset Lab preview that
-exact data, then select its deterministic container and draw the frozen result
-through a shared opt-in runtime proof. Stop before animation, production actor
-migration, instancing, curved primitives, or LOD.
+baseline, select the shared Rust compiler owner, prepare the exact box/UV data
+in memory at figure residency, and draw the frozen result through a shared
+opt-in runtime proof. Record preparation count, time, and memory, but do not
+add another persisted figure representation or cache. Stop before animation,
+production actor migration, instancing, curved primitives, or LOD.
 
-After that proof, decide artifact promotion and packing based on observed
-authoring/runtime parity. Then open separate tacticals for true curved
-primitives/material parity and presentation-rate rigid-part animation. Do not
-schedule GPU crowd evaluation until the CPU-palette compiled path and a real
-high-count fixture provide a measured crossover question.
+After that proof, select the next capability from actual production needs:
+presentation-rate rigid-part animation, another box-only migration, or true
+curved-primitive/material parity. Curved tessellation extends the same startup
+compiler and does not reopen persistence. Do not schedule GPU crowd evaluation
+until the CPU-palette prepared path and a real high-count fixture provide a
+measured crossover question.
