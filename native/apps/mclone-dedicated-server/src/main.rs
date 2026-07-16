@@ -100,9 +100,9 @@ impl Cli {
                     cli.seed = parse_i64_arg("--seed", args.next())?;
                 }
                 "--generation-profile" => {
-                    let value = args
-                        .next()
-                        .context("--generation-profile requires overworld or authored-only")?;
+                    let value = args.next().context(
+                        "--generation-profile requires overworld, flat-grass-v1, or authored-only",
+                    )?;
                     cli.world_generation_profile =
                         WorldGenerationProfile::parse_label(&value).map_err(anyhow::Error::msg)?;
                 }
@@ -193,7 +193,7 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
          The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
@@ -1613,6 +1613,51 @@ mod tests {
         drop(session);
         server.join().unwrap().unwrap();
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn dedicated_server_serves_flat_grass_profile_and_origin_spawn() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let (server, addr) = spawn_serve_once_server_with_profile(
+            12_345,
+            WorldGenerationProfile::FlatGrassV1,
+            DedicatedWorldSelection::Transient,
+        );
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+        let updates = wait_for_remote_updates(&mut session, |updates| {
+            chunk_snapshot_opt(updates, ChunkPos::new(0, 0)).is_some()
+                && player_position_update_opt(updates).is_some()
+        });
+        let snapshot = chunk_snapshot(&updates, ChunkPos::new(0, 0));
+        let bedrock = snapshot_block_state(snapshot, BlockPos::new(8, 0, 8));
+        let dirt = snapshot_block_state(snapshot, BlockPos::new(8, 1, 8));
+        let grass = snapshot_block_state(snapshot, BlockPos::new(8, 3, 8));
+        assert_ne!(bedrock, AIR_BLOCK_STATE_ID);
+        assert_ne!(dirt, AIR_BLOCK_STATE_ID);
+        assert_ne!(grass, AIR_BLOCK_STATE_ID);
+        assert_ne!(bedrock, dirt);
+        assert_ne!(dirt, grass);
+        assert_eq!(snapshot_block_state(snapshot, BlockPos::new(8, 2, 8)), dirt);
+        assert_eq!(
+            snapshot_block_state(snapshot, BlockPos::new(8, 4, 8)),
+            AIR_BLOCK_STATE_ID
+        );
+        assert!(snapshot.biomes.iter().all(|biome| *biome == 1));
+        let spawn = player_position_update_opt(&updates).unwrap().position;
+        assert_eq!(spawn.y, 4.0);
+        assert!((0.0..16.0).contains(&spawn.x));
+        assert!((0.0..16.0).contains(&spawn.z));
+
+        drop(session);
+        server.join().unwrap().unwrap();
     }
 
     fn spawn_serve_once_server(

@@ -1,7 +1,8 @@
 # Native Worldgen Status
 
-Living status page for native Rust world generation. The only live procedural
-generator is currently the Minecraft Java 1.17.1-shaped overworld path.
+Living status page for native Rust world generation. Live procedural profiles
+are the Minecraft Java 1.17.1-shaped overworld and the deliberately minimal
+`flat-grass-v1` proof generator.
 
 The current `overworld` profile's durable target is seed parity against vanilla
 1.17.1 overworld output. The accepted follow-up direction is to preserve that
@@ -29,9 +30,12 @@ Landed native coverage:
   biome palette coverage.
 - Scheduler-owned `FEATURES` publication and clean fixture comparisons for the current target chunks.
 - Generated scheduled tick carry-through for fluids.
-- A stored `WorldGenerationProfile` boundary with `Overworld` and
-  `AuthoredOnly`; the latter maps true persistence misses to void, but there is
-  not yet a second procedural generator.
+- A stored, descriptor-driven `WorldGenerationProfile` boundary with
+  `Overworld`, `FlatGrassV1`, and `AuthoredOnly`; flat grass is target-only and
+  authored-only maps true persistence misses to void.
+- Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
+  payloads, origin spawn policy, native/dedicated publication, and save/reopen
+  coverage.
 
 Important native entry points:
 
@@ -71,9 +75,8 @@ Still not full vanilla parity:
   former buried-treasure implementation and the former desert-well,
   monster-room, and fossil feature work belonged to the retired TypeScript
   engine
-- no selectable procedural flat or island generator exists yet; flat grass
-  and bounded island/table content currently appear only in tests or authored
-  persisted fixtures
+- no selectable procedural island generator exists yet; bounded island/table
+  content currently appears only as authored persisted fixtures
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes

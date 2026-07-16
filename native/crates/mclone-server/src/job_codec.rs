@@ -9,6 +9,7 @@ use mclone_worldgen::levelgen::{
     GeneratedChunk, MutableChunkBlockBuffer, OverworldDependencyGenerationTiming,
     OverworldFeatureBatchResult, OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, ScheduledTick, SurfaceFillTiming,
+    generate_flat_grass_chunk,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -119,6 +120,25 @@ pub(crate) fn generate_chunks_with_dependencies(
                 targets.iter().copied(),
                 dependencies,
             )),
+        WorldGenerationProfile::FlatGrassV1 => {
+            if !dependencies.is_empty() {
+                return Err(format!(
+                    "flat-grass-v1 is target-only but received {} dependency chunks",
+                    dependencies.len()
+                ));
+            }
+            let chunks = targets
+                .iter()
+                .copied()
+                .map(|pos| (pos, generate_flat_grass_chunk(pos.x, pos.z)))
+                .collect();
+            Ok(OverworldFeatureBatchResult {
+                chunks,
+                retained_dependencies: BTreeMap::new(),
+                cache_report: OverworldFeatureDependencyCacheReport::default(),
+                timing: OverworldFeatureBatchTiming::default(),
+            })
+        }
         WorldGenerationProfile::AuthoredOnly { .. } => Err(
             "authored-only missing chunks must bypass the procedural worldgen worker".to_owned(),
         ),
@@ -1354,6 +1374,38 @@ mod tests {
         assert_eq!(
             session.descriptor(),
             Some(WorldGenerationDescriptor::overworld(54_321))
+        );
+    }
+
+    #[test]
+    fn flat_grass_frames_are_target_only_and_batch_order_independent() {
+        let descriptor = WorldGenerationDescriptor::new(
+            WorldGenerationProfile::FlatGrassV1,
+            -9_223_372_036_854_775,
+        );
+        let targets = [ChunkPos::new(7, -9), ChunkPos::new(-2, 3)];
+        let forward = encode_worldgen_request(ChunkJobId(1), descriptor, &targets, Vec::new())
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        let reversed_targets = [targets[1], targets[0]];
+        let reversed =
+            encode_worldgen_request(ChunkJobId(2), descriptor, &reversed_targets, Vec::new())
+                .and_then(|frame| compute_worldgen_job_frame(&frame))
+                .and_then(|frame| decode_worldgen_response(&frame))
+                .unwrap();
+
+        assert_eq!(forward.descriptor, descriptor);
+        assert_eq!(forward.generated_chunks, reversed.generated_chunks);
+        assert!(forward.retained_dependencies.is_empty());
+        assert!(forward.retained_dependency_positions.is_empty());
+        assert_eq!(
+            forward
+                .generated_chunks
+                .values()
+                .map(GeneratedChunk::non_air_block_count)
+                .collect::<Vec<_>>(),
+            vec![1_024, 1_024]
         );
     }
 

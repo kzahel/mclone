@@ -1,5 +1,5 @@
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
-use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource};
+use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
@@ -18,6 +18,15 @@ pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
         .unwrap_or(ChunkPos::new(0, 0))
 }
 
+pub fn initial_spawn_center_for_profile(seed: i64, profile: WorldGenerationProfile) -> ChunkPos {
+    match profile {
+        WorldGenerationProfile::Overworld => initial_spawn_center_for_seed(seed),
+        WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
+            ChunkPos::new(0, 0)
+        }
+    }
+}
+
 /// Resolve the same safe surface used by ordinary player admission from an
 /// already-published client/observer snapshot. Preview hosts use this to frame
 /// an observer around its eventual join point without manufacturing a player
@@ -29,7 +38,10 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
     block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
     chunk_ready: impl FnMut(ChunkPos) -> bool,
 ) -> Option<Vec3d> {
-    let column_order = if matches!(profile, WorldGenerationProfile::AuthoredOnly { .. }) {
+    let column_order = if matches!(
+        profile,
+        WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. }
+    ) {
         SpawnColumnOrder::CenterFirst
     } else {
         SpawnColumnOrder::Scan
@@ -38,7 +50,12 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
     find_safe_surface_spawn_with_column_order(
         center,
         block_at,
-        |x, z| biome_source.get_block_position_biome_definition(seed, x, z),
+        |x, z| match profile {
+            WorldGenerationProfile::FlatGrassV1 => get_layered_biome_by_id(1),
+            WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
+                biome_source.get_block_position_biome_definition(seed, x, z)
+            }
+        },
         chunk_ready,
         column_order,
     )

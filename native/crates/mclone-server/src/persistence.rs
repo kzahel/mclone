@@ -4820,11 +4820,20 @@ mod tests {
             WorldGenerationProfile::authored_only()
         );
 
+        let mut flat_grass = Vec::new();
+        write_world_generation_profile(&mut flat_grass, WorldGenerationProfile::FlatGrassV1)
+            .unwrap();
+        assert_eq!(flat_grass, [2]);
+        assert_eq!(
+            read_world_generation_profile(&mut flat_grass.as_slice()).unwrap(),
+            WorldGenerationProfile::FlatGrassV1
+        );
+
         assert!(
-            read_world_generation_profile(&mut [2].as_slice())
+            read_world_generation_profile(&mut [3].as_slice())
                 .unwrap_err()
                 .to_string()
-                .contains("unknown world generation profile tag 2")
+                .contains("unknown world generation profile tag 3")
         );
     }
 

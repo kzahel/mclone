@@ -1,6 +1,7 @@
 mod chunk;
 mod feature_batch;
 mod generator;
+mod profile;
 mod sampler;
 mod settings;
 mod timing;
@@ -13,6 +14,10 @@ pub use feature_batch::{
     generate_overworld_features_chunks, generate_overworld_surface_chunk,
 };
 pub use generator::NoiseBasedChunkGenerator;
+pub use profile::{
+    FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y, FLAT_GRASS_SURFACE_Y, PLAINS_BIOME_ID,
+    generate_flat_grass_chunk,
+};
 pub use sampler::NoiseSampler;
 pub use settings::{
     NoiseGeneratorSettings, NoiseModifier, NoiseSamplingSettings, NoiseSettings, NoiseSlideSettings,

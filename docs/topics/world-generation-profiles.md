@@ -2,10 +2,9 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tactical 187 is active through Slice 1. Scheduler and worker paths
-now carry an immutable profile-plus-seed descriptor through closed shared-Rust
-dispatch, while the only procedural case remains the unchanged
-vanilla-1.17-shaped Overworld; authored-only misses still produce void.**
+Status: **Tactical 187 is active through Slice 2. `flat-grass-v1` is a live,
+persisted, target-only shared-Rust generator beside the unchanged Overworld;
+authored-only misses still produce void. Seeded island is next.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -29,28 +28,33 @@ The first alternate generators are intentionally smaller:
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has two values:
+The stored server-owned `WorldGenerationProfile` has three values:
 
 - `Overworld`: current procedural vanilla-1.17-shaped generation;
+- `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
+  decoration, ticks, or generator neighbors;
 - `AuthoredOnly`: persistence-backed content whose true misses become void.
 
 The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-After an overworld persistence miss, however, the complete worker path is
-concrete:
+Scheduler and worker requests now carry an immutable profile-plus-seed
+descriptor through native messages, WASM codecs, responses, and diagnostics.
+The closed shared-Rust dispatcher selects either the unchanged overworld cache
+or flat grass, and resident state resets when either descriptor fact changes.
 
-- scheduler/mailbox/job codecs assume overworld feature batches;
-- resident worker state is `OverworldFeatureDependencyCache`;
-- surface, carver, feature-biome, and feature-table paths accept
-  `OverworldBiomeSource`;
-- worker requests do not carry a generator descriptor/version;
-- spawn selection assumes the overworld biome search.
+The overworld implementation itself remains concrete:
+
+- shared batch timing/report types still retain Overworld-specific names;
+- resident worker state contains `OverworldFeatureDependencyCache` for the
+  Overworld dispatch case;
+- surface, carver, feature-biome, and feature-table internals remain specific
+  to `OverworldBiomeSource` and the current Overworld case.
 
 The generic `NoiseBiomeSource` used by terrain sampling is only a partial seam.
-There is no selectable native flat generator. Flat grass and island/table
-content currently exist only as tests or pre-authored persisted fixtures.
+Flat grass intentionally bypasses that machinery. Seeded island does not yet
+exist; island/table content remains pre-authored persisted fixtures.
 
 There is also no live native true-structure system. The old buried treasure,
 desert well, monster room, and fossil history belonged to the retired

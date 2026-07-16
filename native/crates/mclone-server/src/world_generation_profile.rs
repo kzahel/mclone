@@ -8,6 +8,8 @@ pub const AUTHORED_WORLD_HEIGHT: i32 = 256;
 pub enum WorldGenerationProfile {
     #[default]
     Overworld,
+    #[serde(rename = "flat-grass-v1")]
+    FlatGrassV1,
     AuthoredOnly {
         #[serde(rename = "missingChunk")]
         missing_chunk: AuthoredMissingChunk,
@@ -24,6 +26,7 @@ impl WorldGenerationProfile {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Overworld => "overworld",
+            Self::FlatGrassV1 => "flat-grass-v1",
             Self::AuthoredOnly { .. } => "authored-only",
         }
     }
@@ -31,16 +34,17 @@ impl WorldGenerationProfile {
     pub fn parse_label(value: &str) -> Result<Self, String> {
         match value.trim() {
             "overworld" | "default" => Ok(Self::Overworld),
+            "flat-grass-v1" | "flat_grass_v1" | "flatGrassV1" => Ok(Self::FlatGrassV1),
             "authored-only" | "authored_only" | "authoredOnly" => Ok(Self::authored_only()),
             value => Err(format!(
-                "world generation profile must be overworld or authored-only, got `{value}`"
+                "world generation profile must be overworld, flat-grass-v1, or authored-only, got `{value}`"
             )),
         }
     }
 
     pub const fn authored_missing_chunk(self) -> Option<AuthoredMissingChunk> {
         match self {
-            Self::Overworld => None,
+            Self::Overworld | Self::FlatGrassV1 => None,
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
         }
     }
@@ -49,6 +53,7 @@ impl WorldGenerationProfile {
         match self {
             Self::Overworld => 0,
             Self::AuthoredOnly { .. } => 1,
+            Self::FlatGrassV1 => 2,
         }
     }
 
@@ -56,6 +61,7 @@ impl WorldGenerationProfile {
         match tag {
             0 => Some(Self::Overworld),
             1 => Some(Self::authored_only()),
+            2 => Some(Self::FlatGrassV1),
             _ => None,
         }
     }
@@ -99,6 +105,7 @@ mod tests {
             WorldGenerationProfile::Overworld
         );
         assert_eq!(WorldGenerationProfile::Overworld.label(), "overworld");
+        assert_eq!(WorldGenerationProfile::FlatGrassV1.label(), "flat-grass-v1");
         assert_eq!(
             WorldGenerationProfile::authored_only().label(),
             "authored-only"
@@ -112,12 +119,20 @@ mod tests {
             WorldGenerationProfile::authored_only()
         );
         assert_eq!(
+            WorldGenerationProfile::parse_label("flat-grass-v1").unwrap(),
+            WorldGenerationProfile::FlatGrassV1
+        );
+        assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::Overworld).unwrap(),
             r#""overworld""#
         );
         assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::authored_only()).unwrap(),
             r#"{"authoredOnly":{"missingChunk":"void"}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::FlatGrassV1).unwrap(),
+            r#""flat-grass-v1""#
         );
         assert_eq!(
             serde_json::from_str::<WorldGenerationProfile>("\"overworld\"").unwrap(),

@@ -492,7 +492,7 @@ Execution record:
 
 ### Slice 2: Flat grass generator
 
-Status: planned.
+Status: complete 2026-07-16.
 
 - Implement `FlatGrassV1` in `mclone-worldgen` with the exact layer/biome
   specification above.
@@ -509,6 +509,23 @@ Status: planned.
 Gate: flat grass is selectable, playable, lit, persistent, byte-deterministic,
 and native/web worker-equivalent, with target-only generation demonstrated by
 diagnostics.
+
+Execution record:
+
+- added persisted label `flat-grass-v1` and binary tag `2` together with the
+  working shared `mclone-worldgen` implementation;
+- emits Y 0 bedrock, Y 1-2 dirt, Y 3 grass, plains biome ID 1 throughout, and
+  no scheduled ticks at all coordinates, independent of seed;
+- scheduler plans only requested targets, publishes through the standard
+  feature/light/save path, and uses center-first plains spawn resolution at
+  the origin; stored chunks still win and a mutated flat chunk survives
+  unload/reopen without regeneration;
+- full/delta job-frame order tests and the dedicated native TCP test exercise
+  the same dispatcher used by the browser WASM adapter and remote clients;
+- inspected `/tmp/mclone-flat-grass-v1-lit.png` at 1280x720 from an elevated
+  oblique camera. Six independently published chunks joined without cracks;
+  grass, two dirt layers, and bedrock were visibly correct. The capture used
+  lighting and the normal shared renderer.
 
 ### Slice 3: Seeded small-island generator core
 
