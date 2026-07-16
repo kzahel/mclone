@@ -1,4 +1,4 @@
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{PreparedFigure, PreparedFigureVertex};
@@ -6,12 +6,18 @@ use mclone_assets::{PreparedFigure, PreparedFigureVertex};
 use crate::GpuPassId;
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, REVERSED_Z_DEPTH_CLEAR};
 use crate::target::RenderFrameTarget;
+use crate::uniform::{
+    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
+};
 
 const MAX_PREPARED_FIGURE_PARTS: usize = 64;
 const VERTEX_BYTE_LEN: usize = 52;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress = VERTEX_BYTE_LEN as wgpu::BufferAddress;
 const VIEW_UNIFORM_BYTE_LEN: usize = 16 * std::mem::size_of::<f32>();
 const VIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = VIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
+const MULTIVIEW_UNIFORM_BYTE_LEN: usize = VIEW_UNIFORM_BYTE_LEN * 2;
+const MULTIVIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress =
+    MULTIVIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
 const PALETTE_FLOAT_COUNT: usize = MAX_PREPARED_FIGURE_PARTS * 16;
 const PALETTE_BYTE_LEN: usize = PALETTE_FLOAT_COUNT * std::mem::size_of::<f32>();
 const PALETTE_BYTE_SIZE: wgpu::BufferAddress = PALETTE_BYTE_LEN as wgpu::BufferAddress;
@@ -31,17 +37,21 @@ pub struct PreparedFigureGpuSnapshot {
     pub immutable_atlas_bytes: u64,
     pub immutable_palette_bytes: u64,
     pub view_uniform_write_count: u64,
+    pub multiview_uniform_write_count: u64,
+    pub multiview_pipeline_count: u64,
 }
 
-/// Immutable prepared-figure topology plus one mutable per-view uniform.
+/// Immutable prepared-figure topology plus mutable per-view uniforms.
 ///
 /// This proof renderer intentionally draws one resident figure and one static
-/// rest palette. Actor records, animation updates, instancing, stereo, and
-/// multiview are later contracts.
+/// rest palette. Ordinary stereo uses distinct live uniform slots; full-frame
+/// stereo uses one two-view uniform and a multiview pipeline. Actor records,
+/// animation updates, and instancing remain later contracts.
 pub struct PreparedFigureDrawResources {
     pipeline: wgpu::RenderPipeline,
-    view_uniform: wgpu::Buffer,
+    view_uniforms: PerViewUniformBuffer,
     view_bind_group: wgpu::BindGroup,
+    multiview: Option<PreparedFigureMultiviewResources>,
     _palette: wgpu::Buffer,
     palette_bind_group: wgpu::BindGroup,
     _texture: wgpu::Texture,
@@ -53,6 +63,12 @@ pub struct PreparedFigureDrawResources {
     vertex_count: u32,
     index_count: u32,
     snapshot: PreparedFigureGpuSnapshot,
+}
+
+struct PreparedFigureMultiviewResources {
+    pipeline: wgpu::RenderPipeline,
+    view_uniform: wgpu::Buffer,
+    view_bind_group: wgpu::BindGroup,
 }
 
 impl PreparedFigureDrawResources {
@@ -91,18 +107,15 @@ impl PreparedFigureDrawResources {
             label: Some("mclone_prepared_figure_shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/prepared_figure.wgsl").into()),
         });
+        let view_uniforms = PerViewUniformBuffer::new(
+            device,
+            "mclone_prepared_figure_view_uniforms",
+            VIEW_UNIFORM_BYTE_SIZE,
+            PER_VIEW_UNIFORM_SLOT_COUNT,
+        );
         let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_prepared_figure_view_layout"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(VIEW_UNIFORM_BYTE_SIZE),
-                },
-                count: None,
-            }],
+            entries: &[view_uniforms.layout_entry(0, wgpu::ShaderStages::VERTEX)],
         });
         let palette_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_prepared_figure_palette_layout"),
@@ -143,71 +156,68 @@ impl PreparedFigureDrawResources {
             bind_group_layouts: &[&view_layout, &palette_layout, &texture_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("mclone_prepared_figure_pipeline"),
-            layout: Some(&pipeline_layout),
-            vertex: wgpu::VertexState {
-                module: &shader,
-                entry_point: Some("vs_main"),
-                compilation_options: Default::default(),
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: VERTEX_BYTE_SIZE,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &[
-                        wgpu::VertexAttribute {
-                            offset: 0,
-                            shader_location: 0,
-                            format: wgpu::VertexFormat::Float32x3,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 12,
-                            shader_location: 1,
-                            format: wgpu::VertexFormat::Float32x3,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 24,
-                            shader_location: 2,
-                            format: wgpu::VertexFormat::Float32x2,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 32,
-                            shader_location: 3,
-                            format: wgpu::VertexFormat::Float32x4,
-                        },
-                        wgpu::VertexAttribute {
-                            offset: 48,
-                            shader_location: 4,
-                            format: wgpu::VertexFormat::Uint32,
-                        },
-                    ],
+        let pipeline = create_prepared_figure_pipeline(
+            device,
+            &pipeline_layout,
+            &shader,
+            color_format,
+            "mclone_prepared_figure_pipeline",
+            None,
+        );
+        let multiview = if device.features().contains(wgpu::Features::MULTIVIEW) {
+            let multiview_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("mclone_prepared_figure_multiview_shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    include_str!("shaders/prepared_figure_multiview.wgsl").into(),
+                ),
+            });
+            let view_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_prepared_figure_multiview_uniform"),
+                size: MULTIVIEW_UNIFORM_BYTE_SIZE,
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_prepared_figure_multiview_view_layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: NonZeroU64::new(MULTIVIEW_UNIFORM_BYTE_SIZE),
+                    },
+                    count: None,
                 }],
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &shader,
-                entry_point: Some("fs_main"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: color_format,
-                    blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: Some(wgpu::Face::Back),
-                ..Default::default()
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::GreaterEqual,
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            multiview: None,
-            cache: None,
-        });
+            });
+            let view_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("mclone_prepared_figure_multiview_view_bind_group"),
+                layout: &view_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: view_uniform.as_entire_binding(),
+                }],
+            });
+            let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("mclone_prepared_figure_multiview_pipeline_layout"),
+                bind_group_layouts: &[&view_layout, &palette_layout, &texture_layout],
+                push_constant_ranges: &[],
+            });
+            Some(PreparedFigureMultiviewResources {
+                pipeline: create_prepared_figure_pipeline(
+                    device,
+                    &pipeline_layout,
+                    &multiview_shader,
+                    color_format,
+                    "mclone_prepared_figure_multiview_pipeline",
+                    NonZeroU32::new(2),
+                ),
+                view_uniform,
+                view_bind_group,
+            })
+        } else {
+            None
+        };
 
         let vertex_bytes = prepared_vertex_bytes(&figure.vertices);
         let index_bytes = prepared_index_bytes(&figure.indices);
@@ -233,19 +243,10 @@ impl PreparedFigureDrawResources {
             wgpu::BufferUsages::UNIFORM,
             &palette_bytes,
         );
-        let view_uniform = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_prepared_figure_view_uniform"),
-            size: VIEW_UNIFORM_BYTE_SIZE,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         let view_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_prepared_figure_view_bind_group"),
             layout: &view_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: view_uniform.as_entire_binding(),
-            }],
+            entries: &[view_uniforms.bind_group_entry(0)],
         });
         let palette_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_prepared_figure_palette_bind_group"),
@@ -317,8 +318,9 @@ impl PreparedFigureDrawResources {
 
         Ok(Self {
             pipeline,
-            view_uniform,
+            view_uniforms,
             view_bind_group,
+            multiview,
             _palette: palette,
             palette_bind_group,
             _texture: texture,
@@ -336,6 +338,10 @@ impl PreparedFigureDrawResources {
                 immutable_atlas_bytes: figure.atlas.rgba.len() as u64,
                 immutable_palette_bytes: palette_bytes.len() as u64,
                 view_uniform_write_count: 0,
+                multiview_uniform_write_count: 0,
+                multiview_pipeline_count: u64::from(
+                    device.features().contains(wgpu::Features::MULTIVIEW),
+                ),
             },
         })
     }
@@ -347,12 +353,23 @@ impl PreparedFigureDrawResources {
         target: RenderFrameTarget<'_>,
         render_view: ChunkRenderView,
     ) -> Result<PreparedFigureRenderStats> {
+        self.render_in_slot(queue, encoder, target, render_view, SINGLE_VIEW_SLOT)
+    }
+
+    pub fn render_in_slot(
+        &mut self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        view_slot: PerViewSlot,
+    ) -> Result<PreparedFigureRenderStats> {
         let depth_view = target
             .depth_view
             .context("prepared figure render pass requires a depth attachment")?;
-        queue.write_buffer(
-            &self.view_uniform,
-            0,
+        let uniform_offset = self.view_uniforms.write_slot(
+            queue,
+            view_slot,
             &float_bytes(&render_view.view_projection.to_cols_array()),
         );
         self.snapshot.view_uniform_write_count =
@@ -379,7 +396,7 @@ impl PreparedFigureDrawResources {
             ..Default::default()
         });
         pass.set_pipeline(&self.pipeline);
-        pass.set_bind_group(0, &self.view_bind_group, &[]);
+        pass.set_bind_group(0, &self.view_bind_group, &[uniform_offset]);
         pass.set_bind_group(1, &self.palette_bind_group, &[]);
         pass.set_bind_group(2, &self.texture_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -390,6 +407,77 @@ impl PreparedFigureDrawResources {
             vertex_count: self.vertex_count,
             index_count: self.index_count,
         })
+    }
+
+    pub fn render_multiview(
+        &mut self,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_views: [ChunkRenderView; 2],
+        clear_color: Option<wgpu::Color>,
+    ) -> Result<PreparedFigureRenderStats> {
+        let depth_view = target
+            .depth_view
+            .context("prepared figure multiview pass requires a depth attachment")?;
+        let multiview = self
+            .multiview
+            .as_ref()
+            .context("prepared figure multiview render requires wgpu MULTIVIEW")?;
+        queue.write_buffer(
+            &multiview.view_uniform,
+            0,
+            &multiview_view_bytes(render_views),
+        );
+        self.snapshot.multiview_uniform_write_count = self
+            .snapshot
+            .multiview_uniform_write_count
+            .saturating_add(1);
+        let color_load = clear_color
+            .map(wgpu::LoadOp::Clear)
+            .unwrap_or(wgpu::LoadOp::Load);
+        let depth_load = if clear_color.is_some() {
+            wgpu::LoadOp::Clear(REVERSED_Z_DEPTH_CLEAR)
+        } else {
+            wgpu::LoadOp::Load
+        };
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_prepared_figure_multiview_render_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: color_load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: depth_view,
+                depth_ops: Some(wgpu::Operations {
+                    load: depth_load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+            ..Default::default()
+        });
+        pass.set_pipeline(&multiview.pipeline);
+        pass.set_bind_group(0, &multiview.view_bind_group, &[]);
+        pass.set_bind_group(1, &self.palette_bind_group, &[]);
+        pass.set_bind_group(2, &self.texture_bind_group, &[]);
+        pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+        pass.draw_indexed(0..self.index_count, 0, 0..1);
+        Ok(PreparedFigureRenderStats {
+            draw_count: 1,
+            vertex_count: self.vertex_count,
+            index_count: self.index_count,
+        })
+    }
+
+    pub fn multiview_supported(&self) -> bool {
+        self.multiview.is_some()
     }
 
     pub fn snapshot(&self) -> PreparedFigureGpuSnapshot {
@@ -423,6 +511,91 @@ pub fn clear_prepared_figure_target(
         }),
         ..Default::default()
     });
+}
+
+fn create_prepared_figure_pipeline(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    label: &'static str,
+    multiview: Option<NonZeroU32>,
+) -> wgpu::RenderPipeline {
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some(label),
+        layout: Some(layout),
+        vertex: wgpu::VertexState {
+            module: shader,
+            entry_point: Some("vs_main"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: VERTEX_BYTE_SIZE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &[
+                    wgpu::VertexAttribute {
+                        offset: 0,
+                        shader_location: 0,
+                        format: wgpu::VertexFormat::Float32x3,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 12,
+                        shader_location: 1,
+                        format: wgpu::VertexFormat::Float32x3,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 24,
+                        shader_location: 2,
+                        format: wgpu::VertexFormat::Float32x2,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 32,
+                        shader_location: 3,
+                        format: wgpu::VertexFormat::Float32x4,
+                    },
+                    wgpu::VertexAttribute {
+                        offset: 48,
+                        shader_location: 4,
+                        format: wgpu::VertexFormat::Uint32,
+                    },
+                ],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader,
+            entry_point: Some("fs_main"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: color_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            cull_mode: Some(wgpu::Face::Back),
+            ..Default::default()
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: DEPTH_FORMAT,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::GreaterEqual,
+            stencil: Default::default(),
+            bias: Default::default(),
+        }),
+        multisample: Default::default(),
+        multiview,
+        cache: None,
+    })
+}
+
+fn multiview_view_bytes(render_views: [ChunkRenderView; 2]) -> [u8; MULTIVIEW_UNIFORM_BYTE_LEN] {
+    let mut bytes = [0_u8; MULTIVIEW_UNIFORM_BYTE_LEN];
+    for (view_index, render_view) in render_views.into_iter().enumerate() {
+        let start = view_index * VIEW_UNIFORM_BYTE_LEN;
+        let view_bytes = float_bytes(&render_view.view_projection.to_cols_array());
+        bytes[start..start + VIEW_UNIFORM_BYTE_LEN].copy_from_slice(&view_bytes);
+    }
+    bytes
 }
 
 fn upload_buffer(
@@ -498,6 +671,7 @@ fn push_f32s(bytes: &mut Vec<u8>, values: &[f32]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::chunk::ChunkCamera;
 
     #[test]
     fn prepared_vertex_layout_is_52_bytes() {
@@ -511,5 +685,39 @@ mod tests {
         let bytes = prepared_vertex_bytes(&[vertex]);
         assert_eq!(bytes.len(), VERTEX_BYTE_LEN);
         assert_eq!(&bytes[48..52], &7_u32.to_ne_bytes());
+    }
+
+    #[test]
+    fn multiview_uniform_keeps_distinct_left_and_right_matrices() {
+        let camera = |x| ChunkCamera {
+            eye: [x, 0.5, 2.0],
+            target: [x, 0.5, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 0.7,
+            z_near: 0.01,
+            z_far: 100.0,
+        };
+        let views = [
+            camera(-0.02).render_view(360, 480),
+            camera(0.02).render_view(360, 480),
+        ];
+        let bytes = multiview_view_bytes(views);
+        assert_eq!(bytes.len(), MULTIVIEW_UNIFORM_BYTE_LEN);
+        assert_ne!(
+            &bytes[..VIEW_UNIFORM_BYTE_LEN],
+            &bytes[VIEW_UNIFORM_BYTE_LEN..]
+        );
+    }
+
+    #[test]
+    fn prepared_multiview_shader_validates_with_multiview_capability() {
+        let source = include_str!("shaders/prepared_figure_multiview.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("multiview WGSL parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::MULTIVIEW,
+        )
+        .validate(&module)
+        .expect("multiview WGSL validates");
     }
 }

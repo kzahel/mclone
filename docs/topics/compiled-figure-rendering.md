@@ -7,9 +7,11 @@ Status: target direction selected 2026-07-16. Tactical
 cover the canonical semantic handoff, shared startup compiler, immutable mono
 proof renderer, and visually approved Three.js/native comparison. The simpler
 native proof lighting was accepted for this stage. Stereo/browser portability
-is the remaining proof work. Semantic JSON remains the only persisted runtime
-format; production migration, animation, curved primitives, instancing, LOD,
-GPU pose evaluation, and a disk cache remain deferred.
+is in progress: distinct-slot native per-eye pixels are inspected, while
+multiview execution is capability-skipped on the current Mac and browser WebGPU
+remains. Semantic JSON remains the only persisted runtime format; production
+migration, animation, curved primitives, instancing, LOD, GPU pose evaluation,
+and a disk cache remain deferred.
 
 ## Scope
 

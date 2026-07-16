@@ -10,11 +10,17 @@ use mclone_assets::{
     load_prepared_figure,
 };
 use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget};
-use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
+use mclone_render::headless::{
+    HeadlessFrameLoopOptions, HeadlessMultiviewFrameOptions, HeadlessStereoFrameOptions,
+    run_headless_capture_loop, save_rgba_png, write_headless_multiview_frame_png,
+    write_headless_stereo_frame_png,
+};
 use mclone_render::prepared_figure::{
     PreparedFigureDrawResources, PreparedFigureGpuSnapshot, PreparedFigureRenderStats,
     clear_prepared_figure_target,
 };
+use mclone_render::target::RenderFrameTarget;
+use mclone_render::uniform::{LEFT_EYE_VIEW_SLOT, RIGHT_EYE_VIEW_SLOT};
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_PANEL_WIDTH: u32 = 360;
@@ -130,6 +136,9 @@ fn main() -> Result<()> {
     let receipt_path = options.out_dir.join("engine-receipt.json");
     fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt)?)
         .with_context(|| format!("failed to write {}", receipt_path.display()))?;
+    if options.portability {
+        write_portability_review(&options, &figure, &review)?;
+    }
     println!(
         "prepared figure review wrote {} views to {} ({} vertices, {} indices, {:.3} ms preparation)",
         views.len(),
@@ -139,6 +148,193 @@ fn main() -> Result<()> {
         preparation_ms
     );
     Ok(())
+}
+
+fn write_portability_review(
+    options: &Options,
+    figure: &PreparedFigure,
+    review: &ReviewContract,
+) -> Result<()> {
+    let stereo_cameras = review.stereo_cameras();
+    let per_eye_path = options.out_dir.join("engine-stereo-per-eye.png");
+    let per_eye_figure = figure.clone();
+    let (per_eye_report, per_eye_gpu) = write_headless_stereo_frame_png(
+        HeadlessStereoFrameOptions {
+            path: per_eye_path.clone(),
+            eye_width: review.panel_width,
+            eye_height: review.panel_height,
+        },
+        move |device, queue, format, size, left_color, right_color| {
+            let mut draw =
+                PreparedFigureDrawResources::new(device, queue, format, &per_eye_figure)?;
+            let left_depth = ChunkDepthTarget::new(device, size[0], size[1]);
+            let right_depth = ChunkDepthTarget::new(device, size[0], size[1]);
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mclone_prepared_figure_per_eye_encoder"),
+            });
+            let left_target =
+                RenderFrameTarget::color(left_color, size).with_depth(&left_depth.view);
+            clear_prepared_figure_target(
+                &mut encoder,
+                left_target,
+                &left_depth.view,
+                review.clear_color(),
+            );
+            draw.render_in_slot(
+                queue,
+                &mut encoder,
+                left_target,
+                stereo_cameras[0].render_view(size[0], size[1]),
+                LEFT_EYE_VIEW_SLOT,
+            )?;
+            let right_target =
+                RenderFrameTarget::color(right_color, size).with_depth(&right_depth.view);
+            clear_prepared_figure_target(
+                &mut encoder,
+                right_target,
+                &right_depth.view,
+                review.clear_color(),
+            );
+            draw.render_in_slot(
+                queue,
+                &mut encoder,
+                right_target,
+                stereo_cameras[1].render_view(size[0], size[1]),
+                RIGHT_EYE_VIEW_SLOT,
+            )?;
+            queue.submit(std::iter::once(encoder.finish()));
+            Ok(draw.snapshot())
+        },
+    )?;
+    if per_eye_gpu.immutable_upload_count != 4
+        || per_eye_gpu.view_uniform_write_count != 2
+        || per_eye_report.eye_pixel_difference_count == 0
+    {
+        bail!("prepared per-eye stereo did not retain resources or distinct eye pixels");
+    }
+
+    let multiview_path = options.out_dir.join("engine-stereo-multiview.png");
+    let multiview_figure = figure.clone();
+    let multiview_result = write_headless_multiview_frame_png(
+        HeadlessMultiviewFrameOptions {
+            path: multiview_path.clone(),
+            eye_width: review.panel_width,
+            eye_height: review.panel_height,
+        },
+        move |device, queue, format, size, color, depth| {
+            let mut draw =
+                PreparedFigureDrawResources::new(device, queue, format, &multiview_figure)?;
+            if !draw.multiview_supported() {
+                bail!("prepared figure resource omitted its multiview pipeline");
+            }
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mclone_prepared_figure_multiview_encoder"),
+            });
+            draw.render_multiview(
+                queue,
+                &mut encoder,
+                RenderFrameTarget::color(color, size).with_depth(depth),
+                [
+                    stereo_cameras[0].render_view(size[0], size[1]),
+                    stereo_cameras[1].render_view(size[0], size[1]),
+                ],
+                Some(review.clear_color()),
+            )?;
+            queue.submit(std::iter::once(encoder.finish()));
+            Ok(draw.snapshot())
+        },
+    );
+    let (multiview, multiview_unavailable_reason, pixel_identical) = match multiview_result {
+        Ok((multiview_report, multiview_gpu)) => {
+            if multiview_gpu.immutable_upload_count != 4
+                || multiview_gpu.multiview_pipeline_count != 1
+                || multiview_gpu.multiview_uniform_write_count != 1
+                || multiview_report.eye_pixel_difference_count == 0
+            {
+                bail!("prepared multiview stereo did not retain resources or distinct eye pixels");
+            }
+            let pixel_identical = fs::read(&per_eye_path)? == fs::read(&multiview_path)?;
+            if !pixel_identical {
+                bail!("prepared per-eye and multiview stereo captures differ");
+            }
+            (
+                Some(PortabilityPathReceipt::new(
+                    &multiview_path,
+                    multiview_report.eye_pixel_difference_count,
+                    multiview_gpu,
+                )),
+                None,
+                Some(pixel_identical),
+            )
+        }
+        Err(error) if error.to_string().contains("does not expose wgpu MULTIVIEW") => {
+            (None, Some(error.to_string()), None)
+        }
+        Err(error) => return Err(error),
+    };
+    let receipt = PortabilityReceipt {
+        schema_version: 1,
+        figure: &figure.name,
+        eye_separation: ReviewContract::STEREO_EYE_SEPARATION,
+        views: ["left", "right"],
+        per_eye: PortabilityPathReceipt::new(
+            &per_eye_path,
+            per_eye_report.eye_pixel_difference_count,
+            per_eye_gpu,
+        ),
+        multiview,
+        multiview_unavailable_reason,
+        pixel_identical,
+    };
+    let receipt_path = options.out_dir.join("portability-receipt.json");
+    fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt)?)
+        .with_context(|| format!("failed to write {}", receipt_path.display()))?;
+    Ok(())
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortabilityReceipt<'a> {
+    schema_version: u32,
+    figure: &'a str,
+    eye_separation: f32,
+    views: [&'static str; 2],
+    per_eye: PortabilityPathReceipt,
+    multiview: Option<PortabilityPathReceipt>,
+    multiview_unavailable_reason: Option<String>,
+    pixel_identical: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortabilityPathReceipt {
+    image: String,
+    eye_pixel_difference_count: usize,
+    immutable_upload_count: u64,
+    view_uniform_write_count: u64,
+    multiview_uniform_write_count: u64,
+    multiview_pipeline_count: u64,
+}
+
+impl PortabilityPathReceipt {
+    fn new(
+        image: &std::path::Path,
+        eye_pixel_difference_count: usize,
+        gpu: PreparedFigureGpuSnapshot,
+    ) -> Self {
+        Self {
+            image: image
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("unknown.png")
+                .to_owned(),
+            eye_pixel_difference_count,
+            immutable_upload_count: gpu.immutable_upload_count,
+            view_uniform_write_count: gpu.view_uniform_write_count,
+            multiview_uniform_write_count: gpu.multiview_uniform_write_count,
+            multiview_pipeline_count: gpu.multiview_pipeline_count,
+        }
+    }
 }
 
 struct ReviewState {
@@ -154,6 +350,7 @@ struct Options {
     width: u32,
     height: u32,
     review_contract: Option<PathBuf>,
+    portability: bool,
 }
 
 impl Options {
@@ -164,6 +361,7 @@ impl Options {
         let mut width = DEFAULT_PANEL_WIDTH;
         let mut height = DEFAULT_PANEL_HEIGHT;
         let mut review_contract = None;
+        let mut portability = false;
         let mut args = args.into_iter();
         while let Some(argument) = args.next() {
             match argument.as_str() {
@@ -188,9 +386,10 @@ impl Options {
                         args.next(),
                     )?));
                 }
+                "--portability" => portability = true,
                 "--help" | "-h" => {
                     println!(
-                        "Usage: mclone-figure-review [--asset-root PATH] [--figure ASSET_PATH] [--out-dir PATH] [--width PIXELS] [--height PIXELS] [--review-contract JSON]"
+                        "Usage: mclone-figure-review [--asset-root PATH] [--figure ASSET_PATH] [--out-dir PATH] [--width PIXELS] [--height PIXELS] [--review-contract JSON] [--portability]"
                     );
                     std::process::exit(0);
                 }
@@ -204,6 +403,7 @@ impl Options {
             width,
             height,
             review_contract,
+            portability,
         })
     }
 }
@@ -235,6 +435,8 @@ struct ReviewContract {
 }
 
 impl ReviewContract {
+    const STEREO_EYE_SEPARATION: f32 = 0.036;
+
     fn for_figure(figure: &PreparedFigure, panel_width: u32, panel_height: u32) -> Self {
         let min = Vec3::from_array(figure.bounds.min);
         let max = Vec3::from_array(figure.bounds.max);
@@ -299,6 +501,21 @@ impl ReviewContract {
         }
     }
 
+    fn stereo_cameras(&self) -> [ChunkCamera; 2] {
+        let target = Vec3::from_array(self.target);
+        let direction = Vec3::new(0.0, 0.2, 1.0).normalize();
+        let center_eye = target + direction * self.distance;
+        let half_separation = Self::STEREO_EYE_SEPARATION * 0.5;
+        [-half_separation, half_separation].map(|offset| ChunkCamera {
+            eye: (center_eye + Vec3::X * offset).to_array(),
+            target: (target + Vec3::X * offset).to_array(),
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: self.fov_degrees.to_radians(),
+            z_near: 0.01,
+            z_far: 100.0,
+        })
+    }
+
     fn clear_color(&self) -> wgpu::Color {
         wgpu::Color {
             r: 0xed as f64 / 255.0,
@@ -341,6 +558,8 @@ struct ReviewReceipt<'a> {
     immutable_atlas_bytes: u64,
     immutable_palette_bytes: u64,
     view_uniform_write_count: u64,
+    multiview_uniform_write_count: u64,
+    multiview_pipeline_count: u64,
 }
 
 impl<'a> ReviewReceipt<'a> {
@@ -381,6 +600,8 @@ impl<'a> ReviewReceipt<'a> {
             immutable_atlas_bytes: gpu.immutable_atlas_bytes,
             immutable_palette_bytes: gpu.immutable_palette_bytes,
             view_uniform_write_count: gpu.view_uniform_write_count,
+            multiview_uniform_write_count: gpu.multiview_uniform_write_count,
+            multiview_pipeline_count: gpu.multiview_pipeline_count,
         }
     }
 }

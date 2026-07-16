@@ -79,6 +79,7 @@ mclone-xr-graphics = { path = "crates/mclone-xr-graphics" }
 mclone-xr-host = { path = "crates/mclone-xr-host" }
 mclone-scene = { path = "crates/mclone-scene" }
 metal = "0.31"
+naga = { version = "=25.0.1", features = ["wgsl-in"] }
 pollster = "0.4"
 openxr = "0.21"
 serde = { version = "1", features = ["derive"] }

@@ -110,6 +110,26 @@ pub struct HeadlessStereoFrameReport {
 }
 
 #[derive(Clone, Debug)]
+pub struct HeadlessMultiviewFrameOptions {
+    pub path: PathBuf,
+    /// Width of one layer. The saved side-by-side image is twice this width.
+    pub eye_width: u32,
+    pub eye_height: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HeadlessMultiviewFrameReport {
+    pub path: PathBuf,
+    pub eye_width: u32,
+    pub eye_height: u32,
+    pub width: u32,
+    pub height: u32,
+    pub byte_len: usize,
+    pub non_clear_rgb_pixel_count: usize,
+    pub eye_pixel_difference_count: usize,
+}
+
+#[derive(Clone, Debug)]
 pub struct HeadlessTimedemoOptions {
     pub width: u32,
     pub height: u32,
@@ -524,6 +544,105 @@ where
     save_rgba_png(&options.path, width, eye_height, &pixels)?;
     Ok((
         HeadlessStereoFrameReport {
+            path: options.path,
+            eye_width,
+            eye_height,
+            width,
+            height: eye_height,
+            byte_len: pixels.len(),
+            non_clear_rgb_pixel_count: count_non_clear_rgb_pixels(&pixels),
+            eye_pixel_difference_count,
+        },
+        output,
+    ))
+}
+
+/// Render one full-frame two-layer multiview target, read both layers, and
+/// save one side-by-side PNG. The callback owns submission so it can use the
+/// renderer's ordinary full-frame multiview command path.
+pub fn write_headless_multiview_frame_png<T, F>(
+    options: HeadlessMultiviewFrameOptions,
+    render: F,
+) -> Result<(HeadlessMultiviewFrameReport, T)>
+where
+    F: FnOnce(
+        &wgpu::Device,
+        &wgpu::Queue,
+        wgpu::TextureFormat,
+        [u32; 2],
+        &wgpu::TextureView,
+        &wgpu::TextureView,
+    ) -> Result<T>,
+{
+    let eye_width = options.eye_width.max(1);
+    let eye_height = options.eye_height.max(1);
+    let width = eye_width
+        .checked_mul(2)
+        .context("headless multiview output width overflow")?;
+    let (device, queue) = create_headless_device()?;
+    if !device.features().contains(wgpu::Features::MULTIVIEW) {
+        bail!("headless adapter does not expose wgpu MULTIVIEW");
+    }
+    let color = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_headless_multiview_color"),
+        size: wgpu::Extent3d {
+            width: eye_width,
+            height: eye_height,
+            depth_or_array_layers: 2,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: HEADLESS_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let color_view = color.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        array_layer_count: Some(2),
+        ..Default::default()
+    });
+    let depth = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("mclone_headless_multiview_depth"),
+        size: wgpu::Extent3d {
+            width: eye_width,
+            height: eye_height,
+            depth_or_array_layers: 2,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: crate::chunk::DEPTH_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    });
+    let depth_view = depth.create_view(&wgpu::TextureViewDescriptor {
+        dimension: Some(wgpu::TextureViewDimension::D2Array),
+        array_layer_count: Some(2),
+        ..Default::default()
+    });
+    let output = render(
+        &device,
+        &queue,
+        HEADLESS_FORMAT,
+        [eye_width, eye_height],
+        &color_view,
+        &depth_view,
+    )?;
+    device
+        .poll(wgpu::PollType::Wait)
+        .context("device poll failed after multiview render")?;
+    let left_pixels = read_rgba8_layer(&device, &queue, &color, eye_width, eye_height, 0)?;
+    let right_pixels = read_rgba8_layer(&device, &queue, &color, eye_width, eye_height, 1)?;
+    let eye_pixel_difference_count = left_pixels
+        .chunks_exact(BYTES_PER_PIXEL as usize)
+        .zip(right_pixels.chunks_exact(BYTES_PER_PIXEL as usize))
+        .filter(|(left, right)| left != right)
+        .count();
+    let pixels = stitch_rgba8_side_by_side(eye_width, eye_height, &left_pixels, &right_pixels)?;
+    save_rgba_png(&options.path, width, eye_height, &pixels)?;
+    Ok((
+        HeadlessMultiviewFrameReport {
             path: options.path,
             eye_width,
             eye_height,

@@ -1,9 +1,10 @@
 # 181: Startup-Prepared Figure Static-Box Proof
 
 Status: active 2026-07-16. Slices 0-3 are implemented; the first paired pixels
-and the proof's simpler native lighting were visually approved. Work is paused
-before stereo/browser portability, animation, production migration, curved
-primitives, instancing, or LOD.
+and the proof's simpler native lighting were visually approved. Work is inside
+Slice 4 after inspected native per-eye stereo; full-frame multiview
+execution and browser WebGPU remain before animation, production migration,
+curved primitives, instancing, or LOD.
 
 Topic: `compiled-figure-rendering`
 
@@ -353,7 +354,7 @@ Gate evidence:
 - Human review approved the geometry and accepted the simpler native proof
   lighting without requesting material or lighting parity work in this slice.
 
-### Slice 4: stereo, multiview, and browser portability
+### Slice 4: stereo, multiview, and browser portability (in progress)
 
 - Add the prepared-figure path to both ordinary per-view and full-frame
   multiview pipelines with each eye/layer using its own view/projection data.
@@ -367,6 +368,27 @@ Gate evidence:
 - Run normal native/web build and shader-validation gates, plus Android/Quest
   compile checks through the repository scripts where required by the current
   platform validation policy.
+
+Native stereo progress on 2026-07-16:
+
+- The ordinary prepared draw now uses `PerViewUniformBuffer` dynamic slots.
+  The proof records left and right draws into one encoder/submission without
+  allowing the second eye's queue write to overwrite the first eye's matrix.
+- One prepared resource owns the ordinary pipeline and, where the device
+  exposes `wgpu::MULTIVIEW`, a two-layer pipeline using the same immutable
+  vertex, index, atlas, and rest-palette resources.
+- The inspected 360x480-per-eye capture is
+  `/tmp/mclone-figure-portability/player/engine-stereo-per-eye.png`. It reports
+  four immutable uploads total, two view writes, and 11,736 differing pixels
+  between eyes.
+- The current macOS Metal headless adapter does not expose multiview. The
+  diagnostic records this as an explicit capability skip. Two-view uniform
+  ordering has a focused test, and the multiview WGSL parses and validates
+  through Naga with the multiview capability; execution still requires a
+  capable adapter and must not be claimed from this host.
+- `--portability` writes the per-eye capture and a diagnostic receipt. On a
+  capable adapter it also renders the two-layer target, reads both layers, and
+  requires exact equality with the ordinary per-eye capture.
 
 Gate: mono, stereo per-eye, multiview, and browser WebGPU all show the same
 prepared player orientation/materials; no path independently recompiles
