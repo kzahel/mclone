@@ -36,24 +36,27 @@ pub struct PreparedFigureGpuSnapshot {
     pub immutable_index_bytes: u64,
     pub immutable_atlas_bytes: u64,
     pub immutable_palette_bytes: u64,
+    pub palette_write_count: u64,
+    pub palette_written_bytes: u64,
     pub view_uniform_write_count: u64,
     pub multiview_uniform_write_count: u64,
     pub multiview_pipeline_count: u64,
 }
 
-/// Immutable prepared-figure topology plus mutable per-view uniforms.
+/// Immutable prepared-figure topology plus mutable palette/view uniforms.
 ///
-/// This proof renderer intentionally draws one resident figure and one static
-/// rest palette. Ordinary stereo uses distinct live uniform slots; full-frame
+/// This proof renderer intentionally draws one resident figure and one final
+/// part palette. Ordinary stereo uses distinct live uniform slots; full-frame
 /// stereo uses one two-view uniform and a multiview pipeline. Actor records,
-/// animation updates, and instancing remain later contracts.
+/// instancing, and GPU clip evaluation remain later contracts.
 pub struct PreparedFigureDrawResources {
     pipeline: wgpu::RenderPipeline,
     view_uniforms: PerViewUniformBuffer,
     view_bind_group: wgpu::BindGroup,
     multiview: Option<PreparedFigureMultiviewResources>,
-    _palette: wgpu::Buffer,
+    palette: wgpu::Buffer,
     palette_bind_group: wgpu::BindGroup,
+    palette_upload_scratch: Vec<u8>,
     _texture: wgpu::Texture,
     _texture_view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
@@ -62,6 +65,7 @@ pub struct PreparedFigureDrawResources {
     index_buffer: wgpu::Buffer,
     vertex_count: u32,
     index_count: u32,
+    part_count: usize,
     snapshot: PreparedFigureGpuSnapshot,
 }
 
@@ -321,8 +325,9 @@ impl PreparedFigureDrawResources {
             view_uniforms,
             view_bind_group,
             multiview,
-            _palette: palette,
+            palette,
             palette_bind_group,
+            palette_upload_scratch: Vec::with_capacity(figure.parts.len() * 16 * 4),
             _texture: texture,
             _texture_view: texture_view,
             _sampler: sampler,
@@ -331,12 +336,15 @@ impl PreparedFigureDrawResources {
             index_buffer,
             vertex_count: figure.vertices.len() as u32,
             index_count: figure.indices.len() as u32,
+            part_count: figure.parts.len(),
             snapshot: PreparedFigureGpuSnapshot {
                 immutable_upload_count: 4,
                 immutable_vertex_bytes: vertex_bytes.len() as u64,
                 immutable_index_bytes: index_bytes.len() as u64,
                 immutable_atlas_bytes: figure.atlas.rgba.len() as u64,
                 immutable_palette_bytes: palette_bytes.len() as u64,
+                palette_write_count: 0,
+                palette_written_bytes: 0,
                 view_uniform_write_count: 0,
                 multiview_uniform_write_count: 0,
                 multiview_pipeline_count: u64::from(
@@ -344,6 +352,25 @@ impl PreparedFigureDrawResources {
                 ),
             },
         })
+    }
+
+    /// Replace the final actor-local part palette without touching resident
+    /// topology or atlas resources.
+    pub fn write_palette(&mut self, queue: &wgpu::Queue, palette: &[[[f32; 4]; 4]]) -> Result<()> {
+        validate_palette(palette, self.part_count)?;
+        self.palette_upload_scratch.clear();
+        for matrix in palette {
+            for column in matrix {
+                push_f32s(&mut self.palette_upload_scratch, column);
+            }
+        }
+        queue.write_buffer(&self.palette, 0, &self.palette_upload_scratch);
+        self.snapshot.palette_write_count = self.snapshot.palette_write_count.saturating_add(1);
+        self.snapshot.palette_written_bytes = self
+            .snapshot
+            .palette_written_bytes
+            .saturating_add(self.palette_upload_scratch.len() as u64);
+        Ok(())
     }
 
     pub fn render(
@@ -483,6 +510,25 @@ impl PreparedFigureDrawResources {
     pub fn snapshot(&self) -> PreparedFigureGpuSnapshot {
         self.snapshot
     }
+}
+
+fn validate_palette(palette: &[[[f32; 4]; 4]], expected_part_count: usize) -> Result<()> {
+    if palette.len() != expected_part_count {
+        bail!(
+            "prepared figure palette has {} matrices; expected {}",
+            palette.len(),
+            expected_part_count
+        );
+    }
+    if palette
+        .iter()
+        .flatten()
+        .flatten()
+        .any(|value| !value.is_finite())
+    {
+        bail!("prepared figure palette contains a non-finite matrix");
+    }
+    Ok(())
 }
 
 pub fn clear_prepared_figure_target(
@@ -685,6 +731,17 @@ mod tests {
         let bytes = prepared_vertex_bytes(&[vertex]);
         assert_eq!(bytes.len(), VERTEX_BYTE_LEN);
         assert_eq!(&bytes[48..52], &7_u32.to_ne_bytes());
+    }
+
+    #[test]
+    fn mutable_palette_requires_exact_finite_part_matrices() {
+        let identity = glam::Mat4::IDENTITY.to_cols_array_2d();
+        assert!(validate_palette(&[identity, identity], 2).is_ok());
+        assert!(validate_palette(&[identity], 2).is_err());
+
+        let mut non_finite = identity;
+        non_finite[3][0] = f32::NAN;
+        assert!(validate_palette(&[identity, non_finite], 2).is_err());
     }
 
     #[test]

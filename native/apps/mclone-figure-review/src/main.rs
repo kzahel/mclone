@@ -6,8 +6,8 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
-    AssetPath, FilesystemAssetSource, PreparedFigure, default_player_figure_path,
-    load_prepared_figure,
+    AssetPath, FilesystemAssetSource, PreparedFigure, PreparedFigurePoseSample,
+    default_player_figure_path, evaluate_prepared_figure_clip_into, load_prepared_figure,
 };
 use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget};
 use mclone_render::headless::{
@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_PANEL_WIDTH: u32 = 360;
 const DEFAULT_PANEL_HEIGHT: u32 = 480;
 const REVIEW_FOV_DEGREES: f32 = 35.0;
+const WALK_PROOF_TIMES_SECONDS: [f64; 8] = [0.045, 0.09, 0.123, 0.125, 0.45, 0.855, 0.899, 0.901];
 
 fn main() -> Result<()> {
     let options = Options::parse(env::args().skip(1))?;
@@ -138,6 +139,9 @@ fn main() -> Result<()> {
         .with_context(|| format!("failed to write {}", receipt_path.display()))?;
     if options.portability {
         write_portability_review(&options, &figure, &review)?;
+    }
+    if options.animation_proof {
+        write_animation_proof(&options, &figure, &review)?;
     }
     println!(
         "prepared figure review wrote {} views to {} ({} vertices, {} indices, {:.3} ms preparation)",
@@ -292,6 +296,194 @@ fn write_portability_review(
     Ok(())
 }
 
+fn write_animation_proof(
+    options: &Options,
+    figure: &PreparedFigure,
+    review: &ReviewContract,
+) -> Result<()> {
+    let figure_for_gpu = figure.clone();
+    let camera = review.views()[0].camera;
+    let (loop_report, pixels, state) = run_headless_capture_loop(
+        HeadlessFrameLoopOptions {
+            width: review.panel_width,
+            height: review.panel_height,
+            frame_count: WALK_PROOF_TIMES_SECONDS.len(),
+            pace_frame_duration: None,
+        },
+        move |device, queue, format, _size| {
+            Ok(AnimationReviewState {
+                draw: PreparedFigureDrawResources::new(device, queue, format, &figure_for_gpu)?,
+                figure: figure_for_gpu,
+                palette: Vec::new(),
+                samples: Vec::with_capacity(WALK_PROOF_TIMES_SECONDS.len()),
+                stats: Vec::with_capacity(WALK_PROOF_TIMES_SECONDS.len()),
+            })
+        },
+        |index, frame, state| {
+            let time_seconds = *WALK_PROOF_TIMES_SECONDS
+                .get(index)
+                .context("prepared animation review time index out of range")?;
+            let sample = evaluate_prepared_figure_clip_into(
+                &state.figure,
+                "walk",
+                time_seconds,
+                &mut state.palette,
+            )?;
+            state.draw.write_palette(frame.queue, &state.palette)?;
+            let depth =
+                ChunkDepthTarget::new(frame.device, frame.target.size[0], frame.target.size[1]);
+            clear_prepared_figure_target(
+                frame.encoder,
+                frame.target,
+                &depth.view,
+                review.clear_color(),
+            );
+            let stats = state.draw.render(
+                frame.queue,
+                frame.encoder,
+                frame.target.with_depth(&depth.view),
+                camera.render_view(frame.target.size[0], frame.target.size[1]),
+            )?;
+            state.samples.push(sample);
+            state.stats.push(stats);
+            Ok(())
+        },
+    )?;
+    if pixels.len() != WALK_PROOF_TIMES_SECONDS.len()
+        || state.samples.len() != WALK_PROOF_TIMES_SECONDS.len()
+        || state.stats.len() != WALK_PROOF_TIMES_SECONDS.len()
+    {
+        bail!("prepared animation review did not produce every requested frame");
+    }
+
+    let mut frames = Vec::with_capacity(pixels.len());
+    let mut previous_pixels: Option<&[u8]> = None;
+    for (((time_seconds, sample), stats), pixels) in WALK_PROOF_TIMES_SECONDS
+        .iter()
+        .zip(&state.samples)
+        .zip(&state.stats)
+        .zip(&pixels)
+    {
+        if stats.vertex_count != figure.vertices.len() as u32
+            || stats.index_count != figure.indices.len() as u32
+            || stats.draw_count != 1
+        {
+            bail!("prepared animation frame reported unexpected draw counts");
+        }
+        let image = format!(
+            "engine-walk-{:06}us.png",
+            (time_seconds * 1_000_000.0).round() as u64
+        );
+        save_rgba_png(
+            &options.out_dir.join(&image),
+            review.panel_width,
+            review.panel_height,
+            pixels,
+        )?;
+        let different_from_previous = previous_pixels
+            .map(|previous| differing_pixel_count(previous, pixels))
+            .transpose()?;
+        frames.push(AnimationFrameReceipt {
+            requested_time_seconds: *time_seconds,
+            local_time_seconds: sample.local_time_seconds,
+            image,
+            different_from_previous,
+        });
+        previous_pixels = Some(pixels);
+    }
+    if frames
+        .iter()
+        .skip(1)
+        .all(|frame| frame.different_from_previous == Some(0))
+    {
+        bail!("prepared animation proof pixels did not change across poses");
+    }
+    let gpu = state.draw.snapshot();
+    let expected_palette_bytes = figure.parts.len() as u64 * 16 * 4;
+    if gpu.immutable_upload_count != 4
+        || gpu.palette_write_count != WALK_PROOF_TIMES_SECONDS.len() as u64
+        || gpu.palette_written_bytes
+            != expected_palette_bytes * WALK_PROOF_TIMES_SECONDS.len() as u64
+        || gpu.view_uniform_write_count != WALK_PROOF_TIMES_SECONDS.len() as u64
+    {
+        bail!(
+            "prepared animation residency reported unexpected uploads/writes: {:?}",
+            gpu
+        );
+    }
+    let receipt = AnimationReceipt {
+        schema_version: 1,
+        figure: &figure.name,
+        clip: "walk",
+        duration_seconds: state.samples[0].duration_seconds,
+        frame_count: frames.len(),
+        render_total_ms: loop_report.total_frame_ms,
+        immutable_upload_count: gpu.immutable_upload_count,
+        immutable_vertex_bytes: gpu.immutable_vertex_bytes,
+        immutable_index_bytes: gpu.immutable_index_bytes,
+        immutable_atlas_bytes: gpu.immutable_atlas_bytes,
+        initial_palette_bytes: gpu.immutable_palette_bytes,
+        palette_write_count: gpu.palette_write_count,
+        palette_written_bytes: gpu.palette_written_bytes,
+        palette_bytes_per_write: expected_palette_bytes,
+        view_uniform_write_count: gpu.view_uniform_write_count,
+        frames,
+    };
+    let receipt_path = options.out_dir.join("animation-receipt.json");
+    fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt)?)
+        .with_context(|| format!("failed to write {}", receipt_path.display()))?;
+    Ok(())
+}
+
+fn differing_pixel_count(left: &[u8], right: &[u8]) -> Result<usize> {
+    if left.len() != right.len() || left.len() % 4 != 0 {
+        bail!("prepared animation pixel buffers have incompatible lengths");
+    }
+    Ok(left
+        .chunks_exact(4)
+        .zip(right.chunks_exact(4))
+        .filter(|(left, right)| left != right)
+        .count())
+}
+
+struct AnimationReviewState {
+    draw: PreparedFigureDrawResources,
+    figure: PreparedFigure,
+    palette: Vec<[[f32; 4]; 4]>,
+    samples: Vec<PreparedFigurePoseSample>,
+    stats: Vec<PreparedFigureRenderStats>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationReceipt<'a> {
+    schema_version: u32,
+    figure: &'a str,
+    clip: &'static str,
+    duration_seconds: f64,
+    frame_count: usize,
+    render_total_ms: f64,
+    immutable_upload_count: u64,
+    immutable_vertex_bytes: u64,
+    immutable_index_bytes: u64,
+    immutable_atlas_bytes: u64,
+    initial_palette_bytes: u64,
+    palette_write_count: u64,
+    palette_written_bytes: u64,
+    palette_bytes_per_write: u64,
+    view_uniform_write_count: u64,
+    frames: Vec<AnimationFrameReceipt>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationFrameReceipt {
+    requested_time_seconds: f64,
+    local_time_seconds: f64,
+    image: String,
+    different_from_previous: Option<usize>,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PortabilityReceipt<'a> {
@@ -351,6 +543,7 @@ struct Options {
     height: u32,
     review_contract: Option<PathBuf>,
     portability: bool,
+    animation_proof: bool,
 }
 
 impl Options {
@@ -362,6 +555,7 @@ impl Options {
         let mut height = DEFAULT_PANEL_HEIGHT;
         let mut review_contract = None;
         let mut portability = false;
+        let mut animation_proof = false;
         let mut args = args.into_iter();
         while let Some(argument) = args.next() {
             match argument.as_str() {
@@ -387,9 +581,10 @@ impl Options {
                     )?));
                 }
                 "--portability" => portability = true,
+                "--animation-proof" => animation_proof = true,
                 "--help" | "-h" => {
                     println!(
-                        "Usage: mclone-figure-review [--asset-root PATH] [--figure ASSET_PATH] [--out-dir PATH] [--width PIXELS] [--height PIXELS] [--review-contract JSON] [--portability]"
+                        "Usage: mclone-figure-review [--asset-root PATH] [--figure ASSET_PATH] [--out-dir PATH] [--width PIXELS] [--height PIXELS] [--review-contract JSON] [--portability] [--animation-proof]"
                     );
                     std::process::exit(0);
                 }
@@ -404,6 +599,7 @@ impl Options {
             height,
             review_contract,
             portability,
+            animation_proof,
         })
     }
 }

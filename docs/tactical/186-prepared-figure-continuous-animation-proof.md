@@ -1,7 +1,7 @@
 # 186: Prepared Figure Continuous Animation Proof
 
-Status: active 2026-07-16. Slice 0 is complete and Slice 1 is next. Stop for
-human clip review after Slice 2 before any production actor migration.
+Status: active 2026-07-16. Slices 0-1 are complete and Slice 2 is next. Stop
+for human clip review after Slice 2 before any production actor migration.
 
 Topic: `compiled-figure-rendering`
 
@@ -121,20 +121,46 @@ Gate evidence:
 - All 58 `mclone-assets` tests, the prepared renderer shader/layout tests, and
   the figure-review app check pass. The renderer remains static in this slice.
 
-### Slice 1: mutable palette over immutable topology
+### Slice 1: mutable palette over immutable topology (complete 2026-07-16)
 
 - Change `PreparedFigureDrawResources` from a one-time rest-palette upload to
   one resident mutable palette buffer initialized from rest pose.
 - Add an explicit palette update method with size/finite validation and
   separate immutable-upload versus mutable-palette-write counters.
 - Render multiple player-walk frames through the existing mono path. Assert
-  four immutable uploads total, one palette write per changed presented pose,
-  no topology/atlas upload growth, and visibly distinct non-keyframe pixels.
+  four initial residency uploads total, one palette write per changed
+  presented pose, no topology/atlas upload growth, and visibly distinct
+  non-keyframe pixels.
 - Preserve ordinary per-eye and multiview resource ownership. Animation proof
   pixels may stay mono until the clip is approved; no app-local shader fork.
 
 Gate: arbitrary presentation times change only the palette and view uniforms;
 the prepared topology, atlas, draw count, and resource identities stay fixed.
+
+Gate evidence:
+
+- `PreparedFigureDrawResources` retains the same vertex, index, atlas,
+  pipelines, and one palette buffer. `write_palette` validates exact part count
+  and finite matrices, reuses serialization scratch, and writes only active
+  matrices; mono, per-eye, and multiview bind the same buffer.
+- The initial rest residency still performs four uploads: vertex, index,
+  atlas, and the padded 4,096-byte palette initialization. Each animated player
+  pose writes 12 active matrices, or 768 bytes; it does not upload the 14,976
+  vertex bytes, 864 index bytes, or 520 atlas bytes again.
+- `mclone-figure-review --animation-proof` captured eight front-view walk poses
+  at `0.045`, `0.09`, `0.123`, `0.125`, `0.45`, `0.855`, `0.899`, and `0.901`
+  seconds under `/tmp/mclone-prepared-animation/native-player/`. The first
+  non-keyframe pixels and representative midpoint/wrap frames were inspected;
+  limbs, sleeves, feet, torso, head, grounding, depth, and inherited motion are
+  coherent in the native path.
+- The receipt records four initial uploads, eight palette writes totaling
+  6,144 bytes, eight view writes, and one unchanged 288-vertex/432-index draw
+  per frame. The `0.123` to `0.125` second pair differs by 2,200 pixels despite
+  only 2 ms of elapsed presentation time; `0.899` to wrapped `0.901` differs by
+  2,053 pixels without a held 12 fps pose.
+- Palette validation tests reject wrong-sized and non-finite matrices. Focused
+  prepared-render tests and the figure-review check pass. No production actor,
+  browser, or XR selector changed.
 
 ### Slice 2: synchronized Three.js/native clip review
 
