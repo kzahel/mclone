@@ -37,6 +37,13 @@ series implements the same concern, normally reuse the document slug in its
   state, structural gaps (lockstep request/response wire, tick-per-command
   dedicated server, no session layer), and the phased plan toward a
   vanilla-shaped push protocol with configurable tick rates.
+- [`realm-dimension-runtime.md`](realm-dimension-runtime.md): accepted unified
+  `RealmServer` topology for integrated, Web Worker, dedicated, and test hosts;
+  realm-scoped players/statistics, open-ended concurrent dimensions,
+  dimension-local persistence/interest, ordinary local sessions, observer
+  previews, and warm transfer as client presentation. Tactical
+  [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) begins with
+  the topology cleanup before adding dimension or statistics features.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   vanilla-shaped client-authoritative interim, planned server validation
   checks, the preserved sequenced-input-replay path, and remote-actor

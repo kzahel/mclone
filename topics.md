@@ -33,3 +33,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `compiled-figure-rendering` — compiled figure artifact, static local-space
   GPU geometry, presentation-rate rigid-part animation, instancing, and
   generated figure LOD direction; Tactical 181 static-box proof
+- `realm-dimension-runtime` — unified integrated/dedicated realm server,
+  concurrent dimension ownership, realm-scoped players/statistics,
+  dimension-local persistence and interest, observer previews, and warm
+  player transfer; Tactical 185

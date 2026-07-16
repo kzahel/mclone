@@ -8,6 +8,18 @@ live model of a distant or nearby active-world location, a "palantir" window
 into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
+The durable realm/dimension/server-topology contract now lives in
+[`realm-dimension-runtime.md`](realm-dimension-runtime.md), with its bounded
+implementation sequence in
+[`185-realm-dimension-and-observer-runtime.md`](../tactical/185-realm-dimension-and-observer-runtime.md).
+The current warm destination starts a complete second joined runtime with its
+own server-side local player; suppressing preview input does not make it a
+non-player observer. Tactical 185 preserves that proof as current behavior but
+defines the target: realm-scoped players and statistics, independently ticking
+dimension runtimes, source-owned dimension-local tickets, and preview
+subscriptions that receive bounded chunk/entity facts without spawning or
+saving a player until explicit activation.
+
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, completed shared Web/WASM lobby

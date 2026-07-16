@@ -30,6 +30,12 @@ rates). Movement authority and prediction have their own topic:
 [`vanilla/networking.md`](vanilla/networking.md);
 the client-replica topology argument lives in
 [`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md).
+The unified integrated/dedicated realm server, multi-dimension ownership,
+realm-scoped player/statistics persistence, observer interest, and warm
+transfer contract live in the focused
+[`realm-dimension-runtime.md`](realm-dimension-runtime.md) topic; Tactical
+[`185`](../tactical/185-realm-dimension-and-observer-runtime.md) owns the
+implementation sequence.
 
 ## Current state (verified 2026-07-16)
 
@@ -367,11 +373,13 @@ lane, expressed in time units.
   generated client-global UUID per native app installation or browser origin,
   outside world stores; local integrated and remote dedicated join through the
   same logical profile contract. Flat Android and Android XR have separate app
-  identities today. Tactical 182 owns storage paths, reset semantics, and the
-  replacement of the structurally special local identity path.
-- Whether the in-process runner channel should carry the full session
-  handshake too (uniformity, cheap testing of login flow) or remain a
-  trusted fast path.
+  identities today. Tactical 182 owns storage paths and reset semantics;
+  Tactical 185 Slice 1 owns removal of the structurally special local player.
+- The in-process adapter must carry the same logical configuration/play
+  handshake, ordinary player registration, ordered updates, disconnect
+  cleanup, and persistence lifecycle as remote transports. Whether it encodes
+  those messages into wire bytes locally remains an implementation/performance
+  choice, guarded by normalized local/TCP/WebSocket trace conformance.
 - Compression codec choice and threshold once frames are measured
   post-push-wire.
 - Whether later measured entity transform traffic warrants a separate
@@ -396,5 +404,7 @@ lane, expressed in time units.
 - Tacticals: 009 (original wire shape), 133 (bus/pacing; Slice 6 handed to
   176),
   151 (inbound pipeline), 154 (ingress cleanup), 167 (startup contract),
-  116 (cadence), 176 (autonomous dedicated push milestone)
+  116 (cadence), 176 (autonomous dedicated push milestone), 182 (local
+  profile/player persistence), 184 (session/liveness), and 185
+  (realm/dimension/observer topology)
 - Vanilla receipts: [`vanilla/networking.md`](vanilla/networking.md)
