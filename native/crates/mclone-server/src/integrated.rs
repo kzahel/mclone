@@ -51,7 +51,10 @@ use crate::falling_block::{
 };
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
-use crate::persistence::{EntityChunkRecord, EntityPersistentId, PlayerRecord, PlayerRecordKey};
+use crate::persistence::{
+    EntityChunkRecord, EntityPersistentId, PlayerRecord, PlayerRecordKey, StoreWriteOutcome,
+    WorldMetadata,
+};
 #[cfg(feature = "physics-engine")]
 use crate::physics_runtime::ServerPhysicsRuntime;
 use crate::placement::DebugBlockItem;
@@ -92,7 +95,11 @@ pub struct IntegratedServer {
     pub(crate) liquid_ticks: FluidTickList,
     simulation_tick: u64,
     day_time: u64,
+    do_daylight_cycle: bool,
     day_time_frozen: bool,
+    day_time_debug_override: bool,
+    world_metadata: Option<WorldMetadata>,
+    world_metadata_dirty: bool,
     scheduled_fluid_ticks_frozen: bool,
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
@@ -153,7 +160,8 @@ impl std::fmt::Debug for ServerBiomeSource {
     }
 }
 
-/// Vanilla overworld spawns at morning (`dayTime` 1000), not midnight.
+/// Legacy mclone transient worlds start at the conventional `/time set day`
+/// value. Typed persistent worlds initialize at vanilla's fresh-world value 0.
 pub const INITIAL_DAY_TIME: u64 = 1000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -366,7 +374,11 @@ impl IntegratedServer {
             liquid_ticks: FluidTickList::new(),
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
+            do_daylight_cycle: true,
             day_time_frozen: false,
+            day_time_debug_override: false,
+            world_metadata: None,
+            world_metadata_dirty: false,
             scheduled_fluid_ticks_frozen: false,
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
@@ -404,6 +416,12 @@ impl IntegratedServer {
         self.simulation_tick
     }
 
+    /// Durable vanilla `gameTime` semantics. `simulation_tick()` remains as a
+    /// compatibility name while callers migrate to the world-clock vocabulary.
+    pub const fn game_time(&self) -> u64 {
+        self.simulation_tick
+    }
+
     /// Authoritative world day-time in ticks, driving the day/night cycle.
     pub const fn day_time(&self) -> u64 {
         self.day_time
@@ -412,12 +430,137 @@ impl IntegratedServer {
     /// Set the authoritative day-time. Debug hook for forcing a starting time.
     pub fn set_day_time(&mut self, day_time: u64) {
         self.day_time = day_time;
+        self.day_time_debug_override = true;
+    }
+
+    /// Durable daylight gamerule. Debug `--freeze-time` is layered separately
+    /// and never changes this saved value.
+    pub fn set_do_daylight_cycle(&mut self, enabled: bool) {
+        if self.do_daylight_cycle == enabled {
+            return;
+        }
+        self.do_daylight_cycle = enabled;
+        if self.world_metadata.is_some() {
+            self.world_metadata_dirty = true;
+        }
+    }
+
+    pub const fn do_daylight_cycle(&self) -> bool {
+        self.do_daylight_cycle
+    }
+
+    pub const fn daylight_cycle_running(&self) -> bool {
+        self.do_daylight_cycle && !self.day_time_frozen
     }
 
     /// Freeze or resume the day/night clock. While frozen, simulation ticks leave
     /// `day_time` unchanged (debug hook for inspecting a fixed time of day).
     pub fn set_day_time_frozen(&mut self, frozen: bool) {
         self.day_time_frozen = frozen;
+    }
+
+    pub fn initialize_world_metadata_blocking(&mut self) -> ChunkStoreResult<WorldMetadata> {
+        self.initialize_world_metadata_at_unix_millis(current_unix_millis())
+    }
+
+    pub fn initialize_world_metadata_at_unix_millis(
+        &mut self,
+        now_unix_millis: u64,
+    ) -> ChunkStoreResult<WorldMetadata> {
+        if let Some(metadata) = &self.world_metadata {
+            return Ok(metadata.clone());
+        }
+        let load = self.scheduler.load_world_metadata_blocking()?;
+        let metadata_was_present = load.record.is_some();
+        let requested_generation = self.scheduler.world_generation_profile();
+        let mut metadata = match load.record {
+            Some(metadata) => {
+                validate_world_metadata(
+                    &metadata,
+                    self.seed,
+                    requested_generation,
+                    self.world_behavior_profile,
+                )?;
+                metadata
+            }
+            None if load.legacy_records_present => WorldMetadata::legacy_mclone(
+                self.seed,
+                requested_generation,
+                self.world_behavior_profile,
+                now_unix_millis,
+                INITIAL_DAY_TIME,
+            ),
+            None => WorldMetadata::new(
+                self.seed,
+                requested_generation,
+                self.world_behavior_profile,
+                now_unix_millis,
+            ),
+        };
+        if !metadata_was_present {
+            match self
+                .scheduler
+                .save_world_metadata_blocking(metadata.clone())?
+            {
+                StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+                StoreWriteOutcome::SkippedOnClose => {
+                    return Err(ChunkStoreError::Closed(
+                        "world metadata initialization was skipped on close".to_owned(),
+                    ));
+                }
+            }
+        }
+        self.simulation_tick = metadata.game_time;
+        self.day_time = metadata.day_time;
+        self.do_daylight_cycle = metadata.do_daylight_cycle;
+        self.day_time_debug_override = false;
+        self.world_metadata_dirty = false;
+        metadata.last_played_unix_millis = metadata
+            .last_played_unix_millis
+            .max(metadata.created_unix_millis);
+        self.world_metadata = Some(metadata.clone());
+        Ok(metadata)
+    }
+
+    pub fn world_metadata(&self) -> Option<&WorldMetadata> {
+        self.world_metadata.as_ref()
+    }
+
+    pub fn save_world_metadata_blocking(&mut self) -> ChunkStoreResult<usize> {
+        self.save_world_metadata_at_unix_millis(current_unix_millis())
+    }
+
+    pub fn save_world_metadata_at_unix_millis(
+        &mut self,
+        now_unix_millis: u64,
+    ) -> ChunkStoreResult<usize> {
+        let Some(mut metadata) = self.world_metadata.clone() else {
+            return Ok(0);
+        };
+        if !self.world_metadata_dirty {
+            return Ok(0);
+        }
+        metadata.revision = metadata.revision.saturating_add(1);
+        metadata.last_played_unix_millis = now_unix_millis.max(metadata.created_unix_millis);
+        metadata.game_time = self.simulation_tick;
+        if !self.day_time_debug_override {
+            metadata.day_time = self.day_time;
+        }
+        metadata.do_daylight_cycle = self.do_daylight_cycle;
+        match self
+            .scheduler
+            .save_world_metadata_blocking(metadata.clone())?
+        {
+            StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+            StoreWriteOutcome::SkippedOnClose => {
+                return Err(ChunkStoreError::Closed(
+                    "world metadata save was skipped on close".to_owned(),
+                ));
+            }
+        }
+        self.world_metadata = Some(metadata);
+        self.world_metadata_dirty = false;
+        Ok(1)
     }
 
     /// Freeze or resume scheduled fluid ticks. While frozen, due water/lava
@@ -1040,8 +1183,11 @@ impl IntegratedServer {
         // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
         // itself frame-driven in the current runtime; revisit if/when ticks are
         // fixed-step. Skipped while frozen (debug `--freeze-time`).
-        if !self.day_time_frozen {
+        if self.daylight_cycle_running() {
             self.day_time = self.day_time.wrapping_add(1);
+        }
+        if self.world_metadata.is_some() {
+            self.world_metadata_dirty = true;
         }
 
         let block_tick_start = simulation_timing_start();
@@ -1476,7 +1622,8 @@ impl IntegratedServer {
     pub fn shutdown_persistence(&mut self) -> ChunkStoreResult<usize> {
         let queued = self
             .save_dirty_chunks()?
-            .saturating_add(self.save_all_player_records()?);
+            .saturating_add(self.save_all_player_records()?)
+            .saturating_add(self.save_world_metadata_blocking()?);
         self.scheduler.close_persistence()?;
         Ok(queued)
     }
@@ -2814,6 +2961,42 @@ fn natural_spawn_tick_seed(world_seed: i64, game_time: u64) -> i64 {
         .wrapping_mul(31)
         .wrapping_add((game_time as i64).wrapping_mul(NATURAL_SPAWN_TICK_SEED_MULTIPLIER))
         .wrapping_add(0x5DEECE66D)
+}
+
+fn current_unix_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
+        .unwrap_or(0)
+}
+
+fn validate_world_metadata(
+    metadata: &WorldMetadata,
+    requested_seed: i64,
+    requested_generation: WorldGenerationProfile,
+    requested_behavior: WorldBehaviorProfile,
+) -> ChunkStoreResult<()> {
+    if metadata.seed != requested_seed {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "world seed mismatch: stored {}, requested {requested_seed}",
+            metadata.seed
+        )));
+    }
+    if metadata.world_generation_profile != requested_generation {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "world generation profile mismatch: stored {}, requested {}",
+            metadata.world_generation_profile.label(),
+            requested_generation.label()
+        )));
+    }
+    if metadata.world_behavior_profile != requested_behavior {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "world behavior profile mismatch: stored {}, requested {}",
+            metadata.world_behavior_profile.label(),
+            requested_behavior.label()
+        )));
+    }
+    Ok(())
 }
 
 fn run_noop_simulation_phase(chunks: &[ChunkPos]) -> usize {

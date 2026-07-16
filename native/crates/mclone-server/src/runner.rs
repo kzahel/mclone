@@ -536,6 +536,7 @@ mod native {
     use crate::player_chunk_tracking::PlayerChunkTrackingPolicy;
 
     const DIAGNOSTICS_DETAIL_REFRESH_INTERVAL: Duration = Duration::from_millis(500);
+    const AUTOSAVE_INTERVAL_GAMEPLAY_TICKS: u64 = 6_000;
 
     fn duration_ms(duration: Duration) -> f64 {
         duration.as_secs_f64() * 1000.0
@@ -1110,6 +1111,14 @@ mod native {
             return Ok(());
         }
         server.set_world_behavior_profile(config.world_behavior_profile);
+        if matches!(
+            &config.world_storage,
+            NativeIntegratedServerWorldStorage::Persistent { .. }
+        ) && let Err(error) = server.initialize_world_metadata_blocking()
+        {
+            let _ = ready_tx.send(Err(error.to_string()));
+            return Ok(());
+        }
         server.set_persistence_demo_jump_experience_enabled(
             config.persistence_demo_jump_experience_enabled,
         );
@@ -1237,6 +1246,14 @@ mod native {
             for _ in 0..frame.gameplay_ticks {
                 let wall_start = Instant::now();
                 let mut report = server.try_simulation_tick_report_with_physics_steps(0)?;
+                if report
+                    .simulation_tick
+                    .is_multiple_of(AUTOSAVE_INTERVAL_GAMEPLAY_TICKS)
+                {
+                    server.save_dirty_chunks()?;
+                    server.save_all_player_records()?;
+                    server.save_world_metadata_blocking()?;
+                }
                 let wall_us = wall_start.elapsed().as_micros();
                 let updates = std::mem::take(&mut report.updates);
                 publish_updates(&update_tx, update_queue_depth, update_queue_bytes, updates)?;
@@ -1400,6 +1417,11 @@ mod native {
                         server
                             .save_all_player_records()
                             .map(|players| chunks.saturating_add(players))
+                    })
+                    .and_then(|queued| {
+                        server
+                            .save_world_metadata_blocking()
+                            .map(|metadata| queued.saturating_add(metadata))
                     })
                     .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
@@ -1978,7 +2000,9 @@ mod native {
             runner.join_shutdown().unwrap();
 
             let mut verifier = NativeIntegratedServerRunner::new(
-                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+                test_runner_config(seed)
+                    .with_persistent_world_dir(root.clone())
+                    .with_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby),
             )
             .unwrap();
             let (snapshot, _) = load_chunk_snapshot(&mut verifier, target.chunk_pos());

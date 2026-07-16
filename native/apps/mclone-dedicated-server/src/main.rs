@@ -270,6 +270,11 @@ fn open_dedicated_server(
     server.disable_local_player();
     server.set_persistence_demo_jump_experience_enabled(true);
     server.set_world_generation_profile(profile)?;
+    if matches!(world, DedicatedWorldSelection::Persistent { .. }) {
+        server
+            .initialize_world_metadata_blocking()
+            .context("failed to initialize authoritative world metadata")?;
+    }
     Ok(server)
 }
 
@@ -647,6 +652,9 @@ fn advance_dedicated_host_frame(
         server
             .save_all_player_records()
             .context("failed to queue dedicated player autosave")?;
+        server
+            .save_world_metadata_blocking()
+            .context("failed to save dedicated world metadata")?;
     }
     Ok(DedicatedSessionDiagnostics::from_report(
         &report,

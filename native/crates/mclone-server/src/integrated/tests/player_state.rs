@@ -2,6 +2,160 @@ use super::*;
 use crate::MemoryWorldStore;
 
 #[test]
+fn new_world_metadata_starts_at_vanilla_zero_and_tracks_both_clocks() {
+    let mut server = IntegratedServer::with_world_store(77, Box::new(MemoryWorldStore::new()));
+    let initialized = server
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+
+    assert_eq!(initialized.game_time, 0);
+    assert_eq!(initialized.day_time, 0);
+    assert!(initialized.do_daylight_cycle);
+    for _ in 0..25 {
+        server.try_simulation_tick_report().unwrap();
+    }
+    assert_eq!(server.game_time(), 25);
+    assert_eq!(server.day_time(), 25);
+    assert_eq!(server.save_world_metadata_at_unix_millis(2_000).unwrap(), 1);
+    let saved = server.world_metadata().unwrap();
+    assert_eq!(saved.game_time, 25);
+    assert_eq!(saved.day_time, 25);
+    assert_eq!(saved.last_played_unix_millis, 2_000);
+}
+
+#[test]
+fn legacy_world_records_initialize_once_at_mclone_morning() {
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x33; 16]), "Legacy").unwrap();
+    let mut store = MemoryWorldStore::new();
+    store
+        .save_player(&PlayerRecord::new(
+            player_record_key(identity.profile_id),
+            1,
+            identity.display_name,
+            Vec3d::new(0.5, 64.0, 0.5),
+        ))
+        .unwrap();
+    let mut server = IntegratedServer::with_world_store(88, Box::new(store));
+
+    let initialized = server
+        .initialize_world_metadata_at_unix_millis(3_000)
+        .unwrap();
+
+    assert_eq!(initialized.game_time, 0);
+    assert_eq!(initialized.day_time, INITIAL_DAY_TIME);
+}
+
+#[test]
+fn stored_world_metadata_rejects_seed_and_profile_mismatches() {
+    let mut seed_store = MemoryWorldStore::new();
+    seed_store
+        .save_world_metadata(&WorldMetadata::new(
+            1,
+            WorldGenerationProfile::Overworld,
+            WorldBehaviorProfile::Mutable,
+            1_000,
+        ))
+        .unwrap();
+    let mut seed_mismatch = IntegratedServer::with_world_store(2, Box::new(seed_store));
+    assert!(
+        seed_mismatch
+            .initialize_world_metadata_at_unix_millis(2_000)
+            .unwrap_err()
+            .to_string()
+            .contains("world seed mismatch")
+    );
+
+    let mut profile_store = MemoryWorldStore::new();
+    profile_store
+        .save_world_metadata(&WorldMetadata::new(
+            2,
+            WorldGenerationProfile::authored_only(),
+            WorldBehaviorProfile::ProtectedLobby,
+            1_000,
+        ))
+        .unwrap();
+    let mut profile_mismatch = IntegratedServer::with_world_store(2, Box::new(profile_store));
+    assert!(
+        profile_mismatch
+            .initialize_world_metadata_at_unix_millis(2_000)
+            .unwrap_err()
+            .to_string()
+            .contains("world generation profile mismatch")
+    );
+}
+
+#[test]
+fn daylight_rule_and_debug_freeze_keep_distinct_durable_semantics() {
+    let mut server = IntegratedServer::with_world_store(99, Box::new(MemoryWorldStore::new()));
+    server
+        .initialize_world_metadata_at_unix_millis(1_000)
+        .unwrap();
+    server.set_do_daylight_cycle(false);
+    for _ in 0..3 {
+        server.try_simulation_tick_report().unwrap();
+    }
+    server.save_world_metadata_at_unix_millis(2_000).unwrap();
+    assert_eq!(server.game_time(), 3);
+    assert_eq!(server.day_time(), 0);
+    assert!(!server.world_metadata().unwrap().do_daylight_cycle);
+
+    server.set_do_daylight_cycle(true);
+    server.set_day_time_frozen(true);
+    server.try_simulation_tick_report().unwrap();
+    server.save_world_metadata_at_unix_millis(3_000).unwrap();
+    assert_eq!(server.game_time(), 4);
+    assert_eq!(server.day_time(), 0);
+    assert!(server.world_metadata().unwrap().do_daylight_cycle);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sqlite_restart_resumes_exact_game_and_day_time() {
+    let root = world_time_temp_dir("sqlite-clock-restart");
+    let seed = 101;
+    let expected;
+    {
+        let mut server = IntegratedServer::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        server
+            .initialize_world_metadata_at_unix_millis(1_000)
+            .unwrap();
+        for _ in 0..25 {
+            server.try_simulation_tick_report().unwrap();
+        }
+        server.set_do_daylight_cycle(false);
+        for _ in 0..4 {
+            server.try_simulation_tick_report().unwrap();
+        }
+        expected = (server.game_time(), server.day_time());
+        server.save_world_metadata_at_unix_millis(2_000).unwrap();
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            IntegratedServer::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        let metadata = reopened
+            .initialize_world_metadata_at_unix_millis(3_000)
+            .unwrap();
+        assert_eq!((metadata.game_time, metadata.day_time), expected);
+        assert!(!metadata.do_daylight_cycle);
+        reopened.try_simulation_tick_report().unwrap();
+        assert_eq!(reopened.game_time(), expected.0 + 1);
+        assert_eq!(reopened.day_time(), expected.1);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn world_time_temp_dir(name: &str) -> std::path::PathBuf {
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("mclone-{name}-{}-{id}", std::process::id()))
+}
+
+#[test]
 fn frozen_day_time_holds_a_forced_value() {
     let mut server = IntegratedServer::new(0);
     server.set_day_time(23000);
