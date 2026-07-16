@@ -270,6 +270,14 @@ mod tests {
     };
     use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[test]
     fn websocket_peer_receives_unsolicited_updates_and_sends_commands() {
         let native_listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -296,7 +304,7 @@ mod tests {
             DedicatedNetworkEvent::Connected { outbound, .. } => outbound,
             event => panic!("expected websocket connection, got {event:?}"),
         };
-        let expected_updates = vec![ServerUpdate::TimeUpdate { day_time: 123 }];
+        let expected_updates = vec![time_update(123)];
         outbound.publish(expected_updates.clone()).unwrap();
         let publication = socket.read().unwrap().into_data();
         assert_eq!(

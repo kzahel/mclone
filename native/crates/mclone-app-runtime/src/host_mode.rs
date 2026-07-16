@@ -255,6 +255,14 @@ mod tests {
     };
     use mclone_protocol::ChunkView;
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[derive(Debug)]
     struct ScriptedRemoteSession {
         batches: Vec<Option<Result<RemoteServerUpdateBatch>>>,
@@ -331,21 +339,16 @@ mod tests {
     #[test]
     fn host_exchange_helpers_preserve_command_and_drain_accounting() {
         assert_eq!(
-            command_exchange(vec![ServerUpdate::TimeUpdate { day_time: 42 }], false, true),
-            RuntimeExchange::new(
-                vec![ServerUpdate::TimeUpdate { day_time: 42 }],
-                1,
-                false,
-                true
-            )
+            command_exchange(vec![time_update(42)], false, true),
+            RuntimeExchange::new(vec![time_update(42)], 1, false, true)
         );
         assert_eq!(
             deferred_command_exchange(),
             RuntimeExchange::new(Vec::new(), 1, true, false)
         );
         assert_eq!(
-            update_drain_exchange(vec![ServerUpdate::TimeUpdate { day_time: 43 }], false),
-            RuntimeExchange::updates(vec![ServerUpdate::TimeUpdate { day_time: 43 }], false)
+            update_drain_exchange(vec![time_update(43)], false),
+            RuntimeExchange::updates(vec![time_update(43)], false)
         );
     }
 

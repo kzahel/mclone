@@ -1892,7 +1892,11 @@ mod native {
             let (update_tx, update_rx) = mpsc::channel();
             let update_queue_depth = AtomicUsize::new(0);
             let update_queue_bytes = AtomicUsize::new(0);
-            let update = ServerUpdate::TimeUpdate { day_time: 42 };
+            let update = ServerUpdate::TimeUpdate {
+                game_time: 81,
+                day_time: 42,
+                daylight_cycle_running: true,
+            };
             let expected_len = encode_server_update(&update).unwrap().len();
 
             publish_updates(

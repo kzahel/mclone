@@ -556,6 +556,14 @@ mod tests {
     };
     use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[test]
     fn dedicated_network_accepts_many_connections() {
         let _guard = crate::DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
@@ -595,9 +603,7 @@ mod tests {
                 DedicatedNetworkEvent::Command { id, command, .. } => {
                     command_events.push((id, command));
                     outbound[&id]
-                        .publish(vec![ServerUpdate::TimeUpdate {
-                            day_time: command_events.len() as u64,
-                        }])
+                        .publish(vec![time_update(command_events.len() as u64)])
                         .unwrap();
                 }
                 DedicatedNetworkEvent::Disconnected { id, .. } => {
@@ -633,12 +639,10 @@ mod tests {
         let DedicatedNetworkEvent::Connected { id, outbound, .. } = network.recv().unwrap() else {
             panic!("expected connected event");
         };
-        outbound
-            .publish(vec![ServerUpdate::TimeUpdate { day_time: 1 }])
-            .unwrap();
+        outbound.publish(vec![time_update(1)]).unwrap();
         assert_eq!(
             client.drain_update_batch().unwrap().into_updates(),
-            vec![ServerUpdate::TimeUpdate { day_time: 1 }]
+            vec![time_update(1)]
         );
 
         let first = ClientCommand::SetChunkView(ChunkView {
@@ -675,12 +679,8 @@ mod tests {
         assert_eq!(first_received, first);
         assert_eq!(second_received, second);
 
-        outbound
-            .publish(vec![ServerUpdate::TimeUpdate { day_time: 2 }])
-            .unwrap();
-        outbound
-            .publish(vec![ServerUpdate::TimeUpdate { day_time: 3 }])
-            .unwrap();
+        outbound.publish(vec![time_update(2)]).unwrap();
+        outbound.publish(vec![time_update(3)]).unwrap();
         assert_eq!(
             client.drain_update_batch().unwrap().inbound_frame_sequence,
             2
@@ -696,13 +696,13 @@ mod tests {
         let (slow, _held_slow_reader) =
             DedicatedOutbound::channel_with_limits(DedicatedOutboundLimits {
                 frames: 3,
-                bytes: 64,
+                bytes: 1_024,
             });
         let (fast, fast_reader) = DedicatedOutbound::channel_with_limits(DedicatedOutboundLimits {
             frames: 3,
-            bytes: 64,
+            bytes: 1_024,
         });
-        let update = vec![ServerUpdate::TimeUpdate { day_time: 1 }];
+        let update = vec![time_update(1)];
         let encoded_bytes = encoded_update_batch_len(&update).unwrap();
 
         let start = std::time::Instant::now();
@@ -733,7 +733,7 @@ mod tests {
 
     #[test]
     fn dedicated_outbound_enforces_encoded_byte_capacity() {
-        let update = vec![ServerUpdate::TimeUpdate { day_time: 1 }];
+        let update = vec![time_update(1)];
         let encoded_bytes = encoded_update_batch_len(&update).unwrap();
         let (outbound, _held_reader) =
             DedicatedOutbound::channel_with_limits(DedicatedOutboundLimits {

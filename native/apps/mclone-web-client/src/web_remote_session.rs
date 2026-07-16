@@ -250,10 +250,19 @@ impl WebSocketServerSession {
                 let encoded_len = frame.len();
                 let update = decode_server_update(&frame)
                     .map_err(|error| format!("decode worker remote update: {error}"))?;
-                if let ServerUpdate::TimeUpdate { day_time } = update {
+                if let ServerUpdate::TimeUpdate {
+                    game_time,
+                    day_time,
+                    daylight_cycle_running,
+                } = update
+                {
                     *self.day_time.borrow_mut() = day_time;
                     QueuedServerUpdate::single(
-                        ServerUpdate::TimeUpdate { day_time },
+                        ServerUpdate::TimeUpdate {
+                            game_time,
+                            day_time,
+                            daylight_cycle_running,
+                        },
                         encoded_len,
                         queued_age,
                         transport_drained,

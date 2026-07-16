@@ -2602,8 +2602,7 @@ impl SingleViewRuntime {
     }
 
     pub fn force_day_time(&mut self, day_time: u64) {
-        self.client_mut()
-            .apply_update(ServerUpdate::TimeUpdate { day_time });
+        self.client_mut().force_day_time(day_time);
     }
 
     pub fn stats(
@@ -2950,6 +2949,14 @@ mod tests {
     };
     use mclone_server::{ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot};
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[derive(Default)]
     struct DeadlineTestCompiler {
         pending_jobs: usize,
@@ -3285,10 +3292,7 @@ mod tests {
     #[test]
     fn runtime_exchange_updates_counters_and_client_state() {
         let mut runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 0, 0);
-        let report =
-            runtime.apply_exchange(RuntimeExchange::command(vec![ServerUpdate::TimeUpdate {
-                day_time: 6000,
-            }]));
+        let report = runtime.apply_exchange(RuntimeExchange::command(vec![time_update(6000)]));
 
         assert_eq!(report.command_count, 1);
         assert_eq!(report.update_count, 1);

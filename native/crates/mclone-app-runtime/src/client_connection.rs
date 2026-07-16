@@ -346,6 +346,14 @@ mod tests {
         RuntimeUpdatePumpBudget, SingleViewRuntime, chunk_tracking_radius_for_render_distance,
     };
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[derive(Debug)]
     struct ScriptedClientConnection {
         sent_commands: Vec<ClientCommand>,
@@ -455,7 +463,7 @@ mod tests {
         let runner = ScriptedIntegratedRunner {
             sent_commands: Vec::new(),
             queued_updates: VecDeque::from([ServerUpdateEnvelope {
-                update: ServerUpdate::TimeUpdate { day_time: 9_000 },
+                update: time_update(9_000),
                 encoded_len: 17,
                 queued_age: Duration::from_millis(4),
             }]),
@@ -493,27 +501,12 @@ mod tests {
             chunk_tracking_radius_for_render_distance(0),
         );
         let mut connection = ScriptedClientConnection::new(vec![
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 100 },
-                11,
-                Duration::from_millis(3),
-                false,
-            )
-            .with_remote_metadata(Some(10), 23.0, 5.0),
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 200 },
-                13,
-                Duration::from_millis(5),
-                false,
-            )
-            .with_remote_metadata(Some(11), 1.5, 0.25),
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 300 },
-                17,
-                Duration::from_millis(7),
-                true,
-            )
-            .with_remote_metadata(Some(12), 2.5, 0.75),
+            QueuedServerUpdate::single(time_update(100), 11, Duration::from_millis(3), false)
+                .with_remote_metadata(Some(10), 23.0, 5.0),
+            QueuedServerUpdate::single(time_update(200), 13, Duration::from_millis(5), false)
+                .with_remote_metadata(Some(11), 1.5, 0.25),
+            QueuedServerUpdate::single(time_update(300), 17, Duration::from_millis(7), true)
+                .with_remote_metadata(Some(12), 2.5, 0.75),
         ]);
 
         let first_report = pump_client_connection_updates_report(
@@ -556,7 +549,7 @@ mod tests {
     fn shared_connection_send_never_drains_or_applies_inbound_updates() {
         let center = ChunkPos::new(0, 0);
         let mut core = SingleViewRuntime::remote_dedicated(center, 0, 0);
-        let update = ServerUpdate::TimeUpdate { day_time: 900 };
+        let update = time_update(900);
         let mut connection = ScriptedClientConnection::new(vec![QueuedServerUpdate::single(
             update,
             9,
@@ -662,24 +655,9 @@ mod tests {
             chunk_tracking_radius_for_render_distance(0),
         );
         let mut connection = ScriptedClientConnection::new(vec![
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 100 },
-                11,
-                Duration::from_millis(3),
-                false,
-            ),
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 200 },
-                13,
-                Duration::from_millis(5),
-                false,
-            ),
-            QueuedServerUpdate::single(
-                ServerUpdate::TimeUpdate { day_time: 300 },
-                17,
-                Duration::from_millis(7),
-                true,
-            ),
+            QueuedServerUpdate::single(time_update(100), 11, Duration::from_millis(3), false),
+            QueuedServerUpdate::single(time_update(200), 13, Duration::from_millis(5), false),
+            QueuedServerUpdate::single(time_update(300), 17, Duration::from_millis(7), true),
         ]);
 
         let report = pump_client_connection_updates_report(

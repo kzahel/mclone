@@ -24,7 +24,7 @@ fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
         .iter()
         .rev()
         .find_map(|update| match update {
-            ServerUpdate::TimeUpdate { day_time } => Some(*day_time),
+            ServerUpdate::TimeUpdate { day_time, .. } => Some(*day_time),
             _ => None,
         })
         .expect("simulation tick should emit a TimeUpdate")

@@ -3698,6 +3698,14 @@ mod tests {
 
     static AUTHORED_STARTUP_TEST_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[derive(Debug)]
     enum NoRemoteSession {}
 
@@ -4021,10 +4029,7 @@ mod tests {
 
         let center = ChunkPos::new(0, 0);
         let mesh_assets = load_textured_mesh_assets().unwrap();
-        let session = PollableRemoteSession::new(vec![
-            None,
-            Some(Ok(vec![ServerUpdate::TimeUpdate { day_time: 6000 }])),
-        ]);
+        let session = PollableRemoteSession::new(vec![None, Some(Ok(vec![time_update(6000)]))]);
         let mut runtime = RemoteDedicatedSceneRuntime::with_mesh_assets(
             SingleViewHostOptions::new(center, 0),
             session,
@@ -4086,10 +4091,7 @@ mod tests {
         runtime
             .connection
             .push_update_batch(
-                RemoteServerUpdateBatch::from_updates(vec![
-                    ServerUpdate::TimeUpdate { day_time: 1 },
-                    ServerUpdate::TimeUpdate { day_time: 2 },
-                ]),
+                RemoteServerUpdateBatch::from_updates(vec![time_update(1), time_update(2)]),
                 false,
             )
             .unwrap();

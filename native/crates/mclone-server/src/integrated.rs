@@ -700,9 +700,7 @@ impl IntegratedServer {
     pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
         let player_id = self.dedicated_players.add();
         let world_info = self.world_info_update();
-        let time_update = ServerUpdate::TimeUpdate {
-            day_time: self.day_time,
-        };
+        let time_update = self.time_update();
         self.chunk_tracking.add_player(player_id);
         self.chunk_tracking
             .queue_update_for_player(player_id, world_info);
@@ -1266,9 +1264,7 @@ impl IntegratedServer {
         self.mark_entity_updates_dirty(&entity_updates);
 
         if simulation_tick == 1 || simulation_tick.is_multiple_of(20) {
-            self.queue_update_for_all_players(ServerUpdate::TimeUpdate {
-                day_time: self.day_time,
-            });
+            self.queue_update_for_all_players(self.time_update());
         }
         let fluid_event_apply_start = simulation_timing_start();
         self.route_scheduler_events(fluid_events)?;
@@ -1626,6 +1622,14 @@ impl IntegratedServer {
             .saturating_add(self.save_world_metadata_blocking()?);
         self.scheduler.close_persistence()?;
         Ok(queued)
+    }
+
+    fn time_update(&self) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: self.game_time(),
+            day_time: self.day_time,
+            daylight_cycle_running: self.daylight_cycle_running(),
+        }
     }
 
     fn set_chunk_view_for_target(

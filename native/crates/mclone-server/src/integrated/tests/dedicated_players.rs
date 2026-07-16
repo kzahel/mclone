@@ -2,7 +2,7 @@ use super::*;
 
 fn time_update(updates: &[ServerUpdate]) -> Option<u64> {
     updates.iter().rev().find_map(|update| match update {
-        ServerUpdate::TimeUpdate { day_time } => Some(*day_time),
+        ServerUpdate::TimeUpdate { day_time, .. } => Some(*day_time),
         _ => None,
     })
 }
@@ -33,6 +33,14 @@ fn global_simulation_tick_routes_without_draining_player_streams() {
         .try_drain_updates_for_player(player_a)
         .expect("drain player a");
     assert_eq!(time_update(&updates_a), Some(start_day_time + 1));
+    assert!(updates_a.iter().any(|update| matches!(
+        update,
+        ServerUpdate::TimeUpdate {
+            game_time: 1,
+            daylight_cycle_running: true,
+            ..
+        }
+    )));
 
     // Draining A neither consumes B nor performs another simulation step.
     assert_eq!(server.simulation_tick(), 1);

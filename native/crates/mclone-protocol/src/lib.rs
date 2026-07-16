@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -274,10 +274,13 @@ pub enum ServerUpdate {
         section_y: i32,
         updates: Vec<SectionBlockUpdate>,
     },
-    /// Authoritative world day-time (in ticks) for the day/night cycle. Mirrors
-    /// the day-time half of Java's `ClientboundSetTimePacket`.
+    /// Authoritative vanilla world clocks. The client advances both clocks
+    /// locally between samples, except that `day_time` holds while the daylight
+    /// cycle is not running.
     TimeUpdate {
+        game_time: u64,
         day_time: u64,
+        daylight_cycle_running: bool,
     },
     PlayerPosition(PlayerPositionUpdate),
     RemotePlayerAdd(RemotePlayerUpdate),
@@ -622,9 +625,15 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
                 writer.write_section_block_update(update);
             }
         }
-        ServerUpdate::TimeUpdate { day_time } => {
+        ServerUpdate::TimeUpdate {
+            game_time,
+            day_time,
+            daylight_cycle_running,
+        } => {
             writer.write_u8(SERVER_UPDATE_TIME);
+            writer.write_u64(*game_time);
             writer.write_u64(*day_time);
+            writer.write_bool(*daylight_cycle_running);
         }
         ServerUpdate::PlayerPosition(update) => {
             validate_player_position_update(update)?;
@@ -696,7 +705,9 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             }
         }
         SERVER_UPDATE_TIME => ServerUpdate::TimeUpdate {
+            game_time: reader.read_u64()?,
             day_time: reader.read_u64()?,
+            daylight_cycle_running: reader.read_bool()?,
         },
         SERVER_UPDATE_PLAYER_POSITION => {
             ServerUpdate::PlayerPosition(reader.read_player_position_update()?)
@@ -2175,7 +2186,11 @@ mod tests {
 
     #[test]
     fn server_update_codec_round_trips_time() {
-        let update = ServerUpdate::TimeUpdate { day_time: 1_000 };
+        let update = ServerUpdate::TimeUpdate {
+            game_time: 12_345,
+            day_time: 1_000,
+            daylight_cycle_running: false,
+        };
 
         let bytes = encode_server_update(&update).unwrap();
 

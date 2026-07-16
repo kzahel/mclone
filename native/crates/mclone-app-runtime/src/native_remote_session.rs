@@ -166,6 +166,14 @@ mod tests {
     use mclone_core::ChunkPos;
     use mclone_protocol::{ChunkView, ServerUpdate};
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[test]
     fn remote_server_session_reuses_one_native_tcp_connection() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -190,20 +198,12 @@ mod tests {
                 mclone_net::read_client_command_frame(&mut stream).unwrap(),
                 first_server_command
             );
-            mclone_net::write_server_update_batch(
-                &mut stream,
-                &[ServerUpdate::TimeUpdate { day_time: 10 }],
-            )
-            .unwrap();
+            mclone_net::write_server_update_batch(&mut stream, &[time_update(10)]).unwrap();
             assert_eq!(
                 mclone_net::read_client_command_frame(&mut stream).unwrap(),
                 second_server_command
             );
-            mclone_net::write_server_update_batch(
-                &mut stream,
-                &[ServerUpdate::TimeUpdate { day_time: 20 }],
-            )
-            .unwrap();
+            mclone_net::write_server_update_batch(&mut stream, &[time_update(20)]).unwrap();
             assert!(
                 mclone_net::try_read_client_command_frame(&mut stream)
                     .unwrap()
@@ -216,12 +216,12 @@ mod tests {
             session.send_command_only(first_command).unwrap();
             assert_eq!(
                 wait_for_update_batch(&mut session).into_updates(),
-                vec![ServerUpdate::TimeUpdate { day_time: 10 }]
+                vec![time_update(10)]
             );
             session.send_command_only(second_command).unwrap();
             assert_eq!(
                 wait_for_update_batch(&mut session).into_updates(),
-                vec![ServerUpdate::TimeUpdate { day_time: 20 }]
+                vec![time_update(20)]
             );
         }
         server.join().unwrap();
@@ -259,11 +259,7 @@ mod tests {
                 mclone_net::read_client_command_frame(&mut second_stream).unwrap(),
                 second_server_command
             );
-            mclone_net::write_server_update_batch(
-                &mut second_stream,
-                &[ServerUpdate::TimeUpdate { day_time: 30 }],
-            )
-            .unwrap();
+            mclone_net::write_server_update_batch(&mut second_stream, &[time_update(30)]).unwrap();
         });
 
         {
@@ -274,7 +270,7 @@ mod tests {
             session.send_command_only(second_command).unwrap();
             assert_eq!(
                 wait_for_update_batch(&mut session).into_updates(),
-                vec![ServerUpdate::TimeUpdate { day_time: 30 }]
+                vec![time_update(30)]
             );
         }
         server.join().unwrap();

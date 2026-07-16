@@ -227,7 +227,11 @@ fn engine_render_session_applies_server_updates_and_marks_render_dirty() {
     let mut engine = EngineRenderSession::new(client);
 
     let report = engine.apply_server_updates(vec![
-        ServerUpdate::TimeUpdate { day_time: 1 },
+        ServerUpdate::TimeUpdate {
+            game_time: 2,
+            day_time: 1,
+            daylight_cycle_running: true,
+        },
         ServerUpdate::SectionBlockUpdates {
             pos: chunk,
             section_y: 7,

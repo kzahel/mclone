@@ -1316,6 +1316,14 @@ mod tests {
     use mclone_core::ChunkPos;
     use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
 
+    fn time_update(day_time: u64) -> ServerUpdate {
+        ServerUpdate::TimeUpdate {
+            game_time: day_time.saturating_add(100),
+            day_time,
+            daylight_cycle_running: true,
+        }
+    }
+
     #[test]
     fn distinguishes_local_native_and_web_transports() {
         assert_ne!(TransportKind::Local, TransportKind::NativeSocket);
@@ -1382,7 +1390,7 @@ mod tests {
         );
 
         let updates = vec![
-            ServerUpdate::TimeUpdate { day_time: 99 },
+            time_update(99),
             ServerUpdate::ChunkUnload {
                 pos: ChunkPos::new(5, -7),
             },
@@ -1534,8 +1542,8 @@ mod tests {
         });
         let first_server_command = first_command.clone();
         let second_server_command = second_command.clone();
-        let first_updates = vec![ServerUpdate::TimeUpdate { day_time: 1 }];
-        let second_updates = vec![ServerUpdate::TimeUpdate { day_time: 2 }];
+        let first_updates = vec![time_update(1)];
+        let second_updates = vec![time_update(2)];
         let first_server_updates = first_updates.clone();
         let second_server_updates = second_updates.clone();
 
@@ -1586,7 +1594,7 @@ mod tests {
             chunk_tracking_radius: 0,
         });
         let server_command = command.clone();
-        let expected_updates = vec![ServerUpdate::TimeUpdate { day_time: 1234 }];
+        let expected_updates = vec![time_update(1234)];
         let server_updates = expected_updates.clone();
 
         let server = std::thread::spawn(move || {
@@ -1631,8 +1639,8 @@ mod tests {
         });
         let first_server_command = first_command.clone();
         let second_server_command = second_command.clone();
-        let first_updates = vec![ServerUpdate::TimeUpdate { day_time: 10 }];
-        let second_updates = vec![ServerUpdate::TimeUpdate { day_time: 20 }];
+        let first_updates = vec![time_update(10)];
+        let second_updates = vec![time_update(20)];
         let first_server_updates = first_updates.clone();
         let second_server_updates = second_updates.clone();
         let (first_command_read_tx, first_command_read_rx) = std::sync::mpsc::channel();
@@ -1704,7 +1712,7 @@ mod tests {
     fn native_tcp_client_reader_accepts_unsolicited_update_frame() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
-        let expected_updates = vec![ServerUpdate::TimeUpdate { day_time: 77 }];
+        let expected_updates = vec![time_update(77)];
         let server_updates = expected_updates.clone();
         let (release_server_tx, release_server_rx) = std::sync::mpsc::channel();
 
@@ -1746,12 +1754,12 @@ mod tests {
         let first_server_command = first_command.clone();
         let second_server_command = second_command.clone();
         let first_updates = vec![
-            ServerUpdate::TimeUpdate { day_time: 10 },
+            time_update(10),
             ServerUpdate::ChunkUnload {
                 pos: ChunkPos::new(4, -3),
             },
         ];
-        let second_updates = vec![ServerUpdate::TimeUpdate { day_time: 20 }];
+        let second_updates = vec![time_update(20)];
         let first_server_updates = first_updates.clone();
         let second_server_updates = second_updates.clone();
         let (release_server_tx, release_server_rx) = std::sync::mpsc::channel();
@@ -1827,13 +1835,7 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             complete_server_handshake(&mut stream).unwrap();
             for sequence in 0..=NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY {
-                if write_server_update_batch(
-                    &mut stream,
-                    &[ServerUpdate::TimeUpdate {
-                        day_time: sequence as u64,
-                    }],
-                )
-                .is_err()
+                if write_server_update_batch(&mut stream, &[time_update(sequence as u64)]).is_err()
                 {
                     break;
                 }

@@ -4248,6 +4248,9 @@ impl McloneSceneHost {
         if !self.player_pose_sync.is_due(self.services.clock.now()) {
             return Ok(None);
         }
+        if let Some(runtime) = self.active_world.runtime.as_mut() {
+            runtime.core_mut().client_mut().advance_time_tick();
+        }
         self.commit_engine_camera_player_pose_timed().map(Some)
     }
 

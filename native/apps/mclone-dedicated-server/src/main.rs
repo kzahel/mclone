@@ -1207,7 +1207,7 @@ mod tests {
         let mut session = NativeClientIoSession::connect(addr).unwrap();
         let updates = wait_for_remote_updates(&mut session, |updates| {
             let mut times = updates.iter().filter_map(|update| match update {
-                ServerUpdate::TimeUpdate { day_time } => Some(*day_time),
+                ServerUpdate::TimeUpdate { day_time, .. } => Some(*day_time),
                 _ => None,
             });
             let Some(first) = times.next() else {

@@ -80,7 +80,9 @@ pub struct ClientRuntime {
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
     deferred_chunk_drops: VecDeque<ChunkSnapshot>,
     deferred_chunk_drop_items: usize,
+    game_time: u64,
     day_time: u64,
+    daylight_cycle_running: bool,
     total_experience: u64,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
@@ -99,7 +101,9 @@ impl ClientRuntime {
             chunks: BTreeMap::new(),
             deferred_chunk_drops: VecDeque::new(),
             deferred_chunk_drop_items: 0,
+            game_time: 0,
             day_time: 0,
+            daylight_cycle_running: true,
             total_experience: 0,
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
@@ -163,8 +167,14 @@ impl ClientRuntime {
             } => {
                 self.apply_section_block_updates(pos, section_y, &updates);
             }
-            ServerUpdate::TimeUpdate { day_time } => {
+            ServerUpdate::TimeUpdate {
+                game_time,
+                day_time,
+                daylight_cycle_running,
+            } => {
+                self.game_time = game_time;
                 self.day_time = day_time;
+                self.daylight_cycle_running = daylight_cycle_running;
             }
             ServerUpdate::PlayerPosition(update) => {
                 self.player_position_updates.push_back(update);
@@ -406,9 +416,33 @@ impl ClientRuntime {
         self.player_position_updates.drain(..)
     }
 
-    /// Latest authoritative world day-time (ticks) from the server.
+    /// Locally advanced vanilla `gameTime`, corrected by periodic server
+    /// samples.
+    pub const fn game_time(&self) -> u64 {
+        self.game_time
+    }
+
+    /// Locally advanced vanilla `dayTime`, corrected by periodic server
+    /// samples.
     pub const fn day_time(&self) -> u64 {
         self.day_time
+    }
+
+    pub const fn daylight_cycle_running(&self) -> bool {
+        self.daylight_cycle_running
+    }
+
+    /// Advance one vanilla client tick between authoritative clock samples.
+    pub fn advance_time_tick(&mut self) {
+        self.game_time = self.game_time.wrapping_add(1);
+        if self.daylight_cycle_running {
+            self.day_time = self.day_time.wrapping_add(1);
+        }
+    }
+
+    /// Debug presentation hook that does not change the other clock state.
+    pub fn force_day_time(&mut self, day_time: u64) {
+        self.day_time = day_time;
     }
 
     /// Celestial phase in `[0, 1)` for the current day-time. See
@@ -842,12 +876,40 @@ mod tests {
         let mut runtime = ClientRuntime::local_integrated();
         assert_eq!(runtime.day_time(), 0);
 
-        runtime.apply_update(ServerUpdate::TimeUpdate { day_time: 6_000 });
+        runtime.apply_update(ServerUpdate::TimeUpdate {
+            game_time: 12_000,
+            day_time: 6_000,
+            daylight_cycle_running: true,
+        });
 
+        assert_eq!(runtime.game_time(), 12_000);
         assert_eq!(runtime.day_time(), 6_000);
         // dayTime 6000 is noon, which the smoothed curve maps to phase ~0.0.
         assert!(runtime.time_of_day().abs() < 1e-4);
         assert!(runtime.sun_angle().abs() < 1e-3);
+    }
+
+    #[test]
+    fn client_runtime_advances_clocks_between_server_samples() {
+        let mut runtime = ClientRuntime::local_integrated();
+        runtime.apply_update(ServerUpdate::TimeUpdate {
+            game_time: 50,
+            day_time: 600,
+            daylight_cycle_running: false,
+        });
+
+        runtime.advance_time_tick();
+        assert_eq!(runtime.game_time(), 51);
+        assert_eq!(runtime.day_time(), 600);
+
+        runtime.apply_update(ServerUpdate::TimeUpdate {
+            game_time: 80,
+            day_time: 900,
+            daylight_cycle_running: true,
+        });
+        runtime.advance_time_tick();
+        assert_eq!(runtime.game_time(), 81);
+        assert_eq!(runtime.day_time(), 901);
     }
 
     #[test]
