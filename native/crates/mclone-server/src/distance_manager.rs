@@ -18,8 +18,9 @@ use crate::{
 #[derive(Debug)]
 pub(crate) struct ChunkDistanceManager {
     tickets: BTreeMap<ChunkPos, BTreeSet<ChunkTicket>>,
-    aggregate_player_ticket_positions: BTreeSet<ChunkPos>,
-    aggregate_player_ticket_priority_centers: Vec<ChunkPos>,
+    aggregate_resident_positions: BTreeSet<ChunkPos>,
+    aggregate_simulation_ticket_positions: BTreeSet<ChunkPos>,
+    aggregate_interest_priority_centers: Vec<ChunkPos>,
     ticket_tick: u64,
 }
 
@@ -27,8 +28,9 @@ impl ChunkDistanceManager {
     pub(crate) fn new() -> Self {
         Self {
             tickets: BTreeMap::new(),
-            aggregate_player_ticket_positions: BTreeSet::new(),
-            aggregate_player_ticket_priority_centers: Vec::new(),
+            aggregate_resident_positions: BTreeSet::new(),
+            aggregate_simulation_ticket_positions: BTreeSet::new(),
+            aggregate_interest_priority_centers: Vec::new(),
             ticket_tick: 0,
         }
     }
@@ -37,14 +39,29 @@ impl ChunkDistanceManager {
         self.ticket_tick
     }
 
-    pub(crate) fn set_aggregate_player_ticket_positions_with_priority(
+    pub(crate) fn set_aggregate_interest_positions_with_priority(
         &mut self,
-        new_positions: BTreeSet<ChunkPos>,
+        new_resident_positions: BTreeSet<ChunkPos>,
+        new_simulation_positions: BTreeSet<ChunkPos>,
         priority_centers: Vec<ChunkPos>,
     ) {
-        let old_positions = std::mem::take(&mut self.aggregate_player_ticket_positions);
+        debug_assert!(new_simulation_positions.is_subset(&new_resident_positions));
+        let old_resident_positions = std::mem::take(&mut self.aggregate_resident_positions);
+        let old_simulation_positions =
+            std::mem::take(&mut self.aggregate_simulation_ticket_positions);
+        let old_residency_only = old_resident_positions
+            .difference(&old_simulation_positions)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let new_residency_only = new_resident_positions
+            .difference(&new_simulation_positions)
+            .copied()
+            .collect::<BTreeSet<_>>();
 
-        for pos in old_positions.difference(&new_positions).copied() {
+        for pos in old_simulation_positions
+            .difference(&new_simulation_positions)
+            .copied()
+        {
             self.remove_ticket(
                 ChunkTicketType::Player,
                 pos,
@@ -53,7 +70,19 @@ impl ChunkDistanceManager {
             );
         }
 
-        for pos in new_positions.difference(&old_positions).copied() {
+        for pos in old_residency_only.difference(&new_residency_only).copied() {
+            self.remove_ticket(
+                ChunkTicketType::Observer,
+                pos,
+                CHUNK_LEVEL_FULL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        }
+
+        for pos in new_simulation_positions
+            .difference(&old_simulation_positions)
+            .copied()
+        {
             self.add_ticket(
                 ChunkTicketType::Player,
                 pos,
@@ -62,8 +91,18 @@ impl ChunkDistanceManager {
             );
         }
 
-        self.aggregate_player_ticket_positions = new_positions;
-        self.aggregate_player_ticket_priority_centers = priority_centers
+        for pos in new_residency_only.difference(&old_residency_only).copied() {
+            self.add_ticket(
+                ChunkTicketType::Observer,
+                pos,
+                CHUNK_LEVEL_FULL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        }
+
+        self.aggregate_resident_positions = new_resident_positions;
+        self.aggregate_simulation_ticket_positions = new_simulation_positions;
+        self.aggregate_interest_priority_centers = priority_centers
             .into_iter()
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -169,11 +208,11 @@ impl ChunkDistanceManager {
     }
 
     pub(crate) fn player_interest_positions(&self) -> BTreeSet<ChunkPos> {
-        self.aggregate_player_ticket_positions.clone()
+        self.aggregate_resident_positions.clone()
     }
 
     pub(crate) fn player_interest_priority_centers(&self) -> &[ChunkPos] {
-        &self.aggregate_player_ticket_priority_centers
+        &self.aggregate_interest_priority_centers
     }
 
     pub(crate) fn ticketed_chunk_count(&self) -> usize {

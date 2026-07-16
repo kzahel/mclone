@@ -1423,14 +1423,21 @@ mod tests {
             let (opened, mut store) = catalog.open_sqlite_world_store(&summary.id).unwrap();
             assert_eq!(opened.summary.id, summary.id);
             assert_eq!(store.path(), opened.database_path().as_path());
-            store.save_chunk(&record).unwrap();
+            store
+                .save_chunk(&mclone_protocol::DimensionKey::overworld(), &record)
+                .unwrap();
             store.flush().unwrap();
             store.close().unwrap();
         }
 
         {
             let (_opened, mut reopened) = catalog.open_sqlite_world_store(&summary.id).unwrap();
-            assert_eq!(reopened.load_chunk(chunk_pos).unwrap(), Some(record));
+            assert_eq!(
+                reopened
+                    .load_chunk(&mclone_protocol::DimensionKey::overworld(), chunk_pos)
+                    .unwrap(),
+                Some(record)
+            );
         }
     }
 

@@ -2,11 +2,11 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-4 are
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-5 are
 complete. Every host uses one `RealmServer`, the integrated player is ordinary,
 realm/dimension persistence is qualified, and one realm can concurrently tick
-players in multiple isolated `DimensionRuntime`s. Slice 5 source-owned
-player/observer interest is next.**
+players in multiple isolated `DimensionRuntime`s. Source-owned player and
+non-player observer interest is live; Slice 6 player transfer is next.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -133,15 +133,21 @@ unified:
   exact v1/v5 rows migrated to `minecraft:overworld` and native collision
   coverage for equal coordinates in different dimensions;
 - players carry one current dimension and all command/publication paths route
-  through that runtime; within each runtime `PlayerChunkTracking` still
-  reduces player views to one anonymous aggregate chunk set;
+  through that runtime; players and realm-global `ObserverId`s retain
+  source-owned views and outbound queues inside that dimension;
+- aggregate client residency and block/entity simulation interest are separate:
+  players contribute both, residency-only observers use a border-level ticket,
+  and explicitly ticking observers contribute both;
+- observers receive configuration, world/time, chunks, block deltas, entities,
+  and real players without owning player state, commands, identity, inventory,
+  experience, or persistence records;
 - the current warm diorama starts a full second joined runtime with a real
   server-side local player. Input suppression makes it non-interactive, not an
   observer.
 
-The next work can therefore replace anonymous player-only interest with
-explicit player and observer sources without a persistence collision or a
-second integrated-only gameplay path.
+The next work can therefore transfer one ordinary player between those
+dimension runtimes without replacing realm state, then replace the diorama's
+synthetic player session with the proven observer contract.
 
 ## Hard Topology Invariants
 

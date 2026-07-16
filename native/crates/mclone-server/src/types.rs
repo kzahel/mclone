@@ -106,6 +106,7 @@ pub enum ChunkTicketType {
     Start,
     Dragon,
     Player,
+    Observer,
     Forced,
     Light,
     Portal,
@@ -119,7 +120,12 @@ impl ChunkTicketType {
             Self::Portal => Some(300),
             Self::PostTeleport => Some(5),
             Self::Unknown => Some(1),
-            Self::Start | Self::Dragon | Self::Player | Self::Forced | Self::Light => None,
+            Self::Start
+            | Self::Dragon
+            | Self::Player
+            | Self::Observer
+            | Self::Forced
+            | Self::Light => None,
         }
     }
 }

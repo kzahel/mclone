@@ -918,19 +918,26 @@ impl ChunkScheduler {
         &mut self,
         view: ChunkView,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let positions = chunk_positions_for_view(&view);
         self.apply_player_ticket_positions_with_priority(
-            chunk_positions_for_view(&view),
+            positions.clone(),
+            positions,
             vec![view.center],
         )
     }
 
     pub(crate) fn apply_player_ticket_positions_with_priority(
         &mut self,
-        positions: BTreeSet<ChunkPos>,
+        resident_positions: BTreeSet<ChunkPos>,
+        simulation_positions: BTreeSet<ChunkPos>,
         priority_centers: Vec<ChunkPos>,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         self.distance_manager
-            .set_aggregate_player_ticket_positions_with_priority(positions, priority_centers);
+            .set_aggregate_interest_positions_with_priority(
+                resident_positions,
+                simulation_positions,
+                priority_centers,
+            );
         self.reconcile_ticketed_holders()
     }
 
@@ -4450,7 +4457,11 @@ mod tests {
         let far = ChunkPos::new(8, 0);
         scheduler
             .distance_manager
-            .set_aggregate_player_ticket_positions_with_priority(BTreeSet::new(), vec![center]);
+            .set_aggregate_interest_positions_with_priority(
+                BTreeSet::new(),
+                BTreeSet::new(),
+                vec![center],
+            );
         scheduler
             .holders
             .insert(center, test_scheduled_light_holder(center));

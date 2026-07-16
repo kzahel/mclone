@@ -69,7 +69,10 @@ pub use cadence::{
 };
 pub use dimension::DimensionRegistry;
 pub use holder::{ChunkHolder, ChunkStatusSlot};
-pub use integrated::{DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession, RealmServer};
+pub use integrated::{
+    DimensionInterestDiagnostics, DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession,
+    RealmInterestDiagnostics, RealmServer,
+};
 pub use job_codec::{
     WorldgenJobSession, compute_light_status_job_frame, compute_worldgen_job_frame,
 };
@@ -93,7 +96,9 @@ pub use persistence::{
     encode_world_metadata,
 };
 pub use player_chunk_tracking::{
-    PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,
+    DimensionInterestSource, ObserverChunkTrackingDiagnostics, ObserverId,
+    ObserverSimulationInterest, PlayerChunkTrackingDiagnostics,
+    PlayerChunkTrackingPlayerDiagnostics,
 };
 pub use players::ServerPlayerId;
 pub use runner::{

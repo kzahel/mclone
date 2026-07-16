@@ -3,19 +3,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use mclone_core::ChunkPos;
 use mclone_protocol::{EntityId, ServerUpdate};
 
-use crate::players::ServerPlayerId;
+use crate::player_chunk_tracking::DimensionInterestSource;
 
 use super::ServerEntityState;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RoutedEntityUpdate {
-    pub(crate) recipient: ServerPlayerId,
+    pub(crate) recipient: DimensionInterestSource,
     pub(crate) update: ServerUpdate,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct EntityTracking {
-    seen_by_entity: BTreeMap<EntityId, BTreeSet<ServerPlayerId>>,
+    seen_by_entity: BTreeMap<EntityId, BTreeSet<DimensionInterestSource>>,
 }
 
 impl EntityTracking {
@@ -31,17 +31,17 @@ impl EntityTracking {
         }
     }
 
-    pub(crate) fn remove_observer(&mut self, player_id: ServerPlayerId) {
+    pub(crate) fn remove_observer(&mut self, observer: DimensionInterestSource) {
         for observers in self.seen_by_entity.values_mut() {
-            observers.remove(&player_id);
+            observers.remove(&observer);
         }
     }
 
     pub(crate) fn reconcile_observer(
         &mut self,
-        observer: ServerPlayerId,
+        observer: DimensionInterestSource,
         subjects: &[ServerEntityState],
-        mut tracks_chunk: impl FnMut(ServerPlayerId, ChunkPos) -> bool,
+        mut tracks_chunk: impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
     ) -> Vec<RoutedEntityUpdate> {
         let mut routes = Vec::new();
         for subject in subjects {
@@ -53,8 +53,8 @@ impl EntityTracking {
     pub(crate) fn reconcile_subject(
         &mut self,
         subject: ServerEntityState,
-        observers: impl IntoIterator<Item = ServerPlayerId>,
-        mut tracks_chunk: impl FnMut(ServerPlayerId, ChunkPos) -> bool,
+        observers: impl IntoIterator<Item = DimensionInterestSource>,
+        mut tracks_chunk: impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
         emit_existing_updates: bool,
     ) -> Vec<RoutedEntityUpdate> {
         let mut routes = Vec::new();
@@ -72,9 +72,9 @@ impl EntityTracking {
 
     fn reconcile_pair(
         &mut self,
-        observer: ServerPlayerId,
+        observer: DimensionInterestSource,
         subject: ServerEntityState,
-        tracks_chunk: &mut impl FnMut(ServerPlayerId, ChunkPos) -> bool,
+        tracks_chunk: &mut impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
         emit_existing_update: bool,
         routes: &mut Vec<RoutedEntityUpdate>,
     ) {
@@ -111,6 +111,7 @@ pub(crate) struct EntityTrackingDiagnostics {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ServerPlayerId;
     use mclone_core::Vec3d;
     use mclone_protocol::EntityKind;
 
@@ -137,7 +138,7 @@ mod tests {
 
     #[test]
     fn observer_reconcile_adds_and_removes_visible_entities() {
-        let observer = player(1);
+        let observer = DimensionInterestSource::Player(player(1));
         let subject = state(7, 8.0, 8.0);
         let mut tracking = EntityTracking::default();
 
@@ -178,7 +179,7 @@ mod tests {
 
     #[test]
     fn subject_reconcile_updates_existing_observers() {
-        let observer = player(1);
+        let observer = DimensionInterestSource::Player(player(1));
         let mut tracking = EntityTracking::default();
         let initial = state(7, 8.0, 8.0);
         tracking.reconcile_subject(initial, [observer], |_, _| true, false);

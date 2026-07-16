@@ -1,14 +1,15 @@
-//! Per-player chunk view tracking and update routing.
+//! Per-source dimension interest and update routing.
 //!
 //! Java keeps this shape in `ChunkMap`: requested/accepted player views,
 //! player-visible chunk sets, and chunk load/unload fan-out live next to player
 //! chunk tracking, while `DistanceManager` consumes aggregate player-ticket
-//! inputs. This module keeps that boundary explicit for the native server.
+//! inputs. Mclone extends that boundary with player-free observers while
+//! keeping residency and simulation interest separate.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_core::{ChunkPos, ChunkSnapshot};
-use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate, encode_server_update};
 
 use crate::players::ServerPlayerId;
 
@@ -17,6 +18,32 @@ pub(crate) const JAVA_MAX_VIEW_DISTANCE: u32 = 33;
 pub(crate) const DEFAULT_DEDICATED_SERVER_VIEW_DISTANCE: u32 = 10;
 pub(crate) const DEFAULT_DEDICATED_SERVER_CHUNK_TRACKING_RADIUS: u32 =
     DEFAULT_DEDICATED_SERVER_VIEW_DISTANCE + 1;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ObserverId(u64);
+
+impl ObserverId {
+    pub(crate) const fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub const fn as_u64(self) -> u64 {
+        self.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum DimensionInterestSource {
+    Player(ServerPlayerId),
+    Observer(ObserverId),
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ObserverSimulationInterest {
+    #[default]
+    ResidencyOnly,
+    BlockAndEntityTicking,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct PlayerChunkTrackingPolicy {
@@ -103,6 +130,12 @@ pub(crate) struct PlayerChunkViewState {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct ObserverChunkViewState {
+    view: PlayerChunkViewState,
+    simulation: ObserverSimulationInterest,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(crate) struct PlayerChunkViewChange {
     pub(crate) accepted: Option<ChunkView>,
     pub(crate) added_chunks: Vec<ChunkPos>,
@@ -114,12 +147,21 @@ pub(crate) struct PlayerChunkViewChange {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PlayerChunkTrackingDiagnostics {
     pub player_count: usize,
+    pub observer_count: usize,
     pub aggregate_player_ticket_chunks: usize,
+    pub aggregate_resident_chunks: usize,
+    pub aggregate_simulation_ticket_chunks: usize,
     pub total_player_visible_chunks: usize,
+    pub total_observer_visible_chunks: usize,
     pub total_outbound_queue_depth: usize,
+    pub total_observer_outbound_queue_depth: usize,
+    pub total_observer_outbound_bytes: usize,
     pub max_player_visible_chunks: usize,
+    pub max_observer_visible_chunks: usize,
     pub max_outbound_queue_depth: usize,
+    pub max_observer_outbound_queue_depth: usize,
     pub players: Vec<PlayerChunkTrackingPlayerDiagnostics>,
+    pub observers: Vec<ObserverChunkTrackingDiagnostics>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -131,12 +173,27 @@ pub struct PlayerChunkTrackingPlayerDiagnostics {
     pub outbound_queue_depth: usize,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObserverChunkTrackingDiagnostics {
+    pub observer_id: ObserverId,
+    pub simulation: ObserverSimulationInterest,
+    pub requested_view: Option<ChunkView>,
+    pub accepted_view: Option<ChunkView>,
+    pub visible_chunks: usize,
+    pub outbound_queue_depth: usize,
+    pub outbound_bytes: usize,
+}
+
 #[derive(Debug)]
 pub(crate) struct PlayerChunkTracking {
     policy: PlayerChunkTrackingPolicy,
     players: BTreeMap<ServerPlayerId, PlayerChunkViewState>,
+    observers: BTreeMap<ObserverId, ObserverChunkViewState>,
     aggregate_player_ticket_positions: BTreeSet<ChunkPos>,
+    aggregate_resident_positions: BTreeSet<ChunkPos>,
+    aggregate_simulation_ticket_positions: BTreeSet<ChunkPos>,
     pending_updates: BTreeMap<ServerPlayerId, VecDeque<ServerUpdate>>,
+    pending_observer_updates: BTreeMap<ObserverId, VecDeque<ServerUpdate>>,
 }
 
 impl PlayerChunkTracking {
@@ -144,8 +201,12 @@ impl PlayerChunkTracking {
         Self {
             policy,
             players: BTreeMap::new(),
+            observers: BTreeMap::new(),
             aggregate_player_ticket_positions: BTreeSet::new(),
+            aggregate_resident_positions: BTreeSet::new(),
+            aggregate_simulation_ticket_positions: BTreeSet::new(),
             pending_updates: BTreeMap::new(),
+            pending_observer_updates: BTreeMap::new(),
         }
     }
 
@@ -165,7 +226,7 @@ impl PlayerChunkTracking {
             .map(|state| state.visible_chunks)
             .unwrap_or_default();
         self.pending_updates.remove(&player_id);
-        let aggregate_changed = self.rebuild_aggregate_player_ticket_positions();
+        let aggregate_changed = self.rebuild_aggregate_interest_positions();
         PlayerChunkViewChange {
             accepted: None,
             added_chunks: Vec::new(),
@@ -181,7 +242,7 @@ impl PlayerChunkTracking {
         requested: ChunkView,
     ) -> PlayerChunkViewChange {
         self.add_player(player_id);
-        let old_priority_centers = self.aggregate_player_ticket_priority_centers();
+        let old_priority_centers = self.aggregate_interest_priority_centers();
         let accepted = self.policy.clamp_view(&requested);
         let state = self
             .players
@@ -211,9 +272,9 @@ impl PlayerChunkTracking {
             .difference(&state.visible_chunks)
             .copied()
             .collect();
-        let aggregate_changed = self.rebuild_aggregate_player_ticket_positions();
+        let aggregate_changed = self.rebuild_aggregate_interest_positions();
         let priority_centers_changed =
-            self.aggregate_player_ticket_priority_centers() != old_priority_centers;
+            self.aggregate_interest_priority_centers() != old_priority_centers;
 
         PlayerChunkViewChange {
             accepted: Some(accepted),
@@ -230,14 +291,113 @@ impl PlayerChunkTracking {
             .and_then(|state| state.accepted.as_ref())
     }
 
+    pub(crate) fn add_observer(
+        &mut self,
+        observer_id: ObserverId,
+        simulation: ObserverSimulationInterest,
+    ) {
+        self.observers.entry(observer_id).or_default().simulation = simulation;
+        self.pending_observer_updates
+            .entry(observer_id)
+            .or_default();
+    }
+
+    pub(crate) fn remove_observer(&mut self, observer_id: ObserverId) -> PlayerChunkViewChange {
+        let removed = self
+            .observers
+            .remove(&observer_id)
+            .map(|state| state.view.visible_chunks)
+            .unwrap_or_default();
+        self.pending_observer_updates.remove(&observer_id);
+        let aggregate_changed = self.rebuild_aggregate_interest_positions();
+        PlayerChunkViewChange {
+            accepted: None,
+            added_chunks: Vec::new(),
+            removed_chunks: removed.into_iter().collect(),
+            aggregate_changed,
+            priority_centers_changed: true,
+        }
+    }
+
+    pub(crate) fn set_observer_requested_view(
+        &mut self,
+        observer_id: ObserverId,
+        requested: ChunkView,
+        simulation: ObserverSimulationInterest,
+    ) -> PlayerChunkViewChange {
+        self.add_observer(observer_id, simulation);
+        let old_priority_centers = self.aggregate_interest_priority_centers();
+        let accepted = self.policy.clamp_view(&requested);
+        let state = self
+            .observers
+            .get_mut(&observer_id)
+            .expect("observer state must exist after add_observer");
+        let old_visible = std::mem::take(&mut state.view.visible_chunks);
+        let target_visible = chunk_positions_for_view(&accepted);
+        let unload_visible = chunk_positions_for_center_radius(
+            accepted.center,
+            self.policy.unload_radius(&accepted),
+        );
+        let retained_visible = old_visible
+            .intersection(&unload_visible)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        state.view.visible_chunks = target_visible.union(&retained_visible).copied().collect();
+        state.view.requested = Some(requested);
+        state.view.accepted = Some(accepted.clone());
+        state.simulation = simulation;
+
+        let added_chunks = state
+            .view
+            .visible_chunks
+            .difference(&old_visible)
+            .copied()
+            .collect();
+        let removed_chunks = old_visible
+            .difference(&state.view.visible_chunks)
+            .copied()
+            .collect();
+        let aggregate_changed = self.rebuild_aggregate_interest_positions();
+        let priority_centers_changed =
+            self.aggregate_interest_priority_centers() != old_priority_centers;
+        PlayerChunkViewChange {
+            accepted: Some(accepted),
+            added_chunks,
+            removed_chunks,
+            aggregate_changed,
+            priority_centers_changed,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn accepted_observer_view(&self, observer_id: ObserverId) -> Option<&ChunkView> {
+        self.observers
+            .get(&observer_id)
+            .and_then(|state| state.view.accepted.as_ref())
+    }
+
+    #[cfg(test)]
     pub(crate) fn aggregate_player_ticket_positions(&self) -> BTreeSet<ChunkPos> {
         self.aggregate_player_ticket_positions.clone()
     }
 
-    pub(crate) fn aggregate_player_ticket_priority_centers(&self) -> Vec<ChunkPos> {
+    pub(crate) fn aggregate_resident_positions(&self) -> BTreeSet<ChunkPos> {
+        self.aggregate_resident_positions.clone()
+    }
+
+    pub(crate) fn aggregate_simulation_ticket_positions(&self) -> BTreeSet<ChunkPos> {
+        self.aggregate_simulation_ticket_positions.clone()
+    }
+
+    pub(crate) fn aggregate_interest_priority_centers(&self) -> Vec<ChunkPos> {
         self.players
             .values()
             .filter_map(|state| state.accepted.as_ref().map(|view| view.center))
+            .chain(
+                self.observers
+                    .values()
+                    .filter_map(|state| state.view.accepted.as_ref().map(|view| view.center)),
+            )
             .collect()
     }
 
@@ -257,14 +417,55 @@ impl PlayerChunkTracking {
                 }
             })
             .collect::<Vec<_>>();
+        let observers = self
+            .observers
+            .iter()
+            .map(|(observer_id, state)| {
+                let queue = self.pending_observer_updates.get(observer_id);
+                let outbound_queue_depth = queue.map_or(0, VecDeque::len);
+                let outbound_bytes = queue.map_or(0, |updates| {
+                    updates
+                        .iter()
+                        .filter_map(|update| encode_server_update(update).ok())
+                        .map(|frame| frame.len())
+                        .sum()
+                });
+                ObserverChunkTrackingDiagnostics {
+                    observer_id: *observer_id,
+                    simulation: state.simulation,
+                    requested_view: state.view.requested.clone(),
+                    accepted_view: state.view.accepted.clone(),
+                    visible_chunks: state.view.visible_chunks.len(),
+                    outbound_queue_depth,
+                    outbound_bytes,
+                }
+            })
+            .collect::<Vec<_>>();
         let total_player_visible_chunks = players.iter().map(|player| player.visible_chunks).sum();
+        let total_observer_visible_chunks = observers
+            .iter()
+            .map(|observer| observer.visible_chunks)
+            .sum();
         let total_outbound_queue_depth = players
             .iter()
             .map(|player| player.outbound_queue_depth)
             .sum();
+        let total_observer_outbound_queue_depth = observers
+            .iter()
+            .map(|observer| observer.outbound_queue_depth)
+            .sum();
+        let total_observer_outbound_bytes = observers
+            .iter()
+            .map(|observer| observer.outbound_bytes)
+            .sum();
         let max_player_visible_chunks = players
             .iter()
             .map(|player| player.visible_chunks)
+            .max()
+            .unwrap_or(0);
+        let max_observer_visible_chunks = observers
+            .iter()
+            .map(|observer| observer.visible_chunks)
             .max()
             .unwrap_or(0);
         let max_outbound_queue_depth = players
@@ -272,15 +473,29 @@ impl PlayerChunkTracking {
             .map(|player| player.outbound_queue_depth)
             .max()
             .unwrap_or(0);
+        let max_observer_outbound_queue_depth = observers
+            .iter()
+            .map(|observer| observer.outbound_queue_depth)
+            .max()
+            .unwrap_or(0);
 
         PlayerChunkTrackingDiagnostics {
             player_count: players.len(),
+            observer_count: observers.len(),
             aggregate_player_ticket_chunks: self.aggregate_player_ticket_positions.len(),
+            aggregate_resident_chunks: self.aggregate_resident_positions.len(),
+            aggregate_simulation_ticket_chunks: self.aggregate_simulation_ticket_positions.len(),
             total_player_visible_chunks,
+            total_observer_visible_chunks,
             total_outbound_queue_depth,
+            total_observer_outbound_queue_depth,
+            total_observer_outbound_bytes,
             max_player_visible_chunks,
+            max_observer_visible_chunks,
             max_outbound_queue_depth,
+            max_observer_outbound_queue_depth,
             players,
+            observers,
         }
     }
 
@@ -290,14 +505,45 @@ impl PlayerChunkTracking {
             .is_some_and(|state| state.visible_chunks.contains(&pos))
     }
 
+    pub(crate) fn source_tracks_chunk(
+        &self,
+        source: DimensionInterestSource,
+        pos: ChunkPos,
+    ) -> bool {
+        match source {
+            DimensionInterestSource::Player(player_id) => self.player_tracks_chunk(player_id, pos),
+            DimensionInterestSource::Observer(observer_id) => self
+                .observers
+                .get(&observer_id)
+                .is_some_and(|state| state.view.visible_chunks.contains(&pos)),
+        }
+    }
+
+    pub(crate) fn interest_sources(&self) -> Vec<DimensionInterestSource> {
+        self.players
+            .keys()
+            .copied()
+            .map(DimensionInterestSource::Player)
+            .chain(
+                self.observers
+                    .keys()
+                    .copied()
+                    .map(DimensionInterestSource::Observer),
+            )
+            .collect()
+    }
+
     pub(crate) fn queue_unload_for_player(&mut self, player_id: ServerPlayerId, pos: ChunkPos) {
         self.queue_update_for_player(player_id, ServerUpdate::ChunkUnload { pos });
     }
 
-    pub(crate) fn queue_unload_for_tracking_players(&mut self, pos: ChunkPos) {
-        let recipients = self.players_tracking_chunk(pos);
-        for player_id in recipients {
-            self.queue_unload_for_player(player_id, pos);
+    pub(crate) fn queue_unload_for_observer(&mut self, observer_id: ObserverId, pos: ChunkPos) {
+        self.queue_update_for_observer(observer_id, ServerUpdate::ChunkUnload { pos });
+    }
+
+    pub(crate) fn queue_unload_for_tracking_sources(&mut self, pos: ChunkPos) {
+        for source in self.sources_tracking_chunk(pos) {
+            self.queue_update_for_source(source, ServerUpdate::ChunkUnload { pos });
         }
     }
 
@@ -309,14 +555,21 @@ impl PlayerChunkTracking {
         self.queue_update_for_player(player_id, ServerUpdate::ChunkSnapshot(snapshot));
     }
 
-    pub(crate) fn queue_snapshot_for_tracking_players(&mut self, snapshot: ChunkSnapshot) {
-        let recipients = self.players_tracking_chunk(snapshot.pos);
-        for player_id in recipients {
-            self.queue_snapshot_for_player(player_id, snapshot.clone());
+    pub(crate) fn queue_snapshot_for_observer(
+        &mut self,
+        observer_id: ObserverId,
+        snapshot: ChunkSnapshot,
+    ) {
+        self.queue_update_for_observer(observer_id, ServerUpdate::ChunkSnapshot(snapshot));
+    }
+
+    pub(crate) fn queue_snapshot_for_tracking_sources(&mut self, snapshot: ChunkSnapshot) {
+        for source in self.sources_tracking_chunk(snapshot.pos) {
+            self.queue_update_for_source(source, ServerUpdate::ChunkSnapshot(snapshot.clone()));
         }
     }
 
-    pub(crate) fn queue_section_updates_for_tracking_players(
+    pub(crate) fn queue_section_updates_for_tracking_sources(
         &mut self,
         pos: ChunkPos,
         section_y: i32,
@@ -325,10 +578,9 @@ impl PlayerChunkTracking {
         if updates.is_empty() {
             return;
         }
-        let recipients = self.players_tracking_chunk(pos);
-        for player_id in recipients {
-            self.queue_update_for_player(
-                player_id,
+        for source in self.sources_tracking_chunk(pos) {
+            self.queue_update_for_source(
+                source,
                 ServerUpdate::SectionBlockUpdates {
                     pos,
                     section_y,
@@ -341,6 +593,14 @@ impl PlayerChunkTracking {
     pub(crate) fn drain_updates(&mut self, player_id: ServerPlayerId) -> Vec<ServerUpdate> {
         self.pending_updates
             .entry(player_id)
+            .or_default()
+            .drain(..)
+            .collect()
+    }
+
+    pub(crate) fn drain_observer_updates(&mut self, observer_id: ObserverId) -> Vec<ServerUpdate> {
+        self.pending_observer_updates
+            .entry(observer_id)
             .or_default()
             .drain(..)
             .collect()
@@ -359,6 +619,34 @@ impl PlayerChunkTracking {
         }
     }
 
+    pub(crate) fn queue_update_for_observer(
+        &mut self,
+        observer_id: ObserverId,
+        update: ServerUpdate,
+    ) {
+        if self.observers.contains_key(&observer_id) {
+            self.pending_observer_updates
+                .entry(observer_id)
+                .or_default()
+                .push_back(update);
+        }
+    }
+
+    pub(crate) fn queue_update_for_source(
+        &mut self,
+        source: DimensionInterestSource,
+        update: ServerUpdate,
+    ) {
+        match source {
+            DimensionInterestSource::Player(player_id) => {
+                self.queue_update_for_player(player_id, update);
+            }
+            DimensionInterestSource::Observer(observer_id) => {
+                self.queue_update_for_observer(observer_id, update);
+            }
+        }
+    }
+
     fn players_tracking_chunk(&self, pos: ChunkPos) -> Vec<ServerPlayerId> {
         self.players
             .iter()
@@ -368,17 +656,52 @@ impl PlayerChunkTracking {
             .collect()
     }
 
-    fn rebuild_aggregate_player_ticket_positions(&mut self) -> bool {
-        let next = self
+    fn sources_tracking_chunk(&self, pos: ChunkPos) -> Vec<DimensionInterestSource> {
+        self.players_tracking_chunk(pos)
+            .into_iter()
+            .map(DimensionInterestSource::Player)
+            .chain(self.observers.iter().filter_map(|(observer_id, state)| {
+                state
+                    .view
+                    .visible_chunks
+                    .contains(&pos)
+                    .then_some(DimensionInterestSource::Observer(*observer_id))
+            }))
+            .collect()
+    }
+
+    fn rebuild_aggregate_interest_positions(&mut self) -> bool {
+        let player_positions = self
             .players
             .values()
             .flat_map(|state| state.visible_chunks.iter().copied())
             .collect::<BTreeSet<_>>();
-        if next == self.aggregate_player_ticket_positions {
-            return false;
-        }
-        self.aggregate_player_ticket_positions = next;
-        true
+        let observer_positions = self
+            .observers
+            .values()
+            .flat_map(|state| state.view.visible_chunks.iter().copied())
+            .collect::<BTreeSet<_>>();
+        let observer_simulation_positions = self
+            .observers
+            .values()
+            .filter(|state| state.simulation == ObserverSimulationInterest::BlockAndEntityTicking)
+            .flat_map(|state| state.view.visible_chunks.iter().copied())
+            .collect::<BTreeSet<_>>();
+        let resident_positions = player_positions
+            .union(&observer_positions)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let simulation_positions = player_positions
+            .union(&observer_simulation_positions)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let changed = player_positions != self.aggregate_player_ticket_positions
+            || resident_positions != self.aggregate_resident_positions
+            || simulation_positions != self.aggregate_simulation_ticket_positions;
+        self.aggregate_player_ticket_positions = player_positions;
+        self.aggregate_resident_positions = resident_positions;
+        self.aggregate_simulation_ticket_positions = simulation_positions;
+        changed
     }
 }
 
@@ -558,5 +881,59 @@ mod tests {
             tracking.aggregate_player_ticket_positions(),
             BTreeSet::from([ChunkPos::new(1, 0)])
         );
+    }
+
+    #[test]
+    fn observers_are_source_owned_clamped_and_simulation_optional() {
+        let mut tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::new(4, 4));
+        let player = ServerPlayerId::from_raw_for_tests(0);
+        let resident_observer = ObserverId::from_raw(7);
+        let ticking_observer = ObserverId::from_raw(8);
+        tracking.set_requested_view(player, view(ChunkPos::new(0, 0), 0));
+
+        let resident = tracking.set_observer_requested_view(
+            resident_observer,
+            view(ChunkPos::new(0, 0), u32::MAX),
+            ObserverSimulationInterest::ResidencyOnly,
+        );
+        assert_eq!(resident.accepted, Some(view(ChunkPos::new(0, 0), 4)));
+        assert_eq!(
+            tracking.accepted_observer_view(resident_observer),
+            Some(&view(ChunkPos::new(0, 0), 4))
+        );
+        assert_eq!(tracking.aggregate_player_ticket_positions().len(), 1);
+        assert_eq!(tracking.aggregate_resident_positions().len(), 81);
+        assert_eq!(tracking.aggregate_simulation_ticket_positions().len(), 1);
+
+        tracking.set_observer_requested_view(
+            ticking_observer,
+            view(ChunkPos::new(8, 0), 0),
+            ObserverSimulationInterest::BlockAndEntityTicking,
+        );
+        assert_eq!(tracking.aggregate_resident_positions().len(), 82);
+        assert_eq!(tracking.aggregate_simulation_ticket_positions().len(), 2);
+
+        tracking.remove_observer(resident_observer);
+        assert_eq!(tracking.aggregate_resident_positions().len(), 2);
+        assert_eq!(tracking.aggregate_simulation_ticket_positions().len(), 2);
+        tracking.set_observer_requested_view(
+            resident_observer,
+            view(ChunkPos::new(0, 0), u32::MAX),
+            ObserverSimulationInterest::ResidencyOnly,
+        );
+        assert_eq!(tracking.aggregate_resident_positions().len(), 82);
+
+        tracking.remove_player(player);
+        assert!(tracking.aggregate_player_ticket_positions().is_empty());
+        assert_eq!(tracking.aggregate_resident_positions().len(), 82);
+        assert_eq!(tracking.aggregate_simulation_ticket_positions().len(), 1);
+        tracking.remove_observer(resident_observer);
+        assert_eq!(
+            tracking.aggregate_resident_positions(),
+            BTreeSet::from([ChunkPos::new(8, 0)])
+        );
+        tracking.remove_observer(ticking_observer);
+        assert!(tracking.aggregate_resident_positions().is_empty());
+        assert!(tracking.aggregate_simulation_ticket_positions().is_empty());
     }
 }

@@ -60,7 +60,10 @@ use crate::persistence::{
 use crate::physics_runtime::ServerPhysicsRuntime;
 use crate::placement::DebugBlockItem;
 use crate::player::{MovePlayerApplyResult, ServerPlayerState};
-use crate::player_chunk_tracking::{PlayerChunkTracking, PlayerChunkTrackingPolicy};
+use crate::player_chunk_tracking::{
+    DimensionInterestSource, ObserverId, ObserverSimulationInterest, PlayerChunkTracking,
+    PlayerChunkTrackingPolicy,
+};
 use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
 use crate::spawn::{SpawnColumnOrder, find_safe_surface_spawn_with_column_order};
@@ -160,6 +163,28 @@ impl DimensionRuntime {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RealmInterestDiagnostics {
+    pub realm_id: RealmId,
+    pub active_dimension: DimensionKey,
+    pub loaded_dimension_count: usize,
+    pub player_count: usize,
+    pub observer_count: usize,
+    pub dimensions: Vec<DimensionInterestDiagnostics>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DimensionInterestDiagnostics {
+    pub dimension: DimensionKey,
+    pub player_count: usize,
+    pub observer_count: usize,
+    pub ticking_chunks: usize,
+    pub entity_ticking_chunks: usize,
+    pub pending_persistence_loads: usize,
+    pub pending_persistence_saves: usize,
+    pub chunk_tracking: PlayerChunkTrackingDiagnostics,
+}
+
 #[derive(Debug)]
 pub struct RealmServer {
     realm_id: RealmId,
@@ -180,6 +205,8 @@ pub struct RealmServer {
     world_behavior_profile: WorldBehaviorProfile,
     persistence_demo_jump_experience_enabled: bool,
     players: ServerPlayerList,
+    observers: BTreeMap<ObserverId, DimensionKey>,
+    next_observer_id: u64,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
 }
 
@@ -493,6 +520,8 @@ impl RealmServer {
             world_behavior_profile: WorldBehaviorProfile::default(),
             persistence_demo_jump_experience_enabled: false,
             players: ServerPlayerList::default(),
+            observers: BTreeMap::new(),
+            next_observer_id: 0,
             debug_auxiliary_player_script: None,
         }
     }
@@ -534,6 +563,43 @@ impl RealmServer {
 
     pub fn player_dimension(&self, player_id: ServerPlayerId) -> Option<&DimensionKey> {
         self.players.dimension(player_id)
+    }
+
+    pub fn observer_dimension(&self, observer_id: ObserverId) -> Option<&DimensionKey> {
+        self.observers.get(&observer_id)
+    }
+
+    pub fn observer_count(&self) -> usize {
+        self.observers.len()
+    }
+
+    pub fn realm_interest_diagnostics(&self) -> RealmInterestDiagnostics {
+        let dimensions = self
+            .loaded_dimension_keys()
+            .into_iter()
+            .filter_map(|dimension| {
+                let runtime = self.dimension_runtime(&dimension)?;
+                let chunk_tracking = runtime.chunk_tracking.diagnostics();
+                Some(DimensionInterestDiagnostics {
+                    dimension,
+                    player_count: chunk_tracking.player_count,
+                    observer_count: chunk_tracking.observer_count,
+                    ticking_chunks: runtime.scheduler.block_ticking_chunk_count(),
+                    entity_ticking_chunks: runtime.scheduler.entity_ticking_chunk_count(),
+                    pending_persistence_loads: runtime.scheduler.pending_persistence_load_count(),
+                    pending_persistence_saves: runtime.scheduler.pending_persistence_save_count(),
+                    chunk_tracking,
+                })
+            })
+            .collect::<Vec<_>>();
+        RealmInterestDiagnostics {
+            realm_id: self.realm_id,
+            active_dimension: self.active_dimension.key.clone(),
+            loaded_dimension_count: dimensions.len(),
+            player_count: self.players.len(),
+            observer_count: self.observers.len(),
+            dimensions,
+        }
     }
 
     pub fn register_dimension(&mut self, record: DimensionRecord) -> ChunkStoreResult<bool> {
@@ -604,6 +670,7 @@ impl RealmServer {
                 .players
                 .iter()
                 .any(|(_, player)| &player.dimension == key)
+            || self.observers.values().any(|dimension| dimension == key)
         {
             return Ok(false);
         }
@@ -1018,6 +1085,94 @@ impl RealmServer {
             .expect("compatibility Overworld dimension must remain loaded")
     }
 
+    pub fn add_observer(
+        &mut self,
+        dimension: DimensionKey,
+        view: ChunkView,
+        simulation: ObserverSimulationInterest,
+    ) -> ChunkStoreResult<ObserverId> {
+        self.activate_dimension(&dimension)?;
+        let observer_id = ObserverId::from_raw(self.next_observer_id);
+        self.next_observer_id = self.next_observer_id.checked_add(1).ok_or_else(|| {
+            ChunkStoreError::InvalidData("realm observer id space exhausted".to_owned())
+        })?;
+        self.observers.insert(observer_id, dimension);
+        let configuration = session_configuration(
+            self.chunk_tracking.policy(),
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        );
+        let world_info = self.world_info_update();
+        let time_update = self.time_update();
+        self.chunk_tracking.add_observer(observer_id, simulation);
+        self.chunk_tracking.queue_update_for_observer(
+            observer_id,
+            ServerUpdate::SessionConfiguration(configuration),
+        );
+        self.chunk_tracking
+            .queue_update_for_observer(observer_id, ServerUpdate::SessionReady);
+        self.chunk_tracking
+            .queue_update_for_observer(observer_id, world_info);
+        self.chunk_tracking
+            .queue_update_for_observer(observer_id, time_update);
+        if let Err(error) = self.set_observer_interest_active(observer_id, view, simulation) {
+            let change = self.chunk_tracking.remove_observer(observer_id);
+            self.observers.remove(&observer_id);
+            if change.aggregate_changed || change.priority_centers_changed {
+                let events = self.apply_active_dimension_interest()?;
+                self.route_scheduler_events(events)?;
+            }
+            return Err(error);
+        }
+        Ok(observer_id)
+    }
+
+    pub fn set_observer_interest(
+        &mut self,
+        observer_id: ObserverId,
+        view: ChunkView,
+        simulation: ObserverSimulationInterest,
+    ) -> ChunkStoreResult<ChunkView> {
+        let dimension = self
+            .observers
+            .get(&observer_id)
+            .cloned()
+            .ok_or_else(|| unknown_observer_error(observer_id))?;
+        self.activate_dimension(&dimension)?;
+        self.set_observer_interest_active(observer_id, view, simulation)
+    }
+
+    pub fn try_drain_updates_for_observer(
+        &mut self,
+        observer_id: ObserverId,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let dimension = self
+            .observers
+            .get(&observer_id)
+            .cloned()
+            .ok_or_else(|| unknown_observer_error(observer_id))?;
+        self.activate_dimension(&dimension)?;
+        self.reconcile_remote_players_for_observer(observer_id);
+        self.reconcile_entities_for_observer(observer_id);
+        Ok(self.chunk_tracking.drain_observer_updates(observer_id))
+    }
+
+    pub fn remove_observer(&mut self, observer_id: ObserverId) -> ChunkStoreResult<bool> {
+        let Some(dimension) = self.observers.get(&observer_id).cloned() else {
+            return Ok(false);
+        };
+        self.activate_dimension(&dimension)?;
+        let source = DimensionInterestSource::Observer(observer_id);
+        self.remote_players.remove_observer(source);
+        self.entity_tracking.remove_observer(source);
+        let change = self.chunk_tracking.remove_observer(observer_id);
+        if change.aggregate_changed || change.priority_centers_changed {
+            let events = self.apply_active_dimension_interest()?;
+            self.route_scheduler_events(events)?;
+        }
+        self.observers.remove(&observer_id);
+        Ok(true)
+    }
+
     fn add_player_with_capabilities_in_dimension(
         &mut self,
         dimension: DimensionKey,
@@ -1157,7 +1312,8 @@ impl RealmServer {
         }
         let routes = self.remote_players.remove_player(player_id);
         self.route_remote_player_updates(routes);
-        self.entity_tracking.remove_observer(player_id);
+        self.entity_tracking
+            .remove_observer(DimensionInterestSource::Player(player_id));
         self.remove_player_chunk_tracking(player_id);
         true
     }
@@ -1353,7 +1509,7 @@ impl RealmServer {
         let scheduler_event_count = report.events.len();
         let scheduler_apply_start = simulation_timing_start();
         self.route_scheduler_events(report.events)?;
-        self.prepare_publications_for_all_player_observers()?;
+        self.prepare_publications_for_all_interest_sources()?;
         let scheduler_apply_events_us = simulation_timing_elapsed_us(scheduler_apply_start);
         let chunk_tracking = self.chunk_tracking_diagnostics();
         let scheduler_timing = report.timing;
@@ -1557,7 +1713,7 @@ impl RealmServer {
         self.mark_entity_updates_dirty(&entity_updates);
 
         if simulation_tick == 1 || simulation_tick.is_multiple_of(20) {
-            self.queue_update_for_all_players(self.time_update());
+            self.queue_time_update_for_all_interest_sources(self.time_update());
         }
         let fluid_event_apply_start = simulation_timing_start();
         self.route_scheduler_events(fluid_events)?;
@@ -1953,16 +2109,55 @@ impl RealmServer {
             }
         }
         let events = if change.aggregate_changed || change.priority_centers_changed {
-            let positions = self.chunk_tracking.aggregate_player_ticket_positions();
-            let centers = self
-                .chunk_tracking
-                .aggregate_player_ticket_priority_centers();
-            self.scheduler
-                .apply_player_ticket_positions_with_priority(positions, centers)?
+            self.apply_active_dimension_interest()?
         } else {
             Vec::new()
         };
         self.apply_scheduler_events_for_target(target, events)
+    }
+
+    fn set_observer_interest_active(
+        &mut self,
+        observer_id: ObserverId,
+        view: ChunkView,
+        simulation: ObserverSimulationInterest,
+    ) -> ChunkStoreResult<ChunkView> {
+        let change = self
+            .chunk_tracking
+            .set_observer_requested_view(observer_id, view, simulation);
+        for pos in &change.removed_chunks {
+            self.chunk_tracking
+                .queue_unload_for_observer(observer_id, *pos);
+        }
+        for pos in &change.added_chunks {
+            if let Some(snapshot) = self.scheduler.client_visible_snapshot(*pos) {
+                self.chunk_tracking
+                    .queue_snapshot_for_observer(observer_id, snapshot);
+            }
+        }
+        if change.aggregate_changed || change.priority_centers_changed {
+            let events = self.apply_active_dimension_interest()?;
+            self.route_scheduler_events(events)?;
+        }
+        self.reconcile_remote_players_for_observer(observer_id);
+        self.reconcile_entities_for_observer(observer_id);
+        change.accepted.ok_or_else(|| {
+            ChunkStoreError::InvalidData(format!(
+                "observer {} did not retain an accepted view",
+                observer_id.as_u64()
+            ))
+        })
+    }
+
+    fn apply_active_dimension_interest(&mut self) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let resident_positions = self.chunk_tracking.aggregate_resident_positions();
+        let simulation_positions = self.chunk_tracking.aggregate_simulation_ticket_positions();
+        let centers = self.chunk_tracking.aggregate_interest_priority_centers();
+        self.scheduler.apply_player_ticket_positions_with_priority(
+            resident_positions,
+            simulation_positions,
+            centers,
+        )
     }
 
     fn handle_move_player_for_target(
@@ -2375,11 +2570,11 @@ impl RealmServer {
             match event {
                 ChunkSchedulerEvent::SnapshotReady(snapshot) => {
                     self.chunk_tracking
-                        .queue_snapshot_for_tracking_players(snapshot);
+                        .queue_snapshot_for_tracking_sources(snapshot);
                 }
                 ChunkSchedulerEvent::Unloaded { pos } => {
                     self.loading_progress.clear_chunk(pos);
-                    self.chunk_tracking.queue_unload_for_tracking_players(pos);
+                    self.chunk_tracking.queue_unload_for_tracking_sources(pos);
                 }
                 ChunkSchedulerEvent::HolderUnloaded { pos } => {
                     self.block_ticks.remove_chunk_ticks(pos);
@@ -2408,7 +2603,7 @@ impl RealmServer {
                     updates,
                 } => {
                     self.chunk_tracking
-                        .queue_section_updates_for_tracking_players(pos, section_y, updates);
+                        .queue_section_updates_for_tracking_sources(pos, section_y, updates);
                 }
                 ChunkSchedulerEvent::FluidTickScheduled { pos, fluid, delay } => {
                     let simulation_tick = self.simulation_tick;
@@ -2432,31 +2627,44 @@ impl RealmServer {
     fn route_remote_player_updates(&mut self, routes: Vec<RoutedRemotePlayerUpdate>) {
         for route in routes {
             self.chunk_tracking
-                .queue_update_for_player(route.recipient, route.update);
+                .queue_update_for_source(route.recipient, route.update);
         }
     }
 
     fn route_entity_updates(&mut self, routes: Vec<RoutedEntityUpdate>) {
         for route in routes {
             self.chunk_tracking
-                .queue_update_for_player(route.recipient, route.update);
+                .queue_update_for_source(route.recipient, route.update);
         }
     }
 
     fn reconcile_remote_players_for_target_observer(&mut self, target: CommandTarget) {
-        let observer = target.player_id();
-        if !self.players.contains(observer) {
+        let player_id = target.player_id();
+        if !self.players.contains(player_id) {
             return;
         }
+        let observer = DimensionInterestSource::Player(player_id);
         let states = self.remote_player_states();
         let runtime = &mut self.active_dimension;
         let chunk_tracking = &runtime.chunk_tracking;
-        let routes =
-            runtime
-                .remote_players
-                .reconcile_observer(observer, &states, |player_id, pos| {
-                    chunk_tracking.player_tracks_chunk(player_id, pos)
-                });
+        let routes = runtime
+            .remote_players
+            .reconcile_observer(observer, &states, |source, pos| {
+                chunk_tracking.source_tracks_chunk(source, pos)
+            });
+        self.route_remote_player_updates(routes);
+    }
+
+    fn reconcile_remote_players_for_observer(&mut self, observer_id: ObserverId) {
+        let observer = DimensionInterestSource::Observer(observer_id);
+        let states = self.remote_player_states();
+        let runtime = &mut self.active_dimension;
+        let chunk_tracking = &runtime.chunk_tracking;
+        let routes = runtime
+            .remote_players
+            .reconcile_observer(observer, &states, |source, pos| {
+                chunk_tracking.source_tracks_chunk(source, pos)
+            });
         self.route_remote_player_updates(routes);
     }
 
@@ -2471,13 +2679,13 @@ impl RealmServer {
         let Some(state) = self.remote_player_state(subject) else {
             return;
         };
-        let observers = self.player_observers();
+        let observers = self.chunk_tracking.interest_sources();
         let runtime = &mut self.active_dimension;
         let chunk_tracking = &runtime.chunk_tracking;
         let routes = runtime.remote_players.reconcile_subject(
             state,
             observers,
-            |player_id, pos| chunk_tracking.player_tracks_chunk(player_id, pos),
+            |source, pos| chunk_tracking.source_tracks_chunk(source, pos),
             emit_existing_updates,
         );
         self.route_remote_player_updates(routes);
@@ -2510,15 +2718,29 @@ impl RealmServer {
     }
 
     fn reconcile_entities_for_target_observer(&mut self, target: CommandTarget) {
-        let observer = target.player_id();
+        let observer = DimensionInterestSource::Player(target.player_id());
         let runtime = &mut self.active_dimension;
         let states = runtime.entities.states();
         let chunk_tracking = &runtime.chunk_tracking;
         let routes =
             runtime
                 .entity_tracking
-                .reconcile_observer(observer, &states, |player_id, pos| {
-                    chunk_tracking.player_tracks_chunk(player_id, pos)
+                .reconcile_observer(observer, &states, |source, pos| {
+                    chunk_tracking.source_tracks_chunk(source, pos)
+                });
+        self.route_entity_updates(routes);
+    }
+
+    fn reconcile_entities_for_observer(&mut self, observer_id: ObserverId) {
+        let observer = DimensionInterestSource::Observer(observer_id);
+        let runtime = &mut self.active_dimension;
+        let states = runtime.entities.states();
+        let chunk_tracking = &runtime.chunk_tracking;
+        let routes =
+            runtime
+                .entity_tracking
+                .reconcile_observer(observer, &states, |source, pos| {
+                    chunk_tracking.source_tracks_chunk(source, pos)
                 });
         self.route_entity_updates(routes);
     }
@@ -2528,7 +2750,7 @@ impl RealmServer {
         subjects: impl IntoIterator<Item = ServerEntityState>,
         emit_existing_updates: bool,
     ) {
-        let observers = self.player_observers();
+        let observers = self.chunk_tracking.interest_sources();
         let runtime = &mut self.active_dimension;
         let chunk_tracking = &runtime.chunk_tracking;
         let mut routes = Vec::new();
@@ -2536,7 +2758,7 @@ impl RealmServer {
             routes.extend(runtime.entity_tracking.reconcile_subject(
                 subject,
                 observers.iter().copied(),
-                |player_id, pos| chunk_tracking.player_tracks_chunk(player_id, pos),
+                |source, pos| chunk_tracking.source_tracks_chunk(source, pos),
                 emit_existing_updates,
             ));
         }
@@ -2643,7 +2865,7 @@ impl RealmServer {
             .collect()
     }
 
-    fn prepare_publications_for_all_player_observers(&mut self) -> ChunkStoreResult<()> {
+    fn prepare_publications_for_all_interest_sources(&mut self) -> ChunkStoreResult<()> {
         for target in self.player_targets() {
             self.reconcile_remote_players_for_target_observer(target);
             let initial_spawn_update = self.initial_spawn_update_for_target(target)?;
@@ -2655,13 +2877,26 @@ impl RealmServer {
                 );
             }
         }
+        let observers = self
+            .chunk_tracking
+            .interest_sources()
+            .into_iter()
+            .filter_map(|source| match source {
+                DimensionInterestSource::Observer(observer_id) => Some(observer_id),
+                DimensionInterestSource::Player(_) => None,
+            })
+            .collect::<Vec<_>>();
+        for observer_id in observers {
+            self.reconcile_remote_players_for_observer(observer_id);
+            self.reconcile_entities_for_observer(observer_id);
+        }
         Ok(())
     }
 
-    fn queue_update_for_all_players(&mut self, update: ServerUpdate) {
-        for player_id in self.player_observers() {
+    fn queue_time_update_for_all_interest_sources(&mut self, update: ServerUpdate) {
+        for source in self.chunk_tracking.interest_sources() {
             self.chunk_tracking
-                .queue_update_for_player(player_id, update.clone());
+                .queue_update_for_source(source, update.clone());
         }
     }
 
@@ -2860,7 +3095,8 @@ impl RealmServer {
         let queued_updates = self.chunk_tracking.drain_updates(player_id);
         let routes = self.remote_players.remove_player(player_id);
         self.route_remote_player_updates(routes);
-        self.entity_tracking.remove_observer(player_id);
+        self.entity_tracking
+            .remove_observer(DimensionInterestSource::Player(player_id));
         self.remove_player_chunk_tracking(player_id);
 
         self.activate_dimension(&destination)?;
@@ -2993,13 +3229,16 @@ impl RealmServer {
         if !change.aggregate_changed {
             return;
         }
-        let positions = self.chunk_tracking.aggregate_player_ticket_positions();
-        let centers = self
-            .chunk_tracking
-            .aggregate_player_ticket_priority_centers();
+        let resident_positions = self.chunk_tracking.aggregate_resident_positions();
+        let simulation_positions = self.chunk_tracking.aggregate_simulation_ticket_positions();
+        let centers = self.chunk_tracking.aggregate_interest_priority_centers();
         let events = self
             .scheduler
-            .apply_player_ticket_positions_with_priority(positions, centers)
+            .apply_player_ticket_positions_with_priority(
+                resident_positions,
+                simulation_positions,
+                centers,
+            )
             .expect("failed to reconcile chunk tracking after player disconnect");
         self.route_scheduler_events(events)
             .expect("failed to route scheduler events after player disconnect");
@@ -3336,6 +3575,13 @@ impl CommandTarget {
 
 fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {
     ChunkStoreError::InvalidData(format!("unknown server player {player_id}"))
+}
+
+fn unknown_observer_error(observer_id: ObserverId) -> ChunkStoreError {
+    ChunkStoreError::InvalidData(format!(
+        "unknown dimension observer {}",
+        observer_id.as_u64()
+    ))
 }
 
 fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId> {

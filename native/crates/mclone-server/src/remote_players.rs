@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_protocol::{PlayerAppearance, RemotePlayerId, RemotePlayerUpdate, ServerUpdate};
 
-use crate::players::ServerPlayerId;
+use crate::{player_chunk_tracking::DimensionInterestSource, players::ServerPlayerId};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct RemotePlayerState {
@@ -42,13 +42,13 @@ impl RemotePlayerState {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct RoutedRemotePlayerUpdate {
-    pub(crate) recipient: ServerPlayerId,
+    pub(crate) recipient: DimensionInterestSource,
     pub(crate) update: ServerUpdate,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct RemotePlayerTracking {
-    seen_by_subject: BTreeMap<ServerPlayerId, BTreeSet<ServerPlayerId>>,
+    seen_by_subject: BTreeMap<ServerPlayerId, BTreeSet<DimensionInterestSource>>,
 }
 
 impl RemotePlayerTracking {
@@ -63,22 +63,28 @@ impl RemotePlayerTracking {
         let mut routes = Vec::new();
         if let Some(observers) = self.seen_by_subject.remove(&player_id) {
             for observer in observers {
-                if observer != player_id {
+                if observer != DimensionInterestSource::Player(player_id) {
                     routes.push(remote_remove_route(observer, player_id));
                 }
             }
         }
         for observers in self.seen_by_subject.values_mut() {
-            observers.remove(&player_id);
+            observers.remove(&DimensionInterestSource::Player(player_id));
         }
         routes
     }
 
+    pub(crate) fn remove_observer(&mut self, observer: DimensionInterestSource) {
+        for observers in self.seen_by_subject.values_mut() {
+            observers.remove(&observer);
+        }
+    }
+
     pub(crate) fn reconcile_observer(
         &mut self,
-        observer: ServerPlayerId,
+        observer: DimensionInterestSource,
         subjects: &[RemotePlayerState],
-        mut tracks_chunk: impl FnMut(ServerPlayerId, ChunkPos) -> bool,
+        mut tracks_chunk: impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
     ) -> Vec<RoutedRemotePlayerUpdate> {
         let mut routes = Vec::new();
         for subject in subjects {
@@ -90,8 +96,8 @@ impl RemotePlayerTracking {
     pub(crate) fn reconcile_subject(
         &mut self,
         subject: RemotePlayerState,
-        observers: impl IntoIterator<Item = ServerPlayerId>,
-        mut tracks_chunk: impl FnMut(ServerPlayerId, ChunkPos) -> bool,
+        observers: impl IntoIterator<Item = DimensionInterestSource>,
+        mut tracks_chunk: impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
         emit_existing_updates: bool,
     ) -> Vec<RoutedRemotePlayerUpdate> {
         let mut routes = Vec::new();
@@ -110,13 +116,13 @@ impl RemotePlayerTracking {
 
     fn reconcile_pair(
         &mut self,
-        observer: ServerPlayerId,
+        observer: DimensionInterestSource,
         subject: RemotePlayerState,
-        tracks_chunk: &mut impl FnMut(ServerPlayerId, ChunkPos) -> bool,
+        tracks_chunk: &mut impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
         emit_existing_update: bool,
         routes: &mut Vec<RoutedRemotePlayerUpdate>,
     ) {
-        if observer == subject.player_id {
+        if observer == DimensionInterestSource::Player(subject.player_id) {
             return;
         }
         let observers = self.seen_by_subject.entry(subject.player_id).or_default();
@@ -140,7 +146,7 @@ impl RemotePlayerTracking {
 }
 
 fn remote_remove_route(
-    recipient: ServerPlayerId,
+    recipient: DimensionInterestSource,
     subject: ServerPlayerId,
 ) -> RoutedRemotePlayerUpdate {
     RoutedRemotePlayerUpdate {
@@ -177,10 +183,10 @@ mod tests {
 
     #[test]
     fn observer_reconcile_adds_and_removes_visible_subjects() {
-        let observer = player(1);
+        let observer = DimensionInterestSource::Player(player(1));
         let subject = player(2);
         let mut tracking = RemotePlayerTracking::default();
-        tracking.add_player(observer);
+        tracking.add_player(player(1));
         tracking.add_player(subject);
         let subject_state = state(subject, 8.0, 8.0);
 
@@ -209,7 +215,7 @@ mod tests {
 
     #[test]
     fn subject_reconcile_updates_existing_observers() {
-        let observer = player(1);
+        let observer = DimensionInterestSource::Player(player(1));
         let subject = player(2);
         let mut tracking = RemotePlayerTracking::default();
         let initial = state(subject, 8.0, 8.0);

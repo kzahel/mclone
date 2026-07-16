@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-4 complete; source-owned dimension
-interest is next in Slice 5
+Status: active 2026-07-16; Slices 0-5 complete; live player dimension
+transfer is next in Slice 6
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -705,6 +705,8 @@ one realm and one server host.
 
 ### Slice 5: Source-owned dimension interest
 
+Status: complete 2026-07-16.
+
 - Replace the anonymous aggregate player set with per-source interest inside
   each dimension.
 - Preserve player routing while adding non-player `ObserverId` sources.
@@ -712,6 +714,41 @@ one realm and one server host.
   interest.
 - Add overlap/removal, dimension isolation, saturation, cancellation, and idle
   unload tests plus source-attributed diagnostics.
+
+Evidence:
+
+- dimension interest now has stable `DimensionInterestSource::Player` and
+  `DimensionInterestSource::Observer` owners; `ObserverId` is realm-global and
+  maps to exactly one current dimension without creating a `ServerPlayerEntry`;
+- every source retains its own requested/accepted bounded view and outbound
+  queue. Aggregate residency is the union of those source views, while
+  aggregate simulation interest is a separate union;
+- players always contribute residency plus block/entity ticking. Observers
+  default to `ResidencyOnly` at the non-ticking full-chunk border level and can
+  explicitly request `BlockAndEntityTicking`; ticket reconciliation safely
+  transitions overlapping chunks between the two levels;
+- chunk snapshots, unloads, block deltas, real remote players, entities, and
+  realm time route to player and observer recipients through the same
+  dimension-local publication paths. Player position, experience, commands,
+  inventory, identity, and player-record persistence remain player-only;
+- `RealmInterestDiagnostics` attributes player/observer counts, residency,
+  simulation tickets, ticking lanes, persistence pressure, per-observer queue
+  depth, and encoded observer bytes to realm and dimension identities;
+- source unit coverage proves large views clamp at the configured limit,
+  overlapping sources reduce correctly, optional ticking remains distinct,
+  and either removal order preserves the other source;
+- integrated observer coverage proves a bounded observer receives the normal
+  world prelude, chunk snapshot, real-player publication, and live block delta
+  without position/experience or a persisted player record;
+- multi-dimension coverage proves equal observer coordinates remain isolated,
+  an occupied observer dimension cannot unload, removal permits idle unload,
+  and immediate cancellation leaves no interest or outbound queue;
+- the complete `mclone-server` suite passes with 430 tests, the native
+  workspace check passes, and `mclone-app-runtime` test targets compile after
+  qualifying its SQLite catalog fixture with the Overworld dimension key;
+- the browser WASM check, TypeScript check, and production browser smoke pass;
+  the captured canvas remains visually correct with ordinary player behavior
+  unchanged.
 
 Exit: an observer keeps and receives one bounded region without any player
 entity or player persistence activity.

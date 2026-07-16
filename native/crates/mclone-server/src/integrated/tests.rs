@@ -403,5 +403,6 @@ mod dedicated_players;
 mod diagnostics;
 mod dimensions;
 mod entities;
+mod observers;
 mod player_state;
 mod simulation_physics;
