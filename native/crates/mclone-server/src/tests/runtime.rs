@@ -35,7 +35,7 @@ fn chunk_scheduler_uses_platform_worldgen_mailbox() {
 
 #[test]
 fn integrated_server_publishes_interested_chunks() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
 
     let updates = handle_command_and_poll(
         &mut server,
@@ -51,6 +51,14 @@ fn integrated_server_publishes_interested_chunks() {
         Some(ServerUpdate::SessionConfiguration(_))
     ));
     assert!(matches!(updates.get(1), Some(ServerUpdate::SessionReady)));
+    assert!(matches!(
+        updates.get(2),
+        Some(ServerUpdate::WorldInfo { .. })
+    ));
+    assert!(matches!(
+        updates.get(3),
+        Some(ServerUpdate::TimeUpdate { .. })
+    ));
 
     assert_eq!(
         updates
@@ -333,7 +341,7 @@ fn integrated_server_publishes_interested_chunks() {
             Some(job.id)
         );
     }
-    assert!(updates.iter().skip(2).all(|update| {
+    assert!(updates.iter().skip(4).all(|update| {
         matches!(
             update,
             ServerUpdate::ChunkSnapshot(_) | ServerUpdate::EntitySnapshot(_)
@@ -455,7 +463,7 @@ fn scheduler_tick_report_lists_runtime_lanes_without_simulation() {
 
 #[test]
 fn integrated_server_tick_report_exposes_protocol_updates_and_lanes() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
 
     handle_command_and_poll(
         &mut server,
@@ -480,7 +488,7 @@ fn integrated_server_tick_report_exposes_protocol_updates_and_lanes() {
 
 #[test]
 fn integrated_server_simulation_tick_report_records_phases() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
 
     handle_command_and_poll(
         &mut server,
@@ -517,7 +525,7 @@ fn integrated_server_simulation_tick_report_records_phases() {
 
 #[test]
 fn changed_interest_unloads_chunks_outside_view() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     handle_command_and_poll(
         &mut server,
         ClientCommand::SetChunkView(ChunkView {

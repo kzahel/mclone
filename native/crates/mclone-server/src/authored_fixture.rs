@@ -469,7 +469,7 @@ mod tests {
     use mclone_worldgen::block::{AIR, generated_block_state_id};
 
     use super::*;
-    use crate::IntegratedServer;
+    use crate::LocalRealmSession;
 
     static TEST_ROOT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -695,7 +695,7 @@ mod tests {
 
             {
                 let mut server =
-                    IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root)
+                    LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root)
                         .unwrap();
                 server
                     .set_world_generation_profile(manifest.world_generation_profile)
@@ -715,7 +715,7 @@ mod tests {
 
             {
                 let mut server =
-                    IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root)
+                    LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root)
                         .unwrap();
                 server
                     .set_world_generation_profile(manifest.world_generation_profile)
@@ -736,7 +736,8 @@ mod tests {
                 .unwrap();
         let saved_positions = {
             let mut server =
-                IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
+                LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root)
+                    .unwrap();
             server
                 .set_world_generation_profile(manifest.world_generation_profile)
                 .unwrap();
@@ -786,7 +787,7 @@ mod tests {
         };
 
         let mut server =
-            IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
         server
             .set_world_generation_profile(manifest.world_generation_profile)
             .unwrap();
@@ -817,7 +818,7 @@ mod tests {
         let manifest =
             write_authored_world_fixture_dir(&root, AuthoredWorldFixtureKind::Table).unwrap();
         let mut server =
-            IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
         server
             .set_world_generation_profile(manifest.world_generation_profile)
             .unwrap();
@@ -845,7 +846,7 @@ mod tests {
         let manifest =
             write_authored_world_fixture_dir(&root, AuthoredWorldFixtureKind::Table).unwrap();
         let mut server =
-            IntegratedServer::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
         server
             .set_world_generation_profile(manifest.world_generation_profile)
             .unwrap();
@@ -871,7 +872,7 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    fn load_view_until_idle(server: &mut IntegratedServer, center: ChunkPos) -> Vec<ServerUpdate> {
+    fn load_view_until_idle(server: &mut LocalRealmSession, center: ChunkPos) -> Vec<ServerUpdate> {
         let mut updates = server.handle_command(ClientCommand::SetChunkView(ChunkView {
             center,
             render_distance: 0,

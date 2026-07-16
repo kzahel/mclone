@@ -10,7 +10,7 @@ fn scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload() {
     };
     let source = WorldBlockPos::new(8, 120, 8);
     let below = source.below();
-    let mut server = IntegratedServer::with_world_store(
+    let mut server = LocalRealmSession::with_world_store(
         12_345,
         Box::new(FilesystemChunkSnapshotStore::new(&root)),
     );
@@ -94,7 +94,7 @@ fn scheduled_fluid_tick_survives_fully_unloaded_chunk_until_reload() {
 
 #[test]
 fn integrated_server_tick_uses_simulation_layer() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
 
     handle_command_and_poll(
         &mut server,
@@ -152,7 +152,7 @@ fn scheduler_tick_report_counts_bounded_pending_unload_work() {
 
 #[test]
 fn duplicate_interest_does_not_regenerate_loaded_chunks() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     let interest = ChunkView {
         center: ChunkPos::new(0, 0),
         render_distance: 0,
@@ -172,7 +172,7 @@ fn duplicate_interest_does_not_regenerate_loaded_chunks() {
 
 #[test]
 fn adjacent_interest_reuses_retained_dependency_chunks() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
 
     let first_updates = handle_command_and_poll(
         &mut server,

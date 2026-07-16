@@ -102,7 +102,7 @@ pub(super) fn poll_scheduler_until_persistence_idle(scheduler: &mut ChunkSchedul
 }
 
 pub(super) fn handle_command_and_poll(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     command: ClientCommand,
 ) -> Vec<ServerUpdate> {
     let mut updates = server.handle_command(command);
@@ -112,7 +112,7 @@ pub(super) fn handle_command_and_poll(
 }
 
 pub(super) fn try_handle_command_and_poll(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     command: ClientCommand,
 ) -> ChunkStoreResult<Vec<ServerUpdate>> {
     let mut updates = server.try_handle_command(command)?;
@@ -122,7 +122,7 @@ pub(super) fn try_handle_command_and_poll(
 }
 
 pub(super) fn accept_and_remove_player_position_updates(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     updates: &mut Vec<ServerUpdate>,
 ) {
     try_accept_and_remove_player_position_updates(server, updates)
@@ -130,7 +130,7 @@ pub(super) fn accept_and_remove_player_position_updates(
 }
 
 pub(super) fn try_accept_and_remove_player_position_updates(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     updates: &mut Vec<ServerUpdate>,
 ) -> ChunkStoreResult<()> {
     let mut index = 0;
@@ -152,12 +152,12 @@ pub(super) fn try_accept_and_remove_player_position_updates(
     Ok(())
 }
 
-pub(super) fn poll_server_until_idle(server: &mut IntegratedServer) -> Vec<ServerUpdate> {
+pub(super) fn poll_server_until_idle(server: &mut LocalRealmSession) -> Vec<ServerUpdate> {
     try_poll_server_until_idle(server).unwrap()
 }
 
 pub(super) fn try_poll_server_until_idle(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
 ) -> ChunkStoreResult<Vec<ServerUpdate>> {
     let mut updates = Vec::new();
     for _ in 0..60_000 {
@@ -173,7 +173,7 @@ pub(super) fn try_poll_server_until_idle(
 }
 
 pub(super) fn try_poll_server_until_persistence_idle(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
 ) -> ChunkStoreResult<()> {
     for _ in 0..60_000 {
         if server.scheduler().pending_persistence_load_count() == 0
@@ -198,7 +198,7 @@ pub(super) fn wait_for_scheduler_completion(scheduler: &mut ChunkScheduler) {
     let _ = scheduler.wait_for_light_completion(timeout);
 }
 
-pub(super) fn wait_for_server_completion(server: &mut IntegratedServer) {
+pub(super) fn wait_for_server_completion(server: &mut LocalRealmSession) {
     let timeout = std::time::Duration::from_millis(1);
     let _ = server.wait_for_worldgen_completion(timeout);
     let _ = server.wait_for_light_completion(timeout);

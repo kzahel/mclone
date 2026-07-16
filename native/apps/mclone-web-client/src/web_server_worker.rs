@@ -17,8 +17,8 @@ use mclone_protocol::{
 };
 use mclone_server::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
-    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServer,
-    IntegratedServerRunner, LightStatusMailboxKind, PlayerRecord, PlayerRecordKey,
+    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServerRunner,
+    LightStatusMailboxKind, LocalRealmSession, PlayerRecord, PlayerRecordKey,
     ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
     ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
     WorkerFrameMetrics, WorkerFrameTransportKind, WorldGenerationProfile, WorldMetadata,
@@ -1699,7 +1699,7 @@ fn ensure_worker_response_ok(value: &JsValue) -> Result<(), String> {
 
 #[wasm_bindgen]
 pub struct McloneWebIntegratedServerWorker {
-    server: IntegratedServer,
+    server: LocalRealmSession,
     diagnostics: ServerRunnerDiagnostics,
     indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
     command_queue_depth: usize,
@@ -1827,7 +1827,7 @@ impl WorldStore for WebIndexedDbWorldStore {
 impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: i64) -> Self {
-        let server = IntegratedServer::local_integrated(seed);
+        let server = LocalRealmSession::local_integrated(seed);
         Self::from_server(seed, server, None)
     }
 
@@ -1838,7 +1838,7 @@ impl McloneWebIntegratedServerWorker {
         bindgen_js_url: String,
         bindgen_wasm_url: String,
     ) -> Self {
-        let server = IntegratedServer::local_integrated_with_wasm_job_workers(
+        let server = LocalRealmSession::local_integrated_with_wasm_job_workers(
             seed,
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
         );
@@ -1861,7 +1861,7 @@ impl McloneWebIntegratedServerWorker {
         )
         .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server = IntegratedServer::local_integrated_with_world_store(seed, store);
+        let server = LocalRealmSession::local_integrated_with_world_store(seed, store);
         Ok(Self::from_server(seed, server, Some(state)))
     }
 
@@ -1879,7 +1879,8 @@ impl McloneWebIntegratedServerWorker {
             .map_err(|error| JsValue::from_str(&error))?,
         ));
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server = IntegratedServer::local_integrated_with_external_load_world_store(seed, store);
+        let server =
+            LocalRealmSession::local_integrated_with_external_load_world_store(seed, store);
         Ok(Self::from_server(seed, server, Some(state)))
     }
 
@@ -1902,7 +1903,7 @@ impl McloneWebIntegratedServerWorker {
         )
         .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server = IntegratedServer::local_integrated_with_world_store_and_wasm_job_workers(
+        let server = LocalRealmSession::local_integrated_with_world_store_and_wasm_job_workers(
             seed,
             store,
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
@@ -1928,7 +1929,7 @@ impl McloneWebIntegratedServerWorker {
         ));
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
         let server =
-            IntegratedServer::local_integrated_with_external_load_world_store_and_wasm_job_workers(
+            LocalRealmSession::local_integrated_with_external_load_world_store_and_wasm_job_workers(
                 seed,
                 store,
                 WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
@@ -2141,7 +2142,7 @@ impl McloneWebIntegratedServerWorker {
 impl McloneWebIntegratedServerWorker {
     fn from_server(
         seed: i64,
-        mut server: IntegratedServer,
+        mut server: LocalRealmSession,
         indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
     ) -> Self {
         server.set_persistence_demo_jump_experience_enabled(true);

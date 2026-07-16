@@ -20,7 +20,7 @@ use mclone_protocol::{
     SetPlayerAppearanceCommand,
 };
 use mclone_render_session::EngineCameraViewMode;
-use mclone_server::{IntegratedServer, ServerPlayerId};
+use mclone_server::{LocalRealmSession, ServerPlayerId};
 
 use crate::cli::{
     HeadlessScreenshotOptions, HeadlessScreenshotUi, RemotePlayerVisualSmokeOptions,
@@ -196,8 +196,8 @@ impl Drop for LoopbackDedicatedServer {
     }
 }
 
-fn new_integrated_server(scene: &crate::cli::SceneOptions) -> IntegratedServer {
-    let mut server = IntegratedServer::new(scene.seed);
+fn new_integrated_server(scene: &crate::cli::SceneOptions) -> LocalRealmSession {
+    let mut server = LocalRealmSession::new(scene.seed);
     server.set_lighting_enabled(scene.lighting_enabled);
     if let Some(day_time) = scene.day_time_override {
         server.set_day_time(day_time);
@@ -223,7 +223,7 @@ fn accept_loop(
                 if !running.load(Ordering::Acquire) {
                     break;
                 }
-                let player_id = server.add_dedicated_player();
+                let player_id = server.add_player();
                 connections.insert(player_id, DedicatedConnectionState::default());
                 let command_tx = command_tx.clone();
                 connection_threads.push(thread::spawn(move || {
@@ -256,7 +256,7 @@ enum ServerIoCommand {
 }
 
 fn drain_server_commands(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     connections: &mut BTreeMap<ServerPlayerId, DedicatedConnectionState>,
     command_rx: &mpsc::Receiver<ServerIoCommand>,
 ) -> Result<()> {
@@ -278,7 +278,7 @@ fn drain_server_commands(
             }
             ServerIoCommand::Disconnect { player_id } => {
                 connections.remove(&player_id);
-                server.remove_dedicated_player(player_id);
+                server.remove_player(player_id);
             }
         }
     }
@@ -336,7 +336,7 @@ fn request_server_command(
 
 fn handle_client_command(
     connection: &mut DedicatedConnectionState,
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     player_id: ServerPlayerId,
     command: ClientCommand,
 ) -> Result<Vec<ServerUpdate>> {
@@ -364,7 +364,7 @@ struct DedicatedConnectionState {
 impl DedicatedConnectionState {
     fn handle_command(
         &mut self,
-        server: &mut IntegratedServer,
+        server: &mut LocalRealmSession,
         player_id: ServerPlayerId,
         command: ClientCommand,
     ) -> Result<Vec<ServerUpdate>> {
@@ -383,7 +383,7 @@ impl DedicatedConnectionState {
 
     fn flush_movement(
         &mut self,
-        server: &mut IntegratedServer,
+        server: &mut LocalRealmSession,
         player_id: ServerPlayerId,
     ) -> Result<Vec<ServerUpdate>> {
         let mut updates = Vec::new();
@@ -400,7 +400,7 @@ impl DedicatedConnectionState {
 }
 
 fn wait_for_server_jobs(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     player_id: ServerPlayerId,
 ) -> Result<Vec<ServerUpdate>> {
     let deadline = Instant::now() + SERVER_JOB_TIMEOUT;

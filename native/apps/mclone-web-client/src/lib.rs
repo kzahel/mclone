@@ -19,7 +19,7 @@ use mclone_protocol::{
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_render::RenderBackend;
-use mclone_server::IntegratedServer;
+use mclone_server::LocalRealmSession;
 #[cfg(target_arch = "wasm32")]
 use mclone_server::{IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerKind};
 #[cfg(target_arch = "wasm32")]
@@ -592,7 +592,7 @@ fn combine_step_reports(
 
 #[derive(Debug)]
 struct WebLoopbackHost {
-    server: IntegratedServer,
+    server: LocalRealmSession,
     transport: LocalTransport,
     queued_updates: VecDeque<(ServerUpdate, usize)>,
     queued_update_bytes: usize,
@@ -601,7 +601,7 @@ struct WebLoopbackHost {
 impl WebLoopbackHost {
     fn new(seed: i64) -> Self {
         Self {
-            server: IntegratedServer::local_integrated(seed),
+            server: LocalRealmSession::local_integrated(seed),
             transport: LocalTransport::new(),
             queued_updates: VecDeque::new(),
             queued_update_bytes: 0,

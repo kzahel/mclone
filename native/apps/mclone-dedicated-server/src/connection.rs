@@ -626,10 +626,19 @@ mod tests {
                     outbound.insert(id, connection_outbound);
                 }
                 DedicatedNetworkEvent::Command { id, command, .. } => {
-                    command_events.push((id, command));
-                    outbound[&id]
-                        .publish(vec![time_update(command_events.len() as u64)])
-                        .unwrap();
+                    if matches!(command, ClientCommand::SetChunkView(_)) {
+                        command_events.push((id, command));
+                        outbound[&id]
+                            .publish(vec![time_update(command_events.len() as u64)])
+                            .unwrap();
+                    } else {
+                        assert_eq!(
+                            command,
+                            ClientCommand::Disconnect(
+                                mclone_protocol::ClientDisconnectReason::Quit
+                            )
+                        );
+                    }
                 }
                 DedicatedNetworkEvent::Disconnected { id, .. } => {
                     outbound.remove(&id);

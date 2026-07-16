@@ -461,7 +461,7 @@ mod tests {
     #[test]
     fn per_player_views_diff_visible_sets_and_aggregate_tickets() {
         let mut tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::new(4, 4));
-        let player_a = ServerPlayerId::LOCAL;
+        let player_a = ServerPlayerId::from_raw_for_tests(0);
         let player_b = ServerPlayerId::from_raw_for_tests(1);
 
         let first = tracking.set_requested_view(player_a, view(ChunkPos::new(0, 0), 0));
@@ -503,7 +503,7 @@ mod tests {
         let mut tracking = PlayerChunkTracking::new(
             PlayerChunkTrackingPolicy::new(4, 4).with_unload_hysteresis_chunks(1),
         );
-        let player = ServerPlayerId::LOCAL;
+        let player = ServerPlayerId::from_raw_for_tests(0);
 
         tracking.set_requested_view(player, view(ChunkPos::new(0, 0), 0));
         let moved = tracking.set_requested_view(player, view(ChunkPos::new(1, 0), 0));
@@ -519,7 +519,7 @@ mod tests {
         let mut tracking = PlayerChunkTracking::new(
             PlayerChunkTrackingPolicy::new(8, 8).with_unload_hysteresis_chunks(1),
         );
-        let player = ServerPlayerId::LOCAL;
+        let player = ServerPlayerId::from_raw_for_tests(0);
 
         let first = tracking.set_requested_view(player, view(ChunkPos::new(0, 0), 3));
         assert_eq!(first.added_chunks.len(), 49);
@@ -546,7 +546,7 @@ mod tests {
     #[test]
     fn disconnect_removes_only_that_players_ticket_contribution() {
         let mut tracking = PlayerChunkTracking::new(PlayerChunkTrackingPolicy::new(4, 4));
-        let player_a = ServerPlayerId::LOCAL;
+        let player_a = ServerPlayerId::from_raw_for_tests(0);
         let player_b = ServerPlayerId::from_raw_for_tests(1);
         tracking.set_requested_view(player_a, view(ChunkPos::new(0, 0), 0));
         tracking.set_requested_view(player_b, view(ChunkPos::new(1, 0), 0));

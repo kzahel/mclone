@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn local_and_dedicated_players_pair_symmetrically() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     load_center_chunk(&mut server);
     server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
@@ -13,10 +13,11 @@ fn local_and_dedicated_players_pair_symmetrically() {
         }))
         .expect("move local player into tracked chunk");
 
-    let dedicated = server.add_dedicated_player();
+    let dedicated = server.add_player();
     let dedicated_updates =
         set_dedicated_chunk_view_and_poll(&mut server, dedicated, ChunkPos::new(0, 0), 0);
-    let local_for_dedicated = remote_player_add(&dedicated_updates, ServerPlayerId::LOCAL)
+    let local_player = server.player_id();
+    let local_for_dedicated = remote_player_add(&dedicated_updates, local_player)
         .expect("dedicated player should observe the local integrated player");
     assert_eq!(local_for_dedicated.id, RemotePlayerId(0));
 
@@ -37,7 +38,7 @@ fn local_and_dedicated_players_pair_symmetrically() {
     let dedicated_updates = server
         .try_drain_updates_for_player(dedicated)
         .expect("drain local movement for dedicated observer");
-    let local_update = remote_player_update(&dedicated_updates, ServerPlayerId::LOCAL)
+    let local_update = remote_player_update(&dedicated_updates, local_player)
         .expect("dedicated observer should receive local movement");
     assert_eq!(local_update.position, local_moved);
 
@@ -73,26 +74,23 @@ fn local_and_dedicated_players_pair_symmetrically() {
         .try_drain_updates_for_player(dedicated)
         .expect("drain local appearance");
     assert_eq!(
-        remote_player_update(&dedicated_updates, ServerPlayerId::LOCAL)
+        remote_player_update(&dedicated_updates, local_player)
             .expect("dedicated observer should receive local appearance")
             .appearance
             .model,
         PlayerModelKind::UprightBear
     );
 
-    server.disable_local_player();
+    assert!(server.remove_player(local_player));
     let dedicated_updates = server
         .try_drain_updates_for_player(dedicated)
         .expect("drain local removal");
-    assert!(has_remote_player_remove(
-        &dedicated_updates,
-        ServerPlayerId::LOCAL
-    ));
+    assert!(has_remote_player_remove(&dedicated_updates, local_player));
 }
 
 #[test]
 fn shared_auxiliary_player_script_uses_authoritative_commands() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     load_center_chunk(&mut server);
     server.set_debug_auxiliary_player_script_enabled(true);
     let player_id = server
@@ -124,15 +122,15 @@ fn shared_auxiliary_player_script_uses_authoritative_commands() {
     server.set_debug_auxiliary_player_script_enabled(false);
     let updates = server.try_drain_updates().expect("drain auxiliary removal");
     assert!(has_remote_player_remove(&updates, player_id));
-    assert_eq!(server.dedicated_player_count(), 0);
+    assert_eq!(server.player_count(), 1);
 }
 
 #[test]
 fn dedicated_players_publish_remote_state_when_visible() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
     server
         .try_handle_command_for_player(
@@ -220,10 +218,10 @@ fn dedicated_players_publish_remote_state_when_visible() {
 
 #[test]
 fn dedicated_remote_players_are_removed_when_the_observer_view_stops_tracking_them() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
     server
         .try_handle_command_for_player(
@@ -248,10 +246,10 @@ fn dedicated_remote_players_are_removed_when_the_observer_view_stops_tracking_th
 
 #[test]
 fn dedicated_remote_players_are_removed_on_disconnect() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
     server
         .try_handle_command_for_player(
@@ -268,7 +266,7 @@ fn dedicated_remote_players_are_removed_on_disconnect() {
         set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
     assert!(remote_player_add(&updates_b, player_a).is_some());
 
-    assert!(server.remove_dedicated_player(player_a));
+    assert!(server.remove_player(player_a));
     let updates_b = server.try_poll_for_player(player_b).expect("poll player b");
 
     assert!(has_remote_player_remove(&updates_b, player_a));
@@ -276,9 +274,9 @@ fn dedicated_remote_players_are_removed_on_disconnect() {
 
 #[test]
 fn dedicated_player_receives_debug_passive_showcase_when_visible() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
 
     let updates = set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
 
@@ -294,10 +292,10 @@ fn dedicated_player_receives_debug_passive_showcase_when_visible() {
 
 #[test]
 fn debug_passive_showcase_can_be_disabled() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
     server.set_debug_passive_showcase_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
 
     let updates = set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
 
@@ -306,9 +304,9 @@ fn debug_passive_showcase_can_be_disabled() {
 
 #[test]
 fn debug_passive_showcase_entity_updates_age_on_simulation_tick() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
     let updates = set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
     let snapshot = first_entity_snapshot(&updates).expect("entity snapshot");
 
@@ -324,9 +322,9 @@ fn debug_passive_showcase_entity_updates_age_on_simulation_tick() {
 
 #[test]
 fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
 
     let report = server
@@ -360,10 +358,10 @@ fn natural_spawning_diagnostics_use_live_players_chunks_and_creature_counts() {
 #[test]
 fn volatile_natural_spawning_creates_entities_from_ticket_loaded_chunks() {
     let seed = 12_345;
-    let mut server = IntegratedServer::new(seed);
+    let mut server = LocalRealmSession::new(seed);
     server.set_debug_passive_showcase_enabled(false);
     server.set_lighting_enabled(true);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
     let center = crate::spawn::initial_spawn_center_for_seed(seed);
     set_dedicated_chunk_view_and_poll(&mut server, player, center, 4);
 
@@ -412,11 +410,11 @@ fn volatile_natural_spawning_creates_entities_from_ticket_loaded_chunks() {
 
 #[test]
 fn volatile_entities_are_discarded_when_ticket_loaded_chunk_fully_unloads() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
     server.set_debug_passive_showcase_enabled(false);
     server.set_volatile_natural_spawning_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
     let entity = server.entities.spawn_volatile_passive_mob(
         EntityKind::Cow,
@@ -425,7 +423,7 @@ fn volatile_entities_are_discarded_when_ticket_loaded_chunk_fully_unloads() {
     );
     server.reconcile_entity_subjects([entity], true);
     let updates = server
-        .drain_chunk_updates_for_target(CommandTarget::Dedicated(player))
+        .drain_chunk_updates_for_target(CommandTarget::Player(player))
         .expect("drain volatile spawn update");
     assert_eq!(
         first_entity_snapshot_of_kind(&updates, EntityKind::Cow).map(|snapshot| snapshot.id),
@@ -455,7 +453,7 @@ fn volatile_entities_are_discarded_when_ticket_loaded_chunk_fully_unloads() {
 
 #[test]
 fn volatile_natural_spawning_can_be_disabled() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_volatile_natural_spawning_enabled(false);
 
     let spawning = server.natural_spawning_diagnostics(400, &[]);
@@ -470,9 +468,9 @@ fn volatile_natural_spawning_can_be_disabled() {
 
 #[test]
 fn debug_passive_showcase_entity_is_removed_when_observer_view_stops_tracking_it() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
     let updates = set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 2);
     let snapshot = first_entity_snapshot(&updates).expect("entity snapshot");
 
@@ -483,10 +481,10 @@ fn debug_passive_showcase_entity_is_removed_when_observer_view_stops_tracking_it
 
 #[test]
 fn local_player_picks_up_ready_item_entity_through_server_inventory() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
     load_center_chunk(&mut server);
-    let player_position = server.player.position();
+    let player_position = server.player().position();
     let item_id = server.entities.insert_item_entity_for_test(
         ItemStackSnapshot {
             kind: ItemKind::Egg,
@@ -495,12 +493,11 @@ fn local_player_picks_up_ready_item_entity_through_server_inventory() {
         player_position,
     );
     server.entities.set_item_pickup_delay_for_test(item_id, 0);
-    server.reconcile_entity_subjects(
-        std::iter::once(server.entities.state(item_id).unwrap()),
-        true,
-    );
+    let item_state = server.entities.state(item_id).unwrap();
+    server.reconcile_entity_subjects(std::iter::once(item_state), true);
+    let player_id = server.player_id();
     let initial_updates = server
-        .drain_chunk_updates_for_target(CommandTarget::Local)
+        .drain_chunk_updates_for_target(CommandTarget::Player(player_id))
         .expect("drain initial item snapshot");
     assert!(initial_updates.iter().any(|update| {
         matches!(update, ServerUpdate::EntitySnapshot(snapshot) if snapshot.id == item_id)
@@ -511,6 +508,6 @@ fn local_player_picks_up_ready_item_entity_through_server_inventory() {
         .expect("simulation tick should pick up item");
 
     assert!(has_entity_remove(&report.updates, item_id));
-    assert_eq!(server.inventory.item_count(ItemKind::Egg), 1);
+    assert_eq!(server.inventory().item_count(ItemKind::Egg), 1);
     assert_eq!(server.entities.state(item_id), None);
 }

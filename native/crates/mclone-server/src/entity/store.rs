@@ -1336,7 +1336,7 @@ mod tests {
             Vec3d::new(4.0, 64.0, 4.0),
         );
         let target = ItemPickupTarget {
-            player_id: ServerPlayerId::LOCAL,
+            player_id: ServerPlayerId::from_raw_for_tests(0),
             position: Vec3d::new(4.0, 64.0, 4.0),
         };
 
@@ -1379,7 +1379,7 @@ mod tests {
             .unwrap()
             .set_pickup_delay_for_test(0);
         let target = ItemPickupTarget {
-            player_id: ServerPlayerId::LOCAL,
+            player_id: ServerPlayerId::from_raw_for_tests(0),
             position: Vec3d::new(4.0, 64.0, 4.0),
         };
 

@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
     set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
     server
@@ -38,9 +38,10 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
     let diagnostics = server.chunk_tracking_diagnostics();
     assert_eq!(diagnostics.aggregate_player_ticket_chunks, 1);
     assert_eq!(diagnostics.total_player_visible_chunks, 2);
-    // The local player has not drained its ordered configuration/ready pair.
-    assert_eq!(diagnostics.total_outbound_queue_depth, 4);
-    assert_eq!(diagnostics.max_outbound_queue_depth, 2);
+    // The local in-memory session has not drained the same ordered
+    // configuration/ready/world/time prelude remote sessions receive.
+    assert_eq!(diagnostics.total_outbound_queue_depth, 6);
+    assert_eq!(diagnostics.max_outbound_queue_depth, 4);
     assert_eq!(
         diagnostics
             .players
@@ -60,16 +61,16 @@ fn chunk_tracking_diagnostics_reports_outbound_queue_depth() {
         server
             .chunk_tracking_diagnostics()
             .total_outbound_queue_depth,
-        2
+        4
     );
 }
 
 #[test]
 fn disconnect_removes_player_chunk_ticket_contribution() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     server
         .try_handle_command_for_player(
             player_a,
@@ -93,7 +94,7 @@ fn disconnect_removes_player_chunk_ticket_contribution() {
     assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 1);
     assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(4, 0)), 1);
 
-    assert!(server.remove_dedicated_player(player_a));
+    assert!(server.remove_player(player_a));
 
     assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(0, 0)), 0);
     assert_eq!(server.scheduler().ticket_count_at(ChunkPos::new(4, 0)), 1);

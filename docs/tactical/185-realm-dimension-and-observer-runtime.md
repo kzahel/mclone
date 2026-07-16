@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; reference/current-state audit and Slice 0
-executable locks complete; Slice 1 unified-server cleanup next
+Status: active 2026-07-16; Slices 0-1 complete; neutral realm/dimension
+identities are next in Slice 2
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -139,7 +139,10 @@ Intentional mclone extensions:
 - realm and dimension identity remain independent of the process that happens
   to host them, while this tactical still uses exactly one host process.
 
-## Verified Current Mclone State
+## Verified Pre-Slice 1 Mclone State
+
+This is the locked baseline that Slice 1 replaced. It remains here as the
+migration receipt rather than a description of the live topology.
 
 ### Server and simulation
 
@@ -217,13 +220,11 @@ details differ:
 - dimension transfer and player/statistics persistence therefore remain
   server mechanics rather than single-player approximations.
 
-Mclone already has part of this shape: both the native integrated runner and
-the dedicated host construct the type currently named `IntegratedServer`.
-However, the shared core still contains a structurally privileged local
-player (`ServerPlayerId::LOCAL`, `CommandTarget::Local`, parallel local-player
-state), and the dedicated host compensates by calling
-`disable_local_player()`. The name hides the useful sharing while the local
-exception prevents real topology equivalence.
+Slice 1 completed this part of the shape. Native and browser integrated hosts
+wrap `RealmServer` with `LocalRealmSession`, which allocates one ordinary
+player id. Dedicated TCP/WebSocket hosts own the same empty-at-construction
+`RealmServer` directly. The former privileged local id/state branches and the
+dedicated-host compensation no longer exist.
 
 The target is:
 
@@ -535,6 +536,8 @@ Exit: every implicit singleton that must change is enumerated and guarded.
 
 ### Slice 1: Unified realm server core and ordinary local session
 
+Status: complete 2026-07-16.
+
 This is the first structural implementation slice after Slice 0's evidence
 locks, before dimension, observer, or statistics features.
 
@@ -553,6 +556,30 @@ locks, before dimension, observer, or statistics features.
   policy/adapters rather than alternative gameplay mechanics.
 - Add normalized local/TCP/WebSocket session-trace conformance coverage and
   prove the one-world direct path has no gameplay or pixel change.
+
+Evidence:
+
+- the shared authority is now exported as `RealmServer`; it starts with zero
+  players and owns the only player list, command routing, persistence state,
+  chunk interest, entity publication, and simulation state;
+- `LocalRealmSession` owns one ordinary allocated `ServerPlayerId` and delegates
+  commands, update drains, ticks, identity loading, save state, spawn safety,
+  and view diagnostics to that same core/player path;
+- `ServerPlayerId::LOCAL`, `CommandTarget::Local`, parallel local player,
+  inventory, XP, resume, and appearance fields, and
+  `disable_local_player()` no longer exist;
+- the native runner, browser/Web Worker, deterministic tests, dedicated TCP,
+  and dedicated WebSocket host paths all construct either `RealmServer`
+  directly or the thin `LocalRealmSession` adapter around it;
+- `realm_server_has_no_implicit_player_and_local_session_joins_normally` and
+  `local_adapter_and_hosted_player_share_the_same_logical_session_trace` lock
+  zero implicit players and identical local/hosted join and command behavior;
+- `local_tcp_and_websocket_adapters_preserve_one_logical_trace` proves the
+  in-memory join update sequence and a client command survive native TCP and
+  direct WebSocket framing unchanged;
+- the complete `mclone-server` suite (418 tests), dedicated-server suite (35
+  tests), composable-world presentation contract, IndexedDB persistence lock,
+  and native workspace check pass. No renderer or presentation path changed.
 
 Exit: integrated and dedicated modes differ only at explicit host boundaries;
 there is no server-owned special local player or local-only persistence path.

@@ -267,7 +267,7 @@ fn assert_generated_chunk_light_matches_persisted_fixture(
         .parse::<i64>()
         .expect("integration fixture seed must fit i64");
 
-    let mut server = IntegratedServer::new(seed);
+    let mut server = LocalRealmSession::new(seed);
     let updates = handle_command_and_poll(
         &mut server,
         ClientCommand::SetChunkView(ChunkView {
@@ -319,7 +319,7 @@ fn assert_generated_chunk_light_matches_scheduler_fixture(
         .parse::<i64>()
         .expect("scheduler fixture seed must fit i64");
 
-    let mut server = IntegratedServer::new(seed);
+    let mut server = LocalRealmSession::new(seed);
     let updates = handle_command_and_poll(
         &mut server,
         ClientCommand::SetChunkView(ChunkView {

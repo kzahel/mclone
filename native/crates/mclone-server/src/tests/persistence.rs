@@ -64,7 +64,7 @@ fn loaded_chunk_record_hydrates_scheduled_fluid_ticks() {
             ScheduledTickRecord::new(source, "minecraft:water", 0),
         ]),
     );
-    let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(12_345, Box::new(store));
 
     let updates = handle_command_and_poll(
         &mut server,
@@ -107,7 +107,7 @@ fn loaded_chunk_record_hydrates_scheduled_block_ticks() {
             ScheduledTickRecord::new(tick_pos, "minecraft:sand", 0),
         ]),
     );
-    let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(12_345, Box::new(store));
 
     let updates = handle_command_and_poll(
         &mut server,
@@ -150,7 +150,7 @@ fn loaded_entity_chunk_record_hydrates_entities() {
         .entity_chunks
         .borrow_mut()
         .insert(pos, stored_egg_item_entity_record(pos, 3, 1));
-    let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(12_345, Box::new(store));
     server.set_debug_passive_showcase_enabled(false);
 
     let updates = handle_command_and_poll(
@@ -197,7 +197,7 @@ fn entity_chunk_record_survives_holder_unload_and_reload() {
         .entity_chunks
         .borrow_mut()
         .insert(pos, stored_egg_item_entity_record(pos, 4, 2));
-    let mut server = IntegratedServer::with_world_store(12_345, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(12_345, Box::new(store));
     server.set_debug_passive_showcase_enabled(false);
 
     let initial_updates = handle_command_and_poll(
@@ -433,7 +433,7 @@ fn integrated_server_saves_and_reloads_resident_chunk() {
         chunk_tracking_radius: 0,
     };
     let first_snapshot = {
-        let mut server = IntegratedServer::with_chunk_store(
+        let mut server = LocalRealmSession::with_chunk_store(
             12_345,
             Box::new(FilesystemChunkSnapshotStore::new(&root)),
         );
@@ -467,7 +467,7 @@ fn integrated_server_saves_and_reloads_resident_chunk() {
         snapshot.clone()
     };
 
-    let mut reloaded = IntegratedServer::with_chunk_store(
+    let mut reloaded = LocalRealmSession::with_chunk_store(
         12_345,
         Box::new(FilesystemChunkSnapshotStore::new(&root)),
     );

@@ -2,10 +2,10 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; current-state and vanilla audits
-and Tactical 185 Slice 0 executable locks are complete. Slice 1 shared-server
-topology cleanup is next, before new dimension, observer, or statistics
-features.**
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-1 are
+complete. Every host now uses one `RealmServer` core and the integrated player
+is ordinary. Slice 2 neutral realm/dimension identities are next, before
+dimension, observer, or statistics features.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -25,20 +25,18 @@ dimensions concurrently. Different players may occupy different dimensions
 while sharing realm-scoped player state. A second server is created only for a
 genuinely independent realm, not for another dimension in the same realm.
 
-The first structural cleanup is to make the existing sharing honest and
-executable:
+The first structural cleanup is now complete:
 
-- rename or extract the current shared `IntegratedServer` authority as
-  `RealmServer`;
-- remove its structurally privileged local player and local-only command/state
-  branches;
-- make the local profile join an ordinary session and ordinary player registry
-  through an in-memory ordered adapter;
-- compare normalized local, TCP, and WebSocket session traces before adding
-  multi-dimension behavior.
+- the shared authority is `RealmServer` and has no implicit player;
+- local-only command/state branches and the privileged local player id are
+  gone;
+- `LocalRealmSession` registers the local profile as an ordinary realm player
+  through the same core APIs used by hosted sessions;
+- normalized in-memory, TCP, and WebSocket join/command traces are locked by
+  tests before multi-dimension behavior is added.
 
-No dimension, observer, or statistics feature should build on the current
-special-local-player topology.
+Dimension, observer, and statistics work can now build on the ordinary-player
+topology rather than preserving the retired local-player exception.
 
 ## Concept Model
 
@@ -107,16 +105,17 @@ client replica. Those extensions do not change the shared server topology.
 
 ## Verified Current Mclone State
 
-The current code is partly unified but not yet equivalent:
+The host topology is unified, while dimension ownership is still singleton:
 
-- the native integrated runner and the dedicated host both instantiate the
-  type named `IntegratedServer`;
-- that type owns one scheduler/entity/time/store domain and therefore exactly
-  one current dimension;
-- it contains `ServerPlayerId::LOCAL`, `CommandTarget::Local`, and parallel
-  local-player state;
-- the dedicated host calls `disable_local_player()` to suppress that built-in
-  player;
+- native integrated and browser/Web Worker hosts wrap `RealmServer` in a thin
+  `LocalRealmSession`; dedicated TCP/WebSocket hosts own `RealmServer`
+  directly;
+- `RealmServer` owns one ordinary player registry and starts empty;
+- the local adapter allocates one normal `ServerPlayerId` and delegates to the
+  same command, publication, persistence, and safe-resume APIs as hosted
+  players;
+- the server still owns one scheduler/entity/time/store domain and therefore
+  exactly one current dimension;
 - player records already key by profile UUID but currently hard-code
   `minecraft:overworld` on write/resume;
 - SQLite and IndexedDB chunk/entity record keys have no dimension component;
@@ -126,8 +125,8 @@ The current code is partly unified but not yet equivalent:
   server-side local player. Input suppression makes it non-interactive, not an
   observer.
 
-This means mclone should preserve the useful common server core while removing
-the misleading integrated ownership and the special local-player mechanics.
+The next work can therefore qualify and multiply dimension ownership without
+preserving a second integrated-only gameplay path.
 
 ## Hard Topology Invariants
 
@@ -262,10 +261,10 @@ Multi-dimension validation must additionally prove:
 
 ## Code and Ownership Map
 
-Current seams that the first slices must change or protect:
+Current seams that the next slices must change or protect:
 
 - `native/crates/mclone-server/src/integrated.rs`: current single-dimension
-  authority, built-in local player, local/dedicated command branches, player
+  `RealmServer` authority plus the thin `LocalRealmSession` adapter, player
   save, ticks, and publication;
 - `native/crates/mclone-server/src/players.rs`: runtime player identities and
   realm player list;
@@ -276,7 +275,7 @@ Current seams that the first slices must change or protect:
 - `native/crates/mclone-server/src/persistence.rs`: record codecs, native
   SQLite schema, and store ownership;
 - `native/apps/mclone-dedicated-server/src/main.rs`: dedicated TCP/WebSocket
-  host and the current `disable_local_player()` compensation;
+  host around the same empty-at-construction `RealmServer`;
 - `native/crates/mclone-app-runtime/src/client_connection.rs`: in-memory
   runner connection and client connection contract;
 - `native/crates/mclone-app-runtime/src/native_service_assembly.rs`: local
@@ -315,6 +314,8 @@ architectural:
 Do not start with the statistics feature simply because its record is small.
 Its purpose is to prove the scope above, and implementing it before the scope
 would encode accidental singleton behavior.
+
+Steps 1-2 are complete. Step 3 is the active next boundary.
 
 ## Related
 

@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn debug_break_command_mutates_block_and_returns_section_delta() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     let pos = BlockPos::new(8, 80, 8);
@@ -30,7 +30,7 @@ fn debug_break_command_mutates_block_and_returns_section_delta() {
 
 #[test]
 fn protected_lobby_rejects_forged_break_and_place_commands() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
@@ -68,7 +68,7 @@ fn protected_lobby_rejects_forged_break_and_place_commands() {
 
 #[test]
 fn debug_break_command_refreshes_lighting_after_opacity_change() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_chunk_view_with_lighting(&mut server, ChunkPos::new(0, 0), true);
     let pos = BlockPos::new(8, 120, 8);
     let chunk_pos = pos.chunk_pos();
@@ -106,7 +106,7 @@ fn debug_break_command_refreshes_lighting_after_opacity_change() {
 
 #[test]
 fn debug_break_reschedules_neighbor_water_to_refill_removed_block() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     server.liquid_ticks = FluidTickList::new();
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
@@ -177,7 +177,7 @@ fn debug_break_reschedules_neighbor_water_to_refill_removed_block() {
 
 #[test]
 fn debug_place_command_places_adjacent_to_hit_face() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
@@ -208,7 +208,7 @@ fn debug_place_command_places_adjacent_to_hit_face() {
 
 #[test]
 fn debug_place_schedules_basic_falling_block_tick() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 82.0, 8.5));
     sync_carried_slot(&mut server, 0);
@@ -261,7 +261,7 @@ fn debug_place_schedules_basic_falling_block_tick() {
 
 #[test]
 fn debug_break_schedules_basic_falling_block_above() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 82.0, 8.5));
 
@@ -303,7 +303,7 @@ fn debug_break_schedules_basic_falling_block_above() {
 
 #[test]
 fn debug_place_command_places_bricks_from_selected_hotbar_slot() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 7);
@@ -334,7 +334,7 @@ fn debug_place_command_places_bricks_from_selected_hotbar_slot() {
 
 #[test]
 fn set_debug_hotbar_slot_command_changes_placed_block() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 0);
@@ -366,7 +366,7 @@ fn set_debug_hotbar_slot_command_changes_placed_block() {
 
 #[test]
 fn debug_place_command_orients_log_to_clicked_face_axis() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 4);
@@ -423,7 +423,7 @@ fn debug_place_command_orients_log_to_clicked_face_axis() {
 
 #[test]
 fn debug_place_command_places_floor_torch_from_torch_item() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 0);
@@ -452,7 +452,7 @@ fn debug_place_command_places_floor_torch_from_torch_item() {
 
 #[test]
 fn debug_place_command_places_wall_torch_matching_clicked_side() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 0);
@@ -484,7 +484,7 @@ fn debug_place_command_places_wall_torch_matching_clicked_side() {
 
 #[test]
 fn debug_place_command_rejects_bottom_face_torch_placement() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 0);
@@ -511,7 +511,7 @@ fn debug_place_command_rejects_bottom_face_torch_placement() {
 
 #[test]
 fn debug_place_command_replaces_clicked_replaceable_block() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
@@ -544,7 +544,7 @@ fn debug_place_command_replaces_clicked_replaceable_block() {
 
 #[test]
 fn debug_place_command_does_not_overwrite_solid_relative_target() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);
@@ -570,7 +570,7 @@ fn debug_place_command_does_not_overwrite_solid_relative_target() {
 
 #[test]
 fn debug_place_command_rejects_cleared_selected_hotbar_slot() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 8);
@@ -594,7 +594,7 @@ fn debug_place_command_rejects_cleared_selected_hotbar_slot() {
 
 #[test]
 fn debug_interaction_commands_reject_far_server_player_positions() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(100.0, 80.0, 100.0));
     sync_carried_slot(&mut server, 1);
@@ -627,7 +627,7 @@ fn debug_interaction_commands_reject_far_server_player_positions() {
 
 #[test]
 fn debug_place_command_replaces_one_layer_snow_in_place() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
     sync_carried_slot(&mut server, 1);

@@ -283,10 +283,12 @@ mod tests {
     use super::*;
     use mclone_core::ChunkPos;
     use mclone_net::{
-        decode_websocket_server_handshake, decode_websocket_server_update_batch,
-        encode_current_websocket_client_handshake, encode_websocket_client_command,
+        NativeClientIoSession, decode_websocket_server_handshake,
+        decode_websocket_server_update_batch, encode_current_websocket_client_handshake,
+        encode_websocket_client_command,
     };
     use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+    use mclone_server::LocalRealmSession;
 
     fn time_update(day_time: u64) -> ServerUpdate {
         ServerUpdate::TimeUpdate {
@@ -347,5 +349,81 @@ mod tests {
             event => panic!("expected websocket command, got {event:?}"),
         }
         socket.close(None).unwrap();
+    }
+
+    #[test]
+    fn local_tcp_and_websocket_adapters_preserve_one_logical_trace() {
+        let mut local = LocalRealmSession::new(12_345);
+        let join_trace = local.try_drain_updates().unwrap();
+
+        let native_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let native_addr = native_listener.local_addr().unwrap();
+        let websocket_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let websocket_addr = websocket_listener.local_addr().unwrap();
+        let network = crate::connection::DedicatedNetwork::start_with_websocket(
+            native_listener,
+            Some(websocket_listener),
+        )
+        .unwrap();
+
+        let mut native = NativeClientIoSession::connect(native_addr).unwrap();
+        let native_outbound = match network.recv().unwrap() {
+            DedicatedNetworkEvent::Connected { outbound, .. } => outbound,
+            event => panic!("expected native connection, got {event:?}"),
+        };
+
+        let mut websocket = tungstenite::connect(format!("ws://{websocket_addr}"))
+            .unwrap()
+            .0;
+        websocket
+            .send(Message::Binary(
+                encode_current_websocket_client_handshake().unwrap().into(),
+            ))
+            .unwrap();
+        let handshake = websocket.read().unwrap().into_data();
+        decode_websocket_server_handshake(&handshake, PROTOCOL_VERSION).unwrap();
+        let websocket_outbound = match network.recv().unwrap() {
+            DedicatedNetworkEvent::Connected { outbound, .. } => outbound,
+            event => panic!("expected websocket connection, got {event:?}"),
+        };
+
+        native_outbound.publish(join_trace.clone()).unwrap();
+        websocket_outbound.publish(join_trace.clone()).unwrap();
+        assert_eq!(
+            native.drain_update_batch().unwrap().into_updates(),
+            join_trace
+        );
+        assert_eq!(
+            decode_websocket_server_update_batch(&websocket.read().unwrap().into_data()).unwrap(),
+            join_trace
+        );
+
+        let command = ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(2, -3),
+            render_distance: 1,
+            chunk_tracking_radius: 1,
+        });
+        assert!(local.try_handle_command(command.clone()).is_ok());
+
+        native.send_command_only(command.clone()).unwrap();
+        match network.recv().unwrap() {
+            DedicatedNetworkEvent::Command {
+                command: received, ..
+            } => assert_eq!(received, command),
+            event => panic!("expected native command, got {event:?}"),
+        }
+
+        websocket
+            .send(Message::Binary(
+                encode_websocket_client_command(&command).unwrap().into(),
+            ))
+            .unwrap();
+        match network.recv().unwrap() {
+            DedicatedNetworkEvent::Command {
+                command: received, ..
+            } => assert_eq!(received, command),
+            event => panic!("expected websocket command, got {event:?}"),
+        }
+        websocket.close(None).unwrap();
     }
 }

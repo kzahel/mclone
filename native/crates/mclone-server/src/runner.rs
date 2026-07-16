@@ -1,6 +1,6 @@
 //! Integrated server runner boundary.
 //!
-//! The runner owns the `IntegratedServer` and its tick loop. Client/runtime code
+//! The runner owns the `LocalRealmSession` and its tick loop. Client/runtime code
 //! talks to it through encoded command protocol frames and decoded update
 //! envelopes. Local integrated mode still accounts update queue bytes using the
 //! shared update codec, but the runtime pump does not decode update payloads on
@@ -16,7 +16,7 @@ use mclone_protocol::{decode_client_command, encode_client_command, encode_serve
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ChunkPublicationBudgetConfig;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::IntegratedServer;
+use crate::LocalRealmSession;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::SimulationCadence;
 use crate::{
@@ -582,7 +582,7 @@ mod native {
     }
 
     impl DiagnosticsDetailSnapshot {
-        fn from_server(server: &IntegratedServer) -> Self {
+        fn from_server(server: &LocalRealmSession) -> Self {
             Self {
                 worldgen_mailbox_kind: server.scheduler().worldgen_mailbox_kind(),
                 light_status_mailbox_kind: server.scheduler().light_status_mailbox_kind(),
@@ -1087,13 +1087,13 @@ mod native {
         };
         let mut server = match &config.world_storage {
             NativeIntegratedServerWorldStorage::Transient => {
-                IntegratedServer::with_player_chunk_tracking_policy(
+                LocalRealmSession::with_player_chunk_tracking_policy(
                     config.seed,
                     config.player_chunk_tracking_policy,
                 )
             }
             NativeIntegratedServerWorldStorage::Persistent { dir } => {
-                match IntegratedServer::try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
+                match LocalRealmSession::try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
                     config.seed,
                     dir,
                     config.player_chunk_tracking_policy,
@@ -1194,7 +1194,7 @@ mod native {
     }
 
     fn run_native_integrated_server_loop(
-        server: &mut IntegratedServer,
+        server: &mut LocalRealmSession,
         mut timing_state: NativeRunnerTimingState,
         command_rx: mpsc::Receiver<NativeRunnerControl>,
         update_tx: mpsc::Sender<NativeQueuedServerUpdate>,
@@ -1330,7 +1330,7 @@ mod native {
     }
 
     fn recv_until_next_tick(
-        server: &mut IntegratedServer,
+        server: &mut LocalRealmSession,
         command_rx: &mpsc::Receiver<NativeRunnerControl>,
         update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
@@ -1361,7 +1361,7 @@ mod native {
     }
 
     fn drain_available_commands(
-        server: &mut IntegratedServer,
+        server: &mut LocalRealmSession,
         command_rx: &mpsc::Receiver<NativeRunnerControl>,
         update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
@@ -1397,7 +1397,7 @@ mod native {
     }
 
     fn process_control(
-        server: &mut IntegratedServer,
+        server: &mut LocalRealmSession,
         control: NativeRunnerControl,
         update_tx: &mpsc::Sender<NativeQueuedServerUpdate>,
         command_queue_depth: &AtomicUsize,
@@ -1534,7 +1534,7 @@ mod native {
 
     fn refresh_diagnostics(
         diagnostics: &Arc<Mutex<ServerRunnerDiagnostics>>,
-        server: &IntegratedServer,
+        server: &LocalRealmSession,
         command_queue_depth: &AtomicUsize,
         update_queue_depth: &AtomicUsize,
         update_queue_bytes: &AtomicUsize,

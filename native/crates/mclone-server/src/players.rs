@@ -8,14 +8,12 @@ use crate::inventory::ServerInventory;
 use crate::persistence::PlayerRecord;
 use crate::player::ServerPlayerState;
 
-const FIRST_DEDICATED_PLAYER_ID: u64 = 1;
+const FIRST_PLAYER_ID: u64 = 0;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ServerPlayerId(u64);
 
 impl ServerPlayerId {
-    pub(crate) const LOCAL: Self = Self(0);
-
     pub const fn as_u64(self) -> u64 {
         self.0
     }
@@ -68,7 +66,7 @@ pub(crate) struct ServerPlayerList {
 impl Default for ServerPlayerList {
     fn default() -> Self {
         Self {
-            next_id: FIRST_DEDICATED_PLAYER_ID,
+            next_id: FIRST_PLAYER_ID,
             players: BTreeMap::new(),
         }
     }
@@ -80,7 +78,7 @@ impl ServerPlayerList {
         self.next_id = self
             .next_id
             .checked_add(1)
-            .expect("exhausted dedicated server player ids");
+            .expect("exhausted realm server player ids");
         self.players.insert(id, ServerPlayerEntry::default());
         id
     }

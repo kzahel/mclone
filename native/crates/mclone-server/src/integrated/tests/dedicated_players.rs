@@ -1,9 +1,49 @@
 use super::*;
 
 #[test]
+fn realm_server_has_no_implicit_player_and_local_session_joins_normally() {
+    let server = RealmServer::new(0);
+    assert_eq!(server.player_count(), 0);
+
+    let local = LocalRealmSession::new(0);
+    assert_eq!(local.player_count(), 1);
+    assert_eq!(local.player_id().as_u64(), 0);
+}
+
+#[test]
+fn local_adapter_and_hosted_player_share_the_same_logical_session_trace() {
+    let mut local = LocalRealmSession::new(12_345);
+    let mut hosted = RealmServer::new(12_345);
+    let hosted_player = hosted.add_player();
+
+    assert_eq!(
+        local.try_drain_updates().expect("drain local join"),
+        hosted
+            .try_drain_updates_for_player(hosted_player)
+            .expect("drain hosted join")
+    );
+
+    local.set_lighting_enabled(false);
+    hosted.set_lighting_enabled(false);
+    let command = ClientCommand::SetChunkView(ChunkView {
+        center: ChunkPos::new(0, 0),
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    });
+    assert_eq!(
+        local
+            .try_handle_command(command.clone())
+            .expect("local chunk view"),
+        hosted
+            .try_handle_command_for_player(hosted_player, command)
+            .expect("hosted chunk view")
+    );
+}
+
+#[test]
 fn dedicated_join_orders_negotiated_configuration_before_world_state() {
-    let mut server = IntegratedServer::new(0);
-    let player = server.add_dedicated_player_with_capabilities(SessionCapabilities::NONE);
+    let mut server = LocalRealmSession::new(0);
+    let player = server.add_player_with_capabilities(SessionCapabilities::NONE);
 
     let updates = server
         .try_drain_updates_for_player(player)
@@ -35,9 +75,9 @@ fn time_update(updates: &[ServerUpdate]) -> Option<u64> {
 
 #[test]
 fn global_simulation_tick_routes_without_draining_player_streams() {
-    let mut server = IntegratedServer::new(0);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let mut server = LocalRealmSession::new(0);
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     server
         .try_drain_updates_for_player(player_a)
         .expect("drain player a join updates");
@@ -87,9 +127,9 @@ fn global_simulation_tick_routes_without_draining_player_streams() {
 
 #[test]
 fn time_publication_broadcasts_at_twenty_tick_period() {
-    let mut server = IntegratedServer::new(0);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let mut server = LocalRealmSession::new(0);
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     server
         .try_drain_updates_for_player(player_a)
         .expect("drain player a join updates");
@@ -115,9 +155,9 @@ fn time_publication_broadcasts_at_twenty_tick_period() {
 
 #[test]
 fn dedicated_player_receives_world_info_before_chunk_view_snapshots() {
-    let mut server = IntegratedServer::new(1124);
+    let mut server = LocalRealmSession::new(1124);
     server.set_lighting_enabled(false);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
 
     let updates = set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
 
@@ -137,10 +177,10 @@ fn dedicated_player_receives_world_info_before_chunk_view_snapshots() {
 
 #[test]
 fn dedicated_player_views_keep_disjoint_ticket_sets() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
 
     let updates_a =
         set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
@@ -159,10 +199,10 @@ fn dedicated_player_views_keep_disjoint_ticket_sets() {
 
 #[test]
 fn overlapping_player_views_unload_only_for_player_leaving_chunk() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
     set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(0, 0), 0);
 
@@ -183,10 +223,10 @@ fn overlapping_player_views_unload_only_for_player_leaving_chunk() {
 
 #[test]
 fn smaller_player_view_receives_fewer_snapshots_than_larger_view() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
 
     let updates_a =
         set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
@@ -202,10 +242,10 @@ fn smaller_player_view_receives_fewer_snapshots_than_larger_view() {
 
 #[test]
 fn block_delta_routing_sends_only_to_players_tracking_changed_chunk() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
-    let player_a = server.add_dedicated_player();
-    let player_b = server.add_dedicated_player();
+    let player_a = server.add_player();
+    let player_b = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player_a, ChunkPos::new(0, 0), 0);
     set_dedicated_chunk_view_and_poll(&mut server, player_b, ChunkPos::new(2, 0), 0);
     server
@@ -241,10 +281,10 @@ fn block_delta_routing_sends_only_to_players_tracking_changed_chunk() {
 
 #[test]
 fn protected_lobby_rejects_forged_dedicated_player_break() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
     server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
-    let player = server.add_dedicated_player();
+    let player = server.add_player();
     set_dedicated_chunk_view_and_poll(&mut server, player, ChunkPos::new(0, 0), 0);
     let pos = BlockPos::new(8, 80, 8);
     assert!(server.scheduler_mut().set_block_at_world(pos, DIRT));

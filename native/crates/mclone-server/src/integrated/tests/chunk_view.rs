@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn local_chunk_view_routes_status_events_into_loading_progress() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     assert_eq!(server.loading_progress_stats(), None);
 
     load_center_chunk(&mut server);
@@ -34,7 +34,7 @@ fn local_chunk_view_routes_status_events_into_loading_progress() {
 
 #[test]
 fn view_readiness_snapshot_tracks_current_accepted_view() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     assert_eq!(server.view_readiness_snapshot(), None);
 
     load_chunk_view(&mut server, ChunkPos::new(0, 0));
@@ -67,7 +67,7 @@ fn view_readiness_snapshot_tracks_current_accepted_view() {
 
 #[test]
 fn view_readiness_snapshot_uses_runtime_target_status() {
-    let mut unlit_server = IntegratedServer::new(0);
+    let mut unlit_server = LocalRealmSession::new(0);
     load_chunk_view_with_lighting(&mut unlit_server, ChunkPos::new(0, 0), false);
     let unlit = unlit_server
         .view_readiness_snapshot()
@@ -80,7 +80,7 @@ fn view_readiness_snapshot_uses_runtime_target_status() {
     assert_eq!(unlit.stats.playable_gate_ready_chunks, 9);
     assert!(unlit.stats.playable_chunk_ready);
 
-    let mut lit_server = IntegratedServer::new(0);
+    let mut lit_server = LocalRealmSession::new(0);
     load_chunk_view_with_lighting(&mut lit_server, ChunkPos::new(0, 0), true);
     let lit = lit_server
         .view_readiness_snapshot()

@@ -37,7 +37,7 @@ fn first_biome_zoom_seed(updates: &[ServerUpdate]) -> Option<i64> {
     })
 }
 
-fn request_initial_chunk_view(server: &mut IntegratedServer) {
+fn request_initial_chunk_view(server: &mut LocalRealmSession) {
     server.set_lighting_enabled(false);
     let updates = server
         .try_handle_command(ClientCommand::SetChunkView(ChunkView {
@@ -54,7 +54,7 @@ fn request_initial_chunk_view(server: &mut IntegratedServer) {
 }
 
 fn wait_for_initial_spawn_update(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
 ) -> mclone_protocol::PlayerPositionUpdate {
     let mut spawn = None;
     for _ in 0..60_000 {
@@ -76,7 +76,7 @@ fn wait_for_initial_spawn_update(
 }
 
 fn load_chunk_view_with_lighting(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     center: ChunkPos,
     lighting_enabled: bool,
 ) {
@@ -103,16 +103,16 @@ fn load_chunk_view_with_lighting(
     panic!("timed out loading center chunk");
 }
 
-fn load_chunk_view(server: &mut IntegratedServer, center: ChunkPos) {
+fn load_chunk_view(server: &mut LocalRealmSession, center: ChunkPos) {
     load_chunk_view_with_lighting(server, center, false);
 }
 
-fn load_center_chunk(server: &mut IntegratedServer) {
+fn load_center_chunk(server: &mut LocalRealmSession) {
     load_chunk_view(server, ChunkPos::new(0, 0));
 }
 
 #[cfg(feature = "physics-rapier")]
-fn prepare_debug_physics_floor(server: &mut IntegratedServer) {
+fn prepare_debug_physics_floor(server: &mut LocalRealmSession) {
     load_center_chunk(server);
 
     for y in 0..16 {
@@ -135,7 +135,7 @@ fn prepare_debug_physics_floor(server: &mut IntegratedServer) {
         .expect("move player before debug shot");
 }
 
-fn accept_player_position_updates(server: &mut IntegratedServer, updates: &[ServerUpdate]) {
+fn accept_player_position_updates(server: &mut LocalRealmSession, updates: &[ServerUpdate]) {
     for update in updates {
         let ServerUpdate::PlayerPosition(update) = update else {
             continue;
@@ -150,7 +150,7 @@ fn accept_player_position_updates(server: &mut IntegratedServer, updates: &[Serv
 }
 
 fn set_dedicated_chunk_view_and_poll(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     player_id: ServerPlayerId,
     center: ChunkPos,
     radius: u32,
@@ -165,10 +165,10 @@ fn set_dedicated_chunk_view_and_poll(
             }),
         )
         .expect("set dedicated chunk view");
-    accept_dedicated_player_position_updates(server, player_id, &updates);
+    accept_player_position_updates_for_player(server, player_id, &updates);
     for _ in 0..60_000 {
         let polled = server.try_poll_for_player(player_id).expect("poll player");
-        accept_dedicated_player_position_updates(server, player_id, &polled);
+        accept_player_position_updates_for_player(server, player_id, &polled);
         updates.extend(polled);
         if server.pending_job_count() == 0 {
             return updates;
@@ -180,8 +180,8 @@ fn set_dedicated_chunk_view_and_poll(
     panic!("timed out loading dedicated player chunk view");
 }
 
-fn accept_dedicated_player_position_updates(
-    server: &mut IntegratedServer,
+fn accept_player_position_updates_for_player(
+    server: &mut LocalRealmSession,
     player_id: ServerPlayerId,
     updates: &[ServerUpdate],
 ) {
@@ -327,8 +327,8 @@ fn has_entity_remove(updates: &[ServerUpdate], id: EntityId) -> bool {
     )
 }
 
-fn sync_player(server: &mut IntegratedServer, position: Vec3d) {
-    let mut current = server.player.position();
+fn sync_player(server: &mut LocalRealmSession, position: Vec3d) {
+    let mut current = server.player().position();
     for _ in 0..64 {
         let delta = position.subtract(current);
         if delta.length_sqr() <= 64.0 {
@@ -345,7 +345,7 @@ fn sync_player(server: &mut IntegratedServer, position: Vec3d) {
     panic!("timed out walking test player to {position:?}");
 }
 
-fn send_player_move(server: &mut IntegratedServer, position: Vec3d) {
+fn send_player_move(server: &mut LocalRealmSession, position: Vec3d) {
     let updates = server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
             position,
@@ -357,7 +357,7 @@ fn send_player_move(server: &mut IntegratedServer, position: Vec3d) {
     assert!(updates.is_empty());
 }
 
-fn sync_carried_slot(server: &mut IntegratedServer, slot: u8) {
+fn sync_carried_slot(server: &mut LocalRealmSession, slot: u8) {
     let updates = server
         .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
             slot,
@@ -366,7 +366,7 @@ fn sync_carried_slot(server: &mut IntegratedServer, slot: u8) {
     assert!(updates.is_empty());
 }
 
-fn assign_debug_hotbar_slot(server: &mut IntegratedServer, slot: u8, block_state: BlockStateId) {
+fn assign_debug_hotbar_slot(server: &mut LocalRealmSession, slot: u8, block_state: BlockStateId) {
     let updates = server
         .try_handle_command(ClientCommand::SetDebugHotbarSlot(
             SetDebugHotbarSlotCommand {
@@ -378,7 +378,7 @@ fn assign_debug_hotbar_slot(server: &mut IntegratedServer, slot: u8, block_state
     assert!(updates.is_empty());
 }
 
-fn clear_debug_hotbar_slot(server: &mut IntegratedServer, slot: u8) {
+fn clear_debug_hotbar_slot(server: &mut LocalRealmSession, slot: u8) {
     let updates = server
         .try_handle_command(ClientCommand::SetDebugHotbarSlot(
             SetDebugHotbarSlotCommand {

@@ -3,7 +3,7 @@ use crate::MemoryWorldStore;
 
 #[test]
 fn new_world_metadata_starts_at_vanilla_zero_and_tracks_both_clocks() {
-    let mut server = IntegratedServer::with_world_store(77, Box::new(MemoryWorldStore::new()));
+    let mut server = LocalRealmSession::with_world_store(77, Box::new(MemoryWorldStore::new()));
     let initialized = server
         .initialize_world_metadata_at_unix_millis(1_000)
         .unwrap();
@@ -35,7 +35,7 @@ fn legacy_world_records_initialize_once_at_mclone_morning() {
             Vec3d::new(0.5, 64.0, 0.5),
         ))
         .unwrap();
-    let mut server = IntegratedServer::with_world_store(88, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(88, Box::new(store));
 
     let initialized = server
         .initialize_world_metadata_at_unix_millis(3_000)
@@ -56,7 +56,7 @@ fn stored_world_metadata_rejects_seed_and_profile_mismatches() {
             1_000,
         ))
         .unwrap();
-    let mut seed_mismatch = IntegratedServer::with_world_store(2, Box::new(seed_store));
+    let mut seed_mismatch = LocalRealmSession::with_world_store(2, Box::new(seed_store));
     assert!(
         seed_mismatch
             .initialize_world_metadata_at_unix_millis(2_000)
@@ -74,7 +74,7 @@ fn stored_world_metadata_rejects_seed_and_profile_mismatches() {
             1_000,
         ))
         .unwrap();
-    let mut profile_mismatch = IntegratedServer::with_world_store(2, Box::new(profile_store));
+    let mut profile_mismatch = LocalRealmSession::with_world_store(2, Box::new(profile_store));
     assert!(
         profile_mismatch
             .initialize_world_metadata_at_unix_millis(2_000)
@@ -86,7 +86,7 @@ fn stored_world_metadata_rejects_seed_and_profile_mismatches() {
 
 #[test]
 fn daylight_rule_and_debug_freeze_keep_distinct_durable_semantics() {
-    let mut server = IntegratedServer::with_world_store(99, Box::new(MemoryWorldStore::new()));
+    let mut server = LocalRealmSession::with_world_store(99, Box::new(MemoryWorldStore::new()));
     server
         .initialize_world_metadata_at_unix_millis(1_000)
         .unwrap();
@@ -115,7 +115,8 @@ fn sqlite_restart_resumes_exact_game_and_day_time() {
     let seed = 101;
     let expected;
     {
-        let mut server = IntegratedServer::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
         server
             .initialize_world_metadata_at_unix_millis(1_000)
             .unwrap();
@@ -133,7 +134,7 @@ fn sqlite_restart_resumes_exact_game_and_day_time() {
 
     {
         let mut reopened =
-            IntegratedServer::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
         let metadata = reopened
             .initialize_world_metadata_at_unix_millis(3_000)
             .unwrap();
@@ -157,7 +158,7 @@ fn world_time_temp_dir(name: &str) -> std::path::PathBuf {
 
 #[test]
 fn frozen_day_time_holds_a_forced_value() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     server.set_day_time(23000);
     server.set_day_time_frozen(true);
     for tick in 1..=5 {
@@ -178,7 +179,7 @@ fn frozen_day_time_holds_a_forced_value() {
 
 #[test]
 fn first_chunk_view_sends_safe_surface_spawn_position() {
-    let mut server = IntegratedServer::new(12345);
+    let mut server = LocalRealmSession::new(12345);
     request_initial_chunk_view(&mut server);
     let spawn = wait_for_initial_spawn_update(&mut server);
 
@@ -216,7 +217,7 @@ fn first_chunk_view_sends_safe_surface_spawn_position() {
 
     assert_eq!(
         server
-            .player
+            .player()
             .awaiting_teleport()
             .map(|awaiting| awaiting.id),
         Some(spawn.teleport_id)
@@ -227,14 +228,14 @@ fn first_chunk_view_sends_safe_surface_spawn_position() {
         }))
         .expect("accept spawn");
     assert!(updates.is_empty());
-    assert_eq!(server.player.awaiting_teleport(), None);
-    assert_eq!(server.player.position(), spawn.position);
+    assert_eq!(server.player().awaiting_teleport(), None);
+    assert_eq!(server.player().position(), spawn.position);
 }
 
 #[test]
 fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     let seed = 12_345;
-    let mut probe = IntegratedServer::new(seed);
+    let mut probe = LocalRealmSession::new(seed);
     request_initial_chunk_view(&mut probe);
     let safe_spawn = wait_for_initial_spawn_update(&mut probe).position;
     let identity = ClientIdentity::new(PlayerProfileId::new([0x42; 16]), "Builder").unwrap();
@@ -252,7 +253,7 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     let mut store = MemoryWorldStore::new();
     store.save_player(&record).unwrap();
 
-    let mut server = IntegratedServer::with_world_store(seed, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(seed, Box::new(store));
     server
         .configure_local_player_identity_blocking(identity)
         .unwrap();
@@ -262,9 +263,9 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     assert_eq!(resumed.position, record.position);
     assert_eq!(resumed.y_rot_degrees, record.y_rot_degrees);
     assert_eq!(resumed.x_rot_degrees, record.x_rot_degrees);
-    assert!(!server.player.on_ground());
-    assert_eq!(server.inventory.selected_hotbar_slot(), 4);
-    assert_eq!(server.local_player_total_experience, 19);
+    assert!(!server.player().on_ground());
+    assert_eq!(server.inventory().selected_hotbar_slot(), 4);
+    assert_eq!(server.total_experience(), 19);
 }
 
 #[test]
@@ -283,7 +284,7 @@ fn current_single_dimension_runtime_rejects_non_overworld_resume_records() {
     let mut store = MemoryWorldStore::new();
     store.save_player(&record).unwrap();
 
-    let mut server = IntegratedServer::with_world_store(seed, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(seed, Box::new(store));
     server
         .configure_local_player_identity_blocking(identity)
         .unwrap();
@@ -291,15 +292,15 @@ fn current_single_dimension_runtime_rejects_non_overworld_resume_records() {
     let spawned = wait_for_initial_spawn_update(&mut server);
 
     assert_ne!(spawned.position, record.position);
-    assert_eq!(server.inventory.selected_hotbar_slot(), 0);
-    assert_eq!(server.local_player_total_experience, 0);
-    assert!(server.local_player_resume_record.is_none());
+    assert_eq!(server.inventory().selected_hotbar_slot(), 0);
+    assert_eq!(server.total_experience(), 0);
+    assert!(server.resume_record().is_none());
 }
 
 #[test]
 fn blocked_saved_player_pose_falls_back_to_safe_surface_nearby() {
     let seed = 12_345;
-    let mut probe = IntegratedServer::new(seed);
+    let mut probe = LocalRealmSession::new(seed);
     request_initial_chunk_view(&mut probe);
     let safe_spawn = wait_for_initial_spawn_update(&mut probe).position;
     let identity = ClientIdentity::new(PlayerProfileId::new([0x24; 16]), "Explorer").unwrap();
@@ -313,7 +314,7 @@ fn blocked_saved_player_pose_falls_back_to_safe_surface_nearby() {
     let mut store = MemoryWorldStore::new();
     store.save_player(&record).unwrap();
 
-    let mut server = IntegratedServer::with_world_store(seed, Box::new(store));
+    let mut server = LocalRealmSession::with_world_store(seed, Box::new(store));
     server
         .configure_local_player_identity_blocking(identity)
         .unwrap();
@@ -328,7 +329,7 @@ fn blocked_saved_player_pose_falls_back_to_safe_surface_nearby() {
 
 #[test]
 fn seed_789_initial_spawn_uses_surface_not_underground_cave() {
-    let mut server = IntegratedServer::new(789);
+    let mut server = LocalRealmSession::new(789);
     request_initial_chunk_view(&mut server);
     let spawn = wait_for_initial_spawn_update(&mut server);
     let feet = BlockPos::new(
@@ -352,7 +353,7 @@ fn seed_789_initial_spawn_uses_surface_not_underground_cave() {
 
 #[test]
 fn move_player_command_updates_server_player_state_without_world_updates() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
 
     let updates = server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
@@ -364,15 +365,15 @@ fn move_player_command_updates_server_player_state_without_world_updates() {
         .expect("move player");
 
     assert!(updates.is_empty());
-    assert_eq!(server.player.position(), Vec3d::new(1.25, 63.0, -4.5));
-    assert_eq!(server.player.y_rot_degrees(), -179.0);
-    assert_eq!(server.player.x_rot_degrees(), 179.0);
-    assert!(server.player.on_ground());
+    assert_eq!(server.player().position(), Vec3d::new(1.25, 63.0, -4.5));
+    assert_eq!(server.player().y_rot_degrees(), -179.0);
+    assert_eq!(server.player().x_rot_degrees(), 179.0);
+    assert!(server.player().on_ground());
 }
 
 #[test]
 fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     server.set_persistence_demo_jump_experience_enabled(true);
     send_player_move(&mut server, Vec3d::new(1.0, 64.0, 1.0));
 
@@ -414,12 +415,12 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(server.local_player_total_experience, 1);
+    assert_eq!(server.total_experience(), 1);
 }
 
 #[test]
 fn persistence_demo_is_explicit_and_protected_worlds_never_award_jump_experience() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
     assert!(
         server
@@ -447,14 +448,14 @@ fn persistence_demo_is_explicit_and_protected_worlds_never_award_jump_experience
             .unwrap()
             .is_empty()
     );
-    assert_eq!(server.local_player_total_experience, 0);
+    assert_eq!(server.total_experience(), 0);
 }
 
 #[test]
 fn awarded_demo_experience_is_written_to_the_identity_player_record() {
     let identity = ClientIdentity::new(PlayerProfileId::new([0x55; 16]), "Jumper").unwrap();
     let key = player_record_key(identity.profile_id);
-    let mut server = IntegratedServer::with_world_store(0, Box::new(MemoryWorldStore::new()));
+    let mut server = LocalRealmSession::with_world_store(0, Box::new(MemoryWorldStore::new()));
     server
         .configure_local_player_identity_blocking(identity)
         .unwrap();
@@ -480,7 +481,7 @@ fn awarded_demo_experience_is_written_to_the_identity_player_record() {
 
 #[test]
 fn simulation_tick_records_java_shaped_movement_packet_boundary() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
 
     server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
@@ -496,35 +497,36 @@ fn simulation_tick_records_java_shaped_movement_packet_boundary() {
         }))
         .expect("rotate player");
 
-    assert_eq!(server.player.position(), Vec3d::new(1.0, 64.0, 1.0));
-    assert_eq!(server.player.received_move_packet_count(), 2);
-    assert_eq!(server.player.known_move_packet_count(), 0);
+    assert_eq!(server.player().position(), Vec3d::new(1.0, 64.0, 1.0));
+    assert_eq!(server.player().received_move_packet_count(), 2);
+    assert_eq!(server.player().known_move_packet_count(), 0);
 
     server
         .try_simulation_tick_report()
         .expect("simulation tick");
 
-    assert_eq!(server.player.received_move_packet_count(), 2);
-    assert_eq!(server.player.known_move_packet_count(), 2);
+    assert_eq!(server.player().received_move_packet_count(), 2);
+    assert_eq!(server.player().known_move_packet_count(), 2);
     assert_eq!(
-        server.player.first_good_position(),
+        server.player().first_good_position(),
         Vec3d::new(1.0, 64.0, 1.0)
     );
     assert_eq!(
-        server.player.last_good_position(),
+        server.player().last_good_position(),
         Vec3d::new(1.0, 64.0, 1.0)
     );
 }
 
 #[test]
 fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
 
-    let first = server.player.initial_position_update(
+    let simulation_tick = server.simulation_tick;
+    let first = server.player_mut().initial_position_update(
         Vec3d::new(0.0, 64.0, 0.0),
         45.0,
         10.0,
-        server.simulation_tick,
+        simulation_tick,
     );
     assert_eq!(first.teleport_id, 1);
 
@@ -535,10 +537,10 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
         }))
         .expect("move while awaiting teleport");
     assert!(updates.is_empty());
-    assert_eq!(server.player.position(), Vec3d::new(0.0, 64.0, 0.0));
+    assert_eq!(server.player().position(), Vec3d::new(0.0, 64.0, 0.0));
     assert_eq!(
         server
-            .player
+            .player()
             .awaiting_teleport()
             .map(|awaiting| awaiting.id),
         Some(first.teleport_id)
@@ -578,7 +580,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
     assert_eq!(resend.teleport_id, 2);
     assert_eq!(
         server
-            .player
+            .player()
             .awaiting_teleport()
             .map(|awaiting| awaiting.id),
         Some(2)
@@ -591,7 +593,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
         .expect("accept stale teleport");
     assert_eq!(
         server
-            .player
+            .player()
             .awaiting_teleport()
             .map(|awaiting| awaiting.id),
         Some(2)
@@ -602,7 +604,7 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
             id: resend.teleport_id,
         }))
         .expect("accept resent teleport");
-    assert_eq!(server.player.awaiting_teleport(), None);
+    assert_eq!(server.player().awaiting_teleport(), None);
 
     let updates = server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
@@ -611,12 +613,12 @@ fn pending_player_position_update_blocks_moves_until_ack_and_resends() {
         }))
         .expect("move after ack");
     assert!(updates.is_empty());
-    assert_eq!(server.player.position(), Vec3d::new(32.0, 64.0, 0.0));
+    assert_eq!(server.player().position(), Vec3d::new(32.0, 64.0, 0.0));
 }
 
 #[test]
 fn set_carried_item_updates_server_selected_hotbar_slot_without_world_updates() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
 
     let updates = server
         .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
@@ -625,7 +627,7 @@ fn set_carried_item_updates_server_selected_hotbar_slot_without_world_updates() 
         .expect("set carried item");
 
     assert!(updates.is_empty());
-    assert_eq!(server.inventory.selected_hotbar_slot(), 4);
+    assert_eq!(server.inventory().selected_hotbar_slot(), 4);
 
     let updates = server
         .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
@@ -634,5 +636,5 @@ fn set_carried_item_updates_server_selected_hotbar_slot_without_world_updates() 
         .expect("invalid carried item");
 
     assert!(updates.is_empty());
-    assert_eq!(server.inventory.selected_hotbar_slot(), 4);
+    assert_eq!(server.inventory().selected_hotbar_slot(), 4);
 }

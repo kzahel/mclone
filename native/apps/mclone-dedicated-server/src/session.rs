@@ -11,8 +11,7 @@ use mclone_protocol::{
     SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
 };
 use mclone_server::{
-    ChunkSchedulerPublicationDiagnostics, IntegratedServer, ServerPlayerId,
-    ServerSimulationTickReport,
+    ChunkSchedulerPublicationDiagnostics, RealmServer, ServerPlayerId, ServerSimulationTickReport,
 };
 
 #[cfg(test)]
@@ -21,11 +20,11 @@ use mclone_net::{try_read_client_command_frame, write_server_update_batch};
 #[cfg(test)]
 pub(crate) fn serve_connection(
     stream: &mut (impl Read + Write),
-    server: &mut IntegratedServer,
+    server: &mut RealmServer,
 ) -> Result<usize> {
-    let player_id = server.add_dedicated_player();
+    let player_id = server.add_player();
     let result = DedicatedSession::new(player_id).serve(stream, server);
-    server.remove_dedicated_player(player_id);
+    server.remove_player(player_id);
     result
 }
 
@@ -77,7 +76,7 @@ impl DedicatedSession {
     fn serve(
         &mut self,
         stream: &mut (impl Read + Write),
-        server: &mut IntegratedServer,
+        server: &mut RealmServer,
     ) -> Result<usize> {
         let mut command_count = 0;
         let mut update_count = 0;
@@ -111,7 +110,7 @@ impl DedicatedSession {
 
     pub(crate) fn handle_client_command(
         &mut self,
-        server: &mut IntegratedServer,
+        server: &mut RealmServer,
         command: ClientCommand,
     ) -> Result<DedicatedCommandOutcome> {
         match command {
@@ -143,7 +142,7 @@ impl DedicatedSession {
         self.liveness.poll(now)
     }
 
-    pub(crate) fn finish_tick_boundary(&mut self, server: &mut IntegratedServer) -> Result<()> {
+    pub(crate) fn finish_tick_boundary(&mut self, server: &mut RealmServer) -> Result<()> {
         self.connection.flush_movement(server, self.player_id)?;
         self.connection.mark_tick_boundary();
         Ok(())
@@ -253,7 +252,7 @@ struct DedicatedConnectionState {
 impl DedicatedConnectionState {
     fn handle_command(
         &mut self,
-        server: &mut IntegratedServer,
+        server: &mut RealmServer,
         player_id: ServerPlayerId,
         command: ClientCommand,
     ) -> Result<()> {
@@ -277,7 +276,7 @@ impl DedicatedConnectionState {
 
     fn flush_movement(
         &mut self,
-        server: &mut IntegratedServer,
+        server: &mut RealmServer,
         player_id: ServerPlayerId,
     ) -> Result<()> {
         while let Some(command) = self.pending_movement.pop_front() {
@@ -363,8 +362,8 @@ mod tests {
 
     #[test]
     fn dedicated_session_rejects_debug_commands_without_capability() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        let player_id = server.add_dedicated_player_with_capabilities(SessionCapabilities::NONE);
+        let mut server = RealmServer::new(DEFAULT_SEED);
+        let player_id = server.add_player_with_capabilities(SessionCapabilities::NONE);
         let mut session =
             DedicatedSession::new_with_capabilities(player_id, SessionCapabilities::NONE);
 
@@ -426,7 +425,7 @@ mod tests {
         )
         .unwrap();
         let mut stream = ScriptedStream::new(request);
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let mut server = RealmServer::new(DEFAULT_SEED);
 
         let update_count = serve_connection(&mut stream, &mut server).unwrap();
 
@@ -448,8 +447,8 @@ mod tests {
 
     #[test]
     fn dedicated_connection_buffers_movement_until_flush_or_ordered_command() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        let player_id = server.add_dedicated_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
+        let player_id = server.add_player();
         let mut connection = DedicatedConnectionState::default();
 
         connection
@@ -482,8 +481,8 @@ mod tests {
 
     #[test]
     fn dedicated_session_tick_marks_connection_movement_boundary() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        let player_id = server.add_dedicated_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
+        let player_id = server.add_player();
         let mut session = DedicatedSession::new(player_id);
 
         session
@@ -509,9 +508,9 @@ mod tests {
 
     #[test]
     fn dedicated_sessions_route_movement_to_assigned_server_players() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        let player_a = server.add_dedicated_player();
-        let player_b = server.add_dedicated_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
+        let player_a = server.add_player();
+        let player_b = server.add_player();
         let mut session_a = DedicatedSession::new(player_a);
         let mut session_b = DedicatedSession::new(player_b);
 
@@ -537,21 +536,21 @@ mod tests {
         session_b.finish_tick_boundary(&mut server).unwrap();
 
         assert_eq!(
-            server.dedicated_player_position(player_a),
+            server.player_position(player_a),
             Some(Vec3d::new(1.0, 64.0, 1.0))
         );
         assert_eq!(
-            server.dedicated_player_position(player_b),
+            server.player_position(player_b),
             Some(Vec3d::new(-2.0, 70.0, 3.0))
         );
     }
 
     #[test]
     fn dedicated_sessions_keep_independent_chunk_views() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let mut server = RealmServer::new(DEFAULT_SEED);
         server.set_lighting_enabled(false);
-        let player_a = server.add_dedicated_player();
-        let player_b = server.add_dedicated_player();
+        let player_a = server.add_player();
+        let player_b = server.add_player();
         let mut session_a = DedicatedSession::new(player_a);
         let mut session_b = DedicatedSession::new(player_b);
 
@@ -635,7 +634,7 @@ mod tests {
         )
         .unwrap();
         let mut stream = ScriptedStream::new(request);
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let mut server = RealmServer::new(DEFAULT_SEED);
 
         assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 5);
 
@@ -680,7 +679,7 @@ mod tests {
     }
 
     fn collect_player_updates_until_idle<const N: usize>(
-        server: &mut IntegratedServer,
+        server: &mut RealmServer,
         players: [ServerPlayerId; N],
     ) -> [Vec<ServerUpdate>; N] {
         let mut collected = std::array::from_fn(|_| Vec::new());

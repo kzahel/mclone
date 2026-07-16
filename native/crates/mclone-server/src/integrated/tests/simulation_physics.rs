@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn day_time_advances_each_tick_by_default() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     let start = server.day_time();
     let report = server.try_simulation_tick_report().expect("tick");
     assert_eq!(server.day_time(), start + 1);
@@ -12,7 +12,7 @@ fn day_time_advances_each_tick_by_default() {
 #[cfg(feature = "physics-rapier")]
 #[test]
 fn debug_physics_cube_steps_against_live_terrain_section() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
 
     for y in 0..16 {
@@ -74,7 +74,7 @@ fn debug_physics_cube_steps_against_live_terrain_section() {
 #[cfg(feature = "physics-rapier")]
 #[test]
 fn debug_physics_cube_applies_minecraft_vertical_drag() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
 
     for y in 0..16 {
@@ -114,7 +114,7 @@ fn debug_physics_cube_applies_minecraft_vertical_drag() {
 #[cfg(feature = "physics-rapier")]
 #[test]
 fn shoot_debug_physics_cube_command_publishes_debug_entity() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     prepare_debug_physics_floor(&mut server);
 
     let updates = server
@@ -170,7 +170,7 @@ fn shoot_debug_physics_cube_command_publishes_debug_entity() {
 #[cfg(feature = "physics-rapier")]
 #[test]
 fn physics_step_report_advances_debug_cube_without_gameplay_tick() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     prepare_debug_physics_floor(&mut server);
 
     let updates = server
@@ -214,7 +214,7 @@ fn physics_step_report_advances_debug_cube_without_gameplay_tick() {
 #[cfg(feature = "physics-rapier")]
 #[test]
 fn debug_physics_cube_collides_with_player_collider() {
-    let mut server = IntegratedServer::new(0);
+    let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
 
     for y in 0..16 {

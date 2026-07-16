@@ -303,8 +303,12 @@ fn standby_preview_currently_joins_a_full_local_player_not_an_observer() {
         &server,
         "fn with_scheduler_and_player_chunk_tracking_policy(",
     );
-    assert!(constructor.contains("chunk_tracking.add_player(ServerPlayerId::LOCAL)"));
-    assert!(constructor.contains("remote_players.add_player(ServerPlayerId::LOCAL)"));
+    assert!(constructor.contains("players: ServerPlayerList::default()"));
+    assert!(!constructor.contains(".add_player("));
+
+    let local_session = braced_item(&server, "pub fn from_server(mut server: RealmServer)");
+    assert!(local_session.contains("let player_id = server.add_player()"));
+    assert!(local_session.contains("Self { server, player_id }"));
 
     let scene = read("src/lib.rs");
     let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
@@ -463,10 +467,11 @@ fn integrated_remote_player_tracking_pairs_local_and_dedicated_symmetrically() {
     let states = braced_item(&server, "fn remote_player_states(&self)");
     let state = braced_item(&server, "fn remote_player_state(&self");
     assert!(observer.contains("let observer = target.player_id()"));
-    assert!(!observer.contains("dedicated_player_id"));
-    assert!(subject.contains("subject == ServerPlayerId::LOCAL"));
-    assert!(subject.contains("self.dedicated_players.contains(subject)"));
+    assert!(observer.contains("self.players.contains(observer)"));
+    assert!(!observer.contains("local_player"));
+    assert!(subject.contains("self.players.contains(subject)"));
+    assert!(!subject.contains("ServerPlayerId::LOCAL"));
     assert!(states.contains("self.player_observers()"));
-    assert!(state.contains("player_id == ServerPlayerId::LOCAL"));
-    assert!(state.contains("self.dedicated_players.get(player_id)"));
+    assert!(state.contains("self.players.get(player_id)?"));
+    assert!(!state.contains("local_player"));
 }

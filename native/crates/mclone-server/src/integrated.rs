@@ -1,9 +1,8 @@
-//! Integrated single-process server facade.
+//! Shared authoritative realm server and local in-process session adapter.
 //!
-//! Move-only home for `IntegratedServer`, the in-process wrapper that drives a
-//! `ChunkScheduler` plus the fluid tick list and turns scheduler events into
-//! protocol `ServerUpdate`s. Roughly mirrors Java's integrated-server glue over
-//! `ServerChunkCache`; the heavy chunk-management logic lives in the scheduler.
+//! `RealmServer` owns gameplay, players, persistence, and publication without
+//! knowing whether a session is local, TCP, or WebSocket. `LocalRealmSession`
+//! is the in-memory adapter used by integrated hosts and tests.
 
 use std::collections::{BTreeMap, BTreeSet};
 #[cfg(not(target_arch = "wasm32"))]
@@ -100,7 +99,7 @@ fn session_configuration(
 }
 
 #[derive(Debug)]
-pub struct IntegratedServer {
+pub struct RealmServer {
     seed: i64,
     biome_source: ServerBiomeSource,
     scheduler: ChunkScheduler,
@@ -118,16 +117,7 @@ pub struct IntegratedServer {
     volatile_natural_spawning_enabled: bool,
     world_behavior_profile: WorldBehaviorProfile,
     persistence_demo_jump_experience_enabled: bool,
-    initial_spawn_center: Option<ChunkPos>,
-    local_player_active: bool,
-    player: ServerPlayerState,
-    local_player_appearance: PlayerAppearance,
-    inventory: ServerInventory,
-    local_player_identity: Option<ClientIdentity>,
-    local_player_resume_record: Option<PlayerRecord>,
-    local_player_total_experience: u64,
-    local_player_record_revision: u64,
-    dedicated_players: ServerPlayerList,
+    players: ServerPlayerList,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
     chunk_tracking: PlayerChunkTracking,
     remote_players: RemotePlayerTracking,
@@ -179,8 +169,7 @@ pub const INITIAL_DAY_TIME: u64 = 1000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CommandTarget {
-    Local,
-    Dedicated(ServerPlayerId),
+    Player(ServerPlayerId),
 }
 
 /// Shared Rust-authored validation actor. Platform adapters may only enable or
@@ -224,7 +213,7 @@ struct NaturalSpawningTickResult {
     spawned_entities: Vec<ServerEntityState>,
 }
 
-impl IntegratedServer {
+impl RealmServer {
     pub fn new(seed: i64) -> Self {
         Self::with_chunk_store(seed, Box::<NullChunkSnapshotStore>::default())
     }
@@ -374,17 +363,8 @@ impl IntegratedServer {
         scheduler: ChunkScheduler,
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
-        let mut chunk_tracking = PlayerChunkTracking::new(policy);
-        chunk_tracking.add_player(ServerPlayerId::LOCAL);
-        let configuration = session_configuration(policy, SessionCapabilities::DEVELOPMENT_DEFAULT);
-        chunk_tracking.queue_update_for_player(
-            ServerPlayerId::LOCAL,
-            ServerUpdate::SessionConfiguration(configuration),
-        );
-        chunk_tracking.queue_update_for_player(ServerPlayerId::LOCAL, ServerUpdate::SessionReady);
+        let chunk_tracking = PlayerChunkTracking::new(policy);
         let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
-        let mut remote_players = RemotePlayerTracking::default();
-        remote_players.add_player(ServerPlayerId::LOCAL);
         Self {
             seed,
             biome_source: ServerBiomeSource::new(seed),
@@ -403,19 +383,10 @@ impl IntegratedServer {
             volatile_natural_spawning_enabled: true,
             world_behavior_profile: WorldBehaviorProfile::default(),
             persistence_demo_jump_experience_enabled: false,
-            initial_spawn_center: None,
-            local_player_active: true,
-            player: ServerPlayerState::default(),
-            local_player_appearance: PlayerAppearance::default(),
-            inventory: ServerInventory::default(),
-            local_player_identity: None,
-            local_player_resume_record: None,
-            local_player_total_experience: 0,
-            local_player_record_revision: 0,
-            dedicated_players: ServerPlayerList::default(),
+            players: ServerPlayerList::default(),
             debug_auxiliary_player_script: None,
             chunk_tracking,
-            remote_players,
+            remote_players: RemotePlayerTracking::default(),
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
             dirty_entity_chunks: BTreeSet::new(),
@@ -598,12 +569,12 @@ impl IntegratedServer {
                 self.debug_auxiliary_player_script = Some(script);
             }
             (true, None) => {
-                let player_id = self.add_dedicated_player();
+                let player_id = self.add_player();
                 self.debug_auxiliary_player_script =
                     Some(DebugAuxiliaryPlayerScript::new(player_id));
             }
             (false, Some(script)) => {
-                let _ = self.remove_dedicated_player(script.player_id);
+                let _ = self.remove_player(script.player_id);
             }
             (false, None) => {}
         }
@@ -657,8 +628,11 @@ impl IntegratedServer {
         self.loading_progress.snapshot()
     }
 
-    pub fn view_readiness_snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
-        let view = self.chunk_tracking.accepted_view(ServerPlayerId::LOCAL)?;
+    pub fn view_readiness_snapshot(
+        &self,
+        player_id: ServerPlayerId,
+    ) -> Option<ChunkLoadingProgressSnapshot> {
+        let view = self.chunk_tracking.accepted_view(player_id)?;
         Some(self.scheduler.view_readiness_snapshot(view))
     }
 
@@ -716,15 +690,15 @@ impl IntegratedServer {
             .set_publication_budget_gameplay_rate_hz(gameplay_rate_hz);
     }
 
-    pub fn add_dedicated_player(&mut self) -> ServerPlayerId {
-        self.add_dedicated_player_with_capabilities(SessionCapabilities::DEVELOPMENT_DEFAULT)
+    pub fn add_player(&mut self) -> ServerPlayerId {
+        self.add_player_with_capabilities(SessionCapabilities::DEVELOPMENT_DEFAULT)
     }
 
-    pub fn add_dedicated_player_with_capabilities(
+    pub fn add_player_with_capabilities(
         &mut self,
         capabilities: SessionCapabilities,
     ) -> ServerPlayerId {
-        let player_id = self.dedicated_players.add();
+        let player_id = self.players.add();
         let configuration = session_configuration(self.chunk_tracking.policy(), capabilities);
         let world_info = self.world_info_update();
         let time_update = self.time_update();
@@ -741,28 +715,28 @@ impl IntegratedServer {
         player_id
     }
 
-    pub fn add_dedicated_player_with_identity(
+    pub fn add_player_with_identity(
         &mut self,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<ServerPlayerId> {
-        self.add_dedicated_player_with_identity_and_capabilities(
+        self.add_player_with_identity_and_capabilities(
             identity,
             SessionCapabilities::DEVELOPMENT_DEFAULT,
         )
     }
 
-    pub fn add_dedicated_player_with_identity_and_capabilities(
+    pub fn add_player_with_identity_and_capabilities(
         &mut self,
         identity: ClientIdentity,
         capabilities: SessionCapabilities,
     ) -> ChunkStoreResult<ServerPlayerId> {
         let key = player_record_key(identity.profile_id);
         let record = self.scheduler.load_player_record_blocking(key)?;
-        let player_id = self.add_dedicated_player_with_capabilities(capabilities);
+        let player_id = self.add_player_with_capabilities(capabilities);
         let player = self
-            .dedicated_players
+            .players
             .get_mut(player_id)
-            .expect("new dedicated player must exist");
+            .expect("new realm player must exist");
         player.identity = Some(identity);
         if let Some(record) = record.filter(player_record_is_usable) {
             player.initial_spawn_center = Some(ChunkPos::new(
@@ -784,27 +758,36 @@ impl IntegratedServer {
         Ok(player_id)
     }
 
-    pub fn configure_local_player_identity(&mut self, identity: ClientIdentity) {
+    pub fn configure_player_identity(
+        &mut self,
+        player_id: ServerPlayerId,
+        identity: ClientIdentity,
+    ) -> ChunkStoreResult<()> {
+        let Some(player) = self.players.get_mut(player_id) else {
+            return Err(unknown_player_error(player_id));
+        };
         let key = player_record_key(identity.profile_id);
-        self.local_player_identity = Some(identity);
+        player.identity = Some(identity);
         self.scheduler.load_player_record(key);
+        Ok(())
     }
 
-    pub fn configure_local_player_identity_blocking(
+    pub fn configure_player_identity_blocking(
         &mut self,
+        player_id: ServerPlayerId,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<()> {
         let key = player_record_key(identity.profile_id);
         let record = self.scheduler.load_player_record_blocking(key.clone())?;
-        self.local_player_identity = Some(identity);
+        let Some(player) = self.players.get_mut(player_id) else {
+            return Err(unknown_player_error(player_id));
+        };
+        player.identity = Some(identity);
         self.apply_loaded_player_record(&key, record)
     }
 
-    pub fn save_dedicated_player_record(
-        &mut self,
-        player_id: ServerPlayerId,
-    ) -> ChunkStoreResult<bool> {
-        let Some(player) = self.dedicated_players.get_mut(player_id) else {
+    pub fn save_player_record(&mut self, player_id: ServerPlayerId) -> ChunkStoreResult<bool> {
+        let Some(player) = self.players.get_mut(player_id) else {
             return Ok(false);
         };
         let Some(record) = player_record_from_entry(player) else {
@@ -815,14 +798,11 @@ impl IntegratedServer {
     }
 
     pub fn save_all_player_records(&mut self) -> ChunkStoreResult<usize> {
-        let mut records = self
-            .dedicated_players
+        let records = self
+            .players
             .values_mut()
             .filter_map(player_record_from_entry)
             .collect::<Vec<_>>();
-        if let Some(record) = self.local_player_record() {
-            records.push(record);
-        }
         let count = records.len();
         for record in records {
             self.scheduler.save_player_record(record);
@@ -830,49 +810,8 @@ impl IntegratedServer {
         Ok(count)
     }
 
-    fn local_player_record(&mut self) -> Option<PlayerRecord> {
-        let identity = self.local_player_identity.as_ref()?;
-        let revision = self.local_player_record_revision.saturating_add(1);
-        self.local_player_record_revision = revision;
-        if !self.player.has_accepted_position() {
-            let mut record = self.local_player_resume_record.clone()?;
-            record.revision = revision;
-            record.last_known_name = identity.display_name.clone();
-            record.selected_hotbar_slot = self.inventory.selected_hotbar_slot();
-            record.total_experience = self.local_player_total_experience;
-            return Some(record);
-        }
-        Some(PlayerRecord {
-            player: player_record_key(identity.profile_id),
-            codec_version: crate::persistence::PLAYER_RECORD_VERSION,
-            revision,
-            last_known_name: identity.display_name.clone(),
-            dimension: "minecraft:overworld".to_owned(),
-            position: self.player.position(),
-            y_rot_degrees: self.player.y_rot_degrees(),
-            x_rot_degrees: self.player.x_rot_degrees(),
-            on_ground: self.player.on_ground(),
-            selected_hotbar_slot: self.inventory.selected_hotbar_slot(),
-            total_experience: self.local_player_total_experience,
-        })
-    }
-
-    /// Removes the integrated local-player slot when this server is owned by a
-    /// dedicated host. Dedicated authority must not retain a ghost observer or
-    /// accumulate publications for a client that cannot drain them.
-    pub fn disable_local_player(&mut self) {
-        if !self.local_player_active {
-            return;
-        }
-        self.local_player_active = false;
-        let routes = self.remote_players.remove_player(ServerPlayerId::LOCAL);
-        self.route_remote_player_updates(routes);
-        self.entity_tracking.remove_observer(ServerPlayerId::LOCAL);
-        self.remove_player_chunk_tracking(ServerPlayerId::LOCAL);
-    }
-
-    pub fn remove_dedicated_player(&mut self, player_id: ServerPlayerId) -> bool {
-        if self.dedicated_players.remove(player_id).is_none() {
+    pub fn remove_player(&mut self, player_id: ServerPlayerId) -> bool {
+        if self.players.remove(player_id).is_none() {
             return false;
         }
         let routes = self.remote_players.remove_player(player_id);
@@ -882,71 +821,38 @@ impl IntegratedServer {
         true
     }
 
-    pub fn dedicated_player_count(&self) -> usize {
-        self.dedicated_players.len()
+    pub fn player_count(&self) -> usize {
+        self.players.len()
     }
 
-    pub fn dedicated_player_position(&self, player_id: ServerPlayerId) -> Option<Vec3d> {
-        self.dedicated_players.position(player_id)
+    pub fn player_position(&self, player_id: ServerPlayerId) -> Option<Vec3d> {
+        self.players.position(player_id)
     }
 
     fn mob_player_targets(&self) -> Vec<MobPlayerTarget> {
-        let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
-        if self.local_player_active {
-            targets.push(MobPlayerTarget::from_position(self.player.position()));
-        }
-        targets.extend(
-            self.dedicated_players
-                .iter()
-                .map(|(_, entry)| MobPlayerTarget::from_position(entry.state.position())),
-        );
-        targets
+        self.players
+            .iter()
+            .map(|(_, entry)| MobPlayerTarget::from_position(entry.state.position()))
+            .collect()
     }
 
     fn natural_spawn_player_positions(&self) -> Vec<Vec3d> {
-        let mut positions = Vec::with_capacity(self.dedicated_players.len() + 1);
-        if self.local_player_active && self.player.has_accepted_position() {
-            positions.push(self.player.position());
-        }
-        positions.extend(
-            self.dedicated_players
-                .iter()
-                .filter(|(_, entry)| entry.state.has_accepted_position())
-                .map(|(_, entry)| entry.state.position()),
-        );
-        positions
+        self.players
+            .iter()
+            .filter(|(_, entry)| entry.state.has_accepted_position())
+            .map(|(_, entry)| entry.state.position())
+            .collect()
     }
 
     fn item_pickup_targets(&self) -> Vec<ItemPickupTarget> {
-        let mut targets = Vec::with_capacity(self.dedicated_players.len() + 1);
-        if self.local_player_active && self.player.has_accepted_position() {
-            targets.push(ItemPickupTarget {
-                player_id: ServerPlayerId::LOCAL,
-                position: self.player.position(),
-            });
-        }
-        targets.extend(
-            self.dedicated_players
-                .iter()
-                .filter(|(_, entry)| entry.state.has_accepted_position())
-                .map(|(player_id, entry)| ItemPickupTarget {
-                    player_id,
-                    position: entry.state.position(),
-                }),
-        );
-        targets
-    }
-
-    pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
-        self.try_handle_command(command)
-            .expect("integrated server command failed")
-    }
-
-    pub fn try_handle_command(
-        &mut self,
-        command: ClientCommand,
-    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.try_handle_command_for_target(CommandTarget::Local, command)
+        self.players
+            .iter()
+            .filter(|(_, entry)| entry.state.has_accepted_position())
+            .map(|(player_id, entry)| ItemPickupTarget {
+                player_id,
+                position: entry.state.position(),
+            })
+            .collect()
     }
 
     pub fn try_handle_command_for_player(
@@ -954,13 +860,13 @@ impl IntegratedServer {
         player_id: ServerPlayerId,
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.try_handle_command_for_target(CommandTarget::Dedicated(player_id), command)
+        self.try_handle_command_for_target(CommandTarget::Player(player_id), command)
     }
 
     /// Applies one dedicated-player command and appends all resulting updates
     /// to that player's ordered publication stream.
     ///
-    /// The response-shaped dedicated server keeps using
+    /// Response-shaped host adapters keep using
     /// [`Self::try_handle_command_for_player`] until its transport cutover.
     /// Autonomous hosts use this method so command results and later tick
     /// publications share one ordered per-player queue.
@@ -1012,19 +918,11 @@ impl IntegratedServer {
         }
     }
 
-    pub fn poll(&mut self) -> Vec<ServerUpdate> {
-        self.try_poll().expect("integrated server poll failed")
-    }
-
-    pub fn try_poll(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.try_poll_for_target(CommandTarget::Local)
-    }
-
     pub fn try_poll_for_player(
         &mut self,
         player_id: ServerPlayerId,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.try_poll_for_target(CommandTarget::Dedicated(player_id))
+        self.try_poll_for_target(CommandTarget::Player(player_id))
     }
 
     fn try_poll_for_target(
@@ -1036,36 +934,13 @@ impl IntegratedServer {
         self.apply_scheduler_events_for_target(target, events)
     }
 
-    /// Drains already-routed local updates without polling workers or
+    /// Drains already-routed updates for one player without polling workers or
     /// advancing global simulation.
-    pub fn try_drain_updates(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.drain_chunk_updates_for_target(CommandTarget::Local)
-    }
-
-    /// Drains already-routed updates for one dedicated player without polling
-    /// workers or advancing global simulation.
     pub fn try_drain_updates_for_player(
         &mut self,
         player_id: ServerPlayerId,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        self.drain_chunk_updates_for_target(CommandTarget::Dedicated(player_id))
-    }
-
-    pub fn tick(&mut self) -> Vec<ServerUpdate> {
-        self.try_tick().expect("integrated server tick failed")
-    }
-
-    pub fn try_tick(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        Ok(self.try_simulation_tick_report()?.updates)
-    }
-
-    pub fn tick_report(&mut self) -> ServerTickReport {
-        self.try_tick_report()
-            .expect("integrated server tick report failed")
-    }
-
-    pub fn try_tick_report(&mut self) -> ChunkStoreResult<ServerTickReport> {
-        self.try_tick_report_for_target(CommandTarget::Local)
+        self.drain_chunk_updates_for_target(CommandTarget::Player(player_id))
     }
 
     fn try_tick_report_for_target(
@@ -1127,44 +1002,11 @@ impl IntegratedServer {
         })
     }
 
-    pub fn simulation_tick_report(&mut self) -> ServerSimulationTickReport {
-        self.try_simulation_tick_report()
-            .expect("integrated server simulation tick report failed")
-    }
-
-    pub fn try_simulation_tick_report(&mut self) -> ChunkStoreResult<ServerSimulationTickReport> {
-        self.try_simulation_tick_report_for_target(CommandTarget::Local)
-    }
-
     pub fn try_simulation_tick_report_for_player(
         &mut self,
         player_id: ServerPlayerId,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
-        self.try_simulation_tick_report_for_target(CommandTarget::Dedicated(player_id))
-    }
-
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) fn try_simulation_tick_report_with_physics_steps(
-        &mut self,
-        physics_steps: u32,
-    ) -> ChunkStoreResult<ServerSimulationTickReport> {
-        self.try_simulation_tick_report_with_physics_steps_and_step_dt(
-            physics_steps,
-            DEFAULT_PHYSICS_STEP_DT_SECONDS,
-        )
-    }
-
-    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
-    pub(crate) fn try_simulation_tick_report_with_physics_steps_and_step_dt(
-        &mut self,
-        physics_steps: u32,
-        physics_step_dt_seconds: f64,
-    ) -> ChunkStoreResult<ServerSimulationTickReport> {
-        self.try_simulation_tick_report_for_target_with_physics_steps(
-            CommandTarget::Local,
-            physics_steps,
-            physics_step_dt_seconds,
-        )
+        self.try_simulation_tick_report_for_target(CommandTarget::Player(player_id))
     }
 
     fn try_simulation_tick_report_for_target(
@@ -1272,15 +1114,11 @@ impl IntegratedServer {
             },
         ));
         let item_pickup_targets = self.item_pickup_targets();
-        let local_inventory = &mut self.inventory;
-        let dedicated_players = &mut self.dedicated_players;
+        let players = &mut self.players;
         entity_updates.extend(self.entities.collect_item_entities(
             &item_pickup_targets,
             |player_id, stack| {
-                if player_id == ServerPlayerId::LOCAL {
-                    return local_inventory.add_item_stack(stack).remaining;
-                }
-                dedicated_players
+                players
                     .get_mut(player_id)
                     .map(|player| player.inventory.add_item_stack(stack).remaining)
                     .unwrap_or(Some(stack))
@@ -1357,21 +1195,27 @@ impl IntegratedServer {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn try_physics_step_report(
+    pub(crate) fn try_physics_step_report_for_player(
         &mut self,
+        player_id: ServerPlayerId,
         physics_steps: u32,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
-        self.try_physics_step_report_with_step_dt(physics_steps, DEFAULT_PHYSICS_STEP_DT_SECONDS)
+        self.try_physics_step_report_for_player_with_step_dt(
+            player_id,
+            physics_steps,
+            DEFAULT_PHYSICS_STEP_DT_SECONDS,
+        )
     }
 
-    pub(crate) fn try_physics_step_report_with_step_dt(
+    pub(crate) fn try_physics_step_report_for_player_with_step_dt(
         &mut self,
+        player_id: ServerPlayerId,
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerPhysicsStepReport> {
         let mut report = self
             .try_physics_step_report_global_with_step_dt(physics_steps, physics_step_dt_seconds)?;
-        report.updates = self.drain_chunk_updates_for_target(CommandTarget::Local)?;
+        report.updates = self.drain_chunk_updates_for_target(CommandTarget::Player(player_id))?;
         Ok(report)
     }
 
@@ -1684,9 +1528,7 @@ impl IntegratedServer {
         if let Some(record) = self.resume_record_for_target(target)? {
             view.center = chunk_pos_for_player_position(record.position);
         }
-        if target == CommandTarget::Local {
-            self.loading_progress.set_view(&view);
-        }
+        self.loading_progress.set_view(&view);
         self.set_initial_spawn_center_for_target(target, view.center)?;
         let player_id = target.player_id();
         let change = self.chunk_tracking.set_requested_view(player_id, view);
@@ -1758,21 +1600,13 @@ impl IntegratedServer {
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<u64> {
-        match target {
-            CommandTarget::Local => {
-                self.local_player_total_experience =
-                    self.local_player_total_experience.saturating_add(1);
-                Ok(self.local_player_total_experience)
-            }
-            CommandTarget::Dedicated(player_id) => {
-                let player = self
-                    .dedicated_players
-                    .get_mut(player_id)
-                    .ok_or_else(|| unknown_player_error(player_id))?;
-                player.total_experience = player.total_experience.saturating_add(1);
-                Ok(player.total_experience)
-            }
-        }
+        let player_id = target.player_id();
+        let player = self
+            .players
+            .get_mut(player_id)
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        player.total_experience = player.total_experience.saturating_add(1);
+        Ok(player.total_experience)
     }
 
     fn advance_debug_auxiliary_player_script(&mut self) -> ChunkStoreResult<()> {
@@ -1818,15 +1652,17 @@ impl IntegratedServer {
                 return Ok(());
             }
 
-            // Keep the shared validation actor near the authoritative local
+            // Keep the shared validation actor near an admitted physical
             // player so accepted-entry-relative preview crops can exercise it
             // for arbitrary generated-world spawn coordinates. The fixed
             // anchor remains the pre-admission/test fallback.
-            let anchor = if self.local_player_active && self.player.has_accepted_position() {
-                self.player.position()
-            } else {
-                Vec3d::new(8.5, 66.0, 8.5)
-            };
+            let anchor = self
+                .players
+                .iter()
+                .filter(|(player_id, _)| *player_id != script.player_id)
+                .find(|(_, player)| player.state.has_accepted_position())
+                .map(|(_, player)| player.state.position())
+                .unwrap_or(Vec3d::new(8.5, 66.0, 8.5));
             let to_anchor = anchor.subtract(script.current_position);
             let desired = if to_anchor.length_sqr() > 0.25 * 0.25 {
                 let distance = to_anchor.length_sqr().sqrt();
@@ -1857,7 +1693,7 @@ impl IntegratedServer {
                 }),
             )?;
             script.current_position = self
-                .dedicated_player_position(script.player_id)
+                .player_position(script.player_id)
                 .unwrap_or(script.current_position);
             script.move_sequence = script.move_sequence.saturating_add(1);
             Ok(())
@@ -1893,20 +1729,13 @@ impl IntegratedServer {
         command: SetPlayerAppearanceCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let player_id = target.player_id();
-        let changed = match target {
-            CommandTarget::Local => {
-                let changed = self.local_player_appearance != command.appearance;
-                self.local_player_appearance = command.appearance;
-                changed
-            }
-            CommandTarget::Dedicated(player_id) => {
-                let Some(player) = self.dedicated_players.get_mut(player_id) else {
-                    return Err(unknown_player_error(player_id));
-                };
-                let changed = player.appearance != command.appearance;
-                player.appearance = command.appearance;
-                changed
-            }
+        let changed = {
+            let Some(player) = self.players.get_mut(player_id) else {
+                return Err(unknown_player_error(player_id));
+            };
+            let changed = player.appearance != command.appearance;
+            player.appearance = command.appearance;
+            changed
         };
         if changed {
             self.reconcile_remote_player_subject(player_id, true);
@@ -2205,7 +2034,7 @@ impl IntegratedServer {
 
     fn reconcile_remote_players_for_target_observer(&mut self, target: CommandTarget) {
         let observer = target.player_id();
-        if observer == ServerPlayerId::LOCAL && !self.local_player_active {
+        if !self.players.contains(observer) {
             return;
         }
         let states = self.remote_player_states();
@@ -2223,9 +2052,7 @@ impl IntegratedServer {
         subject: ServerPlayerId,
         emit_existing_updates: bool,
     ) {
-        if subject == ServerPlayerId::LOCAL && !self.local_player_active
-            || subject != ServerPlayerId::LOCAL && !self.dedicated_players.contains(subject)
-        {
+        if !self.players.contains(subject) {
             return;
         }
         let Some(state) = self.remote_player_state(subject) else {
@@ -2253,18 +2080,7 @@ impl IntegratedServer {
     }
 
     fn remote_player_state(&self, player_id: ServerPlayerId) -> Option<RemotePlayerState> {
-        if player_id == ServerPlayerId::LOCAL {
-            return self.local_player_active.then_some(RemotePlayerState {
-                player_id,
-                appearance: self.local_player_appearance,
-                position: self.player.position(),
-                y_rot_degrees: self.player.y_rot_degrees(),
-                x_rot_degrees: self.player.x_rot_degrees(),
-                on_ground: self.player.on_ground(),
-                publishable: self.player.has_accepted_position(),
-            });
-        }
-        let player = self.dedicated_players.get(player_id)?;
+        let player = self.players.get(player_id)?;
         Some(RemotePlayerState {
             player_id,
             appearance: player.appearance,
@@ -2390,26 +2206,16 @@ impl IntegratedServer {
     }
 
     fn player_observers(&self) -> Vec<ServerPlayerId> {
-        self.local_player_active
-            .then_some(ServerPlayerId::LOCAL)
-            .into_iter()
-            .chain(
-                self.dedicated_players
-                    .iter()
-                    .map(|(player_id, _)| player_id),
-            )
+        self.players
+            .iter()
+            .map(|(player_id, _)| player_id)
             .collect()
     }
 
     fn player_targets(&self) -> Vec<CommandTarget> {
-        self.local_player_active
-            .then_some(CommandTarget::Local)
-            .into_iter()
-            .chain(
-                self.dedicated_players
-                    .iter()
-                    .map(|(player_id, _)| CommandTarget::Dedicated(player_id)),
-            )
+        self.players
+            .iter()
+            .map(|(player_id, _)| CommandTarget::Player(player_id))
             .collect()
     }
 
@@ -2529,28 +2335,22 @@ impl IntegratedServer {
         &self,
         target: CommandTarget,
     ) -> ChunkStoreResult<Option<&PlayerRecord>> {
-        match target {
-            CommandTarget::Local => Ok(self.local_player_resume_record.as_ref()),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get(player_id)
-                .map(|player| player.resume_record.as_ref())
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get(player_id)
+            .map(|player| player.resume_record.as_ref())
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn take_resume_record_for_target(
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<Option<PlayerRecord>> {
-        match target {
-            CommandTarget::Local => Ok(self.local_player_resume_record.take()),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get_mut(player_id)
-                .map(|player| player.resume_record.take())
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get_mut(player_id)
+            .map(|player| player.resume_record.take())
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn player_pose_has_clearance(&self, position: Vec3d) -> bool {
@@ -2582,45 +2382,18 @@ impl IntegratedServer {
         let Some(record) = record.filter(player_record_is_usable) else {
             return Ok(());
         };
-        if self
-            .local_player_identity
-            .as_ref()
-            .is_some_and(|identity| player_record_key(identity.profile_id) == *key)
-        {
-            self.initial_spawn_center = Some(chunk_pos_for_player_position(record.position));
-            self.inventory
-                .restore_selected_hotbar_slot(record.selected_hotbar_slot);
-            self.local_player_total_experience = record.total_experience;
-            self.local_player_record_revision = record.revision;
-            self.local_player_resume_record = Some(record);
-            self.chunk_tracking.queue_update_for_player(
-                ServerPlayerId::LOCAL,
-                ServerUpdate::PlayerExperience {
-                    total_experience: self.local_player_total_experience,
-                },
-            );
-            self.retarget_player_view_for_resume(
-                CommandTarget::Local,
-                self.initial_spawn_center
-                    .expect("loaded local resume has a spawn center"),
-            )?;
-            return Ok(());
-        }
-        let matched = self
-            .dedicated_players
-            .iter()
-            .find_map(|(player_id, candidate)| {
-                candidate
-                    .identity
-                    .as_ref()
-                    .is_some_and(|identity| player_record_key(identity.profile_id) == *key)
-                    .then_some(player_id)
-            });
+        let matched = self.players.iter().find_map(|(player_id, candidate)| {
+            candidate
+                .identity
+                .as_ref()
+                .is_some_and(|identity| player_record_key(identity.profile_id) == *key)
+                .then_some(player_id)
+        });
         if let Some(player_id) = matched {
             let player = self
-                .dedicated_players
+                .players
                 .get_mut(player_id)
-                .expect("matched dedicated player must exist");
+                .expect("matched realm player must exist");
             player.initial_spawn_center = Some(chunk_pos_for_player_position(record.position));
             player
                 .inventory
@@ -2634,11 +2407,11 @@ impl IntegratedServer {
                 ServerUpdate::PlayerExperience { total_experience },
             );
             let center = self
-                .dedicated_players
+                .players
                 .get(player_id)
                 .and_then(|player| player.initial_spawn_center)
-                .expect("loaded dedicated resume has a spawn center");
-            self.retarget_player_view_for_resume(CommandTarget::Dedicated(player_id), center)?;
+                .expect("loaded realm resume has a spawn center");
+            self.retarget_player_view_for_resume(CommandTarget::Player(player_id), center)?;
         }
         Ok(())
     }
@@ -2669,108 +2442,77 @@ impl IntegratedServer {
         target: CommandTarget,
         center: ChunkPos,
     ) -> ChunkStoreResult<()> {
-        match target {
-            CommandTarget::Local => {
-                if self.initial_spawn_center.is_none() && self.player.needs_initial_position_sync()
-                {
-                    self.initial_spawn_center = Some(center);
-                }
-                Ok(())
-            }
-            CommandTarget::Dedicated(player_id) => {
-                let player = self
-                    .dedicated_players
-                    .get_mut(player_id)
-                    .ok_or_else(|| unknown_player_error(player_id))?;
-                if player.initial_spawn_center.is_none()
-                    && player.state.needs_initial_position_sync()
-                {
-                    player.initial_spawn_center = Some(center);
-                }
-                Ok(())
-            }
+        let player_id = target.player_id();
+        let player = self
+            .players
+            .get_mut(player_id)
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        if player.initial_spawn_center.is_none() && player.state.needs_initial_position_sync() {
+            player.initial_spawn_center = Some(center);
         }
+        Ok(())
     }
 
     fn initial_spawn_center_for_target(
         &self,
         target: CommandTarget,
     ) -> ChunkStoreResult<Option<ChunkPos>> {
-        match target {
-            CommandTarget::Local => Ok(self.initial_spawn_center),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get(player_id)
-                .map(|player| player.initial_spawn_center)
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get(player_id)
+            .map(|player| player.initial_spawn_center)
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn player_for_target(&self, target: CommandTarget) -> ChunkStoreResult<&ServerPlayerState> {
-        match target {
-            CommandTarget::Local => Ok(&self.player),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get(player_id)
-                .map(|player| &player.state)
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get(player_id)
+            .map(|player| &player.state)
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn player_mut_for_target(
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<&mut ServerPlayerState> {
-        match target {
-            CommandTarget::Local => Ok(&mut self.player),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get_mut(player_id)
-                .map(|player| &mut player.state)
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get_mut(player_id)
+            .map(|player| &mut player.state)
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn inventory_for_target(&self, target: CommandTarget) -> ChunkStoreResult<&ServerInventory> {
-        match target {
-            CommandTarget::Local => Ok(&self.inventory),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get(player_id)
-                .map(|player| &player.inventory)
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get(player_id)
+            .map(|player| &player.inventory)
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn inventory_mut_for_target(
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<&mut ServerInventory> {
-        match target {
-            CommandTarget::Local => Ok(&mut self.inventory),
-            CommandTarget::Dedicated(player_id) => self
-                .dedicated_players
-                .get_mut(player_id)
-                .map(|player| &mut player.inventory)
-                .ok_or_else(|| unknown_player_error(player_id)),
-        }
+        let player_id = target.player_id();
+        self.players
+            .get_mut(player_id)
+            .map(|player| &mut player.inventory)
+            .ok_or_else(|| unknown_player_error(player_id))
     }
 
     fn ensure_target_exists(&self, target: CommandTarget) -> ChunkStoreResult<()> {
-        match target {
-            CommandTarget::Local => Ok(()),
-            CommandTarget::Dedicated(player_id) if self.dedicated_players.contains(player_id) => {
-                Ok(())
-            }
-            CommandTarget::Dedicated(player_id) => Err(unknown_player_error(player_id)),
+        let player_id = target.player_id();
+        if self.players.contains(player_id) {
+            Ok(())
+        } else {
+            Err(unknown_player_error(player_id))
         }
     }
 
     fn mark_player_tick_boundaries(&mut self) {
-        if self.local_player_active {
-            self.player.mark_tick_boundary();
-        }
-        for player in self.dedicated_players.values_mut() {
+        for player in self.players.values_mut() {
             player.state.mark_tick_boundary();
         }
     }
@@ -2787,17 +2529,332 @@ impl IntegratedServer {
                 self.chunk_tracking
                     .aggregate_player_ticket_priority_centers(),
             )
-            .expect("failed to reconcile chunk tracking after dedicated player disconnect");
+            .expect("failed to reconcile chunk tracking after player disconnect");
         self.route_scheduler_events(events)
-            .expect("failed to route scheduler events after dedicated player disconnect");
+            .expect("failed to route scheduler events after player disconnect");
+    }
+}
+
+/// In-memory integrated-host adapter for one ordinary realm player.
+///
+/// The authoritative state remains entirely in [`RealmServer`]. This adapter
+/// only remembers which ordinary `ServerPlayerId` belongs to the owning local
+/// connection and supplies that id to the same command, publication, save, and
+/// disconnect paths used by remote transports.
+#[derive(Debug)]
+pub struct LocalRealmSession {
+    server: RealmServer,
+    player_id: ServerPlayerId,
+}
+
+impl LocalRealmSession {
+    pub fn from_server(mut server: RealmServer) -> Self {
+        let player_id = server.add_player();
+        Self { server, player_id }
+    }
+
+    pub fn new(seed: i64) -> Self {
+        Self::from_server(RealmServer::new(seed))
+    }
+
+    pub fn local_integrated(seed: i64) -> Self {
+        Self::from_server(RealmServer::local_integrated(seed))
+    }
+
+    pub fn with_chunk_store(seed: i64, store: Box<dyn ChunkSnapshotStore>) -> Self {
+        Self::from_server(RealmServer::with_chunk_store(seed, store))
+    }
+
+    pub fn with_world_store(seed: i64, store: Box<dyn WorldStore>) -> Self {
+        Self::from_server(RealmServer::with_world_store(seed, store))
+    }
+
+    pub fn local_integrated_with_world_store(seed: i64, store: Box<dyn WorldStore>) -> Self {
+        Self::from_server(RealmServer::local_integrated_with_world_store(seed, store))
+    }
+
+    pub fn local_integrated_with_external_load_world_store(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        Self::from_server(RealmServer::local_integrated_with_external_load_world_store(seed, store))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_with_threaded_world_store(
+        seed: i64,
+        store: Box<dyn WorldStore + Send>,
+    ) -> ChunkStoreResult<Self> {
+        Ok(Self::from_server(
+            RealmServer::try_with_threaded_world_store(seed, store)?,
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_with_threaded_sqlite_world_dir(
+        seed: i64,
+        world_dir: impl AsRef<Path>,
+    ) -> ChunkStoreResult<Self> {
+        Ok(Self::from_server(
+            RealmServer::try_with_threaded_sqlite_world_dir(seed, world_dir)?,
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
+        seed: i64,
+        world_dir: impl AsRef<Path>,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> ChunkStoreResult<Self> {
+        Ok(Self::from_server(
+            RealmServer::try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
+                seed, world_dir, policy,
+            )?,
+        ))
+    }
+
+    pub(crate) fn with_player_chunk_tracking_policy(
+        seed: i64,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> Self {
+        Self::from_server(RealmServer::with_player_chunk_tracking_policy(seed, policy))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn with_wasm_job_workers(seed: i64, config: WasmServerJobWorkerConfig) -> Self {
+        Self::from_server(RealmServer::with_wasm_job_workers(seed, config))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_wasm_job_workers(
+        seed: i64,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::from_server(RealmServer::local_integrated_with_wasm_job_workers(
+            seed, config,
+        ))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_world_store_and_wasm_job_workers(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_world_store_and_wasm_job_workers(
+                seed, store, config,
+            ),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_external_load_world_store_and_wasm_job_workers(
+        seed: i64,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_external_load_world_store_and_wasm_job_workers(
+                seed, store, config,
+            ),
+        )
+    }
+
+    pub const fn player_id(&self) -> ServerPlayerId {
+        self.player_id
+    }
+
+    pub fn server(&self) -> &RealmServer {
+        &self.server
+    }
+
+    pub fn server_mut(&mut self) -> &mut RealmServer {
+        &mut self.server
+    }
+
+    pub fn configure_local_player_identity(
+        &mut self,
+        identity: ClientIdentity,
+    ) -> ChunkStoreResult<()> {
+        self.server
+            .configure_player_identity(self.player_id, identity)
+    }
+
+    pub fn configure_local_player_identity_blocking(
+        &mut self,
+        identity: ClientIdentity,
+    ) -> ChunkStoreResult<()> {
+        self.server
+            .configure_player_identity_blocking(self.player_id, identity)
+    }
+
+    pub fn handle_command(&mut self, command: ClientCommand) -> Vec<ServerUpdate> {
+        self.try_handle_command(command)
+            .expect("local realm session command failed")
+    }
+
+    pub fn try_handle_command(
+        &mut self,
+        command: ClientCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.server
+            .try_handle_command_for_player(self.player_id, command)
+    }
+
+    pub fn poll(&mut self) -> Vec<ServerUpdate> {
+        self.try_poll().expect("local realm session poll failed")
+    }
+
+    pub fn try_poll(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.server.try_poll_for_player(self.player_id)
+    }
+
+    pub fn try_drain_updates(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.server.try_drain_updates_for_player(self.player_id)
+    }
+
+    pub fn tick(&mut self) -> Vec<ServerUpdate> {
+        self.try_tick().expect("local realm session tick failed")
+    }
+
+    pub fn try_tick(&mut self) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        Ok(self.try_simulation_tick_report()?.updates)
+    }
+
+    pub fn tick_report(&mut self) -> ServerTickReport {
+        self.try_tick_report()
+            .expect("local realm session tick report failed")
+    }
+
+    pub fn try_tick_report(&mut self) -> ChunkStoreResult<ServerTickReport> {
+        self.server
+            .try_tick_report_for_target(CommandTarget::Player(self.player_id))
+    }
+
+    pub fn simulation_tick_report(&mut self) -> ServerSimulationTickReport {
+        self.try_simulation_tick_report()
+            .expect("local realm session simulation tick failed")
+    }
+
+    pub fn try_simulation_tick_report(&mut self) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.server
+            .try_simulation_tick_report_for_player(self.player_id)
+    }
+
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn try_simulation_tick_report_with_physics_steps(
+        &mut self,
+        physics_steps: u32,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.try_simulation_tick_report_with_physics_steps_and_step_dt(
+            physics_steps,
+            DEFAULT_PHYSICS_STEP_DT_SECONDS,
+        )
+    }
+
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    pub(crate) fn try_simulation_tick_report_with_physics_steps_and_step_dt(
+        &mut self,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.server
+            .try_simulation_tick_report_for_target_with_physics_steps(
+                CommandTarget::Player(self.player_id),
+                physics_steps,
+                physics_step_dt_seconds,
+            )
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn try_physics_step_report(
+        &mut self,
+        physics_steps: u32,
+    ) -> ChunkStoreResult<ServerPhysicsStepReport> {
+        self.server
+            .try_physics_step_report_for_player(self.player_id, physics_steps)
+    }
+
+    pub(crate) fn try_physics_step_report_with_step_dt(
+        &mut self,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ChunkStoreResult<ServerPhysicsStepReport> {
+        self.server.try_physics_step_report_for_player_with_step_dt(
+            self.player_id,
+            physics_steps,
+            physics_step_dt_seconds,
+        )
+    }
+
+    pub fn view_readiness_snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
+        self.server.view_readiness_snapshot(self.player_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player(&self) -> &ServerPlayerState {
+        self.server
+            .players
+            .get(self.player_id)
+            .map(|player| &player.state)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn player_mut(&mut self) -> &mut ServerPlayerState {
+        self.server
+            .players
+            .get_mut(self.player_id)
+            .map(|player| &mut player.state)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inventory(&self) -> &ServerInventory {
+        self.server
+            .players
+            .get(self.player_id)
+            .map(|player| &player.inventory)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn total_experience(&self) -> u64 {
+        self.server
+            .players
+            .get(self.player_id)
+            .map(|player| player.total_experience)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn resume_record(&self) -> Option<&PlayerRecord> {
+        self.server
+            .players
+            .get(self.player_id)
+            .and_then(|player| player.resume_record.as_ref())
+    }
+}
+
+impl std::ops::Deref for LocalRealmSession {
+    type Target = RealmServer;
+
+    fn deref(&self) -> &Self::Target {
+        &self.server
+    }
+}
+
+impl std::ops::DerefMut for LocalRealmSession {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.server
     }
 }
 
 impl CommandTarget {
     const fn player_id(self) -> ServerPlayerId {
         match self {
-            CommandTarget::Local => ServerPlayerId::LOCAL,
-            CommandTarget::Dedicated(player_id) => player_id,
+            Self::Player(player_id) => player_id,
         }
     }
 }

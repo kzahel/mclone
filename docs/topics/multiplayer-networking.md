@@ -20,7 +20,10 @@ authoritative world-metadata and two-clock persistence/replication follow-up on
 2026-07-16. Tactical
 [`184`](../tactical/184-session-configuration-liveness-and-disconnect.md)
 completed configured play admission, capability negotiation, remote liveness,
-typed close, and movement sequence plumbing on 2026-07-16.
+typed close, and movement sequence plumbing on 2026-07-16. Tactical 185
+Slice 1 then removed the privileged local-player path: integrated, Web Worker,
+TCP, and WebSocket hosts now share one `RealmServer` authority and ordinary
+player registry, with local/TCP/WebSocket join/command trace coverage.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -373,13 +376,13 @@ lane, expressed in time units.
   generated client-global UUID per native app installation or browser origin,
   outside world stores; local integrated and remote dedicated join through the
   same logical profile contract. Flat Android and Android XR have separate app
-  identities today. Tactical 182 owns storage paths and reset semantics;
-  Tactical 185 Slice 1 owns removal of the structurally special local player.
-- The in-process adapter must carry the same logical configuration/play
-  handshake, ordinary player registration, ordered updates, disconnect
-  cleanup, and persistence lifecycle as remote transports. Whether it encodes
-  those messages into wire bytes locally remains an implementation/performance
-  choice, guarded by normalized local/TCP/WebSocket trace conformance.
+  identities today. Tactical 182 owns storage paths and reset semantics.
+  Tactical 185 Slice 1 completed removal of the structurally special local
+  player.
+- The in-process adapter now carries the same logical join updates, ordinary
+  player registration, command path, persistence state, and safe-resume logic
+  as remote hosts without encoding wire bytes. Normalized local/TCP/WebSocket
+  join and command traces guard that host-boundary choice.
 - Compression codec choice and threshold once frames are measured
   post-push-wire.
 - Whether later measured entity transform traffic warrants a separate

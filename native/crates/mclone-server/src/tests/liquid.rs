@@ -1,6 +1,6 @@
 use super::support::*;
 
-fn assert_liquid_oracle_fixture_matches(server: &IntegratedServer, fixture_json: &str) {
+fn assert_liquid_oracle_fixture_matches(server: &LocalRealmSession, fixture_json: &str) {
     let fixture = serde_json::from_str::<Value>(fixture_json).unwrap();
     let bounds = &fixture["bounds"];
     let min_x = fixture_i32(bounds, "minX");
@@ -72,12 +72,12 @@ fn assert_liquid_oracle_fixture_matches(server: &IntegratedServer, fixture_json:
     );
 }
 
-fn new_liquid_oracle_server() -> IntegratedServer {
+fn new_liquid_oracle_server() -> LocalRealmSession {
     new_liquid_oracle_server_with_radius(0)
 }
 
-fn new_liquid_oracle_server_with_radius(radius_chunks: u32) -> IntegratedServer {
-    let mut server = IntegratedServer::new(12_345);
+fn new_liquid_oracle_server_with_radius(radius_chunks: u32) -> LocalRealmSession {
+    let mut server = LocalRealmSession::new(12_345);
     handle_command_and_poll(
         &mut server,
         ClientCommand::SetChunkView(ChunkView {
@@ -91,7 +91,7 @@ fn new_liquid_oracle_server_with_radius(radius_chunks: u32) -> IntegratedServer 
 }
 
 fn fill_blocks(
-    server: &mut IntegratedServer,
+    server: &mut LocalRealmSession,
     min: WorldBlockPos,
     max: WorldBlockPos,
     block: RawBlockId,
@@ -107,13 +107,13 @@ fn fill_blocks(
     }
 }
 
-fn run_simulation_ticks(server: &mut IntegratedServer, ticks: usize) {
+fn run_simulation_ticks(server: &mut LocalRealmSession, ticks: usize) {
     for _ in 0..ticks {
         server.simulation_tick_report();
     }
 }
 
-fn setup_liquid_slope(server: &mut IntegratedServer, source_block: RawBlockId, fluid: FluidKind) {
+fn setup_liquid_slope(server: &mut LocalRealmSession, source_block: RawBlockId, fluid: FluidKind) {
     fill_blocks(
         server,
         WorldBlockPos::new(0, 78, 0),
@@ -152,15 +152,15 @@ fn setup_liquid_slope(server: &mut IntegratedServer, source_block: RawBlockId, f
     server.schedule_fluid_tick(source, fluid, fluid.tick_delay());
 }
 
-fn setup_water_slope(server: &mut IntegratedServer) {
+fn setup_water_slope(server: &mut LocalRealmSession) {
     setup_liquid_slope(server, WATER, FluidKind::Water);
 }
 
-fn setup_lava_slope(server: &mut IntegratedServer) {
+fn setup_lava_slope(server: &mut LocalRealmSession) {
     setup_liquid_slope(server, LAVA, FluidKind::Lava);
 }
 
-fn setup_cross_chunk_water_slope(server: &mut IntegratedServer) {
+fn setup_cross_chunk_water_slope(server: &mut LocalRealmSession) {
     fill_blocks(
         server,
         WorldBlockPos::new(14, 78, 0),
@@ -197,7 +197,7 @@ fn setup_cross_chunk_water_slope(server: &mut IntegratedServer) {
     server.schedule_fluid_tick(source, FluidKind::Water, FluidKind::Water.tick_delay());
 }
 
-fn setup_liquid_fall(server: &mut IntegratedServer, source_block: RawBlockId, fluid: FluidKind) {
+fn setup_liquid_fall(server: &mut LocalRealmSession, source_block: RawBlockId, fluid: FluidKind) {
     fill_blocks(
         server,
         WorldBlockPos::new(0, 78, 0),
@@ -266,15 +266,15 @@ fn setup_liquid_fall(server: &mut IntegratedServer, source_block: RawBlockId, fl
     server.schedule_fluid_tick(source, fluid, fluid.tick_delay());
 }
 
-fn setup_water_fall(server: &mut IntegratedServer) {
+fn setup_water_fall(server: &mut LocalRealmSession) {
     setup_liquid_fall(server, WATER, FluidKind::Water);
 }
 
-fn setup_lava_fall(server: &mut IntegratedServer) {
+fn setup_lava_fall(server: &mut LocalRealmSession) {
     setup_liquid_fall(server, LAVA, FluidKind::Lava);
 }
 
-fn setup_water_source_conversion(server: &mut IntegratedServer) {
+fn setup_water_source_conversion(server: &mut LocalRealmSession) {
     fill_blocks(
         server,
         WorldBlockPos::new(0, 78, 0),
@@ -318,7 +318,7 @@ fn setup_water_source_conversion(server: &mut IntegratedServer) {
     }
 }
 
-fn setup_lava_source_water_contact(server: &mut IntegratedServer) {
+fn setup_lava_source_water_contact(server: &mut LocalRealmSession) {
     fill_blocks(
         server,
         WorldBlockPos::new(0, 78, 0),
@@ -498,7 +498,7 @@ fn fluid_kind_accepts_generated_and_persisted_tick_targets() {
 
 #[test]
 fn generated_liquid_ticks_are_registered_when_watery_chunk_is_published() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     let center = ChunkPos::new(117, -128);
 
     let updates = handle_command_and_poll(
@@ -534,7 +534,7 @@ fn generated_liquid_ticks_are_registered_when_watery_chunk_is_published() {
 
 #[test]
 fn scheduled_water_tick_spreads_down_and_publishes_section_update() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     let initial_updates = handle_command_and_poll(
         &mut server,
         ClientCommand::SetChunkView(ChunkView {
@@ -880,7 +880,7 @@ fn lava_source_water_contact_matches_oracle_fixture_after_1_script_tick() {
 
 #[test]
 fn scheduled_fluid_tick_waits_until_chunk_is_entity_ticking() {
-    let mut server = IntegratedServer::new(12_345);
+    let mut server = LocalRealmSession::new(12_345);
     handle_command_and_poll(
         &mut server,
         ClientCommand::SetChunkView(ChunkView {

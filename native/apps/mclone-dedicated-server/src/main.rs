@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use mclone_protocol::{DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION};
 use mclone_server::{
-    IntegratedServer, SimulationCadence, SimulationCadenceConfig, WorldGenerationProfile,
+    RealmServer, SimulationCadence, SimulationCadenceConfig, WorldGenerationProfile,
 };
 
 use crate::connection::{
@@ -261,15 +261,14 @@ fn open_dedicated_server(
     seed: i64,
     profile: WorldGenerationProfile,
     world: &DedicatedWorldSelection,
-) -> Result<IntegratedServer> {
+) -> Result<RealmServer> {
     let mut server = match world {
-        DedicatedWorldSelection::Transient => Ok(IntegratedServer::new(seed)),
+        DedicatedWorldSelection::Transient => Ok(RealmServer::new(seed)),
         DedicatedWorldSelection::Persistent { dir } => {
-            IntegratedServer::try_with_threaded_sqlite_world_dir(seed, dir)
+            RealmServer::try_with_threaded_sqlite_world_dir(seed, dir)
                 .with_context(|| format!("failed to open dedicated world at {}", dir.display()))
         }
     }?;
-    server.disable_local_player();
     server.set_persistence_demo_jump_experience_enabled(true);
     server.set_world_generation_profile(profile)?;
     if matches!(world, DedicatedWorldSelection::Persistent { .. }) {
@@ -359,7 +358,7 @@ fn run_server_loop_with_listeners(
 
 fn run_server_loop_inner(
     network: DedicatedNetwork,
-    server: &mut IntegratedServer,
+    server: &mut RealmServer,
     mode: ServerRunMode,
 ) -> Result<()> {
     let mut sessions = BTreeMap::<DedicatedConnectionId, DedicatedSession>::new();
@@ -420,10 +419,8 @@ fn run_server_loop_inner(
                         continue;
                     }
                     let player_id = match server
-                        .add_dedicated_player_with_identity_and_capabilities(
-                            identity.clone(),
-                            capabilities,
-                        ) {
+                        .add_player_with_identity_and_capabilities(identity.clone(), capabilities)
+                    {
                         Ok(player_id) => player_id,
                         Err(error) => {
                             let message = format!(
@@ -718,7 +715,7 @@ fn run_server_loop_inner(
 }
 
 fn advance_dedicated_host_frame(
-    server: &mut IntegratedServer,
+    server: &mut RealmServer,
     sessions: &mut BTreeMap<DedicatedConnectionId, DedicatedSession>,
     cadence: &mut SimulationCadence,
 ) -> Result<DedicatedSessionDiagnostics> {
@@ -884,7 +881,7 @@ fn micros_to_ms(value: u128) -> f64 {
 }
 
 fn remove_session_player(
-    server: &mut IntegratedServer,
+    server: &mut RealmServer,
     sessions: &mut BTreeMap<DedicatedConnectionId, DedicatedSession>,
     session_profiles: &mut BTreeMap<DedicatedConnectionId, mclone_protocol::PlayerProfileId>,
     active_profiles: &mut BTreeMap<mclone_protocol::PlayerProfileId, DedicatedConnectionId>,
@@ -896,13 +893,13 @@ fn remove_session_player(
     let Some(session) = sessions.remove(&connection_id) else {
         return;
     };
-    if let Err(error) = server.save_dedicated_player_record(session.player_id()) {
+    if let Err(error) = server.save_player_record(session.player_id()) {
         log::warn!(
             "failed to save player {} for connection {connection_id}: {error}",
             session.player_id()
         );
     }
-    server.remove_dedicated_player(session.player_id());
+    server.remove_player(session.player_id());
 }
 
 #[cfg(test)]
@@ -1109,8 +1106,7 @@ mod tests {
 
     #[test]
     fn dedicated_host_advances_without_clients() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        server.disable_local_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
         let start_day_time = server.day_time();
         let mut sessions = BTreeMap::new();
         let mut cadence = SimulationCadence::default();
@@ -1125,10 +1121,9 @@ mod tests {
 
     #[test]
     fn aggregate_command_volume_does_not_advance_host_clock() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        server.disable_local_player();
-        let player_a = server.add_dedicated_player();
-        let player_b = server.add_dedicated_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
+        let player_a = server.add_player();
+        let player_b = server.add_player();
         let id_a = DedicatedConnectionId::test_new(1);
         let id_b = DedicatedConnectionId::test_new(2);
         let mut sessions = BTreeMap::from([
@@ -1163,10 +1158,9 @@ mod tests {
 
     #[test]
     fn dedicated_chunk_view_returns_before_snapshot_and_pushes_later() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        server.disable_local_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
         server.set_lighting_enabled(false);
-        let player = server.add_dedicated_player();
+        let player = server.add_player();
         server.try_drain_updates_for_player(player).unwrap();
         let id = DedicatedConnectionId::test_new(1);
         let mut sessions = BTreeMap::from([(id, DedicatedSession::new(player))]);
@@ -1208,11 +1202,10 @@ mod tests {
 
     #[test]
     fn idle_observer_receives_remote_player_movement() {
-        let mut server = IntegratedServer::new(DEFAULT_SEED);
-        server.disable_local_player();
+        let mut server = RealmServer::new(DEFAULT_SEED);
         server.set_lighting_enabled(false);
-        let player_a = server.add_dedicated_player();
-        let player_b = server.add_dedicated_player();
+        let player_a = server.add_player();
+        let player_b = server.add_player();
         let id_a = DedicatedConnectionId::test_new(1);
         let id_b = DedicatedConnectionId::test_new(2);
         let mut sessions = BTreeMap::from([

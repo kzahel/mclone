@@ -16,7 +16,7 @@ use mclone_protocol::{
     PlayerActionCommand, PlayerActionKind, RemotePlayerId, ServerUpdate, SetCarriedItemCommand,
     SetDebugHotbarSlotCommand, UseItemOnCommand,
 };
-use mclone_server::{IntegratedServer, PlayerChunkTrackingDiagnostics, SimulationCadence};
+use mclone_server::{PlayerChunkTrackingDiagnostics, RealmServer, SimulationCadence};
 
 use crate::connection::{DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent};
 use crate::session::DedicatedSession;
@@ -383,7 +383,7 @@ pub(crate) fn run_multi_client_smoke(seed: i64) -> Result<()> {
 #[derive(Debug)]
 struct SmokeServer {
     network: DedicatedNetwork,
-    server: IntegratedServer,
+    server: RealmServer,
     sessions: BTreeMap<DedicatedConnectionId, DedicatedSession>,
     outbound: BTreeMap<DedicatedConnectionId, crate::connection::DedicatedOutbound>,
     cadence: SimulationCadence,
@@ -392,8 +392,7 @@ struct SmokeServer {
 
 impl SmokeServer {
     fn new(seed: i64, network: DedicatedNetwork) -> Self {
-        let mut server = IntegratedServer::new(seed);
-        server.disable_local_player();
+        let mut server = RealmServer::new(seed);
         server.set_lighting_enabled(false);
         Self {
             network,
@@ -458,7 +457,7 @@ impl SmokeServer {
     ) -> Result<Option<PlayerChunkTrackingDiagnostics>> {
         match event {
             DedicatedNetworkEvent::Connected { id, outbound, .. } => {
-                let player_id = self.server.add_dedicated_player();
+                let player_id = self.server.add_player();
                 self.sessions.insert(id, DedicatedSession::new(player_id));
                 self.outbound.insert(id, outbound);
                 Ok(None)
@@ -523,7 +522,7 @@ impl SmokeServer {
             } => {
                 self.outbound.remove(&id);
                 if let Some(session) = self.sessions.remove(&id) {
-                    self.server.remove_dedicated_player(session.player_id());
+                    self.server.remove_player(session.player_id());
                 }
                 self.disconnected_connections += 1;
                 if !allow_disconnect {
