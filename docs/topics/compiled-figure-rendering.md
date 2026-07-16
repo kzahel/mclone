@@ -145,6 +145,17 @@ winding, or material slots and then rely on screenshot luck to remain aligned.
 The semantic source remains reviewable and regenerable. A compiled artifact is
 derived content, not a replacement authoring format.
 
+Three.js retains semantic authority in this pipeline even where it loses
+byte-production duty. Asset Lab exists so that AI agents and humans can author
+figures fluently, and that fluency comes from Three.js scene semantics being
+deeply familiar: an author writing `figure.ts` knows what `CapsuleGeometry`
+parameters produce without running anything. "What a figure looks like" is
+therefore defined as what Three.js renders for the semantic description, the
+authoring preview stays Three.js-shaped, and the compiler's job is to
+reproduce those semantics deterministically — never to invent its own
+primitive interpretation that authors would have to learn. Dropping the
+Three.js dependency outright is not a goal of this direction.
+
 ## Selected Direction And Deliberate Flexibility
 
 The durable contract is the compiled figure, not a particular pose evaluator
@@ -166,10 +177,13 @@ For the first proof, a deterministic compiler module under
 `tools/asset-lab` is the provisional authority. For boxes the compiler owns
 the trivial tessellation directly, and Three.js is a test oracle: an equality
 test against the repository-pinned `BoxGeometry` output guards drift without
-making artifact bytes depend on a dependency's internals. Extracting topology
-from the pinned Three.js constructors remains the plan for spheres, capsules,
-and cylinders in Phase 2, where reimplementing tessellation is genuinely
-expensive; there the artifact must record compiler and Three.js versions or
+making artifact bytes depend on a dependency's internals. That test is also
+the semantic-authority guarantee — it pins compiler output to what the author
+targeted and previewed. Extracting topology from the pinned Three.js
+constructors remains the plan for spheres, capsules, and cylinders in
+Phase 2, where reimplementing tessellation is genuinely expensive and where
+extraction is the most direct implementation of the Three.js-semantics
+contract; there the artifact must record compiler and Three.js versions or
 hashes so a dependency change fails loudly instead of silently altering
 output. In both modes the compiler serializes the result and makes
 compiled-output preview the acceptance surface. Runtime Rust must validate
@@ -501,7 +515,8 @@ include:
 - batch compilation integrated with first-party asset packing.
 
 The tool should continue making semantic source easy for agents and humans to
-edit. Compiled data can be binary and optimized; authored source should remain
+edit, targeting the familiar Three.js scene semantics described in the North
+Star. Compiled data can be binary and optimized; authored source should remain
 small, typed, diffable, and regenerable.
 
 ## Relationship To The Immediate Actor-Cache Issue
@@ -655,10 +670,12 @@ Closed 2026-07-16 during the pre-landing design review.
    revisited only when a concrete Phase 2 UV/material/LOD authoring need
    appears — the trigger tracked by the UV-policy and material-expansion
    questions below.
-2. **Preview authority.** The direct semantic Three.js preview is retained as
-   a comparison oracle through Phase 2. Compiled-output preview becomes the
-   default Asset Lab acceptance surface once curved-primitive and material
-   parity land.
+2. **Preview authority.** Authoring and acceptance are different roles. The
+   live semantic Three.js preview remains the authoring surface indefinitely —
+   it is what keeps the author's mental model and iteration loop cheap — and
+   serves as a comparison oracle through Phase 2. Compiled-output preview
+   becomes the default acceptance/verification surface once curved-primitive
+   and material parity land.
 3. **Texture ownership.** One deterministic atlas per figure is the promoted
    answer. Pack-time shared atlas pages are demoted to a Phase 5 optimization
    taken only if draw/bind profiling justifies them. Replacement packs follow
