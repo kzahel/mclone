@@ -45,6 +45,8 @@ const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE === "1";
 const assetPackUiProbe = process.argv.includes("--asset-pack-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE === "1";
+const preparedFigureProbe = process.argv.includes("--prepared-figure-probe")
+  || process.env.MCLONE_NATIVE_WEB_PREPARED_FIGURE_PROBE === "1";
 const halfSpaceTerrainProbe = process.argv.includes("--half-space-terrain-probe")
   || process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE === "1";
 const actorCompositionProbe = process.argv.includes("--actor-composition-probe")
@@ -92,6 +94,7 @@ const appLoop = movementPerf
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
+  || preparedFigureProbe
   || halfSpaceTerrainProbe
   || actorCompositionProbe
   || managedScenarioStorageProbe
@@ -118,6 +121,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe.png"
+    : preparedFigureProbe
+    ? "/tmp/mclone-native-web-prepared-figure-probe.png"
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
     : actorCompositionProbe
@@ -142,6 +147,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-catalog-ui-probe-canvas.png"
     : assetPackUiProbe
     ? "/tmp/mclone-native-web-asset-pack-ui-probe-canvas.png"
+    : preparedFigureProbe
+    ? "/tmp/mclone-native-web-prepared-figure-probe-canvas.png"
     : halfSpaceTerrainProbe
     ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
     : actorCompositionProbe
@@ -177,6 +184,8 @@ const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_
   ?? "/tmp/mclone-native-web-catalog-ui-probe.json";
 const assetPackUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_ASSET_PACK_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-asset-pack-ui-probe.json";
+const preparedFigureProbeReportPath = process.env.MCLONE_NATIVE_WEB_PREPARED_FIGURE_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-prepared-figure-probe.json";
 const halfSpaceTerrainProbeReportPath = process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE_REPORT
   ?? "/tmp/mclone-native-web-half-space-terrain-probe.json";
 const actorCompositionProbeReportPath = process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE_REPORT
@@ -287,6 +296,7 @@ async function run() {
     if (
       managedScenarioRuntimeProbe
       || lobbyScenarioProbe
+      || preparedFigureProbe
       || halfSpaceTerrainProbe
       || actorCompositionProbe
     ) {
@@ -493,6 +503,66 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (preparedFigureProbe) {
+        const preparedFigureProbeResult = await page.evaluate(
+          async () => await globalThis.__mcloneWebApp.renderPreparedFigureProof?.() ?? null,
+        );
+        await page.waitForTimeout(250);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const pixels = analyzePreparedFigurePng(canvasPng);
+        const workerStatsBeforeClose = await page.evaluate(
+          () => /** @type {any} */ (globalThis).__mcloneWorkerStats ?? null,
+        );
+        const report = {
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          preparedFigureProbeReportPath,
+          preparedFigureProbeResult,
+          pixels,
+          workerStatsBeforeClose,
+          pageErrors,
+        };
+        await writeFile(
+          preparedFigureProbeReportPath,
+          `${JSON.stringify(report, null, 2)}\n`,
+        );
+        if (
+          preparedFigureProbeResult?.ok !== true
+          || preparedFigureProbeResult?.backend !== "browser-webgpu"
+          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-box-v0"
+          || Number(preparedFigureProbeResult?.partCount) !== 12
+          || Number(preparedFigureProbeResult?.vertexCount) !== 288
+          || Number(preparedFigureProbeResult?.indexCount) !== 432
+          || Number(preparedFigureProbeResult?.drawRangeCount) !== 72
+          || Number(preparedFigureProbeResult?.atlasWidth) !== 13
+          || Number(preparedFigureProbeResult?.atlasHeight) !== 10
+          || Number(preparedFigureProbeResult?.drawCount) !== 1
+          || Number(preparedFigureProbeResult?.immutableUploadCount) !== 4
+          || Number(preparedFigureProbeResult?.viewUniformWriteCount) !== 1
+          || pixels.figurePixelCount <= 1_000
+          || pixels.clearPixelCount <= 1_000
+          || pixels.distinctFigureColorCount <= 4
+          || Number(workerStatsBeforeClose?.active?.["mclone-integrated-server"]) !== 1
+          || Number(workerStatsBeforeClose?.active?.["mclone-render-compiler-app"]) !== 1
+          || pageErrors.length > 0
+        ) {
+          throw new Error(
+            `browser prepared figure probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (actorCompositionProbe) {
         const actorCompositionProbeResult = await page.evaluate(
           async () => await globalThis.__mcloneWebApp.renderActorCompositionProof?.() ?? null,
@@ -7514,6 +7584,42 @@ function analyzePng(bytes) {
     nearBlackInteriorPixelCount,
     transparentInteriorPixelCount,
     expectedClearColor: expected,
+  };
+}
+
+/** @param {Buffer} bytes */
+function analyzePreparedFigurePng(bytes) {
+  const png = decodePngRgba(bytes);
+  const clear = [0xed, 0xf1, 0xf4];
+  const figureColors = new Set();
+  let clearPixelCount = 0;
+  let figurePixelCount = 0;
+  let transparentPixelCount = 0;
+  for (let offset = 0; offset < png.rgba.length; offset += 4) {
+    const r = png.rgba[offset];
+    const g = png.rgba[offset + 1];
+    const b = png.rgba[offset + 2];
+    const a = png.rgba[offset + 3];
+    const isClear = Math.abs(r - clear[0]) <= 5
+      && Math.abs(g - clear[1]) <= 5
+      && Math.abs(b - clear[2]) <= 5;
+    if (isClear) {
+      clearPixelCount += 1;
+    } else if (a > 200) {
+      figurePixelCount += 1;
+      figureColors.add(`${r},${g},${b}`);
+    }
+    if (a < 250) {
+      transparentPixelCount += 1;
+    }
+  }
+  return {
+    width: png.width,
+    height: png.height,
+    clearPixelCount,
+    figurePixelCount,
+    distinctFigureColorCount: figureColors.size,
+    transparentPixelCount,
   };
 }
 

@@ -95,6 +95,7 @@ interface AppRuntime {
   frameInteractionSurface?: () => WasmReport | null;
   renderOneFrameForSmoke?: () => Promise<WasmReport | null>;
   renderHalfSpaceTerrainProof?: () => Promise<WasmReport | null>;
+  renderPreparedFigureProof?: () => Promise<WasmReport | null>;
   renderActorCompositionProof?: () => Promise<WasmReport | null>;
   rebuildRenderResourcesForSmoke?: () => WasmReport | null;
   openNativeTitleUi?: () => WasmReport | null;
@@ -283,6 +284,7 @@ async function boot(): Promise<WasmReport> {
   runtime.frameInteractionSurface = () => app.frameInteractionSurface();
   runtime.renderOneFrameForSmoke = () => app.renderOneFrameForSmoke();
   runtime.renderHalfSpaceTerrainProof = () => app.renderHalfSpaceTerrainProof();
+  runtime.renderPreparedFigureProof = () => app.renderPreparedFigureProof();
   runtime.renderActorCompositionProof = () => app.renderActorCompositionProof();
   runtime.rebuildRenderResourcesForSmoke = () => app.rebuildRenderResourcesForSmoke();
   runtime.openNativeTitleUi = () => app.openNativeTitleUi();
@@ -554,6 +556,7 @@ class WebFrameDriver {
       "discardManagedScenarioOperations",
       "installManagedScenarioServices",
       "renderHalfSpaceTerrainProof",
+      "renderPreparedFigureProof",
       "renderActorCompositionProof",
       "shutdown",
     ]) {
@@ -664,7 +667,17 @@ class WebFrameDriver {
     while (this.tickFrameBusy || this.sessionBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    this.pauseRendering();
     return this.session?.renderHalfSpaceTerrainProof() ?? null;
+  }
+
+  async renderPreparedFigureProof(): Promise<WasmReport | null> {
+    this.pauseRendering();
+    while (this.tickFrameBusy || this.sessionBusy) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    this.pauseRendering();
+    return this.session?.renderPreparedFigureProof() ?? null;
   }
 
   async renderActorCompositionProof(): Promise<WasmReport | null> {
@@ -672,6 +685,7 @@ class WebFrameDriver {
     while (this.tickFrameBusy || this.sessionBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    this.pauseRendering();
     return this.session?.renderActorCompositionProof() ?? null;
   }
 

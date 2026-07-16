@@ -3,15 +3,15 @@
 Topic: `compiled-figure-rendering`
 
 Status: target direction selected 2026-07-16. Tactical
-[`181`](../tactical/181-compiled-figure-static-box-proof.md) Slices 0-3 now
+[`181`](../tactical/181-compiled-figure-static-box-proof.md) Slices 0-4 now
 cover the canonical semantic handoff, shared startup compiler, immutable mono
-proof renderer, and visually approved Three.js/native comparison. The simpler
-native proof lighting was accepted for this stage. Stereo/browser portability
-is in progress: distinct-slot native per-eye pixels are inspected, while
-multiview execution is capability-skipped on the current Mac and browser WebGPU
-remains. Semantic JSON remains the only persisted runtime format; production
-migration, animation, curved primitives, instancing, LOD, GPU pose evaluation,
-and a disk cache remain deferred.
+proof renderer, visually approved Three.js/native comparison, inspected native
+per-eye stereo, and inspected production browser WebGPU pixels. The simpler
+native proof lighting was accepted for this stage. Multiview execution remains
+capability-skipped on the current Mac with shader/contract validation pending a
+capable adapter. Semantic JSON remains the only persisted runtime format;
+production migration, animation, curved primitives, instancing, LOD, GPU pose
+evaluation, and a disk cache remain deferred.
 
 ## Scope
 
@@ -678,16 +678,16 @@ decision.
 - add representative per-figure geometry and pose-cost reports; and
 - retain current pixels and all platform paths.
 
-### Phase 1: startup-prepared static box proof (mono proof approved)
+### Phase 1: startup-prepared static box proof (portability complete)
 
 - establish the shared Rust startup compiler and in-memory `PreparedFigure`
   through Tactical
   [`181`](../tactical/181-compiled-figure-static-box-proof.md);
 - compile one box-only figure with positions, normals, UVs, indices, part IDs,
   materials, and a real ASCII-derived texture atlas;
-- upload and draw the prepared result through shared rendering; native mono is
-  implemented and inspected, while stereo/multiview and production browser
-  WebGPU remain Tactical 181 Slice 4;
+- upload and draw the prepared result through shared rendering; native mono,
+  distinct-slot per-eye stereo, and production browser WebGPU are implemented
+  and inspected, while full-frame multiview execution is capability-deferred;
 - compare runtime pixels, bounds, winding, UVs, and counts against the
   semantic Three.js baseline; and
 - record startup preparation time without creating a persisted geometry file.
@@ -953,16 +953,15 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Finish Tactical [`181`](../tactical/181-compiled-figure-static-box-proof.md)'s
-stereo/multiview and production browser WebGPU portability gate now that the
-paired mono geometry, framing, grounding, face orientation, and simpler native
-proof lighting are approved. Do not start animation, production actor
-migration, instancing, curved primitives, LOD, or a persisted prepared format
-as part of that portability step.
+Close Tactical [`181`](../tactical/181-compiled-figure-static-box-proof.md) with
+its accounting, malformed-input, provenance, and unchanged-production-path
+evidence. Then open a bounded presentation-rate rigid-part animation tactical:
+evaluate local TRS into a final part palette at the actual presentation time,
+upload only that mutable palette, render a continuously interpolated player
+walk beside the semantic Three.js clip, and stop for human clip review before
+any production actor migration.
 
-After that proof, select the next capability from actual production needs:
-presentation-rate rigid-part animation, another box-only migration, or true
-curved-primitive/material parity. Curved tessellation extends the same startup
-compiler and does not reopen persistence. Do not schedule GPU crowd evaluation
-until the CPU-palette prepared path and a real high-count fixture provide a
-measured crossover question.
+Curved tessellation extends the same startup compiler and does not reopen
+persistence. Keep it, instancing, LOD, and GPU crowd evaluation out of the
+first CPU-palette animation proof. A real high-count fixture should establish
+the GPU evaluator crossover later.

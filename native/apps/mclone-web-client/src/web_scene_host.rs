@@ -26,7 +26,9 @@ use mclone_app_runtime::world_catalog::{
     LocalWorldCreateOptions, LocalWorldId, WorldCatalogError, WorldCatalogErrorKind,
     WorldCatalogRequest,
 };
-use mclone_assets::PackedAssetSource;
+use mclone_assets::{
+    MemoryAssetSource, PackedAssetSource, default_player_figure_path, load_prepared_figure,
+};
 use mclone_client::BlockInteractionTarget;
 use mclone_core::{BlockPos, ChunkPos, Direction, Vec3d};
 use mclone_input::{
@@ -34,8 +36,11 @@ use mclone_input::{
     ResolvedFlatInput, TouchControlsMode,
 };
 use mclone_render::actor_composition_fixture::ActorCompositionFixture;
-use mclone_render::chunk::{ChunkDepthTarget, ChunkRenderTarget, TexturedSectionRenderOptions};
+use mclone_render::chunk::{
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, TexturedSectionRenderOptions,
+};
 use mclone_render::composition_fixture::ComplementaryHalfSpaceTerrainFixture;
+use mclone_render::prepared_figure::{PreparedFigureDrawResources, clear_prepared_figure_target};
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::SINGLE_VIEW_SLOT;
 use mclone_scene::{
@@ -404,6 +409,108 @@ impl WebSceneHost {
             report.right_translucent_section_count as f64,
         )
         .map_err(JsValue::from)?;
+        Ok(object.into())
+    }
+
+    /// Present the canonical player through the shared startup-prepared path.
+    /// The browser adapter embeds canonical semantic JSON and supplies only
+    /// its WebGPU target, review camera, and presentation.
+    #[wasm_bindgen(js_name = renderPreparedFigureProof)]
+    pub fn render_prepared_figure_proof(&mut self) -> Result<JsValue, JsValue> {
+        let figure_path = default_player_figure_path();
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            figure_path.clone(),
+            include_str!("../../../../assets/mclone/figures/player.figure.json"),
+        );
+        let figure =
+            load_prepared_figure(&source, &figure_path).map_err(|error| js_error(error.into()))?;
+        let mut draw = PreparedFigureDrawResources::new(
+            &self.context.device,
+            &self.context.queue,
+            self.context.format,
+            &figure,
+        )
+        .map_err(js_error)?;
+
+        let surface_texture = self
+            .context
+            .surface
+            .get_current_texture()
+            .map_err(|error| {
+                JsValue::from_str(&format!("acquire prepared figure proof surface: {error}"))
+            })?;
+        let view = surface_texture.texture.create_view(&Default::default());
+        let mut encoder =
+            self.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("mclone_web_prepared_figure_proof_encoder"),
+                });
+        let size = [self.context.width, self.context.height];
+        let target = RenderFrameTarget::color(&view, size).with_depth(&self.depth.view);
+        clear_prepared_figure_target(
+            &mut encoder,
+            target,
+            &self.depth.view,
+            wgpu::Color {
+                r: 0xed as f64 / 255.0,
+                g: 0xf1 as f64 / 255.0,
+                b: 0xf4 as f64 / 255.0,
+                a: 1.0,
+            },
+        );
+
+        let min = Vec3::from_array(figure.bounds.min);
+        let max = Vec3::from_array(figure.bounds.max);
+        let center = (min + max) * 0.5;
+        let radius = ((max - min).length() * 0.5).max(0.75);
+        let fov_y_radians = 35.0_f32.to_radians();
+        let distance = 2.2_f32.max((radius / (fov_y_radians * 0.5).sin()) * 1.12);
+        let eye = center + Vec3::new(0.0, 0.2, 1.0).normalize() * distance;
+        let stats = draw
+            .render(
+                &self.context.queue,
+                &mut encoder,
+                target,
+                ChunkCamera {
+                    eye: eye.to_array(),
+                    target: center.to_array(),
+                    up: [0.0, 1.0, 0.0],
+                    fov_y_radians,
+                    z_near: 0.01,
+                    z_far: 100.0,
+                }
+                .render_view(size[0], size[1]),
+            )
+            .map_err(js_error)?;
+        let gpu = draw.snapshot();
+        self.context.queue.submit(std::iter::once(encoder.finish()));
+        surface_texture.present();
+
+        let object = js_sys::Object::new();
+        report_set_bool(&object, "ok", true).map_err(JsValue::from)?;
+        report_set_string(&object, "backend", "browser-webgpu").map_err(JsValue::from)?;
+        report_set_string(&object, "compilerId", figure.diagnostics.compiler_id)
+            .map_err(JsValue::from)?;
+        if let Some(crc32) = figure.diagnostics.semantic_crc32 {
+            report_set_string(&object, "semanticCrc32", &format!("{crc32:08x}"))
+                .map_err(JsValue::from)?;
+        }
+        for (name, value) in [
+            ("partCount", figure.parts.len() as u64),
+            ("vertexCount", u64::from(stats.vertex_count)),
+            ("indexCount", u64::from(stats.index_count)),
+            ("drawRangeCount", figure.draw_ranges.len() as u64),
+            ("atlasWidth", u64::from(figure.atlas.width)),
+            ("atlasHeight", u64::from(figure.atlas.height)),
+            ("drawCount", u64::from(stats.draw_count)),
+            ("immutableUploadCount", gpu.immutable_upload_count),
+            ("viewUniformWriteCount", gpu.view_uniform_write_count),
+            ("multiviewPipelineCount", gpu.multiview_pipeline_count),
+        ] {
+            report_set_number(&object, name, value as f64).map_err(JsValue::from)?;
+        }
         Ok(object.into())
     }
 

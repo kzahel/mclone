@@ -1,10 +1,11 @@
 # 181: Startup-Prepared Figure Static-Box Proof
 
-Status: active 2026-07-16. Slices 0-3 are implemented; the first paired pixels
-and the proof's simpler native lighting were visually approved. Work is inside
-Slice 4 after inspected native per-eye stereo; full-frame multiview
-execution and browser WebGPU remain before animation, production migration,
-curved primitives, instancing, or LOD.
+Status: active 2026-07-16. Slices 0-4 are implemented; the paired mono pixels
+and simpler native lighting were visually approved, native per-eye stereo was
+inspected, and production browser WebGPU now presents the same shared prepared
+player. Work moves to Slice 5 closeout before animation. Full-frame multiview
+execution remains capability-skipped on the current Mac, with its shader and
+two-view contract validated pending a capable adapter.
 
 Topic: `compiled-figure-rendering`
 
@@ -354,7 +355,7 @@ Gate evidence:
 - Human review approved the geometry and accepted the simpler native proof
   lighting without requesting material or lighting parity work in this slice.
 
-### Slice 4: stereo, multiview, and browser portability (in progress)
+### Slice 4: stereo, multiview, and browser portability (complete 2026-07-16)
 
 - Add the prepared-figure path to both ordinary per-view and full-frame
   multiview pipelines with each eye/layer using its own view/projection data.
@@ -389,10 +390,33 @@ Native stereo progress on 2026-07-16:
 - `--portability` writes the per-eye capture and a diagnostic receipt. On a
   capable adapter it also renders the two-layer target, reads both layers, and
   requires exact equality with the ordinary per-eye capture.
+- `pnpm native:web:prepared-figure-smoke` drives the production browser WebGPU
+  canvas through the same `mclone-assets` startup compiler and
+  `mclone-render::PreparedFigureDrawResources`; the browser adapter owns only
+  embedded canonical semantic bytes, the review camera, target, and present.
+- The inspected browser capture is
+  `/tmp/mclone-native-web-prepared-figure-probe-canvas.png`. Its receipt pins
+  semantic CRC-32 `505cea99`, compiler ID
+  `mclone-prepared-figure-box-v0`, 12 parts, 288 vertices, 432 indices, 72 draw
+  ranges, a 13x10 atlas, one draw, four immutable uploads, and one view write.
+  The 1280x720 capture contains 52,772 non-background figure pixels and 19
+  distinct figure colors.
+- The proof wrapper cancels a request-animation-frame that an already-running
+  frame can schedule while the diagnostic waits for its borrow to finish.
+  This keeps all three browser renderer probes from racing a later scene frame
+  over their captured output.
 
 Gate: mono, stereo per-eye, multiview, and browser WebGPU all show the same
 prepared player orientation/materials; no path independently recompiles
 semantic primitives or uploads topology per eye/frame.
+
+Gate disposition: complete on the available desktop/browser validation
+matrix. Mono, per-eye, and browser pixels are inspected. The full-frame
+multiview implementation shares the same immutable resources and validates
+through Naga with multiview enabled, while actual layered execution stays an
+explicit capability skip until a capable adapter or Quest lane runs it. This
+is recorded evidence, not a claim of Mac multiview pixels, and does not block
+the CPU animation proof.
 
 ### Slice 5: close the proof and choose the next tactical
 
