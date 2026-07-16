@@ -22,6 +22,8 @@ import type { TouchOverlayState } from "./mclone-web-touch.js";
 import {
   createIndexedDbCatalogWorld,
   deleteIndexedDbCatalogWorld,
+  deleteAllIndexedDbCatalogWorlds,
+  factoryResetIndexedDbLocalData,
   listIndexedDbCatalogWorlds,
   openIndexedDbCatalogWorld,
   recordIndexedDbCatalogWorldPlayed,
@@ -1953,7 +1955,7 @@ class WebFrameDriver {
     db: IDBDatabase,
     operation: string,
     report: WasmReport,
-  ): Promise<WebLocalWorldSummary | WebLocalWorldSummary[]> {
+  ): Promise<WebLocalWorldSummary | WebLocalWorldSummary[] | { deletedCount: number }> {
     switch (operation) {
       case "listWorlds":
         return listIndexedDbCatalogWorlds(db);
@@ -1978,6 +1980,20 @@ class WebFrameDriver {
         return deleteIndexedDbCatalogWorld(
           db,
           String(report.catalogWorldId ?? ""),
+          activeWorldId.length > 0 ? activeWorldId : null,
+        );
+      }
+      case "deleteAllLocalWorlds": {
+        const activeWorldId = String(report.activeWorldId ?? "").trim();
+        return deleteAllIndexedDbCatalogWorlds(
+          db,
+          activeWorldId.length > 0 ? activeWorldId : null,
+        );
+      }
+      case "factoryResetLocalData": {
+        const activeWorldId = String(report.activeWorldId ?? "").trim();
+        return factoryResetIndexedDbLocalData(
+          db,
           activeWorldId.length > 0 ? activeWorldId : null,
         );
       }

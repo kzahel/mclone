@@ -10,6 +10,7 @@ use uuid::Uuid;
 pub const LOCAL_PLAYER_PROFILE_SCHEMA: u32 = 1;
 pub const LOCAL_PLAYER_PROFILE_FILE_NAME: &str = "player-profile.v1.json";
 pub const WEB_LOCAL_PLAYER_PROFILE_KEY: &str = "mclone.playerProfile.v1";
+pub const WEB_ASSET_PACK_PREFERENCE_KEY: &str = "mclone.assetPacks.v1";
 pub const DEFAULT_LOCAL_PLAYER_DISPLAY_NAME: &str = "Player";
 pub const MAX_LOCAL_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
 
@@ -245,6 +246,47 @@ pub fn load_or_create_native_local_player_profile(
     load_or_create_local_player_profile(&FileLocalPlayerProfileStorage::new(path))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn reset_native_local_player_profile(world_root: Option<&Path>) -> Result<LocalPlayerProfile> {
+    let path = native_local_player_profile_path(world_root)
+        .context("native local player profile requires an app world root or file override")?;
+    reset_local_player_profile(&FileLocalPlayerProfileStorage::new(path))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn factory_reset_native_local_preferences(
+    world_root: Option<&Path>,
+) -> Result<LocalPlayerProfile> {
+    let world_root = world_root.context("native factory reset requires an app world root")?;
+    if let Some(path) =
+        crate::asset_pack_preferences::native_asset_pack_preference_path(Some(world_root))
+    {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("delete asset-pack preference {}", path.display()));
+            }
+        }
+    }
+    let scenario_root =
+        crate::scenario_content::native_managed_scenario_root_from_world_root(world_root);
+    match std::fs::remove_dir_all(&scenario_root) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| {
+                format!(
+                    "delete managed scenario content {}",
+                    scenario_root.display()
+                )
+            });
+        }
+    }
+    reset_native_local_player_profile(Some(world_root))
+}
+
 #[cfg(target_arch = "wasm32")]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WebLocalPlayerProfileStorage;
@@ -289,6 +331,20 @@ impl LocalPlayerProfileStorage for WebLocalPlayerProfileStorage {
 #[cfg(target_arch = "wasm32")]
 pub fn load_or_create_web_local_player_profile() -> Result<LocalPlayerProfile> {
     load_or_create_local_player_profile(&WebLocalPlayerProfileStorage)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn reset_web_local_player_profile() -> Result<LocalPlayerProfile> {
+    reset_local_player_profile(&WebLocalPlayerProfileStorage)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn factory_reset_web_local_preferences() -> Result<LocalPlayerProfile> {
+    let storage = WebLocalPlayerProfileStorage.storage()?;
+    storage
+        .remove_item(WEB_ASSET_PACK_PREFERENCE_KEY)
+        .map_err(|error| anyhow::anyhow!("delete browser asset-pack preference: {error:?}"))?;
+    reset_web_local_player_profile()
 }
 
 fn validate_display_name(value: String) -> Result<String> {
@@ -389,6 +445,43 @@ mod tests {
             native_local_player_profile_path(Some(root)).unwrap(),
             PathBuf::from("/tmp/mclone/app-data/preferences/player-profile.v1.json")
         );
+    }
+
+    #[test]
+    fn native_factory_reset_replaces_profile_and_only_removes_registered_preferences() {
+        let path = temp_profile_path("factory-reset");
+        let app_root = path.parent().unwrap();
+        let world_root = app_root.join("worlds");
+        let preferences = app_root.join("preferences");
+        let scenario_root = app_root.join("scenarios");
+        let unrelated = app_root.join("keep-me.txt");
+        std::fs::create_dir_all(&world_root).unwrap();
+        std::fs::create_dir_all(&preferences).unwrap();
+        std::fs::create_dir_all(&scenario_root).unwrap();
+        std::fs::write(
+            preferences.join(crate::asset_pack_preferences::ASSET_PACK_PREFERENCE_FILE_NAME),
+            "preference",
+        )
+        .unwrap();
+        std::fs::write(scenario_root.join("managed.bin"), "managed").unwrap();
+        std::fs::write(&unrelated, "preserve").unwrap();
+
+        let original = load_or_create_native_local_player_profile(Some(&world_root)).unwrap();
+        let replacement = factory_reset_native_local_preferences(Some(&world_root)).unwrap();
+
+        assert_ne!(replacement.id, original.id);
+        assert_eq!(
+            load_or_create_native_local_player_profile(Some(&world_root)).unwrap(),
+            replacement
+        );
+        assert!(
+            !preferences
+                .join(crate::asset_pack_preferences::ASSET_PACK_PREFERENCE_FILE_NAME)
+                .exists()
+        );
+        assert!(!scenario_root.exists());
+        assert_eq!(std::fs::read_to_string(&unrelated).unwrap(), "preserve");
+        let _ = std::fs::remove_dir_all(app_root);
     }
 
     #[test]

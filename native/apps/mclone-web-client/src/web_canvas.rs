@@ -3102,6 +3102,10 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleAssetPack(_) => "toggleAssetPack",
         GameUiAction::ApplyAssetPacks => "applyAssetPacks",
         GameUiAction::CancelAssetPacks => "cancelAssetPacks",
+        GameUiAction::ConfirmStorageAction(_, _) => "confirmStorageAction",
+        GameUiAction::ExecuteStorageAction(_, _) => "executeStorageAction",
+        GameUiAction::CancelStorageAction(_) => "cancelStorageAction",
+        GameUiAction::ClearRebuildableCache => "clearRebuildableCache",
         GameUiAction::BackToTitle => "backToTitle",
         GameUiAction::BackToPause => "backToPause",
         GameUiAction::QuitToTitle => "quitToTitle",
@@ -3160,6 +3164,11 @@ pub(super) fn decode_world_catalog_response(
             id: LocalWorldId::new(js_string_property(payload, "id")?)
                 .map_err(|error| error.message)?,
         }),
+        "deleteAllLocalWorlds" | "factoryResetLocalData" => {
+            Ok(WorldCatalogResponse::AllLocalWorldsDeleted {
+                deleted_count: js_u64_property(payload, "deletedCount")? as usize,
+            })
+        }
         other => Err(format!(
             "unsupported world catalog response operation {other:?}"
         )),

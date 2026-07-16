@@ -11,7 +11,7 @@ use crate::far_lod::{
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     GameCollisionMode, GameFarLodDetailMode, GameFramePacingMode, GameMovementMode,
-    GamePlayerModel, GameScenarioId, GameSimulationCadence, GameTouchSettings,
+    GamePlayerModel, GameScenarioId, GameSimulationCadence, GameStorageAction, GameTouchSettings,
     GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameXrTurnMode,
 };
 
@@ -188,6 +188,42 @@ impl ClientExperienceController {
                     effects.asset_packs.push(effect);
                 }
             }
+            GameUiAction::ExecuteStorageAction(parent, action)
+                if parent == mclone_ui::GameOptionsParent::Title =>
+            {
+                let mut catalog_request_queued = true;
+                if matches!(
+                    action,
+                    GameStorageAction::DeleteAllLocalWorlds | GameStorageAction::FactoryReset
+                ) {
+                    effects.catalog = self.catalog.apply_ui_action(
+                        GameUiAction::ExecuteStorageAction(parent, action),
+                        ClientCatalogActionContext {
+                            new_world_seed: context.new_world_seed,
+                        },
+                    );
+                    catalog_request_queued = !effects.catalog.catalog_requests.is_empty();
+                }
+                if matches!(
+                    action,
+                    GameStorageAction::ResetPlayerIdentity | GameStorageAction::FactoryReset
+                ) && (action != GameStorageAction::FactoryReset || catalog_request_queued)
+                {
+                    effects.local_data.push(match action {
+                        GameStorageAction::ResetPlayerIdentity => {
+                            ClientExperienceLocalDataEffect::ResetPlayerIdentity
+                        }
+                        GameStorageAction::FactoryReset => {
+                            ClientExperienceLocalDataEffect::FactoryReset
+                        }
+                        GameStorageAction::DeleteAllLocalWorlds => unreachable!(),
+                    });
+                }
+            }
+            GameUiAction::ExecuteStorageAction(_, _) => {}
+            GameUiAction::ClearRebuildableCache => effects
+                .local_data
+                .push(ClientExperienceLocalDataEffect::ClearRebuildableCache),
             GameUiAction::AssignHotbarBlock { slot, block_state } => {
                 effects
                     .gameplay
@@ -201,6 +237,8 @@ impl ClientExperienceController {
             | GameUiAction::OpenOptions(_)
             | GameUiAction::OpenOptionsCategory(_, _)
             | GameUiAction::OpenServerSettings(_)
+            | GameUiAction::ConfirmStorageAction(_, _)
+            | GameUiAction::CancelStorageAction(_)
             | GameUiAction::BackToPause => {
                 effects
                     .projection
@@ -242,7 +280,15 @@ pub struct ClientExperienceEffects {
     pub asset_packs: Vec<ClientAssetPackEffect>,
     pub scenario: Vec<ClientExperienceScenarioEffect>,
     pub gameplay: Vec<ClientExperienceGameplayEffect>,
+    pub local_data: Vec<ClientExperienceLocalDataEffect>,
     pub projection: Vec<ClientExperienceProjectionEffect>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ClientExperienceLocalDataEffect {
+    ClearRebuildableCache,
+    ResetPlayerIdentity,
+    FactoryReset,
 }
 
 impl ClientExperienceEffects {
@@ -1497,6 +1543,10 @@ pub enum ClientExperienceActionKind {
     ToggleAssetPack,
     ApplyAssetPacks,
     CancelAssetPacks,
+    ConfirmStorageAction,
+    ExecuteStorageAction,
+    CancelStorageAction,
+    ClearRebuildableCache,
     BackToTitle,
     BackToPause,
     QuitToTitle,
@@ -1556,6 +1606,14 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::ToggleAssetPack(_) => ClientExperienceActionKind::ToggleAssetPack,
         GameUiAction::ApplyAssetPacks => ClientExperienceActionKind::ApplyAssetPacks,
         GameUiAction::CancelAssetPacks => ClientExperienceActionKind::CancelAssetPacks,
+        GameUiAction::ConfirmStorageAction(_, _) => {
+            ClientExperienceActionKind::ConfirmStorageAction
+        }
+        GameUiAction::ExecuteStorageAction(_, _) => {
+            ClientExperienceActionKind::ExecuteStorageAction
+        }
+        GameUiAction::CancelStorageAction(_) => ClientExperienceActionKind::CancelStorageAction,
+        GameUiAction::ClearRebuildableCache => ClientExperienceActionKind::ClearRebuildableCache,
         GameUiAction::BackToTitle => ClientExperienceActionKind::BackToTitle,
         GameUiAction::BackToPause => ClientExperienceActionKind::BackToPause,
         GameUiAction::QuitToTitle => ClientExperienceActionKind::QuitToTitle,
@@ -1613,6 +1671,10 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::ToggleAssetPack
         | ClientExperienceActionKind::ApplyAssetPacks
         | ClientExperienceActionKind::CancelAssetPacks
+        | ClientExperienceActionKind::ConfirmStorageAction
+        | ClientExperienceActionKind::ExecuteStorageAction
+        | ClientExperienceActionKind::CancelStorageAction
+        | ClientExperienceActionKind::ClearRebuildableCache
         | ClientExperienceActionKind::OpenNewWorld
         | ClientExperienceActionKind::OpenJoinRemote
         | ClientExperienceActionKind::RerollSeed
@@ -1696,7 +1758,7 @@ fn finite_or(value: f32, fallback: f32) -> f32 {
 mod tests {
     use super::*;
     use crate::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS;
-    use crate::world_catalog::{WorldCatalogCapabilities, WorldCatalogRequest};
+    use crate::world_catalog::{LocalWorldId, WorldCatalogCapabilities, WorldCatalogRequest};
     use mclone_ui::{
         AssetPackUiId, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId,
         WorldCatalogUiWorldId,
@@ -1873,6 +1935,16 @@ mod tests {
             GameUiAction::ToggleAssetPack(AssetPackUiId(1)),
             GameUiAction::ApplyAssetPacks,
             GameUiAction::CancelAssetPacks,
+            GameUiAction::ConfirmStorageAction(
+                GameOptionsParent::Title,
+                GameStorageAction::ResetPlayerIdentity,
+            ),
+            GameUiAction::ExecuteStorageAction(
+                GameOptionsParent::Title,
+                GameStorageAction::FactoryReset,
+            ),
+            GameUiAction::CancelStorageAction(GameOptionsParent::Title),
+            GameUiAction::ClearRebuildableCache,
             GameUiAction::BackToTitle,
             GameUiAction::BackToPause,
             GameUiAction::QuitToTitle,
@@ -1903,7 +1975,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 55);
+        assert_eq!(samples.len(), 59);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2050,6 +2122,69 @@ mod tests {
                 block_state: 9
             }]
         );
+    }
+
+    #[test]
+    fn facade_routes_title_storage_actions_and_rejects_pause_execution() {
+        let mut controller = ClientExperienceController::default();
+        controller
+            .catalog_mut()
+            .set_capabilities(WorldCatalogCapabilities::persistent_local());
+
+        let reset = controller.apply_ui_action(
+            GameUiAction::ExecuteStorageAction(
+                GameOptionsParent::Title,
+                GameStorageAction::ResetPlayerIdentity,
+            ),
+            context(),
+        );
+        assert_eq!(
+            reset.local_data,
+            vec![ClientExperienceLocalDataEffect::ResetPlayerIdentity]
+        );
+        assert!(reset.catalog.catalog_requests.is_empty());
+
+        let factory = controller.apply_ui_action(
+            GameUiAction::ExecuteStorageAction(
+                GameOptionsParent::Title,
+                GameStorageAction::FactoryReset,
+            ),
+            context(),
+        );
+        assert_eq!(
+            factory.local_data,
+            vec![ClientExperienceLocalDataEffect::FactoryReset]
+        );
+        assert_eq!(factory.catalog.catalog_requests.len(), 1);
+        assert_eq!(
+            factory.catalog.catalog_requests[0].request,
+            WorldCatalogRequest::DeleteAllLocalWorlds {
+                include_managed_content: true,
+            }
+        );
+
+        let pause = controller.apply_ui_action(
+            GameUiAction::ExecuteStorageAction(
+                GameOptionsParent::Pause,
+                GameStorageAction::ResetPlayerIdentity,
+            ),
+            context(),
+        );
+        assert!(pause.local_data.is_empty());
+        assert!(pause.catalog.catalog_requests.is_empty());
+
+        controller
+            .catalog_mut()
+            .set_active_world(Some(LocalWorldId::new("active-world").unwrap()));
+        let active_factory = controller.apply_ui_action(
+            GameUiAction::ExecuteStorageAction(
+                GameOptionsParent::Title,
+                GameStorageAction::FactoryReset,
+            ),
+            context(),
+        );
+        assert!(active_factory.local_data.is_empty());
+        assert!(active_factory.catalog.catalog_requests.is_empty());
     }
 
     #[test]

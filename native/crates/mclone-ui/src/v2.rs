@@ -2,9 +2,9 @@ use crate::{
     AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsCategory,
-    GameOptionsParent, GameScenarioId, GameScreen, GameTurnMode, GameUiAction, GameUiRenderState,
-    GuiDrawList, GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction,
-    LoadingProgressOverlay, Point, Rect, Slider, WidgetId, WorldCatalogUiEntry,
+    GameOptionsParent, GameScenarioId, GameScreen, GameStorageAction, GameTurnMode, GameUiAction,
+    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE,
+    Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId, WorldCatalogUiEntry,
     WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect, block_palette_slot_rect,
     centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
     far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
@@ -49,6 +49,10 @@ pub enum UiScreenId {
     AssetPacks {
         parent: GameOptionsParent,
     },
+    StorageConfirm {
+        parent: GameOptionsParent,
+        action: GameStorageAction,
+    },
     Help {
         parent: GameHelpParent,
     },
@@ -72,6 +76,9 @@ impl UiScreenId {
             }
             Some(GameScreen::ServerSettings { parent }) => Some(Self::ServerSettings { parent }),
             Some(GameScreen::AssetPacks { parent }) => Some(Self::AssetPacks { parent }),
+            Some(GameScreen::StorageConfirm { parent, action }) => {
+                Some(Self::StorageConfirm { parent, action })
+            }
             Some(GameScreen::Help { parent }) => Some(Self::Help { parent }),
             None => None,
         }
@@ -730,6 +737,10 @@ impl UiSurface {
                 true,
                 Some(GameUiAction::OpenHelp(help_parent_for_options(parent))),
             ),
+            (Some(UiScreenId::StorageConfirm { parent, .. }), GuiKey::Escape) => {
+                (true, Some(GameUiAction::CancelStorageAction(parent)))
+            }
+            (Some(UiScreenId::StorageConfirm { .. }), GuiKey::F1) => (true, None),
             (Some(UiScreenId::Help { parent }), GuiKey::Escape | GuiKey::F1) => {
                 (true, Some(GameUiAction::CloseHelp(parent)))
             }
@@ -761,6 +772,9 @@ impl UiSurface {
                 self.render_server_settings(&mut draw, parent)
             }
             Some(UiScreenId::AssetPacks { parent }) => self.render_asset_packs(&mut draw, parent),
+            Some(UiScreenId::StorageConfirm { parent, action }) => {
+                self.render_storage_confirm(&mut draw, parent, action)
+            }
             Some(UiScreenId::Help { parent }) => self.render_help(&mut draw, parent),
             None => {}
         }
@@ -826,6 +840,13 @@ impl UiSurface {
                 self.layout_revision,
                 parent,
                 self.render_state.asset_packs,
+            ),
+            Some(UiScreenId::StorageConfirm { parent, action }) => storage_confirm_layout(
+                self.scale,
+                self.layout_revision,
+                parent,
+                action,
+                self.render_state,
             ),
             Some(UiScreenId::Help { parent }) => {
                 help_layout(self.scale, self.layout_revision, parent)
@@ -1084,6 +1105,56 @@ impl UiSurface {
         }
     }
 
+    fn render_storage_confirm(
+        &self,
+        draw: &mut GuiDrawList,
+        _parent: GameOptionsParent,
+        action: GameStorageAction,
+    ) {
+        render_title_background(draw, self.scale);
+        let panel = storage_confirm_panel_rect(self.scale);
+        draw.fill_gradient(
+            panel,
+            Color::rgba(45, 33, 35, 245),
+            Color::rgba(18, 13, 14, 245),
+        );
+        draw.outline(panel, Color::rgba(190, 124, 124, 255));
+        self.font.draw_centered_atlas(
+            draw,
+            action.title(),
+            panel.center_x(),
+            panel.y + 12.0,
+            Color::rgba(255, 224, 224, 255),
+        );
+        let warnings = match action {
+            GameStorageAction::ResetPlayerIdentity => (
+                "CREATES NEW UUID; WORLDS AND PREFERENCES STAY",
+                "OLD LOCAL AND REMOTE PLAYER RECORDS REMAIN",
+            ),
+            GameStorageAction::DeleteAllLocalWorlds => (
+                "DELETES CATALOG WORLDS; PROFILE AND PREFERENCES STAY",
+                "MANAGED CONTENT AND REMOTE DATA STAY",
+            ),
+            GameStorageAction::FactoryReset => (
+                "DELETES PROFILE, PREFERENCES, WORLDS & MANAGED CONTENT",
+                "REMOTE SERVER PLAYER RECORDS STAY",
+            ),
+        };
+        for (index, warning) in [warnings.0, warnings.1].into_iter().enumerate() {
+            self.font.draw_centered_atlas(
+                draw,
+                warning,
+                panel.center_x(),
+                panel.y + 42.0 + index as f32 * 12.0,
+                Color::rgba(255, 178, 178, 255),
+            );
+        }
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+    }
+
     fn render_new_world(&self, draw: &mut GuiDrawList) {
         render_title_background(draw, self.scale);
         self.font.draw_centered_atlas(
@@ -1199,6 +1270,31 @@ impl UiSurface {
         let interaction = self.interaction();
         for widget in self.layout.widgets() {
             self.render_widget(draw, widget, interaction);
+        }
+        if category == GameOptionsCategory::StorageProfile {
+            let status = if self.render_state.storage_profile.status.visible {
+                self.render_state.storage_profile.status
+            } else {
+                self.render_state.world_catalog.status
+            };
+            if status.visible || self.render_state.world_catalog.loading {
+                let (message, ok) = if status.visible {
+                    (status.message.as_str(), status.ok)
+                } else {
+                    ("Updating local world storage...", true)
+                };
+                self.font.draw_centered_atlas(
+                    draw,
+                    message,
+                    panel.center_x(),
+                    (panel.bottom() + 2.0).min(self.scale.height - 10.0),
+                    if ok {
+                        Color::rgba(190, 224, 196, 255)
+                    } else {
+                        Color::rgba(255, 178, 178, 255)
+                    },
+                );
+            }
         }
         let _ = parent;
     }
@@ -2263,6 +2359,7 @@ impl GameUiHost {
                     | GameScreen::WorldList
                     | GameScreen::WorldCreate
                     | GameScreen::WorldDeleteConfirm { .. }
+                    | GameScreen::StorageConfirm { .. }
                     | GameScreen::NewWorld
                     | GameScreen::JoinRemote
             )
@@ -2363,6 +2460,16 @@ impl GameUiHost {
             GameUiAction::OpenAssetPacks(parent) => {
                 self.screen = Some(GameScreen::AssetPacks { parent });
             }
+            GameUiAction::ConfirmStorageAction(parent, action) => {
+                self.screen = Some(GameScreen::StorageConfirm { parent, action });
+            }
+            GameUiAction::ExecuteStorageAction(parent, _)
+            | GameUiAction::CancelStorageAction(parent) => {
+                self.screen = Some(GameScreen::OptionsCategory {
+                    parent,
+                    category: GameOptionsCategory::StorageProfile,
+                });
+            }
             GameUiAction::CancelAssetPacks => {
                 if let Some(GameScreen::AssetPacks { parent }) = self.screen {
                     self.screen = Some(GameScreen::Options { parent });
@@ -2377,6 +2484,7 @@ impl GameUiHost {
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::ApplyAssetPacks
+            | GameUiAction::ClearRebuildableCache
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
             | GameUiAction::CycleFarLodDetail
@@ -2595,6 +2703,17 @@ const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
 const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
 const UI_V2_OPTIONS_FAR_LOD_DETAIL: UiWidgetId = UiWidgetId(131);
+const UI_V2_OPTIONS_CAT_STORAGE: UiWidgetId = UiWidgetId(132);
+const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
+const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
+const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
+const UI_V2_STORAGE_WORLD_COUNT: UiWidgetId = UiWidgetId(136);
+const UI_V2_STORAGE_CLEAR_CACHE: UiWidgetId = UiWidgetId(137);
+const UI_V2_STORAGE_RESET_IDENTITY: UiWidgetId = UiWidgetId(138);
+const UI_V2_STORAGE_DELETE_ALL_WORLDS: UiWidgetId = UiWidgetId(139);
+const UI_V2_STORAGE_FACTORY_RESET: UiWidgetId = UiWidgetId(140);
+const UI_V2_STORAGE_CONFIRM: UiWidgetId = UiWidgetId(141);
+const UI_V2_STORAGE_CANCEL: UiWidgetId = UiWidgetId(142);
 const UI_V2_ASSET_PACK_ROW_BASE: u64 = 1300;
 const UI_V2_ASSET_PACK_CANCEL: UiWidgetId = UiWidgetId(1310);
 const UI_V2_ASSET_PACK_APPLY: UiWidgetId = UiWidgetId(1311);
@@ -2800,6 +2919,51 @@ fn world_delete_confirm_layout(
     layout
 }
 
+fn storage_confirm_layout(
+    scale: GuiScale,
+    revision: u64,
+    parent: GameOptionsParent,
+    action: GameStorageAction,
+    state: GameUiRenderState,
+) -> UiLayout {
+    let mut layout = UiLayout::new(
+        Some(UiScreenId::StorageConfirm { parent, action }),
+        revision,
+    );
+    let panel = storage_confirm_panel_rect(scale);
+    let world_count = state.world_catalog.entry_count();
+    let enabled = match action {
+        GameStorageAction::ResetPlayerIdentity => state.storage_profile.profile_actions_available,
+        GameStorageAction::DeleteAllLocalWorlds => {
+            state.world_catalog.delete_supported && world_count > 0
+        }
+        GameStorageAction::FactoryReset => {
+            state.storage_profile.factory_reset_available && state.world_catalog.delete_supported
+        }
+    } && parent == GameOptionsParent::Title
+        && state.world_catalog.active.is_none()
+        && !state.world_catalog.loading;
+    let y = panel.y + 89.0;
+    layout.push(
+        UiWidget::button(
+            UI_V2_STORAGE_CONFIRM,
+            menu_button_rect_at(panel.center_x(), y),
+            action.confirm_label(),
+        )
+        .enabled(enabled)
+        .action(GameUiAction::ExecuteStorageAction(parent, action)),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_STORAGE_CANCEL,
+            menu_button_rect_at(panel.center_x(), y + 24.0),
+            "Cancel",
+        )
+        .action(GameUiAction::CancelStorageAction(parent)),
+    );
+    layout
+}
+
 fn new_world_layout(scale: GuiScale, revision: u64) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::NewWorld), revision);
     let y = scale.height * 0.5 - 4.0;
@@ -2896,6 +3060,10 @@ fn world_create_panel_rect(scale: GuiScale) -> Rect {
 
 fn world_delete_confirm_panel_rect(scale: GuiScale) -> Rect {
     centered_panel(scale, 340.0, 158.0)
+}
+
+fn storage_confirm_panel_rect(scale: GuiScale) -> Rect {
+    centered_panel(scale, 430.0, 158.0)
 }
 
 fn world_list_row_rects(panel: Rect) -> [Rect; 8] {
@@ -3084,6 +3252,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
         GameOptionsCategory::Movement => UI_V2_OPTIONS_CAT_MOVEMENT,
         GameOptionsCategory::Display => UI_V2_OPTIONS_CAT_DISPLAY,
         GameOptionsCategory::Debug => UI_V2_OPTIONS_CAT_DEBUG,
+        GameOptionsCategory::StorageProfile => UI_V2_OPTIONS_CAT_STORAGE,
     }
 }
 
@@ -3097,6 +3266,7 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::Debug => 4,
+        GameOptionsCategory::StorageProfile => 8,
     }
 }
 
@@ -3180,6 +3350,7 @@ fn options_layout(
 /// whose backing platform state is absent are emitted disabled (with an "N/A"
 /// value and no action) so every setting is discoverable while developing.
 fn options_category_rows(
+    parent: GameOptionsParent,
     category: GameOptionsCategory,
     state: GameUiRenderState,
 ) -> Vec<(f32, UiWidget)> {
@@ -3427,7 +3598,127 @@ fn options_category_rows(
                 .action(GameUiAction::ToggleFullbright),
             ),
         ],
+        GameOptionsCategory::StorageProfile => {
+            let title_only = parent == GameOptionsParent::Title;
+            let storage = state.storage_profile;
+            let profile_id = storage
+                .profile_id
+                .map(format_profile_id)
+                .unwrap_or_else(|| "Unavailable".to_owned());
+            let world_count = state.world_catalog.entry_count();
+            let delete_all_available = title_only
+                && state.world_catalog.delete_supported
+                && state.world_catalog.active.is_none()
+                && !state.world_catalog.loading
+                && world_count > 0;
+            vec![
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_STORAGE_PROFILE_NAME,
+                        ph,
+                        "Player",
+                        if storage.display_name.is_empty() {
+                            "Unavailable"
+                        } else {
+                            storage.display_name.as_str()
+                        },
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(UI_V2_STORAGE_PROFILE_ID, ph, "UUID", profile_id)
+                        .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_STORAGE_BACKEND,
+                        ph,
+                        "Profile Store",
+                        storage.backend.label(),
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_STORAGE_WORLD_COUNT,
+                        ph,
+                        "Local Worlds",
+                        world_count.to_string(),
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(UI_V2_STORAGE_CLEAR_CACHE, ph, "Clear Rebuildable Cache")
+                        .enabled(title_only && storage.clear_cache_available)
+                        .action(GameUiAction::ClearRebuildableCache),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(UI_V2_STORAGE_RESET_IDENTITY, ph, "Reset Player Identity")
+                        .enabled(title_only && storage.profile_actions_available)
+                        .action(GameUiAction::ConfirmStorageAction(
+                            parent,
+                            GameStorageAction::ResetPlayerIdentity,
+                        )),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(
+                        UI_V2_STORAGE_DELETE_ALL_WORLDS,
+                        ph,
+                        "Delete All Local Worlds",
+                    )
+                    .enabled(delete_all_available)
+                    .action(GameUiAction::ConfirmStorageAction(
+                        parent,
+                        GameStorageAction::DeleteAllLocalWorlds,
+                    )),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(UI_V2_STORAGE_FACTORY_RESET, ph, "Factory Reset")
+                        .enabled(
+                            title_only
+                                && storage.factory_reset_available
+                                && state.world_catalog.delete_supported
+                                && state.world_catalog.active.is_none()
+                                && !state.world_catalog.loading,
+                        )
+                        .action(GameUiAction::ConfirmStorageAction(
+                            parent,
+                            GameStorageAction::FactoryReset,
+                        )),
+                ),
+            ]
+        }
     }
+}
+
+fn format_profile_id(bytes: [u8; 16]) -> String {
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    )
 }
 
 /// Build a cycle row backed by an `Option<T>` platform value. When present it
@@ -3463,8 +3754,12 @@ fn options_category_layout(
         revision,
     );
     let panel = options_category_panel_rect(scale, category);
-    let rows = options_category_rows(category, state);
-    let bottom = place_option_rows(&mut layout, panel, 2, rows);
+    let rows = options_category_rows(parent, category, state);
+    let bottom = if category == GameOptionsCategory::StorageProfile {
+        place_storage_profile_rows(&mut layout, panel, rows)
+    } else {
+        place_option_rows(&mut layout, panel, 2, rows)
+    };
     layout.push(
         UiWidget::button(
             UI_V2_OPTIONS_BACK,
@@ -3477,6 +3772,40 @@ fn options_category_layout(
         .action(GameUiAction::OpenOptions(parent)),
     );
     layout
+}
+
+fn place_storage_profile_rows(
+    layout: &mut UiLayout,
+    panel: Rect,
+    rows: Vec<(f32, UiWidget)>,
+) -> f32 {
+    debug_assert_eq!(
+        rows.len(),
+        options_category_row_count(GameOptionsCategory::StorageProfile)
+    );
+    let x0 = panel.x + 18.0;
+    let y0 = panel.y + 30.0;
+    let pitch = 24.0;
+    let column_gap = 10.0;
+    let full_width = panel.width - 36.0;
+    let action_width = (full_width - column_gap) * 0.5;
+    for (index, (height, mut widget)) in rows.into_iter().enumerate() {
+        widget.rect = if index < 4 {
+            Rect::new(x0, y0 + index as f32 * pitch, full_width, height)
+        } else {
+            let action_index = index - 4;
+            let column = action_index % 2;
+            let row = action_index / 2;
+            Rect::new(
+                x0 + column as f32 * (action_width + column_gap),
+                y0 + (4 + row) as f32 * pitch,
+                action_width,
+                height,
+            )
+        };
+        layout.push(widget);
+    }
+    y0 + 6.0 * pitch
 }
 
 /// Flow `rows` (each `(height, widget)`) into `cols` columns within `panel`,
@@ -3647,10 +3976,14 @@ fn asset_packs_layout(
 }
 
 fn options_category_panel_rect(scale: GuiScale, category: GameOptionsCategory) -> Rect {
-    let per_col = options_category_row_count(category).div_ceil(2).max(1);
+    let row_count = if category == GameOptionsCategory::StorageProfile {
+        6
+    } else {
+        options_category_row_count(category).div_ceil(2).max(1)
+    };
     let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
     // title band + flowed rows + Back button + bottom padding
-    let content = 30.0 + per_col as f32 * 24.0 + 34.0;
+    let content = 30.0 + row_count as f32 * 24.0 + 34.0;
     let panel_height = content.min((scale.height - 4.0).max(1.0));
     centered_panel(scale, panel_width, panel_height)
 }

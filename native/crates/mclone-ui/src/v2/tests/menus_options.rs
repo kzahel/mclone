@@ -182,6 +182,112 @@ fn options_categories_show_unavailable_rows_disabled() {
 }
 
 #[test]
+fn storage_profile_title_exposes_only_supported_destructive_actions() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Title,
+        category: GameOptionsCategory::StorageProfile,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_render_state(GameUiRenderState {
+        world_catalog: world_catalog_state(),
+        storage_profile: StorageProfileUiState::available(
+            [0x42; 16],
+            "Player",
+            StorageProfileBackend::NativePreferences,
+        ),
+        ..GameUiRenderState::default()
+    });
+
+    let layout = surface.layout();
+    for id in [
+        UI_V2_STORAGE_PROFILE_NAME,
+        UI_V2_STORAGE_PROFILE_ID,
+        UI_V2_STORAGE_BACKEND,
+        UI_V2_STORAGE_WORLD_COUNT,
+        UI_V2_STORAGE_CLEAR_CACHE,
+    ] {
+        assert!(!layout.widget(id).expect("storage row").enabled);
+    }
+    for id in [
+        UI_V2_STORAGE_RESET_IDENTITY,
+        UI_V2_STORAGE_DELETE_ALL_WORLDS,
+        UI_V2_STORAGE_FACTORY_RESET,
+    ] {
+        assert!(layout.widget(id).expect("storage action").enabled);
+    }
+}
+
+#[test]
+fn storage_profile_pause_disables_destructive_actions() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::StorageProfile,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_render_state(GameUiRenderState {
+        world_catalog: world_catalog_state(),
+        storage_profile: StorageProfileUiState::available(
+            [0x42; 16],
+            "Player",
+            StorageProfileBackend::NativePreferences,
+        ),
+        ..GameUiRenderState::default()
+    });
+
+    for id in [
+        UI_V2_STORAGE_CLEAR_CACHE,
+        UI_V2_STORAGE_RESET_IDENTITY,
+        UI_V2_STORAGE_DELETE_ALL_WORLDS,
+        UI_V2_STORAGE_FACTORY_RESET,
+    ] {
+        assert!(!surface.layout().widget(id).expect("storage action").enabled);
+    }
+}
+
+#[test]
+fn storage_confirmation_requires_explicit_confirm_or_cancel() {
+    let state = GameUiRenderState {
+        world_catalog: world_catalog_state(),
+        storage_profile: StorageProfileUiState::available(
+            [0x42; 16],
+            "Player",
+            StorageProfileBackend::NativePreferences,
+        ),
+        ..GameUiRenderState::default()
+    };
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::StorageConfirm {
+        parent: GameOptionsParent::Title,
+        action: GameStorageAction::FactoryReset,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_render_state(state);
+
+    let confirm = surface
+        .layout()
+        .widget(UI_V2_STORAGE_CONFIRM)
+        .expect("factory reset confirm")
+        .rect;
+    assert!(surface.pointer_down(point_in(confirm), state));
+    assert_eq!(
+        surface.pointer_up(point_in(confirm), state).1,
+        Some(GameUiAction::ExecuteStorageAction(
+            GameOptionsParent::Title,
+            GameStorageAction::FactoryReset,
+        ))
+    );
+    assert_eq!(
+        surface.key_pressed(GuiKey::Escape),
+        (
+            true,
+            Some(GameUiAction::CancelStorageAction(GameOptionsParent::Title)),
+        )
+    );
+}
+
+#[test]
 fn game_ui_host_pointer_input_uses_committed_render_state() {
     let mut host = GameUiHost::new_ingame();
     host.set_screen(Some(GameScreen::OptionsCategory {

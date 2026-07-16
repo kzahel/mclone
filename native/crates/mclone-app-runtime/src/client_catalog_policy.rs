@@ -7,8 +7,8 @@ use crate::world_catalog::{
     most_recent_compatible_local_world, sort_local_world_summaries,
 };
 use mclone_ui::{
-    GameUiAction, WORLD_CATALOG_UI_ROW_CAPACITY, WorldCatalogUiEntry, WorldCatalogUiState,
-    WorldCatalogUiStatus, WorldCatalogUiText, WorldCatalogUiWorldId,
+    GameStorageAction, GameUiAction, WORLD_CATALOG_UI_ROW_CAPACITY, WorldCatalogUiEntry,
+    WorldCatalogUiState, WorldCatalogUiStatus, WorldCatalogUiText, WorldCatalogUiWorldId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -161,6 +161,12 @@ impl ClientCatalogController {
                 self.request_catalog_world_create(context.new_world_seed)
             }
             GameUiAction::DeleteWorld(id) => self.request_catalog_world_delete(id),
+            GameUiAction::ExecuteStorageAction(_, GameStorageAction::DeleteAllLocalWorlds) => {
+                self.request_delete_all_local_worlds(false)
+            }
+            GameUiAction::ExecuteStorageAction(_, GameStorageAction::FactoryReset) => {
+                self.request_delete_all_local_worlds(true)
+            }
             _ => ClientCatalogEffects::default(),
         }
     }
@@ -226,6 +232,19 @@ impl ClientCatalogController {
                 self.remove_world(&deleted_id);
                 self.ui.status =
                     WorldCatalogUiStatus::new(&format!("Deleted {display_name}"), true);
+                ClientCatalogEffects::default()
+            }
+            (
+                PendingCatalogRequest::DeleteAll,
+                WorldCatalogResponse::AllLocalWorldsDeleted { deleted_count },
+            ) => {
+                self.set_world_catalog_worlds(
+                    Vec::new(),
+                    WorldCatalogUiStatus::new(
+                        &format!("Deleted {deleted_count} local worlds"),
+                        true,
+                    ),
+                );
                 ClientCatalogEffects::default()
             }
             _ => {
@@ -318,6 +337,27 @@ impl ClientCatalogController {
                 id: entry.summary.id,
                 display_name: entry.summary.display_name,
             },
+        )
+    }
+
+    fn request_delete_all_local_worlds(
+        &mut self,
+        include_managed_content: bool,
+    ) -> ClientCatalogEffects {
+        if self.active_world.is_some() {
+            self.ui.status =
+                WorldCatalogUiStatus::new("Quit to title before deleting all worlds", false);
+            return ClientCatalogEffects::default();
+        }
+        if !self.capabilities.delete_supported {
+            self.ui.status = WorldCatalogUiStatus::new("World deletion is unavailable", false);
+            return ClientCatalogEffects::default();
+        }
+        self.queue_catalog_request(
+            WorldCatalogRequest::DeleteAllLocalWorlds {
+                include_managed_content,
+            },
+            PendingCatalogRequest::DeleteAll,
         )
     }
 
@@ -523,6 +563,7 @@ enum PendingCatalogRequest {
         id: LocalWorldId,
         display_name: String,
     },
+    DeleteAll,
 }
 
 fn world_catalog_ui_state_for_capabilities(
@@ -941,6 +982,40 @@ mod tests {
                 .as_str()
                 .contains("cannot delete active")
         );
+    }
+
+    #[test]
+    fn bulk_delete_and_factory_reset_requests_keep_their_storage_scope() {
+        let worlds = vec![
+            summary("alpha-base", "Alpha Base", 11),
+            summary("beta-mine", "Beta Mine", 22),
+        ];
+        for (action, include_managed_content) in [
+            (GameStorageAction::DeleteAllLocalWorlds, false),
+            (GameStorageAction::FactoryReset, true),
+        ] {
+            let mut controller = persistent_controller(worlds.clone());
+            let request = only_request(controller.apply_ui_action(
+                GameUiAction::ExecuteStorageAction(mclone_ui::GameOptionsParent::Title, action),
+                context(0),
+            ));
+            assert_eq!(
+                request.request,
+                WorldCatalogRequest::DeleteAllLocalWorlds {
+                    include_managed_content,
+                }
+            );
+
+            controller.apply_catalog_response(
+                request.id,
+                WorldCatalogResponse::AllLocalWorldsDeleted { deleted_count: 2 },
+            );
+            assert_eq!(controller.ui_state().entry_count(), 0);
+            assert_eq!(
+                controller.ui_state().status.message.as_str(),
+                "Deleted 2 local worlds"
+            );
+        }
     }
 
     #[test]

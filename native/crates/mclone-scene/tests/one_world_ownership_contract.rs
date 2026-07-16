@@ -115,6 +115,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "session",
     "session_runtime_factory",
     "client_experience",
+    "storage_profile_ui",
     "initial_alignment_mode",
     "render_options",
     "player_collision_box_visible",
@@ -176,7 +177,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 22);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 83);
+    assert_eq!(host_fields.len(), 84);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")

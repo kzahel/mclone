@@ -275,6 +275,7 @@ pub enum WorldCatalogRequest {
     OpenWorld { id: LocalWorldId },
     RecordWorldPlayed { id: LocalWorldId },
     DeleteWorld { id: LocalWorldId },
+    DeleteAllLocalWorlds { include_managed_content: bool },
 }
 
 impl WorldCatalogRequest {
@@ -285,6 +286,7 @@ impl WorldCatalogRequest {
             Self::OpenWorld { .. } => WorldCatalogOperation::OpenWorld,
             Self::RecordWorldPlayed { .. } => WorldCatalogOperation::RecordWorldPlayed,
             Self::DeleteWorld { .. } => WorldCatalogOperation::DeleteWorld,
+            Self::DeleteAllLocalWorlds { .. } => WorldCatalogOperation::DeleteAllLocalWorlds,
         }
     }
 }
@@ -308,6 +310,9 @@ pub enum WorldCatalogResponse {
     WorldDeleted {
         id: LocalWorldId,
     },
+    AllLocalWorldsDeleted {
+        deleted_count: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -318,6 +323,7 @@ pub enum WorldCatalogOperation {
     OpenWorld,
     RecordWorldPlayed,
     DeleteWorld,
+    DeleteAllLocalWorlds,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -489,6 +495,35 @@ impl NativeWorldCatalog {
             WorldCatalogRequest::DeleteWorld { id } => {
                 self.delete_world(&id, active_world)?;
                 Ok(WorldCatalogResponse::WorldDeleted { id })
+            }
+            WorldCatalogRequest::DeleteAllLocalWorlds {
+                include_managed_content,
+            } => {
+                if active_world.is_some() {
+                    return Err(WorldCatalogError::new(
+                        WorldCatalogErrorKind::ActiveWorld,
+                        "Quit to title before deleting all local worlds",
+                    ));
+                }
+                let worlds = self.list_worlds()?;
+                let deleted_count = worlds.len();
+                for world in worlds {
+                    self.delete_world(&world.id, None)?;
+                }
+                if include_managed_content {
+                    let managed_root = self.root.parent().unwrap_or(&self.root).join("scenarios");
+                    match fs::remove_dir_all(&managed_root) {
+                        Ok(()) => {}
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                        Err(error) => {
+                            return Err(storage_error(
+                                "failed to delete managed scenario content",
+                                error,
+                            ));
+                        }
+                    }
+                }
+                Ok(WorldCatalogResponse::AllLocalWorldsDeleted { deleted_count })
             }
         }
     }
@@ -1215,6 +1250,63 @@ mod tests {
         let remaining = catalog.list_worlds().unwrap();
         assert_eq!(remaining.len(), 1);
         assert_eq!(remaining[0].id, second.id);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_bulk_delete_preserves_non_catalog_data_unless_factory_scoped() {
+        let temp = TestTempDir::new("native-catalog-bulk-delete");
+        let world_root = temp.path().join("worlds");
+        let catalog = NativeWorldCatalog::new(&world_root);
+        catalog
+            .create_world(LocalWorldCreateOptions::new("Alpha", 1).unwrap())
+            .unwrap();
+        catalog
+            .create_world(LocalWorldCreateOptions::new("Beta", 2).unwrap())
+            .unwrap();
+        let unrecognized = world_root.join("not-a-catalog-world");
+        let preferences = temp.path().join("preferences");
+        let scenarios = temp.path().join("scenarios");
+        fs::create_dir_all(&unrecognized).unwrap();
+        fs::create_dir_all(&preferences).unwrap();
+        fs::create_dir_all(&scenarios).unwrap();
+        fs::write(unrecognized.join("keep"), "keep").unwrap();
+        fs::write(preferences.join("keep"), "keep").unwrap();
+        fs::write(scenarios.join("managed"), "managed").unwrap();
+
+        assert_eq!(
+            catalog
+                .handle_request(
+                    WorldCatalogRequest::DeleteAllLocalWorlds {
+                        include_managed_content: false,
+                    },
+                    None,
+                )
+                .unwrap(),
+            WorldCatalogResponse::AllLocalWorldsDeleted { deleted_count: 2 }
+        );
+        assert!(catalog.list_worlds().unwrap().is_empty());
+        assert!(unrecognized.exists());
+        assert!(preferences.exists());
+        assert!(scenarios.exists());
+
+        catalog
+            .create_world(LocalWorldCreateOptions::new("Gamma", 3).unwrap())
+            .unwrap();
+        assert_eq!(
+            catalog
+                .handle_request(
+                    WorldCatalogRequest::DeleteAllLocalWorlds {
+                        include_managed_content: true,
+                    },
+                    None,
+                )
+                .unwrap(),
+            WorldCatalogResponse::AllLocalWorldsDeleted { deleted_count: 1 }
+        );
+        assert!(unrecognized.exists());
+        assert!(preferences.exists());
+        assert!(!scenarios.exists());
     }
 
     #[cfg(not(target_arch = "wasm32"))]

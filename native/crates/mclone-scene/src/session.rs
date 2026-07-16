@@ -415,6 +415,7 @@ impl McloneSceneHost {
             client_experience: ClientExperienceController::new(
                 xr_native_client_experience_profile(),
             ),
+            storage_profile_ui: StorageProfileUiState::default(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -475,6 +476,7 @@ impl McloneSceneHost {
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        state.refresh_storage_profile_ui();
         Ok(state)
     }
 
@@ -610,6 +612,7 @@ impl McloneSceneHost {
             client_experience: ClientExperienceController::new(
                 xr_native_client_experience_profile(),
             ),
+            storage_profile_ui: StorageProfileUiState::default(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -670,6 +673,7 @@ impl McloneSceneHost {
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        state.refresh_storage_profile_ui();
         state.apply_debug_ui_screen();
         Ok(state)
     }
@@ -810,6 +814,7 @@ impl McloneSceneHost {
             #[cfg(not(target_arch = "wasm32"))]
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(client_experience_profile),
+            storage_profile_ui: StorageProfileUiState::default(),
             initial_alignment_mode: if startup_view_pose.is_some() {
                 XrViewAlignmentMode::ViewPose
             } else {
@@ -869,6 +874,7 @@ impl McloneSceneHost {
             seed_reroll: NewWorldSeedReroll::new(scene.seed),
         };
         state.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
+        state.refresh_storage_profile_ui();
         state.apply_debug_ui_screen();
         Ok(state)
     }
@@ -1325,6 +1331,95 @@ impl McloneSceneHost {
         debug_assert!(effects.session_starts.is_empty());
         debug_assert!(effects.catalog_requests.is_empty());
         self.services.catalog_operations = Some(operations);
+    }
+
+    pub(crate) fn refresh_storage_profile_ui(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        let profile = mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
+            self.active_world.scene.world_root.as_deref(),
+        );
+        #[cfg(target_arch = "wasm32")]
+        let profile = mclone_app_runtime::local_profile::load_or_create_web_local_player_profile();
+
+        self.storage_profile_ui = match profile {
+            Ok(profile) => StorageProfileUiState::available(
+                profile.id.as_bytes(),
+                &profile.display_name,
+                if cfg!(target_arch = "wasm32") {
+                    StorageProfileBackend::BrowserLocalStorage
+                } else {
+                    StorageProfileBackend::NativePreferences
+                },
+            ),
+            Err(error) => StorageProfileUiState {
+                status: WorldCatalogUiStatus::new(
+                    &format!("Player profile unavailable: {error:#}"),
+                    false,
+                ),
+                ..StorageProfileUiState::default()
+            },
+        };
+    }
+
+    pub(crate) fn apply_local_data_effect(&mut self, effect: ClientExperienceLocalDataEffect) {
+        let result = match effect {
+            ClientExperienceLocalDataEffect::ClearRebuildableCache => {
+                self.status_overlay =
+                    StatusOverlay::new("No registered rebuildable caches are available", false);
+                return;
+            }
+            ClientExperienceLocalDataEffect::ResetPlayerIdentity => {
+                #[cfg(not(target_arch = "wasm32"))]
+                let result = mclone_app_runtime::local_profile::reset_native_local_player_profile(
+                    self.active_world.scene.world_root.as_deref(),
+                );
+                #[cfg(target_arch = "wasm32")]
+                let result = mclone_app_runtime::local_profile::reset_web_local_player_profile();
+                result.map(|profile| {
+                    (
+                        profile,
+                        "Player identity reset; existing world and server records remain",
+                    )
+                })
+            }
+            ClientExperienceLocalDataEffect::FactoryReset => {
+                #[cfg(not(target_arch = "wasm32"))]
+                let result =
+                    mclone_app_runtime::local_profile::factory_reset_native_local_preferences(
+                        self.active_world.scene.world_root.as_deref(),
+                    );
+                #[cfg(target_arch = "wasm32")]
+                let result =
+                    mclone_app_runtime::local_profile::factory_reset_web_local_preferences();
+                result.map(|profile| {
+                    (
+                        profile,
+                        "Factory reset complete; remote server player records remain",
+                    )
+                })
+            }
+        };
+
+        match result {
+            Ok((profile, message)) => {
+                self.storage_profile_ui = StorageProfileUiState::available(
+                    profile.id.as_bytes(),
+                    &profile.display_name,
+                    if cfg!(target_arch = "wasm32") {
+                        StorageProfileBackend::BrowserLocalStorage
+                    } else {
+                        StorageProfileBackend::NativePreferences
+                    },
+                );
+                self.storage_profile_ui.status = WorldCatalogUiStatus::new(message, true);
+                self.status_overlay = StatusOverlay::new(message, true);
+            }
+            Err(error) => {
+                let message = format!("Local data operation failed: {error:#}");
+                self.storage_profile_ui.status = WorldCatalogUiStatus::new(&message, false);
+                self.status_overlay = StatusOverlay::new(message, false);
+            }
+        }
     }
 
     pub(crate) fn active_local_world_id(&self) -> Option<&LocalWorldId> {
@@ -5490,6 +5585,9 @@ impl McloneSceneHost {
             scenario_scene_replaced |= self.apply_managed_scenario_effect(effect, device, queue)?;
         }
         self.apply_asset_pack_effects(effects.asset_packs);
+        for effect in effects.local_data {
+            self.apply_local_data_effect(effect);
+        }
         if !self.apply_xr_settings_effects(effects.settings)? {
             return Ok(catalog_scene_replaced || session_scene_replaced || scenario_scene_replaced);
         }

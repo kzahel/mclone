@@ -18,7 +18,8 @@ use mclone_app_runtime::client_catalog_policy::{ClientCatalogEffects, ClientCata
 use mclone_app_runtime::client_experience::xr_native_client_experience_profile;
 use mclone_app_runtime::client_experience::{
     ClientExperienceActionContext, ClientExperienceController, ClientExperienceEffects,
-    ClientExperienceGameplayEffect, ClientExperienceMovementSettingChange, ClientExperienceProfile,
+    ClientExperienceGameplayEffect, ClientExperienceLocalDataEffect,
+    ClientExperienceMovementSettingChange, ClientExperienceProfile,
     ClientExperienceProjectionEffect, ClientExperienceScenarioEffect,
     ClientExperienceSettingsEffects, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
@@ -160,9 +161,9 @@ use mclone_ui::{
     GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen,
     GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
     GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, TouchOverlay, UiDebugSnapshot,
-    UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay,
-    render_status_overlay,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -575,6 +576,7 @@ pub struct McloneSceneHost {
     #[cfg(not(target_arch = "wasm32"))]
     session_runtime_factory: Option<Box<dyn SceneSessionRuntimeFactory>>,
     client_experience: ClientExperienceController,
+    storage_profile_ui: StorageProfileUiState,
     initial_alignment_mode: XrViewAlignmentMode,
     render_options: TexturedSectionRenderOptions,
     player_collision_box_visible: bool,
@@ -5739,6 +5741,10 @@ mod tests {
                 effects.scenario.is_empty(),
                 "emulated XR catalog flow should not emit scenario effects"
             );
+            assert!(
+                effects.local_data.is_empty(),
+                "emulated XR catalog flow should not emit local-data effects"
+            );
             for effect in effects.projection {
                 match effect {
                     ClientExperienceProjectionEffect::ApplyUiAction(action) => {
@@ -5831,6 +5837,11 @@ mod tests {
                         .unwrap_or_else(|| panic!("emulated catalog missing world `{id}`"));
                     let summary = self.worlds.remove(index);
                     WorldCatalogResponse::WorldDeleted { id: summary.id }
+                }
+                WorldCatalogRequest::DeleteAllLocalWorlds { .. } => {
+                    let deleted_count = self.worlds.len();
+                    self.worlds.clear();
+                    WorldCatalogResponse::AllLocalWorldsDeleted { deleted_count }
                 }
             }
         }

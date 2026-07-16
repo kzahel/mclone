@@ -62,7 +62,7 @@ use crate::web_scene_protocol::{
     WebSceneSessionOperationResult,
 };
 
-const WEB_ASSET_PACK_PREFERENCE_KEY: &str = "mclone.assetPacks.v1";
+use mclone_app_runtime::local_profile::WEB_ASSET_PACK_PREFERENCE_KEY;
 
 struct WebAssetPackPreferenceStorage;
 
@@ -3654,6 +3654,7 @@ fn screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::OptionsCategory { .. }) => "optionsCategory",
         Some(GameScreen::ServerSettings { .. }) => "serverSettings",
         Some(GameScreen::AssetPacks { .. }) => "assetPacks",
+        Some(GameScreen::StorageConfirm { .. }) => "storageConfirm",
     }
 }
 
@@ -3745,6 +3746,17 @@ fn write_catalog_request(
             report_set_string(object, "catalogOperation", "deleteWorld")?;
             report_set_string(object, "catalogWorldId", id.as_str())
         }
+        WorldCatalogRequest::DeleteAllLocalWorlds {
+            include_managed_content,
+        } => report_set_string(
+            object,
+            "catalogOperation",
+            if *include_managed_content {
+                "factoryResetLocalData"
+            } else {
+                "deleteAllLocalWorlds"
+            },
+        ),
     }
 }
 

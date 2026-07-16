@@ -696,6 +696,19 @@ fn parse_screenshot_ui_accepts_named_screens() {
         HeadlessScreenshotUi::OptionsPause
     );
     assert_eq!(
+        parse_screenshot_ui_arg("--screenshot-ui", Some("storage-profile-title".to_owned()))
+            .unwrap(),
+        HeadlessScreenshotUi::StorageProfileTitle
+    );
+    assert_eq!(
+        parse_screenshot_ui_arg(
+            "--screenshot-ui",
+            Some("storage-factory-confirm".to_owned()),
+        )
+        .unwrap(),
+        HeadlessScreenshotUi::StorageFactoryConfirm
+    );
+    assert_eq!(
         parse_screenshot_ui_arg("--screenshot-ui", Some("server-settings-pause".to_owned()))
             .unwrap(),
         HeadlessScreenshotUi::ServerSettingsPause

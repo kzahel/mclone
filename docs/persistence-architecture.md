@@ -361,7 +361,7 @@ Current durable native backend:
 
 - one SQLite database per world
 - blob columns for engine-native chunk/entity records
-- player and saved-data placeholder tables
+- active versioned player-record tables plus saved-data placeholders
 - metadata and schema tables with `PRAGMA user_version`
 - WAL mode where supported
 - checkpoint on flush/close
@@ -409,6 +409,13 @@ saved_data
 
 OPFS remains a possible later backend, but IndexedDB is the most practical first
 portable browser path.
+
+The current browser adapter uses `players` records keyed by world id plus the
+stable local profile UUID, parallel to native SQLite. The client-global UUID
+itself is not a world record: it lives in
+`localStorage["mclone.playerProfile.v1"]` and may be reset without deleting
+local or remote world rows. Catalog worlds and managed scenario content remain
+separate deletion domains.
 
 ### Android
 

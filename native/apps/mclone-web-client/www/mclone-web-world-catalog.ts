@@ -220,6 +220,41 @@ export async function deleteIndexedDbCatalogWorld(
   return deleted;
 }
 
+export async function deleteAllIndexedDbCatalogWorlds(
+  db: IDBDatabase,
+  activeWorldId: string | null = null,
+): Promise<{ deletedCount: number }> {
+  if (activeWorldId && activeWorldId.trim().length > 0) {
+    throw new Error("Quit to title before deleting all local worlds");
+  }
+  const worlds = await listIndexedDbCatalogWorlds(db);
+  for (const world of worlds) {
+    await deleteIndexedDbCatalogWorld(db, world.id, null);
+  }
+  return { deletedCount: worlds.length };
+}
+
+export async function factoryResetIndexedDbLocalData(
+  db: IDBDatabase,
+  activeWorldId: string | null = null,
+): Promise<{ deletedCount: number }> {
+  const result = await deleteAllIndexedDbCatalogWorlds(db, activeWorldId);
+  const stores = [
+    MANAGED_WORLD_METADATA_STORE,
+    WORLD_CHUNK_STORE,
+    WORLD_ENTITY_CHUNK_STORE,
+    WORLD_PLAYER_STORE,
+  ].filter((storeName) => db.objectStoreNames.contains(storeName));
+  if (stores.length > 0) {
+    const transaction = db.transaction(stores, "readwrite");
+    for (const storeName of stores) {
+      transaction.objectStore(storeName).clear();
+    }
+    await transactionDone(transaction);
+  }
+  return result;
+}
+
 export async function clearIndexedDbWorldRecords(
   db: IDBDatabase,
   worldId: string,

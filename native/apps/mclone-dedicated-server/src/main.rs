@@ -1357,6 +1357,100 @@ mod tests {
     }
 
     #[test]
+    fn stable_identity_resumes_pose_and_experience_after_dedicated_restart() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let root = unique_temp_dir("dedicated-player-record-restart");
+        let world = DedicatedWorldSelection::Persistent { dir: root.clone() };
+        let identity = ClientIdentity::new(PlayerProfileId::new([0xD4; 16]), "Jumper").unwrap();
+        let saved_position = {
+            let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world.clone());
+            let mut session =
+                NativeClientIoSession::connect_with_identity(addr, &identity).unwrap();
+            session
+                .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(0, 0),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                }))
+                .unwrap();
+            let updates = wait_for_remote_updates(&mut session, |updates| {
+                player_position_update_opt(updates).is_some()
+            });
+            let spawn = player_position_update_opt(&updates).unwrap().clone();
+            session
+                .send_command_only(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                    id: spawn.teleport_id,
+                }))
+                .unwrap();
+            session
+                .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                    position: spawn.position,
+                    on_ground: true,
+                }))
+                .unwrap();
+            let saved_position = spawn.position.add(Vec3d::new(0.0, 0.42, 0.0));
+            session
+                .send_command_only(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                    position: saved_position,
+                    on_ground: false,
+                }))
+                .unwrap();
+            let experience = wait_for_remote_updates(&mut session, |updates| {
+                updates.iter().any(|update| {
+                    matches!(
+                        update,
+                        ServerUpdate::PlayerExperience {
+                            total_experience: 1
+                        }
+                    )
+                })
+            });
+            assert!(experience.iter().any(|update| matches!(
+                update,
+                ServerUpdate::PlayerExperience {
+                    total_experience: 1
+                }
+            )));
+            drop(session);
+            server.join().unwrap().unwrap();
+            saved_position
+        };
+
+        let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world);
+        let mut session = NativeClientIoSession::connect_with_identity(addr, &identity).unwrap();
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center: BlockPos::new(
+                    saved_position.x.floor() as i32,
+                    saved_position.y.floor() as i32,
+                    saved_position.z.floor() as i32,
+                )
+                .chunk_pos(),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+        let resumed = wait_for_remote_updates(&mut session, |updates| {
+            player_position_update_opt(updates).is_some()
+                && updates.iter().any(|update| {
+                    matches!(
+                        update,
+                        ServerUpdate::PlayerExperience {
+                            total_experience: 1
+                        }
+                    )
+                })
+        });
+        assert_eq!(
+            player_position_update_opt(&resumed).unwrap().position,
+            saved_position
+        );
+        drop(session);
+        server.join().unwrap().unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn dedicated_server_serves_persistent_authored_fixture() {
         let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
         let root = unique_temp_dir("dedicated-authored-fixture");
@@ -1442,8 +1536,14 @@ mod tests {
     }
 
     fn player_position_teleport_id_opt(updates: &[ServerUpdate]) -> Option<u32> {
+        player_position_update_opt(updates).map(|update| update.teleport_id)
+    }
+
+    fn player_position_update_opt(
+        updates: &[ServerUpdate],
+    ) -> Option<&mclone_protocol::PlayerPositionUpdate> {
         updates.iter().find_map(|update| match update {
-            ServerUpdate::PlayerPosition(update) => Some(update.teleport_id),
+            ServerUpdate::PlayerPosition(update) => Some(update),
             _ => None,
         })
     }

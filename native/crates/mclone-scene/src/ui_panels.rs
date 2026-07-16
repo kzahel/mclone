@@ -596,6 +596,7 @@ impl McloneSceneHost {
                 .catalog()
                 .ui_state_with_active_world(self.active_local_world_id()),
             asset_packs: self.client_experience.asset_packs().ui_state(),
+            storage_profile: self.storage_profile_ui,
             render_distance: (render_distance as i32).clamp(1, MAX_XR_RENDER_DISTANCE as i32),
             min_render_distance: 1,
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,

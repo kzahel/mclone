@@ -351,6 +351,19 @@ mod tests {
                     }
                     None => self.record(Err(world_not_found(&id))),
                 },
+                WorldCatalogRequest::DeleteAllLocalWorlds { .. } => {
+                    if active_world.is_some() {
+                        return self.record(Err(WorldCatalogError::new(
+                            WorldCatalogErrorKind::ActiveWorld,
+                            "Quit to title before deleting all local worlds",
+                        )));
+                    }
+                    let deleted_count = self.worlds.borrow().len();
+                    self.worlds.borrow_mut().clear();
+                    self.record(Ok(WorldCatalogResponse::AllLocalWorldsDeleted {
+                        deleted_count,
+                    }))
+                }
             }
         }
     }

@@ -991,6 +991,9 @@ impl McloneSceneHost {
             scenario_scene_replaced |= self.apply_managed_scenario_effect(effect, device, queue)?;
         }
         self.apply_asset_pack_effects(effects.asset_packs);
+        for effect in effects.local_data {
+            self.apply_local_data_effect(effect);
+        }
         if !apply_client_experience_settings_effects(self, host, effects.settings)? {
             return Ok(catalog_scene_replaced || session_scene_replaced || scenario_scene_replaced);
         }

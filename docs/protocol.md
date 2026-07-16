@@ -42,10 +42,16 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `20`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `22`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
+
+The same handshake now carries the unauthenticated local player profile UUID
+and display name. The UUID selects one world-scoped player record, while the
+display name is last-seen presentation metadata. A dedicated world rejects a
+second live connection claiming an already active UUID. This is stable local
+identity, not Mojang/Microsoft authentication or proof of ownership.
 
 This is **strict equality** — there is no capability or version-range
 negotiation yet. That is a known cross-play gap once web (deployed URL), Android
@@ -65,7 +71,7 @@ model.
 | Command | Purpose |
 |---|---|
 | `SetChunkView` | view-shaped chunk-interest command (center + render/tracking radius) |
-| `MovePlayer` | sequenced movement record — `Pos` / `PosRot` / `Rot` / `StatusOnly`, mirroring Java 1.17 `ServerboundMovePlayerPacket` |
+| `MovePlayer` | ordered movement record — `Pos` / `PosRot` / `Rot` / `StatusOnly`, mirroring Java 1.17 `ServerboundMovePlayerPacket`; an explicit movement sequence field remains future work |
 | `PlayerAction` | block-destroy lifecycle (start/stop/abort destroy) plus debug instant-break |
 | `UseItemOn` | server-authoritative use/place against a `BlockHitResult` |
 | `SetCarriedItem` | select the active hotbar slot |
@@ -90,6 +96,7 @@ commands are intents, not client-owned state mutations.
 | `SectionBlockUpdates` | block mutations within a loaded section after the baseline |
 | `TimeUpdate` | authoritative world day-time (ticks) for the day/night cycle |
 | `PlayerPosition` | authoritative local-player position/rotation correction with relative flags and a teleport id |
+| `PlayerExperience` | owner-only authoritative total experience restored from and dirtied into the world-scoped player record |
 | `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |
 | `EntitySnapshot` | entity baseline for a visible chunk; passive mobs are stackless, item entities carry an `ItemStackSnapshot` |
 | `EntityUpdate` | partial entity position/rotation/age update after a baseline; item entities also carry their current `ItemStackSnapshot` when stack data is present |
@@ -154,7 +161,7 @@ than chicken-specific or one-off update messages.
 | `session_state` / `world_opened` / `world_error` | explicit session/world lifecycle and a stable in-band failure surface |
 | `keepalive` / `disconnect` | liveness, timeout, and explicit close reason once the session layer lands |
 | `inventory_state` | player inventory and container state |
-| `join_world` / `resume_session` | named player-slot join split from world open, once persisted players exist |
+| explicit login/configuration result | split identity acceptance, world configuration, player-record disposition, and play admission into an in-band session lifecycle |
 
 ## Client Replica And Prediction Inputs
 
@@ -177,7 +184,7 @@ reduce prediction instead of silently drifting.
 The logical protocol must not imply that one command frame, one host world
 tick, one snapshot, or one render frame equals one movement step. Movement is
 sequenced command records plus authoritative correction snapshots. The host may
-drain multiple movement commands inside one lower-rate world/network tick, and
+drain multiple ordered movement commands inside one lower-rate world/network tick, and
 the client may render many interpolated frames without creating additional
 authoritative movement. Any future transport (push WebSocket, WebRTC) must carry
 the same logical records rather than inventing a different gameplay protocol.

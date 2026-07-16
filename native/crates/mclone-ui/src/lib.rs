@@ -1259,6 +1259,10 @@ pub enum GameScreen {
     AssetPacks {
         parent: GameOptionsParent,
     },
+    StorageConfirm {
+        parent: GameOptionsParent,
+        action: GameStorageAction,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1280,11 +1284,18 @@ pub enum GameOptionsCategory {
     Movement,
     Display,
     Debug,
+    StorageProfile,
 }
 
 impl GameOptionsCategory {
     /// Categories in the order the hub lists them.
-    pub const ALL: [Self; 4] = [Self::Graphics, Self::Movement, Self::Display, Self::Debug];
+    pub const ALL: [Self; 5] = [
+        Self::Graphics,
+        Self::Movement,
+        Self::Display,
+        Self::Debug,
+        Self::StorageProfile,
+    ];
 
     pub const fn label(self) -> &'static str {
         match self {
@@ -1292,6 +1303,7 @@ impl GameOptionsCategory {
             Self::Movement => "Movement",
             Self::Display => "Display",
             Self::Debug => "Debug",
+            Self::StorageProfile => "Storage & Profile",
         }
     }
 
@@ -1302,6 +1314,95 @@ impl GameOptionsCategory {
             Self::Movement => "MOVEMENT",
             Self::Display => "DISPLAY",
             Self::Debug => "DEBUG",
+            Self::StorageProfile => "STORAGE & PROFILE",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameStorageAction {
+    ResetPlayerIdentity,
+    DeleteAllLocalWorlds,
+    FactoryReset,
+}
+
+impl GameStorageAction {
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::ResetPlayerIdentity => "RESET PLAYER IDENTITY",
+            Self::DeleteAllLocalWorlds => "DELETE ALL LOCAL WORLDS",
+            Self::FactoryReset => "FACTORY RESET",
+        }
+    }
+
+    pub const fn confirm_label(self) -> &'static str {
+        match self {
+            Self::ResetPlayerIdentity => "Reset Identity",
+            Self::DeleteAllLocalWorlds => "Delete All Worlds",
+            Self::FactoryReset => "Factory Reset",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StorageProfileBackend {
+    NativePreferences,
+    BrowserLocalStorage,
+    Ephemeral,
+    #[default]
+    Unavailable,
+}
+
+impl StorageProfileBackend {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::NativePreferences => "Native preferences",
+            Self::BrowserLocalStorage => "Browser localStorage",
+            Self::Ephemeral => "Ephemeral",
+            Self::Unavailable => "Unavailable",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StorageProfileUiState {
+    pub profile_id: Option<[u8; 16]>,
+    pub display_name: WorldCatalogUiText,
+    pub backend: StorageProfileBackend,
+    pub profile_actions_available: bool,
+    pub clear_cache_available: bool,
+    pub factory_reset_available: bool,
+    pub status: WorldCatalogUiStatus,
+}
+
+impl StorageProfileUiState {
+    pub fn available(
+        profile_id: [u8; 16],
+        display_name: &str,
+        backend: StorageProfileBackend,
+    ) -> Self {
+        Self {
+            profile_id: Some(profile_id),
+            display_name: WorldCatalogUiText::new(display_name),
+            backend,
+            profile_actions_available: true,
+            clear_cache_available: false,
+            factory_reset_available: true,
+            status: WorldCatalogUiStatus::hidden(),
+        }
+    }
+}
+
+impl Default for StorageProfileUiState {
+    fn default() -> Self {
+        Self {
+            profile_id: None,
+            display_name: WorldCatalogUiText::empty(),
+            backend: StorageProfileBackend::Unavailable,
+            profile_actions_available: false,
+            clear_cache_available: false,
+            factory_reset_available: false,
+            status: WorldCatalogUiStatus::hidden(),
         }
     }
 }
@@ -1682,6 +1783,10 @@ pub enum GameUiAction {
     ToggleAssetPack(AssetPackUiId),
     ApplyAssetPacks,
     CancelAssetPacks,
+    ConfirmStorageAction(GameOptionsParent, GameStorageAction),
+    ExecuteStorageAction(GameOptionsParent, GameStorageAction),
+    CancelStorageAction(GameOptionsParent),
+    ClearRebuildableCache,
     BackToTitle,
     BackToPause,
     QuitToTitle,
@@ -1812,6 +1917,7 @@ pub struct GameUiRenderState {
     pub lobby_scenario_available: bool,
     pub world_catalog: WorldCatalogUiState,
     pub asset_packs: AssetPacksUiState,
+    pub storage_profile: StorageProfileUiState,
     pub render_distance: i32,
     pub min_render_distance: i32,
     pub max_render_distance: i32,
@@ -1853,6 +1959,7 @@ impl Default for GameUiRenderState {
             lobby_scenario_available: true,
             world_catalog: WorldCatalogUiState::default(),
             asset_packs: AssetPacksUiState::default(),
+            storage_profile: StorageProfileUiState::default(),
             render_distance: 2,
             min_render_distance: 2,
             max_render_distance: 16,

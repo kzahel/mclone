@@ -67,8 +67,10 @@ the same protocol/client/server boundary as singleplayer.
   pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION = 20` is negotiated with strict equality in the handshake
-  (see [`protocol.md`](./protocol.md)).
+- `PROTOCOL_VERSION = 22` is negotiated with strict equality. The handshake
+  also carries the client's unauthenticated stable local UUID/display name;
+  persistent worlds save pose, selected slot, and XP under that UUID (see
+  [`protocol.md`](./protocol.md)).
 
 Client connect status (full grid in
 [`topics/platform-parity.md`](./topics/platform-parity.md)):
@@ -104,8 +106,9 @@ WebSocket endpoint. Graceful, admin-only config reload/restart is a later server
 lifecycle feature, not a client debug shortcut.
 
 The next hosting lifecycle gaps are persistent world metadata (seed,
-generation profile, and day time), durable player identity/state, login and
-capability negotiation, keepalive/timeouts, and explicit disconnect reasons.
+generation profile, and day time), broader player state such as inventory,
+authenticated login/capability negotiation, keepalive/timeouts, and explicit
+disconnect reasons.
 Those belong in the shared session/persistence layers rather than app-specific
 TCP or WebSocket wrappers.
 

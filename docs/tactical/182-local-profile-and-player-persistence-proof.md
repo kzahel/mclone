@@ -1,6 +1,10 @@
 # 182: Local Profile And Player Persistence Proof
 
-Status: proposed 2026-07-16. Implementation has not started.
+Status: core identity/player-persistence proof implemented 2026-07-16.
+Slices 1, 2, the player-record portion of 3, the identity-bearing portion of
+4, 5, and 6 are complete. World metadata/day-time durability, movement
+sequence fields, keepalive/disconnect protocol, and physical-device lifecycle
+closeout remain follow-ups rather than being implied complete.
 
 Topic: `multiplayer-networking`
 
@@ -323,6 +327,8 @@ unclassified destructive target.
 
 ### Slice 1: Shared local-profile contract and platform stores
 
+Status: complete 2026-07-16 (`32746127`).
+
 - Add a shared `LocalPlayerProfile`/`PlayerProfileId` model and a small
   load/store/reset storage trait in `mclone-app-runtime` or a narrower shared
   preferences owner if one emerges during the audit.
@@ -346,6 +352,9 @@ Validation:
 - test/offscreen roots do not touch the default profile file.
 
 ### Slice 2: Shared Storage & Profile UI and destructive operations
+
+Status: complete 2026-07-16. Clear-cache is truthfully unavailable because no
+persistent rebuildable cache family is currently registered.
 
 - Add a shared title/options `Storage & Profile` screen and confirmation/
   progress/error states in `mclone-ui`.
@@ -375,6 +384,9 @@ until the user can inspect and reset it.
 
 ### Slice 3: World metadata and player-record persistence
 
+Status: player-record portion complete 2026-07-16 (`836530a8`); the broader
+world metadata/seed/day-time portion remains open.
+
 - Activate world metadata and player load/save request/completion variants in
   the shared persistence actor.
 - Add stable, versioned codecs and SQLite tables/queries without serializing
@@ -397,6 +409,10 @@ Validation:
 - injected storage failures remain visible and do not claim clean shutdown.
 
 ### Slice 4: Identity-bearing join across local, TCP, and WebSocket paths
+
+Status: stable identity handshake/join and duplicate-live-identity rejection
+complete 2026-07-16 (`836530a8`). Movement sequence/correction echo and the
+broader login/configuration lifecycle remain open.
 
 - Add profile hello/join-result logical messages and the coordinated protocol
   bump in `mclone-protocol`/`mclone-net`.
@@ -423,6 +439,9 @@ Validation:
 
 ### Slice 5: Safe saved-position resume
 
+Status: complete 2026-07-16 (`836530a8`). Exact valid airborne/grounded poses
+resume; blocked poses use the bounded deterministic safe-surface fallback.
+
 - Extract shared safe-position/clearance predicates from the current server
   spawn path.
 - Implement exact resume, bounded nearby recovery, and initial-spawn fallback
@@ -445,6 +464,8 @@ Validation fixtures:
 
 ### Slice 6: Persistence-demo experience and shared HUD proof
 
+Status: complete 2026-07-16 (`c26a8150`).
+
 - Add `total_experience_points` to authoritative/player-replica state and the
   owner-only server update.
 - Add the explicit non-vanilla demo behavior flag and one-point accepted-jump
@@ -462,6 +483,10 @@ Validation:
 - inspect desktop/offscreen, web, and synthetic stereo captures under `/tmp`.
 
 ### Slice 7: Cross-platform lifecycle and closeout
+
+Status: shared native/web code and desktop offscreen evidence complete;
+Android/Quest physical lifecycle evidence and the broader metadata/session
+follow-ups remain open.
 
 - Prove the full UI/profile/join/save/resume flow on desktop local and remote,
   browser IndexedDB local and remote WebSocket, flat Android, desktop XR, and
@@ -522,6 +547,39 @@ pnpm native:android-xr:apk
 
 Add focused automation for the end-to-end profile/player persistence scenario;
 do not rely only on unit record round trips.
+
+## Implementation Record
+
+The landed core proof is split into four reviewable commits:
+
+- `32746127 Add durable local player profiles`: shared UUID profile document,
+  native atomic file storage, browser localStorage, platform-root wiring, and
+  reset/error tests.
+- `836530a8 Persist network players by stable identity`: protocol v21 identity
+  handshake across integrated/TCP/WebSocket/browser-worker paths, duplicate
+  live UUID rejection, versioned player records in memory/SQLite/IndexedDB,
+  selected-slot/pose/XP storage, and safe resume.
+- `c26a8150 Prove persisted experience end to end`: protocol v22 owner-only
+  experience update, explicitly gated non-vanilla accepted-jump demo rule,
+  client replica, persistence dirtying, and shared HUD presentation.
+- the Storage & Profile closeout commit: shared read-only profile/backend/world
+  inventory, strong confirmation screens, native/browser identity reset,
+  delete-all catalog worlds, factory reset of registered preferences and
+  managed content, truthful unavailable cache clearing, and a networked
+  dedicated-restart acceptance test.
+
+Evidence captured during the closeout:
+
+- `/tmp/mclone-storage-profile.png`: visually inspected desktop/offscreen
+  Storage & Profile panel with full UUID, backend, local-world count, disabled
+  cache action, and title-only destructive controls.
+- `/tmp/mclone-storage-factory-confirm.png`: visually inspected explicit
+  factory-reset scope and remote-data preservation warning.
+- a real TCP dedicated server is restarted against one SQLite world; the same
+  UUID resumes the exact saved airborne pose and authoritative experience.
+- native UI/app-runtime suites, native scene/client checks, wasm32 Rust check,
+  and TypeScript web build/typecheck pass. Existing wasm-only warnings remain
+  unrelated to this slice.
 
 ## Explicit Non-Goals
 
