@@ -6202,7 +6202,7 @@ pub fn local_integrated_scene_options(
     {
         options = options.with_initial_spawn_center();
     }
-    options
+    let options = options
         .with_world_generation_profile(scene.world_generation_profile)
         .with_world_behavior_profile(scene.world_behavior_profile)
         .with_freeze_scheduled_fluid_ticks(scene.freeze_scheduled_fluid_ticks)
@@ -6222,7 +6222,16 @@ pub fn local_integrated_scene_options(
                 scene.startup_lod_prewarm,
             ),
         )
-        .with_integrated_world_session_storage(storage)
+        .with_integrated_world_session_storage(storage);
+    match mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
+        scene.world_root.as_deref(),
+    ) {
+        Ok(profile) => options.with_local_player_identity(profile.client_identity()),
+        Err(error) => {
+            log::warn!("local player profile is unavailable for this scene: {error:#}");
+            options
+        }
+    }
 }
 
 fn preview_crop_source_anchor(

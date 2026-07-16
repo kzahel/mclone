@@ -117,6 +117,7 @@ pub struct LocalIntegratedSceneOptions {
     pub render_compile_max_pending_jobs: Option<usize>,
     pub render_compile_worker_timing_enabled: bool,
     pub startup_lod_prewarm: StartupLodPrewarmConfig,
+    pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -188,6 +189,7 @@ impl LocalIntegratedSceneOptions {
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
             render_compile_worker_timing_enabled: true,
             startup_lod_prewarm: StartupLodPrewarmConfig::disabled(),
+            local_player_identity: None,
         }
     }
 
@@ -228,6 +230,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
         self.debug_auxiliary_player_script = enabled;
+        self
+    }
+
+    pub fn with_local_player_identity(mut self, identity: mclone_protocol::ClientIdentity) -> Self {
+        self.local_player_identity = Some(identity);
         self
     }
 
@@ -3354,7 +3361,7 @@ pub fn drain_integrated_server_runner_until_idle(
 fn native_runner_config(
     options: &LocalIntegratedSceneOptions,
 ) -> NativeIntegratedServerRunnerConfig {
-    NativeIntegratedServerRunnerConfig::new(options.seed)
+    let mut config = NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_world_generation_profile(options.world_generation_profile)
         .with_world_behavior_profile(options.world_behavior_profile)
         .with_lighting_enabled(options.lighting_enabled)
@@ -3367,7 +3374,11 @@ fn native_runner_config(
         .with_local_integrated_chunk_tracking()
         .with_adaptive_chunk_publication_budget(options.adaptive_chunk_publication_budget)
         .with_world_storage(options.world_storage.clone())
-        .with_cadence_derived_tick_interval(options.cadence)
+        .with_cadence_derived_tick_interval(options.cadence);
+    if let Some(identity) = options.local_player_identity.clone() {
+        config = config.with_local_player_identity(identity);
+    }
+    config
 }
 
 fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {

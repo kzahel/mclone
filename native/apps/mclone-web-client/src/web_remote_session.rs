@@ -8,7 +8,8 @@ use mclone_app_runtime::client_connection::{
     ClientConnectionDrainResult, ClientConnectionQueueMetrics, QueuedServerUpdate,
 };
 use mclone_protocol::{
-    ClientCommand, ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
+    ClientCommand, ClientIdentity, ServerUpdate, decode_client_command, decode_server_update,
+    encode_client_command,
 };
 use mclone_server::{
     ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics, WorkerFrameTransportKind,
@@ -31,15 +32,17 @@ struct WebSocketWorkerConfig {
     worker_url: String,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
+    identity: ClientIdentity,
 }
 
 impl WebSocketWorkerConfig {
-    fn production_defaults(url: impl Into<String>) -> Self {
+    fn production_defaults(url: impl Into<String>, identity: ClientIdentity) -> Self {
         Self {
             url: url.into(),
             worker_url: DEFAULT_REMOTE_WORKER_URL.to_owned(),
             bindgen_js_url: DEFAULT_BINDGEN_JS_URL.to_owned(),
             bindgen_wasm_url: DEFAULT_BINDGEN_WASM_URL.to_owned(),
+            identity,
         }
     }
 }
@@ -76,7 +79,16 @@ impl std::fmt::Debug for WebSocketServerSession {
 
 impl WebSocketServerSession {
     pub async fn connect(url: impl Into<String>) -> Result<Self, String> {
-        Self::connect_with_config(WebSocketWorkerConfig::production_defaults(url)).await
+        let profile = mclone_app_runtime::local_profile::load_or_create_web_local_player_profile()
+            .map_err(|error| format!("load browser player profile: {error:#}"))?;
+        Self::connect_with_identity(url, profile.client_identity()).await
+    }
+
+    pub async fn connect_with_identity(
+        url: impl Into<String>,
+        identity: ClientIdentity,
+    ) -> Result<Self, String> {
+        Self::connect_with_config(WebSocketWorkerConfig::production_defaults(url, identity)).await
     }
 
     async fn connect_with_config(config: WebSocketWorkerConfig) -> Result<Self, String> {
@@ -148,6 +160,10 @@ impl WebSocketServerSession {
         set_string(&start, "url", &config.url)?;
         set_string(&start, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&start, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
+        set_string(&start, "displayName", &config.identity.display_name)?;
+        let profile_id = Uint8Array::from(config.identity.profile_id.bytes().as_slice());
+        Reflect::set(&start, &JsValue::from_str("profileId"), &profile_id)
+            .map_err(|error| format!("failed to attach remote profile UUID: {error:?}"))?;
         if let Err(error) = worker.post_message(&start) {
             worker.terminate();
             return Err(format!(

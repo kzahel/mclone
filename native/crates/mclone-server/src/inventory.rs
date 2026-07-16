@@ -100,9 +100,14 @@ impl ServerInventory {
             .sum()
     }
 
-    #[cfg(test)]
     pub(crate) const fn selected_hotbar_slot(&self) -> u8 {
         self.selected
+    }
+
+    pub(crate) fn restore_selected_hotbar_slot(&mut self, slot: u8) {
+        if slot < HOTBAR_SLOT_COUNT {
+            self.selected = slot;
+        }
     }
 
     #[cfg(test)]

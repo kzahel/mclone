@@ -56,8 +56,9 @@ use crate::loading_progress::{
 };
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
-    EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, SaveDurability,
-    ScheduledTickRecord, StoreWriteOutcome, WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, PlayerRecord, PlayerRecordKey,
+    SaveDurability, ScheduledTickRecord, StoreWriteOutcome, WorldStore, WorldStoreCompletion,
+    WorldStoreRequest,
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -421,6 +422,10 @@ pub enum ChunkSchedulerEvent {
         pos: ChunkPos,
         record: Option<EntityChunkRecord>,
     },
+    PlayerLoaded {
+        player: PlayerRecordKey,
+        record: Option<PlayerRecord>,
+    },
     SectionBlockUpdates {
         pos: ChunkPos,
         section_y: i32,
@@ -492,6 +497,8 @@ pub struct ChunkScheduler {
     loaded_entity_chunks: BTreeSet<ChunkPos>,
     pending_entity_chunk_saves: BTreeMap<PersistenceRequestId, PendingEntityChunkSave>,
     pending_entity_chunk_save_by_pos: BTreeMap<ChunkPos, PersistenceRequestId>,
+    pending_player_loads: BTreeMap<PersistenceRequestId, PlayerRecordKey>,
+    pending_player_saves: BTreeMap<PersistenceRequestId, PlayerRecordKey>,
     entity_unload_saves: BTreeSet<ChunkPos>,
     pub(crate) distance_manager: ChunkDistanceManager,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
@@ -757,6 +764,8 @@ impl ChunkScheduler {
             loaded_entity_chunks: BTreeSet::new(),
             pending_entity_chunk_saves: BTreeMap::new(),
             pending_entity_chunk_save_by_pos: BTreeMap::new(),
+            pending_player_loads: BTreeMap::new(),
+            pending_player_saves: BTreeMap::new(),
             entity_unload_saves: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
@@ -807,6 +816,8 @@ impl ChunkScheduler {
             loaded_entity_chunks: BTreeSet::new(),
             pending_entity_chunk_saves: BTreeMap::new(),
             pending_entity_chunk_save_by_pos: BTreeMap::new(),
+            pending_player_loads: BTreeMap::new(),
+            pending_player_saves: BTreeMap::new(),
             entity_unload_saves: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
             jobs: BTreeMap::new(),
@@ -1248,11 +1259,42 @@ impl ChunkScheduler {
     }
 
     pub fn pending_persistence_load_count(&self) -> usize {
-        self.pending_chunk_loads.len() + self.pending_entity_chunk_loads.len()
+        self.pending_chunk_loads.len()
+            + self.pending_entity_chunk_loads.len()
+            + self.pending_player_loads.len()
     }
 
     pub fn pending_persistence_save_count(&self) -> usize {
-        self.pending_chunk_saves.len() + self.pending_entity_chunk_saves.len()
+        self.pending_chunk_saves.len()
+            + self.pending_entity_chunk_saves.len()
+            + self.pending_player_saves.len()
+    }
+
+    pub fn load_player_record(&mut self, player: PlayerRecordKey) -> PersistenceRequestId {
+        let request_id = self.store.load_player(player.clone());
+        self.pending_player_loads.insert(request_id, player);
+        request_id
+    }
+
+    pub fn save_player_record(&mut self, record: PlayerRecord) -> PersistenceRequestId {
+        let player = record.player.clone();
+        let request_id = self.store.save_player(record);
+        self.pending_player_saves.insert(request_id, player);
+        request_id
+    }
+
+    pub fn load_player_record_blocking(
+        &mut self,
+        player: PlayerRecordKey,
+    ) -> ChunkStoreResult<Option<PlayerRecord>> {
+        self.store.load_player_blocking(player)
+    }
+
+    pub fn save_player_record_blocking(
+        &mut self,
+        record: PlayerRecord,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        self.store.save_player_blocking(record)
     }
 
     pub fn pending_external_persistence_request_count(&self) -> usize {
@@ -3489,6 +3531,41 @@ impl ChunkScheduler {
                 result,
             } => {
                 self.handle_entity_chunk_save_completion(request_id, pos, result)?;
+                Ok(Vec::new())
+            }
+            WorldStoreCompletion::PlayerLoaded {
+                request_id,
+                player,
+                result,
+            } => {
+                let Some(expected) = self.pending_player_loads.remove(&request_id) else {
+                    return Ok(Vec::new());
+                };
+                if expected != player {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "player load request {request_id} completed for {player:?} but was pending for {expected:?}"
+                    )));
+                }
+                Ok(vec![ChunkSchedulerEvent::PlayerLoaded {
+                    player,
+                    record: result?,
+                }])
+            }
+            WorldStoreCompletion::PlayerSaved {
+                request_id,
+                player,
+                result,
+            } => {
+                let expected = self.pending_player_saves.remove(&request_id);
+                result?;
+                if expected
+                    .as_ref()
+                    .is_some_and(|expected| *expected != player)
+                {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "player save request {request_id} completed for an unexpected key"
+                    )));
+                }
                 Ok(Vec::new())
             }
             WorldStoreCompletion::RequestFailed { result, .. }

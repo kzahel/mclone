@@ -637,6 +637,7 @@ mod native {
         pub cadence: SimulationCadenceConfig,
         pub publication_budget: ChunkPublicationBudgetConfig,
         pub world_storage: NativeIntegratedServerWorldStorage,
+        pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
         player_chunk_tracking_policy: PlayerChunkTrackingPolicy,
     }
 
@@ -657,6 +658,7 @@ mod native {
                 cadence: SimulationCadenceConfig::new(20, 20, 60),
                 publication_budget: ChunkPublicationBudgetConfig::disabled(),
                 world_storage: NativeIntegratedServerWorldStorage::Transient,
+                local_player_identity: None,
                 player_chunk_tracking_policy: PlayerChunkTrackingPolicy::dedicated_default(),
             }
         }
@@ -703,6 +705,14 @@ mod native {
 
         pub fn with_debug_auxiliary_player_script(mut self, enabled: bool) -> Self {
             self.debug_auxiliary_player_script = enabled;
+            self
+        }
+
+        pub fn with_local_player_identity(
+            mut self,
+            identity: mclone_protocol::ClientIdentity,
+        ) -> Self {
+            self.local_player_identity = Some(identity);
             self
         }
 
@@ -1093,6 +1103,12 @@ mod native {
             return Ok(());
         }
         server.set_world_behavior_profile(config.world_behavior_profile);
+        if let Some(identity) = config.local_player_identity.clone()
+            && let Err(error) = server.configure_local_player_identity_blocking(identity)
+        {
+            let _ = ready_tx.send(Err(error.to_string()));
+            return Ok(());
+        }
         server.set_lighting_enabled(config.lighting_enabled);
         server.set_light_status_batch_size(config.light_status_batch_size);
         server.set_publication_budget_config(if config.publication_budget.enabled {
@@ -1368,7 +1384,14 @@ mod native {
         match control {
             NativeRunnerControl::Shutdown => Ok(false),
             NativeRunnerControl::FlushPersistence { ack } => {
-                let result = server.save_dirty_chunks().map_err(ServerRunnerError::from);
+                let result = server
+                    .save_dirty_chunks()
+                    .and_then(|chunks| {
+                        server
+                            .save_all_player_records()
+                            .map(|players| chunks.saturating_add(players))
+                    })
+                    .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 // The caller may have gone away (e.g. the process is being
                 // killed); dropping the ack is not a runner error.

@@ -12,14 +12,15 @@ use std::time::Duration;
 
 use mclone_core::{
     AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos, ChunkSnapshot, Vec3d,
-    obfuscate_biome_zoom_seed,
+    block_to_chunk_coord, obfuscate_biome_zoom_seed,
 };
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    AcceptTeleportCommand, ChunkView, ClientCommand, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind, ServerUpdate,
-    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, UseItemOnCommand,
+    AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, InteractionHand,
+    MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind,
+    PlayerProfileId, ServerUpdate, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    SetPlayerAppearanceCommand, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -50,7 +51,7 @@ use crate::falling_block::{
 };
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
-use crate::persistence::{EntityChunkRecord, EntityPersistentId};
+use crate::persistence::{EntityChunkRecord, EntityPersistentId, PlayerRecord, PlayerRecordKey};
 #[cfg(feature = "physics-engine")]
 use crate::physics_runtime::ServerPhysicsRuntime;
 use crate::placement::DebugBlockItem;
@@ -101,6 +102,10 @@ pub struct IntegratedServer {
     player: ServerPlayerState,
     local_player_appearance: PlayerAppearance,
     inventory: ServerInventory,
+    local_player_identity: Option<ClientIdentity>,
+    local_player_resume_record: Option<PlayerRecord>,
+    local_player_total_experience: u64,
+    local_player_record_revision: u64,
     dedicated_players: ServerPlayerList,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
     chunk_tracking: PlayerChunkTracking,
@@ -370,6 +375,10 @@ impl IntegratedServer {
             player: ServerPlayerState::default(),
             local_player_appearance: PlayerAppearance::default(),
             inventory: ServerInventory::default(),
+            local_player_identity: None,
+            local_player_resume_record: None,
+            local_player_total_experience: 0,
+            local_player_record_revision: 0,
             dedicated_players: ServerPlayerList::default(),
             debug_auxiliary_player_script: None,
             chunk_tracking,
@@ -546,6 +555,106 @@ impl IntegratedServer {
             .queue_update_for_player(player_id, time_update);
         self.remote_players.add_player(player_id);
         player_id
+    }
+
+    pub fn add_dedicated_player_with_identity(
+        &mut self,
+        identity: ClientIdentity,
+    ) -> ChunkStoreResult<ServerPlayerId> {
+        let key = player_record_key(identity.profile_id);
+        let record = self.scheduler.load_player_record_blocking(key)?;
+        let player_id = self.add_dedicated_player();
+        let player = self
+            .dedicated_players
+            .get_mut(player_id)
+            .expect("new dedicated player must exist");
+        player.identity = Some(identity);
+        if let Some(record) = record.filter(player_record_is_usable) {
+            player.initial_spawn_center = Some(ChunkPos::new(
+                block_to_chunk_coord(record.position.x.floor() as i32),
+                block_to_chunk_coord(record.position.z.floor() as i32),
+            ));
+            player
+                .inventory
+                .restore_selected_hotbar_slot(record.selected_hotbar_slot);
+            player.total_experience = record.total_experience;
+            player.player_record_revision = record.revision;
+            player.resume_record = Some(record);
+        }
+        Ok(player_id)
+    }
+
+    pub fn configure_local_player_identity(&mut self, identity: ClientIdentity) {
+        let key = player_record_key(identity.profile_id);
+        self.local_player_identity = Some(identity);
+        self.scheduler.load_player_record(key);
+    }
+
+    pub fn configure_local_player_identity_blocking(
+        &mut self,
+        identity: ClientIdentity,
+    ) -> ChunkStoreResult<()> {
+        let key = player_record_key(identity.profile_id);
+        let record = self.scheduler.load_player_record_blocking(key.clone())?;
+        self.local_player_identity = Some(identity);
+        self.apply_loaded_player_record(&key, record)
+    }
+
+    pub fn save_dedicated_player_record(
+        &mut self,
+        player_id: ServerPlayerId,
+    ) -> ChunkStoreResult<bool> {
+        let Some(player) = self.dedicated_players.get_mut(player_id) else {
+            return Ok(false);
+        };
+        let Some(record) = player_record_from_entry(player) else {
+            return Ok(false);
+        };
+        self.scheduler.save_player_record(record);
+        Ok(true)
+    }
+
+    pub fn save_all_player_records(&mut self) -> ChunkStoreResult<usize> {
+        let mut records = self
+            .dedicated_players
+            .values_mut()
+            .filter_map(player_record_from_entry)
+            .collect::<Vec<_>>();
+        if let Some(record) = self.local_player_record() {
+            records.push(record);
+        }
+        let count = records.len();
+        for record in records {
+            self.scheduler.save_player_record(record);
+        }
+        Ok(count)
+    }
+
+    fn local_player_record(&mut self) -> Option<PlayerRecord> {
+        let identity = self.local_player_identity.as_ref()?;
+        let revision = self.local_player_record_revision.saturating_add(1);
+        self.local_player_record_revision = revision;
+        if !self.player.has_accepted_position() {
+            let mut record = self.local_player_resume_record.clone()?;
+            record.revision = revision;
+            record.last_known_name = identity.display_name.clone();
+            record.selected_hotbar_slot = self.inventory.selected_hotbar_slot();
+            record.total_experience = self.local_player_total_experience;
+            return Some(record);
+        }
+        Some(PlayerRecord {
+            player: player_record_key(identity.profile_id),
+            codec_version: crate::persistence::PLAYER_RECORD_VERSION,
+            revision,
+            last_known_name: identity.display_name.clone(),
+            dimension: "minecraft:overworld".to_owned(),
+            position: self.player.position(),
+            y_rot_degrees: self.player.y_rot_degrees(),
+            x_rot_degrees: self.player.x_rot_degrees(),
+            on_ground: self.player.on_ground(),
+            selected_hotbar_slot: self.inventory.selected_hotbar_slot(),
+            total_experience: self.local_player_total_experience,
+        })
     }
 
     /// Removes the integrated local-player slot when this server is owned by a
@@ -1348,7 +1457,9 @@ impl IntegratedServer {
     }
 
     pub fn shutdown_persistence(&mut self) -> ChunkStoreResult<usize> {
-        let queued = self.save_dirty_chunks()?;
+        let queued = self
+            .save_dirty_chunks()?
+            .saturating_add(self.save_all_player_records()?);
         self.scheduler.close_persistence()?;
         Ok(queued)
     }
@@ -1356,9 +1467,12 @@ impl IntegratedServer {
     fn set_chunk_view_for_target(
         &mut self,
         target: CommandTarget,
-        view: ChunkView,
+        mut view: ChunkView,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         self.ensure_target_exists(target)?;
+        if let Some(record) = self.resume_record_for_target(target)? {
+            view.center = chunk_pos_for_player_position(record.position);
+        }
         if target == CommandTarget::Local {
             self.loading_progress.set_view(&view);
         }
@@ -1794,6 +1908,9 @@ impl IntegratedServer {
                         self.reconcile_entity_subjects(loaded, true);
                     }
                 }
+                ChunkSchedulerEvent::PlayerLoaded { player, record } => {
+                    self.apply_loaded_player_record(&player, record)?;
+                }
                 ChunkSchedulerEvent::SectionBlockUpdates {
                     pos,
                     section_y,
@@ -2090,6 +2207,15 @@ impl IntegratedServer {
         let Some(center) = self.initial_spawn_center_for_target(target)? else {
             return Ok(None);
         };
+        let resume = self.resume_record_for_target(target)?.cloned();
+        if let Some(record) = resume.as_ref()
+            && !self
+                .scheduler
+                .client_visible_snapshot(chunk_pos_for_player_position(record.position))
+                .is_some()
+        {
+            return Ok(None);
+        }
         let column_order = if matches!(
             self.scheduler.world_generation_profile(),
             WorldGenerationProfile::AuthoredOnly { .. }
@@ -2098,14 +2224,22 @@ impl IntegratedServer {
         } else {
             SpawnColumnOrder::Scan
         };
-        let Some(position) = find_safe_surface_spawn_with_column_order(
-            center,
-            |pos| self.scheduler.block_at_world(pos),
-            |x, z| self.biome_source.block_position_biome_definition(x, z),
-            |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
-            column_order,
-        ) else {
-            return Ok(None);
+        let exact_resume = resume
+            .as_ref()
+            .filter(|record| self.player_pose_has_clearance(record.position));
+        let position = if let Some(record) = exact_resume {
+            record.position
+        } else {
+            let Some(position) = find_safe_surface_spawn_with_column_order(
+                center,
+                |pos| self.scheduler.block_at_world(pos),
+                |x, z| self.biome_source.block_position_biome_definition(x, z),
+                |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
+                column_order,
+            ) else {
+                return Ok(None);
+            };
+            position
         };
         let showcase_ids = self.entities.ensure_debug_passive_showcase_near_spawn(
             position,
@@ -2117,14 +2251,153 @@ impl IntegratedServer {
             .collect::<Vec<_>>();
         self.mark_entity_updates_dirty(&showcase_states);
         let simulation_tick = self.simulation_tick;
-        Ok(Some(
+        let update = if let Some(record) = exact_resume {
+            self.player_mut_for_target(target)?
+                .restored_position_update(
+                    position,
+                    record.y_rot_degrees,
+                    record.x_rot_degrees,
+                    record.on_ground,
+                    simulation_tick,
+                )
+        } else {
             self.player_mut_for_target(target)?.initial_position_update(
                 position,
                 0.0,
                 0.0,
                 simulation_tick,
-            ),
-        ))
+            )
+        };
+        self.take_resume_record_for_target(target)?;
+        Ok(Some(update))
+    }
+
+    fn resume_record_for_target(
+        &self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Option<&PlayerRecord>> {
+        match target {
+            CommandTarget::Local => Ok(self.local_player_resume_record.as_ref()),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get(player_id)
+                .map(|player| player.resume_record.as_ref())
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn take_resume_record_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Option<PlayerRecord>> {
+        match target {
+            CommandTarget::Local => Ok(self.local_player_resume_record.take()),
+            CommandTarget::Dedicated(player_id) => self
+                .dedicated_players
+                .get_mut(player_id)
+                .map(|player| player.resume_record.take())
+                .ok_or_else(|| unknown_player_error(player_id)),
+        }
+    }
+
+    fn player_pose_has_clearance(&self, position: Vec3d) -> bool {
+        const PLAYER_RADIUS: f64 = 0.299;
+        const PLAYER_HEIGHT: f64 = 1.799;
+        let xs = [position.x - PLAYER_RADIUS, position.x + PLAYER_RADIUS];
+        let ys = [position.y, position.y + PLAYER_HEIGHT];
+        let zs = [position.z - PLAYER_RADIUS, position.z + PLAYER_RADIUS];
+        xs.into_iter().all(|x| {
+            ys.into_iter().all(|y| {
+                zs.into_iter().all(|z| {
+                    self.scheduler
+                        .block_at_world(BlockPos::new(
+                            x.floor() as i32,
+                            y.floor() as i32,
+                            z.floor() as i32,
+                        ))
+                        .is_some_and(|block| !mclone_worldgen::block::material_blocks_motion(block))
+                })
+            })
+        })
+    }
+
+    fn apply_loaded_player_record(
+        &mut self,
+        key: &PlayerRecordKey,
+        record: Option<PlayerRecord>,
+    ) -> ChunkStoreResult<()> {
+        let Some(record) = record.filter(player_record_is_usable) else {
+            return Ok(());
+        };
+        if self
+            .local_player_identity
+            .as_ref()
+            .is_some_and(|identity| player_record_key(identity.profile_id) == *key)
+        {
+            self.initial_spawn_center = Some(chunk_pos_for_player_position(record.position));
+            self.inventory
+                .restore_selected_hotbar_slot(record.selected_hotbar_slot);
+            self.local_player_total_experience = record.total_experience;
+            self.local_player_record_revision = record.revision;
+            self.local_player_resume_record = Some(record);
+            self.retarget_player_view_for_resume(
+                CommandTarget::Local,
+                self.initial_spawn_center
+                    .expect("loaded local resume has a spawn center"),
+            )?;
+            return Ok(());
+        }
+        let matched = self
+            .dedicated_players
+            .iter()
+            .find_map(|(player_id, candidate)| {
+                candidate
+                    .identity
+                    .as_ref()
+                    .is_some_and(|identity| player_record_key(identity.profile_id) == *key)
+                    .then_some(player_id)
+            });
+        if let Some(player_id) = matched {
+            let player = self
+                .dedicated_players
+                .get_mut(player_id)
+                .expect("matched dedicated player must exist");
+            player.initial_spawn_center = Some(chunk_pos_for_player_position(record.position));
+            player
+                .inventory
+                .restore_selected_hotbar_slot(record.selected_hotbar_slot);
+            player.total_experience = record.total_experience;
+            player.player_record_revision = record.revision;
+            player.resume_record = Some(record);
+            let center = self
+                .dedicated_players
+                .get(player_id)
+                .and_then(|player| player.initial_spawn_center)
+                .expect("loaded dedicated resume has a spawn center");
+            self.retarget_player_view_for_resume(CommandTarget::Dedicated(player_id), center)?;
+        }
+        Ok(())
+    }
+
+    fn retarget_player_view_for_resume(
+        &mut self,
+        target: CommandTarget,
+        center: ChunkPos,
+    ) -> ChunkStoreResult<()> {
+        let Some(mut view) = self
+            .chunk_tracking
+            .accepted_view(target.player_id())
+            .cloned()
+        else {
+            return Ok(());
+        };
+        view.center = center;
+        let updates = self.set_chunk_view_for_target(target, view)?;
+        for update in updates {
+            self.chunk_tracking
+                .queue_update_for_player(target.player_id(), update);
+        }
+        Ok(())
     }
 
     fn set_initial_spawn_center_for_target(
@@ -2271,6 +2544,73 @@ fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {
 
 fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId> {
     RawBlockId::try_from(block_state.0).ok()
+}
+
+fn player_record_key(profile_id: PlayerProfileId) -> PlayerRecordKey {
+    let bytes = profile_id.bytes();
+    PlayerRecordKey::Uuid(format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    ))
+}
+
+fn chunk_pos_for_player_position(position: Vec3d) -> ChunkPos {
+    ChunkPos::new(
+        block_to_chunk_coord(position.x.floor() as i32),
+        block_to_chunk_coord(position.z.floor() as i32),
+    )
+}
+
+fn player_record_is_usable(record: &PlayerRecord) -> bool {
+    record.codec_version == crate::persistence::PLAYER_RECORD_VERSION
+        && record.dimension == "minecraft:overworld"
+        && record.position.is_finite()
+        && record.y_rot_degrees.is_finite()
+        && record.x_rot_degrees.is_finite()
+}
+
+fn player_record_from_entry(
+    player: &mut crate::players::ServerPlayerEntry,
+) -> Option<PlayerRecord> {
+    let identity = player.identity.as_ref()?;
+    let revision = player.player_record_revision.saturating_add(1);
+    player.player_record_revision = revision;
+    if !player.state.has_accepted_position() {
+        let mut record = player.resume_record.clone()?;
+        record.revision = revision;
+        record.last_known_name = identity.display_name.clone();
+        record.selected_hotbar_slot = player.inventory.selected_hotbar_slot();
+        record.total_experience = player.total_experience;
+        return Some(record);
+    }
+    Some(PlayerRecord {
+        player: player_record_key(identity.profile_id),
+        codec_version: crate::persistence::PLAYER_RECORD_VERSION,
+        revision,
+        last_known_name: identity.display_name.clone(),
+        dimension: "minecraft:overworld".to_owned(),
+        position: player.state.position(),
+        y_rot_degrees: player.state.y_rot_degrees(),
+        x_rot_degrees: player.state.x_rot_degrees(),
+        on_ground: player.state.on_ground(),
+        selected_hotbar_slot: player.inventory.selected_hotbar_slot(),
+        total_experience: player.total_experience,
+    })
 }
 
 #[cfg(feature = "physics-engine")]

@@ -9,9 +9,10 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 20;
+pub const PROTOCOL_VERSION: u32 = 21;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
+pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
 pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
     Some(BlockStateId(1)),
     Some(BlockStateId(5)),
@@ -45,6 +46,76 @@ const SERVER_UPDATE_ENTITY_SNAPSHOT: u8 = 9;
 const SERVER_UPDATE_ENTITY_UPDATE: u8 = 10;
 const SERVER_UPDATE_ENTITY_REMOVE: u8 = 11;
 const SERVER_UPDATE_WORLD_INFO: u8 = 12;
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct PlayerProfileId(pub [u8; 16]);
+
+impl PlayerProfileId {
+    pub const TEST_DEFAULT: Self = Self([1; 16]);
+
+    pub const fn new(bytes: [u8; 16]) -> Self {
+        Self(bytes)
+    }
+
+    pub const fn bytes(self) -> [u8; 16] {
+        self.0
+    }
+
+    pub fn is_nil(self) -> bool {
+        self.0 == [0; 16]
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientIdentity {
+    pub profile_id: PlayerProfileId,
+    pub display_name: String,
+}
+
+impl ClientIdentity {
+    pub fn new(
+        profile_id: PlayerProfileId,
+        display_name: impl Into<String>,
+    ) -> ProtocolCodecResult<Self> {
+        let identity = Self {
+            profile_id,
+            display_name: display_name.into(),
+        };
+        validate_client_identity(&identity)?;
+        Ok(identity)
+    }
+
+    pub fn test_default() -> Self {
+        Self {
+            profile_id: PlayerProfileId::TEST_DEFAULT,
+            display_name: "Player".to_owned(),
+        }
+    }
+}
+
+pub fn validate_client_identity(identity: &ClientIdentity) -> ProtocolCodecResult<()> {
+    if identity.profile_id.is_nil() {
+        return Err(ProtocolCodecError::InvalidData(
+            "player profile UUID must not be nil",
+        ));
+    }
+    if identity.display_name.is_empty() {
+        return Err(ProtocolCodecError::InvalidData(
+            "player display name must not be empty",
+        ));
+    }
+    if identity.display_name.len() > MAX_PLAYER_DISPLAY_NAME_BYTES {
+        return Err(ProtocolCodecError::InvalidData(
+            "player display name exceeds the protocol maximum",
+        ));
+    }
+    if identity.display_name.chars().any(char::is_control) {
+        return Err(ProtocolCodecError::InvalidData(
+            "player display name contains control characters",
+        ));
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkView {

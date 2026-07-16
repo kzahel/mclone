@@ -1,12 +1,15 @@
 use std::fmt;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use mclone_protocol::{ClientIdentity, PlayerProfileId as ProtocolPlayerProfileId};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub const LOCAL_PLAYER_PROFILE_SCHEMA: u32 = 1;
 pub const LOCAL_PLAYER_PROFILE_FILE_NAME: &str = "player-profile.v1.json";
+pub const WEB_LOCAL_PLAYER_PROFILE_KEY: &str = "mclone.playerProfile.v1";
 pub const DEFAULT_LOCAL_PLAYER_DISPLAY_NAME: &str = "Player";
 pub const MAX_LOCAL_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
 
@@ -79,6 +82,14 @@ impl LocalPlayerProfile {
             DEFAULT_LOCAL_PLAYER_DISPLAY_NAME,
             now_unix_millis(),
         )
+    }
+
+    pub fn client_identity(&self) -> ClientIdentity {
+        ClientIdentity::new(
+            ProtocolPlayerProfileId::new(self.id.as_bytes()),
+            self.display_name.clone(),
+        )
+        .expect("stored local player profile must satisfy protocol identity limits")
     }
 
     pub fn to_json(&self) -> Result<String> {
@@ -223,6 +234,61 @@ pub fn native_local_player_profile_path(world_root: Option<&Path>) -> Option<Pat
         root.join("preferences")
             .join(LOCAL_PLAYER_PROFILE_FILE_NAME)
     })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_or_create_native_local_player_profile(
+    world_root: Option<&Path>,
+) -> Result<LocalPlayerProfile> {
+    let path = native_local_player_profile_path(world_root)
+        .context("native local player profile requires an app world root or file override")?;
+    load_or_create_local_player_profile(&FileLocalPlayerProfileStorage::new(path))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WebLocalPlayerProfileStorage;
+
+#[cfg(target_arch = "wasm32")]
+impl WebLocalPlayerProfileStorage {
+    fn storage(self) -> Result<web_sys::Storage> {
+        web_sys::window()
+            .and_then(|window| window.local_storage().ok().flatten())
+            .context("browser localStorage is unavailable")
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+impl LocalPlayerProfileStorage for WebLocalPlayerProfileStorage {
+    fn load(&self) -> Result<Option<LocalPlayerProfile>> {
+        let json = self
+            .storage()?
+            .get_item(WEB_LOCAL_PLAYER_PROFILE_KEY)
+            .map_err(|error| anyhow::anyhow!("read browser localStorage: {error:?}"))?;
+        json.map(|json| LocalPlayerProfile::from_json(&json))
+            .transpose()
+    }
+
+    fn store(&self, profile: &LocalPlayerProfile) -> Result<()> {
+        self.storage()?
+            .set_item(WEB_LOCAL_PLAYER_PROFILE_KEY, &profile.to_json()?)
+            .map_err(|error| anyhow::anyhow!("write browser localStorage: {error:?}"))
+    }
+
+    fn delete(&self) -> Result<()> {
+        self.storage()?
+            .remove_item(WEB_LOCAL_PLAYER_PROFILE_KEY)
+            .map_err(|error| anyhow::anyhow!("delete browser localStorage: {error:?}"))
+    }
+
+    fn label(&self) -> &str {
+        "browser localStorage mclone.playerProfile.v1"
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn load_or_create_web_local_player_profile() -> Result<LocalPlayerProfile> {
+    load_or_create_local_player_profile(&WebLocalPlayerProfileStorage)
 }
 
 fn validate_display_name(value: String) -> Result<String> {

@@ -11,7 +11,7 @@ use anyhow::{Context, Result};
 use mclone_net::{
     complete_server_handshake, try_read_client_command_frame, write_server_update_batch,
 };
-use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_protocol::{ClientCommand, ClientIdentity, ServerUpdate};
 
 pub(crate) const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 pub(crate) const DEDICATED_OUTBOUND_QUEUE_BYTE_CAPACITY: usize = 64 * 1024 * 1024;
@@ -264,6 +264,7 @@ pub(crate) enum DedicatedNetworkEvent {
     Connected {
         id: DedicatedConnectionId,
         peer_addr: SocketAddr,
+        identity: ClientIdentity,
         outbound: DedicatedOutbound,
     },
     Command {
@@ -424,15 +425,18 @@ fn connection_loop(
     if let Err(err) = stream.set_nodelay(true) {
         log::warn!("failed to set TCP_NODELAY for {id} {peer_addr}: {err}");
     }
-    if let Err(err) = complete_server_handshake(&mut stream) {
-        let _ = events.send(DedicatedNetworkEvent::Disconnected {
-            id,
-            peer_addr,
-            command_count: 0,
-            reason: Some(format!("failed dedicated protocol handshake: {err}")),
-        });
-        return;
-    }
+    let identity = match complete_server_handshake(&mut stream) {
+        Ok(identity) => identity,
+        Err(err) => {
+            let _ = events.send(DedicatedNetworkEvent::Disconnected {
+                id,
+                peer_addr,
+                command_count: 0,
+                reason: Some(format!("failed dedicated protocol handshake: {err}")),
+            });
+            return;
+        }
+    };
     let writer_stream = match stream.try_clone() {
         Ok(stream) => stream,
         Err(err) => {
@@ -468,6 +472,7 @@ fn connection_loop(
         .send(DedicatedNetworkEvent::Connected {
             id,
             peer_addr,
+            identity,
             outbound,
         })
         .is_err()

@@ -81,10 +81,11 @@ pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
     ChunkStoreError, ChunkStoreResult, EntityChunkRecord, EntityPersistentId, EntitySavePayload,
     EntitySaveRecord, MemoryWorldStore, NullChunkSnapshotStore, NullWorldStore, PersistenceActor,
-    PersistenceMailbox, PersistenceRequestId, PlayerRecordKey, SaveDurability, ScheduledTickRecord,
-    StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey, WorldStore,
-    WorldStoreCompletion, WorldStoreRequest, decode_chunk_record, decode_entity_chunk_record,
-    encode_chunk_record, encode_entity_chunk_record,
+    PersistenceMailbox, PersistenceRequestId, PlayerRecord, PlayerRecordKey, SaveDurability,
+    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade, WorldRecordKey,
+    WorldStore, WorldStoreCompletion, WorldStoreRequest, decode_chunk_record,
+    decode_entity_chunk_record, decode_player_record, encode_chunk_record,
+    encode_entity_chunk_record, encode_player_record,
 };
 pub use player_chunk_tracking::{
     PlayerChunkTrackingDiagnostics, PlayerChunkTrackingPlayerDiagnostics,

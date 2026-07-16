@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use mclone_app_runtime::DEFAULT_STARTUP_READINESS_TIMEOUT;
 use mclone_app_runtime::far_lod::StartupLodPrewarmConfig;
 use mclone_app_runtime::host_mode::SingleViewHostOptions;
+use mclone_app_runtime::local_profile::load_or_create_native_local_player_profile;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_service_assembly::{
     IntegratedWorldSessionStorage, LocalIntegratedSceneOptions, NativeSceneServices,
@@ -39,6 +40,7 @@ fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
 pub(crate) fn local_integrated_scene_options(
     scene: &SceneOptions,
 ) -> Result<LocalIntegratedSceneOptions> {
+    let profile = load_or_create_native_local_player_profile(scene.world_root.as_deref())?;
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
     let options = LocalIntegratedSceneOptions::new(
@@ -60,6 +62,7 @@ pub(crate) fn local_integrated_scene_options(
         scene.startup_lod_prewarm,
     ))
     .with_integrated_world_session_storage(storage);
+    let options = options.with_local_player_identity(profile.client_identity());
     Ok(options)
 }
 
@@ -83,7 +86,12 @@ pub(crate) fn native_window_scene_runtime_with_mesh_assets(
         );
     };
 
-    let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "desktop")?;
+    let profile = load_or_create_native_local_player_profile(scene.world_root.as_deref())?;
+    let session = NativeRemoteServerSession::connect_with_identity(
+        remote_addr.as_str(),
+        "desktop",
+        profile.client_identity(),
+    )?;
     NativeSceneServices::remote_dedicated_with_mesh_assets(
         SingleViewHostOptions::new(center, render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)

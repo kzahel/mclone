@@ -5,8 +5,9 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_protocol::{
-    ClientCommand, PROTOCOL_VERSION, ProtocolCodecError, ServerUpdate, decode_client_command,
-    decode_server_update, encode_client_command, encode_server_update,
+    ClientCommand, ClientIdentity, PROTOCOL_VERSION, PlayerProfileId, ProtocolCodecError,
+    ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
+    encode_server_update, validate_client_identity,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -14,9 +15,10 @@ pub use native_tcp::{
     NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY, NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY,
     NativeClientIoDiagnostics, NativeClientIoSession, NativeServerUpdateBatch,
     NativeServerUpdateEnvelope, NativeTransportError, NativeTransportResult,
-    complete_client_handshake, complete_client_handshake_with_version, complete_server_handshake,
-    read_client_command_frame, read_client_command_frames, read_server_update_batch,
-    try_read_client_command_frame, write_client_command_frame, write_server_update_batch,
+    complete_client_handshake, complete_client_handshake_with_identity,
+    complete_client_handshake_with_version, complete_server_handshake, read_client_command_frame,
+    read_client_command_frames, read_server_update_batch, try_read_client_command_frame,
+    write_client_command_frame, write_server_update_batch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,12 +89,33 @@ impl From<ProtocolCodecError> for WebSocketTransportError {
 
 pub type WebSocketTransportResult<T> = Result<T, WebSocketTransportError>;
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClientHandshake {
+    pub protocol_version: u32,
+    pub identity: ClientIdentity,
+}
+
 pub fn encode_websocket_client_handshake(
     protocol_version: u32,
 ) -> WebSocketTransportResult<Vec<u8>> {
-    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 4);
+    encode_websocket_client_handshake_with_identity(
+        protocol_version,
+        &ClientIdentity::test_default(),
+    )
+}
+
+pub fn encode_websocket_client_handshake_with_identity(
+    protocol_version: u32,
+    identity: &ClientIdentity,
+) -> WebSocketTransportResult<Vec<u8>> {
+    validate_client_identity(identity)?;
+    let name = identity.display_name.as_bytes();
+    let mut payload = Vec::with_capacity(WEBSOCKET_HANDSHAKE_MAGIC.len() + 21 + name.len());
     payload.extend_from_slice(WEBSOCKET_HANDSHAKE_MAGIC);
     payload.extend_from_slice(&protocol_version.to_le_bytes());
+    payload.extend_from_slice(&identity.profile_id.bytes());
+    payload.push(name.len() as u8);
+    payload.extend_from_slice(name);
     checked_websocket_message_len("client handshake", payload.len())?;
     Ok(payload)
 }
@@ -101,9 +124,12 @@ pub fn encode_current_websocket_client_handshake() -> WebSocketTransportResult<V
     encode_websocket_client_handshake(PROTOCOL_VERSION)
 }
 
-pub fn decode_websocket_client_handshake(payload: &[u8]) -> WebSocketTransportResult<u32> {
+pub fn decode_websocket_client_handshake(
+    payload: &[u8],
+) -> WebSocketTransportResult<ClientHandshake> {
     checked_websocket_message_len("client handshake", payload.len())?;
-    if payload.len() != WEBSOCKET_HANDSHAKE_MAGIC.len() + 4 {
+    let fixed_len = WEBSOCKET_HANDSHAKE_MAGIC.len() + 21;
+    if payload.len() < fixed_len {
         return Err(WebSocketTransportError::InvalidHandshake(
             "client handshake had invalid length",
         ));
@@ -114,11 +140,34 @@ pub fn decode_websocket_client_handshake(payload: &[u8]) -> WebSocketTransportRe
         ));
     }
     let version_offset = WEBSOCKET_HANDSHAKE_MAGIC.len();
-    Ok(u32::from_le_bytes(
+    let protocol_version = u32::from_le_bytes(
         payload[version_offset..version_offset + 4]
             .try_into()
             .expect("websocket handshake version length checked"),
-    ))
+    );
+    let profile_offset = version_offset + 4;
+    let profile_id = PlayerProfileId::new(
+        payload[profile_offset..profile_offset + 16]
+            .try_into()
+            .expect("websocket handshake profile UUID length checked"),
+    );
+    let name_len_offset = profile_offset + 16;
+    let name_len = usize::from(payload[name_len_offset]);
+    if payload.len() != fixed_len + name_len {
+        return Err(WebSocketTransportError::InvalidHandshake(
+            "client handshake display name length did not match payload",
+        ));
+    }
+    let display_name = std::str::from_utf8(&payload[name_len_offset + 1..])
+        .map_err(|_| {
+            WebSocketTransportError::InvalidHandshake("client handshake display name was not UTF-8")
+        })?
+        .to_owned();
+    let identity = ClientIdentity::new(profile_id, display_name)?;
+    Ok(ClientHandshake {
+        protocol_version,
+        identity,
+    })
 }
 
 pub fn encode_websocket_server_handshake_accept(
@@ -357,8 +406,9 @@ mod native_tcp {
     use std::time::{Duration, Instant};
 
     use mclone_protocol::{
-        ClientCommand, PROTOCOL_VERSION, ProtocolCodecError, ServerUpdate, decode_client_command,
-        decode_server_update, encode_client_command, encode_server_update,
+        ClientCommand, ClientIdentity, PROTOCOL_VERSION, PlayerProfileId, ProtocolCodecError,
+        ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
+        encode_server_update, validate_client_identity,
     };
 
     pub type NativeTransportResult<T> = Result<T, NativeTransportError>;
@@ -692,8 +742,15 @@ mod native_tcp {
 
     impl NativeClientIoSession {
         pub fn connect(addr: impl ToSocketAddrs) -> NativeTransportResult<Self> {
+            Self::connect_with_identity(addr, &ClientIdentity::test_default())
+        }
+
+        pub fn connect_with_identity(
+            addr: impl ToSocketAddrs,
+            identity: &ClientIdentity,
+        ) -> NativeTransportResult<Self> {
             let mut stream = TcpStream::connect(addr)?;
-            complete_client_handshake(&mut stream)?;
+            complete_client_handshake_with_identity(&mut stream, identity)?;
             let shutdown_stream = stream.try_clone()?;
             let reader_stream = stream.try_clone()?;
             let (command_tx, command_rx) = mpsc::sync_channel(NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY);
@@ -935,26 +992,37 @@ mod native_tcp {
         complete_client_handshake_with_version(stream, PROTOCOL_VERSION)
     }
 
+    pub fn complete_client_handshake_with_identity<T: Read + Write>(
+        stream: &mut T,
+        identity: &ClientIdentity,
+    ) -> NativeTransportResult<()> {
+        write_client_handshake(stream, PROTOCOL_VERSION, identity)?;
+        stream.flush()?;
+        read_server_handshake(stream, PROTOCOL_VERSION)
+    }
+
     pub fn complete_client_handshake_with_version<T: Read + Write>(
         stream: &mut T,
         protocol_version: u32,
     ) -> NativeTransportResult<()> {
-        write_client_handshake(stream, protocol_version)?;
+        write_client_handshake(stream, protocol_version, &ClientIdentity::test_default())?;
         stream.flush()?;
         read_server_handshake(stream, protocol_version)
     }
 
-    pub fn complete_server_handshake<T: Read + Write>(stream: &mut T) -> NativeTransportResult<()> {
+    pub fn complete_server_handshake<T: Read + Write>(
+        stream: &mut T,
+    ) -> NativeTransportResult<ClientIdentity> {
         let received = read_client_handshake(stream)?;
-        if received != PROTOCOL_VERSION {
-            write_server_handshake_reject(stream, PROTOCOL_VERSION, received)?;
+        if received.protocol_version != PROTOCOL_VERSION {
+            write_server_handshake_reject(stream, PROTOCOL_VERSION, received.protocol_version)?;
             return Err(NativeTransportError::ProtocolVersionMismatch {
                 expected: PROTOCOL_VERSION,
-                received,
+                received: received.protocol_version,
             });
         }
         write_server_handshake_accept(stream, PROTOCOL_VERSION)?;
-        Ok(())
+        Ok(received.identity)
     }
 
     pub fn write_client_command_frame(
@@ -1022,16 +1090,25 @@ mod native_tcp {
     fn write_client_handshake(
         writer: &mut impl Write,
         protocol_version: u32,
+        identity: &ClientIdentity,
     ) -> NativeTransportResult<()> {
-        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 4);
+        validate_client_identity(identity)?;
+        let name = identity.display_name.as_bytes();
+        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 21 + name.len());
         payload.extend_from_slice(HANDSHAKE_MAGIC);
         payload.extend_from_slice(&protocol_version.to_le_bytes());
+        payload.extend_from_slice(&identity.profile_id.bytes());
+        payload.push(name.len() as u8);
+        payload.extend_from_slice(name);
         write_frame(writer, "client handshake", &payload)
     }
 
-    fn read_client_handshake(reader: &mut impl Read) -> NativeTransportResult<u32> {
+    fn read_client_handshake(
+        reader: &mut impl Read,
+    ) -> NativeTransportResult<super::ClientHandshake> {
         let payload = read_frame(reader, "client handshake")?;
-        if payload.len() != HANDSHAKE_MAGIC.len() + 4 {
+        let fixed_len = HANDSHAKE_MAGIC.len() + 21;
+        if payload.len() < fixed_len {
             return Err(NativeTransportError::InvalidHandshake(
                 "client handshake had invalid length",
             ));
@@ -1043,11 +1120,36 @@ mod native_tcp {
         }
 
         let version_offset = HANDSHAKE_MAGIC.len();
-        Ok(u32::from_le_bytes(
+        let protocol_version = u32::from_le_bytes(
             payload[version_offset..version_offset + 4]
                 .try_into()
                 .expect("handshake version length checked"),
-        ))
+        );
+        let profile_offset = version_offset + 4;
+        let profile_id = PlayerProfileId::new(
+            payload[profile_offset..profile_offset + 16]
+                .try_into()
+                .expect("handshake profile UUID length checked"),
+        );
+        let name_len_offset = profile_offset + 16;
+        let name_len = usize::from(payload[name_len_offset]);
+        if payload.len() != fixed_len + name_len {
+            return Err(NativeTransportError::InvalidHandshake(
+                "client handshake display name length did not match payload",
+            ));
+        }
+        let display_name = std::str::from_utf8(&payload[name_len_offset + 1..])
+            .map_err(|_| {
+                NativeTransportError::InvalidHandshake(
+                    "client handshake display name was not UTF-8",
+                )
+            })?
+            .to_owned();
+        let identity = ClientIdentity::new(profile_id, display_name)?;
+        Ok(super::ClientHandshake {
+            protocol_version,
+            identity,
+        })
     }
 
     fn write_server_handshake_accept(
@@ -1243,10 +1345,9 @@ mod tests {
     #[test]
     fn websocket_handshake_accepts_current_protocol_version() {
         let client = encode_current_websocket_client_handshake().unwrap();
-        assert_eq!(
-            decode_websocket_client_handshake(&client).unwrap(),
-            PROTOCOL_VERSION
-        );
+        let decoded = decode_websocket_client_handshake(&client).unwrap();
+        assert_eq!(decoded.protocol_version, PROTOCOL_VERSION);
+        assert_eq!(decoded.identity, ClientIdentity::test_default());
 
         let server = encode_websocket_server_handshake_accept(PROTOCOL_VERSION).unwrap();
         decode_websocket_server_handshake(&server, PROTOCOL_VERSION).unwrap();

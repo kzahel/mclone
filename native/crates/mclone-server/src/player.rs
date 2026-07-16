@@ -131,6 +131,19 @@ impl ServerPlayerState {
         self.correction_update(tick)
     }
 
+    pub(crate) fn restored_position_update(
+        &mut self,
+        position: Vec3d,
+        y_rot_degrees: f32,
+        x_rot_degrees: f32,
+        on_ground: bool,
+        tick: u64,
+    ) -> PlayerPositionUpdate {
+        let update = self.initial_position_update(position, y_rot_degrees, x_rot_degrees, tick);
+        self.on_ground = on_ground;
+        update
+    }
+
     pub(crate) fn resend_pending_correction_update(
         &mut self,
         tick: u64,

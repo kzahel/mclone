@@ -1,5 +1,5 @@
 type WasmModule = typeof import("mclone-web-client-wasm") & {
-  mclone_web_remote_handshake_frame(): Uint8Array;
+  mclone_web_remote_handshake_frame(profileId: Uint8Array, displayName: string): Uint8Array;
   mclone_web_validate_remote_handshake(frame: Uint8Array): void;
   mclone_web_canonicalize_remote_command(frame: Uint8Array): Uint8Array;
   mclone_web_decode_remote_update_batch(frame: Uint8Array): Array<Uint8Array>;
@@ -13,6 +13,8 @@ interface RemoteWorkerMessage {
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
   frame?: Uint8Array;
+  profileId?: Uint8Array;
+  displayName?: string;
   batchSequence?: number;
 }
 
@@ -53,7 +55,8 @@ workerSelf.onmessage = async (event: MessageEvent) => {
 
 async function start(message: RemoteWorkerMessage): Promise<void> {
   if (socket) throw new Error("remote websocket worker was already started");
-  if (!message.url || !message.bindgenJsUrl || !message.bindgenWasmUrl) {
+  if (!message.url || !message.bindgenJsUrl || !message.bindgenWasmUrl
+      || !message.profileId || !message.displayName) {
     throw new Error("remote websocket worker start is missing a required URL");
   }
   const module = await import(message.bindgenJsUrl) as WasmModule;
@@ -65,7 +68,10 @@ async function start(message: RemoteWorkerMessage): Promise<void> {
   activeSocket.binaryType = "arraybuffer";
   activeSocket.onopen = () => {
     try {
-      activeSocket.send(requireModule().mclone_web_remote_handshake_frame());
+      activeSocket.send(requireModule().mclone_web_remote_handshake_frame(
+        message.profileId!,
+        message.displayName!,
+      ));
     } catch (error) {
       fail(stringifyError(error));
     }

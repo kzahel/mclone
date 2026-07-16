@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
-use mclone_protocol::ClientCommand;
+use mclone_protocol::{ClientCommand, ClientIdentity};
 
 use crate::host_mode::{
     RemoteDedicatedServerSession, RemoteServerUpdate, RemoteServerUpdateBatch,
@@ -16,7 +16,27 @@ pub fn connect_native_remote_session_runtime(
     mesh_assets: TexturedMeshAssets,
     host_label: &'static str,
 ) -> Result<NativeSessionServices<NativeRemoteServerSession>> {
-    let session = NativeRemoteServerSession::connect(endpoint.address.as_str(), host_label)?;
+    connect_native_remote_session_runtime_with_identity(
+        endpoint,
+        options,
+        mesh_assets,
+        host_label,
+        ClientIdentity::test_default(),
+    )
+}
+
+pub fn connect_native_remote_session_runtime_with_identity(
+    endpoint: RemoteSessionEndpoint,
+    options: SingleViewHostOptions,
+    mesh_assets: TexturedMeshAssets,
+    host_label: &'static str,
+    identity: ClientIdentity,
+) -> Result<NativeSessionServices<NativeRemoteServerSession>> {
+    let session = NativeRemoteServerSession::connect_with_identity(
+        endpoint.address.as_str(),
+        host_label,
+        identity,
+    )?;
     NativeSessionServices::remote_dedicated_with_mesh_assets(
         endpoint,
         options,
@@ -33,28 +53,40 @@ pub fn connect_native_remote_session_runtime(
 pub struct NativeRemoteServerSession {
     addr: String,
     host_label: &'static str,
+    identity: ClientIdentity,
     session: NativeClientIoSession,
 }
 
 impl NativeRemoteServerSession {
     pub fn connect(addr: impl Into<String>, host_label: &'static str) -> Result<Self> {
+        Self::connect_with_identity(addr, host_label, ClientIdentity::test_default())
+    }
+
+    pub fn connect_with_identity(
+        addr: impl Into<String>,
+        host_label: &'static str,
+        identity: ClientIdentity,
+    ) -> Result<Self> {
         let addr = addr.into();
-        let session = NativeClientIoSession::connect(addr.as_str())
+        let session = NativeClientIoSession::connect_with_identity(addr.as_str(), &identity)
             .with_context(|| format!("failed to connect to {host_label} remote server {addr}"))?;
         Ok(Self {
             addr,
             host_label,
+            identity,
             session,
         })
     }
 
     pub fn reconnect(&mut self) -> Result<()> {
-        self.session = NativeClientIoSession::connect(self.addr.as_str()).with_context(|| {
-            format!(
-                "failed to reconnect to {} remote server {}",
-                self.host_label, self.addr
-            )
-        })?;
+        self.session =
+            NativeClientIoSession::connect_with_identity(self.addr.as_str(), &self.identity)
+                .with_context(|| {
+                    format!(
+                        "failed to reconnect to {} remote server {}",
+                        self.host_label, self.addr
+                    )
+                })?;
         Ok(())
     }
 

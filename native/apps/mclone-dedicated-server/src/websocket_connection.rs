@@ -97,16 +97,19 @@ fn websocket_connection_loop(
             return;
         }
     };
-    if let Err(err) = complete_websocket_protocol_handshake(&mut websocket) {
-        send_disconnected(
-            &events,
-            id,
-            peer_addr,
-            0,
-            Some(format!("failed websocket protocol handshake: {err:#}")),
-        );
-        return;
-    }
+    let identity = match complete_websocket_protocol_handshake(&mut websocket) {
+        Ok(identity) => identity,
+        Err(err) => {
+            send_disconnected(
+                &events,
+                id,
+                peer_addr,
+                0,
+                Some(format!("failed websocket protocol handshake: {err:#}")),
+            );
+            return;
+        }
+    };
     if let Err(err) = websocket.get_mut().set_nonblocking(true) {
         send_disconnected(
             &events,
@@ -125,6 +128,7 @@ fn websocket_connection_loop(
         .send(DedicatedNetworkEvent::Connected {
             id,
             peer_addr,
+            identity,
             outbound,
         })
         .is_err()
@@ -225,7 +229,7 @@ fn send_disconnected(
 
 fn complete_websocket_protocol_handshake(
     websocket: &mut tungstenite::WebSocket<TcpStream>,
-) -> Result<()> {
+) -> Result<mclone_protocol::ClientIdentity> {
     let message = websocket
         .read()
         .context("failed to read websocket protocol handshake")?;
@@ -236,14 +240,15 @@ fn complete_websocket_protocol_handshake(
     };
     let received = decode_websocket_client_handshake(&payload)
         .context("failed to decode websocket protocol handshake")?;
-    if received != PROTOCOL_VERSION {
-        let response = encode_websocket_server_handshake_reject(PROTOCOL_VERSION, received)
-            .context("failed to encode websocket protocol rejection")?;
+    if received.protocol_version != PROTOCOL_VERSION {
+        let response =
+            encode_websocket_server_handshake_reject(PROTOCOL_VERSION, received.protocol_version)
+                .context("failed to encode websocket protocol rejection")?;
         let _ = websocket.send(Message::Binary(response.into()));
         bail!(
             "websocket protocol version mismatch: expected {}, received {}",
             PROTOCOL_VERSION,
-            received
+            received.protocol_version
         );
     }
 
@@ -252,7 +257,7 @@ fn complete_websocket_protocol_handshake(
     websocket
         .send(Message::Binary(response.into()))
         .context("failed to send websocket protocol acceptance")?;
-    Ok(())
+    Ok(received.identity)
 }
 
 #[cfg(test)]

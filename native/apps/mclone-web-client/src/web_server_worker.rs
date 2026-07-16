@@ -12,18 +12,19 @@ use mclone_app_runtime::client_connection::{
 use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
 use mclone_core::{ChunkPos, ChunkStatus};
 use mclone_protocol::{
-    ChunkView, ClientCommand, ServerUpdate, decode_client_command, decode_server_update,
-    encode_client_command, encode_server_update,
+    ChunkView, ClientCommand, ClientIdentity, PlayerProfileId, ServerUpdate, decode_client_command,
+    decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_server::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
     ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServer,
-    IntegratedServerRunner, LightStatusMailboxKind, ServerRunnerDiagnostics, ServerRunnerError,
-    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
-    WorldGenerationProfile, WorldStore, WorldStoreCompletion, WorldStoreRequest,
-    WorldgenJobSession, WorldgenMailboxKind, compute_light_status_job_frame, decode_chunk_record,
-    decode_entity_chunk_record, encode_chunk_record, encode_entity_chunk_record,
+    IntegratedServerRunner, LightStatusMailboxKind, PlayerRecord, PlayerRecordKey,
+    ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
+    ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
+    WorkerFrameMetrics, WorkerFrameTransportKind, WorldGenerationProfile, WorldStore,
+    WorldStoreCompletion, WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind,
+    compute_light_status_job_frame, decode_chunk_record, decode_entity_chunk_record,
+    decode_player_record, encode_chunk_record, encode_entity_chunk_record, encode_player_record,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -67,6 +68,7 @@ pub struct WebIntegratedServerRunnerConfig {
     pub world_storage: WebIntegratedServerWorldStorage,
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
     pub runner_initial_inbound_bytes: u32,
+    pub local_player_identity: ClientIdentity,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -101,6 +103,7 @@ impl WebIntegratedServerRunnerConfig {
             world_storage: WebIntegratedServerWorldStorage::Transient,
             runner_transport_kind: None,
             runner_initial_inbound_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
+            local_player_identity: ClientIdentity::test_default(),
         }
     }
 
@@ -231,6 +234,11 @@ impl RunnerSharedSlot {
 
 impl WebIntegratedServerRunner {
     pub async fn new(config: WebIntegratedServerRunnerConfig) -> Result<Self, String> {
+        let mut config = config;
+        config.local_player_identity =
+            mclone_app_runtime::local_profile::load_or_create_web_local_player_profile()
+                .map_err(|error| format!("load browser player profile: {error:#}"))?
+                .client_identity();
         let options = WorkerOptions::new();
         options.set_type(WorkerType::Module);
         options.set_name("mclone-integrated-server");
@@ -502,6 +510,15 @@ impl WebIntegratedServerRunner {
         set_string(&message, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
         set_string(&message, "jobWorkerUrl", &config.job_worker_url)?;
+        set_string(
+            &message,
+            "displayName",
+            &config.local_player_identity.display_name,
+        )?;
+        let profile_id =
+            Uint8Array::from(config.local_player_identity.profile_id.bytes().as_slice());
+        Reflect::set(&message, &JsValue::from_str("profileId"), &profile_id)
+            .map_err(|error| format!("failed to attach local profile UUID: {error:?}"))?;
         match &config.world_storage {
             WebIntegratedServerWorldStorage::Transient => {
                 set_string(&message, "worldStorage", "transient")?;
@@ -1675,6 +1692,8 @@ struct WebIndexedDbWorldStoreState {
     entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
     dirty_chunks: BTreeMap<ChunkPos, ChunkRecord>,
     dirty_entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
+    players: BTreeMap<PlayerRecordKey, PlayerRecord>,
+    dirty_players: BTreeMap<PlayerRecordKey, PlayerRecord>,
 }
 
 impl WebIndexedDbWorldStoreState {
@@ -1728,6 +1747,19 @@ impl WorldStore for WebIndexedDbWorldStore {
         let mut state = self.state.borrow_mut();
         state.entity_chunks.insert(record.pos, record.clone());
         state.dirty_entity_chunks.insert(record.pos, record.clone());
+        Ok(())
+    }
+
+    fn load_player(&mut self, key: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
+        Ok(self.state.borrow().players.get(key).cloned())
+    }
+
+    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        state.players.insert(record.player.clone(), record.clone());
+        state
+            .dirty_players
+            .insert(record.player.clone(), record.clone());
         Ok(())
     }
 }
@@ -1827,6 +1859,22 @@ impl McloneWebIntegratedServerWorker {
         self.server
             .set_world_generation_profile(profile)
             .map_err(|error| JsValue::from_str(&error.to_string()))
+    }
+
+    #[wasm_bindgen(js_name = setLocalPlayerIdentity)]
+    pub fn set_local_player_identity(
+        &mut self,
+        profile_id: Uint8Array,
+        display_name: String,
+    ) -> Result<(), JsValue> {
+        let bytes: [u8; 16] = profile_id
+            .to_vec()
+            .try_into()
+            .map_err(|_| JsValue::from_str("local profile UUID must contain 16 bytes"))?;
+        let identity = ClientIdentity::new(PlayerProfileId::new(bytes), display_name)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.server.configure_local_player_identity(identity);
+        Ok(())
     }
 
     #[wasm_bindgen(js_name = setWorldBehaviorProfile)]
@@ -2027,6 +2075,9 @@ impl McloneWebIntegratedServerWorker {
         self.server
             .save_dirty_chunks()
             .map_err(|error| error.to_string())?;
+        self.server
+            .save_all_player_records()
+            .map_err(|error| error.to_string())?;
         for _ in 0..256 {
             if self.server.scheduler().pending_persistence_save_count() == 0 {
                 return Ok(());
@@ -2152,6 +2203,7 @@ fn attach_indexed_db_dirty_records(
 ) -> Result<(), String> {
     let chunks = chunk_records_to_js(&state.dirty_chunks)?;
     let entity_chunks = entity_chunk_records_to_js(&state.dirty_entity_chunks)?;
+    let players = player_records_to_js(&state.dirty_players)?;
     Reflect::set(response, &JsValue::from_str("indexedDbChunks"), &chunks)
         .map_err(|error| format!("failed to attach indexedDB chunks: {error:?}"))?;
     Reflect::set(
@@ -2160,8 +2212,11 @@ fn attach_indexed_db_dirty_records(
         &entity_chunks,
     )
     .map_err(|error| format!("failed to attach indexedDB entity chunks: {error:?}"))?;
+    Reflect::set(response, &JsValue::from_str("indexedDbPlayers"), &players)
+        .map_err(|error| format!("failed to attach indexedDB players: {error:?}"))?;
     state.dirty_chunks.clear();
     state.dirty_entity_chunks.clear();
+    state.dirty_players.clear();
     Ok(())
 }
 
@@ -2196,6 +2251,11 @@ fn indexed_db_load_requests_to_js(requests: Vec<WorldStoreRequest>) -> Result<Ar
                 set_number(&object, "x", f64::from(pos.x))?;
                 set_number(&object, "z", f64::from(pos.z))?;
             }
+            WorldStoreRequest::LoadPlayer { request_id, player } => {
+                set_string(&object, "kind", "player")?;
+                set_number(&object, "requestId", request_id as f64)?;
+                set_string(&object, "playerKey", player.as_str())?;
+            }
             other => {
                 return Err(format!(
                     "IndexedDB external persistence emitted unsupported request {other:?}"
@@ -2221,16 +2281,9 @@ fn decode_indexed_db_load_completions_from_js(
         let request_id = number_prop(&value, "requestId")
             .ok_or_else(|| format!("indexedDB load completion {index} is missing requestId"))?
             as u64;
-        let pos = ChunkPos::new(
-            number_prop(&value, "x")
-                .ok_or_else(|| format!("indexedDB load completion {index} is missing x"))?
-                as i32,
-            number_prop(&value, "z")
-                .ok_or_else(|| format!("indexedDB load completion {index} is missing z"))?
-                as i32,
-        );
         match kind.as_str() {
             "chunk" => {
+                let pos = indexed_db_completion_pos(&value, index)?;
                 let result = decode_indexed_db_chunk_load_result(&value, pos).map_err(|error| {
                     ChunkStoreError::InvalidData(format!(
                         "indexedDB chunk load completion {index}: {error}"
@@ -2243,6 +2296,7 @@ fn decode_indexed_db_load_completions_from_js(
                 });
             }
             "entityChunk" => {
+                let pos = indexed_db_completion_pos(&value, index)?;
                 let result =
                     decode_indexed_db_entity_chunk_load_result(&value, pos).map_err(|error| {
                         ChunkStoreError::InvalidData(format!(
@@ -2252,6 +2306,23 @@ fn decode_indexed_db_load_completions_from_js(
                 completions.push(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
                     pos,
+                    result,
+                });
+            }
+            "player" => {
+                let player =
+                    PlayerRecordKey::Uuid(string_prop(&value, "playerKey").ok_or_else(|| {
+                        format!("indexedDB load completion {index} is missing playerKey")
+                    })?);
+                let result =
+                    decode_indexed_db_player_load_result(&value, &player).map_err(|error| {
+                        ChunkStoreError::InvalidData(format!(
+                            "indexedDB player load completion {index}: {error}"
+                        ))
+                    });
+                completions.push(WorldStoreCompletion::PlayerLoaded {
+                    request_id,
+                    player,
                     result,
                 });
             }
@@ -2314,6 +2385,39 @@ fn decode_indexed_db_entity_chunk_load_result(
     Ok(Some(record))
 }
 
+fn decode_indexed_db_player_load_result(
+    value: &JsValue,
+    player: &PlayerRecordKey,
+) -> ChunkStoreResult<Option<PlayerRecord>> {
+    if let Some(error) = string_prop(value, "error")
+        && !error.is_empty()
+    {
+        return Err(ChunkStoreError::InvalidData(error));
+    }
+    if bool_prop(value, "found") == Some(false) {
+        return Ok(None);
+    }
+    let bytes = js_record_bytes(value).map_err(ChunkStoreError::InvalidData)?;
+    let record = decode_player_record(&bytes)?;
+    if record.player != *player {
+        return Err(ChunkStoreError::InvalidData(
+            "player record key does not match the requested key".to_owned(),
+        ));
+    }
+    Ok(Some(record))
+}
+
+fn indexed_db_completion_pos(value: &JsValue, index: u32) -> Result<ChunkPos, String> {
+    Ok(ChunkPos::new(
+        number_prop(value, "x")
+            .ok_or_else(|| format!("indexedDB load completion {index} is missing x"))?
+            as i32,
+        number_prop(value, "z")
+            .ok_or_else(|| format!("indexedDB load completion {index} is missing z"))?
+            as i32,
+    ))
+}
+
 fn chunk_records_to_js(records: &BTreeMap<ChunkPos, ChunkRecord>) -> Result<Array, String> {
     let array = Array::new();
     for (pos, record) in records {
@@ -2341,6 +2445,23 @@ fn entity_chunk_records_to_js(
             )
         })?;
         let object: JsValue = indexed_db_record_to_js(*pos, bytes)?.into();
+        array.push(&object);
+    }
+    Ok(array)
+}
+
+fn player_records_to_js(
+    records: &BTreeMap<PlayerRecordKey, PlayerRecord>,
+) -> Result<Array, String> {
+    let array = Array::new();
+    for (key, record) in records {
+        let bytes = encode_player_record(record)
+            .map_err(|error| format!("encode indexedDB player record {key:?}: {error}"))?;
+        let object = Object::new();
+        set_string(&object, "playerKey", key.as_str())?;
+        let bytes = Uint8Array::from(bytes.as_slice());
+        Reflect::set(&object, &JsValue::from_str("record"), &bytes)
+            .map_err(|error| format!("failed to attach indexedDB player bytes: {error:?}"))?;
         array.push(&object);
     }
     Ok(array)

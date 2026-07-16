@@ -2064,7 +2064,15 @@ mod android {
                 scene_options.world_root.as_deref(),
             );
         let mut terrain = if let Some(remote_addr) = remote_addr {
-            let session = NativeRemoteServerSession::connect(remote_addr.as_str(), "Android XR")?;
+            let profile =
+                mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
+                    scene_options.world_root.as_deref(),
+                )?;
+            let session = NativeRemoteServerSession::connect_with_identity(
+                remote_addr.as_str(),
+                "Android XR",
+                profile.client_identity(),
+            )?;
             let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
                 RemoteSessionEndpoint::new(remote_addr.clone()),
                 single_view_host_options(&scene_options),
@@ -2144,7 +2152,15 @@ mod android {
         scene_options: McloneSceneHostOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<AndroidXrSceneRuntime> {
-        let session = NativeRemoteServerSession::connect(endpoint.address.as_str(), "Android XR")?;
+        let profile =
+            mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
+                scene_options.world_root.as_deref(),
+            )?;
+        let session = NativeRemoteServerSession::connect_with_identity(
+            endpoint.address.as_str(),
+            "Android XR",
+            profile.client_identity(),
+        )?;
         AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
             endpoint.clone(),
             single_view_host_options(&scene_options),

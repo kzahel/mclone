@@ -67,9 +67,24 @@ const LOADED_CHUNK_COUNT_SHIFT: u32 = 24;
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
-pub fn mclone_web_remote_handshake_frame() -> Result<js_sys::Uint8Array, JsValue> {
-    let frame = mclone_net::encode_current_websocket_client_handshake()
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+pub fn mclone_web_remote_handshake_frame(
+    profile_id: js_sys::Uint8Array,
+    display_name: String,
+) -> Result<js_sys::Uint8Array, JsValue> {
+    let profile_id: [u8; 16] = profile_id
+        .to_vec()
+        .try_into()
+        .map_err(|_| JsValue::from_str("remote profile UUID must contain 16 bytes"))?;
+    let identity = mclone_protocol::ClientIdentity::new(
+        mclone_protocol::PlayerProfileId::new(profile_id),
+        display_name,
+    )
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let frame = mclone_net::encode_websocket_client_handshake_with_identity(
+        mclone_protocol::PROTOCOL_VERSION,
+        &identity,
+    )
+    .map_err(|error| JsValue::from_str(&error.to_string()))?;
     Ok(js_sys::Uint8Array::from(frame.as_slice()))
 }
 

@@ -12,6 +12,7 @@ import {
 import {
   WORLD_CHUNK_STORE,
   WORLD_ENTITY_CHUNK_STORE,
+  WORLD_PLAYER_STORE,
   WORLD_ID_INDEX,
   clearIndexedDbWorldRecords,
   openWorldDb,
@@ -44,6 +45,8 @@ interface IntegratedServerWorkerMessage {
   debugPassiveShowcase?: boolean;
   debugAuxiliaryPlayerScript?: boolean;
   frame?: Uint8Array;
+  profileId?: Uint8Array;
+  displayName?: string;
   transportKind?: "shared-memory" | "message-transfer";
   controlBuffer?: SharedArrayBuffer;
   requestBuffer?: SharedArrayBuffer;
@@ -85,10 +88,11 @@ interface IndexedDbWorldRecords {
 }
 
 interface IndexedDbLoadRequest {
-  kind: "chunk" | "entityChunk";
+  kind: "chunk" | "entityChunk" | "player";
   requestId: number;
-  x: number;
-  z: number;
+  x?: number;
+  z?: number;
+  playerKey?: string;
 }
 
 interface IndexedDbLoadCompletion extends IndexedDbLoadRequest {
@@ -219,6 +223,12 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   const generationProfile = String(message.generationProfile ?? "overworld");
   if (typeof (server as any).setWorldGenerationProfile === "function") {
     (server as any).setWorldGenerationProfile(generationProfile);
+  }
+  if (typeof (server as any).setLocalPlayerIdentity === "function") {
+    if (!message.profileId || !message.displayName) {
+      throw new Error("integrated server start is missing local player identity");
+    }
+    (server as any).setLocalPlayerIdentity(message.profileId, message.displayName);
   }
   const behaviorProfile = String(message.behaviorProfile ?? "mutable");
   if (typeof (server as any).setWorldBehaviorProfile === "function") {
@@ -422,7 +432,8 @@ async function loadIndexedDbRecords(
 async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string, any>): Promise<void> {
   const chunks = indexedDbRecordsFromResult(worldId, result.indexedDbChunks);
   const entityChunks = indexedDbRecordsFromResult(worldId, result.indexedDbEntityChunks);
-  if (chunks.length === 0 && entityChunks.length === 0) {
+  const players = indexedDbPlayerRecordsFromResult(worldId, result.indexedDbPlayers);
+  if (chunks.length === 0 && entityChunks.length === 0 && players.length === 0) {
     return;
   }
   const db = await openWorldDb();
@@ -430,6 +441,7 @@ async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string,
     await Promise.all([
       putIndexedDbRecords(db, WORLD_CHUNK_STORE, chunks),
       putIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, entityChunks),
+      putIndexedDbPlayerRecords(db, players),
     ]);
   } finally {
     db.close();
@@ -451,7 +463,7 @@ function indexedDbLoadRequestsFromResult(result: Record<string, any>): IndexedDb
   return value.map((request) => {
     const record = (request ?? {}) as Record<string, unknown>;
     const kind = String(record.kind ?? "");
-    if (kind !== "chunk" && kind !== "entityChunk") {
+    if (kind !== "chunk" && kind !== "entityChunk" && kind !== "player") {
       throw new Error(`unsupported IndexedDB load request kind ${kind}`);
     }
     return {
@@ -459,6 +471,7 @@ function indexedDbLoadRequestsFromResult(result: Record<string, any>): IndexedDb
       requestId: Math.trunc(Number(record.requestId) || 0),
       x: Math.trunc(Number(record.x) || 0),
       z: Math.trunc(Number(record.z) || 0),
+      playerKey: String(record.playerKey ?? ""),
     };
   });
 }
@@ -485,11 +498,25 @@ async function loadIndexedDbCompletion(
   worldId: string,
   request: IndexedDbLoadRequest,
 ): Promise<IndexedDbLoadCompletion> {
-  const storeName = request.kind === "chunk" ? WORLD_CHUNK_STORE : WORLD_ENTITY_CHUNK_STORE;
+  const storeName = request.kind === "chunk"
+    ? WORLD_CHUNK_STORE
+    : request.kind === "entityChunk"
+      ? WORLD_ENTITY_CHUNK_STORE
+      : WORLD_PLAYER_STORE;
   const transaction = db.transaction(storeName, "readonly");
-  const requestHandle = transaction
-    .objectStore(storeName)
-    .get([worldId, request.x, request.z]);
+  let key: IDBValidKey;
+  if (request.kind === "player") {
+    if (typeof request.playerKey !== "string") {
+      throw new Error("IndexedDB player load request is missing playerKey");
+    }
+    key = [worldId, request.playerKey];
+  } else {
+    if (typeof request.x !== "number" || typeof request.z !== "number") {
+      throw new Error(`IndexedDB ${request.kind} load request is missing coordinates`);
+    }
+    key = [worldId, request.x, request.z];
+  }
+  const requestHandle = transaction.objectStore(storeName).get(key);
   const record = await idbRequest<unknown>(requestHandle);
   await transactionDone(transaction);
   if (!record) {
@@ -498,7 +525,9 @@ async function loadIndexedDbCompletion(
   return {
     ...request,
     found: true,
-    record: normalizeIndexedDbRecord(worldId, record).record,
+    record: request.kind === "player"
+      ? normalizeIndexedDbPlayerRecord(worldId, record).record
+      : normalizeIndexedDbRecord(worldId, record).record,
   };
 }
 
@@ -514,6 +543,43 @@ async function putIndexedDbRecords(
     store.put(record);
   }
   await transactionDone(transaction);
+}
+
+interface IndexedDbPlayerRecord {
+  worldId: string;
+  playerKey: string;
+  record: Uint8Array;
+}
+
+async function putIndexedDbPlayerRecords(
+  db: IDBDatabase,
+  records: IndexedDbPlayerRecord[],
+): Promise<void> {
+  if (records.length === 0) return;
+  const transaction = db.transaction(WORLD_PLAYER_STORE, "readwrite");
+  const store = transaction.objectStore(WORLD_PLAYER_STORE);
+  for (const record of records) store.put(record);
+  await transactionDone(transaction);
+}
+
+function indexedDbPlayerRecordsFromResult(
+  worldId: string,
+  value: unknown,
+): IndexedDbPlayerRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((record) => normalizeIndexedDbPlayerRecord(worldId, record));
+}
+
+function normalizeIndexedDbPlayerRecord(
+  worldId: string,
+  value: unknown,
+): IndexedDbPlayerRecord {
+  const record = (value ?? {}) as Record<string, unknown>;
+  return {
+    worldId,
+    playerKey: String(record.playerKey ?? ""),
+    record: uint8ArrayFromUnknown(record.record),
+  };
 }
 
 function indexedDbRecordsFromResult(worldId: string, value: unknown): IndexedDbRecord[] {

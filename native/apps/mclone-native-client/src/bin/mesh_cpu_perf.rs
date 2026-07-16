@@ -236,6 +236,7 @@ impl LoopCounters {
                 ChunkSchedulerEvent::Unloaded { .. }
                 | ChunkSchedulerEvent::HolderUnloaded { .. }
                 | ChunkSchedulerEvent::EntityChunkLoaded { .. }
+                | ChunkSchedulerEvent::PlayerLoaded { .. }
                 | ChunkSchedulerEvent::SectionBlockUpdates { .. }
                 | ChunkSchedulerEvent::BlockTickScheduled { .. }
                 | ChunkSchedulerEvent::FluidTickScheduled { .. } => {}

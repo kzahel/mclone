@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
-use mclone_protocol::PlayerAppearance;
+use mclone_protocol::{ClientIdentity, PlayerAppearance};
 
 use crate::inventory::ServerInventory;
+use crate::persistence::PlayerRecord;
 use crate::player::ServerPlayerState;
 
 const FIRST_DEDICATED_PLAYER_ID: u64 = 1;
@@ -37,6 +38,10 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) inventory: ServerInventory,
     pub(crate) appearance: PlayerAppearance,
     pub(crate) initial_spawn_center: Option<ChunkPos>,
+    pub(crate) identity: Option<ClientIdentity>,
+    pub(crate) resume_record: Option<PlayerRecord>,
+    pub(crate) total_experience: u64,
+    pub(crate) player_record_revision: u64,
 }
 
 impl Default for ServerPlayerEntry {
@@ -46,6 +51,10 @@ impl Default for ServerPlayerEntry {
             inventory: ServerInventory::default(),
             appearance: PlayerAppearance::default(),
             initial_spawn_center: None,
+            identity: None,
+            resume_record: None,
+            total_experience: 0,
+            player_record_revision: 0,
         }
     }
 }

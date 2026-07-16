@@ -10,7 +10,7 @@ use mclone_app_runtime::frame_pacing::{
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::native_remote_session::{
-    NativeRemoteServerSession, connect_native_remote_session_runtime,
+    NativeRemoteServerSession, connect_native_remote_session_runtime_with_identity,
 };
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::render_assets::{
@@ -1069,7 +1069,10 @@ fn android_remote_runtime(
     scene: &McloneSceneHostOptions,
     mesh_assets: TexturedMeshAssets,
 ) -> Result<NativeSessionServices<NativeRemoteServerSession>> {
-    connect_native_remote_session_runtime(
+    let profile = mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
+        scene.world_root.as_deref(),
+    )?;
+    connect_native_remote_session_runtime_with_identity(
         endpoint.clone(),
         SingleViewHostOptions::new(scene.center(), scene.render_distance)
             .with_render_compile_worker_count(scene.render_compile_worker_count)
@@ -1077,6 +1080,7 @@ fn android_remote_runtime(
             .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled),
         mesh_assets,
         "Android",
+        profile.client_identity(),
     )
     .with_context(|| {
         format!(

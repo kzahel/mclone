@@ -27,6 +27,7 @@ use mclone_core::{
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
 const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
+const PLAYER_RECORD_MAGIC: &[u8; 12] = b"MCLONEPLYR\0\0";
 #[cfg(not(target_arch = "wasm32"))]
 const SQLITE_WORLD_SCHEMA_VERSION: i64 = 1;
 #[cfg(not(target_arch = "wasm32"))]
@@ -34,6 +35,7 @@ pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
+pub const PLAYER_RECORD_VERSION: u32 = 1;
 
 pub type PersistenceRequestId = u64;
 
@@ -205,6 +207,17 @@ pub fn decode_entity_chunk_record(bytes: &[u8]) -> ChunkStoreResult<EntityChunkR
     read_entity_chunk_record(&mut reader)
 }
 
+pub fn encode_player_record(record: &PlayerRecord) -> ChunkStoreResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_player_record(&mut bytes, record)?;
+    Ok(bytes)
+}
+
+pub fn decode_player_record(bytes: &[u8]) -> ChunkStoreResult<PlayerRecord> {
+    let mut reader = bytes;
+    read_player_record(&mut reader)
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EntityPersistentId {
     pub most: u64,
@@ -272,6 +285,52 @@ pub enum PlayerRecordKey {
     Uuid(String),
 }
 
+impl PlayerRecordKey {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Uuid(value) => value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerRecord {
+    pub player: PlayerRecordKey,
+    pub codec_version: u32,
+    pub revision: u64,
+    pub last_known_name: String,
+    pub dimension: String,
+    pub position: Vec3d,
+    pub y_rot_degrees: f32,
+    pub x_rot_degrees: f32,
+    pub on_ground: bool,
+    pub selected_hotbar_slot: u8,
+    pub total_experience: u64,
+}
+
+impl PlayerRecord {
+    pub fn new(
+        player: PlayerRecordKey,
+        revision: u64,
+        last_known_name: impl Into<String>,
+        position: Vec3d,
+    ) -> Self {
+        Self {
+            player,
+            codec_version: PLAYER_RECORD_VERSION,
+            revision,
+            last_known_name: last_known_name.into(),
+            dimension: "minecraft:overworld".to_owned(),
+            position,
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: false,
+            selected_hotbar_slot: 0,
+            total_experience: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum WorldRecordKey {
     Chunk(ChunkPos),
@@ -304,6 +363,10 @@ pub enum WorldStoreRequest {
         request_id: PersistenceRequestId,
         player: PlayerRecordKey,
     },
+    SavePlayer {
+        request_id: PersistenceRequestId,
+        record: PlayerRecord,
+    },
     LoadSavedData {
         request_id: PersistenceRequestId,
         key: String,
@@ -324,6 +387,7 @@ impl WorldStoreRequest {
             | Self::LoadEntityChunk { request_id, .. }
             | Self::SaveEntityChunk { request_id, .. }
             | Self::LoadPlayer { request_id, .. }
+            | Self::SavePlayer { request_id, .. }
             | Self::LoadSavedData { request_id, .. }
             | Self::Flush { request_id }
             | Self::Close { request_id } => *request_id,
@@ -357,9 +421,14 @@ impl WorldStoreRequest {
                 pos: record.pos,
                 result: Err(closed_error()),
             },
-            Self::LoadPlayer { request_id, player } => WorldStoreCompletion::RequestFailed {
+            Self::LoadPlayer { request_id, player } => WorldStoreCompletion::PlayerLoaded {
                 request_id,
-                key: WorldRecordKey::Player(player),
+                player,
+                result: Err(closed_error()),
+            },
+            Self::SavePlayer { request_id, record } => WorldStoreCompletion::PlayerSaved {
+                request_id,
+                player: record.player,
                 result: Err(closed_error()),
             },
             Self::LoadSavedData { request_id, key } => WorldStoreCompletion::RequestFailed {
@@ -408,6 +477,16 @@ pub enum WorldStoreCompletion {
         pos: ChunkPos,
         result: ChunkStoreResult<StoreWriteOutcome>,
     },
+    PlayerLoaded {
+        request_id: PersistenceRequestId,
+        player: PlayerRecordKey,
+        result: ChunkStoreResult<Option<PlayerRecord>>,
+    },
+    PlayerSaved {
+        request_id: PersistenceRequestId,
+        player: PlayerRecordKey,
+        result: ChunkStoreResult<StoreWriteOutcome>,
+    },
     RequestFailed {
         request_id: PersistenceRequestId,
         key: WorldRecordKey,
@@ -430,6 +509,8 @@ impl WorldStoreCompletion {
             | Self::ChunkSaved { request_id, .. }
             | Self::EntityChunkLoaded { request_id, .. }
             | Self::EntityChunkSaved { request_id, .. }
+            | Self::PlayerLoaded { request_id, .. }
+            | Self::PlayerSaved { request_id, .. }
             | Self::RequestFailed { request_id, .. }
             | Self::FlushComplete { request_id, .. }
             | Self::CloseComplete { request_id, .. } => *request_id,
@@ -461,6 +542,17 @@ pub trait WorldStore: fmt::Debug {
         Err(ChunkStoreError::InvalidData(format!(
             "entity chunk storage is not supported for ({}, {})",
             record.pos.x, record.pos.z
+        )))
+    }
+
+    fn load_player(&mut self, _player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
+        Ok(None)
+    }
+
+    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
+        Err(ChunkStoreError::InvalidData(format!(
+            "player storage is not supported for {}",
+            record.player.as_str()
         )))
     }
 
@@ -505,12 +597,17 @@ impl WorldStore for NullWorldStore {
     fn save_entity_chunk(&mut self, _record: &EntityChunkRecord) -> ChunkStoreResult<()> {
         Ok(())
     }
+
+    fn save_player(&mut self, _record: &PlayerRecord) -> ChunkStoreResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
 pub struct MemoryWorldStore {
     chunks: BTreeMap<ChunkPos, ChunkRecord>,
     entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
+    players: BTreeMap<PlayerRecordKey, PlayerRecord>,
 }
 
 impl MemoryWorldStore {
@@ -524,6 +621,10 @@ impl MemoryWorldStore {
 
     pub fn entity_chunk(&self, pos: ChunkPos) -> Option<&EntityChunkRecord> {
         self.entity_chunks.get(&pos)
+    }
+
+    pub fn player(&self, key: &PlayerRecordKey) -> Option<&PlayerRecord> {
+        self.players.get(key)
     }
 }
 
@@ -547,6 +648,15 @@ impl WorldStore for MemoryWorldStore {
 
     fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
         self.entity_chunks.insert(record.pos, record.clone());
+        Ok(())
+    }
+
+    fn load_player(&mut self, player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
+        Ok(self.players.get(player).cloned())
+    }
+
+    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
+        self.players.insert(record.player.clone(), record.clone());
         Ok(())
     }
 }
@@ -622,10 +732,11 @@ enum PendingWriteKey {
     EntityChunk(ChunkPos),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum ExternalLoadKey {
     Chunk(ChunkPos),
     EntityChunk(ChunkPos),
+    Player(PlayerRecordKey),
 }
 
 #[derive(Debug)]
@@ -790,6 +901,37 @@ impl PersistenceActor {
         }
 
         self.pending_entity_chunk_writes.insert(pos, incoming);
+    }
+
+    pub fn load_player(&mut self, request_id: PersistenceRequestId, player: PlayerRecordKey) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store.load_player(&player)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::PlayerLoaded {
+                request_id,
+                player,
+                result,
+            });
+    }
+
+    pub fn save_player(&mut self, request_id: PersistenceRequestId, record: PlayerRecord) {
+        let player = record.player.clone();
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_player(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::PlayerSaved {
+                request_id,
+                player,
+                result,
+            });
     }
 
     pub fn fail_reserved_request(&mut self, request_id: PersistenceRequestId, key: WorldRecordKey) {
@@ -1070,7 +1212,10 @@ impl ExternalLoadPersistenceActor {
                 self.save_entity_chunk(request_id, record, durability);
             }
             WorldStoreRequest::LoadPlayer { request_id, player } => {
-                self.fail_reserved_request(request_id, WorldRecordKey::Player(player));
+                self.load_player(request_id, player);
+            }
+            WorldStoreRequest::SavePlayer { request_id, record } => {
+                self.save_player(request_id, record);
             }
             WorldStoreRequest::LoadSavedData { request_id, key } => {
                 self.fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
@@ -1303,6 +1448,57 @@ impl ExternalLoadPersistenceActor {
             });
     }
 
+    fn load_player(&mut self, request_id: PersistenceRequestId, player: PlayerRecordKey) {
+        if self.closed {
+            self.completions
+                .push_back(WorldStoreCompletion::PlayerLoaded {
+                    request_id,
+                    player,
+                    result: Err(closed_error()),
+                });
+            return;
+        }
+        match self.store.load_player(&player) {
+            Ok(Some(record)) => self
+                .completions
+                .push_back(WorldStoreCompletion::PlayerLoaded {
+                    request_id,
+                    player,
+                    result: Ok(Some(record)),
+                }),
+            Ok(None) => {
+                self.pending_external_loads
+                    .insert(request_id, ExternalLoadKey::Player(player.clone()));
+                self.external_requests
+                    .push_back(WorldStoreRequest::LoadPlayer { request_id, player });
+            }
+            Err(error) => self
+                .completions
+                .push_back(WorldStoreCompletion::PlayerLoaded {
+                    request_id,
+                    player,
+                    result: Err(error),
+                }),
+        }
+    }
+
+    fn save_player(&mut self, request_id: PersistenceRequestId, record: PlayerRecord) {
+        let player = record.player.clone();
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_player(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::PlayerSaved {
+                request_id,
+                player,
+                result,
+            });
+    }
+
     fn fail_reserved_request(&mut self, request_id: PersistenceRequestId, key: WorldRecordKey) {
         let result = if self.closed {
             Err(closed_error())
@@ -1382,6 +1578,11 @@ impl ExternalLoadPersistenceActor {
                 pos,
                 result,
             } => self.complete_external_entity_chunk_load(request_id, pos, result),
+            WorldStoreCompletion::PlayerLoaded {
+                request_id,
+                player,
+                result,
+            } => self.complete_external_player_load(request_id, player, result),
             other => Err(ChunkStoreError::InvalidData(format!(
                 "external persistence backend only accepts load completions, got {other:?}"
             ))),
@@ -1488,6 +1689,45 @@ impl ExternalLoadPersistenceActor {
             });
         Ok(())
     }
+
+    fn complete_external_player_load(
+        &mut self,
+        request_id: PersistenceRequestId,
+        player: PlayerRecordKey,
+        result: ChunkStoreResult<Option<PlayerRecord>>,
+    ) -> ChunkStoreResult<()> {
+        match self.pending_external_loads.remove(&request_id) {
+            Some(ExternalLoadKey::Player(expected)) if expected == player => {}
+            Some(other) => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external player load request {request_id} completed for {player:?} but was pending for {other:?}"
+                )));
+            }
+            None => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external player load request {request_id} was not pending"
+                )));
+            }
+        }
+        let result = result.and_then(|record| {
+            if record
+                .as_ref()
+                .is_some_and(|record| record.player != player)
+            {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "external player load request {request_id} returned a mismatched key"
+                )));
+            }
+            Ok(record)
+        });
+        self.completions
+            .push_back(WorldStoreCompletion::PlayerLoaded {
+                request_id,
+                player,
+                result,
+            });
+        Ok(())
+    }
 }
 
 fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreRequest) {
@@ -1513,7 +1753,10 @@ fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreR
             actor.save_entity_chunk(request_id, record, durability);
         }
         WorldStoreRequest::LoadPlayer { request_id, player } => {
-            actor.fail_reserved_request(request_id, WorldRecordKey::Player(player));
+            actor.load_player(request_id, player);
+        }
+        WorldStoreRequest::SavePlayer { request_id, record } => {
+            actor.save_player(request_id, record);
         }
         WorldStoreRequest::LoadSavedData { request_id, key } => {
             actor.fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
@@ -1933,6 +2176,13 @@ impl PersistenceMailbox {
         request_id
     }
 
+    pub fn save_player(&mut self, record: PlayerRecord) -> PersistenceRequestId {
+        let request_id = self.next_request_id();
+        self.backend
+            .send_request(WorldStoreRequest::SavePlayer { request_id, record });
+        request_id
+    }
+
     pub fn load_saved_data(&mut self, key: String) -> PersistenceRequestId {
         let request_id = self.next_request_id();
         self.backend
@@ -2034,6 +2284,32 @@ impl PersistenceMailbox {
             WorldStoreCompletion::EntityChunkSaved { result, .. } => result,
             completion => Err(ChunkStoreError::InvalidData(format!(
                 "save_entity_chunk completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn load_player_blocking(
+        &mut self,
+        player: PlayerRecordKey,
+    ) -> ChunkStoreResult<Option<PlayerRecord>> {
+        let request_id = self.load_player(player);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::PlayerLoaded { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "load_player completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn save_player_blocking(
+        &mut self,
+        record: PlayerRecord,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        let request_id = self.save_player(record);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::PlayerSaved { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "save_player completed with unexpected persistence completion {completion:?}"
             ))),
         }
     }
@@ -2373,6 +2649,52 @@ impl WorldStore for SqliteWorldStore {
         Ok(())
     }
 
+    fn load_player(&mut self, player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
+        let blob = self
+            .connection
+            .query_row(
+                "SELECT record_blob FROM player_records WHERE player_key = ?1",
+                params![player.as_str()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let Some(blob) = blob else {
+            return Ok(None);
+        };
+        let record = read_player_record(&mut blob.as_slice())?;
+        if record.player != *player {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "sqlite player record for {} contained key {}",
+                player.as_str(),
+                record.player.as_str()
+            )));
+        }
+        Ok(Some(record))
+    }
+
+    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
+        let mut blob = Vec::new();
+        write_player_record(&mut blob, record)?;
+        self.connection
+            .execute(
+                "INSERT INTO player_records (player_key, codec_version, revision, record_blob)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(player_key) DO UPDATE SET
+                    codec_version = excluded.codec_version,
+                    revision = excluded.revision,
+                    record_blob = excluded.record_blob",
+                params![
+                    record.player.as_str(),
+                    record.codec_version,
+                    record.revision.to_string(),
+                    blob
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
     fn flush(&mut self) -> ChunkStoreResult<()> {
         let _busy: i64 = self
             .connection
@@ -2617,6 +2939,76 @@ fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityCh
         codec_version,
         entities,
     })
+}
+
+fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkStoreResult<()> {
+    if record.codec_version != PLAYER_RECORD_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported player record codec version {}",
+            record.codec_version
+        )));
+    }
+    if !record.position.is_finite()
+        || !record.y_rot_degrees.is_finite()
+        || !record.x_rot_degrees.is_finite()
+    {
+        return Err(ChunkStoreError::InvalidData(
+            "player record pose must be finite".to_owned(),
+        ));
+    }
+    writer.write_all(PLAYER_RECORD_MAGIC)?;
+    write_u32(writer, PLAYER_RECORD_VERSION)?;
+    write_string(writer, record.player.as_str(), "player key")?;
+    write_u64(writer, record.revision)?;
+    write_string(writer, &record.last_known_name, "player name")?;
+    write_string(writer, &record.dimension, "player dimension")?;
+    write_vec3d(writer, record.position)?;
+    write_f32(writer, record.y_rot_degrees)?;
+    write_f32(writer, record.x_rot_degrees)?;
+    write_bool(writer, record.on_ground)?;
+    write_u8(writer, record.selected_hotbar_slot)?;
+    write_u64(writer, record.total_experience)?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> {
+    let mut magic = [0_u8; PLAYER_RECORD_MAGIC.len()];
+    reader.read_exact(&mut magic)?;
+    if &magic != PLAYER_RECORD_MAGIC {
+        return Err(ChunkStoreError::InvalidData(
+            "player record had invalid magic".to_owned(),
+        ));
+    }
+    let codec_version = read_u32(reader)?;
+    if codec_version != PLAYER_RECORD_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported player record codec version {codec_version}"
+        )));
+    }
+    let player = PlayerRecordKey::Uuid(read_string(reader)?);
+    let record = PlayerRecord {
+        player,
+        codec_version,
+        revision: read_u64(reader)?,
+        last_known_name: read_string(reader)?,
+        dimension: read_string(reader)?,
+        position: read_vec3d(reader)?,
+        y_rot_degrees: read_f32(reader)?,
+        x_rot_degrees: read_f32(reader)?,
+        on_ground: read_bool(reader)?,
+        selected_hotbar_slot: read_u8(reader)?,
+        total_experience: read_u64(reader)?,
+    };
+    if !record.position.is_finite()
+        || !record.y_rot_degrees.is_finite()
+        || !record.x_rot_degrees.is_finite()
+    {
+        return Err(ChunkStoreError::InvalidData(
+            "player record pose must be finite".to_owned(),
+        ));
+    }
+    Ok(record)
 }
 
 fn write_entity_save_record(
@@ -3134,6 +3526,16 @@ mod tests {
     }
 
     #[test]
+    fn binary_player_record_format_roundtrips_identity_pose_and_progress() {
+        let record = test_player_record(43);
+
+        let bytes = encode_player_record(&record).unwrap();
+        let decoded = decode_player_record(&bytes).unwrap();
+
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
     fn actor_load_sees_pending_same_chunk_write() {
         let mut mailbox = PersistenceMailbox::memory();
         let pos = ChunkPos::new(2, 3);
@@ -3582,19 +3984,21 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn sqlite_world_store_roundtrips_chunk_and_entity_records_across_reopen() {
+    fn sqlite_world_store_roundtrips_world_records_across_reopen() {
         let root = unique_temp_dir("sqlite_world_store_roundtrips_records");
         let path = root.join("world.sqlite3");
         let chunk_pos = ChunkPos::new(21, -3);
         let entity_pos = ChunkPos::new(21, -2);
         let chunk = test_record(chunk_pos, 14);
         let entity_chunk = test_entity_chunk_record(entity_pos, 15);
+        let player = test_player_record(16);
 
         {
             let mut store = SqliteWorldStore::new(&path).unwrap();
             assert!(store.supports_entity_chunks());
             store.save_chunk(&chunk).unwrap();
             store.save_entity_chunk(&entity_chunk).unwrap();
+            store.save_player(&player).unwrap();
             store.flush().unwrap();
             store.close().unwrap();
         }
@@ -3607,6 +4011,7 @@ mod tests {
                 reopened.load_entity_chunk(entity_pos).unwrap(),
                 Some(entity_chunk)
             );
+            assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
             assert_eq!(reopened.load_chunk(ChunkPos::new(99, 99)).unwrap(), None);
             assert_eq!(
                 reopened.load_entity_chunk(ChunkPos::new(99, 99)).unwrap(),
@@ -3626,6 +4031,7 @@ mod tests {
         let entity_pos = ChunkPos::new(22, 4);
         let chunk = test_record(chunk_pos, 16);
         let entity_chunk = test_entity_chunk_record(entity_pos, 17);
+        let player = test_player_record(18);
 
         {
             let store = SqliteWorldStore::new(&path).unwrap();
@@ -3633,6 +4039,7 @@ mod tests {
             let chunk_save_id = mailbox.save_chunk(chunk.clone(), SaveDurability::Durable);
             let entity_save_id =
                 mailbox.save_entity_chunk(entity_chunk.clone(), SaveDurability::Durable);
+            let player_save_id = mailbox.save_player(player.clone());
             let close_id = mailbox.close();
 
             assert_eq!(
@@ -3641,6 +4048,10 @@ mod tests {
             );
             assert_eq!(
                 take_saved_entity_chunk_wait(&mut mailbox, entity_save_id),
+                StoreWriteOutcome::Written
+            );
+            assert_eq!(
+                take_saved_player_wait(&mut mailbox, player_save_id),
                 StoreWriteOutcome::Written
             );
             take_close_complete_wait(&mut mailbox, close_id);
@@ -3653,6 +4064,7 @@ mod tests {
                 reopened.load_entity_chunk(entity_pos).unwrap(),
                 Some(entity_chunk)
             );
+            assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
         }
 
         fs::remove_dir_all(root).unwrap();
@@ -3692,6 +4104,22 @@ mod tests {
                 stack: ItemStackSaveRecord::new("minecraft:egg", 3),
                 pickup_delay: 7,
             },
+        }
+    }
+
+    fn test_player_record(revision: u64) -> PlayerRecord {
+        PlayerRecord {
+            player: PlayerRecordKey::Uuid("00112233-4455-6677-8899-aabbccddeeff".to_owned()),
+            codec_version: PLAYER_RECORD_VERSION,
+            revision,
+            last_known_name: "Builder".to_owned(),
+            dimension: "minecraft:overworld".to_owned(),
+            position: Vec3d::new(12.25, 78.5, -44.75),
+            y_rot_degrees: 123.0,
+            x_rot_degrees: -12.5,
+            on_ground: false,
+            selected_hotbar_slot: 4,
+            total_experience: 987,
         }
     }
 
@@ -3816,6 +4244,17 @@ mod tests {
     ) -> StoreWriteOutcome {
         match take_completion_wait(mailbox, request_id) {
             WorldStoreCompletion::EntityChunkSaved { result, .. } => result.unwrap(),
+            completion => panic!("unexpected completion: {completion:?}"),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn take_saved_player_wait(
+        mailbox: &mut PersistenceMailbox,
+        request_id: PersistenceRequestId,
+    ) -> StoreWriteOutcome {
+        match take_completion_wait(mailbox, request_id) {
+            WorldStoreCompletion::PlayerSaved { result, .. } => result.unwrap(),
             completion => panic!("unexpected completion: {completion:?}"),
         }
     }

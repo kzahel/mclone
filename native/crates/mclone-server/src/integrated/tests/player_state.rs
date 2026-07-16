@@ -1,4 +1,5 @@
 use super::*;
+use crate::MemoryWorldStore;
 
 #[test]
 fn frozen_day_time_holds_a_forced_value() {
@@ -74,6 +75,72 @@ fn first_chunk_view_sends_safe_surface_spawn_position() {
     assert!(updates.is_empty());
     assert_eq!(server.player.awaiting_teleport(), None);
     assert_eq!(server.player.position(), spawn.position);
+}
+
+#[test]
+fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
+    let seed = 12_345;
+    let mut probe = IntegratedServer::new(seed);
+    request_initial_chunk_view(&mut probe);
+    let safe_spawn = wait_for_initial_spawn_update(&mut probe).position;
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x42; 16]), "Builder").unwrap();
+    let mut record = PlayerRecord::new(
+        player_record_key(identity.profile_id),
+        7,
+        identity.display_name.clone(),
+        safe_spawn.add(Vec3d::new(0.0, 2.0, 0.0)),
+    );
+    record.y_rot_degrees = 135.0;
+    record.x_rot_degrees = -22.5;
+    record.on_ground = false;
+    record.selected_hotbar_slot = 4;
+    record.total_experience = 19;
+    let mut store = MemoryWorldStore::new();
+    store.save_player(&record).unwrap();
+
+    let mut server = IntegratedServer::with_world_store(seed, Box::new(store));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    request_initial_chunk_view(&mut server);
+    let resumed = wait_for_initial_spawn_update(&mut server);
+
+    assert_eq!(resumed.position, record.position);
+    assert_eq!(resumed.y_rot_degrees, record.y_rot_degrees);
+    assert_eq!(resumed.x_rot_degrees, record.x_rot_degrees);
+    assert!(!server.player.on_ground());
+    assert_eq!(server.inventory.selected_hotbar_slot(), 4);
+    assert_eq!(server.local_player_total_experience, 19);
+}
+
+#[test]
+fn blocked_saved_player_pose_falls_back_to_safe_surface_nearby() {
+    let seed = 12_345;
+    let mut probe = IntegratedServer::new(seed);
+    request_initial_chunk_view(&mut probe);
+    let safe_spawn = wait_for_initial_spawn_update(&mut probe).position;
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x24; 16]), "Explorer").unwrap();
+    let blocked_position = safe_spawn.add(Vec3d::new(0.0, -1.0, 0.0));
+    let record = PlayerRecord::new(
+        player_record_key(identity.profile_id),
+        3,
+        identity.display_name.clone(),
+        blocked_position,
+    );
+    let mut store = MemoryWorldStore::new();
+    store.save_player(&record).unwrap();
+
+    let mut server = IntegratedServer::with_world_store(seed, Box::new(store));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    request_initial_chunk_view(&mut server);
+    let resumed = wait_for_initial_spawn_update(&mut server);
+
+    assert_ne!(resumed.position, blocked_position);
+    assert!(server.player_pose_has_clearance(resumed.position));
+    assert_eq!(resumed.position.x.floor(), blocked_position.x.floor());
+    assert_eq!(resumed.position.z.floor(), blocked_position.z.floor());
 }
 
 #[test]

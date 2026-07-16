@@ -1,8 +1,9 @@
 export const WORLD_DB_NAME = "mclone-web-worlds";
-export const WORLD_DB_VERSION = 3;
+export const WORLD_DB_VERSION = 4;
 export const WORLD_CATALOG_STORE = "worlds";
 export const WORLD_CHUNK_STORE = "chunks";
 export const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
+export const WORLD_PLAYER_STORE = "players";
 export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
 export const WORLD_ID_INDEX = "worldId";
 
@@ -125,6 +126,7 @@ export function openWorldDb(): Promise<IDBDatabase> {
       const db = request.result;
       ensureWorldRecordStore(db, request.transaction, WORLD_CHUNK_STORE);
       ensureWorldRecordStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
+      ensureWorldPlayerStore(db, request.transaction);
       ensureWorldCatalogStore(db);
       ensureManagedWorldMetadataStore(db);
     };
@@ -225,6 +227,7 @@ export async function clearIndexedDbWorldRecords(
   await Promise.all([
     clearIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, WORLD_PLAYER_STORE, worldId),
   ]);
 }
 
@@ -368,6 +371,23 @@ function ensureWorldRecordStore(
     return;
   }
   const store = db.createObjectStore(storeName, { keyPath: ["worldId", "x", "z"] });
+  store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+}
+
+function ensureWorldPlayerStore(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null,
+): void {
+  if (db.objectStoreNames.contains(WORLD_PLAYER_STORE)) {
+    const store = transaction?.objectStore(WORLD_PLAYER_STORE);
+    if (store && !store.indexNames.contains(WORLD_ID_INDEX)) {
+      store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+    }
+    return;
+  }
+  const store = db.createObjectStore(WORLD_PLAYER_STORE, {
+    keyPath: ["worldId", "playerKey"],
+  });
   store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
 }
 

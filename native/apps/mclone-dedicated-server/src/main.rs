@@ -355,6 +355,10 @@ fn run_server_loop_inner(
     mode: ServerRunMode,
 ) -> Result<()> {
     let mut sessions = BTreeMap::<DedicatedConnectionId, DedicatedSession>::new();
+    let mut session_profiles =
+        BTreeMap::<DedicatedConnectionId, mclone_protocol::PlayerProfileId>::new();
+    let mut active_profiles =
+        BTreeMap::<mclone_protocol::PlayerProfileId, DedicatedConnectionId>::new();
     let mut outbound = BTreeMap::<DedicatedConnectionId, connection::DedicatedOutbound>::new();
     let mut session_command_counts = BTreeMap::<DedicatedConnectionId, usize>::new();
     let mut summary = DedicatedServerSummary::default();
@@ -389,13 +393,45 @@ fn run_server_loop_inner(
                 DedicatedNetworkEvent::Connected {
                     id,
                     peer_addr,
+                    identity,
                     outbound: connection_outbound,
                 } => {
-                    let player_id = server.add_dedicated_player();
+                    if let Some(existing) = active_profiles.get(&identity.profile_id) {
+                        let message = format!(
+                            "profile {:?} is already connected as {existing}",
+                            identity.profile_id
+                        );
+                        let _ = connection_outbound.close(message.clone());
+                        log::warn!(
+                            "rejected duplicate dedicated client {id} from {peer_addr}: {message}"
+                        );
+                        continue;
+                    }
+                    let player_id =
+                        match server.add_dedicated_player_with_identity(identity.clone()) {
+                            Ok(player_id) => player_id,
+                            Err(error) => {
+                                let message = format!(
+                                    "failed to load player record for {:?}: {error}",
+                                    identity.profile_id
+                                );
+                                let _ = connection_outbound.close(message.clone());
+                                log::warn!(
+                                    "rejected dedicated client {id} from {peer_addr}: {message}"
+                                );
+                                continue;
+                            }
+                        };
                     sessions.insert(id, DedicatedSession::new(player_id));
+                    session_profiles.insert(id, identity.profile_id);
+                    active_profiles.insert(identity.profile_id, id);
                     outbound.insert(id, connection_outbound);
                     session_command_counts.insert(id, 0);
-                    log::info!("accepted dedicated client {id} from {peer_addr}");
+                    log::info!(
+                        "accepted dedicated client {id} from {peer_addr} as {} ({:?})",
+                        identity.display_name,
+                        identity.profile_id
+                    );
                 }
                 DedicatedNetworkEvent::Command {
                     id,
@@ -425,7 +461,13 @@ fn run_server_loop_inner(
                             if let Some(connection_outbound) = outbound.remove(&id) {
                                 let _ = connection_outbound.close(message.clone());
                             }
-                            remove_session_player(server, &mut sessions, id);
+                            remove_session_player(
+                                server,
+                                &mut sessions,
+                                &mut session_profiles,
+                                &mut active_profiles,
+                                id,
+                            );
                             session_command_counts.remove(&id);
                             if mode == ServerRunMode::ServeOnce {
                                 exit_error = Some(
@@ -448,7 +490,13 @@ fn run_server_loop_inner(
                     reason,
                 } => {
                     outbound.remove(&id);
-                    remove_session_player(server, &mut sessions, id);
+                    remove_session_player(
+                        server,
+                        &mut sessions,
+                        &mut session_profiles,
+                        &mut active_profiles,
+                        id,
+                    );
                     let connection_command_count =
                         session_command_counts.remove(&id).unwrap_or(command_count);
                     println!(
@@ -532,7 +580,13 @@ fn run_server_loop_inner(
         }
         for (id, update_count, error) in failed_publications {
             summary.record_publication_disconnect(error.to_string().contains("queue reached"));
-            remove_session_player(server, &mut sessions, id);
+            remove_session_player(
+                server,
+                &mut sessions,
+                &mut session_profiles,
+                &mut active_profiles,
+                id,
+            );
             outbound.remove(&id);
             let command_count = session_command_counts.remove(&id).unwrap_or_default();
             println!(
@@ -589,6 +643,9 @@ fn advance_dedicated_host_frame(
         server
             .save_dirty_chunks()
             .context("failed to queue dedicated autosave")?;
+        server
+            .save_all_player_records()
+            .context("failed to queue dedicated player autosave")?;
     }
     Ok(DedicatedSessionDiagnostics::from_report(
         &report,
@@ -728,11 +785,22 @@ fn micros_to_ms(value: u128) -> f64 {
 fn remove_session_player(
     server: &mut IntegratedServer,
     sessions: &mut BTreeMap<DedicatedConnectionId, DedicatedSession>,
+    session_profiles: &mut BTreeMap<DedicatedConnectionId, mclone_protocol::PlayerProfileId>,
+    active_profiles: &mut BTreeMap<mclone_protocol::PlayerProfileId, DedicatedConnectionId>,
     connection_id: DedicatedConnectionId,
 ) {
+    if let Some(profile_id) = session_profiles.remove(&connection_id) {
+        active_profiles.remove(&profile_id);
+    }
     let Some(session) = sessions.remove(&connection_id) else {
         return;
     };
+    if let Err(error) = server.save_dedicated_player_record(session.player_id()) {
+        log::warn!(
+            "failed to save player {} for connection {connection_id}: {error}",
+            session.player_id()
+        );
+    }
     server.remove_dedicated_player(session.player_id());
 }
 
@@ -745,8 +813,8 @@ mod tests {
     };
     use mclone_net::NativeClientIoSession;
     use mclone_protocol::{
-        AcceptTeleportCommand, ChunkView, ClientCommand, MovePlayerCommand, PlayerActionCommand,
-        PlayerActionKind, RemotePlayerId, ServerUpdate,
+        AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, MovePlayerCommand,
+        PlayerActionCommand, PlayerActionKind, PlayerProfileId, RemotePlayerId, ServerUpdate,
     };
 
     #[test]
@@ -1174,7 +1242,10 @@ mod tests {
         });
 
         let client_a = std::thread::spawn(move || {
-            let mut session = NativeClientIoSession::connect(addr).unwrap();
+            let identity =
+                ClientIdentity::new(PlayerProfileId::new([0xA1; 16]), "PlayerA").unwrap();
+            let mut session =
+                NativeClientIoSession::connect_with_identity(addr, &identity).unwrap();
             session
                 .send_command_only(ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(0, 0),
@@ -1187,7 +1258,10 @@ mod tests {
             })
         });
         let client_b = std::thread::spawn(move || {
-            let mut session = NativeClientIoSession::connect(addr).unwrap();
+            let identity =
+                ClientIdentity::new(PlayerProfileId::new([0xB2; 16]), "PlayerB").unwrap();
+            let mut session =
+                NativeClientIoSession::connect_with_identity(addr, &identity).unwrap();
             session
                 .send_command_only(ClientCommand::SetChunkView(ChunkView {
                     center: ChunkPos::new(1, 0),
