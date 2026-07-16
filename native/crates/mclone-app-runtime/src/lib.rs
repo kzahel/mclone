@@ -16,6 +16,7 @@ pub mod frame_pipeline_accounting;
 pub mod frame_pipeline_presentation;
 pub mod frame_render;
 pub mod host_mode;
+pub mod local_profile;
 pub mod lod_coverage;
 pub mod monotonic;
 #[cfg(not(target_arch = "wasm32"))]

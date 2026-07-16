@@ -30,6 +30,7 @@ mclone-ui.workspace = true
 mclone-worldgen.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+uuid.workspace = true
 wgpu.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

@@ -7,8 +7,11 @@ pose-publication follow-up complete 2026-07-14. Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md) delivered
 autonomous dedicated ticking, native TCP/direct WebSocket push,
 native/browser consumer convergence, bounded pressure, conformance evidence,
-and compatibility cleanup. Session lifecycle and persistence metadata are the
-next priorities.
+and compatibility cleanup. Tactical
+[`182`](../tactical/182-local-profile-and-player-persistence-proof.md) now
+plans the first session/persistence vertical slice: inspectable/resettable
+client-global UUID identity, explicit local-data controls, durable world/player
+records, identity-bearing join, safe resume, and a gated experience proof.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -267,6 +270,11 @@ later phases remain topic-level direction.
    `placeNewPlayer`; keepalive/timeout (15 s / 30 s to start); explicit
    disconnect messages; rejoin-as-same-player keyed on profile id (needs the
    persistence track's player records for position/inventory restore).
+   Tactical
+   [`182`](../tactical/182-local-profile-and-player-persistence-proof.md)
+   owns the first unauthenticated identity/player-record proof and its local
+   data-management prerequisite; keepalive and the remaining session lifecycle
+   follow after that proof.
 3. **Movement validation (basic anti-teleport).** Vanilla's checks server-
    side: packet-burst clamp, moved-too-quickly, collision replay +
    moved-wrongly, floating kick, with the local-integrated owner exempted
@@ -309,11 +317,12 @@ lane, expressed in time units.
 
 ## Open questions
 
-- Player identity source on each platform (generated UUID in config/world
-  catalog? per-install?) and whether the local integrated player shares the
-  identity path (today `ServerPlayerId::LOCAL` is structurally special —
-  `mclone-server/src/integrated.rs:337-339` — and local play is hard-wired
-  single-player).
+- Player identity source is decided for the first unauthenticated phase: one
+  generated client-global UUID per native app installation or browser origin,
+  outside world stores; local integrated and remote dedicated join through the
+  same logical profile contract. Flat Android and Android XR have separate app
+  identities today. Tactical 182 owns storage paths, reset semantics, and the
+  replacement of the structurally special local identity path.
 - Whether the in-process runner channel should carry the full session
   handshake too (uniformity, cheap testing of login flow) or remain a
   trusted fast path.
