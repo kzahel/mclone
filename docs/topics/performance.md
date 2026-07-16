@@ -57,11 +57,23 @@ The preferred bounded pickup order is:
 2. On a pose-only change, reuse the existing index data and index buffer;
    rebuild and upload vertices only. Prove index rebuild/upload counts stay
    unchanged across movement and walk animation.
-3. Track stable per-actor vertex spans so one changed pose rebuilds and uploads
-   only that actor's vertex range rather than the combined mesh.
-4. Consider GPU part transforms, instancing, or skinning only after the bounded
-   CPU/cache improvements are measured. Those are larger architecture choices,
-   not prerequisites for the first win.
+3. For the CPU-baked fallback, consider stable per-actor vertex spans so one
+   changed pose rebuilds and uploads only that actor's vertex range rather than
+   the combined mesh.
+4. Treat Asset Lab figures separately from that fallback. Their semantic source
+   already provides rigid hierarchical parts, pivots, primitive topology, and
+   clips suitable for static compiled geometry plus GPU part transforms. The
+   selected [`compiled-figure-rendering`](compiled-figure-rendering.md) topic
+   owns that broader direction, including real UV/texture compilation,
+   presentation-rate rigid-part animation, instancing, and generated figure
+   LODs. Proposed Tactical
+   [`181`](../tactical/181-compiled-figure-static-box-proof.md) deliberately
+   proves the artifact and static renderer before crowd optimization.
+
+Do not make a large CPU span-cache campaign a prerequisite for the compiled
+Asset Lab path. Index reuse remains the low-risk first win; measurements and
+the compiled-figure contract should decide how much fallback range-update work
+is worthwhile before the static-geometry path is proven.
 
 Acceptance evidence should include:
 
@@ -79,7 +91,8 @@ resources may be shared, but mutable actor caches remain per drawable world.
 Useful references are Tactical
 [`131`](../tactical/131-quest-cpu-gpu-overlap-and-frame-cost-hygiene.md#finding-2-the-actor-pass-allocates-fresh-gpu-buffers-per-eye-per-frame),
 Tactical [`179`](../tactical/179-composable-world-presentation-and-live-preview-actors.md),
-and [`../entity-architecture.md`](../entity-architecture.md).
+[`compiled-figure-rendering.md`](compiled-figure-rendering.md), and
+[`../entity-architecture.md`](../entity-architecture.md).
 
 ## Current Baseline
 

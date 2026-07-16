@@ -30,3 +30,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   Initial dual-integrated-host ownership smoke added; no commit series yet
 - `performance` — high-priority known performance issues, measured pickup
   queue, baselines, and cross-platform performance follow-ups
+- `compiled-figure-rendering` — compiled figure artifact, static local-space
+  GPU geometry, presentation-rate rigid-part animation, instancing, and
+  generated figure LOD direction; Tactical 181 static-box proof

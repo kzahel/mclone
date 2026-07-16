@@ -64,6 +64,13 @@ series implements the same concern, normally reuse the document slug in its
   and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+- [`compiled-figure-rendering.md`](compiled-figure-rendering.md): selected
+  direction for compiling Asset Lab primitives, textures, rigs, clips, and
+  generated LODs into shared static GPU figures with presentation-rate
+  rigid-part animation, optional measured crowd pose evaluation, instancing,
+  and cross-platform validation. Tactical
+  [`181`](../tactical/181-compiled-figure-static-box-proof.md) owns the first
+  bounded static-box/UV artifact proof.
 - [`asset-pack-profiles.md`](asset-pack-profiles.md): shared UI asset-pack
   selection, pack-time generated missing assets, runtime provenance, and the
   standalone first-party boundary.
