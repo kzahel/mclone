@@ -15,6 +15,7 @@ mclone-physics = { workspace = true, optional = true }
 mclone-protocol.workspace = true
 mclone-worldgen.workspace = true
 serde.workspace = true
+uuid.workspace = true
 
 [features]
 default = []

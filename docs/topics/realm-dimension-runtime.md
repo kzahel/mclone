@@ -2,10 +2,10 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-2 are
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-3 are
 complete. Every host uses one `RealmServer`, the integrated player is ordinary,
-and neutral realm/dimension identities plus the one-Overworld registry are
-live. Slice 3 dimension-qualified persistence is next.**
+and realm/dimension identities plus dimension-qualified native and browser
+persistence are live. Slice 4 multi-dimension runtime ownership is next.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -35,8 +35,9 @@ The first structural cleanup is now complete:
 - normalized in-memory, TCP, and WebSocket join/command traces are locked by
   tests before multi-dimension behavior is added.
 
-Dimension, observer, and statistics work can now build on the ordinary-player
-topology rather than preserving the retired local-player exception.
+Multi-dimension runtime, observer, transfer, and statistics work can now build
+on the ordinary-player topology and collision-safe persistence rather than
+preserving the retired local-player exception.
 
 ## Concept Model
 
@@ -105,7 +106,8 @@ client replica. Those extensions do not change the shared server topology.
 
 ## Verified Current Mclone State
 
-The host topology is unified, while dimension ownership is still singleton:
+The host topology and persistence model are unified, while live dimension
+ownership is still singleton:
 
 - native integrated and browser/Web Worker hosts wrap `RealmServer` in a thin
   `LocalRealmSession`; dedicated TCP/WebSocket hosts own `RealmServer`
@@ -116,23 +118,25 @@ The host topology is unified, while dimension ownership is still singleton:
   players;
 - the server still owns one scheduler/entity/time/store domain and therefore
   exactly one current dimension;
-- `RealmServer` owns an explicit `RealmId` and one-entry `DimensionRegistry`;
-  compatibility stores use a named legacy id until Slice 3 persists a unique
-  id in realm metadata;
+- `RealmServer` owns an explicit, persisted `RealmId` and one-entry
+  `DimensionRegistry`; exact v1 metadata receives a stable generated UUID on
+  first open;
 - `mclone-protocol` owns validated `DimensionKey` and `DimensionChunkPos`
   boundary types, while hot scheduler code remains scoped by runtime and uses
   plain `ChunkPos`;
-- player records already key by profile UUID but currently hard-code
-  `minecraft:overworld` on write/resume;
-- SQLite and IndexedDB chunk/entity record keys have no dimension component;
+- player records remain realm-root records keyed by profile UUID and carry a
+  validated current `DimensionKey`;
+- SQLite and IndexedDB chunk/entity records are dimension-qualified, with
+  exact v1/v5 rows migrated to `minecraft:overworld` and native collision
+  coverage for equal coordinates in different dimensions;
 - `PlayerChunkTracking` reduces player views to one anonymous aggregate chunk
   set;
 - the current warm diorama starts a full second joined runtime with a real
   server-side local player. Input suppression makes it non-interactive, not an
   observer.
 
-The next work can therefore qualify and multiply dimension ownership without
-preserving a second integrated-only gameplay path.
+The next work can therefore multiply live dimension ownership without a
+persistence collision or a second integrated-only gameplay path.
 
 ## Hard Topology Invariants
 

@@ -12,6 +12,7 @@ import {
 import {
   WORLD_CHUNK_STORE,
   WORLD_ENTITY_CHUNK_STORE,
+  WORLD_DIMENSION_STORE,
   WORLD_METADATA_STORE,
   WORLD_PLAYER_STORE,
   WORLD_ID_INDEX,
@@ -78,6 +79,7 @@ type RunnerOutboundMessage = Record<string, any> & {
 
 interface IndexedDbRecord {
   worldId: string;
+  dimensionKey: string;
   x: number;
   z: number;
   record: Uint8Array;
@@ -100,6 +102,7 @@ interface IndexedDbLoadRequest {
   requestId: number;
   x?: number;
   z?: number;
+  dimensionKey?: string;
   playerKey?: string;
 }
 
@@ -524,6 +527,7 @@ async function loadIndexedDbRecords(
 async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string, any>): Promise<void> {
   const chunks = indexedDbRecordsFromResult(worldId, result.indexedDbChunks);
   const entityChunks = indexedDbRecordsFromResult(worldId, result.indexedDbEntityChunks);
+  const dimensions = indexedDbDimensionRecordsFromResult(worldId, result.indexedDbDimensions);
   const players = indexedDbPlayerRecordsFromResult(worldId, result.indexedDbPlayers);
   const worldMetadata = indexedDbWorldMetadataFromResult(
     worldId,
@@ -532,6 +536,7 @@ async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string,
   if (
     chunks.length === 0
     && entityChunks.length === 0
+    && dimensions.length === 0
     && players.length === 0
     && !worldMetadata
   ) {
@@ -542,6 +547,7 @@ async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string,
     await Promise.all([
       putIndexedDbRecords(db, WORLD_CHUNK_STORE, chunks),
       putIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, entityChunks),
+      putIndexedDbDimensionRecords(db, dimensions),
       putIndexedDbPlayerRecords(db, players),
       putIndexedDbWorldMetadata(db, worldMetadata),
     ]);
@@ -596,6 +602,7 @@ function indexedDbLoadRequestsFromResult(result: Record<string, any>): IndexedDb
       requestId: Math.trunc(Number(record.requestId) || 0),
       x: Math.trunc(Number(record.x) || 0),
       z: Math.trunc(Number(record.z) || 0),
+      dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
       playerKey: String(record.playerKey ?? ""),
     };
   });
@@ -639,7 +646,12 @@ async function loadIndexedDbCompletion(
     if (typeof request.x !== "number" || typeof request.z !== "number") {
       throw new Error(`IndexedDB ${request.kind} load request is missing coordinates`);
     }
-    key = [worldId, request.x, request.z];
+    key = [
+      worldId,
+      request.dimensionKey ?? "minecraft:overworld",
+      request.x,
+      request.z,
+    ];
   }
   const requestHandle = transaction.objectStore(storeName).get(key);
   const record = await idbRequest<unknown>(requestHandle);
@@ -674,6 +686,38 @@ interface IndexedDbPlayerRecord {
   worldId: string;
   playerKey: string;
   record: Uint8Array;
+}
+
+interface IndexedDbDimensionRecord {
+  worldId: string;
+  dimensionKey: string;
+  record: Uint8Array;
+}
+
+async function putIndexedDbDimensionRecords(
+  db: IDBDatabase,
+  records: IndexedDbDimensionRecord[],
+): Promise<void> {
+  if (records.length === 0) return;
+  const transaction = db.transaction(WORLD_DIMENSION_STORE, "readwrite");
+  const store = transaction.objectStore(WORLD_DIMENSION_STORE);
+  for (const record of records) store.put(record);
+  await transactionDone(transaction);
+}
+
+function indexedDbDimensionRecordsFromResult(
+  worldId: string,
+  value: unknown,
+): IndexedDbDimensionRecord[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => {
+    const record = (entry ?? {}) as Record<string, unknown>;
+    return {
+      worldId,
+      dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
+      record: uint8ArrayFromUnknown(record.record),
+    };
+  });
 }
 
 async function putIndexedDbPlayerRecords(
@@ -718,6 +762,7 @@ function normalizeIndexedDbRecord(worldId: string, value: unknown): IndexedDbRec
   const record = (value ?? {}) as Record<string, unknown>;
   return {
     worldId,
+    dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
     x: Math.trunc(Number(record.x) || 0),
     z: Math.trunc(Number(record.z) || 0),
     record: uint8ArrayFromUnknown(record.record),

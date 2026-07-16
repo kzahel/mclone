@@ -12,20 +12,22 @@ use mclone_app_runtime::client_connection::{
 use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
 use mclone_core::{ChunkPos, ChunkStatus};
 use mclone_protocol::{
-    ChunkView, ClientCommand, ClientIdentity, PlayerProfileId, ServerUpdate, decode_client_command,
-    decode_server_update, encode_client_command, encode_server_update,
+    ChunkView, ClientCommand, ClientIdentity, DimensionChunkPos, DimensionKey, PlayerProfileId,
+    ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
+    encode_server_update,
 };
 use mclone_server::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
-    ChunkStoreError, ChunkStoreResult, EntityChunkRecord, INITIAL_DAY_TIME, IntegratedServerRunner,
-    LightStatusMailboxKind, LocalRealmSession, PlayerRecord, PlayerRecordKey,
-    ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
-    ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
-    WorkerFrameMetrics, WorkerFrameTransportKind, WorldGenerationProfile, WorldMetadata,
-    WorldMetadataLoad, WorldStore, WorldStoreCompletion, WorldStoreRequest, WorldgenJobSession,
-    WorldgenMailboxKind, compute_light_status_job_frame, decode_chunk_record,
-    decode_entity_chunk_record, decode_player_record, decode_world_metadata, encode_chunk_record,
-    encode_entity_chunk_record, encode_player_record, encode_world_metadata,
+    ChunkStoreError, ChunkStoreResult, DimensionRecord, EntityChunkRecord, INITIAL_DAY_TIME,
+    IntegratedServerRunner, LightStatusMailboxKind, LocalRealmSession, PlayerRecord,
+    PlayerRecordKey, ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind,
+    ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
+    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    WorldGenerationProfile, WorldMetadata, WorldMetadataLoad, WorldStore, WorldStoreCompletion,
+    WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind, compute_light_status_job_frame,
+    decode_chunk_record, decode_entity_chunk_record, decode_player_record, decode_world_metadata,
+    encode_chunk_record, encode_dimension_record, encode_entity_chunk_record, encode_player_record,
+    encode_world_metadata,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -842,6 +844,8 @@ impl WebIntegratedServerRunner {
 impl Drop for WebIntegratedServerRunner {
     fn drop(&mut self) {
         self.request_shutdown();
+        self.worker.set_onmessage(None);
+        self.worker.set_onerror(None);
         let _ = &self.message_closure;
         let _ = &self.error_closure;
     }
@@ -1710,11 +1714,13 @@ pub struct McloneWebIntegratedServerWorker {
 struct WebIndexedDbWorldStoreState {
     world_metadata: Option<WorldMetadata>,
     dirty_world_metadata: Option<WorldMetadata>,
+    dimensions: BTreeMap<DimensionKey, DimensionRecord>,
+    dirty_dimensions: BTreeMap<DimensionKey, DimensionRecord>,
     legacy_records_present: bool,
-    chunks: BTreeMap<ChunkPos, ChunkRecord>,
-    entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
-    dirty_chunks: BTreeMap<ChunkPos, ChunkRecord>,
-    dirty_entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
+    chunks: BTreeMap<DimensionChunkPos, ChunkRecord>,
+    entity_chunks: BTreeMap<DimensionChunkPos, EntityChunkRecord>,
+    dirty_chunks: BTreeMap<DimensionChunkPos, ChunkRecord>,
+    dirty_entity_chunks: BTreeMap<DimensionChunkPos, EntityChunkRecord>,
     players: BTreeMap<PlayerRecordKey, PlayerRecord>,
     dirty_players: BTreeMap<PlayerRecordKey, PlayerRecord>,
 }
@@ -1727,11 +1733,11 @@ impl WebIndexedDbWorldStoreState {
         legacy_records_present: bool,
     ) -> Result<Rc<RefCell<Self>>, String> {
         let mut state = Self::from_js_metadata(world_metadata_record, legacy_records_present)?;
-        for record in decode_chunk_records_from_js(&chunk_records)? {
-            state.chunks.insert(record.pos(), record);
+        for (address, record) in decode_chunk_records_from_js(&chunk_records)? {
+            state.chunks.insert(address, record);
         }
-        for record in decode_entity_chunk_records_from_js(&entity_chunk_records)? {
-            state.entity_chunks.insert(record.pos, record);
+        for (address, record) in decode_entity_chunk_records_from_js(&entity_chunk_records)? {
+            state.entity_chunks.insert(address, record);
         }
         state.legacy_records_present |= !state.chunks.is_empty() || !state.entity_chunks.is_empty();
         Ok(Rc::new(RefCell::new(state)))
@@ -1787,25 +1793,66 @@ impl WorldStore for WebIndexedDbWorldStore {
         true
     }
 
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
-        Ok(self.state.borrow().chunks.get(&pos).cloned())
+    fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
+        Ok(self.state.borrow().dimensions.get(key).cloned())
     }
 
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
         let mut state = self.state.borrow_mut();
-        state.chunks.insert(record.pos(), record.clone());
-        state.dirty_chunks.insert(record.pos(), record.clone());
+        state.dimensions.insert(record.key.clone(), record.clone());
+        state
+            .dirty_dimensions
+            .insert(record.key.clone(), record.clone());
         Ok(())
     }
 
-    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-        Ok(self.state.borrow().entity_chunks.get(&pos).cloned())
+    fn load_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
+        Ok(self
+            .state
+            .borrow()
+            .chunks
+            .get(&DimensionChunkPos::new(dimension.clone(), pos))
+            .cloned())
     }
 
-    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+    fn save_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
         let mut state = self.state.borrow_mut();
-        state.entity_chunks.insert(record.pos, record.clone());
-        state.dirty_entity_chunks.insert(record.pos, record.clone());
+        let address = DimensionChunkPos::new(dimension.clone(), record.pos());
+        state.chunks.insert(address.clone(), record.clone());
+        state.dirty_chunks.insert(address, record.clone());
+        Ok(())
+    }
+
+    fn load_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(self
+            .state
+            .borrow()
+            .entity_chunks
+            .get(&DimensionChunkPos::new(dimension.clone(), pos))
+            .cloned())
+    }
+
+    fn save_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        let address = DimensionChunkPos::new(dimension.clone(), record.pos);
+        state.entity_chunks.insert(address.clone(), record.clone());
+        state.dirty_entity_chunks.insert(address, record.clone());
         Ok(())
     }
 
@@ -2276,7 +2323,9 @@ fn worker_response(
     Ok(object.into())
 }
 
-fn decode_chunk_records_from_js(value: &JsValue) -> Result<Vec<ChunkRecord>, String> {
+fn decode_chunk_records_from_js(
+    value: &JsValue,
+) -> Result<Vec<(DimensionChunkPos, ChunkRecord)>, String> {
     if value.is_null() || value.is_undefined() {
         return Ok(Vec::new());
     }
@@ -2286,13 +2335,19 @@ fn decode_chunk_records_from_js(value: &JsValue) -> Result<Vec<ChunkRecord>, Str
         .map(|(index, entry)| {
             let bytes = js_record_bytes(&entry)
                 .map_err(|error| format!("indexedDB chunk record {index}: {error}"))?;
-            decode_chunk_record(&bytes)
-                .map_err(|error| format!("decode indexedDB chunk record {index}: {error}"))
+            let record = decode_chunk_record(&bytes)
+                .map_err(|error| format!("decode indexedDB chunk record {index}: {error}"))?;
+            let dimension = indexed_db_dimension_key(&entry).map_err(|error| {
+                format!("indexedDB chunk record {index} had invalid dimension: {error}")
+            })?;
+            Ok((DimensionChunkPos::new(dimension, record.pos()), record))
         })
         .collect()
 }
 
-fn decode_entity_chunk_records_from_js(value: &JsValue) -> Result<Vec<EntityChunkRecord>, String> {
+fn decode_entity_chunk_records_from_js(
+    value: &JsValue,
+) -> Result<Vec<(DimensionChunkPos, EntityChunkRecord)>, String> {
     if value.is_null() || value.is_undefined() {
         return Ok(Vec::new());
     }
@@ -2302,8 +2357,13 @@ fn decode_entity_chunk_records_from_js(value: &JsValue) -> Result<Vec<EntityChun
         .map(|(index, entry)| {
             let bytes = js_record_bytes(&entry)
                 .map_err(|error| format!("indexedDB entity chunk record {index}: {error}"))?;
-            decode_entity_chunk_record(&bytes)
-                .map_err(|error| format!("decode indexedDB entity chunk record {index}: {error}"))
+            let record = decode_entity_chunk_record(&bytes).map_err(|error| {
+                format!("decode indexedDB entity chunk record {index}: {error}")
+            })?;
+            let dimension = indexed_db_dimension_key(&entry).map_err(|error| {
+                format!("indexedDB entity chunk record {index} had invalid dimension: {error}")
+            })?;
+            Ok((DimensionChunkPos::new(dimension, record.pos), record))
         })
         .collect()
 }
@@ -2337,6 +2397,7 @@ fn attach_indexed_db_dirty_records(
 ) -> Result<(), String> {
     let chunks = chunk_records_to_js(&state.dirty_chunks)?;
     let entity_chunks = entity_chunk_records_to_js(&state.dirty_entity_chunks)?;
+    let dimensions = dimension_records_to_js(&state.dirty_dimensions)?;
     let players = player_records_to_js(&state.dirty_players)?;
     let world_metadata = world_metadata_to_js(state.dirty_world_metadata.as_ref())?;
     Reflect::set(response, &JsValue::from_str("indexedDbChunks"), &chunks)
@@ -2351,12 +2412,19 @@ fn attach_indexed_db_dirty_records(
         .map_err(|error| format!("failed to attach indexedDB players: {error:?}"))?;
     Reflect::set(
         response,
+        &JsValue::from_str("indexedDbDimensions"),
+        &dimensions,
+    )
+    .map_err(|error| format!("failed to attach indexedDB dimensions: {error:?}"))?;
+    Reflect::set(
+        response,
         &JsValue::from_str("indexedDbWorldMetadata"),
         &world_metadata,
     )
     .map_err(|error| format!("failed to attach indexedDB world metadata: {error:?}"))?;
     state.dirty_chunks.clear();
     state.dirty_entity_chunks.clear();
+    state.dirty_dimensions.clear();
     state.dirty_players.clear();
     state.dirty_world_metadata = None;
     Ok(())
@@ -2381,15 +2449,25 @@ fn indexed_db_load_requests_to_js(requests: Vec<WorldStoreRequest>) -> Result<Ar
     for request in requests {
         let object = Object::new();
         match request {
-            WorldStoreRequest::LoadChunk { request_id, pos } => {
+            WorldStoreRequest::LoadChunk {
+                request_id,
+                dimension,
+                pos,
+            } => {
                 set_string(&object, "kind", "chunk")?;
                 set_number(&object, "requestId", request_id as f64)?;
+                set_string(&object, "dimensionKey", dimension.as_str())?;
                 set_number(&object, "x", f64::from(pos.x))?;
                 set_number(&object, "z", f64::from(pos.z))?;
             }
-            WorldStoreRequest::LoadEntityChunk { request_id, pos } => {
+            WorldStoreRequest::LoadEntityChunk {
+                request_id,
+                dimension,
+                pos,
+            } => {
                 set_string(&object, "kind", "entityChunk")?;
                 set_number(&object, "requestId", request_id as f64)?;
+                set_string(&object, "dimensionKey", dimension.as_str())?;
                 set_number(&object, "x", f64::from(pos.x))?;
                 set_number(&object, "z", f64::from(pos.z))?;
             }
@@ -2426,6 +2504,7 @@ fn decode_indexed_db_load_completions_from_js(
         match kind.as_str() {
             "chunk" => {
                 let pos = indexed_db_completion_pos(&value, index)?;
+                let dimension = indexed_db_dimension_key(&value)?;
                 let result = decode_indexed_db_chunk_load_result(&value, pos).map_err(|error| {
                     ChunkStoreError::InvalidData(format!(
                         "indexedDB chunk load completion {index}: {error}"
@@ -2433,12 +2512,14 @@ fn decode_indexed_db_load_completions_from_js(
                 });
                 completions.push(WorldStoreCompletion::ChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result,
                 });
             }
             "entityChunk" => {
                 let pos = indexed_db_completion_pos(&value, index)?;
+                let dimension = indexed_db_dimension_key(&value)?;
                 let result =
                     decode_indexed_db_entity_chunk_load_result(&value, pos).map_err(|error| {
                         ChunkStoreError::InvalidData(format!(
@@ -2447,6 +2528,7 @@ fn decode_indexed_db_load_completions_from_js(
                     });
                 completions.push(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result,
                 });
@@ -2560,33 +2642,64 @@ fn indexed_db_completion_pos(value: &JsValue, index: u32) -> Result<ChunkPos, St
     ))
 }
 
-fn chunk_records_to_js(records: &BTreeMap<ChunkPos, ChunkRecord>) -> Result<Array, String> {
+fn indexed_db_dimension_key(value: &JsValue) -> Result<DimensionKey, String> {
+    match string_prop(value, "dimensionKey") {
+        Some(value) => DimensionKey::parse(&value).map_err(|error| error.to_string()),
+        None => Ok(DimensionKey::overworld()),
+    }
+}
+
+fn chunk_records_to_js(
+    records: &BTreeMap<DimensionChunkPos, ChunkRecord>,
+) -> Result<Array, String> {
     let array = Array::new();
-    for (pos, record) in records {
+    for (address, record) in records {
         let bytes = encode_chunk_record(record).map_err(|error| {
             format!(
-                "encode indexedDB chunk record ({}, {}): {error}",
-                pos.x, pos.z
+                "encode indexedDB chunk record {} ({}, {}): {error}",
+                address.dimension, address.pos.x, address.pos.z
             )
         })?;
-        let object: JsValue = indexed_db_record_to_js(*pos, bytes)?.into();
+        let object: JsValue =
+            indexed_db_record_to_js(&address.dimension, address.pos, bytes)?.into();
         array.push(&object);
     }
     Ok(array)
 }
 
 fn entity_chunk_records_to_js(
-    records: &BTreeMap<ChunkPos, EntityChunkRecord>,
+    records: &BTreeMap<DimensionChunkPos, EntityChunkRecord>,
 ) -> Result<Array, String> {
     let array = Array::new();
-    for (pos, record) in records {
+    for (address, record) in records {
         let bytes = encode_entity_chunk_record(record).map_err(|error| {
             format!(
-                "encode indexedDB entity chunk record ({}, {}): {error}",
-                pos.x, pos.z
+                "encode indexedDB entity chunk record {} ({}, {}): {error}",
+                address.dimension, address.pos.x, address.pos.z
             )
         })?;
-        let object: JsValue = indexed_db_record_to_js(*pos, bytes)?.into();
+        let object: JsValue =
+            indexed_db_record_to_js(&address.dimension, address.pos, bytes)?.into();
+        array.push(&object);
+    }
+    Ok(array)
+}
+
+fn dimension_records_to_js(
+    records: &BTreeMap<DimensionKey, DimensionRecord>,
+) -> Result<Array, String> {
+    let array = Array::new();
+    for (key, record) in records {
+        let bytes = encode_dimension_record(record)
+            .map_err(|error| format!("encode indexedDB dimension record {key}: {error}"))?;
+        let object = Object::new();
+        set_string(&object, "dimensionKey", key.as_str())?;
+        Reflect::set(
+            &object,
+            &JsValue::from_str("record"),
+            &Uint8Array::from(bytes.as_slice()),
+        )
+        .map_err(|error| format!("failed to attach IndexedDB dimension bytes: {error:?}"))?;
         array.push(&object);
     }
     Ok(array)
@@ -2618,8 +2731,13 @@ fn world_metadata_to_js(record: Option<&WorldMetadata>) -> Result<JsValue, Strin
     Ok(Uint8Array::from(bytes.as_slice()).into())
 }
 
-fn indexed_db_record_to_js(pos: ChunkPos, bytes: Vec<u8>) -> Result<Object, String> {
+fn indexed_db_record_to_js(
+    dimension: &DimensionKey,
+    pos: ChunkPos,
+    bytes: Vec<u8>,
+) -> Result<Object, String> {
     let object = Object::new();
+    set_string(&object, "dimensionKey", dimension.as_str())?;
     set_number(&object, "x", f64::from(pos.x))?;
     set_number(&object, "z", f64::from(pos.z))?;
     let bytes = Uint8Array::from(bytes.as_slice());

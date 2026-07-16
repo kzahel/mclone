@@ -1090,7 +1090,10 @@ fn run_live_diorama_mutation_smoke(
 
     let mut store = SqliteWorldStore::open_world_dir(&source_world_dir)?;
     let record = store
-        .load_chunk(block.chunk_pos())?
+        .load_chunk(
+            &mclone_protocol::DimensionKey::overworld(),
+            block.chunk_pos(),
+        )?
         .with_context(|| format!("persisted fixture lost chunk {:?}", block.chunk_pos()))?;
     let persisted_after_restart =
         snapshot_block_state(&record.snapshot, block) == AIR_BLOCK_STATE_ID;

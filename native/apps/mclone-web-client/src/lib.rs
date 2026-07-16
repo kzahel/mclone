@@ -770,7 +770,7 @@ pub fn try_run_web_runtime_smoke() -> ProtocolCodecResult<WebSmokeReport> {
         && transport_drained
         && protocol_codec_roundtrip
         && command_count == 2
-        && update_count == 10
+        && update_count == 12
         && loaded_chunk_count == 1;
 
     Ok(WebSmokeReport {
@@ -955,7 +955,7 @@ mod tests {
                 previous_chunk_unloaded: true,
                 protocol_codec_roundtrip: true,
                 command_count: 2,
-                update_count: 10,
+                update_count: 12,
                 loaded_chunk_count: 1,
             }
         );

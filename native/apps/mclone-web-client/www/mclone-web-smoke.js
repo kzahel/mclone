@@ -693,6 +693,7 @@ async function putIndexedDbSmokeRecord(db, storeName, worldId, x, z) {
   const transaction = db.transaction(storeName, "readwrite");
   transaction.objectStore(storeName).put({
     worldId,
+    dimensionKey: "minecraft:overworld",
     x,
     z,
     record: new Uint8Array([1, 2, 3, 4]),

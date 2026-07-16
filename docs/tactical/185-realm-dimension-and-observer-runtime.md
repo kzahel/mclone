@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-2 complete; dimension-qualified
-persistence is next in Slice 3
+Status: active 2026-07-16; Slices 0-3 complete; multi-dimension
+authoritative runtime is next in Slice 4
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -622,11 +622,39 @@ Exit: no gameplay or pixels change; existing worlds resolve exactly one
 
 ### Slice 3: Dimension-qualified persistence
 
+Status: complete 2026-07-16.
+
 - Add realm metadata/dimension record versions and explicit v1 migration.
 - Qualify native SQLite and browser IndexedDB chunk/entity keys by dimension.
 - Keep player records realm-scoped and accept a validated current dimension.
 - Add scoped store handles and cross-dimension collision tests using identical
   chunk/entity ids.
+
+Evidence:
+
+- world metadata v2 persists a generated non-nil `RealmId`; exact v1 metadata
+  decodes through a named legacy sentinel, is assigned a UUID on first open,
+  and reopens with that stable id thereafter;
+- validated binary `DimensionRecord` values and native SQLite
+  `dimension_records` establish the durable registry format, with the
+  compatibility Overworld definition initialized from realm metadata;
+- every `WorldStore` chunk/entity operation and persistence actor request is
+  dimension-qualified, while `PersistenceMailbox` provides a scoped handle so
+  scheduler hot paths retain plain `ChunkPos` values;
+- native SQLite schema v2 transactionally copies exact v1 chunk/entity rows
+  into `minecraft:overworld`; collision coverage persists distinct chunk and
+  entity-chunk records at the same `(0, 0)` in Overworld and `mclone:moon`;
+- browser IndexedDB v6 uses
+  `[worldId, dimensionKey, x, z]` for dimension chunks/entities, keeps player
+  records at the realm root, and cursor-copies recoverable v5 rows into the
+  Overworld-qualified stores during upgrade;
+- Web Worker IndexedDB loads, dirty saves, and dimension-definition writes
+  carry the validated dimension key end to end;
+- Web Worker teardown now clears browser event handlers before Rust closures
+  are released, so graceful shutdown cannot invoke a dropped callback;
+- the complete `mclone-server` suite (424 tests), focused browser migration
+  lock, web runtime codec smoke, native workspace check, browser/WASM check,
+  TypeScript check, and production browser smoke pass.
 
 Exit: two dimensions can persist `(0, 0)` independently; old worlds reopen as
 one Overworld realm on native and web.

@@ -41,22 +41,38 @@ impl WorldStore for SharedMemoryWorldStore {
         true
     }
 
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+    fn load_chunk(
+        &mut self,
+        _dimension: &mclone_protocol::DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
         Ok(self.chunks.borrow().get(&pos).cloned())
     }
 
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+    fn save_chunk(
+        &mut self,
+        _dimension: &mclone_protocol::DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
         self.chunks
             .borrow_mut()
             .insert(record.pos(), record.clone());
         Ok(())
     }
 
-    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+    fn load_entity_chunk(
+        &mut self,
+        _dimension: &mclone_protocol::DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
         Ok(self.entity_chunks.borrow().get(&pos).cloned())
     }
 
-    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+    fn save_entity_chunk(
+        &mut self,
+        _dimension: &mclone_protocol::DimensionKey,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
         self.entity_chunks
             .borrow_mut()
             .insert(record.pos, record.clone());

@@ -52,8 +52,8 @@ use crate::falling_block::{
 use crate::game_mode::ServerInteractionContext;
 use crate::inventory::ServerInventory;
 use crate::persistence::{
-    EntityChunkRecord, EntityPersistentId, PlayerRecord, PlayerRecordKey, StoreWriteOutcome,
-    WorldMetadata,
+    DimensionRecord, EntityChunkRecord, EntityPersistentId, PlayerRecord, PlayerRecordKey,
+    StoreWriteOutcome, WorldMetadata,
 };
 #[cfg(feature = "physics-engine")]
 use crate::physics_runtime::ServerPhysicsRuntime;
@@ -519,31 +519,64 @@ impl RealmServer {
         let load = self.scheduler.load_world_metadata_blocking()?;
         let metadata_was_present = load.record.is_some();
         let requested_generation = self.scheduler.world_generation_profile();
+        let mut metadata_needs_migration = false;
         let mut metadata = match load.record {
-            Some(metadata) => {
+            Some(mut metadata) => {
                 validate_world_metadata(
                     &metadata,
                     self.seed,
                     requested_generation,
                     self.world_behavior_profile,
                 )?;
+                if metadata.realm_id == RealmId::LEGACY_SINGLE_REALM {
+                    if self.realm_id == RealmId::LEGACY_SINGLE_REALM {
+                        self.realm_id = fresh_realm_id();
+                    }
+                    metadata.realm_id = self.realm_id;
+                    metadata.codec_version = crate::persistence::WORLD_METADATA_VERSION;
+                    metadata.revision = metadata.revision.saturating_add(1);
+                    metadata_needs_migration = true;
+                } else {
+                    if self.realm_id != RealmId::LEGACY_SINGLE_REALM
+                        && self.realm_id != metadata.realm_id
+                    {
+                        return Err(ChunkStoreError::InvalidData(format!(
+                            "realm id mismatch: stored {}, requested {}",
+                            metadata.realm_id, self.realm_id
+                        )));
+                    }
+                    self.realm_id = metadata.realm_id;
+                }
                 metadata
             }
-            None if load.legacy_records_present => WorldMetadata::legacy_mclone(
-                self.seed,
-                requested_generation,
-                self.world_behavior_profile,
-                now_unix_millis,
-                INITIAL_DAY_TIME,
-            ),
-            None => WorldMetadata::new(
-                self.seed,
-                requested_generation,
-                self.world_behavior_profile,
-                now_unix_millis,
-            ),
+            None if load.legacy_records_present => {
+                if self.realm_id == RealmId::LEGACY_SINGLE_REALM {
+                    self.realm_id = fresh_realm_id();
+                }
+                let mut metadata = WorldMetadata::new_in_realm(
+                    self.realm_id,
+                    self.seed,
+                    requested_generation,
+                    self.world_behavior_profile,
+                    now_unix_millis,
+                );
+                metadata.day_time = INITIAL_DAY_TIME;
+                metadata
+            }
+            None => {
+                if self.realm_id == RealmId::LEGACY_SINGLE_REALM {
+                    self.realm_id = fresh_realm_id();
+                }
+                WorldMetadata::new_in_realm(
+                    self.realm_id,
+                    self.seed,
+                    requested_generation,
+                    self.world_behavior_profile,
+                    now_unix_millis,
+                )
+            }
         };
-        if !metadata_was_present {
+        if !metadata_was_present || metadata_needs_migration {
             match self
                 .scheduler
                 .save_world_metadata_blocking(metadata.clone())?
@@ -555,6 +588,31 @@ impl RealmServer {
                     ));
                 }
             }
+        }
+        let overworld_record =
+            DimensionRecord::overworld(metadata.seed, metadata.world_generation_profile);
+        match self
+            .scheduler
+            .load_dimension_blocking(DimensionKey::overworld())?
+        {
+            Some(stored)
+                if stored.key != overworld_record.key
+                    || stored.definition != overworld_record.definition =>
+            {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "stored {} dimension definition does not match realm metadata",
+                    stored.key
+                )));
+            }
+            Some(_) => {}
+            None => match self.scheduler.save_dimension_blocking(overworld_record)? {
+                StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+                StoreWriteOutcome::SkippedOnClose => {
+                    return Err(ChunkStoreError::Closed(
+                        "Overworld dimension initialization was skipped on close".to_owned(),
+                    ));
+                }
+            },
         }
         self.simulation_tick = metadata.game_time;
         self.day_time = metadata.day_time;
@@ -2961,7 +3019,7 @@ fn chunk_pos_for_player_position(position: Vec3d) -> ChunkPos {
 
 fn player_record_is_usable(record: &PlayerRecord) -> bool {
     record.codec_version == crate::persistence::PLAYER_RECORD_VERSION
-        && record.dimension == "minecraft:overworld"
+        && record.dimension == DimensionKey::overworld()
         && record.position.is_finite()
         && record.y_rot_degrees.is_finite()
         && record.x_rot_degrees.is_finite()
@@ -2986,7 +3044,7 @@ fn player_record_from_entry(
         codec_version: crate::persistence::PLAYER_RECORD_VERSION,
         revision,
         last_known_name: identity.display_name.clone(),
-        dimension: "minecraft:overworld".to_owned(),
+        dimension: DimensionKey::overworld(),
         position: player.state.position(),
         y_rot_degrees: player.state.y_rot_degrees(),
         x_rot_degrees: player.state.x_rot_degrees(),
@@ -3142,6 +3200,10 @@ fn current_unix_millis() -> u64 {
             .map(|duration| u64::try_from(duration.as_millis()).unwrap_or(u64::MAX))
             .unwrap_or(0)
     }
+}
+
+fn fresh_realm_id() -> RealmId {
+    RealmId::new(*uuid::Uuid::new_v4().as_bytes()).expect("UUID v4 must be non-nil")
 }
 
 fn validate_world_metadata(

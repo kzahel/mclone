@@ -4512,12 +4512,14 @@ async function installIndexedDbCatalogHelper(page) {
           transaction.onabort = () => reject(transaction.error ?? new Error("aborted while seeding IndexedDB world records"));
           transaction.objectStore(catalog.WORLD_CHUNK_STORE).put({
             worldId,
+            dimensionKey: "minecraft:overworld",
             x: 991,
             z: 991,
             record: { smoke: "catalog-delete-chunk" },
           });
           transaction.objectStore(catalog.WORLD_ENTITY_CHUNK_STORE).put({
             worldId,
+            dimensionKey: "minecraft:overworld",
             x: 991,
             z: 991,
             record: { smoke: "catalog-delete-entity-chunk" },
@@ -4768,8 +4770,8 @@ async function installIndexedDbCountHelper(page) {
           request.onerror = () => reject(request.error ?? new Error(`failed to count ${storeName}`));
         });
         const [chunks, entityChunks, worldMetadataRecord] = await Promise.all([
-          countStore("chunks"),
-          countStore("entityChunks"),
+          countStore("dimensionChunks"),
+          countStore("dimensionEntityChunks"),
           new Promise((resolve, reject) => {
             if (!db.objectStoreNames.contains("worldMetadata")) {
               resolve(null);
@@ -6582,7 +6584,7 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
   }
   if (
     result.wasm.report.commandCount !== 2
-    || result.wasm.report.updateCount !== 8
+    || result.wasm.report.updateCount !== 12
     || !result.wasm.report.protocolCodecRoundtrip
   ) {
     throw new Error(`unexpected runtime message counts:\n${JSON.stringify(result.wasm.report, null, 2)}`);

@@ -114,12 +114,15 @@ fn sqlite_restart_resumes_exact_game_and_day_time() {
     let root = world_time_temp_dir("sqlite-clock-restart");
     let seed = 101;
     let expected;
+    let expected_realm_id;
     {
         let mut server =
             LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
         server
             .initialize_world_metadata_at_unix_millis(1_000)
             .unwrap();
+        expected_realm_id = server.realm_id();
+        assert_ne!(expected_realm_id, RealmId::LEGACY_SINGLE_REALM);
         for _ in 0..25 {
             server.try_simulation_tick_report().unwrap();
         }
@@ -139,6 +142,8 @@ fn sqlite_restart_resumes_exact_game_and_day_time() {
             .initialize_world_metadata_at_unix_millis(3_000)
             .unwrap();
         assert_eq!((metadata.game_time, metadata.day_time), expected);
+        assert_eq!(metadata.realm_id, expected_realm_id);
+        assert_eq!(reopened.realm_id(), expected_realm_id);
         assert!(!metadata.do_daylight_cycle);
         reopened.try_simulation_tick_report().unwrap();
         assert_eq!(reopened.game_time(), expected.0 + 1);
@@ -278,7 +283,7 @@ fn current_single_dimension_runtime_rejects_non_overworld_resume_records() {
         identity.display_name.clone(),
         Vec3d::new(4_096.5, 200.0, -4_096.5),
     );
-    record.dimension = "mclone:moon".to_owned();
+    record.dimension = DimensionKey::parse("mclone:moon").unwrap();
     record.selected_hotbar_slot = 6;
     record.total_experience = 41;
     let mut store = MemoryWorldStore::new();

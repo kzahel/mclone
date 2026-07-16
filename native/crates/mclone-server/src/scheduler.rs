@@ -56,9 +56,9 @@ use crate::loading_progress::{
 };
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
-    EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, PlayerRecord, PlayerRecordKey,
-    SaveDurability, ScheduledTickRecord, StoreWriteOutcome, WorldMetadata, WorldMetadataLoad,
-    WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    DimensionRecord, EntityChunkRecord, PersistenceMailbox, PersistenceRequestId, PlayerRecord,
+    PlayerRecordKey, SaveDurability, ScheduledTickRecord, StoreWriteOutcome, WorldMetadata,
+    WorldMetadataLoad, WorldStore, WorldStoreCompletion, WorldStoreRequest,
 };
 use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
@@ -1279,6 +1279,20 @@ impl ChunkScheduler {
         record: WorldMetadata,
     ) -> ChunkStoreResult<StoreWriteOutcome> {
         self.store.save_world_metadata_blocking(record)
+    }
+
+    pub fn load_dimension_blocking(
+        &mut self,
+        key: mclone_protocol::DimensionKey,
+    ) -> ChunkStoreResult<Option<DimensionRecord>> {
+        self.store.load_dimension_blocking(key)
+    }
+
+    pub fn save_dimension_blocking(
+        &mut self,
+        record: DimensionRecord,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        self.store.save_dimension_blocking(record)
     }
 
     pub fn load_player_record(&mut self, player: PlayerRecordKey) -> PersistenceRequestId {
@@ -3526,15 +3540,25 @@ impl ChunkScheduler {
                 result?;
                 Ok(Vec::new())
             }
+            WorldStoreCompletion::DimensionLoaded { result, .. } => {
+                result?;
+                Ok(Vec::new())
+            }
+            WorldStoreCompletion::DimensionSaved { result, .. } => {
+                result?;
+                Ok(Vec::new())
+            }
             WorldStoreCompletion::ChunkLoaded {
                 request_id,
                 pos,
                 result,
+                ..
             } => self.handle_chunk_load_completion(request_id, pos, result),
             WorldStoreCompletion::ChunkSaved {
                 request_id,
                 pos,
                 result,
+                ..
             } => {
                 self.handle_chunk_save_completion(request_id, pos, result)?;
                 Ok(Vec::new())
@@ -3543,11 +3567,13 @@ impl ChunkScheduler {
                 request_id,
                 pos,
                 result,
+                ..
             } => self.handle_entity_chunk_load_completion(request_id, pos, result),
             WorldStoreCompletion::EntityChunkSaved {
                 request_id,
                 pos,
                 result,
+                ..
             } => {
                 self.handle_entity_chunk_save_completion(request_id, pos, result)?;
                 Ok(Vec::new())

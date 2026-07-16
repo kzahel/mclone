@@ -242,10 +242,10 @@ pub fn write_authored_world_fixture_to_store(
 ) -> ChunkStoreResult<AuthoredWorldFixtureManifest> {
     let (manifest, records, entity_records) = authored_world_fixture_records(kind)?;
     for record in &records {
-        store.save_chunk(record)?;
+        store.save_chunk(&mclone_protocol::DimensionKey::overworld(), record)?;
     }
     for record in &entity_records {
-        store.save_entity_chunk(record)?;
+        store.save_entity_chunk(&mclone_protocol::DimensionKey::overworld(), record)?;
     }
     store.flush()?;
     Ok(manifest)

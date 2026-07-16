@@ -1,8 +1,11 @@
 export const WORLD_DB_NAME = "mclone-web-worlds";
-export const WORLD_DB_VERSION = 5;
+export const WORLD_DB_VERSION = 6;
 export const WORLD_CATALOG_STORE = "worlds";
-export const WORLD_CHUNK_STORE = "chunks";
-export const WORLD_ENTITY_CHUNK_STORE = "entityChunks";
+export const WORLD_CHUNK_STORE = "dimensionChunks";
+export const WORLD_ENTITY_CHUNK_STORE = "dimensionEntityChunks";
+export const LEGACY_WORLD_CHUNK_STORE = "chunks";
+export const LEGACY_WORLD_ENTITY_CHUNK_STORE = "entityChunks";
+export const WORLD_DIMENSION_STORE = "dimensions";
 export const WORLD_PLAYER_STORE = "players";
 export const WORLD_METADATA_STORE = "worldMetadata";
 export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
@@ -125,12 +128,14 @@ export function openWorldDb(): Promise<IDBDatabase> {
     const request = indexedDB.open(WORLD_DB_NAME, WORLD_DB_VERSION);
     request.onupgradeneeded = () => {
       const db = request.result;
-      ensureWorldRecordStore(db, request.transaction, WORLD_CHUNK_STORE);
-      ensureWorldRecordStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
+      ensureDimensionWorldRecordStore(db, request.transaction, WORLD_CHUNK_STORE);
+      ensureDimensionWorldRecordStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
+      ensureWorldDimensionStore(db, request.transaction);
       ensureWorldPlayerStore(db, request.transaction);
       ensureWorldMetadataStore(db, request.transaction);
       ensureWorldCatalogStore(db);
       ensureManagedWorldMetadataStore(db);
+      migrateLegacyWorldRecordsToOverworld(db, request.transaction);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB world store"));
@@ -245,6 +250,9 @@ export async function factoryResetIndexedDbLocalData(
     MANAGED_WORLD_METADATA_STORE,
     WORLD_CHUNK_STORE,
     WORLD_ENTITY_CHUNK_STORE,
+    LEGACY_WORLD_CHUNK_STORE,
+    LEGACY_WORLD_ENTITY_CHUNK_STORE,
+    WORLD_DIMENSION_STORE,
     WORLD_PLAYER_STORE,
     WORLD_METADATA_STORE,
   ].filter((storeName) => db.objectStoreNames.contains(storeName));
@@ -265,6 +273,9 @@ export async function clearIndexedDbWorldRecords(
   await Promise.all([
     clearIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, LEGACY_WORLD_CHUNK_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, LEGACY_WORLD_ENTITY_CHUNK_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, WORLD_DIMENSION_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_PLAYER_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_METADATA_STORE, worldId),
   ]);
@@ -397,7 +408,7 @@ export function provisionIndexedDbManagedScenarioWorldInWorker(
   });
 }
 
-function ensureWorldRecordStore(
+function ensureDimensionWorldRecordStore(
   db: IDBDatabase,
   transaction: IDBTransaction | null,
   storeName: string,
@@ -409,8 +420,64 @@ function ensureWorldRecordStore(
     }
     return;
   }
-  const store = db.createObjectStore(storeName, { keyPath: ["worldId", "x", "z"] });
+  const store = db.createObjectStore(storeName, {
+    keyPath: ["worldId", "dimensionKey", "x", "z"],
+  });
   store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+}
+
+function ensureWorldDimensionStore(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null,
+): void {
+  if (db.objectStoreNames.contains(WORLD_DIMENSION_STORE)) {
+    const store = transaction?.objectStore(WORLD_DIMENSION_STORE);
+    if (store && !store.indexNames.contains(WORLD_ID_INDEX)) {
+      store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+    }
+    return;
+  }
+  const store = db.createObjectStore(WORLD_DIMENSION_STORE, {
+    keyPath: ["worldId", "dimensionKey"],
+  });
+  store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+}
+
+function migrateLegacyWorldRecordsToOverworld(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null,
+): void {
+  if (!transaction) return;
+  migrateLegacyWorldRecordStore(
+    db,
+    transaction,
+    LEGACY_WORLD_CHUNK_STORE,
+    WORLD_CHUNK_STORE,
+  );
+  migrateLegacyWorldRecordStore(
+    db,
+    transaction,
+    LEGACY_WORLD_ENTITY_CHUNK_STORE,
+    WORLD_ENTITY_CHUNK_STORE,
+  );
+}
+
+function migrateLegacyWorldRecordStore(
+  db: IDBDatabase,
+  transaction: IDBTransaction,
+  legacyStoreName: string,
+  destinationStoreName: string,
+): void {
+  if (!db.objectStoreNames.contains(legacyStoreName)) return;
+  const destination = transaction.objectStore(destinationStoreName);
+  const request = transaction.objectStore(legacyStoreName).openCursor();
+  request.onsuccess = () => {
+    const cursor = request.result;
+    if (!cursor) return;
+    const value = (cursor.value ?? {}) as Record<string, unknown>;
+    destination.put({ ...value, dimensionKey: "minecraft:overworld" });
+    cursor.continue();
+  };
 }
 
 function ensureWorldPlayerStore(
@@ -547,11 +614,19 @@ async function publishIndexedDbManagedWorld(
     throwIfAborted(signal);
     const chunks = transaction.objectStore(WORLD_CHUNK_STORE);
     for (const record of payload.chunks) {
-      chunks.put({ ...record, worldId: payload.worldId });
+      chunks.put({
+        ...record,
+        worldId: payload.worldId,
+        dimensionKey: "minecraft:overworld",
+      });
     }
     const entityChunks = transaction.objectStore(WORLD_ENTITY_CHUNK_STORE);
     for (const record of payload.entityChunks) {
-      entityChunks.put({ ...record, worldId: payload.worldId });
+      entityChunks.put({
+        ...record,
+        worldId: payload.worldId,
+        dimensionKey: "minecraft:overworld",
+      });
     }
     const metadata = transaction.objectStore(MANAGED_WORLD_METADATA_STORE);
     if (exclusiveMetadata) {
@@ -669,6 +744,7 @@ async function clearIndexedDbStoreForWorld(
   storeName: string,
   worldId: string,
 ): Promise<void> {
+  if (!db.objectStoreNames.contains(storeName)) return;
   const transaction = db.transaction(storeName, "readwrite");
   const store = transaction.objectStore(storeName);
   const request = store.index(WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));

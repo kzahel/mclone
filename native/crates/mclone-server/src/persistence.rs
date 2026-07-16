@@ -18,7 +18,9 @@ use std::{
 use rusqlite::{Connection, OptionalExtension, params};
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
-use mclone_protocol::{DimensionKey, EntityRotation, ItemStackSnapshot};
+use mclone_protocol::{
+    DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot, RealmId,
+};
 
 use crate::{WorldBehaviorProfile, WorldGenerationProfile};
 
@@ -31,8 +33,9 @@ const SNAPSHOT_FORMAT_VERSION: u32 = 5;
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
 const PLAYER_RECORD_MAGIC: &[u8; 12] = b"MCLONEPLYR\0\0";
 const WORLD_METADATA_MAGIC: &[u8; 12] = b"MCLONEWRLD\0\0";
+const DIMENSION_RECORD_MAGIC: &[u8; 12] = b"MCLONEDIM\0\0\0";
 #[cfg(not(target_arch = "wasm32"))]
-const SQLITE_WORLD_SCHEMA_VERSION: i64 = 1;
+const SQLITE_WORLD_SCHEMA_VERSION: i64 = 2;
 #[cfg(not(target_arch = "wasm32"))]
 pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 
@@ -40,7 +43,7 @@ pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
 pub const PLAYER_RECORD_VERSION: u32 = 1;
 pub const DIMENSION_RECORD_VERSION: u32 = 1;
-pub const WORLD_METADATA_VERSION: u32 = 1;
+pub const WORLD_METADATA_VERSION: u32 = 2;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
 pub type PersistenceRequestId = u64;
@@ -242,6 +245,24 @@ pub fn decode_world_metadata(bytes: &[u8]) -> ChunkStoreResult<WorldMetadata> {
     Ok(record)
 }
 
+pub fn encode_dimension_record(record: &DimensionRecord) -> ChunkStoreResult<Vec<u8>> {
+    let mut bytes = Vec::new();
+    write_dimension_record(&mut bytes, record)?;
+    Ok(bytes)
+}
+
+pub fn decode_dimension_record(bytes: &[u8]) -> ChunkStoreResult<DimensionRecord> {
+    let mut reader = bytes;
+    let record = read_dimension_record(&mut reader)?;
+    if !reader.is_empty() {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "dimension record had {} trailing bytes",
+            reader.len()
+        )));
+    }
+    Ok(record)
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EntityPersistentId {
     pub most: u64,
@@ -323,7 +344,7 @@ pub struct PlayerRecord {
     pub codec_version: u32,
     pub revision: u64,
     pub last_known_name: String,
-    pub dimension: String,
+    pub dimension: DimensionKey,
     pub position: Vec3d,
     pub y_rot_degrees: f32,
     pub x_rot_degrees: f32,
@@ -344,7 +365,7 @@ impl PlayerRecord {
             codec_version: PLAYER_RECORD_VERSION,
             revision,
             last_known_name: last_known_name.into(),
-            dimension: "minecraft:overworld".to_owned(),
+            dimension: DimensionKey::overworld(),
             position,
             y_rot_degrees: 0.0,
             x_rot_degrees: 0.0,
@@ -421,6 +442,7 @@ impl Default for DimensionRecord {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorldMetadata {
     pub codec_version: u32,
+    pub realm_id: RealmId,
     pub revision: u64,
     pub target_minecraft_version: String,
     pub seed: i64,
@@ -440,8 +462,25 @@ impl WorldMetadata {
         world_behavior_profile: WorldBehaviorProfile,
         now_unix_millis: u64,
     ) -> Self {
+        Self::new_in_realm(
+            RealmId::LEGACY_SINGLE_REALM,
+            seed,
+            world_generation_profile,
+            world_behavior_profile,
+            now_unix_millis,
+        )
+    }
+
+    pub fn new_in_realm(
+        realm_id: RealmId,
+        seed: i64,
+        world_generation_profile: WorldGenerationProfile,
+        world_behavior_profile: WorldBehaviorProfile,
+        now_unix_millis: u64,
+    ) -> Self {
         Self {
             codec_version: WORLD_METADATA_VERSION,
+            realm_id,
             revision: 1,
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed,
@@ -482,8 +521,9 @@ pub struct WorldMetadataLoad {
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum WorldRecordKey {
     WorldMetadata,
-    Chunk(ChunkPos),
-    EntityChunk(ChunkPos),
+    Dimension(DimensionKey),
+    Chunk(DimensionChunkPos),
+    EntityChunk(DimensionChunkPos),
     Player(PlayerRecordKey),
     SavedData(String),
 }
@@ -497,21 +537,33 @@ pub enum WorldStoreRequest {
         request_id: PersistenceRequestId,
         record: WorldMetadata,
     },
+    LoadDimension {
+        request_id: PersistenceRequestId,
+        key: DimensionKey,
+    },
+    SaveDimension {
+        request_id: PersistenceRequestId,
+        record: DimensionRecord,
+    },
     LoadChunk {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
     },
     SaveChunk {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         record: ChunkRecord,
         durability: SaveDurability,
     },
     LoadEntityChunk {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
     },
     SaveEntityChunk {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         record: EntityChunkRecord,
         durability: SaveDurability,
     },
@@ -540,6 +592,8 @@ impl WorldStoreRequest {
         match self {
             Self::LoadWorldMetadata { request_id }
             | Self::SaveWorldMetadata { request_id, .. }
+            | Self::LoadDimension { request_id, .. }
+            | Self::SaveDimension { request_id, .. }
             | Self::LoadChunk { request_id, .. }
             | Self::SaveChunk { request_id, .. }
             | Self::LoadEntityChunk { request_id, .. }
@@ -566,27 +620,55 @@ impl WorldStoreRequest {
                     result: Err(closed_error()),
                 }
             }
-            Self::LoadChunk { request_id, pos } => WorldStoreCompletion::ChunkLoaded {
+            Self::LoadDimension { request_id, key } => WorldStoreCompletion::DimensionLoaded {
                 request_id,
+                key,
+                result: Err(closed_error()),
+            },
+            Self::SaveDimension { request_id, record } => WorldStoreCompletion::DimensionSaved {
+                request_id,
+                key: record.key,
+                result: Err(closed_error()),
+            },
+            Self::LoadChunk {
+                request_id,
+                dimension,
+                pos,
+            } => WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                dimension,
                 pos,
                 result: Err(closed_error()),
             },
             Self::SaveChunk {
-                request_id, record, ..
+                request_id,
+                dimension,
+                record,
+                ..
             } => WorldStoreCompletion::ChunkSaved {
                 request_id,
+                dimension,
                 pos: record.pos(),
                 result: Err(closed_error()),
             },
-            Self::LoadEntityChunk { request_id, pos } => WorldStoreCompletion::EntityChunkLoaded {
+            Self::LoadEntityChunk {
                 request_id,
+                dimension,
+                pos,
+            } => WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                dimension,
                 pos,
                 result: Err(closed_error()),
             },
             Self::SaveEntityChunk {
-                request_id, record, ..
+                request_id,
+                dimension,
+                record,
+                ..
             } => WorldStoreCompletion::EntityChunkSaved {
                 request_id,
+                dimension,
                 pos: record.pos,
                 result: Err(closed_error()),
             },
@@ -635,23 +717,37 @@ pub enum WorldStoreCompletion {
         revision: u64,
         result: ChunkStoreResult<StoreWriteOutcome>,
     },
+    DimensionLoaded {
+        request_id: PersistenceRequestId,
+        key: DimensionKey,
+        result: ChunkStoreResult<Option<DimensionRecord>>,
+    },
+    DimensionSaved {
+        request_id: PersistenceRequestId,
+        key: DimensionKey,
+        result: ChunkStoreResult<StoreWriteOutcome>,
+    },
     ChunkLoaded {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
         result: ChunkStoreResult<Option<ChunkRecord>>,
     },
     ChunkSaved {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
         result: ChunkStoreResult<StoreWriteOutcome>,
     },
     EntityChunkLoaded {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
         result: ChunkStoreResult<Option<EntityChunkRecord>>,
     },
     EntityChunkSaved {
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
         result: ChunkStoreResult<StoreWriteOutcome>,
     },
@@ -685,6 +781,8 @@ impl WorldStoreCompletion {
         match self {
             Self::WorldMetadataLoaded { request_id, .. }
             | Self::WorldMetadataSaved { request_id, .. }
+            | Self::DimensionLoaded { request_id, .. }
+            | Self::DimensionSaved { request_id, .. }
             | Self::ChunkLoaded { request_id, .. }
             | Self::ChunkSaved { request_id, .. }
             | Self::EntityChunkLoaded { request_id, .. }
@@ -718,20 +816,47 @@ pub trait WorldStore: fmt::Debug {
         ))
     }
 
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>>;
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()>;
+    fn load_dimension(&mut self, _key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
+        Ok(None)
+    }
 
-    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
         Err(ChunkStoreError::InvalidData(format!(
-            "entity chunk storage is not supported for ({}, {})",
-            pos.x, pos.z
+            "dimension storage is not supported for {}",
+            record.key
         )))
     }
 
-    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+    fn load_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>>;
+    fn save_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()>;
+
+    fn load_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
         Err(ChunkStoreError::InvalidData(format!(
-            "entity chunk storage is not supported for ({}, {})",
-            record.pos.x, record.pos.z
+            "entity chunk storage is not supported for {dimension} ({}, {})",
+            pos.x, pos.z,
+        )))
+    }
+
+    fn save_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        Err(ChunkStoreError::InvalidData(format!(
+            "entity chunk storage is not supported for {dimension} ({}, {})",
+            record.pos.x, record.pos.z,
         )))
     }
 
@@ -776,19 +901,39 @@ impl WorldStore for NullWorldStore {
         Ok(())
     }
 
-    fn load_chunk(&mut self, _pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
-        Ok(None)
-    }
-
-    fn save_chunk(&mut self, _record: &ChunkRecord) -> ChunkStoreResult<()> {
+    fn save_dimension(&mut self, _record: &DimensionRecord) -> ChunkStoreResult<()> {
         Ok(())
     }
 
-    fn load_entity_chunk(&mut self, _pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+    fn load_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        _pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
         Ok(None)
     }
 
-    fn save_entity_chunk(&mut self, _record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+    fn save_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        _record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        Ok(())
+    }
+
+    fn load_entity_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        _pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(None)
+    }
+
+    fn save_entity_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        _record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
         Ok(())
     }
 
@@ -800,8 +945,9 @@ impl WorldStore for NullWorldStore {
 #[derive(Debug, Default)]
 pub struct MemoryWorldStore {
     world_metadata: Option<WorldMetadata>,
-    chunks: BTreeMap<ChunkPos, ChunkRecord>,
-    entity_chunks: BTreeMap<ChunkPos, EntityChunkRecord>,
+    dimensions: BTreeMap<DimensionKey, DimensionRecord>,
+    chunks: BTreeMap<DimensionChunkPos, ChunkRecord>,
+    entity_chunks: BTreeMap<DimensionChunkPos, EntityChunkRecord>,
     players: BTreeMap<PlayerRecordKey, PlayerRecord>,
 }
 
@@ -811,11 +957,29 @@ impl MemoryWorldStore {
     }
 
     pub fn chunk(&self, pos: ChunkPos) -> Option<&ChunkRecord> {
-        self.chunks.get(&pos)
+        self.chunk_in_dimension(&DimensionKey::overworld(), pos)
+    }
+
+    pub fn chunk_in_dimension(
+        &self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> Option<&ChunkRecord> {
+        self.chunks
+            .get(&DimensionChunkPos::new(dimension.clone(), pos))
     }
 
     pub fn entity_chunk(&self, pos: ChunkPos) -> Option<&EntityChunkRecord> {
-        self.entity_chunks.get(&pos)
+        self.entity_chunk_in_dimension(&DimensionKey::overworld(), pos)
+    }
+
+    pub fn entity_chunk_in_dimension(
+        &self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> Option<&EntityChunkRecord> {
+        self.entity_chunks
+            .get(&DimensionChunkPos::new(dimension.clone(), pos))
     }
 
     pub fn player(&self, key: &PlayerRecordKey) -> Option<&PlayerRecord> {
@@ -825,6 +989,10 @@ impl MemoryWorldStore {
     pub fn world_metadata(&self) -> Option<&WorldMetadata> {
         self.world_metadata.as_ref()
     }
+
+    pub fn dimension(&self, key: &DimensionKey) -> Option<&DimensionRecord> {
+        self.dimensions.get(key)
+    }
 }
 
 impl WorldStore for MemoryWorldStore {
@@ -833,7 +1001,8 @@ impl WorldStore for MemoryWorldStore {
             record: self.world_metadata.clone(),
             legacy_records_present: !self.chunks.is_empty()
                 || !self.entity_chunks.is_empty()
-                || !self.players.is_empty(),
+                || !self.players.is_empty()
+                || !self.dimensions.is_empty(),
         })
     }
 
@@ -849,25 +1018,69 @@ impl WorldStore for MemoryWorldStore {
         Ok(())
     }
 
+    fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
+        Ok(self.dimensions.get(key).cloned())
+    }
+
+    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
+        if self
+            .dimensions
+            .get(&record.key)
+            .is_some_and(|stored| stored.revision > record.revision)
+        {
+            return Ok(());
+        }
+        self.dimensions.insert(record.key.clone(), record.clone());
+        Ok(())
+    }
+
     fn supports_entity_chunks(&self) -> bool {
         true
     }
 
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
-        Ok(self.chunks.get(&pos).cloned())
+    fn load_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
+        Ok(self
+            .chunks
+            .get(&DimensionChunkPos::new(dimension.clone(), pos))
+            .cloned())
     }
 
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
-        self.chunks.insert(record.pos(), record.clone());
+    fn save_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        self.chunks.insert(
+            DimensionChunkPos::new(dimension.clone(), record.pos()),
+            record.clone(),
+        );
         Ok(())
     }
 
-    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-        Ok(self.entity_chunks.get(&pos).cloned())
+    fn load_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        Ok(self
+            .entity_chunks
+            .get(&DimensionChunkPos::new(dimension.clone(), pos))
+            .cloned())
     }
 
-    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
-        self.entity_chunks.insert(record.pos, record.clone());
+    fn save_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        self.entity_chunks.insert(
+            DimensionChunkPos::new(dimension.clone(), record.pos),
+            record.clone(),
+        );
         Ok(())
     }
 
@@ -893,13 +1106,21 @@ impl ChunkSnapshotWorldStore {
 }
 
 impl WorldStore for ChunkSnapshotWorldStore {
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+    fn load_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
         self.store
             .load_chunk(pos)
             .map(|snapshot| snapshot.map(ChunkRecord::legacy_snapshot))
     }
 
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+    fn save_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
         self.store.save_chunk(&record.snapshot)
     }
 }
@@ -907,6 +1128,7 @@ impl WorldStore for ChunkSnapshotWorldStore {
 #[derive(Clone, Debug)]
 struct PendingChunkWrite {
     request_id: PersistenceRequestId,
+    dimension: DimensionKey,
     record: ChunkRecord,
     durability: SaveDurability,
 }
@@ -929,6 +1151,7 @@ impl PendingChunkWrite {
 #[derive(Clone, Debug)]
 struct PendingEntityChunkWrite {
     request_id: PersistenceRequestId,
+    dimension: DimensionKey,
     record: EntityChunkRecord,
     durability: SaveDurability,
 }
@@ -954,8 +1177,8 @@ enum PendingWriteKey {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum ExternalLoadKey {
-    Chunk(ChunkPos),
-    EntityChunk(ChunkPos),
+    Chunk(DimensionChunkPos),
+    EntityChunk(DimensionChunkPos),
     Player(PlayerRecordKey),
 }
 
@@ -1010,11 +1233,48 @@ impl PersistenceActor {
             });
     }
 
-    pub fn load_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+    pub fn load_dimension(&mut self, request_id: PersistenceRequestId, key: DimensionKey) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store.load_dimension(&key)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::DimensionLoaded {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    pub fn save_dimension(&mut self, request_id: PersistenceRequestId, record: DimensionRecord) {
+        let key = record.key.clone();
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_dimension(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::DimensionSaved {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    pub fn load_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        dimension: DimensionKey,
+        pos: ChunkPos,
+    ) {
         if self.closed {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1024,11 +1284,12 @@ impl PersistenceActor {
         let result = if let Some(pending) = self.pending_chunk_writes.get(&pos) {
             Ok(Some(pending.record.clone()))
         } else {
-            self.store.load_chunk(pos)
+            self.store.load_chunk(&dimension, pos)
         };
         self.completions
             .push_back(WorldStoreCompletion::ChunkLoaded {
                 request_id,
+                dimension,
                 pos,
                 result,
             });
@@ -1037,6 +1298,7 @@ impl PersistenceActor {
     pub fn save_chunk(
         &mut self,
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         record: ChunkRecord,
         durability: SaveDurability,
     ) {
@@ -1045,6 +1307,7 @@ impl PersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkSaved {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1053,6 +1316,7 @@ impl PersistenceActor {
 
         let incoming = PendingChunkWrite {
             request_id,
+            dimension: dimension.clone(),
             record,
             durability,
         };
@@ -1063,6 +1327,7 @@ impl PersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
                         request_id: superseded_id,
+                        dimension: dimension.clone(),
                         pos,
                         result: Ok(StoreWriteOutcome::Superseded),
                     });
@@ -1070,6 +1335,7 @@ impl PersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
                         request_id,
+                        dimension,
                         pos,
                         result: Ok(StoreWriteOutcome::Superseded),
                     });
@@ -1080,11 +1346,17 @@ impl PersistenceActor {
         self.pending_chunk_writes.insert(pos, incoming);
     }
 
-    pub fn load_entity_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+    pub fn load_entity_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        dimension: DimensionKey,
+        pos: ChunkPos,
+    ) {
         if self.closed {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1094,11 +1366,12 @@ impl PersistenceActor {
         let result = if let Some(pending) = self.pending_entity_chunk_writes.get(&pos) {
             Ok(Some(pending.record.clone()))
         } else {
-            self.store.load_entity_chunk(pos)
+            self.store.load_entity_chunk(&dimension, pos)
         };
         self.completions
             .push_back(WorldStoreCompletion::EntityChunkLoaded {
                 request_id,
+                dimension,
                 pos,
                 result,
             });
@@ -1107,6 +1380,7 @@ impl PersistenceActor {
     pub fn save_entity_chunk(
         &mut self,
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         record: EntityChunkRecord,
         durability: SaveDurability,
     ) {
@@ -1115,6 +1389,7 @@ impl PersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkSaved {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1123,6 +1398,7 @@ impl PersistenceActor {
 
         let incoming = PendingEntityChunkWrite {
             request_id,
+            dimension: dimension.clone(),
             record,
             durability,
         };
@@ -1133,6 +1409,7 @@ impl PersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id: superseded_id,
+                        dimension: dimension.clone(),
                         pos,
                         result: Ok(StoreWriteOutcome::Superseded),
                     });
@@ -1140,6 +1417,7 @@ impl PersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id,
+                        dimension,
                         pos,
                         result: Ok(StoreWriteOutcome::Superseded),
                     });
@@ -1248,6 +1526,7 @@ impl PersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
                         request_id: pending.request_id,
+                        dimension: pending.dimension,
                         pos,
                         result: Ok(StoreWriteOutcome::SkippedOnClose),
                     });
@@ -1263,6 +1542,7 @@ impl PersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id: pending.request_id,
+                        dimension: pending.dimension,
                         pos,
                         result: Ok(StoreWriteOutcome::SkippedOnClose),
                     });
@@ -1378,11 +1658,12 @@ impl PersistenceActor {
         let Some(pending) = self.pending_chunk_writes.remove(&pos) else {
             return Ok(());
         };
-        let result = self.store.save_chunk(&pending.record);
+        let result = self.store.save_chunk(&pending.dimension, &pending.record);
         let barrier_result = result.as_ref().map(|_| ()).map_err(duplicate_store_error);
         self.completions
             .push_back(WorldStoreCompletion::ChunkSaved {
                 request_id: pending.request_id,
+                dimension: pending.dimension,
                 pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
             });
@@ -1393,11 +1674,14 @@ impl PersistenceActor {
         let Some(pending) = self.pending_entity_chunk_writes.remove(&pos) else {
             return Ok(());
         };
-        let result = self.store.save_entity_chunk(&pending.record);
+        let result = self
+            .store
+            .save_entity_chunk(&pending.dimension, &pending.record);
         let barrier_result = result.as_ref().map(|_| ()).map_err(duplicate_store_error);
         self.completions
             .push_back(WorldStoreCompletion::EntityChunkSaved {
                 request_id: pending.request_id,
+                dimension: pending.dimension,
                 pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
             });
@@ -1444,25 +1728,41 @@ impl ExternalLoadPersistenceActor {
             WorldStoreRequest::SaveWorldMetadata { request_id, record } => {
                 self.save_world_metadata(request_id, record);
             }
-            WorldStoreRequest::LoadChunk { request_id, pos } => {
-                self.load_chunk(request_id, pos);
+            WorldStoreRequest::LoadDimension { request_id, key } => {
+                self.load_dimension(request_id, key);
+            }
+            WorldStoreRequest::SaveDimension { request_id, record } => {
+                self.save_dimension(request_id, record);
+            }
+            WorldStoreRequest::LoadChunk {
+                request_id,
+                dimension,
+                pos,
+            } => {
+                self.load_chunk(request_id, dimension, pos);
             }
             WorldStoreRequest::SaveChunk {
                 request_id,
+                dimension,
                 record,
                 durability,
             } => {
-                self.save_chunk(request_id, record, durability);
+                self.save_chunk(request_id, dimension, record, durability);
             }
-            WorldStoreRequest::LoadEntityChunk { request_id, pos } => {
-                self.load_entity_chunk(request_id, pos);
+            WorldStoreRequest::LoadEntityChunk {
+                request_id,
+                dimension,
+                pos,
+            } => {
+                self.load_entity_chunk(request_id, dimension, pos);
             }
             WorldStoreRequest::SaveEntityChunk {
                 request_id,
+                dimension,
                 record,
                 durability,
             } => {
-                self.save_entity_chunk(request_id, record, durability);
+                self.save_entity_chunk(request_id, dimension, record, durability);
             }
             WorldStoreRequest::LoadPlayer { request_id, player } => {
                 self.load_player(request_id, player);
@@ -1509,11 +1809,48 @@ impl ExternalLoadPersistenceActor {
             });
     }
 
-    fn load_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+    fn load_dimension(&mut self, request_id: PersistenceRequestId, key: DimensionKey) {
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store.load_dimension(&key)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::DimensionLoaded {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    fn save_dimension(&mut self, request_id: PersistenceRequestId, record: DimensionRecord) {
+        let key = record.key.clone();
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_dimension(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::DimensionSaved {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    fn load_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        dimension: DimensionKey,
+        pos: ChunkPos,
+    ) {
         if self.closed {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1524,18 +1861,20 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Ok(Some(cached.record.clone())),
                 });
             return;
         }
 
-        match self.store.load_chunk(pos) {
+        match self.store.load_chunk(&dimension, pos) {
             Ok(Some(record)) => {
                 self.cached_chunk_records.insert(
                     pos,
                     PendingChunkWrite {
                         request_id: 0,
+                        dimension: dimension.clone(),
                         record: record.clone(),
                         durability: SaveDurability::Durable,
                     },
@@ -1543,20 +1882,28 @@ impl ExternalLoadPersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkLoaded {
                         request_id,
+                        dimension,
                         pos,
                         result: Ok(Some(record)),
                     });
             }
             Ok(None) => {
-                self.pending_external_loads
-                    .insert(request_id, ExternalLoadKey::Chunk(pos));
+                self.pending_external_loads.insert(
+                    request_id,
+                    ExternalLoadKey::Chunk(DimensionChunkPos::new(dimension.clone(), pos)),
+                );
                 self.external_requests
-                    .push_back(WorldStoreRequest::LoadChunk { request_id, pos });
+                    .push_back(WorldStoreRequest::LoadChunk {
+                        request_id,
+                        dimension,
+                        pos,
+                    });
             }
             Err(error) => {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkLoaded {
                         request_id,
+                        dimension,
                         pos,
                         result: Err(error),
                     });
@@ -1567,6 +1914,7 @@ impl ExternalLoadPersistenceActor {
     fn save_chunk(
         &mut self,
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         record: ChunkRecord,
         durability: SaveDurability,
     ) {
@@ -1575,6 +1923,7 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkSaved {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1583,6 +1932,7 @@ impl ExternalLoadPersistenceActor {
 
         let incoming = PendingChunkWrite {
             request_id,
+            dimension: dimension.clone(),
             record,
             durability,
         };
@@ -1594,29 +1944,37 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkSaved {
                     request_id,
+                    dimension,
                     pos,
                     result: Ok(StoreWriteOutcome::Superseded),
                 });
             return;
         }
 
-        let result = self.store.save_chunk(&incoming.record);
+        let result = self.store.save_chunk(&dimension, &incoming.record);
         if result.is_ok() {
             self.cached_chunk_records.insert(pos, incoming);
         }
         self.completions
             .push_back(WorldStoreCompletion::ChunkSaved {
                 request_id,
+                dimension,
                 pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
             });
     }
 
-    fn load_entity_chunk(&mut self, request_id: PersistenceRequestId, pos: ChunkPos) {
+    fn load_entity_chunk(
+        &mut self,
+        request_id: PersistenceRequestId,
+        dimension: DimensionKey,
+        pos: ChunkPos,
+    ) {
         if self.closed {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1627,6 +1985,7 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(ChunkStoreError::InvalidData(format!(
                         "entity chunk storage is not supported for ({}, {})",
@@ -1640,18 +1999,20 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
+                    dimension,
                     pos,
                     result: Ok(Some(cached.record.clone())),
                 });
             return;
         }
 
-        match self.store.load_entity_chunk(pos) {
+        match self.store.load_entity_chunk(&dimension, pos) {
             Ok(Some(record)) => {
                 self.cached_entity_chunk_records.insert(
                     pos,
                     PendingEntityChunkWrite {
                         request_id: 0,
+                        dimension: dimension.clone(),
                         record: record.clone(),
                         durability: SaveDurability::Durable,
                     },
@@ -1659,20 +2020,28 @@ impl ExternalLoadPersistenceActor {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkLoaded {
                         request_id,
+                        dimension,
                         pos,
                         result: Ok(Some(record)),
                     });
             }
             Ok(None) => {
-                self.pending_external_loads
-                    .insert(request_id, ExternalLoadKey::EntityChunk(pos));
+                self.pending_external_loads.insert(
+                    request_id,
+                    ExternalLoadKey::EntityChunk(DimensionChunkPos::new(dimension.clone(), pos)),
+                );
                 self.external_requests
-                    .push_back(WorldStoreRequest::LoadEntityChunk { request_id, pos });
+                    .push_back(WorldStoreRequest::LoadEntityChunk {
+                        request_id,
+                        dimension,
+                        pos,
+                    });
             }
             Err(error) => {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkLoaded {
                         request_id,
+                        dimension,
                         pos,
                         result: Err(error),
                     });
@@ -1683,6 +2052,7 @@ impl ExternalLoadPersistenceActor {
     fn save_entity_chunk(
         &mut self,
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         record: EntityChunkRecord,
         durability: SaveDurability,
     ) {
@@ -1691,6 +2061,7 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkSaved {
                     request_id,
+                    dimension,
                     pos,
                     result: Err(closed_error()),
                 });
@@ -1699,6 +2070,7 @@ impl ExternalLoadPersistenceActor {
 
         let incoming = PendingEntityChunkWrite {
             request_id,
+            dimension: dimension.clone(),
             record,
             durability,
         };
@@ -1710,19 +2082,21 @@ impl ExternalLoadPersistenceActor {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkSaved {
                     request_id,
+                    dimension,
                     pos,
                     result: Ok(StoreWriteOutcome::Superseded),
                 });
             return;
         }
 
-        let result = self.store.save_entity_chunk(&incoming.record);
+        let result = self.store.save_entity_chunk(&dimension, &incoming.record);
         if result.is_ok() {
             self.cached_entity_chunk_records.insert(pos, incoming);
         }
         self.completions
             .push_back(WorldStoreCompletion::EntityChunkSaved {
                 request_id,
+                dimension,
                 pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
             });
@@ -1854,14 +2228,16 @@ impl ExternalLoadPersistenceActor {
             )),
             WorldStoreCompletion::ChunkLoaded {
                 request_id,
+                dimension,
                 pos,
                 result,
-            } => self.complete_external_chunk_load(request_id, pos, result),
+            } => self.complete_external_chunk_load(request_id, dimension, pos, result),
             WorldStoreCompletion::EntityChunkLoaded {
                 request_id,
+                dimension,
                 pos,
                 result,
-            } => self.complete_external_entity_chunk_load(request_id, pos, result),
+            } => self.complete_external_entity_chunk_load(request_id, dimension, pos, result),
             WorldStoreCompletion::PlayerLoaded {
                 request_id,
                 player,
@@ -1876,11 +2252,13 @@ impl ExternalLoadPersistenceActor {
     fn complete_external_chunk_load(
         &mut self,
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
         result: ChunkStoreResult<Option<ChunkRecord>>,
     ) -> ChunkStoreResult<()> {
         match self.pending_external_loads.remove(&request_id) {
-            Some(ExternalLoadKey::Chunk(expected_pos)) if expected_pos == pos => {}
+            Some(ExternalLoadKey::Chunk(expected))
+                if expected.dimension == dimension && expected.pos == pos => {}
             Some(other) => {
                 return Err(ChunkStoreError::InvalidData(format!(
                     "external chunk load request {request_id} completed for ({}, {}) but was pending for {other:?}",
@@ -1909,6 +2287,7 @@ impl ExternalLoadPersistenceActor {
                     pos,
                     PendingChunkWrite {
                         request_id: 0,
+                        dimension: dimension.clone(),
                         record: record.clone(),
                         durability: SaveDurability::Durable,
                     },
@@ -1919,6 +2298,7 @@ impl ExternalLoadPersistenceActor {
         self.completions
             .push_back(WorldStoreCompletion::ChunkLoaded {
                 request_id,
+                dimension,
                 pos,
                 result,
             });
@@ -1928,11 +2308,13 @@ impl ExternalLoadPersistenceActor {
     fn complete_external_entity_chunk_load(
         &mut self,
         request_id: PersistenceRequestId,
+        dimension: DimensionKey,
         pos: ChunkPos,
         result: ChunkStoreResult<Option<EntityChunkRecord>>,
     ) -> ChunkStoreResult<()> {
         match self.pending_external_loads.remove(&request_id) {
-            Some(ExternalLoadKey::EntityChunk(expected_pos)) if expected_pos == pos => {}
+            Some(ExternalLoadKey::EntityChunk(expected))
+                if expected.dimension == dimension && expected.pos == pos => {}
             Some(other) => {
                 return Err(ChunkStoreError::InvalidData(format!(
                     "external entity chunk load request {request_id} completed for ({}, {}) but was pending for {other:?}",
@@ -1958,6 +2340,7 @@ impl ExternalLoadPersistenceActor {
                     pos,
                     PendingEntityChunkWrite {
                         request_id: 0,
+                        dimension: dimension.clone(),
                         record: record.clone(),
                         durability: SaveDurability::Durable,
                     },
@@ -1968,6 +2351,7 @@ impl ExternalLoadPersistenceActor {
         self.completions
             .push_back(WorldStoreCompletion::EntityChunkLoaded {
                 request_id,
+                dimension,
                 pos,
                 result,
             });
@@ -2022,25 +2406,41 @@ fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreR
         WorldStoreRequest::SaveWorldMetadata { request_id, record } => {
             actor.save_world_metadata(request_id, record);
         }
-        WorldStoreRequest::LoadChunk { request_id, pos } => {
-            actor.load_chunk(request_id, pos);
+        WorldStoreRequest::LoadDimension { request_id, key } => {
+            actor.load_dimension(request_id, key);
+        }
+        WorldStoreRequest::SaveDimension { request_id, record } => {
+            actor.save_dimension(request_id, record);
+        }
+        WorldStoreRequest::LoadChunk {
+            request_id,
+            dimension,
+            pos,
+        } => {
+            actor.load_chunk(request_id, dimension, pos);
         }
         WorldStoreRequest::SaveChunk {
             request_id,
+            dimension,
             record,
             durability,
         } => {
-            actor.save_chunk(request_id, record, durability);
+            actor.save_chunk(request_id, dimension, record, durability);
         }
-        WorldStoreRequest::LoadEntityChunk { request_id, pos } => {
-            actor.load_entity_chunk(request_id, pos);
+        WorldStoreRequest::LoadEntityChunk {
+            request_id,
+            dimension,
+            pos,
+        } => {
+            actor.load_entity_chunk(request_id, dimension, pos);
         }
         WorldStoreRequest::SaveEntityChunk {
             request_id,
+            dimension,
             record,
             durability,
         } => {
-            actor.save_entity_chunk(request_id, record, durability);
+            actor.save_entity_chunk(request_id, dimension, record, durability);
         }
         WorldStoreRequest::LoadPlayer { request_id, player } => {
             actor.load_player(request_id, player);
@@ -2377,20 +2777,34 @@ impl PersistenceBackend {
 
 #[derive(Debug)]
 pub struct PersistenceMailbox {
+    dimension: DimensionKey,
     backend: PersistenceBackend,
     next_request_id: PersistenceRequestId,
 }
 
 impl PersistenceMailbox {
     pub fn new(store: Box<dyn WorldStore>) -> Self {
+        Self::in_dimension(DimensionKey::overworld(), store)
+    }
+
+    pub fn in_dimension(dimension: DimensionKey, store: Box<dyn WorldStore>) -> Self {
         Self {
+            dimension,
             backend: PersistenceBackend::Inline(PersistenceActor::new(store)),
             next_request_id: 1,
         }
     }
 
     pub fn external_loads(store: Box<dyn WorldStore>) -> Self {
+        Self::external_loads_in_dimension(DimensionKey::overworld(), store)
+    }
+
+    pub fn external_loads_in_dimension(
+        dimension: DimensionKey,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
         Self {
+            dimension,
             backend: PersistenceBackend::ExternalLoads(ExternalLoadPersistenceActor::new(store)),
             next_request_id: 1,
         }
@@ -2398,7 +2812,16 @@ impl PersistenceMailbox {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub fn threaded(store: Box<dyn WorldStore + Send>) -> ChunkStoreResult<Self> {
+        Self::threaded_in_dimension(DimensionKey::overworld(), store)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn threaded_in_dimension(
+        dimension: DimensionKey,
+        store: Box<dyn WorldStore + Send>,
+    ) -> ChunkStoreResult<Self> {
         Ok(Self {
+            dimension,
             backend: PersistenceBackend::Threaded(ThreadedPersistenceActor::new(store)?),
             next_request_id: 1,
         })
@@ -2422,6 +2845,20 @@ impl PersistenceMailbox {
         request_id
     }
 
+    pub fn load_dimension(&mut self, key: DimensionKey) -> PersistenceRequestId {
+        let request_id = self.next_request_id();
+        self.backend
+            .send_request(WorldStoreRequest::LoadDimension { request_id, key });
+        request_id
+    }
+
+    pub fn save_dimension(&mut self, record: DimensionRecord) -> PersistenceRequestId {
+        let request_id = self.next_request_id();
+        self.backend
+            .send_request(WorldStoreRequest::SaveDimension { request_id, record });
+        request_id
+    }
+
     pub fn memory() -> Self {
         Self::new(Box::<MemoryWorldStore>::default())
     }
@@ -2430,10 +2867,17 @@ impl PersistenceMailbox {
         self.backend.entity_chunks_supported()
     }
 
+    pub fn dimension(&self) -> &DimensionKey {
+        &self.dimension
+    }
+
     pub fn load_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
         let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::LoadChunk { request_id, pos });
+        self.backend.send_request(WorldStoreRequest::LoadChunk {
+            request_id,
+            dimension: self.dimension.clone(),
+            pos,
+        });
         request_id
     }
 
@@ -2445,6 +2889,7 @@ impl PersistenceMailbox {
         let request_id = self.next_request_id();
         self.backend.send_request(WorldStoreRequest::SaveChunk {
             request_id,
+            dimension: self.dimension.clone(),
             record,
             durability,
         });
@@ -2454,7 +2899,11 @@ impl PersistenceMailbox {
     pub fn load_entity_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
         let request_id = self.next_request_id();
         self.backend
-            .send_request(WorldStoreRequest::LoadEntityChunk { request_id, pos });
+            .send_request(WorldStoreRequest::LoadEntityChunk {
+                request_id,
+                dimension: self.dimension.clone(),
+                pos,
+            });
         request_id
     }
 
@@ -2467,6 +2916,7 @@ impl PersistenceMailbox {
         self.backend
             .send_request(WorldStoreRequest::SaveEntityChunk {
                 request_id,
+                dimension: self.dimension.clone(),
                 record,
                 durability,
             });
@@ -2570,6 +3020,32 @@ impl PersistenceMailbox {
             WorldStoreCompletion::WorldMetadataSaved { result, .. } => result,
             completion => Err(ChunkStoreError::InvalidData(format!(
                 "save_world_metadata completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn load_dimension_blocking(
+        &mut self,
+        key: DimensionKey,
+    ) -> ChunkStoreResult<Option<DimensionRecord>> {
+        let request_id = self.load_dimension(key);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::DimensionLoaded { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "load_dimension completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn save_dimension_blocking(
+        &mut self,
+        record: DimensionRecord,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        let request_id = self.save_dimension(record);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::DimensionSaved { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "save_dimension completed with unexpected persistence completion {completion:?}"
             ))),
         }
     }
@@ -2802,7 +3278,11 @@ impl ChunkSnapshotStore for FilesystemChunkSnapshotStore {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl WorldStore for FilesystemChunkSnapshotStore {
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+    fn load_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
         let path = self.chunk_path(pos);
         let file = match File::open(&path) {
             Ok(file) => file,
@@ -2822,7 +3302,11 @@ impl WorldStore for FilesystemChunkSnapshotStore {
         Ok(Some(record))
     }
 
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+    fn save_chunk(
+        &mut self,
+        _dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
         fs::create_dir_all(&self.root)?;
         let path = self.chunk_path(record.pos());
         let file = File::create(path)?;
@@ -2933,12 +3417,68 @@ impl WorldStore for SqliteWorldStore {
         Ok(())
     }
 
-    fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
+    fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
         let blob = self
             .connection
             .query_row(
-                "SELECT record_blob FROM chunk_records WHERE x = ?1 AND z = ?2",
-                params![pos.x, pos.z],
+                "SELECT record_blob FROM dimension_records WHERE dimension_key = ?1",
+                params![key.as_str()],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .optional()
+            .map_err(sqlite_error)?;
+        let Some(blob) = blob else {
+            return Ok(None);
+        };
+        let record = decode_dimension_record(&blob)?;
+        if record.key != *key {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "sqlite dimension record for {key} contained key {}",
+                record.key
+            )));
+        }
+        Ok(Some(record))
+    }
+
+    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
+        if self
+            .load_dimension(&record.key)?
+            .is_some_and(|stored| stored.revision > record.revision)
+        {
+            return Ok(());
+        }
+        let blob = encode_dimension_record(record)?;
+        self.connection
+            .execute(
+                "INSERT INTO dimension_records
+                    (dimension_key, codec_version, revision, record_blob)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(dimension_key) DO UPDATE SET
+                    codec_version = excluded.codec_version,
+                    revision = excluded.revision,
+                    record_blob = excluded.record_blob",
+                params![
+                    record.key.as_str(),
+                    record.codec_version,
+                    record.revision.to_string(),
+                    blob
+                ],
+            )
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    fn load_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
+        let blob = self
+            .connection
+            .query_row(
+                "SELECT record_blob FROM chunk_records
+                 WHERE dimension_key = ?1 AND x = ?2 AND z = ?3",
+                params![dimension.as_str(), pos.x, pos.z],
                 |row| row.get::<_, Vec<u8>>(0),
             )
             .optional()
@@ -2959,18 +3499,24 @@ impl WorldStore for SqliteWorldStore {
         Ok(Some(record))
     }
 
-    fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+    fn save_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
         let mut blob = Vec::new();
         write_chunk_record(&mut blob, record)?;
         self.connection
             .execute(
-                "INSERT INTO chunk_records (x, z, codec_version, revision, record_blob)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(x, z) DO UPDATE SET
+                "INSERT INTO chunk_records
+                    (dimension_key, x, z, codec_version, revision, record_blob)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(dimension_key, x, z) DO UPDATE SET
                     codec_version = excluded.codec_version,
                     revision = excluded.revision,
                     record_blob = excluded.record_blob",
                 params![
+                    dimension.as_str(),
                     record.pos().x,
                     record.pos().z,
                     SNAPSHOT_FORMAT_VERSION,
@@ -2982,12 +3528,17 @@ impl WorldStore for SqliteWorldStore {
         Ok(())
     }
 
-    fn load_entity_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+    fn load_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
         let blob = self
             .connection
             .query_row(
-                "SELECT record_blob FROM entity_chunk_records WHERE x = ?1 AND z = ?2",
-                params![pos.x, pos.z],
+                "SELECT record_blob FROM entity_chunk_records
+                 WHERE dimension_key = ?1 AND x = ?2 AND z = ?3",
+                params![dimension.as_str(), pos.x, pos.z],
                 |row| row.get::<_, Vec<u8>>(0),
             )
             .optional()
@@ -3005,18 +3556,24 @@ impl WorldStore for SqliteWorldStore {
         Ok(Some(record))
     }
 
-    fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
+    fn save_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
         let mut blob = Vec::new();
         write_entity_chunk_record(&mut blob, record)?;
         self.connection
             .execute(
-                "INSERT INTO entity_chunk_records (x, z, codec_version, revision, record_blob)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(x, z) DO UPDATE SET
+                "INSERT INTO entity_chunk_records
+                    (dimension_key, x, z, codec_version, revision, record_blob)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(dimension_key, x, z) DO UPDATE SET
                     codec_version = excluded.codec_version,
                     revision = excluded.revision,
                     record_blob = excluded.record_blob",
                 params![
+                    dimension.as_str(),
                     record.pos.x,
                     record.pos.z,
                     record.codec_version,
@@ -3092,10 +3649,65 @@ fn initialize_sqlite_world_schema(connection: &Connection) -> ChunkStoreResult<(
     let user_version: i64 = connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(sqlite_error)?;
-    if user_version != 0 && user_version != SQLITE_WORLD_SCHEMA_VERSION {
+    if !(0..=SQLITE_WORLD_SCHEMA_VERSION).contains(&user_version) {
         return Err(ChunkStoreError::InvalidData(format!(
             "unsupported sqlite world schema version {user_version}; expected {SQLITE_WORLD_SCHEMA_VERSION}"
         )));
+    }
+
+    if user_version == 1 {
+        connection
+            .execute_batch(
+                "BEGIN IMMEDIATE;
+                 ALTER TABLE chunk_records RENAME TO legacy_chunk_records;
+                 ALTER TABLE entity_chunk_records RENAME TO legacy_entity_chunk_records;
+                 CREATE TABLE chunk_records (
+                    dimension_key TEXT NOT NULL,
+                    x INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    codec_version INTEGER NOT NULL,
+                    revision TEXT NOT NULL,
+                    record_blob BLOB NOT NULL,
+                    PRIMARY KEY (dimension_key, x, z)
+                 );
+                 CREATE TABLE entity_chunk_records (
+                    dimension_key TEXT NOT NULL,
+                    x INTEGER NOT NULL,
+                    z INTEGER NOT NULL,
+                    codec_version INTEGER NOT NULL,
+                    revision TEXT NOT NULL,
+                    record_blob BLOB NOT NULL,
+                    PRIMARY KEY (dimension_key, x, z)
+                 );
+                 INSERT INTO chunk_records
+                    (dimension_key, x, z, codec_version, revision, record_blob)
+                    SELECT 'minecraft:overworld', x, z, codec_version, revision,
+                           record_blob
+                    FROM legacy_chunk_records;
+                 INSERT INTO entity_chunk_records
+                    (dimension_key, x, z, codec_version, revision, record_blob)
+                    SELECT 'minecraft:overworld', x, z, codec_version, revision,
+                           record_blob
+                    FROM legacy_entity_chunk_records;
+                 DROP TABLE legacy_chunk_records;
+                 DROP TABLE legacy_entity_chunk_records;
+                 CREATE TABLE IF NOT EXISTS dimension_records (
+                    dimension_key TEXT PRIMARY KEY,
+                    codec_version INTEGER NOT NULL,
+                    revision TEXT NOT NULL,
+                    record_blob BLOB NOT NULL
+                 );
+                 INSERT INTO metadata (key, value) VALUES ('schema_version', '2')
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+                 PRAGMA user_version = 2;
+                 COMMIT;",
+            )
+            .map_err(sqlite_error)?;
+        return Ok(());
+    }
+
+    if user_version == SQLITE_WORLD_SCHEMA_VERSION {
+        return Ok(());
     }
 
     connection
@@ -3112,20 +3724,28 @@ fn initialize_sqlite_world_schema(connection: &Connection) -> ChunkStoreResult<(
                 record_blob BLOB NOT NULL
              );
              CREATE TABLE IF NOT EXISTS chunk_records (
+                dimension_key TEXT NOT NULL,
                 x INTEGER NOT NULL,
                 z INTEGER NOT NULL,
                 codec_version INTEGER NOT NULL,
                 revision TEXT NOT NULL,
                 record_blob BLOB NOT NULL,
-                PRIMARY KEY (x, z)
+                PRIMARY KEY (dimension_key, x, z)
              );
              CREATE TABLE IF NOT EXISTS entity_chunk_records (
+                dimension_key TEXT NOT NULL,
                 x INTEGER NOT NULL,
                 z INTEGER NOT NULL,
                 codec_version INTEGER NOT NULL,
                 revision TEXT NOT NULL,
                 record_blob BLOB NOT NULL,
-                PRIMARY KEY (x, z)
+                PRIMARY KEY (dimension_key, x, z)
+             );
+             CREATE TABLE IF NOT EXISTS dimension_records (
+                dimension_key TEXT PRIMARY KEY,
+                codec_version INTEGER NOT NULL,
+                revision TEXT NOT NULL,
+                record_blob BLOB NOT NULL
              );
              CREATE TABLE IF NOT EXISTS player_records (
                 player_key TEXT PRIMARY KEY,
@@ -3140,8 +3760,8 @@ fn initialize_sqlite_world_schema(connection: &Connection) -> ChunkStoreResult<(
                 record_blob BLOB NOT NULL
              );
              INSERT OR IGNORE INTO metadata (key, value)
-                VALUES ('schema_version', '1');
-             PRAGMA user_version = 1;
+                VALUES ('schema_version', '2');
+             PRAGMA user_version = 2;
              COMMIT;",
         )
         .map_err(sqlite_error)?;
@@ -3346,7 +3966,7 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_string(writer, record.player.as_str(), "player key")?;
     write_u64(writer, record.revision)?;
     write_string(writer, &record.last_known_name, "player name")?;
-    write_string(writer, &record.dimension, "player dimension")?;
+    write_string(writer, record.dimension.as_str(), "player dimension")?;
     write_vec3d(writer, record.position)?;
     write_f32(writer, record.y_rot_degrees)?;
     write_f32(writer, record.x_rot_degrees)?;
@@ -3372,6 +3992,7 @@ fn write_world_metadata(writer: &mut impl Write, record: &WorldMetadata) -> Chun
     }
     writer.write_all(WORLD_METADATA_MAGIC)?;
     write_u32(writer, WORLD_METADATA_VERSION)?;
+    writer.write_all(&record.realm_id.bytes())?;
     write_u64(writer, record.revision)?;
     write_string(
         writer,
@@ -3390,6 +4011,92 @@ fn write_world_metadata(writer: &mut impl Write, record: &WorldMetadata) -> Chun
     Ok(())
 }
 
+fn write_dimension_record(
+    writer: &mut impl Write,
+    record: &DimensionRecord,
+) -> ChunkStoreResult<()> {
+    if record.codec_version != DIMENSION_RECORD_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported dimension record codec version {}",
+            record.codec_version
+        )));
+    }
+    let definition = &record.definition;
+    if !definition.coordinate_scale.is_finite() || definition.coordinate_scale <= 0.0 {
+        return Err(ChunkStoreError::InvalidData(
+            "dimension coordinate scale must be finite and positive".to_owned(),
+        ));
+    }
+    if definition.height <= 0 {
+        return Err(ChunkStoreError::InvalidData(
+            "dimension height must be positive".to_owned(),
+        ));
+    }
+    writer.write_all(DIMENSION_RECORD_MAGIC)?;
+    write_u32(writer, DIMENSION_RECORD_VERSION)?;
+    write_string(writer, record.key.as_str(), "dimension key")?;
+    write_u64(writer, record.revision)?;
+    write_i64(writer, definition.seed)?;
+    write_world_generation_profile(writer, definition.generation_profile)?;
+    write_i32(writer, definition.min_y)?;
+    write_i32(writer, definition.height)?;
+    write_f64(writer, definition.coordinate_scale)?;
+    write_bool(writer, definition.has_sky_light)?;
+    write_bool(writer, definition.has_ceiling)?;
+    write_bool(writer, definition.ultrawarm)?;
+    writer.flush()?;
+    Ok(())
+}
+
+fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRecord> {
+    let mut magic = [0_u8; DIMENSION_RECORD_MAGIC.len()];
+    reader.read_exact(&mut magic)?;
+    if &magic != DIMENSION_RECORD_MAGIC {
+        return Err(ChunkStoreError::InvalidData(
+            "dimension record had invalid magic".to_owned(),
+        ));
+    }
+    let codec_version = read_u32(reader)?;
+    if codec_version != DIMENSION_RECORD_VERSION {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "unsupported dimension record codec version {codec_version}"
+        )));
+    }
+    let key_text = read_string(reader)?;
+    let key = DimensionKey::parse(&key_text).map_err(|error| {
+        ChunkStoreError::InvalidData(format!(
+            "dimension record had invalid key {key_text:?}: {error}"
+        ))
+    })?;
+    let revision = read_u64(reader)?;
+    let definition = DimensionDefinition {
+        seed: read_i64(reader)?,
+        generation_profile: read_world_generation_profile(reader)?,
+        min_y: read_i32(reader)?,
+        height: read_i32(reader)?,
+        coordinate_scale: read_f64(reader)?,
+        has_sky_light: read_bool(reader)?,
+        has_ceiling: read_bool(reader)?,
+        ultrawarm: read_bool(reader)?,
+    };
+    if !definition.coordinate_scale.is_finite() || definition.coordinate_scale <= 0.0 {
+        return Err(ChunkStoreError::InvalidData(
+            "dimension coordinate scale must be finite and positive".to_owned(),
+        ));
+    }
+    if definition.height <= 0 {
+        return Err(ChunkStoreError::InvalidData(
+            "dimension height must be positive".to_owned(),
+        ));
+    }
+    Ok(DimensionRecord {
+        key,
+        codec_version,
+        revision,
+        definition,
+    })
+}
+
 fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata> {
     let mut magic = [0_u8; WORLD_METADATA_MAGIC.len()];
     reader.read_exact(&mut magic)?;
@@ -3399,13 +4106,23 @@ fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata
         ));
     }
     let codec_version = read_u32(reader)?;
-    if codec_version != WORLD_METADATA_VERSION {
+    if !(1..=WORLD_METADATA_VERSION).contains(&codec_version) {
         return Err(ChunkStoreError::InvalidData(format!(
             "unsupported world metadata codec version {codec_version}"
         )));
     }
+    let realm_id = if codec_version >= 2 {
+        let mut bytes = [0_u8; 16];
+        reader.read_exact(&mut bytes)?;
+        RealmId::new(bytes).map_err(|error| {
+            ChunkStoreError::InvalidData(format!("world metadata had invalid realm id: {error}"))
+        })?
+    } else {
+        RealmId::LEGACY_SINGLE_REALM
+    };
     let record = WorldMetadata {
         codec_version,
+        realm_id,
         revision: read_u64(reader)?,
         target_minecraft_version: read_string(reader)?,
         seed: read_i64(reader)?,
@@ -3491,7 +4208,9 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         codec_version,
         revision: read_u64(reader)?,
         last_known_name: read_string(reader)?,
-        dimension: read_string(reader)?,
+        dimension: DimensionKey::parse(read_string(reader)?).map_err(|error| {
+            ChunkStoreError::InvalidData(format!("invalid player dimension: {error}"))
+        })?,
         position: read_vec3d(reader)?,
         y_rot_degrees: read_f32(reader)?,
         x_rot_degrees: read_f32(reader)?,
@@ -4056,14 +4775,41 @@ mod tests {
     }
 
     #[test]
+    fn binary_dimension_record_roundtrips_validated_definition() {
+        let mut record = DimensionRecord::overworld(44, WorldGenerationProfile::Overworld);
+        record.key = DimensionKey::parse("mclone:moon").unwrap();
+        record.definition.coordinate_scale = 0.125;
+        record.definition.has_sky_light = false;
+
+        let bytes = encode_dimension_record(&record).unwrap();
+
+        assert_eq!(decode_dimension_record(&bytes).unwrap(), record);
+    }
+
+    #[test]
+    fn binary_world_metadata_v1_decodes_with_legacy_realm_for_migration() {
+        let current = encode_world_metadata(&test_world_metadata(45)).unwrap();
+        let header_len = WORLD_METADATA_MAGIC.len() + std::mem::size_of::<u32>();
+        let mut legacy = current[..header_len].to_vec();
+        legacy[WORLD_METADATA_MAGIC.len()..header_len].copy_from_slice(&1_u32.to_le_bytes());
+        legacy.extend_from_slice(&current[header_len + 16..]);
+
+        let decoded = decode_world_metadata(&legacy).unwrap();
+
+        assert_eq!(decoded.codec_version, 1);
+        assert_eq!(decoded.realm_id, RealmId::LEGACY_SINGLE_REALM);
+        assert_eq!(decoded.revision, 45);
+    }
+
+    #[test]
     fn binary_world_metadata_rejects_unknown_versions_and_trailing_bytes() {
         let mut unknown_version = encode_world_metadata(&test_world_metadata(1)).unwrap();
-        unknown_version[WORLD_METADATA_MAGIC.len()] = 2;
+        unknown_version[WORLD_METADATA_MAGIC.len()] = 3;
         assert!(
             decode_world_metadata(&unknown_version)
                 .unwrap_err()
                 .to_string()
-                .contains("unsupported world metadata codec version 2")
+                .contains("unsupported world metadata codec version 3")
         );
 
         let mut trailing = encode_world_metadata(&test_world_metadata(1)).unwrap();
@@ -4140,12 +4886,14 @@ mod tests {
             Some(WorldStoreRequest::LoadChunk {
                 request_id,
                 pos: request_pos,
+                ..
             }) if *request_id == load_id && *request_pos == pos
         ));
 
         mailbox
             .complete_external_request(WorldStoreCompletion::ChunkLoaded {
                 request_id: load_id,
+                dimension: DimensionKey::overworld(),
                 pos,
                 result: Ok(Some(record.clone())),
             })
@@ -4164,6 +4912,29 @@ mod tests {
     }
 
     #[test]
+    fn scoped_mailbox_automatically_qualifies_dimension_local_requests() {
+        let moon = DimensionKey::parse("mclone:moon").unwrap();
+        let pos = ChunkPos::new(0, 0);
+        let mut mailbox = PersistenceMailbox::external_loads_in_dimension(
+            moon.clone(),
+            Box::<MemoryWorldStore>::default(),
+        );
+
+        let request_id = mailbox.load_chunk(pos);
+        let requests = mailbox.drain_external_requests();
+
+        assert_eq!(mailbox.dimension(), &moon);
+        assert!(matches!(
+            requests.as_slice(),
+            [WorldStoreRequest::LoadChunk {
+                request_id: actual_id,
+                dimension,
+                pos: actual_pos,
+            }] if *actual_id == request_id && dimension == &moon && *actual_pos == pos
+        ));
+    }
+
+    #[test]
     fn external_load_backend_emits_entity_chunk_load_request_and_caches_completion() {
         let mut mailbox = PersistenceMailbox::external_loads(Box::<MemoryWorldStore>::default());
         let pos = ChunkPos::new(-3, 5);
@@ -4177,12 +4948,14 @@ mod tests {
             Some(WorldStoreRequest::LoadEntityChunk {
                 request_id,
                 pos: request_pos,
+                ..
             }) if *request_id == load_id && *request_pos == pos
         ));
 
         mailbox
             .complete_external_request(WorldStoreCompletion::EntityChunkLoaded {
                 request_id: load_id,
+                dimension: DimensionKey::overworld(),
                 pos,
                 result: Ok(Some(record.clone())),
             })
@@ -4554,12 +5327,13 @@ mod tests {
         let entity_chunk = test_entity_chunk_record(entity_pos, 15);
         let player = test_player_record(16);
         let metadata = test_world_metadata(17);
+        let overworld = DimensionKey::overworld();
 
         {
             let mut store = SqliteWorldStore::new(&path).unwrap();
             assert!(store.supports_entity_chunks());
-            store.save_chunk(&chunk).unwrap();
-            store.save_entity_chunk(&entity_chunk).unwrap();
+            store.save_chunk(&overworld, &chunk).unwrap();
+            store.save_entity_chunk(&overworld, &entity_chunk).unwrap();
             store.save_player(&player).unwrap();
             assert_eq!(
                 store.load_world_metadata().unwrap(),
@@ -4576,9 +5350,12 @@ mod tests {
         {
             let mut reopened = SqliteWorldStore::new(&path).unwrap();
             assert_eq!(reopened.path(), path.as_path());
-            assert_eq!(reopened.load_chunk(chunk_pos).unwrap(), Some(chunk));
             assert_eq!(
-                reopened.load_entity_chunk(entity_pos).unwrap(),
+                reopened.load_chunk(&overworld, chunk_pos).unwrap(),
+                Some(chunk)
+            );
+            assert_eq!(
+                reopened.load_entity_chunk(&overworld, entity_pos).unwrap(),
                 Some(entity_chunk)
             );
             assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
@@ -4589,9 +5366,16 @@ mod tests {
                     legacy_records_present: false,
                 }
             );
-            assert_eq!(reopened.load_chunk(ChunkPos::new(99, 99)).unwrap(), None);
             assert_eq!(
-                reopened.load_entity_chunk(ChunkPos::new(99, 99)).unwrap(),
+                reopened
+                    .load_chunk(&overworld, ChunkPos::new(99, 99))
+                    .unwrap(),
+                None
+            );
+            assert_eq!(
+                reopened
+                    .load_entity_chunk(&overworld, ChunkPos::new(99, 99))
+                    .unwrap(),
                 None
             );
         }
@@ -4601,13 +5385,55 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn sqlite_v1_fixture_reopens_with_unqualified_chunk_keys() {
+    fn sqlite_dimension_keys_isolate_identical_chunk_coordinates() {
+        let root = unique_temp_dir("sqlite-dimension-collision");
+        let path = root.join("world.sqlite3");
+        let overworld = DimensionKey::overworld();
+        let moon = DimensionKey::parse("mclone:moon").unwrap();
+        let pos = ChunkPos::new(0, 0);
+        let overworld_chunk = test_record(pos, 31);
+        let moon_chunk = test_record(pos, 32);
+        let overworld_entities = test_entity_chunk_record(pos, 41);
+        let moon_entities = test_entity_chunk_record(pos, 42);
+
+        {
+            let mut store = SqliteWorldStore::new(&path).unwrap();
+            store.save_chunk(&overworld, &overworld_chunk).unwrap();
+            store.save_chunk(&moon, &moon_chunk).unwrap();
+            store
+                .save_entity_chunk(&overworld, &overworld_entities)
+                .unwrap();
+            store.save_entity_chunk(&moon, &moon_entities).unwrap();
+        }
+
+        let mut reopened = SqliteWorldStore::new(&path).unwrap();
+        assert_eq!(
+            reopened.load_chunk(&overworld, pos).unwrap(),
+            Some(overworld_chunk)
+        );
+        assert_eq!(reopened.load_chunk(&moon, pos).unwrap(), Some(moon_chunk));
+        assert_eq!(
+            reopened.load_entity_chunk(&overworld, pos).unwrap(),
+            Some(overworld_entities)
+        );
+        assert_eq!(
+            reopened.load_entity_chunk(&moon, pos).unwrap(),
+            Some(moon_entities)
+        );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn sqlite_v1_fixture_migrates_unqualified_records_to_overworld() {
         let root = unique_temp_dir("sqlite-v1-realm-dimension-fixture");
         let path = root.join("world.sqlite3");
         let chunk = test_record(ChunkPos::new(-31, 47), 21);
         let entity_chunk = test_entity_chunk_record(ChunkPos::new(-31, 48), 22);
         let player = test_player_record(23);
         let metadata = test_world_metadata(24);
+        let overworld = DimensionKey::overworld();
 
         {
             fs::create_dir_all(&root).unwrap();
@@ -4713,9 +5539,14 @@ mod tests {
 
         {
             let mut reopened = SqliteWorldStore::new(&path).unwrap();
-            assert_eq!(reopened.load_chunk(chunk.pos()).unwrap(), Some(chunk));
             assert_eq!(
-                reopened.load_entity_chunk(entity_chunk.pos).unwrap(),
+                reopened.load_chunk(&overworld, chunk.pos()).unwrap(),
+                Some(chunk)
+            );
+            assert_eq!(
+                reopened
+                    .load_entity_chunk(&overworld, entity_chunk.pos)
+                    .unwrap(),
                 Some(entity_chunk)
             );
             assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
@@ -4735,8 +5566,20 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 columns,
-                ["x", "z", "codec_version", "revision", "record_blob"]
+                [
+                    "dimension_key",
+                    "x",
+                    "z",
+                    "codec_version",
+                    "revision",
+                    "record_blob"
+                ]
             );
+            let schema_version: i64 = reopened
+                .connection
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(schema_version, SQLITE_WORLD_SCHEMA_VERSION);
         }
 
         fs::remove_dir_all(root).unwrap();
@@ -4753,6 +5596,7 @@ mod tests {
         let entity_chunk = test_entity_chunk_record(entity_pos, 17);
         let player = test_player_record(18);
         let metadata = test_world_metadata(19);
+        let overworld = DimensionKey::overworld();
 
         {
             let store = SqliteWorldStore::new(&path).unwrap();
@@ -4785,9 +5629,12 @@ mod tests {
 
         {
             let mut reopened = SqliteWorldStore::new(&path).unwrap();
-            assert_eq!(reopened.load_chunk(chunk_pos).unwrap(), Some(chunk));
             assert_eq!(
-                reopened.load_entity_chunk(entity_pos).unwrap(),
+                reopened.load_chunk(&overworld, chunk_pos).unwrap(),
+                Some(chunk)
+            );
+            assert_eq!(
+                reopened.load_entity_chunk(&overworld, entity_pos).unwrap(),
                 Some(entity_chunk)
             );
             assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
@@ -4843,7 +5690,7 @@ mod tests {
             codec_version: PLAYER_RECORD_VERSION,
             revision,
             last_known_name: "Builder".to_owned(),
-            dimension: "minecraft:overworld".to_owned(),
+            dimension: DimensionKey::overworld(),
             position: Vec3d::new(12.25, 78.5, -44.75),
             y_rot_degrees: 123.0,
             x_rot_degrees: -12.5,
@@ -4856,6 +5703,7 @@ mod tests {
     fn test_world_metadata(revision: u64) -> WorldMetadata {
         WorldMetadata {
             codec_version: WORLD_METADATA_VERSION,
+            realm_id: RealmId::new([0x5a; 16]).unwrap(),
             revision,
             target_minecraft_version: WORLD_METADATA_TARGET_MINECRAFT_VERSION.to_owned(),
             seed: -9_223_372_036_854_775,
@@ -5080,11 +5928,19 @@ mod tests {
             self.inner.supports_entity_chunks()
         }
 
-        fn load_chunk(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
-            self.inner.load_chunk(pos)
+        fn load_chunk(
+            &mut self,
+            dimension: &DimensionKey,
+            pos: ChunkPos,
+        ) -> ChunkStoreResult<Option<ChunkRecord>> {
+            self.inner.load_chunk(dimension, pos)
         }
 
-        fn save_chunk(&mut self, record: &ChunkRecord) -> ChunkStoreResult<()> {
+        fn save_chunk(
+            &mut self,
+            dimension: &DimensionKey,
+            record: &ChunkRecord,
+        ) -> ChunkStoreResult<()> {
             let _ = self.save_started_sender.send(());
             self.save_release_receiver
                 .recv_timeout(Duration::from_secs(1))
@@ -5093,18 +5949,23 @@ mod tests {
                         "test store write was not released: {error}"
                     ))
                 })?;
-            self.inner.save_chunk(record)
+            self.inner.save_chunk(dimension, record)
         }
 
         fn load_entity_chunk(
             &mut self,
+            dimension: &DimensionKey,
             pos: ChunkPos,
         ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-            self.inner.load_entity_chunk(pos)
+            self.inner.load_entity_chunk(dimension, pos)
         }
 
-        fn save_entity_chunk(&mut self, record: &EntityChunkRecord) -> ChunkStoreResult<()> {
-            self.inner.save_entity_chunk(record)
+        fn save_entity_chunk(
+            &mut self,
+            dimension: &DimensionKey,
+            record: &EntityChunkRecord,
+        ) -> ChunkStoreResult<()> {
+            self.inner.save_entity_chunk(dimension, record)
         }
     }
 

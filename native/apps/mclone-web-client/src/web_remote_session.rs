@@ -379,6 +379,8 @@ fn queue_transport_disconnect(
 impl Drop for WebSocketServerSession {
     fn drop(&mut self) {
         self.request_shutdown();
+        self.worker.set_onmessage(None);
+        self.worker.set_onerror(None);
         let _ = &self.message_closure;
         let _ = &self.error_closure;
     }

@@ -379,6 +379,8 @@ impl std::fmt::Debug for WasmJobWorker {
 
 impl Drop for WasmJobWorker {
     fn drop(&mut self) {
+        self.worker.set_onmessage(None);
+        self.worker.set_onerror(None);
         self.worker.terminate();
         let _ = &self.message_closure;
         let _ = &self.error_closure;
