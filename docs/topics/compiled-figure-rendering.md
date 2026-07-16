@@ -120,6 +120,33 @@ well above vanilla cuboid-mob geometry. The cost also multiplies by visible
 actor count and animation cadence. More importantly, the pipeline should not
 make CPU world-space rebaking a prerequisite for later, richer figure assets.
 
+## Current Texture And UV Evidence
+
+The current authored figures do not describe generally unwrapped characters.
+An inventory taken on 2026-07-16 from the loaded semantic assets found:
+
+| Fact | Count |
+|---|---:|
+| figures | 18 |
+| total parts | 516 |
+| boxes | 333 |
+| spheres / capsules / cylinders | 73 / 89 / 21 |
+| ASCII textures | 29 |
+| parts with any texture reference | 29 |
+| individual texture applications | 33 |
+| texture applications on curved primitives | 0 |
+
+All 33 applications target an explicit face of a box. Most are a single
+front/north face for eyes or a muzzle. The only broader uses are the top and
+bottom faces of the two butterfly wings and the east, west, and top faces of
+the tiger body. No part uses a whole-primitive texture, and all 183 curved
+primitives currently use solid materials.
+
+This distinction matters: GPU geometry may carry deterministic UV attributes
+without requiring authors to unwrap a figure. The current content needs
+automatic planar coordinates for a sparse set of box-face decals, not a
+general character UV editor or continuity across parts.
+
 ## North Star
 
 Keep the TypeScript DSL or another compact semantic representation as the
@@ -209,7 +236,8 @@ This is a capability sketch, not a frozen binary layout.
 
 - local-space positions;
 - normals;
-- UVs;
+- deterministic UV attributes, generated mechanically and meaningful only to
+  material ranges that actually sample a texture;
 - static indices;
 - one rigid part index per vertex;
 - material/texture slot or material-partitioned draw ranges;
@@ -237,14 +265,29 @@ optimization, not a prerequisite.
 
 ### Materials and textures
 
-- generated RGBA texture data or atlas regions derived from ASCII sources;
+- solid-color materials as the ordinary path;
+- generated RGBA atlas regions derived from the sparse ASCII sources;
+- automatic planar `0..1` coordinates for each explicitly textured box face,
+  remapped mechanically into its atlas region;
 - nearest-filtered sampling where authored;
-- explicit box face mapping;
-- deterministic default projections for sphere, capsule, and cylinder;
-- optional projection rotation, scale, offset, and seam controls when the
-  defaults are not enough;
+- Three.js-compatible default UV attributes retained mechanically for curved
+  primitives, even though current curved materials do not sample them;
+- a clear compile error for authored sphere, capsule, or cylinder textures
+  until a concrete curved-surface texture contract is selected;
 - a deliberately supported material subset; and
 - stable material slots shared across LOD variants.
+
+There is no whole-character unwrap, no cross-part texture continuity, and no
+manual seam/rotation/scale authoring surface in the initial campaign. A solid
+material may ignore UVs entirely or sample a compiler-generated solid atlas
+swatch; that encoding choice does not become authoring work.
+
+If later figures need broad fur variation, mottling, or noise, prefer
+figure/object-space procedural mapping, generated vertex color, or a bounded
+triplanar material over manually unwrapping every primitive. A small curved
+decal patch is another possible focused extension. General curved-surface UV
+authoring is justified only by a real asset that cannot be expressed by these
+simpler choices.
 
 Asset Lab currently previews roughness and metalness through Three.js while
 the native actor path uses simpler baked face colors. The compiled contract
@@ -425,10 +468,10 @@ The implementation should expose at least:
 This direction trades a coarse but simple runtime bridge for a real asset and
 rendering subsystem:
 
-- **Compiler ownership:** Asset Lab gains deterministic tessellation, UV,
-  atlas, versioning, budget, and error-reporting responsibilities. Compiled
-  preview, golden counts, dependency provenance, and stale-artifact rejection
-  are required to keep that cost controlled.
+- **Compiler ownership:** Asset Lab gains deterministic tessellation,
+  box-face projection, atlas, versioning, budget, and error-reporting
+  responsibilities. Compiled preview, golden counts, dependency provenance,
+  and stale-artifact rejection are required to keep that cost controlled.
 - **Sampled-animation approximation:** interpolation prevents temporal pose
   holds but sparse samples can still flatten fast or curved motion. Error-based
   sampling, loop tests, and preservation of canonical clip tracks keep the
@@ -490,10 +533,11 @@ selection invariants are:
 - keep selection and residency policy shared across host adapters.
 
 Open design work includes segment-reduction rules, treatment of tiny parts,
-normal/UV continuity, mip and filtering policy (the proof's nearest-filtered
-unmipped atlas will shimmer on distant actors and must be revisited alongside
-LOD), residency limits, transition policy, shadows if added, and whether
-authored overrides are needed for silhouette-critical features.
+normal continuity, mip and filtering policy for the sparse box-face decals
+(the proof's nearest-filtered unmipped atlas will shimmer on distant actors
+and must be revisited alongside LOD), residency limits, transition policy,
+shadows if added, and whether authored overrides are needed for silhouette-
+critical features.
 
 ## Asset Lab Evolution
 
@@ -506,7 +550,9 @@ include:
   materials, and LODs consumed by the runtime;
 - optional semantic-Three.js versus compiled-output comparison while the
   compiler is brought up;
-- UV/seam/projection visualization;
+- box-face atlas/UV orientation visualization;
+- inspection of compiler-preserved Three.js default coordinates on curved
+  primitives without implying a curved-texture authoring workflow;
 - normal and winding visualization;
 - atlas and material-slot review;
 - per-LOD static sheets and animated transition review;
@@ -569,7 +615,10 @@ wait on an animation de-risk.
 ### Phase 2: true primitive and material parity
 
 - compile spheres, capsules, and cylinders with deterministic segments;
-- define UV projections, seams, normals, and the supported material subset;
+- preserve Three.js positions, normals, indices, and default UV attributes;
+- keep curved primitives on solid materials and reject authored curved
+  textures unless a later concrete asset opens that separate contract;
+- define the supported non-texture material subset;
 - prove a rounded animal against Asset Lab; and
 - add compiler budgets and deterministic pack validation.
 
@@ -654,6 +703,8 @@ wait on an animation de-risk.
 - animation migration, GPU clip sampling, or instancing;
 - runtime primitive tessellation on every host;
 - arbitrary Three.js material/shader compatibility;
+- general character UV unwrapping, cross-part texture continuity, or authored
+  curved-surface seam/projection controls;
 - automatic mesh simplification of unstructured artist meshes;
 - impostors or billboards before ordinary primitive LODs are measured; and
 - changing authoritative entity or collision shape from render LOD.
@@ -667,9 +718,9 @@ Closed 2026-07-16 during the pre-landing design review.
 
 1. **Schema evolution.** Semantic `FigureAsset` remains schema v1; the
    compiled artifact starts at its own independent v1. Semantic v2 is
-   revisited only when a concrete Phase 2 UV/material/LOD authoring need
-   appears — the trigger tracked by the UV-policy and material-expansion
-   questions below.
+   revisited only when a concrete curved-texture, material, or LOD authoring
+   need appears — the triggers tracked by the curved-surface texture and
+   material-expansion questions below.
 2. **Preview authority.** Authoring and acceptance are different roles. The
    live semantic Three.js preview remains the authoring surface indefinitely —
    it is what keeps the author's mental model and iteration loop cheap — and
@@ -688,6 +739,12 @@ Closed 2026-07-16 during the pre-landing design review.
 5. **CPU span cache.** Phase 0's index-reuse cleanup is the ceiling for
    fallback optimization. No per-actor span-cache campaign happens unless the
    compiled path fails its gates.
+6. **Sparse texture policy.** The initial campaign supports solid materials
+   plus automatic planar mapping for explicit box-face decals. It does not
+   introduce whole-character unwraps, cross-part continuity, or manual curved-
+   surface UV controls. Curved primitives preserve Three.js default UV
+   attributes mechanically but use solid materials unless a real asset opens
+   a focused extension.
 
 ## Open Decisions
 
@@ -700,12 +757,14 @@ Closed 2026-07-16 during the pre-landing design review.
    committed versus generated reproducibly during packing, and which gate
    (pack validation, CI, or a commit-time script) enforces byte
    reproducibility on every change?
-3. **UV policy.** What are the exact default orientations and seams for each
-   primitive, and which author controls are necessary without making UV
-   authoring cumbersome?
-4. **Material expansion.** After Tactical 181's opaque color/texture subset,
-   which of alpha mode, roughness, metalness, emissive behavior, and face
-   shading belong in the shared shader contract?
+3. **Curved-surface texture policy.** If a future asset cannot use solid color,
+   figure/object-space procedural variation, generated vertex color,
+   triplanar mapping, or a small decal patch, what is the smallest additional
+   curved-texture contract it actually needs? Do not answer this in advance
+   with a general unwrap editor.
+4. **Material expansion.** After Tactical 181's opaque color/box-face-texture
+   subset, which of alpha mode, roughness, metalness, emissive behavior, and
+   face shading belong in the shared shader contract?
 5. **Palette storage and evaluator threshold.** Uniform, storage-buffer, or
    texture-backed part matrices; how are alignment, browser limits, frames in
    flight, and many instances handled, and when does GPU expansion beat CPU
@@ -730,7 +789,9 @@ Each pixel-producing slice must capture and inspect output at its first
 drawable milestone. The eventual campaign should include:
 
 - compiler determinism and malformed/budget-exceeding asset tests;
-- exact compiled counts, bounds, part indices, winding, normals, and UV tests;
+- exact compiled counts, bounds, part indices, winding, and normals, plus UV
+  tests for explicitly textured box faces and compiler-preserved default
+  curved attributes;
 - Asset Lab compiled-preview sheets and animation videos;
 - native actor review sheets and direct gameplay screenshots;
 - frozen and animated pixel comparisons for every migrated figure;

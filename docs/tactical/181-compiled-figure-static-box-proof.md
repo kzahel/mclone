@@ -32,6 +32,13 @@ triangles. The current runtime bridge represents the same source as 12 base
 cuboids plus 64 texture-cell overlay cuboids, or 1,824 cuboid vertices and
 2,736 indices before actor-list duplication.
 
+This is also representative of the actual texture scope, not merely a
+convenient simplification. Across the current 18 figures and 516 parts, only
+29 parts contain texture references and all 33 applications target explicit
+box faces. All 183 spheres, capsules, and cylinders use solid materials. This
+tactical therefore proves sparse planar box-face decals; it does not begin a
+general UV-unwrapping system.
+
 Success means the checked/generated artifact is deterministic, Asset Lab and
 the Rust loader agree on its exact data, and the shared renderer visibly draws
 its static rest pose with the face texture as UV-mapped pixels. It does not mean
@@ -118,12 +125,16 @@ allocation.
   height normalization. Encode the convention in the header.
 - Use interleaved or separately described static attributes for local position,
   normal, UV, and one rigid `part_id`. The logical contract must not assume a
-  CPU-baked world position.
+  CPU-baked world position. UV storage does not imply authored unwrapping:
+  untextured material ranges may ignore it.
 - Select `u16` or `u32` indices explicitly per LOD and validate the choice.
 - Build one deterministic opaque atlas. ASCII textures become ordinary RGBA
   texels; constant materials may occupy deterministic solid-color atlas
   regions. Sort source names before packing, define gutters and origin, use
   nearest filtering, and disable mip use in the proof.
+- Generate canonical planar `0..1` coordinates independently for each box
+  face and remap only explicitly textured faces into their atlas regions. The
+  author supplies a face name and texture name, not UV vertices or seams.
 - Preserve material slots/draw ranges in metadata even if the initial opaque
   atlas permits one draw. Roughness, metalness, emissive, alpha blending,
   normal maps, and arbitrary Three.js materials are unsupported.
@@ -164,6 +175,8 @@ allocation.
 - No weighted skinning, morph targets, IK, glTF, or arbitrary mesh import.
 - No transparent material, general PBR parity, mip chain, or texture-pack
   atlas merger.
+- No whole-character unwrap, cross-part texture continuity, manual UV editor,
+  or curved-surface texture controls.
 - No protocol, authority, collision, AI, spawning, or player-appearance
   contract change.
 - No app-local rendering implementation or platform-specific figure format.
@@ -183,6 +196,8 @@ inspects its first drawable result before proceeding.
 - Record semantic player source hash, part/material/texture/clip counts,
   intended Three.js geometry counts, rest bounds, and visible face
   orientation.
+- Record the repository-wide sparse-texture inventory: 516 parts, 29 textured
+  parts, 33 explicit box-face applications, and zero curved applications.
 - Define numerical tolerances for bounds/normals and an image comparison rule
   for semantic versus compiled Asset Lab preview.
 
@@ -331,8 +346,10 @@ compiler contract, bump the compiled schema if needed, and regenerate.
 Later work stays in separate tacticals so each optimization has its own visual
 and performance claim:
 
-1. true sphere/capsule/cylinder tessellation, UV seams, normals, and the shared
-   supported material subset;
+1. true sphere/capsule/cylinder tessellation with Three.js positions, normals,
+   indices, and default UV attributes preserved mechanically, while current
+   curved parts remain solid-material and general curved-texture authoring
+   stays deferred;
 2. presentation-rate CPU rigid-part animation using static geometry and final
    actor palettes, including local TRS/quaternion interpolation and remote
    world-transform interpolation;
