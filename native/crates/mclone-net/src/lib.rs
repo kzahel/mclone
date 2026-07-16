@@ -460,9 +460,10 @@ mod native_tcp {
     use std::time::{Duration, Instant};
 
     use mclone_protocol::{
-        ClientCommand, ClientIdentity, PROTOCOL_VERSION, PlayerProfileId, ProtocolCodecError,
-        ServerUpdate, SessionCapabilities, decode_client_command, decode_server_update,
-        encode_client_command, encode_server_update, validate_client_identity,
+        ClientCommand, ClientIdentity, DisconnectReason, PROTOCOL_VERSION, PlayerProfileId,
+        ProtocolCodecError, ServerUpdate, SessionCapabilities, decode_client_command,
+        decode_server_update, encode_client_command, encode_server_update,
+        validate_client_identity,
     };
 
     pub type NativeTransportResult<T> = Result<T, NativeTransportError>;
@@ -793,6 +794,7 @@ mod native_tcp {
     #[derive(Debug)]
     struct NativeClientIoCommand {
         command: ClientCommand,
+        shutdown_after_send: bool,
     }
 
     impl NativeClientIoSession {
@@ -813,6 +815,7 @@ mod native_tcp {
             let shutdown_stream = stream.try_clone()?;
             let reader_stream = stream.try_clone()?;
             let (command_tx, command_rx) = mpsc::sync_channel(NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY);
+            let reader_command_tx = command_tx.clone();
             let (update_tx, update_rx) =
                 mpsc::sync_channel(NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY);
             let diagnostics = Arc::new(NativeClientIoSharedDiagnostics::new());
@@ -826,7 +829,12 @@ mod native_tcp {
             let reader_join_handle = match thread::Builder::new()
                 .name("mclone-native-client-reader".to_owned())
                 .spawn(move || {
-                    run_native_client_reader(reader_stream, update_tx, reader_diagnostics);
+                    run_native_client_reader(
+                        reader_stream,
+                        update_tx,
+                        reader_command_tx,
+                        reader_diagnostics,
+                    );
                 }) {
                 Ok(join_handle) => join_handle,
                 Err(error) => {
@@ -862,7 +870,10 @@ mod native_tcp {
                     .fetch_sub(1, Ordering::AcqRel);
                 return Err(self.diagnostics.actor_stopped_error());
             };
-            match command_tx.try_send(NativeClientIoCommand { command }) {
+            match command_tx.try_send(NativeClientIoCommand {
+                command,
+                shutdown_after_send: false,
+            }) {
                 Ok(()) => Ok(()),
                 Err(mpsc::TrySendError::Full(_)) => {
                     self.diagnostics
@@ -914,11 +925,28 @@ mod native_tcp {
 
     impl Drop for NativeClientIoSession {
         fn drop(&mut self) {
-            self.command_tx.take();
-            let _ = self.shutdown_stream.shutdown(Shutdown::Both);
+            if let Some(command_tx) = self.command_tx.take() {
+                self.diagnostics
+                    .outbound_command_depth
+                    .fetch_add(1, Ordering::AcqRel);
+                if command_tx
+                    .try_send(NativeClientIoCommand {
+                        command: ClientCommand::Disconnect(
+                            mclone_protocol::ClientDisconnectReason::Quit,
+                        ),
+                        shutdown_after_send: true,
+                    })
+                    .is_err()
+                {
+                    self.diagnostics
+                        .outbound_command_depth
+                        .fetch_sub(1, Ordering::AcqRel);
+                }
+            }
             if let Some(join_handle) = self.writer_join_handle.take() {
                 let _ = join_handle.join();
             }
+            let _ = self.shutdown_stream.shutdown(Shutdown::Both);
             if let Some(join_handle) = self.reader_join_handle.take() {
                 let _ = join_handle.join();
             }
@@ -942,12 +970,16 @@ mod native_tcp {
                 let _ = stream.shutdown(Shutdown::Both);
                 return;
             }
+            if command_request.shutdown_after_send {
+                return;
+            }
         }
     }
 
     fn run_native_client_reader(
         mut stream: TcpStream,
         update_tx: mpsc::SyncSender<NativeServerUpdateBatch>,
+        command_tx: mpsc::SyncSender<NativeClientIoCommand>,
         diagnostics: Arc<NativeClientIoSharedDiagnostics>,
     ) {
         let mut inbound_frame_sequence = 0_u64;
@@ -957,11 +989,83 @@ mod native_tcp {
                 match read_server_update_batch_instrumented(&mut stream, inbound_frame_sequence) {
                     Ok(batch) => batch,
                     Err(error) => {
-                        diagnostics.mark_disconnected(error.to_string());
+                        let message = error.to_string();
+                        let update = ServerUpdate::Disconnect(match &error {
+                            NativeTransportError::Io(error)
+                                if matches!(
+                                    error.kind(),
+                                    std::io::ErrorKind::UnexpectedEof
+                                        | std::io::ErrorKind::ConnectionAborted
+                                        | std::io::ErrorKind::ConnectionReset
+                                        | std::io::ErrorKind::BrokenPipe
+                                ) =>
+                            {
+                                DisconnectReason::end_of_stream(message.clone())
+                            }
+                            _ => DisconnectReason::transport_error(message.clone()),
+                        });
+                        let encoded_len = encode_server_update(&update)
+                            .map(|encoded| encoded.len())
+                            .unwrap_or_default();
+                        let batch = NativeServerUpdateBatch {
+                            updates: vec![NativeServerUpdateEnvelope {
+                                update,
+                                encoded_len,
+                                inbound_frame_sequence,
+                                producer_read_ms: 0.0,
+                                producer_decode_ms: 0.0,
+                            }],
+                            inbound_frame_sequence,
+                            producer_read_ms: 0.0,
+                            producer_decode_ms: 0.0,
+                            queued_at: Instant::now(),
+                        };
+                        diagnostics.record_batch_queued(
+                            batch.update_count(),
+                            batch.encoded_bytes(),
+                            inbound_frame_sequence,
+                            0.0,
+                            0.0,
+                        );
+                        if let Err(error) = update_tx.try_send(batch) {
+                            match error {
+                                mpsc::TrySendError::Full(batch) => {
+                                    diagnostics.record_batch_rejected(&batch, true);
+                                }
+                                mpsc::TrySendError::Disconnected(batch) => {
+                                    diagnostics.record_batch_rejected(&batch, false);
+                                }
+                            }
+                        }
+                        diagnostics.mark_disconnected(message);
                         let _ = stream.shutdown(Shutdown::Both);
                         return;
                     }
                 };
+            for update in &batch.updates {
+                let ServerUpdate::KeepAlive { id } = &update.update else {
+                    continue;
+                };
+                diagnostics
+                    .outbound_command_depth
+                    .fetch_add(1, Ordering::AcqRel);
+                if command_tx
+                    .try_send(NativeClientIoCommand {
+                        command: ClientCommand::KeepAlive { id: *id },
+                        shutdown_after_send: false,
+                    })
+                    .is_err()
+                {
+                    diagnostics
+                        .outbound_command_depth
+                        .fetch_sub(1, Ordering::AcqRel);
+                    diagnostics.mark_disconnected(
+                        "outbound command queue could not accept a keepalive response",
+                    );
+                    let _ = stream.shutdown(Shutdown::Both);
+                    return;
+                }
+            }
             let update_count = batch.update_count();
             let encoded_bytes = batch.encoded_bytes();
             let producer_read_ms = batch.producer_read_ms;
@@ -1440,7 +1544,11 @@ mod native_tcp {
 mod tests {
     use super::*;
     use mclone_core::ChunkPos;
-    use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
+    use mclone_protocol::{
+        ChunkView, ClientDisconnectReason, DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION,
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    use std::io::Write;
 
     fn time_update(day_time: u64) -> ServerUpdate {
         ServerUpdate::TimeUpdate {
@@ -1721,10 +1829,9 @@ mod tests {
                 second_server_command
             );
             write_server_update_batch(&mut stream, &second_server_updates).unwrap();
-            assert!(
-                try_read_client_command_frame(&mut stream)
-                    .unwrap()
-                    .is_none()
+            assert_eq!(
+                try_read_client_command_frame(&mut stream).unwrap(),
+                Some(ClientCommand::Disconnect(ClientDisconnectReason::Quit))
             );
         });
 
@@ -2094,5 +2201,89 @@ mod tests {
         assert_eq!(negotiated, SessionCapabilities::NONE);
         assert_eq!(accepted.capabilities, SessionCapabilities::NONE);
         assert_eq!(accepted.identity, ClientIdentity::test_default());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_echoes_keepalive_without_runtime_polling() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+            write_server_update_batch(&mut stream, &[ServerUpdate::KeepAlive { id: 42 }]).unwrap();
+            stream.flush().unwrap();
+            try_read_client_command_frame(&mut stream).unwrap()
+        });
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        assert_eq!(
+            session.drain_update_batch().unwrap().into_updates(),
+            vec![ServerUpdate::KeepAlive { id: 42 }]
+        );
+        assert_eq!(
+            server.join().unwrap(),
+            Some(ClientCommand::KeepAlive { id: 42 })
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_reports_unexpected_eof_as_typed_disconnect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+        });
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        server.join().unwrap();
+        let updates = session.drain_update_batch().unwrap().into_updates();
+        let [ServerUpdate::Disconnect(reason)] = updates.as_slice() else {
+            panic!("unexpected EOF should enqueue one typed disconnect");
+        };
+        assert_eq!(reason.code, DisconnectReasonCode::EndOfStream);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_drop_sends_ordered_quit_command() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+            try_read_client_command_frame(&mut stream).unwrap()
+        });
+
+        let session = NativeClientIoSession::connect(addr).unwrap();
+        drop(session);
+
+        assert_eq!(
+            server.join().unwrap(),
+            Some(ClientCommand::Disconnect(ClientDisconnectReason::Quit))
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_tcp_client_preserves_explicit_server_disconnect() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let reason = DisconnectReason::new(DisconnectReasonCode::Kicked, "test kick");
+        let expected = reason.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            complete_server_handshake(&mut stream).unwrap();
+            write_server_update_batch(&mut stream, &[ServerUpdate::Disconnect(reason)]).unwrap();
+            stream.flush().unwrap();
+        });
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        let updates = session.drain_update_batch().unwrap().into_updates();
+        server.join().unwrap();
+
+        assert_eq!(updates, vec![ServerUpdate::Disconnect(expected)]);
     }
 }

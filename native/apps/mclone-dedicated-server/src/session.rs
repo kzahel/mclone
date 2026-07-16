@@ -1,11 +1,15 @@
 use std::collections::VecDeque;
 #[cfg(test)]
 use std::io::{Read, Write};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 #[cfg(test)]
 use anyhow::{Context, bail};
-use mclone_protocol::{ClientCommand, SequencedMovePlayerCommand};
+use mclone_protocol::{
+    ClientCommand, DisconnectReason, DisconnectReasonCode, PlayerActionKind,
+    SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
+};
 use mclone_server::{
     ChunkSchedulerPublicationDiagnostics, IntegratedServer, ServerPlayerId,
     ServerSimulationTickReport,
@@ -28,14 +32,40 @@ pub(crate) fn serve_connection(
 #[derive(Debug)]
 pub(crate) struct DedicatedSession {
     player_id: ServerPlayerId,
+    capabilities: SessionCapabilities,
     connection: DedicatedConnectionState,
+    liveness: DedicatedLiveness,
+}
+
+pub(crate) const DEDICATED_KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(15);
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum DedicatedCommandOutcome {
+    Continue,
+    Disconnect(DisconnectReason),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum DedicatedLivenessAction {
+    None,
+    Send(ServerUpdate),
+    Disconnect(DisconnectReason),
 }
 
 impl DedicatedSession {
     pub(crate) fn new(player_id: ServerPlayerId) -> Self {
+        Self::new_with_capabilities(player_id, SessionCapabilities::DEVELOPMENT_DEFAULT)
+    }
+
+    pub(crate) fn new_with_capabilities(
+        player_id: ServerPlayerId,
+        capabilities: SessionCapabilities,
+    ) -> Self {
         Self {
             player_id,
+            capabilities,
             connection: DedicatedConnectionState::default(),
+            liveness: DedicatedLiveness::new(Instant::now(), DEDICATED_KEEP_ALIVE_INTERVAL),
         }
     }
 
@@ -55,8 +85,12 @@ impl DedicatedSession {
             try_read_client_command_frame(stream).context("failed to read client command")?
         {
             command_count += 1;
-            self.handle_client_command(server, command)
-                .context("failed to apply client command")?;
+            if let DedicatedCommandOutcome::Disconnect(_) = self
+                .handle_client_command(server, command)
+                .context("failed to apply client command")?
+            {
+                break;
+            }
             self.finish_tick_boundary(server)?;
             server
                 .try_simulation_tick_report_global()
@@ -79,15 +113,104 @@ impl DedicatedSession {
         &mut self,
         server: &mut IntegratedServer,
         command: ClientCommand,
-    ) -> Result<()> {
+    ) -> Result<DedicatedCommandOutcome> {
+        match command {
+            ClientCommand::KeepAlive { id } => return Ok(self.liveness.handle_response(id)),
+            ClientCommand::Disconnect(_) => {
+                return Ok(DedicatedCommandOutcome::Disconnect(DisconnectReason::new(
+                    DisconnectReasonCode::ClientQuit,
+                    "client quit",
+                )));
+            }
+            _ => {}
+        }
+        if command_requires_debug_actions(&command)
+            && !self
+                .capabilities
+                .contains(SessionCapabilities::DEBUG_ACTIONS)
+        {
+            return Ok(DedicatedCommandOutcome::Disconnect(DisconnectReason::new(
+                DisconnectReasonCode::ProtocolViolation,
+                "client sent a debug command without the negotiated capability",
+            )));
+        }
         self.connection
-            .handle_command(server, self.player_id, command)
+            .handle_command(server, self.player_id, command)?;
+        Ok(DedicatedCommandOutcome::Continue)
+    }
+
+    pub(crate) fn poll_liveness(&mut self, now: Instant) -> DedicatedLivenessAction {
+        self.liveness.poll(now)
     }
 
     pub(crate) fn finish_tick_boundary(&mut self, server: &mut IntegratedServer) -> Result<()> {
         self.connection.flush_movement(server, self.player_id)?;
         self.connection.mark_tick_boundary();
         Ok(())
+    }
+}
+
+fn command_requires_debug_actions(command: &ClientCommand) -> bool {
+    match command {
+        ClientCommand::SetDebugHotbarSlot(_) | ClientCommand::ShootDebugPhysicsCube => true,
+        ClientCommand::PlayerAction(command) => command.kind == PlayerActionKind::DebugInstantBreak,
+        _ => false,
+    }
+}
+
+#[derive(Debug)]
+struct DedicatedLiveness {
+    interval: Duration,
+    last_challenge_at: Instant,
+    pending: Option<(u64, Instant)>,
+    next_id: u64,
+    latency: Option<Duration>,
+}
+
+impl DedicatedLiveness {
+    fn new(now: Instant, interval: Duration) -> Self {
+        Self {
+            interval,
+            last_challenge_at: now,
+            pending: None,
+            next_id: 1,
+            latency: None,
+        }
+    }
+
+    fn poll(&mut self, now: Instant) -> DedicatedLivenessAction {
+        if now.saturating_duration_since(self.last_challenge_at) < self.interval {
+            return DedicatedLivenessAction::None;
+        }
+        self.last_challenge_at = now;
+        if self.pending.is_some() {
+            return DedicatedLivenessAction::Disconnect(DisconnectReason::timeout(
+                "client did not answer the keepalive challenge",
+            ));
+        }
+
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        self.pending = Some((id, now));
+        DedicatedLivenessAction::Send(ServerUpdate::KeepAlive { id })
+    }
+
+    fn handle_response(&mut self, id: u64) -> DedicatedCommandOutcome {
+        let Some((expected, sent_at)) = self.pending else {
+            return DedicatedCommandOutcome::Disconnect(DisconnectReason::new(
+                DisconnectReasonCode::ProtocolViolation,
+                "client answered a keepalive that was not pending",
+            ));
+        };
+        if id != expected {
+            return DedicatedCommandOutcome::Disconnect(DisconnectReason::new(
+                DisconnectReasonCode::ProtocolViolation,
+                "client answered the wrong keepalive challenge",
+            ));
+        }
+        self.pending = None;
+        self.latency = Some(Instant::now().saturating_duration_since(sent_at));
+        DedicatedCommandOutcome::Continue
     }
 }
 
@@ -193,6 +316,66 @@ mod tests {
     };
 
     const DEFAULT_SEED: i64 = 12345;
+
+    #[test]
+    fn dedicated_liveness_challenges_then_times_out_one_interval_later() {
+        let now = Instant::now();
+        let interval = Duration::from_millis(10);
+        let mut liveness = DedicatedLiveness::new(now, interval);
+
+        assert_eq!(
+            liveness.poll(now + interval - Duration::from_millis(1)),
+            DedicatedLivenessAction::None
+        );
+        assert_eq!(
+            liveness.poll(now + interval),
+            DedicatedLivenessAction::Send(ServerUpdate::KeepAlive { id: 1 })
+        );
+        let DedicatedLivenessAction::Disconnect(reason) = liveness.poll(now + interval * 2) else {
+            panic!("unanswered keepalive should disconnect");
+        };
+        assert_eq!(reason.code, DisconnectReasonCode::Timeout);
+    }
+
+    #[test]
+    fn dedicated_liveness_accepts_only_the_pending_challenge() {
+        let now = Instant::now();
+        let interval = Duration::from_millis(10);
+        let mut liveness = DedicatedLiveness::new(now, interval);
+        assert!(matches!(
+            liveness.poll(now + interval),
+            DedicatedLivenessAction::Send(ServerUpdate::KeepAlive { id: 1 })
+        ));
+        assert_eq!(
+            liveness.handle_response(1),
+            DedicatedCommandOutcome::Continue
+        );
+        assert!(matches!(
+            liveness.poll(now + interval * 2),
+            DedicatedLivenessAction::Send(ServerUpdate::KeepAlive { id: 2 })
+        ));
+
+        let DedicatedCommandOutcome::Disconnect(reason) = liveness.handle_response(99) else {
+            panic!("wrong keepalive response should disconnect");
+        };
+        assert_eq!(reason.code, DisconnectReasonCode::ProtocolViolation);
+    }
+
+    #[test]
+    fn dedicated_session_rejects_debug_commands_without_capability() {
+        let mut server = IntegratedServer::new(DEFAULT_SEED);
+        let player_id = server.add_dedicated_player_with_capabilities(SessionCapabilities::NONE);
+        let mut session =
+            DedicatedSession::new_with_capabilities(player_id, SessionCapabilities::NONE);
+
+        let DedicatedCommandOutcome::Disconnect(reason) = session
+            .handle_client_command(&mut server, ClientCommand::ShootDebugPhysicsCube)
+            .unwrap()
+        else {
+            panic!("unnegotiated debug command should disconnect");
+        };
+        assert_eq!(reason.code, DisconnectReasonCode::ProtocolViolation);
+    }
 
     #[derive(Debug)]
     struct ScriptedStream {

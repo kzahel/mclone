@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
-use mclone_protocol::PROTOCOL_VERSION;
+use mclone_protocol::{DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION};
 use mclone_server::{
     IntegratedServer, SimulationCadence, SimulationCadenceConfig, WorldGenerationProfile,
 };
@@ -17,7 +17,9 @@ use mclone_server::{
 use crate::connection::{
     DedicatedConnectionId, DedicatedNetwork, DedicatedNetworkEvent, DedicatedOutboundQueueMetrics,
 };
-use crate::session::{DedicatedSession, DedicatedSessionDiagnostics};
+use crate::session::{
+    DedicatedCommandOutcome, DedicatedLivenessAction, DedicatedSession, DedicatedSessionDiagnostics,
+};
 
 const DEFAULT_LISTEN_ADDR: &str = "127.0.0.1:25565";
 const DEFAULT_SEED: i64 = 12345;
@@ -400,6 +402,7 @@ fn run_server_loop_inner(
                     id,
                     peer_addr,
                     identity,
+                    capabilities,
                     outbound: connection_outbound,
                 } => {
                     if let Some(existing) = active_profiles.get(&identity.profile_id) {
@@ -407,28 +410,40 @@ fn run_server_loop_inner(
                             "profile {:?} is already connected as {existing}",
                             identity.profile_id
                         );
-                        let _ = connection_outbound.close(message.clone());
+                        let _ = connection_outbound.close(DisconnectReason::new(
+                            DisconnectReasonCode::DuplicateProfile,
+                            message.clone(),
+                        ));
                         log::warn!(
                             "rejected duplicate dedicated client {id} from {peer_addr}: {message}"
                         );
                         continue;
                     }
-                    let player_id =
-                        match server.add_dedicated_player_with_identity(identity.clone()) {
-                            Ok(player_id) => player_id,
-                            Err(error) => {
-                                let message = format!(
-                                    "failed to load player record for {:?}: {error}",
-                                    identity.profile_id
-                                );
-                                let _ = connection_outbound.close(message.clone());
-                                log::warn!(
-                                    "rejected dedicated client {id} from {peer_addr}: {message}"
-                                );
-                                continue;
-                            }
-                        };
-                    sessions.insert(id, DedicatedSession::new(player_id));
+                    let player_id = match server
+                        .add_dedicated_player_with_identity_and_capabilities(
+                            identity.clone(),
+                            capabilities,
+                        ) {
+                        Ok(player_id) => player_id,
+                        Err(error) => {
+                            let message = format!(
+                                "failed to load player record for {:?}: {error}",
+                                identity.profile_id
+                            );
+                            let _ = connection_outbound.close(DisconnectReason::new(
+                                DisconnectReasonCode::InternalError,
+                                message.clone(),
+                            ));
+                            log::warn!(
+                                "rejected dedicated client {id} from {peer_addr}: {message}"
+                            );
+                            continue;
+                        }
+                    };
+                    sessions.insert(
+                        id,
+                        DedicatedSession::new_with_capabilities(player_id, capabilities),
+                    );
                     session_profiles.insert(id, identity.profile_id);
                     active_profiles.insert(identity.profile_id, id);
                     outbound.insert(id, connection_outbound);
@@ -447,13 +462,16 @@ fn run_server_loop_inner(
                     let Some(session) = sessions.get_mut(&id) else {
                         let message = format!("received command for disconnected client {id}");
                         if let Some(connection_outbound) = outbound.remove(&id) {
-                            let _ = connection_outbound.close(message.clone());
+                            let _ = connection_outbound.close(DisconnectReason::new(
+                                DisconnectReasonCode::ProtocolViolation,
+                                message.clone(),
+                            ));
                         }
                         log::warn!("{message}");
                         continue;
                     };
                     match session.handle_client_command(server, command) {
-                        Ok(()) => {
+                        Ok(DedicatedCommandOutcome::Continue) => {
                             summary.record_command();
                             let connection_command_count =
                                 session_command_counts.entry(id).or_default();
@@ -462,10 +480,29 @@ fn run_server_loop_inner(
                                 active_summary_connections.insert(id);
                             }
                         }
+                        Ok(DedicatedCommandOutcome::Disconnect(reason)) => {
+                            summary.record_command();
+                            let connection_command_count =
+                                session_command_counts.entry(id).or_default();
+                            *connection_command_count = connection_command_count.saturating_add(1);
+                            if let Some(connection_outbound) = outbound.remove(&id) {
+                                let _ = connection_outbound.close(reason);
+                            }
+                            remove_session_player(
+                                server,
+                                &mut sessions,
+                                &mut session_profiles,
+                                &mut active_profiles,
+                                id,
+                            );
+                        }
                         Err(err) => {
                             let message = format!("{err:#}");
                             if let Some(connection_outbound) = outbound.remove(&id) {
-                                let _ = connection_outbound.close(message.clone());
+                                let _ = connection_outbound.close(DisconnectReason::new(
+                                    DisconnectReasonCode::InternalError,
+                                    message.clone(),
+                                ));
                             }
                             remove_session_player(
                                 server,
@@ -560,6 +597,51 @@ fn run_server_loop_inner(
         let diagnostics = advance_dedicated_host_frame(server, &mut sessions, &mut cadence)?;
         summary.record_tick(diagnostics);
 
+        let liveness_now = Instant::now();
+        let mut liveness_disconnects = Vec::new();
+        for (&id, session) in &mut sessions {
+            match session.poll_liveness(liveness_now) {
+                DedicatedLivenessAction::None => {}
+                DedicatedLivenessAction::Send(update) => {
+                    let publish_result = outbound
+                        .get(&id)
+                        .context("dedicated connection has no outbound writer")
+                        .and_then(|connection_outbound| {
+                            connection_outbound.publish(vec![update])?;
+                            Ok(connection_outbound.queue_metrics())
+                        });
+                    match publish_result {
+                        Ok(queue_metrics) => {
+                            summary.record_publication(1);
+                            summary.record_outbound_pressure(queue_metrics);
+                        }
+                        Err(error) => liveness_disconnects.push((
+                            id,
+                            DisconnectReason::new(
+                                DisconnectReasonCode::InternalError,
+                                format!("failed to queue keepalive: {error:#}"),
+                            ),
+                        )),
+                    }
+                }
+                DedicatedLivenessAction::Disconnect(reason) => {
+                    liveness_disconnects.push((id, reason));
+                }
+            }
+        }
+        for (id, reason) in liveness_disconnects {
+            if let Some(connection_outbound) = outbound.remove(&id) {
+                let _ = connection_outbound.close(reason);
+            }
+            remove_session_player(
+                server,
+                &mut sessions,
+                &mut session_profiles,
+                &mut active_profiles,
+                id,
+            );
+        }
+
         let mut failed_publications = Vec::new();
         for (&id, session) in &sessions {
             let updates = server
@@ -586,6 +668,17 @@ fn run_server_loop_inner(
         }
         for (id, update_count, error) in failed_publications {
             summary.record_publication_disconnect(error.to_string().contains("queue reached"));
+            if let Some(connection_outbound) = outbound.remove(&id) {
+                let code = if error.to_string().contains("queue reached") {
+                    DisconnectReasonCode::Kicked
+                } else {
+                    DisconnectReasonCode::InternalError
+                };
+                let _ = connection_outbound.close(DisconnectReason::new(
+                    code,
+                    format!("failed to queue server updates: {error:#}"),
+                ));
+            }
             remove_session_player(
                 server,
                 &mut sessions,
@@ -593,7 +686,6 @@ fn run_server_loop_inner(
                 &mut active_profiles,
                 id,
             );
-            outbound.remove(&id);
             let command_count = session_command_counts.remove(&id).unwrap_or_default();
             println!(
                 "{}",

@@ -9,10 +9,10 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use mclone_net::{
     decode_websocket_client_command, decode_websocket_client_handshake,
-    encode_websocket_server_handshake_accept, encode_websocket_server_handshake_reject,
-    encode_websocket_server_update_batch,
+    encode_websocket_server_handshake_accept_with_capabilities,
+    encode_websocket_server_handshake_reject, encode_websocket_server_update_batch,
 };
-use mclone_protocol::PROTOCOL_VERSION;
+use mclone_protocol::{PROTOCOL_VERSION, ServerUpdate, SessionCapabilities};
 use tungstenite::{Error as WebSocketError, Message, accept};
 
 use crate::connection::{
@@ -97,8 +97,8 @@ fn websocket_connection_loop(
             return;
         }
     };
-    let identity = match complete_websocket_protocol_handshake(&mut websocket) {
-        Ok(identity) => identity,
+    let accepted = match complete_websocket_protocol_handshake(&mut websocket) {
+        Ok(accepted) => accepted,
         Err(err) => {
             send_disconnected(
                 &events,
@@ -128,7 +128,8 @@ fn websocket_connection_loop(
         .send(DedicatedNetworkEvent::Connected {
             id,
             peer_addr,
-            identity,
+            identity: accepted.identity,
+            capabilities: accepted.capabilities,
             outbound,
         })
         .is_err()
@@ -205,7 +206,16 @@ fn flush_outbound(
                     .send(Message::Binary(frame.into()))
                     .context("failed to send websocket server update batch")?;
             }
-            Ok(DedicatedOutboundMessage::Close(message)) => bail!(message),
+            Ok(DedicatedOutboundMessage::Close(reason)) => {
+                let frame = encode_websocket_server_update_batch(&[ServerUpdate::Disconnect(
+                    reason.clone(),
+                )])
+                .context("failed to encode websocket disconnect update")?;
+                websocket
+                    .send(Message::Binary(frame.into()))
+                    .context("failed to send websocket disconnect update")?;
+                bail!(reason.detail)
+            }
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Disconnected) => bail!("dedicated websocket publisher stopped"),
         }
@@ -229,7 +239,7 @@ fn send_disconnected(
 
 fn complete_websocket_protocol_handshake(
     websocket: &mut tungstenite::WebSocket<TcpStream>,
-) -> Result<mclone_protocol::ClientIdentity> {
+) -> Result<mclone_net::AcceptedClientHandshake> {
     let message = websocket
         .read()
         .context("failed to read websocket protocol handshake")?;
@@ -252,12 +262,20 @@ fn complete_websocket_protocol_handshake(
         );
     }
 
-    let response = encode_websocket_server_handshake_accept(PROTOCOL_VERSION)
-        .context("failed to encode websocket protocol acceptance")?;
+    let capabilities = received
+        .capabilities
+        .intersection(SessionCapabilities::DEVELOPMENT_DEFAULT)
+        .known();
+    let response =
+        encode_websocket_server_handshake_accept_with_capabilities(PROTOCOL_VERSION, capabilities)
+            .context("failed to encode websocket protocol acceptance")?;
     websocket
         .send(Message::Binary(response.into()))
         .context("failed to send websocket protocol acceptance")?;
-    Ok(received.identity)
+    Ok(mclone_net::AcceptedClientHandshake {
+        identity: received.identity,
+        capabilities,
+    })
 }
 
 #[cfg(test)]

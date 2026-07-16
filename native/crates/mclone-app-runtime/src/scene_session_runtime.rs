@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use glam::Vec3;
-use mclone_client::ClientRuntime;
+use mclone_client::{ClientRuntime, ClientSessionPhase};
 use mclone_core::{BlockStateId, ChunkPos};
 use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
@@ -227,7 +227,7 @@ impl SceneSessionRuntime {
     }
 
     pub fn session_status(&self) -> Option<SessionStatus> {
-        self.session.status()
+        client_session_status(self.client(), self.session.status())
     }
 
     pub fn client(&self) -> &ClientRuntime {
@@ -381,6 +381,39 @@ impl SceneSessionRuntime {
     }
 }
 
+fn client_session_status(
+    client: &ClientRuntime,
+    fallback: Option<SessionStatus>,
+) -> Option<SessionStatus> {
+    match client.session_phase() {
+        ClientSessionPhase::Connecting => Some(SessionStatus {
+            message: "Connecting...".to_owned(),
+            ok: true,
+        }),
+        ClientSessionPhase::Configuring => Some(SessionStatus {
+            message: "Configuring session...".to_owned(),
+            ok: true,
+        }),
+        ClientSessionPhase::Playing => fallback,
+        ClientSessionPhase::Disconnected => {
+            let reason = client.disconnect_reason();
+            Some(SessionStatus {
+                message: reason.map_or_else(
+                    || "Disconnected".to_owned(),
+                    |reason| {
+                        if reason.detail.is_empty() {
+                            format!("Disconnected: {:?}", reason.code)
+                        } else {
+                            format!("Disconnected: {}", reason.detail)
+                        }
+                    },
+                ),
+                ok: false,
+            })
+        }
+    }
+}
+
 impl Deref for SceneSessionRuntime {
     type Target = dyn SceneRuntimeService;
 
@@ -397,7 +430,44 @@ impl DerefMut for SceneSessionRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::StartupAdmissionEvidence;
+    use super::{StartupAdmissionEvidence, client_session_status};
+    use mclone_client::{ClientHost, ClientRuntime};
+    use mclone_protocol::{
+        DisconnectReason, DisconnectReasonCode, ServerUpdate, SessionCapabilities,
+        SessionConfiguration,
+    };
+
+    #[test]
+    fn session_status_projects_protocol_phase_and_disconnect_reason() {
+        let mut client = ClientRuntime::new(ClientHost::RemoteDedicated);
+        assert_eq!(
+            client_session_status(&client, None).map(|status| status.message),
+            Some("Connecting...".to_owned())
+        );
+
+        client.apply_update(ServerUpdate::SessionConfiguration(
+            SessionConfiguration::fixed_vanilla(11, 11, SessionCapabilities::NONE),
+        ));
+        assert_eq!(
+            client_session_status(&client, None).map(|status| status.message),
+            Some("Configuring session...".to_owned())
+        );
+
+        client.apply_update(ServerUpdate::SessionReady);
+        assert_eq!(client_session_status(&client, None), None);
+
+        client.apply_update(ServerUpdate::Disconnect(DisconnectReason::new(
+            DisconnectReasonCode::Kicked,
+            "operator kick",
+        )));
+        assert_eq!(
+            client_session_status(&client, None),
+            Some(crate::session::SessionStatus {
+                message: "Disconnected: operator kick".to_owned(),
+                ok: false,
+            })
+        );
+    }
 
     #[test]
     fn startup_admission_requires_authority_drawable_coverage_and_settled_presentation() {

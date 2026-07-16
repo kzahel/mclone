@@ -899,7 +899,11 @@ impl McloneSceneHost {
 
     pub(crate) fn session_projection(&self) -> ClientSessionStatusProjection {
         client_session_status_projection(
-            self.session.status(),
+            self.active_world
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.session_status())
+                .or_else(|| self.session.status()),
             self.status_overlay.clone(),
             self.startup_progress_overlay(),
         )

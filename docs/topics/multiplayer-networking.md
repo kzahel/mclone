@@ -17,7 +17,10 @@ records, identity-bearing join, safe resume, and a gated experience proof.
 Tactical
 [`183`](../tactical/183-authoritative-world-time-persistence.md) completed the
 authoritative world-metadata and two-clock persistence/replication follow-up on
-2026-07-16.
+2026-07-16. Tactical
+[`184`](../tactical/184-session-configuration-liveness-and-disconnect.md)
+completed configured play admission, capability negotiation, remote liveness,
+typed close, and movement sequence plumbing on 2026-07-16.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -98,8 +101,18 @@ longer decide whether movement deserves a command. Stationary mouse look now
 reaches `LocalPlayerMoveSync` and emits the existing vanilla-shaped `Rot`
 variant, while the 20-publication-attempt position reminder corresponds to
 about one second at the default rate. Immediate interaction, teleport, and
-offscreen-diagnostic reconciles remain explicit scene-owned operations. The
-world-time additions moved the coordinated wire to protocol version 23.
+offscreen-diagnostic reconciles remain explicit scene-owned operations.
+
+Protocol v24 now negotiates optional capability bits during native/WebSocket
+handshake and publishes `SessionConfiguration` then `SessionReady` before
+ordinary world facts. The shared replica exposes Connecting, Configuring,
+Playing, and first-reason-wins Disconnected state to the UI. Dedicated sessions
+challenge remote peers every 15 seconds, native TCP retains a 30-second read
+timeout, and native/browser I/O actors echo without drawable-frame polling.
+Clean quit and server rejection are ordered protocol messages; unexpected EOF
+is converted to a visible typed reason. `MovePlayer` carries a client sequence
+and corrections echo the latest accepted value. Debug actions are rejected
+unless their capability was negotiated.
 
 This cadence controls when a pose is selected and enqueued; it does not define
 what XR pose means. Current XR behavior still publishes the existing combined
@@ -112,8 +125,9 @@ intended production shape, but broader session and world durability work
 remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, strict
-  `PROTOCOL_VERSION = 23` equality check. The transport handshake now carries
-  the local profile UUID/display name, and `PlayerExperience` is an owner-only
+  `PROTOCOL_VERSION = 24` equality check. The transport handshake now carries
+  the local profile UUID/display name plus supported capabilities, and
+  `PlayerExperience` is an owner-only
   update alongside chunk view/snapshots/unloads, section block deltas,
   vanilla-shaped move/teleport-ack, remote players, entities, two-clock time,
   and obfuscated-seed world info. No serde; every decode validates and rejects
@@ -144,19 +158,20 @@ remain:
 
 ## Structural gaps (the reasons this topic exists)
 
-1. **Session lifecycle is still partial.** Connections now have stable local
-   identity and duplicate-live-UUID rejection, but there is no authenticated
-   login, capability negotiation, keepalive/read timeout, in-band disconnect,
-   or reconnect-without-rebuilding-the-client-replica flow.
+1. **Session lifecycle is still partial beyond basic play admission.** Stable
+   identity, duplicate-live-UUID rejection, negotiated optional capabilities,
+   configuration/ready phases, keepalive/read timeout, and in-band disconnect
+   are live. Authenticated login and reconnect-without-rebuilding-the-client-
+   replica are not.
 2. **World/player durability is still incomplete.** Authoritative metadata,
    seed/profiles, game/day clocks, the daylight rule, player pose/rotation,
    selected slot, display name, and XP persist. Inventory contents, spawn/bed
    state, health, hunger, abilities, effects, and advancement/statistic state
    do not yet persist.
-3. **Debug surface baked into the protocol**: `ShootDebugPhysicsCube`,
-   `SetDebugHotbarSlot`, `PlayerActionKind::DebugInstantBreak`,
-   `EntityKind::DebugCube`, `debug_passive_showcase` defaulting on
-   (`mclone-protocol/src/lib.rs:57-67`, `mclone-server/src/runner.rs:647`).
+3. **Debug vocabulary remains on the wire but is capability-gated**:
+   `ShootDebugPhysicsCube`, `SetDebugHotbarSlot`, and debug instant-break are
+   rejected unless `DEBUG_ACTIONS` was negotiated. `EntityKind::DebugCube` and
+   debug showcase defaults remain development-oriented follow-up surface.
 
 ## Target architecture
 
@@ -274,7 +289,7 @@ first?":
   keyed by the durable local profile UUID. Typed world metadata owns and
   validates the seed/profiles before generation, and durable game/day clocks
   plus the daylight rule ride through SQLite and IndexedDB lifecycle saves.
-- **Documentation cleanup is current.** `protocol.md` records version 23 and
+- **Documentation cleanup is current.** `protocol.md` records version 24 and
   autonomous publication framing; `multiplayer-hosting.md` records persistent
   worlds and direct WebSocket hosting; platform docs record the one shared
   native/browser semantic boundary.
@@ -296,16 +311,16 @@ later phases remain topic-level direction.
    per-command saves, publishes snapshots as worldgen completes, bounds
    per-connection queues, converts production web remote to worker-owned
    WebSocket/decode, and proves one cross-adapter contract.
-2. **Session lifecycle — identity/player-record proof complete 2026-07-16.**
-   The local profile, identity-bearing join, duplicate-live rejection, and
-   rejoin-as-same-player record selection are live. The remaining phase is a
-   fuller login/configuration sequence ordered like vanilla `placeNewPlayer`,
-   capabilities, keepalive/timeout (15 s / 30 s to start), explicit disconnect
-   messages, and broader player-state restore. Tactical
+2. **Basic session lifecycle — complete 2026-07-16.** The local profile,
+   identity-bearing join, duplicate-live rejection, rejoin-as-same-player
+   record selection, configuration-before-ready ordering, optional
+   capabilities, 15-second keepalive/30-second TCP timeout, typed disconnect,
+   and movement sequence echo are live. Tactical
    [`182`](../tactical/182-local-profile-and-player-persistence-proof.md)
-   owns the first unauthenticated identity/player-record proof and its local
-   data-management prerequisite; keepalive and the remaining session lifecycle
-   follow after that proof.
+   owns the identity/player-record proof and tactical
+   [`184`](../tactical/184-session-configuration-liveness-and-disconnect.md)
+   owns configured admission and liveness. Auth, reconnect preservation, and
+   broader player-state restore remain later work.
 3. **Movement validation (basic anti-teleport).** Vanilla's checks server-
    side: packet-burst clamp, moved-too-quickly, collision replay +
    moved-wrongly, floating kick, with the local-integrated owner exempted

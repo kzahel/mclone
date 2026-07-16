@@ -42,20 +42,23 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `23`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `24`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
 
-The same handshake now carries the unauthenticated local player profile UUID
-and display name. The UUID selects one world-scoped player record, while the
-display name is last-seen presentation metadata. A dedicated world rejects a
-second live connection claiming an already active UUID. This is stable local
-identity, not Mojang/Microsoft authentication or proof of ownership.
+The same handshake carries the unauthenticated local player profile UUID,
+display name, and a `u64` supported-capability mask. The server accepts the
+known client/server intersection and returns it in the handshake response.
+`DEBUG_ACTIONS` is the first optional bit. The UUID selects one world-scoped
+player record, while the display name is last-seen presentation metadata. A
+dedicated world rejects a second live connection claiming an already active
+UUID. This is stable local identity and optional-feature negotiation, not
+Mojang/Microsoft authentication, permissions, or proof of ownership.
 
-This is **strict equality** — there is no capability or version-range
-negotiation yet. That is a known cross-play gap once web (deployed URL), Android
-(APK), and desktop (binary) builds can drift apart; tracked in
+Core versions still use **strict equality**; there is no version-range or
+required-capability negotiation. That is a known cross-play gap once web
+(deployed URL), Android (APK), and desktop (binary) builds can drift apart; tracked in
 [`topics/platform-parity.md`](./topics/platform-parity.md).
 
 ## Logical Messages Vs Wire Codecs
@@ -71,7 +74,7 @@ model.
 | Command | Purpose |
 |---|---|
 | `SetChunkView` | view-shaped chunk-interest command (center + render/tracking radius) |
-| `MovePlayer` | ordered movement record — `Pos` / `PosRot` / `Rot` / `StatusOnly`, mirroring Java 1.17 `ServerboundMovePlayerPacket`; an explicit movement sequence field remains future work |
+| `MovePlayer` | ordered, sequenced movement record — `Pos` / `PosRot` / `Rot` / `StatusOnly`, mirroring Java 1.17 `ServerboundMovePlayerPacket`; production sequences are wrapping nonzero `u32` values |
 | `PlayerAction` | block-destroy lifecycle (start/stop/abort destroy) plus debug instant-break |
 | `UseItemOn` | server-authoritative use/place against a `BlockHitResult` |
 | `SetCarriedItem` | select the active hotbar slot |
@@ -79,6 +82,8 @@ model.
 | `SetPlayerAppearance` | publish the player's current model/appearance choice |
 | `SetDebugHotbarSlot` | debug-only mutation of one server-owned hotbar slot |
 | `ShootDebugPhysicsCube` | debug-only request to spawn a physics test entity |
+| `KeepAlive` | immediate echo of the server's pending 64-bit liveness challenge |
+| `Disconnect` | clean client close; currently `Quit` |
 
 `SetChunkView` is an interest command, not a synchronous "load my whole view
 now" RPC — chunk snapshots come back as host updates. There is no world-open or
@@ -90,20 +95,26 @@ commands are intents, not client-owned state mutations.
 
 | Update | Purpose |
 |---|---|
+| `SessionConfiguration` | negotiated capabilities, fixed gameplay/publication rates, and authoritative view ceilings |
+| `SessionReady` | ordered admission from configuring to playing; follows configuration and precedes world state |
 | `WorldInfo` | connection-scoped world facts currently carrying the obfuscated biome zoom seed |
 | `ChunkSnapshot` | baseline chunk facts; **packed sky/block light rides inside the snapshot** (no separate light message) |
 | `ChunkUnload` | release a chunk from client view/cache |
 | `SectionBlockUpdates` | block mutations within a loaded section after the baseline |
 | `TimeUpdate` | authoritative game time, day time, and daylight-cycle-running state; the client advances both 20 Hz between join/tick-1/20-tick corrections, conditionally advancing day time |
-| `PlayerPosition` | authoritative local-player position/rotation correction with relative flags and a teleport id |
+| `PlayerPosition` | authoritative local-player position/rotation correction with relative flags, latest accepted movement sequence, and teleport id |
 | `PlayerExperience` | owner-only authoritative total experience restored from and dirtied into the world-scoped player record |
 | `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |
 | `EntitySnapshot` | entity baseline for a visible chunk; passive mobs are stackless, item entities carry an `ItemStackSnapshot` |
 | `EntityUpdate` | partial entity position/rotation/age update after a baseline; item entities also carry their current `ItemStackSnapshot` when stack data is present |
 | `EntityRemove` | explicit entity untrack/remove for the replica |
+| `KeepAlive` | server liveness challenge; remote transport actors echo without waiting for a drawable frame |
+| `Disconnect` | typed, bounded logical close reason sent before transport shutdown |
 
-Failures are surfaced through the transport handshake and connection errors, not
-yet an in-band error update.
+Active-session failures are surfaced in-band when the server can send a typed
+reason. Unexpected native/browser transport loss becomes a synthetic
+end-of-stream/transport reason; the shared client keeps the first reason if a
+later EOF follows an explicit close.
 
 Native TCP and WebSocket remote transports are full-duplex publication
 streams. Client commands and server publication frames move independently on
@@ -158,10 +169,9 @@ than chicken-specific or one-off update messages.
 | Message | Purpose |
 |---|---|
 | `chunk_delta` | broader block/section/light/block-entity mutation batching |
-| `session_state` / `world_opened` / `world_error` | explicit session/world lifecycle and a stable in-band failure surface |
-| `keepalive` / `disconnect` | liveness, timeout, and explicit close reason once the session layer lands |
+| broader `session_state` / `world_opened` / `world_error` | richer login/world-open disposition beyond the current configuration/ready/disconnect lifecycle |
 | `inventory_state` | player inventory and container state |
-| explicit login/configuration result | split identity acceptance, world configuration, player-record disposition, and play admission into an in-band session lifecycle |
+| authenticated login result | add identity proof/player-record disposition before the implemented configuration/play admission |
 
 ## Client Replica And Prediction Inputs
 
@@ -222,6 +232,6 @@ host.
 The reliable ordered publication lane is now implemented. A later measured
 WebRTC/datagram or coalescing lane for high-rate entity/player transforms must
 preserve spawn/despawn, correction, and keyframe ordering and must not redesign
-authority around the carrier. Compression, login/profile capabilities,
-keepalive/timeouts, and explicit disconnect messages remain future protocol
-work.
+authority around the carrier. Compression, authentication, required
+capabilities, version ranges, and reconnect-without-rebuilding-the-replica
+remain future protocol work.

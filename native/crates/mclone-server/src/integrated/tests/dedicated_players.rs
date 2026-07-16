@@ -1,5 +1,31 @@
 use super::*;
 
+#[test]
+fn dedicated_join_orders_negotiated_configuration_before_world_state() {
+    let mut server = IntegratedServer::new(0);
+    let player = server.add_dedicated_player_with_capabilities(SessionCapabilities::NONE);
+
+    let updates = server
+        .try_drain_updates_for_player(player)
+        .expect("drain dedicated join updates");
+
+    assert!(matches!(
+        updates.as_slice(),
+        [
+            ServerUpdate::SessionConfiguration(SessionConfiguration {
+                gameplay_rate_hz: 20,
+                publication_rate_hz: 20,
+                max_render_distance: 11,
+                max_chunk_tracking_radius: 11,
+                capabilities: SessionCapabilities::NONE,
+            }),
+            ServerUpdate::SessionReady,
+            ServerUpdate::WorldInfo { .. },
+            ServerUpdate::TimeUpdate { .. },
+        ]
+    ));
+}
+
 fn time_update(updates: &[ServerUpdate]) -> Option<u64> {
     updates.iter().rev().find_map(|update| match update {
         ServerUpdate::TimeUpdate { day_time, .. } => Some(*day_time),

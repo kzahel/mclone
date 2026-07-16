@@ -9,12 +9,16 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use mclone_net::{
-    complete_server_handshake, try_read_client_command_frame, write_server_update_batch,
+    complete_server_handshake_with_capabilities, try_read_client_command_frame,
+    write_server_update_batch,
 };
-use mclone_protocol::{ClientCommand, ClientIdentity, ServerUpdate};
+use mclone_protocol::{
+    ClientCommand, ClientIdentity, DisconnectReason, ServerUpdate, SessionCapabilities,
+};
 
 pub(crate) const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
 pub(crate) const DEDICATED_OUTBOUND_QUEUE_BYTE_CAPACITY: usize = 64 * 1024 * 1024;
+pub(crate) const DEDICATED_TCP_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DedicatedConnectionId(u64);
@@ -44,7 +48,7 @@ pub(crate) enum DedicatedOutboundMessage {
         updates: Vec<ServerUpdate>,
         reserved_bytes: usize,
     },
-    Close(String),
+    Close(DisconnectReason),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -124,9 +128,9 @@ impl DedicatedOutbound {
         )
     }
 
-    pub(crate) fn close(&self, reason: impl Into<String>) -> Result<()> {
+    pub(crate) fn close(&self, reason: DisconnectReason) -> Result<()> {
         self.reserve(0)?;
-        self.try_send_reserved(DedicatedOutboundMessage::Close(reason.into()), 0)
+        self.try_send_reserved(DedicatedOutboundMessage::Close(reason), 0)
     }
 
     pub(crate) fn queue_metrics(&self) -> DedicatedOutboundQueueMetrics {
@@ -265,6 +269,7 @@ pub(crate) enum DedicatedNetworkEvent {
         id: DedicatedConnectionId,
         peer_addr: SocketAddr,
         identity: ClientIdentity,
+        capabilities: SessionCapabilities,
         outbound: DedicatedOutbound,
     },
     Command {
@@ -425,8 +430,11 @@ fn connection_loop(
     if let Err(err) = stream.set_nodelay(true) {
         log::warn!("failed to set TCP_NODELAY for {id} {peer_addr}: {err}");
     }
-    let identity = match complete_server_handshake(&mut stream) {
-        Ok(identity) => identity,
+    let accepted = match complete_server_handshake_with_capabilities(
+        &mut stream,
+        SessionCapabilities::DEVELOPMENT_DEFAULT,
+    ) {
+        Ok(accepted) => accepted,
         Err(err) => {
             let _ = events.send(DedicatedNetworkEvent::Disconnected {
                 id,
@@ -437,6 +445,15 @@ fn connection_loop(
             return;
         }
     };
+    if let Err(err) = stream.set_read_timeout(Some(DEDICATED_TCP_READ_TIMEOUT)) {
+        let _ = events.send(DedicatedNetworkEvent::Disconnected {
+            id,
+            peer_addr,
+            command_count: 0,
+            reason: Some(format!("failed to set dedicated read timeout: {err}")),
+        });
+        return;
+    }
     let writer_stream = match stream.try_clone() {
         Ok(stream) => stream,
         Err(err) => {
@@ -472,7 +489,8 @@ fn connection_loop(
         .send(DedicatedNetworkEvent::Connected {
             id,
             peer_addr,
-            identity,
+            identity: accepted.identity,
+            capabilities: accepted.capabilities,
             outbound,
         })
         .is_err()
@@ -536,9 +554,16 @@ fn connection_writer_loop(
                     break;
                 }
             }
-            DedicatedOutboundMessage::Close(message) => {
+            DedicatedOutboundMessage::Close(reason_update) => {
+                let updates = [ServerUpdate::Disconnect(reason_update.clone())];
+                if let Err(err) = write_server_update_batch(&mut stream, &updates) {
+                    if let Ok(mut reason) = reason.lock() {
+                        *reason = Some(format!("failed to write disconnect update: {err}"));
+                    }
+                    break;
+                }
                 if let Ok(mut reason) = reason.lock() {
-                    *reason = Some(message);
+                    *reason = Some(reason_update.detail);
                 }
                 break;
             }
@@ -554,7 +579,7 @@ mod tests {
     use mclone_net::{
         NativeClientIoSession, NativeTransportError, complete_client_handshake_with_version,
     };
-    use mclone_protocol::{ChunkView, PROTOCOL_VERSION};
+    use mclone_protocol::{ChunkView, DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION};
 
     fn time_update(day_time: u64) -> ServerUpdate {
         ServerUpdate::TimeUpdate {
@@ -688,6 +713,32 @@ mod tests {
         assert_eq!(
             client.drain_update_batch().unwrap().inbound_frame_sequence,
             3
+        );
+    }
+
+    #[test]
+    fn dedicated_connection_sends_typed_disconnect_before_close() {
+        let _guard = crate::DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let network = DedicatedNetwork::start(listener).unwrap();
+        let mut client = NativeClientIoSession::connect(addr).unwrap();
+        let DedicatedNetworkEvent::Connected {
+            outbound,
+            capabilities,
+            ..
+        } = network.recv().unwrap()
+        else {
+            panic!("expected connected event");
+        };
+        assert_eq!(capabilities, SessionCapabilities::DEVELOPMENT_DEFAULT);
+        let reason = DisconnectReason::new(DisconnectReasonCode::Kicked, "test kick");
+
+        outbound.close(reason.clone()).unwrap();
+
+        assert_eq!(
+            client.drain_update_batch().unwrap().into_updates(),
+            vec![ServerUpdate::Disconnect(reason)]
         );
     }
 

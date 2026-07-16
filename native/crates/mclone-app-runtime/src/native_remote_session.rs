@@ -164,7 +164,7 @@ fn remote_batch_from_native(batch: NativeServerUpdateBatch) -> RemoteServerUpdat
 mod tests {
     use super::*;
     use mclone_core::ChunkPos;
-    use mclone_protocol::{ChunkView, ServerUpdate};
+    use mclone_protocol::{ChunkView, ClientDisconnectReason, ServerUpdate};
 
     fn time_update(day_time: u64) -> ServerUpdate {
         ServerUpdate::TimeUpdate {
@@ -204,10 +204,9 @@ mod tests {
                 second_server_command
             );
             mclone_net::write_server_update_batch(&mut stream, &[time_update(20)]).unwrap();
-            assert!(
-                mclone_net::try_read_client_command_frame(&mut stream)
-                    .unwrap()
-                    .is_none()
+            assert_eq!(
+                mclone_net::try_read_client_command_frame(&mut stream).unwrap(),
+                Some(ClientCommand::Disconnect(ClientDisconnectReason::Quit))
             );
         });
 

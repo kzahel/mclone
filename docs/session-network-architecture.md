@@ -13,7 +13,10 @@ plus focused remote inbound queue work completed 2026-07-07 under
 with autonomous dedicated tick, native full-duplex server push, one ready-only
 native consumer, direct dedicated WebSocket peers, worker-owned browser remote,
 and bounded connection queues landed 2026-07-13 under
-[`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md)
+[`tactical/176-dedicated-autonomous-push-runtime.md`](./tactical/176-dedicated-autonomous-push-runtime.md);
+configured session phases, negotiated capabilities, keepalive, and typed close
+landed 2026-07-16 under
+[`tactical/184-session-configuration-liveness-and-disconnect.md`](./tactical/184-session-configuration-liveness-and-disconnect.md)
 
 ## Purpose
 
@@ -144,6 +147,12 @@ Reconnect/resync clears the replica and decoded queue before requesting the
 current view, and connection establishment is explicitly a session-lifecycle
 operation rather than a drawable-frame action.
 
+The native reader also answers server keepalive challenges on the ordered
+writer lane without waiting for the runtime pump. Clean drop writes `Quit`
+before shutdown, explicit server reasons remain queued in receive order, and
+unexpected EOF becomes one typed client-replica update. The dedicated session
+owns the 15-second challenge state and TCP retains a 30-second read timeout.
+
 Server-side native dedicated owns an autonomous 20/20/60 cadence. Connection
 readers enqueue commands independently, the authority drains them at host
 boundaries, and per-connection writers consume bounded publication queues for
@@ -155,6 +164,9 @@ that owns the WebSocket, handshake, command send, receipt, and update decode
 validation. It transfers ordered canonical per-update buffers to the Rust
 adapter, where the budgeted ready-only pump materializes and applies them.
 There is no main-thread WebSocket callback path or command-response waiter.
+The remote worker recognizes keepalive through the Rust codec and echoes it
+directly; ordered quit and unexpected-close synthesis use the same shared
+disconnect vocabulary as native TCP.
 
 ## Target Topology
 

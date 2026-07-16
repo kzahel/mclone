@@ -8,8 +8,8 @@ use mclone_app_runtime::client_connection::{
     ClientConnectionDrainResult, ClientConnectionQueueMetrics, QueuedServerUpdate,
 };
 use mclone_protocol::{
-    ClientCommand, ClientIdentity, ServerUpdate, decode_client_command, decode_server_update,
-    encode_client_command,
+    ClientCommand, ClientDisconnectReason, ClientIdentity, DisconnectReason, ServerUpdate,
+    decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_server::{
     ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics, WorkerFrameTransportKind,
@@ -127,6 +127,12 @@ impl WebSocketServerSession {
                     &pending_ready,
                 );
                 if let Err(error) = result {
+                    let _ = queue_transport_disconnect(
+                        &error,
+                        &queued_updates,
+                        &queued_update_bytes,
+                        &frame_metrics,
+                    );
                     record_worker_error(&running, &last_error, &pending_ready, error);
                     worker.terminate();
                 }
@@ -136,6 +142,9 @@ impl WebSocketServerSession {
 
         let error_closure = {
             let running = Rc::clone(&running);
+            let queued_updates = Rc::clone(&queued_updates);
+            let queued_update_bytes = Rc::clone(&queued_update_bytes);
+            let frame_metrics = Rc::clone(&frame_metrics);
             let last_error = Rc::clone(&last_error);
             let pending_ready = Rc::clone(&pending_ready);
             Closure::wrap(Box::new(move |event: ErrorEvent| {
@@ -144,6 +153,12 @@ impl WebSocketServerSession {
                 } else {
                     event.message()
                 };
+                let _ = queue_transport_disconnect(
+                    &message,
+                    &queued_updates,
+                    &queued_update_bytes,
+                    &frame_metrics,
+                );
                 record_worker_error(&running, &last_error, &pending_ready, message);
             }) as Box<dyn FnMut(_)>)
         };
@@ -310,12 +325,14 @@ impl WebSocketServerSession {
         if self.shutdown_requested {
             return;
         }
+        let _ = self.queue_command(ClientCommand::Disconnect(ClientDisconnectReason::Quit));
         self.shutdown_requested = true;
         let message = Object::new();
-        if set_string(&message, "kind", "shutdown").is_ok() {
-            let _ = self.worker.post_message(&message);
+        let posted = set_string(&message, "kind", "shutdown").is_ok()
+            && self.worker.post_message(&message).is_ok();
+        if !posted {
+            self.worker.terminate();
         }
-        self.worker.terminate();
         *self.running.borrow_mut() = false;
     }
 
@@ -327,6 +344,36 @@ impl WebSocketServerSession {
             .post_message(&message)
             .map_err(|error| format!("failed to acknowledge drained remote batch: {error:?}"))
     }
+}
+
+fn queue_transport_disconnect(
+    message: &str,
+    queued_updates: &Rc<RefCell<VecDeque<QueuedWebSocketUpdate>>>,
+    queued_update_bytes: &Rc<RefCell<usize>>,
+    frame_metrics: &Rc<RefCell<WorkerFrameMetrics>>,
+) -> Result<(), String> {
+    let update = ServerUpdate::Disconnect(DisconnectReason::transport_error(message));
+    let frame = encode_server_update(&update)
+        .map_err(|error| format!("encode remote transport disconnect: {error}"))?;
+    let next_frames = queued_updates.borrow().len().saturating_add(1);
+    let next_bytes = queued_update_bytes.borrow().saturating_add(frame.len());
+    if next_frames > MAX_MAIN_UPDATE_FRAMES || next_bytes > MAX_MAIN_UPDATE_BYTES {
+        return Err("remote main update queue could not retain disconnect reason".to_owned());
+    }
+    queued_updates
+        .borrow_mut()
+        .push_back(QueuedWebSocketUpdate {
+            frame: Some(frame.clone()),
+            queued_at_ms: js_sys::Date::now(),
+            batch_sequence: 0,
+            batch_drained: false,
+            producer_decode_ms: 0.0,
+        });
+    *queued_update_bytes.borrow_mut() = next_bytes;
+    let mut metrics = frame_metrics.borrow_mut();
+    metrics.record_inbound(frame.len());
+    metrics.observe_pending_frames(next_frames);
+    Ok(())
 }
 
 impl Drop for WebSocketServerSession {

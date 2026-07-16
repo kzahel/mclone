@@ -3,6 +3,7 @@ type WasmModule = typeof import("mclone-web-client-wasm") & {
   mclone_web_validate_remote_handshake(frame: Uint8Array): void;
   mclone_web_canonicalize_remote_command(frame: Uint8Array): Uint8Array;
   mclone_web_decode_remote_update_batch(frame: Uint8Array): Array<Uint8Array>;
+  mclone_web_remote_control_response(frame: Uint8Array): Uint8Array;
 };
 
 export {};
@@ -101,6 +102,21 @@ function receiveFrame(frame: Uint8Array): void {
 
   const decodeStart = performance.now();
   const canonicalFrames = module.mclone_web_decode_remote_update_batch(frame);
+  for (const canonical of canonicalFrames) {
+    const response = module.mclone_web_remote_control_response(canonical);
+    if (response.byteLength > 0) {
+      const activeSocket = socket;
+      if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
+        throw new Error("remote websocket closed before keepalive response");
+      }
+      if (activeSocket.bufferedAmount > MAX_SOCKET_BUFFERED_COMMAND_BYTES) {
+        throw new Error(
+          `remote control socket buffer exceeded ${MAX_SOCKET_BUFFERED_COMMAND_BYTES} bytes`,
+        );
+      }
+      activeSocket.send(response);
+    }
+  }
   const decodeMs = Math.max(0, performance.now() - decodeStart);
   const batchSequence = nextBatchSequence++;
   const batchBytes = frame.byteLength;

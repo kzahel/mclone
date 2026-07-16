@@ -16,7 +16,8 @@ use mclone_net::{
 };
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, MovePlayerCommand, PlayerAppearance,
-    PlayerModelKind, PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
+    PlayerModelKind, PlayerPositionUpdate, SequencedMovePlayerCommand, ServerUpdate,
+    SetPlayerAppearanceCommand,
 };
 use mclone_render_session::EngineCameraViewMode;
 use mclone_server::{IntegratedServer, ServerPlayerId};
@@ -357,7 +358,7 @@ fn handle_client_command(
 
 #[derive(Debug, Default)]
 struct DedicatedConnectionState {
-    pending_movement: Vec<MovePlayerCommand>,
+    pending_movement: Vec<SequencedMovePlayerCommand>,
 }
 
 impl DedicatedConnectionState {

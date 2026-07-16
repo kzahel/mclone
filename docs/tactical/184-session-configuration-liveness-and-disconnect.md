@@ -1,6 +1,6 @@
 # 184: Session Configuration, Liveness, And Disconnect
 
-Status: active 2026-07-16
+Status: complete 2026-07-16
 
 Topic: `multiplayer-networking`
 
@@ -253,6 +253,38 @@ git diff --check
 This slice changes UI status text but not world pixels or render math. Capture
 is required only if closeout changes layout/presentation beyond the existing
 status overlay.
+
+## Execution Record
+
+Completed end to end in two implementation commits after this plan:
+
+- protocol v24 owns capability negotiation, configuration/ready, keepalive,
+  typed disconnect, sequenced movement, and correction echo codecs;
+- local and dedicated servers publish configuration before play facts, the
+  client replica owns all four lifecycle phases, and shared scene UI projects
+  configuring/disconnected state;
+- dedicated TCP and WebSocket peers share capability enforcement and a
+  fake-clock-tested 15-second challenge; TCP also installs the 30-second read
+  timeout;
+- native and browser transport actors answer keepalive outside the drawable
+  pump, send ordered clean quit, preserve explicit server reasons, and
+  synthesize an unexpected-loss reason without replacing the first reason.
+
+Evidence on 2026-07-16:
+
+- protocol 34/34, net 23/23, client 114/114, dedicated 34/34,
+  render-session 111/111, app-runtime 284/284, and scene library 121/121 plus
+  26/26 ownership integration tests passed;
+- the final server suite passed 414/414, including the corrected diagnostics
+  expectation and the exact configuration-before-world join-order proof;
+- `wasm32-unknown-unknown` web check and `pnpm native:web:typecheck` passed;
+- web runtime and remote-worker ownership tests relevant to this slice passed.
+  Three unrelated scenario-parity source-lock tests were concurrently failing
+  while another uncommitted figure-review workstream changed their inspected
+  source;
+- scene doctests passed on the clean rerun after an earlier shared-target
+  artifact race;
+- `cargo fmt --all`, scoped checks, and `git diff --check` passed.
 
 ## Related
 
