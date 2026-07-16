@@ -24,9 +24,9 @@ use mclone_core::{
     SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
-    ChunkView, ClientCommand, DisconnectReason, DisconnectReasonCode, EntityId, EntitySnapshot,
-    EntityUpdate, PlayerPositionUpdate, RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate,
-    ServerUpdate, SessionConfiguration,
+    ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
+    EntitySnapshot, EntityUpdate, PlayerPositionUpdate, RemotePlayerId, RemotePlayerUpdate,
+    SectionBlockUpdate, ServerUpdate, SessionConfiguration,
 };
 
 pub use actor::{
@@ -87,6 +87,7 @@ pub struct ClientRuntime {
     session_phase: ClientSessionPhase,
     session_configuration: Option<SessionConfiguration>,
     disconnect_reason: Option<DisconnectReason>,
+    current_dimension: DimensionKey,
     biome_zoom_seed: Option<i64>,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
@@ -111,6 +112,7 @@ impl ClientRuntime {
             session_phase: ClientSessionPhase::Connecting,
             session_configuration: None,
             disconnect_reason: None,
+            current_dimension: DimensionKey::overworld(),
             biome_zoom_seed: None,
             chunk_view: None,
             chunks: BTreeMap::new(),
@@ -162,6 +164,10 @@ impl ClientRuntime {
         self.biome_zoom_seed
     }
 
+    pub fn current_dimension(&self) -> &DimensionKey {
+        &self.current_dimension
+    }
+
     pub fn set_chunk_view(&mut self, view: ChunkView) -> ClientCommand {
         self.chunk_view = Some(view.clone());
         ClientCommand::SetChunkView(view)
@@ -191,8 +197,24 @@ impl ClientRuntime {
                     }
                 }
             }
-            ServerUpdate::WorldInfo { biome_zoom_seed } => {
+            ServerUpdate::WorldInfo {
+                dimension,
+                biome_zoom_seed,
+            } => {
+                self.current_dimension = dimension;
                 self.biome_zoom_seed = Some(biome_zoom_seed);
+            }
+            ServerUpdate::DimensionChange {
+                dimension,
+                biome_zoom_seed,
+                keep_player_state,
+            } => {
+                self.clear_server_replica();
+                self.current_dimension = dimension;
+                self.biome_zoom_seed = Some(biome_zoom_seed);
+                if !keep_player_state {
+                    self.total_experience = 0;
+                }
             }
             ServerUpdate::ChunkSnapshot(snapshot) => {
                 if let Some(previous) = self.chunks.insert(snapshot.pos, snapshot) {
@@ -734,14 +756,17 @@ mod tests {
     }
 
     #[test]
-    fn client_runtime_tracks_biome_zoom_seed_from_world_info() {
+    fn client_runtime_tracks_dimension_and_biome_zoom_seed_from_world_info() {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         assert_eq!(runtime.biome_zoom_seed(), None);
 
+        let moon = DimensionKey::parse("mclone:moon").unwrap();
         runtime.apply_update(ServerUpdate::WorldInfo {
+            dimension: moon.clone(),
             biome_zoom_seed: -99,
         });
 
+        assert_eq!(runtime.current_dimension(), &moon);
         assert_eq!(runtime.biome_zoom_seed(), Some(-99));
     }
 
@@ -906,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn client_runtime_clears_stale_server_replica_without_dropping_view() {
+    fn dimension_change_replaces_replica_without_dropping_view_or_player_state() {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         let view = ChunkView {
             center: ChunkPos::new(2, -3),
@@ -954,15 +979,26 @@ mod tests {
             height: 1.4,
             age_ticks: 0,
         }));
+        runtime.apply_update(ServerUpdate::PlayerExperience {
+            total_experience: 37,
+        });
 
         assert_eq!(
             runtime.loaded_chunk_positions().collect::<Vec<_>>(),
             vec![ChunkPos::new(2, -3)]
         );
-        runtime.clear_server_replica();
+        let moon = DimensionKey::parse("mclone:moon").unwrap();
+        runtime.apply_update(ServerUpdate::DimensionChange {
+            dimension: moon.clone(),
+            biome_zoom_seed: 987_654,
+            keep_player_state: true,
+        });
 
         assert_eq!(runtime.host(), ClientHost::RemoteDedicated);
+        assert_eq!(runtime.current_dimension(), &moon);
+        assert_eq!(runtime.biome_zoom_seed(), Some(987_654));
         assert_eq!(runtime.chunk_view(), Some(&view));
+        assert_eq!(runtime.total_experience(), 37);
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
         assert_eq!(runtime.remote_player_count(), 0);

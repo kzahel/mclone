@@ -4725,6 +4725,7 @@ mod tests {
         // ready-only frame pump used after startup.
         let session = PollableRemoteSession::new(vec![Some(Ok(vec![
             ServerUpdate::WorldInfo {
+                dimension: mclone_protocol::DimensionKey::overworld(),
                 biome_zoom_seed: 1124,
             },
             ServerUpdate::ChunkSnapshot(stone_test_snapshot(center)),

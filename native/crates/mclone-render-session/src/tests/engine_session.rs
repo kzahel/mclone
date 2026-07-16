@@ -263,6 +263,57 @@ fn engine_render_session_applies_server_updates_and_marks_render_dirty() {
 }
 
 #[test]
+fn engine_render_session_retires_old_dimension_chunks_before_destination_updates() {
+    let old_chunk = ChunkPos::new(0, 0);
+    let destination_chunk = ChunkPos::new(4, -3);
+    let old_key = RenderSectionKey::new(0, 0, 0);
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+        old_chunk,
+        0,
+        SECTION_HEIGHT,
+    )));
+    let mut engine = EngineRenderSession::new(client);
+    engine.render_session_mut().apply_finished_compile_report(
+        &BTreeSet::from([old_key]),
+        test_build_report([old_key]),
+        &BTreeSet::new(),
+        &BTreeSet::new(),
+    );
+
+    let report = engine.apply_server_updates(vec![
+        ServerUpdate::DimensionChange {
+            dimension: DimensionKey::parse("mclone:moon").expect("dimension key should be valid"),
+            biome_zoom_seed: 41,
+            keep_player_state: true,
+        },
+        ServerUpdate::ChunkSnapshot(empty_test_snapshot(destination_chunk, 0, SECTION_HEIGHT)),
+    ]);
+
+    assert_eq!(engine.client().current_dimension().as_str(), "mclone:moon");
+    assert!(engine.client().chunk_snapshot(old_chunk).is_none());
+    assert!(engine.client().chunk_snapshot(destination_chunk).is_some());
+    assert_eq!(report.updates, 2);
+    assert_eq!(report.snapshot_updates, 1);
+    assert!(report.changed);
+    assert!(
+        engine
+            .render_session()
+            .resident_dirty_section_keys()
+            .any(|key| key == old_key),
+        "the old dimension's resident mesh must be retired"
+    );
+    assert!(
+        engine
+            .render_session()
+            .dirty()
+            .dirty_chunks
+            .contains(&destination_chunk),
+        "the destination snapshot must be compiled"
+    );
+}
+
+#[test]
 fn engine_render_session_can_leave_snapshot_dirtying_to_view_sync_policy() {
     let chunk = ChunkPos::new(3, 4);
     let mut engine = EngineRenderSession::new(ClientRuntime::local_integrated());

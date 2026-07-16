@@ -32,7 +32,9 @@ fn last_time_update(report: &ServerSimulationTickReport) -> u64 {
 
 fn first_biome_zoom_seed(updates: &[ServerUpdate]) -> Option<i64> {
     updates.iter().find_map(|update| match update {
-        ServerUpdate::WorldInfo { biome_zoom_seed } => Some(*biome_zoom_seed),
+        ServerUpdate::WorldInfo {
+            biome_zoom_seed, ..
+        } => Some(*biome_zoom_seed),
         _ => None,
     })
 }
@@ -406,3 +408,4 @@ mod entities;
 mod observers;
 mod player_state;
 mod simulation_physics;
+mod transfers;

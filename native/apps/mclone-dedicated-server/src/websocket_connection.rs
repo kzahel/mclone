@@ -287,7 +287,7 @@ mod tests {
         decode_websocket_server_update_batch, encode_current_websocket_client_handshake,
         encode_websocket_client_command,
     };
-    use mclone_protocol::{ChunkView, ClientCommand, ServerUpdate};
+    use mclone_protocol::{ChunkView, ClientCommand, DimensionKey, ServerUpdate};
     use mclone_server::LocalRealmSession;
 
     fn time_update(day_time: u64) -> ServerUpdate {
@@ -324,7 +324,14 @@ mod tests {
             DedicatedNetworkEvent::Connected { outbound, .. } => outbound,
             event => panic!("expected websocket connection, got {event:?}"),
         };
-        let expected_updates = vec![time_update(123)];
+        let expected_updates = vec![
+            ServerUpdate::DimensionChange {
+                dimension: DimensionKey::parse("mclone:moon").unwrap(),
+                biome_zoom_seed: 54_321,
+                keep_player_state: true,
+            },
+            time_update(123),
+        ];
         outbound.publish(expected_updates.clone()).unwrap();
         let publication = socket.read().unwrap().into_data();
         assert_eq!(

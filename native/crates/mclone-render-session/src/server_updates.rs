@@ -53,6 +53,9 @@ impl EngineServerUpdateReport {
                 ServerUpdate::PlayerPosition(_) => {
                     report.changed = true;
                 }
+                ServerUpdate::DimensionChange { .. } => {
+                    report.changed = true;
+                }
                 ServerUpdate::SessionConfiguration(_)
                 | ServerUpdate::SessionReady
                 | ServerUpdate::KeepAlive { .. }
@@ -118,7 +121,8 @@ impl EngineServerUpdateDirtyBatch {
                 | ServerUpdate::SessionReady
                 | ServerUpdate::KeepAlive { .. }
                 | ServerUpdate::Disconnect(_)
-                | ServerUpdate::WorldInfo { .. } => {}
+                | ServerUpdate::WorldInfo { .. }
+                | ServerUpdate::DimensionChange { .. } => {}
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerExperience { .. } => {}
                 ServerUpdate::PlayerPosition(_) => {}

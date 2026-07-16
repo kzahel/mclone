@@ -104,7 +104,11 @@ impl EngineRenderSession {
     }
 
     pub fn apply_server_updates(&mut self, updates: Vec<ServerUpdate>) -> EngineServerUpdateReport {
+        let stale_chunks = self.dimension_change_stale_chunks(&updates);
         let report = self.mark_server_update_render_dirty(&updates);
+        for pos in stale_chunks {
+            self.mark_chunk_neighborhood_dirty(pos);
+        }
         self.client.apply_updates(updates);
         report
     }
@@ -114,9 +118,21 @@ impl EngineRenderSession {
         updates: Vec<ServerUpdate>,
         policy: EngineServerUpdateDirtyPolicy,
     ) -> EngineServerUpdateReport {
+        let stale_chunks = self.dimension_change_stale_chunks(&updates);
         let report = self.mark_server_update_render_dirty_with_policy(&updates, policy);
+        for pos in stale_chunks {
+            self.mark_chunk_neighborhood_dirty(pos);
+        }
         self.client.apply_updates(updates);
         report
+    }
+
+    fn dimension_change_stale_chunks(&self, updates: &[ServerUpdate]) -> Vec<ChunkPos> {
+        updates
+            .iter()
+            .any(|update| matches!(update, ServerUpdate::DimensionChange { .. }))
+            .then(|| self.client.loaded_chunk_positions().collect())
+            .unwrap_or_default()
     }
 
     pub fn clear_client_replica_and_mark_render_dirty(&mut self) -> Vec<ChunkPos> {

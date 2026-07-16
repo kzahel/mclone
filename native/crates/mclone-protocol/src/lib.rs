@@ -16,7 +16,7 @@ pub use realm_dimension::{
     OVERWORLD_DIMENSION_KEY, RealmId, RealmIdError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -61,6 +61,7 @@ const SERVER_UPDATE_SESSION_CONFIGURATION: u8 = 14;
 const SERVER_UPDATE_SESSION_READY: u8 = 15;
 const SERVER_UPDATE_KEEP_ALIVE: u8 = 16;
 const SERVER_UPDATE_DISCONNECT: u8 = 17;
+const SERVER_UPDATE_DIMENSION_CHANGE: u8 = 18;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -414,7 +415,16 @@ pub enum ServerUpdate {
     SessionConfiguration(SessionConfiguration),
     SessionReady,
     WorldInfo {
+        dimension: DimensionKey,
         biome_zoom_seed: i64,
+    },
+    /// Vanilla-shaped respawn/dimension boundary. The client must replace its
+    /// dimension-local replica before applying following world updates while
+    /// retaining realm-scoped player state when requested.
+    DimensionChange {
+        dimension: DimensionKey,
+        biome_zoom_seed: i64,
+        keep_player_state: bool,
     },
     ChunkSnapshot(ChunkSnapshot),
     ChunkUnload {
@@ -772,9 +782,23 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
         ServerUpdate::SessionReady => {
             writer.write_u8(SERVER_UPDATE_SESSION_READY);
         }
-        ServerUpdate::WorldInfo { biome_zoom_seed } => {
+        ServerUpdate::WorldInfo {
+            dimension,
+            biome_zoom_seed,
+        } => {
             writer.write_u8(SERVER_UPDATE_WORLD_INFO);
+            writer.write_string("dimension key", dimension.as_str())?;
             writer.write_i64(*biome_zoom_seed);
+        }
+        ServerUpdate::DimensionChange {
+            dimension,
+            biome_zoom_seed,
+            keep_player_state,
+        } => {
+            writer.write_u8(SERVER_UPDATE_DIMENSION_CHANGE);
+            writer.write_string("dimension key", dimension.as_str())?;
+            writer.write_i64(*biome_zoom_seed);
+            writer.write_bool(*keep_player_state);
         }
         ServerUpdate::ChunkSnapshot(snapshot) => {
             writer.write_u8(SERVER_UPDATE_CHUNK_SNAPSHOT);
@@ -871,9 +895,25 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             ServerUpdate::SessionConfiguration(reader.read_session_configuration()?)
         }
         SERVER_UPDATE_SESSION_READY => ServerUpdate::SessionReady,
-        SERVER_UPDATE_WORLD_INFO => ServerUpdate::WorldInfo {
-            biome_zoom_seed: reader.read_i64()?,
-        },
+        SERVER_UPDATE_WORLD_INFO => {
+            let dimension =
+                DimensionKey::parse(reader.read_string("dimension key", MAX_DIMENSION_KEY_BYTES)?)
+                    .map_err(|_| ProtocolCodecError::InvalidData("invalid dimension key"))?;
+            ServerUpdate::WorldInfo {
+                dimension,
+                biome_zoom_seed: reader.read_i64()?,
+            }
+        }
+        SERVER_UPDATE_DIMENSION_CHANGE => {
+            let dimension =
+                DimensionKey::parse(reader.read_string("dimension key", MAX_DIMENSION_KEY_BYTES)?)
+                    .map_err(|_| ProtocolCodecError::InvalidData("invalid dimension key"))?;
+            ServerUpdate::DimensionChange {
+                dimension,
+                biome_zoom_seed: reader.read_i64()?,
+                keep_player_state: reader.read_bool()?,
+            }
+        }
         SERVER_UPDATE_CHUNK_SNAPSHOT => ServerUpdate::ChunkSnapshot(reader.read_snapshot()?),
         SERVER_UPDATE_CHUNK_UNLOAD => ServerUpdate::ChunkUnload {
             pos: reader.read_chunk_pos()?,
@@ -2613,7 +2653,21 @@ mod tests {
     #[test]
     fn server_update_codec_round_trips_world_info() {
         let update = ServerUpdate::WorldInfo {
+            dimension: DimensionKey::parse("mclone:moon").unwrap(),
             biome_zoom_seed: -1_234_567_890,
+        };
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_dimension_change() {
+        let update = ServerUpdate::DimensionChange {
+            dimension: DimensionKey::parse("mclone:moon").unwrap(),
+            biome_zoom_seed: -1_234_567_890,
+            keep_player_state: true,
         };
 
         let bytes = encode_server_update(&update).unwrap();

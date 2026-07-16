@@ -1545,7 +1545,8 @@ mod tests {
     use super::*;
     use mclone_core::ChunkPos;
     use mclone_protocol::{
-        ChunkView, ClientDisconnectReason, DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION,
+        ChunkView, ClientDisconnectReason, DimensionKey, DisconnectReason, DisconnectReasonCode,
+        PROTOCOL_VERSION,
     };
     #[cfg(not(target_arch = "wasm32"))]
     use std::io::Write;
@@ -1555,6 +1556,14 @@ mod tests {
             game_time: day_time.saturating_add(100),
             day_time,
             daylight_cycle_running: true,
+        }
+    }
+
+    fn dimension_change() -> ServerUpdate {
+        ServerUpdate::DimensionChange {
+            dimension: DimensionKey::parse("mclone:moon").unwrap(),
+            biome_zoom_seed: 54_321,
+            keep_player_state: true,
         }
     }
 
@@ -1659,6 +1668,7 @@ mod tests {
         );
 
         let updates = vec![
+            dimension_change(),
             time_update(99),
             ServerUpdate::ChunkUnload {
                 pos: ChunkPos::new(5, -7),
@@ -1743,6 +1753,7 @@ mod tests {
     #[test]
     fn native_update_batch_round_trips() {
         let updates = vec![
+            dimension_change(),
             ServerUpdate::ChunkUnload {
                 pos: ChunkPos::new(1, 2),
             },

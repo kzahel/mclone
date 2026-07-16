@@ -2,11 +2,12 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-5 are
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-6 are
 complete. Every host uses one `RealmServer`, the integrated player is ordinary,
 realm/dimension persistence is qualified, and one realm can concurrently tick
 players in multiple isolated `DimensionRuntime`s. Source-owned player and
-non-player observer interest is live; Slice 6 player transfer is next.**
+non-player observer interest and A-to-B-to-A player transfer are live; Slice 7
+diorama observer adoption is next.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -141,13 +142,18 @@ unified:
 - observers receive configuration, world/time, chunks, block deltas, entities,
   and real players without owning player state, commands, identity, inventory,
   experience, or persistence records;
+- one authoritative transfer operation moves the same realm player between
+  dimension runtimes, resets only the client's dimension-local replica and
+  render cache, validates a safe destination, and completes through the
+  existing absolute-position acknowledgement while retaining identity,
+  inventory, experience, and one realm-root record;
 - the current warm diorama starts a full second joined runtime with a real
   server-side local player. Input suppression makes it non-interactive, not an
   observer.
 
-The next work can therefore transfer one ordinary player between those
-dimension runtimes without replacing realm state, then replace the diorama's
-synthetic player session with the proven observer contract.
+The next work can therefore replace the diorama's synthetic player session
+with the proven observer contract and activate it through the same transfer
+mechanics.
 
 ## Hard Topology Invariants
 
@@ -336,7 +342,8 @@ Do not start with the statistics feature simply because its record is small.
 Its purpose is to prove the scope above, and implementing it before the scope
 would encode accidental singleton behavior.
 
-Steps 1-3 are complete. Step 4 is the active next boundary.
+Steps 1-7 are complete. Step 8, diorama observer adoption, is the active next
+boundary.
 
 ## Related
 

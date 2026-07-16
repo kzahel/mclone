@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-5 complete; live player dimension
-transfer is next in Slice 6
+Status: active 2026-07-16; Slices 0-6 complete; diorama observer adoption is
+next in Slice 7
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -755,11 +755,50 @@ entity or player persistence activity.
 
 ### Slice 6: Player dimension transfer
 
+Status: complete 2026-07-16.
+
 - Add server-owned transfer policy and protocol/client replica reset.
 - Move one player between dimensions without disconnecting or replacing realm
   statistics/state.
 - Reuse teleport id/ack and configured-session ordering where applicable.
 - Prove other players remain active in both source and destination.
+
+Evidence:
+
+- the vanilla 1.17.1 `ServerPlayer.changeDimension`,
+  `ClientPacketListener.handleRespawn`, and `ClientboundRespawnPacket` paths
+  establish the reference boundary: the server moves one player between
+  levels, the client replaces its level replica while retaining player data,
+  and the existing absolute-position acknowledgement completes arrival;
+- protocol v25 adds an ordered `DimensionChange` boundary carrying the
+  validated destination key, biome zoom seed, and keep-player-state policy;
+  the boundary precedes destination time, experience, chunks, actors, and
+  absolute player position. Initial `WorldInfo` also names its dimension, so
+  direct admission outside the Overworld cannot inherit a client default;
+- `RealmServer::transfer_player_dimension` preserves the same
+  `ServerPlayerEntry`, profile identity, inventory, selected slot, experience,
+  and realm-root player record while atomically replacing dimension
+  membership, player interest, visibility routes, and initial-sync state;
+- destination streaming begins before the safe-arrival position is published.
+  An invalid or obstructed preferred pose reuses the ordinary safe-surface
+  scan, and player commands remain gated by the existing teleport id/ack;
+- `ClientRuntime` keeps its configured playing session, requested chunk view,
+  and realm player state while clearing all dimension-local chunks, deferred
+  drops, local position, remote players, and entities at the boundary;
+- `EngineRenderSession` marks every old-dimension resident chunk neighborhood
+  dirty before applying the replica reset, preventing stale meshes from
+  surviving even when destination updates reuse coordinates;
+- `player_transfers_a_to_b_to_a_with_one_realm_record_and_replica_reset`
+  proves A-to-B-to-A safe arrival, exact update ordering, retained XP, one
+  player record, one current membership, and uninterrupted source/destination
+  peers. `disconnect_during_transfer_cancels_pending_membership_cleanly`
+  proves cancellation leaves no transfer or duplicate membership;
+- protocol, native batch, direct WebSocket, and dedicated WebSocket round trips
+  all carry the dimension boundary unchanged. The complete protocol (38),
+  client (114), net (23), render-session (112), and server (433) test suites
+  pass, as do the dedicated WebSocket live test, native workspace check,
+  browser WASM check, TypeScript check, and production browser smoke. The
+  captured canvas remains visually correct.
 
 Exit: A-to-B-to-A dimension travel preserves one player record and never
 duplicates the player entity.

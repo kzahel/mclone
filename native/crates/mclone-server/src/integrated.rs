@@ -163,7 +163,7 @@ impl DimensionRuntime {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RealmInterestDiagnostics {
     pub realm_id: RealmId,
     pub active_dimension: DimensionKey,
@@ -171,6 +171,7 @@ pub struct RealmInterestDiagnostics {
     pub player_count: usize,
     pub observer_count: usize,
     pub dimensions: Vec<DimensionInterestDiagnostics>,
+    pub transfers: Vec<PlayerDimensionTransferDiagnostics>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -183,6 +184,31 @@ pub struct DimensionInterestDiagnostics {
     pub pending_persistence_loads: usize,
     pub pending_persistence_saves: usize,
     pub chunk_tracking: PlayerChunkTrackingDiagnostics,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlayerDimensionTransferPhase {
+    LoadingDestination,
+    AwaitingTeleportAck,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerDimensionTransferDiagnostics {
+    pub player_id: ServerPlayerId,
+    pub source: DimensionKey,
+    pub destination: DimensionKey,
+    pub preferred_position: Vec3d,
+    pub phase: PlayerDimensionTransferPhase,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PendingDimensionTransfer {
+    source: DimensionKey,
+    destination: DimensionKey,
+    preferred_position: Vec3d,
+    y_rot_degrees: f32,
+    x_rot_degrees: f32,
+    phase: PlayerDimensionTransferPhase,
 }
 
 #[derive(Debug)]
@@ -207,6 +233,7 @@ pub struct RealmServer {
     players: ServerPlayerList,
     observers: BTreeMap<ObserverId, DimensionKey>,
     next_observer_id: u64,
+    pending_dimension_transfers: BTreeMap<ServerPlayerId, PendingDimensionTransfer>,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
 }
 
@@ -522,6 +549,7 @@ impl RealmServer {
             players: ServerPlayerList::default(),
             observers: BTreeMap::new(),
             next_observer_id: 0,
+            pending_dimension_transfers: BTreeMap::new(),
             debug_auxiliary_player_script: None,
         }
     }
@@ -599,6 +627,17 @@ impl RealmServer {
             player_count: self.players.len(),
             observer_count: self.observers.len(),
             dimensions,
+            transfers: self
+                .pending_dimension_transfers
+                .iter()
+                .map(|(player_id, transfer)| PlayerDimensionTransferDiagnostics {
+                    player_id: *player_id,
+                    source: transfer.source.clone(),
+                    destination: transfer.destination.clone(),
+                    preferred_position: transfer.preferred_position,
+                    phase: transfer.phase,
+                })
+                .collect(),
         }
     }
 
@@ -1173,6 +1212,127 @@ impl RealmServer {
         Ok(true)
     }
 
+    pub fn transfer_player_dimension(
+        &mut self,
+        player_id: ServerPlayerId,
+        destination: DimensionKey,
+        preferred_position: Vec3d,
+    ) -> ChunkStoreResult<bool> {
+        if !preferred_position.is_finite() {
+            return Err(ChunkStoreError::InvalidData(
+                "dimension transfer position must be finite".to_owned(),
+            ));
+        }
+        let source = self
+            .players
+            .dimension(player_id)
+            .cloned()
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        if source == destination {
+            return Ok(false);
+        }
+        if self.pending_dimension_transfers.contains_key(&player_id) {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "server player {player_id} already has a dimension transfer in progress"
+            )));
+        }
+        if self.dimensions.get(&destination).is_none() {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "dimension {destination} is not registered"
+            )));
+        }
+
+        // Build/validate the destination before detaching the source player.
+        self.activate_dimension(&destination)?;
+        self.activate_dimension(&source)?;
+        let (mut view, y_rot_degrees, x_rot_degrees) = {
+            let player = self
+                .players
+                .get(player_id)
+                .ok_or_else(|| unknown_player_error(player_id))?;
+            if !player.state.has_accepted_position() {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "server player {player_id} cannot transfer before initial teleport ack"
+                )));
+            }
+            let view = self
+                .chunk_tracking
+                .accepted_view(player_id)
+                .cloned()
+                .unwrap_or(ChunkView {
+                    center: chunk_pos_for_player_position(preferred_position),
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                });
+            (
+                view,
+                player.state.y_rot_degrees(),
+                player.state.x_rot_degrees(),
+            )
+        };
+
+        let routes = self.remote_players.remove_player(player_id);
+        self.route_remote_player_updates(routes);
+        self.entity_tracking
+            .remove_observer(DimensionInterestSource::Player(player_id));
+        self.remove_player_chunk_tracking(player_id);
+
+        let destination_center = chunk_pos_for_player_position(preferred_position);
+        {
+            let player = self
+                .players
+                .get_mut(player_id)
+                .expect("validated transfer player must remain realm-owned");
+            player.dimension = destination.clone();
+            player.initial_spawn_center = Some(destination_center);
+            player.resume_record = None;
+            player.state.begin_dimension_change();
+        }
+        self.activate_dimension(&destination)?;
+        self.chunk_tracking.add_player(player_id);
+        self.remote_players.add_player(player_id);
+        self.pending_dimension_transfers.insert(
+            player_id,
+            PendingDimensionTransfer {
+                source,
+                destination: destination.clone(),
+                preferred_position,
+                y_rot_degrees,
+                x_rot_degrees,
+                phase: PlayerDimensionTransferPhase::LoadingDestination,
+            },
+        );
+
+        let biome_zoom_seed = obfuscate_biome_zoom_seed(self.active_dimension.definition.seed);
+        let time_update = self.time_update();
+        self.chunk_tracking.queue_update_for_player(
+            player_id,
+            ServerUpdate::DimensionChange {
+                dimension: destination,
+                biome_zoom_seed,
+                keep_player_state: true,
+            },
+        );
+        self.chunk_tracking
+            .queue_update_for_player(player_id, time_update);
+        let total_experience = self
+            .players
+            .get(player_id)
+            .expect("transfer player must remain realm-owned")
+            .total_experience;
+        self.chunk_tracking.queue_update_for_player(
+            player_id,
+            ServerUpdate::PlayerExperience { total_experience },
+        );
+        view.center = destination_center;
+        let updates = self.set_chunk_view_for_target(CommandTarget::Player(player_id), view)?;
+        for update in updates {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, update);
+        }
+        Ok(true)
+    }
+
     fn add_player_with_capabilities_in_dimension(
         &mut self,
         dimension: DimensionKey,
@@ -1310,6 +1470,7 @@ impl RealmServer {
         if self.players.remove(player_id).is_none() {
             return false;
         }
+        self.pending_dimension_transfers.remove(&player_id);
         let routes = self.remote_players.remove_player(player_id);
         self.route_remote_player_updates(routes);
         self.entity_tracking
@@ -2314,7 +2475,9 @@ impl RealmServer {
         target: CommandTarget,
         id: u32,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        if self.player_mut_for_target(target)?.accept_teleport(id) {
+        let accepted = self.player_mut_for_target(target)?.accept_teleport(id);
+        if accepted {
+            self.pending_dimension_transfers.remove(&target.player_id());
             self.reconcile_remote_player_subject(target.player_id(), true);
         }
         Ok(Vec::new())
@@ -2910,6 +3073,7 @@ impl RealmServer {
 
     fn world_info_update(&self) -> ServerUpdate {
         ServerUpdate::WorldInfo {
+            dimension: self.active_dimension.key.clone(),
             biome_zoom_seed: obfuscate_biome_zoom_seed(self.active_dimension.definition.seed),
         }
     }
@@ -2918,6 +3082,7 @@ impl RealmServer {
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<Option<mclone_protocol::PlayerPositionUpdate>> {
+        let player_id = target.player_id();
         let player = self.player_for_target(target)?;
         if !player.needs_initial_position_sync() {
             return Ok(None);
@@ -2926,11 +3091,20 @@ impl RealmServer {
             return Ok(None);
         };
         let resume = self.resume_record_for_target(target)?.cloned();
+        let transfer = self.pending_dimension_transfers.get(&player_id).cloned();
         if let Some(record) = resume.as_ref()
             && !self
                 .scheduler
                 .client_visible_snapshot(chunk_pos_for_player_position(record.position))
                 .is_some()
+        {
+            return Ok(None);
+        }
+        if let Some(transfer) = transfer.as_ref()
+            && self
+                .scheduler
+                .client_visible_snapshot(chunk_pos_for_player_position(transfer.preferred_position))
+                .is_none()
         {
             return Ok(None);
         }
@@ -2945,7 +3119,12 @@ impl RealmServer {
         let exact_resume = resume
             .as_ref()
             .filter(|record| self.player_pose_has_clearance(record.position));
-        let position = if let Some(record) = exact_resume {
+        let exact_transfer = transfer
+            .as_ref()
+            .filter(|transfer| self.player_pose_has_clearance(transfer.preferred_position));
+        let position = if let Some(transfer) = exact_transfer {
+            transfer.preferred_position
+        } else if let Some(record) = exact_resume {
             record.position
         } else {
             let Some(position) = find_safe_surface_spawn_with_column_order(
@@ -2969,7 +3148,14 @@ impl RealmServer {
             .collect::<Vec<_>>();
         self.mark_entity_updates_dirty(&showcase_states);
         let simulation_tick = self.simulation_tick;
-        let update = if let Some(record) = exact_resume {
+        let update = if let Some(transfer) = transfer.as_ref() {
+            self.player_mut_for_target(target)?.initial_position_update(
+                position,
+                transfer.y_rot_degrees,
+                transfer.x_rot_degrees,
+                simulation_tick,
+            )
+        } else if let Some(record) = exact_resume {
             self.player_mut_for_target(target)?
                 .restored_position_update(
                     position,
@@ -2986,6 +3172,9 @@ impl RealmServer {
                 simulation_tick,
             )
         };
+        if let Some(transfer) = self.pending_dimension_transfers.get_mut(&player_id) {
+            transfer.phase = PlayerDimensionTransferPhase::AwaitingTeleportAck;
+        }
         self.take_resume_record_for_target(target)?;
         Ok(Some(update))
     }

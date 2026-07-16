@@ -165,6 +165,14 @@ impl ServerPlayerState {
         update
     }
 
+    pub(crate) fn begin_dimension_change(&mut self) {
+        self.awaiting_teleport = None;
+        self.has_accepted_position = false;
+        self.on_ground = false;
+        self.first_good_position = self.position;
+        self.last_good_position = self.position;
+    }
+
     pub(crate) fn resend_pending_correction_update(
         &mut self,
         tick: u64,

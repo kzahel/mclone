@@ -10,7 +10,7 @@ use mclone_mesh::{
     TexturedChunkVertex, TexturedRenderSectionBuildReport, TexturedVisibleChunkMesh,
     VisibilityGraphBuildStats, VisibilitySet,
 };
-use mclone_protocol::{SectionBlockUpdate, ServerUpdate};
+use mclone_protocol::{DimensionKey, SectionBlockUpdate, ServerUpdate};
 
 use super::*;
 
