@@ -537,7 +537,11 @@ impl McloneSceneHost {
         if !self.mono_ui_is_active() && !activation_was_active {
             camera_changed |= self.apply_mono_movement_frame(frame, dt_seconds);
         }
-        let pose_sync_changed = self.publish_mono_player_pose_if_due()?;
+        let pose_sync_changed = if self.embedded_world_activation.phase.active() {
+            false
+        } else {
+            self.publish_mono_player_pose_if_due()?
+        };
         Ok(MonoInputFrameOutcome {
             camera_changed,
             pose_sync_changed,

@@ -356,6 +356,26 @@ async function run() {
             const terminate = worker.terminate.bind(worker);
             const postMessage = worker.postMessage.bind(worker);
             let terminated = false;
+            /** @param {any[]} messageArgs */
+            const observeShutdown = (messageArgs) => {
+              if (messageArgs[0]?.kind === "shutdown" && !terminated) {
+                terminated = true;
+                stats.active[name] = Math.max(0, (Number(stats.active[name]) || 0) - 1);
+              }
+            };
+            /** @param {...any} messageArgs */
+            worker.postMessage = (...messageArgs) => {
+              observeShutdown(messageArgs);
+              postMessage(...messageArgs);
+            };
+            /** @param {MessageEvent} event */
+            const observeShutdownComplete = (event) => {
+              if (event.data?.kind === "shutdown-complete" && !terminated) {
+                terminated = true;
+                stats.active[name] = Math.max(0, (Number(stats.active[name]) || 0) - 1);
+              }
+            };
+            worker.addEventListener("message", observeShutdownComplete);
             const holdAtOrdinal = Number(control.holdAtCreatedByName[name]);
             if (holdAtOrdinal === ordinal) {
               delete control.holdAtCreatedByName[name];
@@ -368,6 +388,7 @@ async function run() {
               let released = false;
               /** @param {...any} messageArgs */
               worker.postMessage = (...messageArgs) => {
+                observeShutdown(messageArgs);
                 if (released) {
                   postMessage(...messageArgs);
                 } else {
@@ -1477,7 +1498,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
           && Number(state?.embeddedPreviewActorEntityCount) >= 2
           && Number(state?.embeddedPreviewActorObservationCount) >= 2
           && Number(state?.embeddedPreviewActorRemotePlayerCount) === 1
-          && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 1
+          && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 0
           && state?.embeddedPreviewFirstActorEntityId === "1"
           && state?.embeddedPreviewFirstActorKind === "cow"
           && state?.embeddedPreviewSecondActorEntityId === "2"
@@ -1581,7 +1602,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     && Number(relaunched.after.embeddedPreviewActorObservationCount) >= 2
     && Number(relaunched.after.embeddedPreviewActorRemotePlayerCount) === 1
     && Number(relaunched.after.embeddedPreviewRemotePlayerObservationCount) === 1
-    && Number(relaunched.after.embeddedPreviewActorSourceLocalPlayerCount) === 1
+    && Number(relaunched.after.embeddedPreviewActorSourceLocalPlayerCount) === 0
     && Number(relaunched.after.embeddedPreviewSubmittedActorCount) >= 4
     && Number(relaunched.after.embeddedPreviewDrawnActorCount) >= 1
     && relaunched.after.embeddedPreviewFirstRemotePlayerId === "1"
@@ -1634,7 +1655,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && Number(returnedActors.entityCount) >= 2
       && Number(returnedActors.observationCount) >= 2
       && Number(returnedActors.remotePlayerCount) === 1
-      && Number(returnedActors.sourceLocalPlayerCount) === 1
+      && Number(returnedActors.sourceLocalPlayerCount) === 0
       && returnedActors.remotePlayer.id
         === firstLaunch.after.embeddedPreviewFirstRemotePlayerId
       && returnedActors.remotePlayer.model === "uprightBear"
@@ -2493,7 +2514,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
           && Number(state?.embeddedPreviewActorEntityCount) >= 2
           && Number(state?.embeddedPreviewActorObservationCount)
             === Number(state?.embeddedPreviewActorEntityCount)
-          && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 1
+          && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 0
           && Number(state?.embeddedPreviewDrawnActorCount) > 0
           && state?.standbySwitchable === true;
       },
@@ -2503,7 +2524,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
   } catch (error) {
     const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
     throw new Error(
-      `browser lobby preview did not expose authored actors and joined player: ${String(error)}\n`
+      `browser lobby preview did not expose authored actors through observer interest: ${String(error)}\n`
       + JSON.stringify(state, null, 2),
     );
   }
@@ -2969,7 +2990,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       && Number(after.embeddedPreviewActorObservationCount)
         === Number(after.embeddedPreviewActorEntityCount)
       && remotePlayerReceiptOk
-      && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 1
+      && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 0
       && Number(after.embeddedPreviewSubmittedActorCount) === (
         Number(after.embeddedPreviewActorEntityCount)
         + Number(after.embeddedPreviewActorRemotePlayerCount)
@@ -4257,7 +4278,9 @@ function assetPackOptionsButtonPoint(geometry) {
   const panelWidth = Math.min(Math.max(geometry.width - 18.0, 242.0), 360.0);
   const panelHeight = Math.min(238.0, Math.max(geometry.height - 4.0, 1.0));
   const panel = centeredPanel(geometry, panelWidth, panelHeight);
-  return { x: panel.x + panel.width * 0.5, y: panel.y + 136.0 };
+  // Five category rows start at y=30 with a 24 px stride. Asset Packs is
+  // the next 20 px row.
+  return { x: panel.x + panel.width * 0.5, y: panel.y + 160.0 };
 }
 
 /**

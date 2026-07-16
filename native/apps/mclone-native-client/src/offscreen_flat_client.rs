@@ -2566,7 +2566,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                                 && preview.render.last_actor_entity_count >= 2
                                 && preview.render.last_actor_remote_player_count <= 1
                                 && preview.render.last_drawn_actor_count > 0
-                                && preview.render.last_actor_source_local_player_count == 1
+                                && preview.render.last_actor_source_local_player_count == 0
                                 && preview.render.actor_observation_count
                                     == preview.render.last_actor_entity_count
                                 && preview.render.remote_player_observation_count
@@ -2705,10 +2705,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                         .host
                         .scene_host()
                         .embedded_world_preview_snapshot()
-                        .is_some_and(|preview| {
-                            preview.last_drawn_section_count > 0
-                                && preview.render.last_drawn_actor_count > 0
-                        })
+                        .is_some_and(|preview| preview.last_drawn_section_count > 0)
                     {
                         let active_client = state
                             .host
@@ -2767,7 +2764,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                                 && preview.render.last_actor_entity_count >= 2
                                 && preview.render.last_actor_remote_player_count <= 1
                                 && preview.render.last_drawn_actor_count > 0
-                                && preview.render.last_actor_source_local_player_count == 1
+                                && preview.render.last_actor_source_local_player_count == 0
                                 && preview.render.actor_observation_count
                                     == preview.render.last_actor_entity_count
                                 && preview.render.remote_player_observation_count
@@ -2809,10 +2806,10 @@ pub(crate) fn run_lobby_scenario_smoke(
                             if returned_remote.player_id != moved_remote.player_id
                                 || returned_remote.appearance != moved_remote.appearance
                                 || preview.render.last_actor_remote_player_count != 1
-                                || preview.render.last_actor_source_local_player_count != 1
+                                || preview.render.last_actor_source_local_player_count != 0
                             {
                                 bail!(
-                                    "A-to-B-to-A duplicated or collided source-local and remote player figures: {:?}",
+                                    "A-to-B-to-A duplicated the preview observer as a local-player figure or collided remote players: {:?}",
                                     preview.render
                                 );
                             }
@@ -2850,7 +2847,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                                     && preview.last_drawn_section_count > 0
                                     && preview.render.last_actor_entity_count >= 2
                                     && preview.render.last_actor_remote_player_count <= 1
-                                    && preview.render.last_actor_source_local_player_count == 1
+                                    && preview.render.last_actor_source_local_player_count == 0
                                     && preview.render.actor_observation_count
                                         == preview.render.last_actor_entity_count
                                     && preview.render.remote_player_observation_count
@@ -2926,7 +2923,7 @@ pub(crate) fn run_lobby_scenario_smoke(
             .last_actor_entity_count
             .saturating_add(receipt.last_actor_remote_player_count)
             .saturating_add(receipt.last_actor_source_local_player_count);
-        if receipt.last_actor_source_local_player_count != 1
+        if receipt.last_actor_source_local_player_count != 0
             || receipt.last_submitted_actor_count != expected_actor_count
             || receipt.last_drawn_actor_count != expected_actor_count
             || receipt.last_source_rejected_actor_count != 0

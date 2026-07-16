@@ -190,7 +190,7 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
         .last_actor_entity_count
         .saturating_add(actor_receipt.last_actor_remote_player_count)
         .saturating_add(actor_receipt.last_actor_source_local_player_count);
-    if actor_receipt.last_actor_source_local_player_count != 1
+    if actor_receipt.last_actor_source_local_player_count != 0
         || actor_receipt.last_submitted_actor_count != expected_actor_count
         || actor_receipt.last_drawn_actor_count != expected_actor_count
         || actor_receipt.last_source_rejected_actor_count != 0
@@ -421,12 +421,14 @@ fn drive_embedded_preview_activation_roundtrip(
 
         let expected_source = driver.host().active_world_instance_id();
         let mut completed = None;
+        let mut last_snapshot = driver.host().embedded_world_activation_snapshot();
         for _ in 0..120 {
             std::thread::sleep(XR_EMULATION_FRAME_TIME);
             let views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
             driver.render_stereo(device, queue, views, left_view, right_view)?;
             let snapshot = driver.host().embedded_world_activation_snapshot();
+            last_snapshot = snapshot.clone();
             if snapshot.phase == EmbeddedWorldActivationPhase::Failed {
                 bail!("synthetic-stereo diorama activation failed: {snapshot:?}");
             }
@@ -435,9 +437,13 @@ fn drive_embedded_preview_activation_roundtrip(
                 break;
             }
         }
-        let report = completed.context(
-            "synthetic-stereo diorama activation did not complete within 120 rendered frames",
-        )?;
+        let report = completed.with_context(|| {
+            format!(
+                "synthetic-stereo diorama activation did not complete within 120 rendered frames: activation={last_snapshot:?} standby={:?} preview={:?}",
+                driver.host().warm_world_standby_snapshot(),
+                driver.host().embedded_world_preview_snapshot(),
+            )
+        })?;
         let active_world = driver.host().active_world_instance_id();
         if active_world == expected_source {
             bail!("synthetic-stereo diorama activation retained its source world");

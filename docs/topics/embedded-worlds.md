@@ -12,19 +12,19 @@ The durable realm/dimension/server-topology contract now lives in
 [`realm-dimension-runtime.md`](realm-dimension-runtime.md), with its bounded
 implementation sequence in
 [`185-realm-dimension-and-observer-runtime.md`](../tactical/185-realm-dimension-and-observer-runtime.md).
-The current warm destination starts a complete second joined runtime with its
-own server-side local player; suppressing preview input does not make it a
-non-player observer. Tactical 185 preserves that proof as current behavior but
-defines the target: realm-scoped players and statistics, independently ticking
-dimension runtimes, source-owned dimension-local tickets, and preview
-subscriptions that receive bounded chunk/entity facts without spawning or
-saving a player until explicit activation.
+The current warm destination starts its independent realm connection as a
+non-player observer. It receives bounded chunk/entity/player facts without
+loading or saving the local profile's player record. Covered activation
+promotes that connection to one ordinary player, demotes and saves the source
+player to an observer, waits for authoritative safe arrival, and then exchanges
+the retained slots. The same exchange runs in reverse for A-to-B-to-A.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, completed shared Web/WASM lobby
 parity, and a completed composable-world-presentation and live-preview actor
-milestone through Slice 7, plus completed configurable catalog-world
+milestone through Slice 7, completed Tactical 185 observer adoption, plus
+completed configurable catalog-world
 destinations and supported-arrival acceptance. Portable scenario content,
 shared immutable second-slot terrain and actor resources, per-world actor
 presentation/cache state, slot-targeted startup/readiness/activation/swap policy,
@@ -145,14 +145,16 @@ mono/per-eye and full-frame multiview paths. One shared native/browser fixture
 draws a cow, chicken figure, item, remote-player figure, and source-local
 player figure from two independent world-local caches with source, clip, and
 frustum rejection before mesh preparation. Production browser WebGPU uses the
-same Rust fixture through a target-only adapter. The real product scene now
-submits destination entities, remote players, and the retained slot's
-source-local full-body player through those same portable paths after all
-opaque/cutout terrain and before globally ordered translucency. Native
-flat/stereo and production browser desktop/mobile captures show correctly
-scaled, source-lit actors with shared depth; slot exchange keeps the appropriate
-source-local body on both sides. The direct actor path remains byte-identical
-and within its measured noise envelope, while preview diagnostics separately
+same Rust fixture through a target-only adapter. At the Tactical 179
+checkpoint, the product scene also submitted the retained slot's synthetic
+source-local full-body player. Tactical 185 Slice 7 removed that body when the
+standby connection became a real observer; current previews submit only
+destination entities and real remote players after opaque/cutout terrain and
+before globally ordered translucency. Native flat/stereo and production
+browser desktop/mobile captures show correctly scaled, source-lit actors with
+shared depth and zero source-local preview players. The direct actor path
+remains byte-identical and within its measured noise envelope, while preview
+diagnostics separately
 expose selection, rejection, cache, GPU-capacity, and placed-pipeline costs.
 Versioned v2 managed content now carries shared Rust-authored entity codec
 records without reinterpreting v1 storage. Its stable cow and chicken load,
@@ -162,14 +164,15 @@ source/composed displacement, publish it to a visible frame in one frame, and
 show changed tabletop pixels. A-to-B-to-A and full reopen retain both entity
 ids without duplication, while TypeScript remains only a storage/Worker
 adapter. The native and browser direct paths remain within their measured
-noise envelopes. Slice 7 closes the joined-player requirement: shared
-integrated-server tracking pairs local and dedicated players symmetrically,
+noise envelopes. Tactical 179 Slice 7 closed the joined-player receipt at that
+historical checkpoint: shared integrated-server tracking pairs local and
+dedicated players symmetrically,
 and a shared Rust-authored destination script drives one
 ordinary dedicated player through normal appearance, teleport, and
 `MovePlayer` admission. Native and production browser desktop/mobile receipts
-draw the two creatures, remote upright-bear player, and retained source-local
-player together. The remote player moves 0.725 source blocks and exactly
-0.090625 composition blocks at 1:8, advances its walk animation, retains source
+draw the two creatures, remote upright-bear player, and the then-retained
+source-local player together. The remote player moves 0.725 source blocks and
+exactly 0.090625 composition blocks at 1:8, advances its walk animation, retains source
 light, and becomes visible in one frame. A-to-B-to-A and full browser shutdown/
 relaunch retain world-qualified identity without duplication. TypeScript only
 forwards the enable bit and shared diagnostic facts; it owns no pose, protocol
@@ -380,7 +383,7 @@ roots reopen with their independent edits. A combined asset replacement smoke
 observed the old standby become non-switchable and its gate close before active
 epochs `0 -> 1 -> 2`. Capable-device multiview execution remains open.
 
-### Next bounded milestone: one live hosted diorama
+### Historical bounded milestone: one live hosted diorama
 
 The next proof deliberately drops the staged shrink/fall transition from its
 critical path. While arbitrary world A remains active, a bounded section-aligned
@@ -682,10 +685,11 @@ Confirmed against the renderer (see Seams for file:line):
   across worlds must qualify them with a client-side `WorldInstanceId`. The
   network protocol does not need that id when the connection/slot already
   supplies the namespace.
-- **Remote spectator is a target, not current wire behavior:** native remote
-  updates are still paired with commands rather than an independent observer
-  subscription/server-push stream. A real T2 needs an observer protocol or an
-  ordinary joined connection that deliberately maintains view/keepalive
+- **Remote spectator is a target, not current wire behavior:** local integrated
+  runners now have a real non-player observer role, but native remote updates
+  are still paired with commands rather than an independent observer
+  subscription/server-push stream. A remote T2 needs an observer protocol or
+  an ordinary joined connection that deliberately maintains view/keepalive
   commands. `ClientRuntime` alone is not sufficient; the connection, update
   pump, render session, compiler, and uploads must remain alive too. See
   `docs/session-network-architecture.md` and

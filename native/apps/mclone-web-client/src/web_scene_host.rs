@@ -1435,6 +1435,13 @@ impl WebSceneHost {
             .ok_or_else(|| JsValue::from_str("scenario world start omitted its storage source"))?
             .world_id()
             .to_owned();
+        let observer_only = matches!(
+            &pending.target,
+            mclone_scene::ExternalSceneStartTarget::ManagedScenario {
+                role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+                ..
+            }
+        );
         let config = WebIntegratedServerRunnerConfig::new(
             seed,
             worker_url,
@@ -1447,7 +1454,8 @@ impl WebSceneHost {
         .with_world_behavior_profile(pending.scene.world_behavior_profile)
         .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
         .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
-        .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script);
+        .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
+        .with_observer_only(observer_only);
         Ok(WebManagedScenarioRuntimeStart {
             pending: Some(pending),
             config: Some(config),

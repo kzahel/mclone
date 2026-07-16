@@ -1259,6 +1259,18 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             .context("failed to promote local observer to player")
     }
 
+    pub fn demote_player_to_observer(&mut self) -> Result<()> {
+        self.connection
+            .demote_player_to_observer()
+            .context("failed to demote local player to observer")
+    }
+
+    pub fn debug_break_observed_block(&mut self, pos: mclone_core::BlockPos) -> Result<bool> {
+        self.connection
+            .debug_break_observed_block(pos)
+            .context("failed to mutate observed world from debug host")
+    }
+
     pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
         &self.mesh_assets
     }
@@ -1821,7 +1833,8 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         let Some(progress) = self
             .last_runner_diagnostics
             .as_ref()
-            .and_then(|diagnostics| diagnostics.loading_progress)
+            .and_then(|diagnostics| diagnostics.view_readiness_snapshot.as_ref())
+            .map(|snapshot| snapshot.stats)
         else {
             return false;
         };
@@ -1835,7 +1848,10 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
         self.last_runner_diagnostics
             .as_ref()
-            .and_then(loading_progress_overlay_from_diagnostics)
+            .and_then(|diagnostics| {
+                loading_progress_overlay_from_diagnostics(diagnostics)
+                    .or_else(|| view_readiness_overlay_from_diagnostics(diagnostics))
+            })
     }
 }
 
@@ -3670,6 +3686,33 @@ where
 
     fn flush_persistence(&mut self) -> Result<usize> {
         NativeSceneServices::flush_persistence(self)
+    }
+
+    fn promote_observer_to_player(&mut self) -> Result<()> {
+        match self {
+            NativeSceneServices::Local(runtime) => runtime.promote_observer_to_player(),
+            NativeSceneServices::RemoteDedicated(_) => {
+                anyhow::bail!("remote dedicated runtime cannot promote a local observer")
+            }
+        }
+    }
+
+    fn demote_player_to_observer(&mut self) -> Result<()> {
+        match self {
+            NativeSceneServices::Local(runtime) => runtime.demote_player_to_observer(),
+            NativeSceneServices::RemoteDedicated(_) => {
+                anyhow::bail!("remote dedicated runtime cannot demote a local player")
+            }
+        }
+    }
+
+    fn debug_break_observed_block(&mut self, pos: mclone_core::BlockPos) -> Result<bool> {
+        match self {
+            NativeSceneServices::Local(runtime) => runtime.debug_break_observed_block(pos),
+            NativeSceneServices::RemoteDedicated(_) => {
+                anyhow::bail!("remote dedicated runtime has no local observer debug control")
+            }
+        }
     }
 
     fn refresh_startup_diagnostics(&mut self) -> Result<()> {

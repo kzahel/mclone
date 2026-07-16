@@ -671,6 +671,18 @@ impl WebIntegratedServerRunner {
         Ok(())
     }
 
+    fn post_demote_player(&mut self) -> Result<(), String> {
+        let request_id = self.next_request_id();
+        let message = Object::new();
+        set_string(&message, "kind", "demote-player")?;
+        set_number(&message, "requestId", f64::from(request_id))?;
+        self.worker
+            .post_message(&message)
+            .map_err(|error| format!("failed to post player demotion: {error:?}"))?;
+        self.record_runner_request(request_id, 0);
+        Ok(())
+    }
+
     fn shared_command_message(&mut self, request_id: u32, frame: &[u8]) -> Result<Object, String> {
         let request_bytes = u32::try_from(frame.len()).map_err(|_| {
             format!(
@@ -932,6 +944,14 @@ impl IntegratedServerRunner for WebIntegratedServerRunner {
             return Err(ServerRunnerError::CommandChannelClosed);
         }
         self.post_promote_observer()
+            .map_err(ServerRunnerError::ThreadStart)
+    }
+
+    fn demote_player_to_observer(&mut self) -> ServerRunnerResult<()> {
+        if self.shutdown_requested {
+            return Err(ServerRunnerError::CommandChannelClosed);
+        }
+        self.post_demote_player()
             .map_err(ServerRunnerError::ThreadStart)
     }
 
@@ -2063,6 +2083,19 @@ impl McloneWebIntegratedServerWorker {
     pub fn promote_observer_to_player(&mut self) -> Result<JsValue, JsValue> {
         self.server
             .promote_observer_to_player()
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        let updates = self
+            .server
+            .try_drain_updates()
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        self.refresh_diagnostics(None, false, None);
+        self.worker_response(updates).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = demotePlayerToObserver)]
+    pub fn demote_player_to_observer(&mut self) -> Result<JsValue, JsValue> {
+        self.server
+            .demote_player_to_observer()
             .map_err(|error| JsValue::from_str(&error.to_string()))?;
         let updates = self
             .server

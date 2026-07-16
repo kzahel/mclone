@@ -431,6 +431,16 @@ impl WebRuntime {
     pub fn flush_persistence(&mut self) -> Result<usize, String> {
         self.host.flush_persistence()
     }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn promote_observer_to_player(&mut self) -> Result<(), String> {
+        self.host.promote_observer_to_player()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn demote_player_to_observer(&mut self) -> Result<(), String> {
+        self.host.demote_player_to_observer()
+    }
 }
 
 pub(crate) type WebRuntimeStepReport = RuntimeStepReport;
@@ -533,6 +543,28 @@ impl WebRuntimeHost {
             Self::Inline(_) | Self::RemoteWebSocket(_) => Ok(0),
             Self::Worker(host) => {
                 IntegratedServerRunner::flush_persistence(host).map_err(|error| error.to_string())
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn promote_observer_to_player(&mut self) -> Result<(), String> {
+        match self {
+            Self::Worker(host) => IntegratedServerRunner::promote_observer_to_player(host)
+                .map_err(|error| error.to_string()),
+            Self::Inline(_) | Self::RemoteWebSocket(_) => {
+                Err("web runtime does not own a promotable local observer".to_owned())
+            }
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn demote_player_to_observer(&mut self) -> Result<(), String> {
+        match self {
+            Self::Worker(host) => IntegratedServerRunner::demote_player_to_observer(host)
+                .map_err(|error| error.to_string()),
+            Self::Inline(_) | Self::RemoteWebSocket(_) => {
+                Err("web runtime does not own a demotable local player".to_owned())
             }
         }
     }

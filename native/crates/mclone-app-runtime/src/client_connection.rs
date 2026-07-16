@@ -175,6 +175,17 @@ impl<R: IntegratedServerRunner> IntegratedRunnerConnection<R> {
         self.runner.promote_observer_to_player()
     }
 
+    pub fn demote_player_to_observer(&mut self) -> ServerRunnerResult<()> {
+        self.runner.demote_player_to_observer()
+    }
+
+    pub fn debug_break_observed_block(
+        &mut self,
+        pos: mclone_core::BlockPos,
+    ) -> ServerRunnerResult<bool> {
+        self.runner.debug_break_observed_block(pos)
+    }
+
     pub const fn runner(&self) -> &R {
         &self.runner
     }

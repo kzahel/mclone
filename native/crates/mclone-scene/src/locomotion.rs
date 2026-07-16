@@ -535,9 +535,10 @@ impl McloneSceneHost {
             None => (self.apply_locomotion_input(controllers, views)?, false),
         };
         let commit_start = self.services.clock.now();
-        if let Some((_, commit_timing)) = self
-            .commit_engine_camera_player_pose_if_due_timed()
-            .context("publish scheduled XR player pose")?
+        if !self.embedded_world_activation.phase.active()
+            && let Some((_, commit_timing)) = self
+                .commit_engine_camera_player_pose_if_due_timed()
+                .context("publish scheduled XR player pose")?
         {
             timing.commit_ms = elapsed_ms(self.services.clock.elapsed_since(commit_start));
             timing.record_commit_timing(commit_timing);

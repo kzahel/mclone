@@ -2516,12 +2516,26 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         self.runtime.flush_persistence().map_err(anyhow::Error::msg)
     }
 
+    fn promote_observer_to_player(&mut self) -> anyhow::Result<()> {
+        self.runtime
+            .promote_observer_to_player()
+            .map_err(anyhow::Error::msg)
+    }
+
+    fn demote_player_to_observer(&mut self) -> anyhow::Result<()> {
+        self.runtime
+            .demote_player_to_observer()
+            .map_err(anyhow::Error::msg)
+    }
+
     fn refresh_startup_diagnostics(&mut self) -> anyhow::Result<()> {
         Ok(())
     }
 
     fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay> {
-        loading_progress_overlay_from_diagnostics(&self.diagnostics())
+        let diagnostics = self.diagnostics();
+        loading_progress_overlay_from_diagnostics(&diagnostics)
+            .or_else(|| view_readiness_overlay_from_diagnostics(&diagnostics))
     }
 
     fn startup_host_ready(
@@ -2539,14 +2553,17 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         let host_ready = match self.host_mode() {
             SingleViewHostMode::LocalIntegrated => {
                 interest_chunk_ready
-                    && diagnostics.loading_progress.is_none_or(|progress| {
-                        progress.playable_chunk_ready
-                            && self
-                                .runtime
-                                .client()
-                                .chunk_snapshot(progress.playable_chunk)
-                                .is_some()
-                    })
+                    && diagnostics
+                        .view_readiness_snapshot
+                        .as_ref()
+                        .is_none_or(|snapshot| {
+                            snapshot.stats.playable_chunk_ready
+                                && self
+                                    .runtime
+                                    .client()
+                                    .chunk_snapshot(snapshot.stats.playable_chunk)
+                                    .is_some()
+                        })
             }
             SingleViewHostMode::RemoteDedicated => {
                 interest_chunk_ready

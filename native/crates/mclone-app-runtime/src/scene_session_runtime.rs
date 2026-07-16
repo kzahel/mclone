@@ -178,6 +178,15 @@ pub trait SceneRuntimeService {
     fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth;
     fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay>;
     fn flush_persistence(&mut self) -> Result<usize>;
+    fn promote_observer_to_player(&mut self) -> Result<()> {
+        anyhow::bail!("scene runtime does not own a promotable local observer")
+    }
+    fn demote_player_to_observer(&mut self) -> Result<()> {
+        anyhow::bail!("scene runtime does not own a demotable local player")
+    }
+    fn debug_break_observed_block(&mut self, _pos: mclone_core::BlockPos) -> Result<bool> {
+        anyhow::bail!("scene runtime does not own a mutable local observer")
+    }
     fn refresh_startup_diagnostics(&mut self) -> Result<()>;
     fn startup_progress_overlay(&self) -> Option<LoadingProgressOverlay>;
     fn startup_host_ready(&self, policy: StartupReadinessPolicy, camera_position: Vec3) -> bool;
@@ -316,6 +325,18 @@ impl SceneSessionRuntime {
 
     pub fn drain_player_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
         self.core_mut().drain_player_position_updates()
+    }
+
+    pub fn promote_observer_to_player(&mut self) -> Result<()> {
+        self.service.promote_observer_to_player()
+    }
+
+    pub fn demote_player_to_observer(&mut self) -> Result<()> {
+        self.service.demote_player_to_observer()
+    }
+
+    pub fn debug_break_observed_block(&mut self, pos: mclone_core::BlockPos) -> Result<bool> {
+        self.service.debug_break_observed_block(pos)
     }
 
     pub fn poll(&mut self) -> Result<bool> {

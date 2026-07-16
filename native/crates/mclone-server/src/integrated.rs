@@ -2420,16 +2420,30 @@ impl RealmServer {
                 return Ok(());
             }
 
+            let observer_anchor = self.observer_preview_anchor_in_active_dimension();
+            if let Some(anchor) = observer_anchor {
+                let showcase_enabled = self.debug_passive_showcase_enabled;
+                let showcase_ids = self
+                    .entities
+                    .ensure_debug_passive_showcase_near_spawn(anchor, showcase_enabled);
+                let showcase_states = showcase_ids
+                    .into_iter()
+                    .filter_map(|id| self.entities.state(id))
+                    .collect::<Vec<_>>();
+                self.mark_entity_updates_dirty(&showcase_states);
+            }
+
             // Keep the shared validation actor near an admitted physical
-            // player so accepted-entry-relative preview crops can exercise it
-            // for arbitrary generated-world spawn coordinates. The fixed
-            // anchor remains the pre-admission/test fallback.
+            // player or a non-player preview observer so accepted-entry-relative
+            // crops can exercise it for arbitrary generated-world spawn
+            // coordinates. The fixed anchor remains the test fallback.
             let anchor = self
                 .players
                 .iter()
                 .filter(|(player_id, _)| *player_id != script.player_id)
                 .find(|(_, player)| player.state.has_accepted_position())
                 .map(|(_, player)| player.state.position())
+                .or(observer_anchor)
                 .unwrap_or(Vec3d::new(8.5, 66.0, 8.5));
             let to_anchor = anchor.subtract(script.current_position);
             let desired = if to_anchor.length_sqr() > 0.25 * 0.25 {
@@ -2468,6 +2482,40 @@ impl RealmServer {
         })();
         self.debug_auxiliary_player_script = Some(script);
         result
+    }
+
+    fn observer_preview_anchor_in_active_dimension(&self) -> Option<Vec3d> {
+        let observers = self
+            .observers
+            .iter()
+            .filter(|(_, dimension)| *dimension == &self.active_dimension.key)
+            .filter_map(|(observer_id, _)| {
+                self.chunk_tracking
+                    .accepted_observer_view(*observer_id)
+                    .map(|view| (*observer_id, view.center))
+            })
+            .collect::<Vec<_>>();
+        let column_order = if matches!(
+            self.scheduler.world_generation_profile(),
+            WorldGenerationProfile::AuthoredOnly { .. }
+        ) {
+            SpawnColumnOrder::CenterFirst
+        } else {
+            SpawnColumnOrder::Scan
+        };
+        observers.into_iter().find_map(|(observer_id, center)| {
+            find_safe_surface_spawn_with_column_order(
+                center,
+                |pos| self.scheduler.block_at_world(pos),
+                |x, z| self.biome_source.block_position_biome_definition(x, z),
+                |chunk| {
+                    self.chunk_tracking
+                        .source_tracks_chunk(DimensionInterestSource::Observer(observer_id), chunk)
+                        && self.scheduler.client_visible_snapshot(chunk).is_some()
+                },
+                column_order,
+            )
+        })
     }
 
     fn handle_accept_teleport_for_target(
@@ -3138,7 +3186,10 @@ impl RealmServer {
             };
             position
         };
-        let showcase_enabled = self.debug_passive_showcase_enabled;
+        let showcase_enabled = self.debug_passive_showcase_enabled
+            && self
+                .debug_auxiliary_player_script
+                .is_none_or(|script| script.player_id != player_id);
         let showcase_ids = self
             .entities
             .ensure_debug_passive_showcase_near_spawn(position, showcase_enabled);
@@ -3207,7 +3258,7 @@ impl RealmServer {
         let xs = [position.x - PLAYER_RADIUS, position.x + PLAYER_RADIUS];
         let ys = [position.y, position.y + PLAYER_HEIGHT];
         let zs = [position.z - PLAYER_RADIUS, position.z + PLAYER_RADIUS];
-        xs.into_iter().all(|x| {
+        let body_clear = xs.into_iter().all(|x| {
             ys.into_iter().all(|y| {
                 zs.into_iter().all(|z| {
                     self.scheduler
@@ -3219,7 +3270,16 @@ impl RealmServer {
                         .is_some_and(|block| !mclone_worldgen::block::material_blocks_motion(block))
                 })
             })
-        })
+        });
+        let support_y = (position.y - 0.08).floor() as i32;
+        let solid_support = xs.into_iter().any(|x| {
+            zs.into_iter().any(|z| {
+                self.scheduler
+                    .block_at_world(BlockPos::new(x.floor() as i32, support_y, z.floor() as i32))
+                    .is_some_and(mclone_worldgen::block::material_blocks_motion)
+            })
+        });
+        body_clear && solid_support
     }
 
     fn apply_loaded_player_record(
@@ -3676,6 +3736,83 @@ impl LocalRealmSession {
         self.promote_observer_to_player_with_identity_load(true)
     }
 
+    pub fn demote_player_to_observer(&mut self) -> ChunkStoreResult<ObserverId> {
+        self.demote_player_to_observer_with_persistence_flush(false)
+    }
+
+    pub fn demote_player_to_observer_blocking(&mut self) -> ChunkStoreResult<ObserverId> {
+        self.demote_player_to_observer_with_persistence_flush(true)
+    }
+
+    /// Host-only deterministic mutation used by the retained-preview smoke.
+    /// This is not a client command and grants the observer no gameplay
+    /// interaction authority.
+    pub fn debug_break_observed_block(&mut self, pos: BlockPos) -> ChunkStoreResult<bool> {
+        let LocalRealmSessionRole::Observer(observer_id) = self.role else {
+            return Err(ChunkStoreError::InvalidData(
+                "debug observed-world mutation requires an observer session".to_owned(),
+            ));
+        };
+        self.activate_observer_dimension(observer_id)?;
+        if !self.chunk_tracking.source_tracks_chunk(
+            DimensionInterestSource::Observer(observer_id),
+            pos.chunk_pos(),
+        ) {
+            return Err(ChunkStoreError::InvalidData(
+                "debug observed-world mutation lies outside observer interest".to_owned(),
+            ));
+        }
+        if !self.world_behavior_profile.allows_player_break() {
+            return Ok(false);
+        }
+        Ok(self.server.set_block_debug(pos, AIR_BLOCK_STATE_ID))
+    }
+
+    fn demote_player_to_observer_with_persistence_flush(
+        &mut self,
+        flush_persistence: bool,
+    ) -> ChunkStoreResult<ObserverId> {
+        let LocalRealmSessionRole::Player(player_id) = self.role else {
+            return self
+                .observer_id()
+                .ok_or_else(|| ChunkStoreError::InvalidData("local session has no role".into()));
+        };
+        self.server.activate_player_dimension(player_id)?;
+        let dimension = self
+            .server
+            .players
+            .dimension(player_id)
+            .cloned()
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        let view = self
+            .server
+            .chunk_tracking
+            .accepted_view(player_id)
+            .cloned()
+            .ok_or_else(|| {
+                ChunkStoreError::InvalidData(
+                    "cannot demote a local player before its chunk view is accepted".to_owned(),
+                )
+            })?;
+        self.pending_player_identity = self
+            .server
+            .players
+            .get(player_id)
+            .and_then(|player| player.identity.clone());
+        self.server.save_player_record(player_id)?;
+        if flush_persistence {
+            self.server.scheduler.flush_persistence()?;
+        }
+        self.server.remove_player(player_id);
+        let observer_id = self.server.add_observer(
+            dimension,
+            view,
+            ObserverSimulationInterest::BlockAndEntityTicking,
+        )?;
+        self.role = LocalRealmSessionRole::Observer(observer_id);
+        Ok(observer_id)
+    }
+
     fn promote_observer_to_player_with_identity_load(
         &mut self,
         blocking_identity_load: bool,
@@ -3744,9 +3881,9 @@ impl LocalRealmSession {
                     self.server.remove_observer(observer_id)?;
                     Ok(Vec::new())
                 }
-                _ => Err(ChunkStoreError::InvalidData(
-                    "non-player observer cannot issue gameplay commands".to_owned(),
-                )),
+                command => Err(ChunkStoreError::InvalidData(format!(
+                    "non-player observer cannot issue gameplay command {command:?}"
+                ))),
             },
         }
     }

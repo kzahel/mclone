@@ -5,6 +5,7 @@ use mclone_worldgen::block::{
 };
 use mclone_worldgen::surface::overworld_surface_top_material;
 
+use crate::WorldGenerationProfile;
 use crate::game_mode::JAVA_OVERWORLD_MAX_BUILD_HEIGHT;
 
 const JAVA_OVERWORLD_MIN_BUILD_HEIGHT: i32 = 0;
@@ -15,6 +16,32 @@ pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
     OverworldBiomeSource::new(seed, false, false)
         .find_player_spawn_friendly_chunk()
         .unwrap_or(ChunkPos::new(0, 0))
+}
+
+/// Resolve the same safe surface used by ordinary player admission from an
+/// already-published client/observer snapshot. Preview hosts use this to frame
+/// an observer around its eventual join point without manufacturing a player
+/// or publishing player-position authority before activation.
+pub fn find_safe_surface_spawn_for_loaded_profile(
+    seed: i64,
+    profile: WorldGenerationProfile,
+    center: ChunkPos,
+    block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
+    chunk_ready: impl FnMut(ChunkPos) -> bool,
+) -> Option<Vec3d> {
+    let column_order = if matches!(profile, WorldGenerationProfile::AuthoredOnly { .. }) {
+        SpawnColumnOrder::CenterFirst
+    } else {
+        SpawnColumnOrder::Scan
+    };
+    let biome_source = OverworldBiomeSource::new(seed, false, false);
+    find_safe_surface_spawn_with_column_order(
+        center,
+        block_at,
+        |x, z| biome_source.get_block_position_biome_definition(seed, x, z),
+        chunk_ready,
+        column_order,
+    )
 }
 
 #[cfg(test)]

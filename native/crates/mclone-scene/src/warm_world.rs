@@ -548,6 +548,7 @@ pub(crate) struct EmbeddedWorldActivationState {
     pub phase: EmbeddedWorldActivationPhase,
     pub phase_elapsed_seconds: f64,
     pub activation_frame: u32,
+    pub authority_handoff_pending: bool,
     pub volume: Option<EmbeddedWorldActivationVolume>,
     pub report: Option<EmbeddedWorldActivationReport>,
 }
@@ -588,6 +589,7 @@ impl EmbeddedWorldActivationState {
         self.phase = EmbeddedWorldActivationPhase::Closing;
         self.phase_elapsed_seconds = 0.0;
         self.activation_frame = 0;
+        self.authority_handoff_pending = false;
         self.volume = Some(volume);
         self.report = Some(EmbeddedWorldActivationReport {
             sequence,

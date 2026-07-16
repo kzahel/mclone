@@ -9,6 +9,7 @@
 use std::error::Error;
 use std::fmt;
 
+use mclone_core::BlockPos;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_protocol::{
     ChunkView, DimensionKey, decode_client_command, encode_client_command, encode_server_update,
@@ -522,6 +523,16 @@ pub trait IntegratedServerRunner {
     fn promote_observer_to_player(&mut self) -> ServerRunnerResult<()> {
         Ok(())
     }
+
+    /// Save and remove the ordinary local player, then retain the same realm
+    /// connection as a bounded non-player observer.
+    fn demote_player_to_observer(&mut self) -> ServerRunnerResult<()> {
+        Ok(())
+    }
+
+    fn debug_break_observed_block(&mut self, _pos: BlockPos) -> ServerRunnerResult<bool> {
+        Ok(false)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -829,6 +840,13 @@ mod native {
         PromoteObserver {
             ack: mpsc::Sender<ServerRunnerResult<()>>,
         },
+        DemotePlayer {
+            ack: mpsc::Sender<ServerRunnerResult<()>>,
+        },
+        DebugBreakObservedBlock {
+            pos: BlockPos,
+            ack: mpsc::Sender<ServerRunnerResult<bool>>,
+        },
         Shutdown,
     }
 
@@ -1025,6 +1043,46 @@ mod native {
                 .as_ref()
                 .ok_or(ServerRunnerError::CommandChannelClosed)?
                 .send(NativeRunnerControl::PromoteObserver { ack: ack_tx });
+            if send_result.is_err() {
+                self.command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            ack_rx
+                .recv()
+                .map_err(|_| ServerRunnerError::CommandChannelClosed)?
+        }
+
+        fn demote_player_to_observer(&mut self) -> ServerRunnerResult<()> {
+            if self.shutdown_requested {
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            let (ack_tx, ack_rx) = mpsc::channel();
+            self.command_queue_depth.fetch_add(1, Ordering::SeqCst);
+            let send_result = self
+                .command_tx
+                .as_ref()
+                .ok_or(ServerRunnerError::CommandChannelClosed)?
+                .send(NativeRunnerControl::DemotePlayer { ack: ack_tx });
+            if send_result.is_err() {
+                self.command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            ack_rx
+                .recv()
+                .map_err(|_| ServerRunnerError::CommandChannelClosed)?
+        }
+
+        fn debug_break_observed_block(&mut self, pos: BlockPos) -> ServerRunnerResult<bool> {
+            if self.shutdown_requested {
+                return Err(ServerRunnerError::CommandChannelClosed);
+            }
+            let (ack_tx, ack_rx) = mpsc::channel();
+            self.command_queue_depth.fetch_add(1, Ordering::SeqCst);
+            let send_result = self
+                .command_tx
+                .as_ref()
+                .ok_or(ServerRunnerError::CommandChannelClosed)?
+                .send(NativeRunnerControl::DebugBreakObservedBlock { pos, ack: ack_tx });
             if send_result.is_err() {
                 self.command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 return Err(ServerRunnerError::CommandChannelClosed);
@@ -1486,6 +1544,23 @@ mod native {
                 let result = server
                     .promote_observer_to_player_blocking()
                     .map(|_| ())
+                    .map_err(ServerRunnerError::from);
+                command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                let _ = ack.send(result);
+                Ok(true)
+            }
+            NativeRunnerControl::DemotePlayer { ack } => {
+                let result = server
+                    .demote_player_to_observer_blocking()
+                    .map(|_| ())
+                    .map_err(ServerRunnerError::from);
+                command_queue_depth.fetch_sub(1, Ordering::SeqCst);
+                let _ = ack.send(result);
+                Ok(true)
+            }
+            NativeRunnerControl::DebugBreakObservedBlock { pos, ack } => {
+                let result = server
+                    .debug_break_observed_block(pos)
                     .map_err(ServerRunnerError::from);
                 command_queue_depth.fetch_sub(1, Ordering::SeqCst);
                 let _ = ack.send(result);

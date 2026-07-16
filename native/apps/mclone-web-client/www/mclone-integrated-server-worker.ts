@@ -162,6 +162,9 @@ workerSelf.onmessage = async (event: MessageEvent) => {
       case "promote-observer":
         await promoteObserver(message);
         break;
+      case "demote-player":
+        await demotePlayer(message);
+        break;
       default:
         postFailure(
           message.requestId,
@@ -417,6 +420,25 @@ async function promoteObserver(message: IntegratedServerWorkerMessage): Promise<
   postUpdates({
     ok: true,
     kind: "observer-promoted",
+    requestId: Number(message.requestId) || 0,
+    updates: serviced.updates,
+    diagnostics: serviced.diagnostics,
+  }, null);
+}
+
+async function demotePlayer(message: IntegratedServerWorkerMessage): Promise<void> {
+  if (!server || typeof (server as any).demotePlayerToObserver !== "function") {
+    postFailure(message.requestId, "integrated server worker cannot demote its player");
+    return;
+  }
+  const activeServer = server;
+  const serviced = await serviceIndexedDbResultForCurrentWorld(
+    activeServer,
+    (activeServer as any).demotePlayerToObserver(),
+  );
+  postUpdates({
+    ok: true,
+    kind: "player-demoted",
     requestId: Number(message.requestId) || 0,
     updates: serviced.updates,
     diagnostics: serviced.diagnostics,

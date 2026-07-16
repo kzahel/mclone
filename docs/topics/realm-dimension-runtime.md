@@ -2,13 +2,13 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-6 are
-complete and Slice 7 is in progress. Every host uses one `RealmServer`, the
-integrated player is ordinary, realm/dimension persistence is qualified, and
-one realm can concurrently tick players in multiple isolated
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-7 are
+complete and Slice 8 is the next boundary. Every host uses one `RealmServer`,
+the integrated player is ordinary, realm/dimension persistence is qualified,
+and one realm can concurrently tick players in multiple isolated
 `DimensionRuntime`s. Source-owned player and non-player observer interest,
-A-to-B-to-A player transfer, and a promotable integrated-observer connection
-are live; scene-level diorama adoption is next.**
+A-to-B-to-A player transfer, and observer-backed retained dioramas with
+covered player/observer authority exchange are live.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -148,18 +148,23 @@ unified:
   render cache, validates a safe destination, and completes through the
   existing absolute-position acknowledgement while retaining identity,
   inventory, experience, and one realm-root record;
-- the current warm diorama starts a full second joined runtime with a real
-  server-side local player. Input suppression makes it non-interactive, not an
-  observer;
-- the native and browser integrated-runner boundary can now start that second
-  independent realm as a non-player observer and explicitly promote the same
-  connection to one ordinary identity player. Scene startup does not yet
-  select that mode, so this is an available lifecycle rather than current
-  product behavior.
+- native and browser retained dioramas now start the independent destination
+  realm as a non-player observer. The observer receives bounded terrain,
+  entities, real remote players, time, and live deltas without loading or
+  saving the local profile's player record;
+- scene presentation no longer manufactures a source-local player body for a
+  preview observer;
+- covered activation promotes the destination observer to one ordinary
+  identity player, demotes and saves the source player to an observer, waits
+  for the destination's authoritative safe position and drawable readiness,
+  then exchanges the retained slots. A-to-B-to-A repeats the inverse exchange
+  without duplicate players or preview-only persistence;
+- the server and scene resolve preview framing and resumed entry through the
+  ordinary safe-surface rules. Unsupported saved poses fall back to a nearby
+  safe spawn rather than admitting a falling return position.
 
-The next work can therefore replace the diorama's synthetic player session
-with the proven observer contract and activate it through the same transfer
-mechanics.
+The next work can use realm-scoped jump and placement statistics as the small
+acceptance canary for the completed topology.
 
 ## Hard Topology Invariants
 
@@ -268,9 +273,11 @@ mechanics:
 - an independent-realm preview uses a distinct connection/realm server and
   becomes a player only through an explicit leave/join transition.
 
-The current two-full-runtime warm proof remains useful for independent realms
-until observer activation replaces it. It is not the same-realm destination
-ownership target.
+The current product diorama is still implemented as two retained independent
+realm connections, but the inactive connection is an observer rather than a
+second joined player. Same-realm dimension previews can later reuse the
+existing realm observer and transfer primitives without changing the client
+presentation contract.
 
 ## Validation Contract
 
@@ -296,15 +303,15 @@ Multi-dimension validation must additionally prove:
 
 Current seams that the next slices must change or protect:
 
-- `native/crates/mclone-server/src/integrated.rs`: current single-dimension
-  `RealmServer` authority plus the thin `LocalRealmSession` adapter, player
-  save, ticks, and publication;
+- `native/crates/mclone-server/src/integrated.rs`: multi-dimension
+  `RealmServer` authority plus the thin role-aware `LocalRealmSession`
+  adapter, player save, observer promotion/demotion, ticks, and publication;
 - `native/crates/mclone-server/src/players.rs`: runtime player identities and
   realm player list;
 - `native/crates/mclone-server/src/runner.rs`: native integrated runner,
   lifecycle save policy, and shared server cadence;
-- `native/crates/mclone-server/src/player_chunk_tracking.rs`: current
-  player-only aggregate view/ticket source;
+- `native/crates/mclone-server/src/player_chunk_tracking.rs`: source-owned
+  player/observer views and residency/simulation ticket aggregation;
 - `native/crates/mclone-server/src/persistence.rs`: record codecs, native
   SQLite schema, and store ownership;
 - `native/apps/mclone-dedicated-server/src/main.rs`: dedicated TCP/WebSocket
@@ -322,12 +329,13 @@ The shared owner remains `mclone-server`. App crates may assemble transports,
 storage roots, event loops, browser workers, and process lifecycle, but may not
 take ownership of realm/dimension gameplay policy.
 
-Slice 0 now pins the current state with executable receipts: an exact SQLite
-v1 fixture, an IndexedDB v5 key-shape lock, an Overworld-only resume test, and
-a source/behavior lock proving standby preview currently joins a full local
-player. Shared identifiers and qualified cross-boundary addresses will live in
-`mclone-protocol`; authoritative definitions, persistence, runtime membership,
-interest, and transfer remain owned by `mclone-server`.
+Slice 0 pinned the former singleton state with executable receipts: an exact
+SQLite v1 fixture, an IndexedDB v5 key-shape lock, an Overworld-only resume
+test, and a source/behavior lock proving the old standby preview joined a full
+local player. Later slices replaced those assumptions while retaining their
+migration evidence. Shared identifiers and qualified cross-boundary addresses
+live in `mclone-protocol`; authoritative definitions, persistence, runtime
+membership, interest, and transfer remain owned by `mclone-server`.
 
 ## Current Gaps and Ordered Next Work
 
@@ -348,8 +356,8 @@ Do not start with the statistics feature simply because its record is small.
 Its purpose is to prove the scope above, and implementing it before the scope
 would encode accidental singleton behavior.
 
-Steps 1-7 are complete. Step 8, diorama observer adoption, is the active next
-boundary.
+Steps 1-8 are complete. Step 9, the realm-scoped statistics canary, is the
+active next boundary.
 
 ## Related
 

@@ -314,4 +314,31 @@ fn local_observer_promotes_to_one_identity_player_without_preview_persistence() 
         Some(&identity)
     );
     assert_eq!(session.save_all_player_records().unwrap(), 0);
+
+    let return_observer = session.demote_player_to_observer_blocking().unwrap();
+
+    assert_eq!(
+        session.role(),
+        LocalRealmSessionRole::Observer(return_observer)
+    );
+    assert_eq!(session.player_count(), 0);
+    assert_eq!(session.observer_count(), 1);
+    assert_eq!(session.save_all_player_records().unwrap(), 0);
+
+    let returning_player = session.promote_observer_to_player_blocking().unwrap();
+    assert_eq!(
+        session.role(),
+        LocalRealmSessionRole::Player(returning_player)
+    );
+    assert_eq!(session.player_count(), 1);
+    assert_eq!(session.observer_count(), 0);
+    assert_eq!(
+        session
+            .players
+            .get(returning_player)
+            .unwrap()
+            .identity
+            .as_ref(),
+        Some(&identity)
+    );
 }

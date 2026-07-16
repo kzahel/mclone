@@ -1,7 +1,6 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-6 complete; Slice 7 is in progress with
-the promotable integrated-observer session boundary landed
+Status: active 2026-07-16; Slices 0-7 complete; Slice 8 is next
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -805,7 +804,7 @@ duplicates the player entity.
 
 ### Slice 7: Diorama observer adoption
 
-Status: in progress 2026-07-16.
+Status: complete 2026-07-16.
 
 - Replace preview-only full-player startup with observer subscriptions for
   same-realm dimensions first.
@@ -817,7 +816,7 @@ Status: in progress 2026-07-16.
 - Land native and production browser paths together behind the same shared
   policy.
 
-Evidence so far:
+Evidence:
 
 - `LocalRealmSession` now has explicit player and observer roles. Observer
   startup retains the eventual client identity without loading a player
@@ -828,15 +827,47 @@ Evidence so far:
 - native threaded and browser Worker integrated runners expose the same
   promotion contract. Browser promotion services any resulting IndexedDB
   player-record requests before publishing the joined-player updates;
+- the same boundary now supports the inverse operation: demotion saves and
+  removes the ordinary player, retains the profile identity for a future
+  promotion, and creates one observer in the same realm/dimension/view;
 - focused shared-server tests prove preview startup has zero players and zero
   player records, then promotion has one identified player and no observer.
-  A native runner test also proves no player position or XP is published
-  before promotion and an authoritative position is published afterward;
-- the browser WASM build and TypeScript check pass with the new Worker ABI.
-
-Scene standby adoption, activation-covered promotion, removal of the
-synthetic preview-local actor, and the native/browser visual receipts remain
-before this slice is complete.
+  The round trip demotes back to zero players/one observer and promotes again
+  without losing that identity. A native runner test also proves no player
+  position or XP is published before promotion and an authoritative position
+  is published afterward;
+- native and browser diorama destinations start observer-only. Preview startup
+  derives the eventual safe entry from already-published observer snapshots,
+  so it does not manufacture position authority or a player record merely to
+  frame the preview;
+- activation promotes the destination, demotes the source, suppresses stale
+  movement publication while the blink is active, and keeps the cover closed
+  until the destination publishes its authoritative `PlayerPosition` and is
+  still drawable. A-to-B-to-A performs the inverse authority exchange;
+- preview actor assembly no longer synthesizes the inactive connection's
+  source-local body. Diagnostics and native/browser receipts report zero
+  source-local preview players while retaining ordinary entities and real
+  remote players;
+- safe-resume validation now requires loaded solid support in addition to body
+  clearance. An unsupported saved pose therefore falls back through the same
+  nearby safe-surface search used by ordinary initial admission;
+- native validation-only preview mutation uses a host-only observer control,
+  not a gameplay command. Its authored actors and auxiliary remote player are
+  anchored inside observer-owned interest so the live-entity proof remains
+  meaningful without granting the observer physical authority;
+- the native flat lobby smoke and synthetic stereo smoke pass with two covered
+  A-to-B-to-A switches, no boundary compile/upload/materialization, persistent
+  mutation, ordinary/remote actors, and zero preview-local actors. The changed
+  captures were inspected;
+- production browser desktop, throttled mobile, and extended lifecycle smokes
+  pass with observer-backed previews, A-to-B-to-A, mutation/relaunch
+  persistence, cancellation/stale-start rejection, resource replacement, and
+  clean Worker shutdown. The browser WASM build and TypeScript check pass with
+  the shared Worker ABI;
+- the established placed-actor and terrain renderers still carry mono,
+  per-eye, and full-frame multiview variants. Synthetic stereo executes the
+  per-eye path on this host; the current Metal adapter does not expose a
+  production multiview execution lane.
 
 Exit: inspection and tests prove no preview-only player exists server-side.
 

@@ -264,7 +264,7 @@ fn scene_current_actor_path_is_raw_active_only_and_slot_cached() {
 }
 
 #[test]
-fn current_local_player_body_is_active_view_policy_not_preview_policy() {
+fn current_local_player_body_is_active_view_policy_and_preview_observers_have_no_body() {
     let inputs = read("../mclone-render-session/src/mesh_inputs.rs");
     let local = braced_item(&inputs, "pub fn local_player_actor_instance_for_view(");
     assert!(local.contains("EngineCameraViewMode::ThirdPersonBack"));
@@ -283,20 +283,24 @@ fn current_local_player_body_is_active_view_policy_not_preview_policy() {
     assert!(preview_collect.contains(".standby_world"));
     assert!(preview_collect.contains("EmbeddedWorldPreviewPhase::Visible"));
     assert!(preview_collect.contains("actor_instances_from_presentations"));
-    assert!(preview_collect.contains("local_player_actor_instance("));
-    assert!(preview_collect.contains("slot.camera"));
-    assert!(preview_collect.contains("slot.player_model"));
+    assert!(!preview_collect.contains("local_player_actor_instance("));
+    assert!(preview_collect.contains("source_local_player_count: 0"));
     assert!(!preview_collect.contains("local_player_actor_instance_for_view"));
 }
 
 #[test]
-fn standby_preview_currently_joins_a_full_local_player_not_an_observer() {
+fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
     let session = read("src/session.rs");
     let attach = braced_item(
         &session,
         "fn begin_prepared_warm_world_standby_with_native_world_dir(",
     );
     assert!(attach.contains("LocalIntegratedStartupPump::with_mesh_assets("));
+    assert!(attach.contains("with_observer_only(observer_only)"));
+
+    let activate = braced_item(&session, "pub fn request_embedded_world_activation(");
+    assert!(activate.contains("promote_observer_to_player()"));
+    assert!(activate.contains("demote_player_to_observer()"));
 
     let server = read("../mclone-server/src/integrated.rs");
     let constructor = braced_item(
@@ -308,11 +312,28 @@ fn standby_preview_currently_joins_a_full_local_player_not_an_observer() {
 
     let local_session = braced_item(&server, "pub fn from_server(mut server: RealmServer)");
     assert!(local_session.contains("let player_id = server.add_player()"));
-    assert!(local_session.contains("Self { server, player_id }"));
+    assert!(local_session.contains("LocalRealmSessionRole::Player(player_id)"));
+
+    let observe = braced_item(&server, "pub fn begin_observing(");
+    assert!(observe.contains("self.server.add_observer("));
+    assert!(observe.contains("LocalRealmSessionRole::Observer(observer_id)"));
+
+    let promote = braced_item(&server, "fn promote_observer_to_player_with_identity_load(");
+    assert!(promote.contains("self.server.remove_observer(observer_id)?"));
+    assert!(promote.contains("self.server.add_player_in_dimension(dimension)?"));
+
+    let demote = braced_item(
+        &server,
+        "fn demote_player_to_observer_with_persistence_flush(",
+    );
+    assert!(demote.contains("self.server.save_player_record(player_id)?"));
+    assert!(demote.contains("self.server.remove_player(player_id)"));
+    assert!(demote.contains("self.server.add_observer("));
 
     let scene = read("src/lib.rs");
     let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
-    assert!(preview_collect.contains("local_player_actor_instance("));
+    assert!(!preview_collect.contains("local_player_actor_instance("));
+    assert!(preview_collect.contains("source_local_player_count: 0"));
 }
 
 #[test]
@@ -466,9 +487,12 @@ fn integrated_remote_player_tracking_pairs_local_and_dedicated_symmetrically() {
     let subject = braced_item(&server, "fn reconcile_remote_player_subject(");
     let states = braced_item(&server, "fn remote_player_states(&self)");
     let state = braced_item(&server, "fn remote_player_state(&self");
-    assert!(observer.contains("let observer = target.player_id()"));
-    assert!(observer.contains("self.players.contains(observer)"));
+    assert!(observer.contains("let player_id = target.player_id()"));
+    assert!(observer.contains("self.players.contains(player_id)"));
+    assert!(observer.contains("DimensionInterestSource::Player(player_id)"));
     assert!(!observer.contains("local_player"));
+    let non_player_observer = braced_item(&server, "fn reconcile_remote_players_for_observer(");
+    assert!(non_player_observer.contains("DimensionInterestSource::Observer(observer_id)"));
     assert!(subject.contains("self.players.contains(subject)"));
     assert!(!subject.contains("ServerPlayerId::LOCAL"));
     assert!(states.contains("self.player_observers()"));

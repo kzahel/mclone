@@ -150,7 +150,7 @@ use mclone_render_session::{
     EngineHandPushInput, EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
     RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
     RenderSectionUploadPhaseReport, XrFov, XrRenderView, XrView, XrViewPose,
-    actor_instances_from_presentations, engine_debug_world_lines, local_player_actor_instance,
+    actor_instances_from_presentations, engine_debug_world_lines,
     local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
     render_view_from_world_pose,
 };
@@ -3641,7 +3641,7 @@ impl McloneSceneHost {
         let runtime = slot.runtime.as_ref()?;
         let client = runtime.client();
         let presentations = client.actor_presentations();
-        let mut instances = actor_instances_from_presentations(&presentations, client);
+        let instances = actor_instances_from_presentations(&presentations, client);
         let entity_observations = presentations
             .iter()
             .zip(&instances)
@@ -3688,17 +3688,12 @@ impl McloneSceneHost {
             .collect();
         let entity_count = client.entity_count();
         let remote_player_count = client.remote_player_count();
-        instances.push(local_player_actor_instance(
-            &slot.camera,
-            client,
-            actor_figure_id_for_player_model(slot.player_model),
-        ));
         Some(PreviewActorInstances {
             source_world: slot.id,
             instances,
             entity_count,
             remote_player_count,
-            source_local_player_count: 1,
+            source_local_player_count: 0,
             entity_observations,
             remote_player_observations,
         })

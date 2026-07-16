@@ -2508,8 +2508,12 @@ impl McloneSceneHost {
             .unwrap_or_else(|| SessionStartRequest::new_seed_local_world(request.seed));
         let camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(request.entry_center);
 
+        let observer_only = matches!(
+            request.presentation,
+            WarmWorldPresentationRequest::Diorama { .. }
+        );
         let pump = LocalIntegratedStartupPump::with_mesh_assets(
-            local_integrated_scene_options(&scene),
+            local_integrated_scene_options(&scene).with_observer_only(observer_only),
             self.mesh_assets.clone(),
         )
         .context("create detached standby local startup pump")?;
@@ -2828,6 +2832,24 @@ impl McloneSceneHost {
         if volume.ray_distance(ray_origin, ray_direction).is_none() {
             return false;
         }
+        let authority_handoff = (|| -> Result<()> {
+            self.standby_world
+                .as_mut()
+                .and_then(|standby| standby.runtime.as_mut())
+                .context("embedded-world destination has no runtime")?
+                .promote_observer_to_player()
+                .context("promote embedded-world destination observer")?;
+            self.active_world
+                .runtime
+                .as_mut()
+                .context("embedded-world source has no runtime")?
+                .demote_player_to_observer()
+                .context("demote embedded-world source player")
+        })();
+        if let Err(error) = authority_handoff {
+            log::error!("embedded-world authority handoff failed: {error:#}");
+            return false;
+        }
         let Some(standby) = self.standby_world.as_ref() else {
             return false;
         };
@@ -2843,6 +2865,7 @@ impl McloneSceneHost {
             self.rendered_frames,
             volume,
         );
+        self.embedded_world_activation.authority_handoff_pending = true;
         if let Some(report) = self.embedded_world_activation.report.as_mut() {
             report.accepted_destination_entry_pose = Some(accepted_destination_entry_pose);
         }
@@ -2861,10 +2884,33 @@ impl McloneSceneHost {
         match self.embedded_world_activation.phase {
             EmbeddedWorldActivationPhase::Closing => {
                 self.embedded_world_activation.phase_elapsed_seconds += dt_seconds;
+                let authority_ready = match self.advance_embedded_world_authority_handoff() {
+                    Ok(ready) => ready,
+                    Err(error) => {
+                        let failure = format!("embedded-world authority handoff failed: {error:#}");
+                        log::error!("{failure}");
+                        self.embedded_world_activation.phase = EmbeddedWorldActivationPhase::Failed;
+                        self.embedded_world_activation.phase_elapsed_seconds = 0.0;
+                        if let Some(report) = self.embedded_world_activation.report.as_mut() {
+                            report.failure = Some(failure);
+                        }
+                        return true;
+                    }
+                };
                 if self.embedded_world_activation.phase_elapsed_seconds
                     < EMBEDDED_ACTIVATION_CLOSE_SECONDS
+                    || !authority_ready
+                    || !self.embedded_world_activation_ready()
                 {
                     return dt_seconds > 0.0;
+                }
+                if let Some(accepted_entry_pose) = self
+                    .standby_world
+                    .as_ref()
+                    .and_then(|standby| standby.accepted_entry_pose)
+                    && let Some(report) = self.embedded_world_activation.report.as_mut()
+                {
+                    report.accepted_destination_entry_pose = Some(accepted_entry_pose);
                 }
                 let switch = self.swap_through_embedded_world_activation();
                 match switch {
@@ -2978,6 +3024,43 @@ impl McloneSceneHost {
             }
             EmbeddedWorldActivationPhase::Idle | EmbeddedWorldActivationPhase::Failed => false,
         }
+    }
+
+    fn advance_embedded_world_authority_handoff(&mut self) -> Result<bool> {
+        if !self.embedded_world_activation.authority_handoff_pending {
+            return Ok(true);
+        }
+        let standby = self
+            .standby_world
+            .as_mut()
+            .context("embedded-world authority handoff lost its destination")?;
+        let runtime = standby
+            .runtime
+            .as_mut()
+            .context("embedded-world authority handoff destination has no runtime")?;
+        runtime
+            .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())
+            .context("poll promoted embedded-world destination")?;
+        let before = standby.camera.snapshot();
+        let before_feet = standby.camera.feet_position();
+        let accepted = mclone_app_runtime::apply_pending_engine_camera_position_updates(
+            runtime,
+            &mut standby.camera,
+            XR_CAMERA_COMMIT_CONTEXT,
+        )?;
+        if !accepted {
+            return Ok(false);
+        }
+        self.embedded_world_activation.authority_handoff_pending = false;
+        let after = standby.camera.snapshot();
+        let position_changed = before.eye != after.eye
+            || before.yaw_radians != after.yaw_radians
+            || before.pitch_radians != after.pitch_radians
+            || before_feet != standby.camera.feet_position();
+        if position_changed {
+            self.invalidate_warm_world_destination_after_correction();
+        }
+        Ok(true)
     }
 
     fn retarget_embedded_world_preview_after_switch(&mut self) -> Result<()> {
@@ -3160,8 +3243,9 @@ impl McloneSceneHost {
     }
 
     /// Launch-smoke diagnostic for proving that the retained preview is a live
-    /// authoritative world. The command is sent only to B's ordinary session;
-    /// A never receives the interaction or shares its player authority.
+    /// authoritative world. This uses a host-only mutation control on B's
+    /// observer session; it does not grant gameplay authority to the observer
+    /// or route the interaction through A's player.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn debug_break_embedded_world_preview_block(
         &mut self,
@@ -3206,7 +3290,7 @@ impl McloneSceneHost {
             );
         }
 
-        let (command_changed, command_timing) = {
+        let command_changed = {
             let slot = self
                 .standby_world
                 .as_mut()
@@ -3221,13 +3305,7 @@ impl McloneSceneHost {
             {
                 bail!("embedded preview mutation target is already air");
             }
-            runtime.send_gameplay_command_timed(mclone_protocol::ClientCommand::PlayerAction(
-                mclone_protocol::PlayerActionCommand {
-                    pos: block,
-                    direction: mclone_core::Direction::Up,
-                    kind: mclone_protocol::PlayerActionKind::DebugInstantBreak,
-                },
-            ))?
+            runtime.debug_break_observed_block(block)?
         };
         let client_applied = self
             .standby_world
@@ -3250,8 +3328,8 @@ impl McloneSceneHost {
                 EmbeddedWorldPreviewMutationPhase::CommandSent
             },
             command_changed,
-            command_update_count: command_timing.updates,
-            command_section_block_update_count: command_timing.section_block_updates,
+            command_update_count: 0,
+            command_section_block_update_count: 0,
             requested_after_rendered_frame: self.rendered_frames,
             completed_after_rendered_frame: None,
             submitted_compile_section_count: 0,
@@ -4320,7 +4398,12 @@ impl McloneSceneHost {
                     retain_slot = false;
                 }
                 Ok(step) if step.playable_ready => {
-                    let reconciliation = {
+                    let reconciliation = if matches!(
+                        state.presentation,
+                        WarmWorldPresentationRequest::Diorama { .. }
+                    ) {
+                        Ok(false)
+                    } else {
                         let startup = slot
                             .local_startup
                             .as_mut()
@@ -4353,10 +4436,23 @@ impl McloneSceneHost {
                             state.camera_reconciled = true;
                         }
                         Ok(false) => {
-                            let startup = slot
+                            let mut startup = slot
                                 .local_startup
                                 .take()
                                 .expect("stable playable standby owns its startup pump");
+                            if matches!(
+                                state.presentation,
+                                WarmWorldPresentationRequest::Diorama { .. }
+                            ) && !reconcile_observer_preview_entry(
+                                &startup.scene,
+                                startup.pump.runtime().client(),
+                                &mut startup.camera,
+                            ) {
+                                slot.local_startup = Some(startup);
+                                self.standby_world = Some(slot);
+                                self.warm_world_standby = Some(state);
+                                return;
+                            }
                             let SceneLocalStartup {
                                 descriptor,
                                 pump,
@@ -4422,7 +4518,13 @@ impl McloneSceneHost {
                     camera_position,
                 )
             });
-            if runtime_ready {
+            let observer_entry_ready = !matches!(
+                state.presentation,
+                WarmWorldPresentationRequest::Diorama { .. }
+            ) || slot.runtime.as_ref().is_some_and(|runtime| {
+                reconcile_observer_preview_entry(&slot.scene, runtime.client(), &mut slot.camera)
+            });
+            if runtime_ready && observer_entry_ready {
                 slot.external_runtime_startup_pending = false;
                 slot.lifecycle = WorldSlotLifecycle::StandbyCpuReady;
                 slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
@@ -6330,6 +6432,29 @@ pub fn local_integrated_scene_options(
             options
         }
     }
+}
+
+fn reconcile_observer_preview_entry(
+    scene: &McloneSceneHostOptions,
+    client: &mclone_client::ClientRuntime,
+    camera: &mut EngineCameraController,
+) -> bool {
+    let snapshot = camera.snapshot();
+    let Some(feet_position) = mclone_server::find_safe_surface_spawn_for_loaded_profile(
+        scene.seed,
+        scene.world_generation_profile,
+        snapshot.chunk_pos,
+        |pos| {
+            client
+                .block_state_at_block_pos(pos)
+                .and_then(|state| u8::try_from(state.0).ok())
+        },
+        |chunk| client.chunk_snapshot(chunk).is_some(),
+    ) else {
+        return false;
+    };
+    camera.set_player_feet_pose(feet_position, snapshot.yaw_radians, snapshot.pitch_radians);
+    true
 }
 
 fn preview_crop_source_anchor(
