@@ -1,25 +1,28 @@
+import fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
-import { assertValidFigure, type FigureAsset } from "./dsl";
+import type { FigureAsset } from "./dsl";
+import {
+  figureAssetFromUnknown,
+  parseFigureAssetJson,
+  roundTripFigureAsset,
+  serializeFigureAsset,
+  type FigureJsonDocument,
+} from "./figure-json";
 
 export async function loadFigureAsset(inputPath: string): Promise<FigureAsset> {
-  const absolutePath = path.resolve(inputPath);
-  const moduleUrl = pathToFileURL(absolutePath).href;
-  const module = (await import(moduleUrl)) as { default?: unknown; asset?: unknown };
-  const asset = module.default ?? module.asset;
-
-  if (!isFigureAsset(asset)) {
-    throw new Error(`Expected '${inputPath}' to export a FigureAsset as default`);
-  }
-
-  assertValidFigure(asset);
-  return asset;
+  return (await loadFigureJsonDocument(inputPath)).asset;
 }
 
-function isFigureAsset(value: unknown): value is FigureAsset {
-  if (!value || typeof value !== "object") {
-    return false;
+export async function loadFigureJsonDocument(inputPath: string): Promise<FigureJsonDocument> {
+  const absolutePath = path.resolve(inputPath);
+  if (path.extname(absolutePath).toLowerCase() === ".json") {
+    const asset = parseFigureAssetJson(await fs.readFile(absolutePath, "utf8"), inputPath);
+    return { asset, json: serializeFigureAsset(asset) };
   }
-  const asset = value as Partial<FigureAsset>;
-  return asset.schemaVersion === 1 && typeof asset.name === "string" && Array.isArray(asset.parts);
+
+  const moduleUrl = pathToFileURL(absolutePath).href;
+  const module = (await import(moduleUrl)) as { default?: unknown; asset?: unknown };
+  const authoredAsset = figureAssetFromUnknown(module.default ?? module.asset, inputPath);
+  return roundTripFigureAsset(authoredAsset, inputPath);
 }

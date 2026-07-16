@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { assertValidFigure, type FigureAsset } from "./dsl";
+import type { FigureAsset } from "./dsl";
+import { loadBrowserFigure } from "./browser-load";
 import { createFigureScene } from "./scene";
 
 declare global {
@@ -19,7 +20,6 @@ try {
   const figurePath = params.get("figure") ?? "/examples/piglet/figure.ts";
   const clipName = params.get("clip") ?? "walk";
   const asset = await loadBrowserFigure(figurePath);
-  assertValidFigure(asset);
   startPreview(app, asset, clipName);
 } catch (error) {
   const message = error instanceof Error ? error.stack ?? error.message : String(error);
@@ -29,15 +29,6 @@ try {
     pre.textContent = message;
   }
   window.assetLabReady = true;
-}
-
-async function loadBrowserFigure(figurePath: string): Promise<FigureAsset> {
-  const module = (await import(/* @vite-ignore */ figurePath)) as { default?: unknown; asset?: unknown };
-  const asset = module.default ?? module.asset;
-  if (!isFigureAsset(asset)) {
-    throw new Error(`Expected '${figurePath}' to export a FigureAsset as default`);
-  }
-  return asset;
 }
 
 function startPreview(container: HTMLElement, asset: FigureAsset, clipName?: string): void {
@@ -94,12 +85,4 @@ function startPreview(container: HTMLElement, asset: FigureAsset, clipName?: str
     camera.updateProjectionMatrix();
     renderer.setSize(width, height);
   });
-}
-
-function isFigureAsset(value: unknown): value is FigureAsset {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const asset = value as Partial<FigureAsset>;
-  return asset.schemaVersion === 1 && typeof asset.name === "string" && Array.isArray(asset.parts);
 }

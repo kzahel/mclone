@@ -12,6 +12,8 @@ Common commands from the repo root:
 
 ```sh
 pnpm asset-lab:typecheck
+pnpm asset-lab:test
+pnpm asset-lab:figures:check
 pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
@@ -36,8 +38,34 @@ each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. The initial
 batch contains `piglet`, `sheep`, `dog`, `cat`, `butterfly`, `player`,
 `bearfolk`, and `lionfolk`.
 
-Asset files should use the DSL from `src/dsl.ts`. Three.js is an implementation
-detail of the preview, not the source format.
+## Source and generated JSON
+
+Asset files use the DSL from `src/dsl.ts`. A `figure.ts` file is the only
+human- or AI-authored source for a promoted figure. Its schema-v1 JSON is a
+generated semantic snapshot and must not be edited directly.
+
+Every Asset Lab display path crosses that snapshot boundary. When previewing a
+`figure.ts`, the tool executes the DSL, serializes canonical JSON, reparses and
+validates it, and gives only that parsed result to Three.js. Preview, sheet,
+smoke, and video commands also accept a `figure.json` path directly. The viewer
+never renders the live module object through a shortcut.
+
+The three checked runtime figures are mapped to their sources by
+`src/first-party-figures.ts`. Regenerate them and review the diff with:
+
+```sh
+pnpm asset-lab:figures:write
+pnpm asset-lab:figures:check
+```
+
+The check fails for stale or missing output and for any promoted
+`assets/mclone/figures/*.figure.json` without a declared TypeScript source.
+After a checked figure changes, refresh and verify the normal asset-pack lock.
+`asset-lab:test` also discovers and executes every Asset Lab example through
+the serialize/reparse boundary, including examples that are not promoted into
+checked runtime JSON.
+
+Three.js remains the semantic preview implementation, not the source format.
 
 Boxes support Minecraft-style per-face overrides:
 

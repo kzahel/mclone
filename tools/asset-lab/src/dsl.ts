@@ -323,16 +323,40 @@ export function validateFigure(asset: FigureAsset): string[] {
     if (part.primitive.kind === "box" && part.primitive.faces) {
       validateBoxFaces(part, asset, errors);
     }
+    if (part.at !== undefined) {
+      validateFiniteVec(`part '${part.name}' at`, part.at, errors);
+    }
+    if (part.rot !== undefined) {
+      validateFiniteVec(`part '${part.name}' rot`, part.rot, errors);
+    }
+    if (part.pivot !== undefined) {
+      validateFiniteVec(`part '${part.name}' pivot`, part.pivot, errors);
+    }
+    if (part.joint?.pivot !== undefined) {
+      validateFiniteVec(`part '${part.name}' joint pivot`, part.joint.pivot, errors);
+    }
+    if (part.joint?.axis !== undefined) {
+      validateFiniteVec(`part '${part.name}' joint axis`, part.joint.axis, errors);
+    }
     validatePrimitive(part, errors);
   }
 
   for (const [clipName, clip] of Object.entries(asset.clips)) {
-    for (const [partName, time] of clip.keys) {
+    for (const [partName, time, transform] of clip.keys) {
       if (!partNames.has(partName)) {
         errors.push(`clip '${clipName}' references missing part '${partName}'`);
       }
       if (!Number.isFinite(time) || time < 0) {
         errors.push(`clip '${clipName}' has invalid key time '${time}'`);
+      }
+      if (transform.at !== undefined) {
+        validateFiniteVec(`clip '${clipName}' part '${partName}' at`, transform.at, errors);
+      }
+      if (transform.rot !== undefined) {
+        validateFiniteVec(`clip '${clipName}' part '${partName}' rot`, transform.rot, errors);
+      }
+      if (transform.scale !== undefined) {
+        validateFiniteVec(`clip '${clipName}' part '${partName}' scale`, transform.scale, errors);
       }
     }
     if (clip.locomotion) {
@@ -914,6 +938,9 @@ function validateLocomotion(
   if (locomotion.speed !== undefined && (!Number.isFinite(locomotion.speed) || locomotion.speed <= 0)) {
     errors.push(`clip '${clipName}' locomotion speed must be positive`);
   }
+  if (locomotion.units !== undefined && locomotion.units !== "figure") {
+    errors.push(`clip '${clipName}' locomotion units '${locomotion.units}' are invalid`);
+  }
   if (locomotion.direction) {
     let lengthSq = 0;
     for (const [index, value] of locomotion.direction.entries()) {
@@ -1182,6 +1209,18 @@ function validateBoxFaces(part: PartSpec, asset: FigureAsset, errors: string[]):
 function validatePositiveVec(label: string, value: Vec3, errors: string[]): void {
   for (const [index, item] of value.entries()) {
     validatePositive(`${label}[${index}]`, item, errors);
+  }
+}
+
+function validateFiniteVec(label: string, value: unknown, errors: string[]): void {
+  if (!Array.isArray(value) || value.length !== 3) {
+    errors.push(`${label} must contain exactly three numbers`);
+    return;
+  }
+  for (const [index, item] of value.entries()) {
+    if (!Number.isFinite(item)) {
+      errors.push(`${label}[${index}] must be finite`);
+    }
   }
 }
 

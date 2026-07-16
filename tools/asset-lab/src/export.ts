@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { loadFigureAsset } from "./load";
+import { loadFigureJsonDocument } from "./load";
 
 interface ExportArgs {
   input: string;
@@ -8,18 +8,19 @@ interface ExportArgs {
 }
 
 const args = parseArgs(process.argv.slice(2));
-const asset = await loadFigureAsset(args.input);
+const document = await loadFigureJsonDocument(args.input);
+const asset = document.asset;
 const outDir = args.outDir ?? path.join("/tmp", "mclone-asset-lab", asset.name);
 await fs.mkdir(outDir, { recursive: true });
 
 const jsonPath = path.join(outDir, "figure.json");
-await fs.writeFile(jsonPath, `${JSON.stringify(asset, null, 2)}\n`, "utf8");
+await fs.writeFile(jsonPath, document.json, "utf8");
 console.log(`Wrote ${jsonPath}`);
 
 function parseArgs(argv: string[]): ExportArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
-    throw new Error("Usage: tsx src/export.ts <figure.ts> [--out <dir>]");
+    throw new Error("Usage: tsx src/export.ts <figure.ts|figure.json> [--out <dir>]");
   }
 
   let outDir: string | undefined;

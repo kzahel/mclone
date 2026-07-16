@@ -382,10 +382,10 @@
       "loop": true,
       "fps": 8,
       "locomotion": {
-        "kind": "biped_walk",
+        "kind": "biped-walk",
         "cycleDistance": 0.74,
         "speed": 0.74,
-        "units": "blocks_per_second",
+        "units": "figure",
         "direction": [
           0,
           0,
@@ -394,16 +394,16 @@
         "contacts": [
           {
             "part": "foot_l",
-            "role": "left",
             "phaseStart": 0,
             "phaseEnd": 0.66,
+            "role": "left",
             "stanceRatio": 0.66
           },
           {
             "part": "foot_r",
-            "role": "right",
             "phaseStart": 0.5,
-            "phaseEnd": 1.16,
+            "phaseEnd": 0.16,
+            "role": "right",
             "stanceRatio": 0.66
           }
         ]

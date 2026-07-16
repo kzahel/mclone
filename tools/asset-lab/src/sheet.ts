@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import { createServer } from "vite";
+import { assetLabRoot, toViteFigurePath } from "./vite-figure-path";
 
 interface SheetArgs {
   input: string;
@@ -11,9 +11,8 @@ interface SheetArgs {
   debug: boolean;
 }
 
-const assetLabRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const args = parseArgs(process.argv.slice(2));
-const figurePath = toVitePath(args.input);
+const figurePath = toViteFigurePath(args.input);
 await fs.mkdir(path.dirname(args.outPath), { recursive: true });
 
 const server = await createServer({
@@ -75,7 +74,7 @@ try {
 function parseArgs(argv: string[]): SheetArgs {
   const input = argv[0];
   if (!input || input.startsWith("-")) {
-    throw new Error("Usage: tsx src/sheet.ts <figure.ts> [--out <png>] [--clip <name>] [--clean]");
+    throw new Error("Usage: tsx src/sheet.ts <figure.ts|figure.json> [--out <png>] [--clip <name>] [--clean]");
   }
 
   let outPath = path.join("/tmp", "mclone-asset-lab", "sheet.png");
@@ -97,13 +96,4 @@ function parseArgs(argv: string[]): SheetArgs {
   }
 
   return { input, outPath, clip, debug };
-}
-
-function toVitePath(input: string): string {
-  const absolute = path.resolve(input);
-  const relative = path.relative(assetLabRoot, absolute);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    throw new Error(`Figure '${input}' must live under ${assetLabRoot}`);
-  }
-  return `/${relative.replaceAll(path.sep, "/")}`;
 }

@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { assertValidFigure, type FigureAsset } from "./dsl";
+import type { FigureAsset } from "./dsl";
+import { loadBrowserFigure } from "./browser-load";
 import { createReviewFloor, locomotionSummary } from "./review-floor";
 import { clipDuration, createFigureScene } from "./scene";
 
@@ -29,7 +30,6 @@ try {
   const debug = params.get("debug") !== "0";
   const labels = params.get("labels") === "1";
   const asset = await loadBrowserFigure(figurePath);
-  assertValidFigure(asset);
   renderSheet(sheet, asset, { clipName, debug, labels });
   window.assetLabSheetReady = true;
 } catch (error) {
@@ -40,15 +40,6 @@ try {
     pre.textContent = message;
   }
   window.assetLabSheetReady = true;
-}
-
-async function loadBrowserFigure(figurePath: string): Promise<FigureAsset> {
-  const module = (await import(/* @vite-ignore */ figurePath)) as { default?: unknown; asset?: unknown };
-  const asset = module.default ?? module.asset;
-  if (!isFigureAsset(asset)) {
-    throw new Error(`Expected '${figurePath}' to export a FigureAsset as default`);
-  }
-  return asset;
 }
 
 function renderSheet(
@@ -226,14 +217,6 @@ function requiredElement(parent: ParentNode, selector: string): HTMLElement {
     throw new Error(`Missing required element '${selector}'`);
   }
   return element;
-}
-
-function isFigureAsset(value: unknown): value is FigureAsset {
-  if (!value || typeof value !== "object") {
-    return false;
-  }
-  const asset = value as Partial<FigureAsset>;
-  return asset.schemaVersion === 1 && typeof asset.name === "string" && Array.isArray(asset.parts);
 }
 
 function escapeHtml(value: string): string {

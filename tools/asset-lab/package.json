@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/figure-json.test.ts && pnpm figures:check",
+    "figures:check": "tsx src/sync-first-party.ts --check",
+    "figures:write": "tsx src/sync-first-party.ts --write",
     "preview": "vite --host 127.0.0.1",
     "export": "tsx src/export.ts examples/piglet/figure.ts --out /tmp/mclone-asset-lab/piglet",
     "smoke": "tsx src/smoke.ts examples/piglet/figure.ts --out /tmp/mclone-asset-lab/piglet-preview.png",
