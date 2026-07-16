@@ -26,7 +26,6 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_PANEL_WIDTH: u32 = 360;
 const DEFAULT_PANEL_HEIGHT: u32 = 480;
 const REVIEW_FOV_DEGREES: f32 = 35.0;
-const WALK_PROOF_TIMES_SECONDS: [f64; 8] = [0.045, 0.09, 0.123, 0.125, 0.45, 0.855, 0.899, 0.901];
 
 fn main() -> Result<()> {
     let options = Options::parse(env::args().skip(1))?;
@@ -301,13 +300,34 @@ fn write_animation_proof(
     figure: &PreparedFigure,
     review: &ReviewContract,
 ) -> Result<()> {
+    let animation = review
+        .animation
+        .as_ref()
+        .context("--animation-proof requires animation settings in the review contract")?;
+    animation.validate(figure)?;
+    let sample_count = animation.sample_times_seconds.len();
+    let sequence_times = (0..animation.capture_frame_count)
+        .map(|frame| f64::from(frame) / animation.capture_frames_per_second)
+        .collect::<Vec<_>>();
+    let requested_times = animation
+        .sample_times_seconds
+        .iter()
+        .copied()
+        .chain(sequence_times.iter().copied())
+        .collect::<Vec<_>>();
+    let requested_frame_count = requested_times.len();
     let figure_for_gpu = figure.clone();
-    let camera = review.views()[0].camera;
+    let camera = review
+        .views()
+        .into_iter()
+        .find(|view| view.name == animation.view)
+        .with_context(|| format!("unknown animation review view '{}'", animation.view))?
+        .camera;
     let (loop_report, pixels, state) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
             width: review.panel_width,
             height: review.panel_height,
-            frame_count: WALK_PROOF_TIMES_SECONDS.len(),
+            frame_count: requested_frame_count,
             pace_frame_duration: None,
         },
         move |device, queue, format, _size| {
@@ -315,17 +335,17 @@ fn write_animation_proof(
                 draw: PreparedFigureDrawResources::new(device, queue, format, &figure_for_gpu)?,
                 figure: figure_for_gpu,
                 palette: Vec::new(),
-                samples: Vec::with_capacity(WALK_PROOF_TIMES_SECONDS.len()),
-                stats: Vec::with_capacity(WALK_PROOF_TIMES_SECONDS.len()),
+                samples: Vec::with_capacity(requested_frame_count),
+                stats: Vec::with_capacity(requested_frame_count),
             })
         },
         |index, frame, state| {
-            let time_seconds = *WALK_PROOF_TIMES_SECONDS
+            let time_seconds = *requested_times
                 .get(index)
                 .context("prepared animation review time index out of range")?;
             let sample = evaluate_prepared_figure_clip_into(
                 &state.figure,
-                "walk",
+                &animation.clip,
                 time_seconds,
                 &mut state.palette,
             )?;
@@ -349,20 +369,23 @@ fn write_animation_proof(
             Ok(())
         },
     )?;
-    if pixels.len() != WALK_PROOF_TIMES_SECONDS.len()
-        || state.samples.len() != WALK_PROOF_TIMES_SECONDS.len()
-        || state.stats.len() != WALK_PROOF_TIMES_SECONDS.len()
+    if pixels.len() != requested_times.len()
+        || state.samples.len() != requested_times.len()
+        || state.stats.len() != requested_times.len()
     {
         bail!("prepared animation review did not produce every requested frame");
     }
 
-    let mut frames = Vec::with_capacity(pixels.len());
+    let mut sample_frames = Vec::with_capacity(sample_count);
     let mut previous_pixels: Option<&[u8]> = None;
-    for (((time_seconds, sample), stats), pixels) in WALK_PROOF_TIMES_SECONDS
+    let mut previous_sequence_pixels: Option<&[u8]> = None;
+    let mut changed_sequence_frame_count = 0;
+    for (index, (((time_seconds, sample), stats), pixels)) in requested_times
         .iter()
         .zip(&state.samples)
         .zip(&state.stats)
         .zip(&pixels)
+        .enumerate()
     {
         if stats.vertex_count != figure.vertices.len() as u32
             || stats.index_count != figure.indices.len() as u32
@@ -370,28 +393,44 @@ fn write_animation_proof(
         {
             bail!("prepared animation frame reported unexpected draw counts");
         }
-        let image = format!(
-            "engine-walk-{:06}us.png",
-            (time_seconds * 1_000_000.0).round() as u64
-        );
+        let image = if index < sample_count {
+            format!("engine-{}-sample-{index:03}.png", animation.clip)
+        } else {
+            format!(
+                "engine-{}-frame-{:05}.png",
+                animation.clip,
+                index - sample_count
+            )
+        };
         save_rgba_png(
             &options.out_dir.join(&image),
             review.panel_width,
             review.panel_height,
             pixels,
         )?;
-        let different_from_previous = previous_pixels
-            .map(|previous| differing_pixel_count(previous, pixels))
-            .transpose()?;
-        frames.push(AnimationFrameReceipt {
-            requested_time_seconds: *time_seconds,
-            local_time_seconds: sample.local_time_seconds,
-            image,
-            different_from_previous,
-        });
-        previous_pixels = Some(pixels);
+        if index < sample_count {
+            let different_from_previous = previous_pixels
+                .map(|previous| differing_pixel_count(previous, pixels))
+                .transpose()?;
+            sample_frames.push(AnimationFrameReceipt {
+                requested_time_seconds: *time_seconds,
+                local_time_seconds: sample.local_time_seconds,
+                image,
+                different_from_previous,
+            });
+            previous_pixels = Some(pixels);
+        } else {
+            if previous_sequence_pixels
+                .map(|previous| differing_pixel_count(previous, pixels))
+                .transpose()?
+                .is_some_and(|difference| difference > 0)
+            {
+                changed_sequence_frame_count += 1;
+            }
+            previous_sequence_pixels = Some(pixels);
+        }
     }
-    if frames
+    if sample_frames
         .iter()
         .skip(1)
         .all(|frame| frame.different_from_previous == Some(0))
@@ -401,10 +440,9 @@ fn write_animation_proof(
     let gpu = state.draw.snapshot();
     let expected_palette_bytes = figure.parts.len() as u64 * 16 * 4;
     if gpu.immutable_upload_count != 4
-        || gpu.palette_write_count != WALK_PROOF_TIMES_SECONDS.len() as u64
-        || gpu.palette_written_bytes
-            != expected_palette_bytes * WALK_PROOF_TIMES_SECONDS.len() as u64
-        || gpu.view_uniform_write_count != WALK_PROOF_TIMES_SECONDS.len() as u64
+        || gpu.palette_write_count != requested_times.len() as u64
+        || gpu.palette_written_bytes != expected_palette_bytes * requested_times.len() as u64
+        || gpu.view_uniform_write_count != requested_times.len() as u64
     {
         bail!(
             "prepared animation residency reported unexpected uploads/writes: {:?}",
@@ -412,11 +450,17 @@ fn write_animation_proof(
         );
     }
     let receipt = AnimationReceipt {
-        schema_version: 1,
+        schema_version: 2,
         figure: &figure.name,
-        clip: "walk",
+        clip: &animation.clip,
+        view: &animation.view,
         duration_seconds: state.samples[0].duration_seconds,
-        frame_count: frames.len(),
+        sample_frame_count: sample_frames.len(),
+        capture_frames_per_second: animation.capture_frames_per_second,
+        capture_cycle_count: animation.capture_cycle_count,
+        sequence_frame_count: animation.capture_frame_count as usize,
+        changed_sequence_frame_count,
+        sequence_image_pattern: format!("engine-{}-frame-%05d.png", animation.clip),
         render_total_ms: loop_report.total_frame_ms,
         immutable_upload_count: gpu.immutable_upload_count,
         immutable_vertex_bytes: gpu.immutable_vertex_bytes,
@@ -427,7 +471,7 @@ fn write_animation_proof(
         palette_written_bytes: gpu.palette_written_bytes,
         palette_bytes_per_write: expected_palette_bytes,
         view_uniform_write_count: gpu.view_uniform_write_count,
-        frames,
+        sample_frames,
     };
     let receipt_path = options.out_dir.join("animation-receipt.json");
     fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt)?)
@@ -459,9 +503,15 @@ struct AnimationReviewState {
 struct AnimationReceipt<'a> {
     schema_version: u32,
     figure: &'a str,
-    clip: &'static str,
+    clip: &'a str,
+    view: &'a str,
     duration_seconds: f64,
-    frame_count: usize,
+    sample_frame_count: usize,
+    capture_frames_per_second: f64,
+    capture_cycle_count: f64,
+    sequence_frame_count: usize,
+    changed_sequence_frame_count: usize,
+    sequence_image_pattern: String,
     render_total_ms: f64,
     immutable_upload_count: u64,
     immutable_vertex_bytes: u64,
@@ -472,7 +522,7 @@ struct AnimationReceipt<'a> {
     palette_written_bytes: u64,
     palette_bytes_per_write: u64,
     view_uniform_write_count: u64,
-    frames: Vec<AnimationFrameReceipt>,
+    sample_frames: Vec<AnimationFrameReceipt>,
 }
 
 #[derive(Debug, Serialize)]
@@ -628,6 +678,64 @@ struct ReviewContract {
     distance: f32,
     target: [f32; 3],
     background: String,
+    #[serde(default)]
+    animation: Option<AnimationReviewContract>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AnimationReviewContract {
+    clip: String,
+    view: String,
+    duration_seconds: f64,
+    sample_times_seconds: Vec<f64>,
+    capture_frames_per_second: f64,
+    capture_cycle_count: f64,
+    capture_frame_count: u32,
+}
+
+impl AnimationReviewContract {
+    fn validate(&self, figure: &PreparedFigure) -> Result<()> {
+        let clip = figure.clips.get(&self.clip).with_context(|| {
+            format!(
+                "prepared figure '{}' has no review clip '{}'",
+                figure.name, self.clip
+            )
+        })?;
+        if self.view != "three-quarter" {
+            bail!("animation review currently requires the three-quarter view");
+        }
+        if self.sample_times_seconds.is_empty()
+            || self
+                .sample_times_seconds
+                .iter()
+                .any(|time| !time.is_finite() || *time < 0.0)
+        {
+            bail!("animation review sample times must be finite and nonnegative");
+        }
+        if !self.duration_seconds.is_finite()
+            || (self.duration_seconds - f64::from(clip.duration_seconds)).abs() > 1.0e-5
+        {
+            bail!("animation review duration does not match prepared clip");
+        }
+        if !self.capture_frames_per_second.is_finite()
+            || self.capture_frames_per_second <= 0.0
+            || !self.capture_cycle_count.is_finite()
+            || self.capture_cycle_count <= 0.0
+            || self.capture_frame_count < 2
+            || self.capture_frame_count > 2_000
+        {
+            bail!("animation review capture settings are invalid");
+        }
+        let expected_frames =
+            (self.duration_seconds * self.capture_cycle_count * self.capture_frames_per_second)
+                .ceil()
+                .max(2.0) as u32;
+        if self.capture_frame_count != expected_frames {
+            bail!("animation review frame count does not match duration and cadence");
+        }
+        Ok(())
+    }
 }
 
 impl ReviewContract {
@@ -647,6 +755,7 @@ impl ReviewContract {
             distance,
             target: center.to_array(),
             background: "#edf1f4".to_owned(),
+            animation: None,
         }
     }
 
@@ -669,6 +778,13 @@ impl ReviewContract {
         }
         if self.background != "#edf1f4" {
             bail!("review contract background must be #edf1f4");
+        }
+        if let Some(animation) = &self.animation
+            && (animation.clip.is_empty()
+                || !animation.duration_seconds.is_finite()
+                || animation.duration_seconds <= 0.0)
+        {
+            bail!("review contract contains invalid animation settings");
         }
         Ok(())
     }

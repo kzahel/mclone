@@ -15,6 +15,7 @@
     "video": "tsx src/video.ts examples/piglet/figure.ts --out /tmp/mclone-asset-lab/piglet-walk.mp4",
     "batch": "tsx src/batch.ts",
     "compare": "tsx src/compare.ts",
+    "compare:animation": "tsx src/compare-animation.ts",
     "install:browsers": "playwright install chromium"
   },
   "dependencies": {

@@ -12,11 +12,12 @@ capability-skipped on the current Mac with shader/contract validation pending a
 capable adapter. Semantic JSON remains the only persisted runtime format.
 Tactical
 [`186`](../tactical/186-prepared-figure-continuous-animation-proof.md) Slices
-0-1 now own startup-compiled indexed tracks, cadence-independent local TRS/
-hierarchy evaluation, and inspected native mutable-palette pixels over
-unchanged topology. Synchronized Three.js/native walk review is next.
-Production migration, curved primitives, instancing, LOD, GPU pose evaluation,
-and a disk cache remain deferred.
+0-2 now own startup-compiled indexed tracks, cadence-independent local TRS/
+hierarchy evaluation, resident mutable-palette rendering, and a synchronized
+Three.js/native three-quarter walk sheet and two-cycle clip. Those artifacts
+are at the human review checkpoint; no production migration may start until
+they are accepted or corrected. Curved primitives, instancing, LOD, GPU pose
+evaluation, and a disk cache remain deferred.
 
 ## Scope
 

@@ -1,7 +1,7 @@
 # 186: Prepared Figure Continuous Animation Proof
 
-Status: active 2026-07-16. Slices 0-1 are complete and Slice 2 is next. Stop
-for human clip review after Slice 2 before any production actor migration.
+Status: human review checkpoint 2026-07-16. Slices 0-2 are implemented. The
+comparison sheet and clip are ready; stop here before production migration.
 
 Topic: `compiled-figure-rendering`
 
@@ -162,7 +162,7 @@ Gate evidence:
   prepared-render tests and the figure-review check pass. No production actor,
   browser, or XR selector changed.
 
-### Slice 2: synchronized Three.js/native clip review
+### Slice 2: synchronized Three.js/native clip review (review ready 2026-07-16)
 
 - Extend the review contract with `walk`, duration, exact sample times, and an
   animation output cadence used only for capture—not runtime evaluation.
@@ -178,6 +178,39 @@ Gate evidence:
 Gate and stop condition: present the sheet/video and receipts to the human.
 Pause work for approval or correction. Do not begin production migration based
 only on numerical tests or self-inspection.
+
+Gate evidence awaiting human approval:
+
+- Asset Lab now resets authored scale on every update, samples sparse
+  translation/rotation/scale channels independently, and shortest-path slerps
+  additive Euler endpoints as quaternions. Focused tests cover sparse channels,
+  the `170` to `-170` degree path, scale reset, and distinct arbitrary-time
+  samples, so the Three.js side is a credible semantic reference.
+- One transient review contract drives both renderers. It names `walk`, the
+  established three-quarter camera, the approximately `0.9s` loop duration,
+  exact samples at `0`, `0.045`, `0.09`, `0.123`, `0.125`, `0.45`, `0.899`,
+  and `0.901s`, and a 60 fps/two-cycle review capture. The capture cadence is
+  artifact metadata only; neither evaluator advances by it or has a display-
+  rate ceiling.
+- Raw corresponding panels, a labeled exact-time sheet, a 108-frame/1.8-second
+  60 fps side-by-side MP4, and machine receipts are under
+  `/tmp/mclone-prepared-animation/player-comparison/`. Native panels are
+  horizontally reflected only in the sheet/video for the handedness alignment;
+  raw PNGs remain unchanged.
+- The native receipt records the same eight samples and 108 sequence frames,
+  four initial residency uploads, 116 palette writes/view writes, 89,088 total
+  palette bytes, and 768 bytes per presented pose. All 107 adjacent capture
+  transitions changed pixels. In the review's three-quarter view, the `0.123`
+  to `0.125s` pair differs by 1,558 native pixels, and the `0.899` to wrapped
+  `0.901s` pair differs by 1,610 pixels.
+- The sheet, raw representative frames, and an eight-time video contact sheet
+  were inspected. The two renderers show matching limb direction and phase,
+  inherited sleeve/foot motion, torso/head pose, grounding, and wrap-side
+  silhouette; expected lighting/tone differences remain. This is agent
+  self-inspection, not the required human acceptance.
+- The MP4 is verified as 720x480, 60 fps, 108 frames, and 1.8 seconds. Asset Lab
+  tests/typecheck and the native figure-review check pass. Production remains
+  on `ActorMeshCache`; no gameplay/browser/XR selector changed.
 
 ### Slice 3: post-review decision only
 

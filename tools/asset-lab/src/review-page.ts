@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { loadBrowserFigure } from "./browser-load";
-import { createFigureScene } from "./scene";
+import { clipDuration, createFigureScene } from "./scene";
 
 export interface FigureReviewContract {
   panelWidth: number;
@@ -9,6 +9,17 @@ export interface FigureReviewContract {
   distance: number;
   target: [number, number, number];
   background: "#edf1f4";
+  animation?: FigureAnimationReviewContract;
+}
+
+export interface FigureAnimationReviewContract {
+  clip: string;
+  view: "three-quarter";
+  durationSeconds: number;
+  sampleTimesSeconds: number[];
+  captureFramesPerSecond: number;
+  captureCycleCount: number;
+  captureFrameCount: number;
 }
 
 declare global {
@@ -16,6 +27,7 @@ declare global {
     assetLabReviewContract?: FigureReviewContract;
     assetLabReviewFigureName?: string;
     assetLabReviewReady?: boolean;
+    assetLabSetReviewTime?: (timeSeconds: number) => void;
   }
 }
 
@@ -31,8 +43,12 @@ try {
   const figurePath = params.get("figure") ?? "/examples/player/figure.ts";
   const panelWidth = parseDimension(params.get("width"), 360);
   const panelHeight = parseDimension(params.get("height"), 480);
+  const clipName = params.get("clip") ?? undefined;
+  const sampleTimes = parseSampleTimes(params.get("sampleTimes"));
+  const captureFramesPerSecond = parsePositiveNumber(params.get("captureFps"), 60);
+  const captureCycleCount = parsePositiveNumber(params.get("captureCycles"), 2);
   const asset = await loadBrowserFigure(figurePath);
-  const figure = createFigureScene(asset, undefined, {
+  const figure = createFigureScene(asset, clipName, {
     debug: false,
     jointMarkers: false,
     labels: false,
@@ -59,9 +75,31 @@ try {
     target: [0, 0.5, 0],
     background: "#edf1f4",
   };
+  if (clipName) {
+    const durationSeconds = clipDuration(asset.clips[clipName]);
+    if (durationSeconds <= 0) {
+      throw new Error(`Figure '${asset.name}' clip '${clipName}' has no positive duration`);
+    }
+    contract.animation = {
+      clip: clipName,
+      view: "three-quarter",
+      durationSeconds,
+      sampleTimesSeconds: sampleTimes,
+      captureFramesPerSecond,
+      captureCycleCount,
+      captureFrameCount: Math.max(
+        2,
+        Math.ceil(durationSeconds * captureCycleCount * captureFramesPerSecond),
+      ),
+    };
+  }
 
   const scene = createLitScene();
   scene.add(figure.root);
+  const panels: Array<{
+    camera: THREE.PerspectiveCamera;
+    renderer: THREE.WebGLRenderer;
+  }> = [];
   for (const [viewName, direction] of reviewViews()) {
     const viewport = document.createElement("div");
     viewport.className = "viewport";
@@ -86,7 +124,16 @@ try {
     camera.position.copy(center.clone().add(direction.normalize().multiplyScalar(distance * height)));
     camera.lookAt(center);
     renderer.render(scene, camera);
+    panels.push({ camera, renderer });
   }
+
+  window.assetLabSetReviewTime = (timeSeconds: number) => {
+    figure.update(timeSeconds);
+    figure.root.updateMatrixWorld(true);
+    for (const panel of panels) {
+      panel.renderer.render(scene, panel.camera);
+    }
+  };
 
   window.assetLabReviewContract = contract;
   window.assetLabReviewFigureName = asset.name;
@@ -125,6 +172,23 @@ function parseDimension(value: string | null, fallback: number): number {
   const parsed = value === null ? fallback : Number.parseInt(value, 10);
   if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 4096) {
     throw new Error(`Review dimensions must be integers from 1 through 4096, got '${value}'`);
+  }
+  return parsed;
+}
+
+function parsePositiveNumber(value: string | null, fallback: number): number {
+  const parsed = value === null ? fallback : Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new Error(`Animation capture values must be positive, got '${value}'`);
+  }
+  return parsed;
+}
+
+function parseSampleTimes(value: string | null): number[] {
+  const fallback = [0, 0.045, 0.09, 0.123, 0.125, 0.45, 0.899, 0.901];
+  const parsed = value === null ? fallback : value.split(",").map(Number);
+  if (parsed.length === 0 || parsed.some((time) => !Number.isFinite(time) || time < 0)) {
+    throw new Error(`Animation sample times must be finite and nonnegative, got '${value}'`);
   }
   return parsed;
 }

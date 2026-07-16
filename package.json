@@ -203,6 +203,7 @@
     "asset-lab:video": "pnpm --dir ./tools/asset-lab video",
     "asset-lab:batch": "pnpm --dir ./tools/asset-lab batch",
     "asset-lab:compare": "pnpm --dir ./tools/asset-lab compare",
+    "asset-lab:compare-animation": "pnpm --dir ./tools/asset-lab compare:animation",
     "asset-lab:preview": "pnpm --dir ./tools/asset-lab preview",
     "texture-lab:install": "pnpm --dir ./tools/texture-lab install",
     "texture-lab:typecheck": "pnpm --dir ./tools/texture-lab typecheck",
