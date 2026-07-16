@@ -9,7 +9,7 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
-pub const PROTOCOL_VERSION: u32 = 21;
+pub const PROTOCOL_VERSION: u32 = 22;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -46,6 +46,7 @@ const SERVER_UPDATE_ENTITY_SNAPSHOT: u8 = 9;
 const SERVER_UPDATE_ENTITY_UPDATE: u8 = 10;
 const SERVER_UPDATE_ENTITY_REMOVE: u8 = 11;
 const SERVER_UPDATE_WORLD_INFO: u8 = 12;
+const SERVER_UPDATE_PLAYER_EXPERIENCE: u8 = 13;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PlayerProfileId(pub [u8; 16]);
@@ -288,6 +289,11 @@ pub enum ServerUpdate {
     EntityUpdate(EntityUpdate),
     EntityRemove {
         id: EntityId,
+    },
+    /// Owner-only authoritative total experience points. This slice carries
+    /// only the total; vanilla level/progress semantics remain future work.
+    PlayerExperience {
+        total_experience: u64,
     },
 }
 
@@ -653,6 +659,10 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_ENTITY_REMOVE);
             writer.write_entity_id(*id);
         }
+        ServerUpdate::PlayerExperience { total_experience } => {
+            writer.write_u8(SERVER_UPDATE_PLAYER_EXPERIENCE);
+            writer.write_u64(*total_experience);
+        }
     }
     Ok(writer.into_inner())
 }
@@ -706,6 +716,9 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_ENTITY_UPDATE => ServerUpdate::EntityUpdate(reader.read_entity_update()?),
         SERVER_UPDATE_ENTITY_REMOVE => ServerUpdate::EntityRemove {
             id: reader.read_entity_id()?,
+        },
+        SERVER_UPDATE_PLAYER_EXPERIENCE => ServerUpdate::PlayerExperience {
+            total_experience: reader.read_u64()?,
         },
         _ => return Err(ProtocolCodecError::UnknownServerUpdateTag(tag)),
     };
@@ -1889,6 +1902,17 @@ mod tests {
             teleport_id: 42,
             dismount_vehicle: true,
         });
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_player_experience() {
+        let update = ServerUpdate::PlayerExperience {
+            total_experience: 1_234,
+        };
 
         let bytes = encode_server_update(&update).unwrap();
 

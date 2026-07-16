@@ -97,6 +97,7 @@ pub struct IntegratedServer {
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
     world_behavior_profile: WorldBehaviorProfile,
+    persistence_demo_jump_experience_enabled: bool,
     initial_spawn_center: Option<ChunkPos>,
     local_player_active: bool,
     player: ServerPlayerState,
@@ -370,6 +371,7 @@ impl IntegratedServer {
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
             world_behavior_profile: WorldBehaviorProfile::default(),
+            persistence_demo_jump_experience_enabled: false,
             initial_spawn_center: None,
             local_player_active: true,
             player: ServerPlayerState::default(),
@@ -460,6 +462,16 @@ impl IntegratedServer {
 
     pub fn set_world_behavior_profile(&mut self, profile: WorldBehaviorProfile) {
         self.world_behavior_profile = profile;
+    }
+
+    /// Enables the deliberately non-vanilla persistence proof that awards one
+    /// total experience point for an accepted upward jump transition.
+    pub fn set_persistence_demo_jump_experience_enabled(&mut self, enabled: bool) {
+        self.persistence_demo_jump_experience_enabled = enabled;
+    }
+
+    pub const fn persistence_demo_jump_experience_enabled(&self) -> bool {
+        self.persistence_demo_jump_experience_enabled
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
@@ -581,6 +593,11 @@ impl IntegratedServer {
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
         }
+        let total_experience = player.total_experience;
+        self.chunk_tracking.queue_update_for_player(
+            player_id,
+            ServerUpdate::PlayerExperience { total_experience },
+        );
         Ok(player_id)
     }
 
@@ -1506,20 +1523,61 @@ impl IntegratedServer {
         command: MovePlayerCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
-        let player = self.player_mut_for_target(target)?;
-        let result = player.apply_move_player(command);
-        let updates = match result {
-            MovePlayerApplyResult::Accepted | MovePlayerApplyResult::RejectedInvalid => Vec::new(),
-            MovePlayerApplyResult::AwaitingTeleport => player
-                .resend_pending_correction_update(simulation_tick)
-                .map(ServerUpdate::PlayerPosition)
-                .into_iter()
-                .collect(),
+        let jump_demo_enabled = self.persistence_demo_jump_experience_enabled
+            && self
+                .world_behavior_profile
+                .allows_persistence_demo_jump_experience();
+        let (result, recognized_jump, pending_correction) = {
+            let player = self.player_mut_for_target(target)?;
+            let before_position = player.position();
+            let before_on_ground = player.on_ground();
+            let before_position_accepted = player.has_accepted_position();
+            let result = player.apply_move_player(command);
+            let recognized_jump = jump_demo_enabled
+                && result == MovePlayerApplyResult::Accepted
+                && before_position_accepted
+                && before_on_ground
+                && command.has_position()
+                && !player.on_ground()
+                && player.position().y > before_position.y;
+            let pending_correction = (result == MovePlayerApplyResult::AwaitingTeleport)
+                .then(|| player.resend_pending_correction_update(simulation_tick))
+                .flatten();
+            (result, recognized_jump, pending_correction)
         };
+        let mut updates = pending_correction
+            .map(ServerUpdate::PlayerPosition)
+            .into_iter()
+            .collect::<Vec<_>>();
+        if recognized_jump {
+            let total_experience = self.award_persistence_demo_jump_experience(target)?;
+            updates.push(ServerUpdate::PlayerExperience { total_experience });
+        }
         if result == MovePlayerApplyResult::Accepted {
             self.reconcile_remote_player_subject(target.player_id(), true);
         }
         Ok(updates)
+    }
+
+    fn award_persistence_demo_jump_experience(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<u64> {
+        match target {
+            CommandTarget::Local => {
+                self.local_player_total_experience =
+                    self.local_player_total_experience.saturating_add(1);
+                Ok(self.local_player_total_experience)
+            }
+            CommandTarget::Dedicated(player_id) => {
+                let player = self
+                    .dedicated_players
+                    .get_mut(player_id)
+                    .ok_or_else(|| unknown_player_error(player_id))?;
+                player.total_experience = player.total_experience.saturating_add(1);
+                Ok(player.total_experience)
+            }
+        }
     }
 
     fn advance_debug_auxiliary_player_script(&mut self) -> ChunkStoreResult<()> {
@@ -2340,6 +2398,12 @@ impl IntegratedServer {
             self.local_player_total_experience = record.total_experience;
             self.local_player_record_revision = record.revision;
             self.local_player_resume_record = Some(record);
+            self.chunk_tracking.queue_update_for_player(
+                ServerPlayerId::LOCAL,
+                ServerUpdate::PlayerExperience {
+                    total_experience: self.local_player_total_experience,
+                },
+            );
             self.retarget_player_view_for_resume(
                 CommandTarget::Local,
                 self.initial_spawn_center
@@ -2369,6 +2433,11 @@ impl IntegratedServer {
             player.total_experience = record.total_experience;
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
+            let total_experience = player.total_experience;
+            self.chunk_tracking.queue_update_for_player(
+                player_id,
+                ServerUpdate::PlayerExperience { total_experience },
+            );
             let center = self
                 .dedicated_players
                 .get(player_id)

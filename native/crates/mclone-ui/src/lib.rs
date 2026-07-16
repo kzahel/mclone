@@ -2565,6 +2565,7 @@ pub struct FlatHud {
     pub gamepad: GamepadHudOverlay,
     pub touch: TouchOverlay,
     pub status: StatusOverlay,
+    pub total_experience: Option<u64>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
@@ -2579,6 +2580,7 @@ impl FlatHud {
             gamepad: GamepadHudOverlay::visible(),
             touch: TouchOverlay::hidden(),
             status: StatusOverlay::hidden(),
+            total_experience: None,
             debug: None,
             frame_pipeline: None,
         }
@@ -2605,6 +2607,7 @@ impl FlatHud {
             || self.effective_gamepad_overlay().visible
             || self.effective_touch_overlay().visible
             || self.status.visible
+            || (self.world_hud_visible && self.total_experience.is_some())
             || self
                 .debug
                 .as_ref()
@@ -2721,10 +2724,28 @@ pub(crate) fn render_flat_hud_frame_pipeline_layer(
 }
 
 pub(crate) fn render_flat_hud_transient_layers(
-    _scale: GuiScale,
-    _draw: &mut GuiDrawList,
-    _hud: &FlatHud,
+    scale: GuiScale,
+    draw: &mut GuiDrawList,
+    hud: &FlatHud,
 ) {
+    let Some(total_experience) = hud.total_experience.filter(|_| hud.world_hud_visible) else {
+        return;
+    };
+    let touch = hud.effective_touch_overlay();
+    let hotbar_top = if touch.visible && touch.hotbar_visible {
+        touch_hotbar_slot_rects(scale)[0].y
+    } else if hud.should_render_flat_hotbar() {
+        flat_hotbar_slot_rects(scale)[0].y
+    } else {
+        scale.height - 12.0
+    };
+    Font::default().draw_centered_atlas(
+        draw,
+        &format!("XP {total_experience}"),
+        scale.width * 0.5,
+        (hotbar_top - 14.0).max(4.0),
+        Color::rgba(128, 255, 90, 255),
+    );
 }
 
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {

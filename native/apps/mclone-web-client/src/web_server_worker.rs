@@ -2033,9 +2033,10 @@ impl McloneWebIntegratedServerWorker {
 impl McloneWebIntegratedServerWorker {
     fn from_server(
         seed: i64,
-        server: IntegratedServer,
+        mut server: IntegratedServer,
         indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
     ) -> Self {
+        server.set_persistence_demo_jump_experience_enabled(true);
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
         diagnostics.running = true;

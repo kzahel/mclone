@@ -1762,6 +1762,7 @@ impl McloneSceneHost {
             ),
         );
         hud.status = self.session_projection().status_overlay;
+        hud.total_experience = Some(runtime.client().total_experience());
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self
             .diagnostic_panel

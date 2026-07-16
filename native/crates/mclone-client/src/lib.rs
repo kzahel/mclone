@@ -81,6 +81,7 @@ pub struct ClientRuntime {
     deferred_chunk_drops: VecDeque<ChunkSnapshot>,
     deferred_chunk_drop_items: usize,
     day_time: u64,
+    total_experience: u64,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
@@ -99,6 +100,7 @@ impl ClientRuntime {
             deferred_chunk_drops: VecDeque::new(),
             deferred_chunk_drop_items: 0,
             day_time: 0,
+            total_experience: 0,
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
@@ -196,6 +198,9 @@ impl ClientRuntime {
             ServerUpdate::EntityRemove { id } => {
                 self.remove_entity(id);
             }
+            ServerUpdate::PlayerExperience { total_experience } => {
+                self.total_experience = total_experience;
+            }
         }
     }
 
@@ -203,6 +208,10 @@ impl ClientRuntime {
         for update in updates {
             self.apply_update(update);
         }
+    }
+
+    pub const fn total_experience(&self) -> u64 {
+        self.total_experience
     }
 
     pub fn chunk_snapshot(&self, pos: ChunkPos) -> Option<&ChunkSnapshot> {
@@ -839,6 +848,17 @@ mod tests {
         // dayTime 6000 is noon, which the smoothed curve maps to phase ~0.0.
         assert!(runtime.time_of_day().abs() < 1e-4);
         assert!(runtime.sun_angle().abs() < 1e-3);
+    }
+
+    #[test]
+    fn client_runtime_tracks_authoritative_player_experience() {
+        let mut runtime = ClientRuntime::local_integrated();
+
+        runtime.apply_update(ServerUpdate::PlayerExperience {
+            total_experience: 37,
+        });
+
+        assert_eq!(runtime.total_experience(), 37);
     }
 
     #[test]

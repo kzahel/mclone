@@ -101,6 +101,7 @@ pub struct LocalIntegratedSceneOptions {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
     pub world_behavior_profile: WorldBehaviorProfile,
+    pub persistence_demo_jump_experience_enabled: bool,
     pub center: ChunkPos,
     pub render_distance: u32,
     pub cadence: SimulationCadenceConfig,
@@ -173,6 +174,7 @@ impl LocalIntegratedSceneOptions {
             seed,
             world_generation_profile: WorldGenerationProfile::Overworld,
             world_behavior_profile: WorldBehaviorProfile::Mutable,
+            persistence_demo_jump_experience_enabled: true,
             center,
             render_distance,
             cadence: SimulationCadenceConfig::new(20, 20, 60),
@@ -205,6 +207,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
         self.world_behavior_profile = profile;
+        self
+    }
+
+    pub const fn with_persistence_demo_jump_experience_enabled(mut self, enabled: bool) -> Self {
+        self.persistence_demo_jump_experience_enabled = enabled;
         self
     }
 
@@ -3364,6 +3371,9 @@ fn native_runner_config(
     let mut config = NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_world_generation_profile(options.world_generation_profile)
         .with_world_behavior_profile(options.world_behavior_profile)
+        .with_persistence_demo_jump_experience_enabled(
+            options.persistence_demo_jump_experience_enabled,
+        )
         .with_lighting_enabled(options.lighting_enabled)
         .with_light_status_batch_size(options.light_status_batch_size)
         .with_debug_passive_showcase(options.debug_passive_showcase)

@@ -188,6 +188,114 @@ fn move_player_command_updates_server_player_state_without_world_updates() {
 }
 
 #[test]
+fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
+    let mut server = IntegratedServer::new(0);
+    server.set_persistence_demo_jump_experience_enabled(true);
+    send_player_move(&mut server, Vec3d::new(1.0, 64.0, 1.0));
+
+    let updates = server
+        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            position: Vec3d::new(1.0, 64.42, 1.0),
+            on_ground: false,
+        }))
+        .unwrap();
+    assert_eq!(
+        updates,
+        vec![ServerUpdate::PlayerExperience {
+            total_experience: 1
+        }]
+    );
+
+    let duplicate = server
+        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            position: Vec3d::new(1.0, 64.42, 1.0),
+            on_ground: false,
+        }))
+        .unwrap();
+    assert!(duplicate.is_empty());
+    assert!(
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
+                on_ground: true
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Rot {
+                y_rot_degrees: 90.0,
+                x_rot_degrees: 0.0,
+                on_ground: false,
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(server.local_player_total_experience, 1);
+}
+
+#[test]
+fn persistence_demo_is_explicit_and_protected_worlds_never_award_jump_experience() {
+    let mut server = IntegratedServer::new(0);
+    send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
+    assert!(
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(0.0, 64.42, 0.0),
+                on_ground: false,
+            }))
+            .unwrap()
+            .is_empty()
+    );
+
+    server.set_persistence_demo_jump_experience_enabled(true);
+    server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
+    server
+        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::StatusOnly {
+            on_ground: true,
+        }))
+        .unwrap();
+    assert!(
+        server
+            .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+                position: Vec3d::new(0.0, 64.84, 0.0),
+                on_ground: false,
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(server.local_player_total_experience, 0);
+}
+
+#[test]
+fn awarded_demo_experience_is_written_to_the_identity_player_record() {
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x55; 16]), "Jumper").unwrap();
+    let key = player_record_key(identity.profile_id);
+    let mut server = IntegratedServer::with_world_store(0, Box::new(MemoryWorldStore::new()));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    server.set_persistence_demo_jump_experience_enabled(true);
+    send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
+    server
+        .try_handle_command(ClientCommand::MovePlayer(MovePlayerCommand::Pos {
+            position: Vec3d::new(0.0, 64.42, 0.0),
+            on_ground: false,
+        }))
+        .unwrap();
+
+    assert_eq!(server.save_all_player_records().unwrap(), 1);
+    let record = server
+        .scheduler_mut()
+        .load_player_record_blocking(key)
+        .unwrap()
+        .expect("saved player record");
+
+    assert_eq!(record.total_experience, 1);
+    assert_eq!(record.position, Vec3d::new(0.0, 64.42, 0.0));
+}
+
+#[test]
 fn simulation_tick_records_java_shaped_movement_packet_boundary() {
     let mut server = IntegratedServer::new(0);
 

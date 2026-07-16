@@ -36,6 +36,10 @@ impl WorldBehaviorProfile {
     pub const fn allows_player_place(self) -> bool {
         matches!(self, Self::Mutable)
     }
+
+    pub const fn allows_persistence_demo_jump_experience(self) -> bool {
+        matches!(self, Self::Mutable)
+    }
 }
 
 #[cfg(test)]
@@ -50,8 +54,10 @@ mod tests {
         );
         assert!(WorldBehaviorProfile::Mutable.allows_player_break());
         assert!(WorldBehaviorProfile::Mutable.allows_player_place());
+        assert!(WorldBehaviorProfile::Mutable.allows_persistence_demo_jump_experience());
         assert!(!WorldBehaviorProfile::ProtectedLobby.allows_player_break());
         assert!(!WorldBehaviorProfile::ProtectedLobby.allows_player_place());
+        assert!(!WorldBehaviorProfile::ProtectedLobby.allows_persistence_demo_jump_experience());
         assert_eq!(
             serde_json::to_string(&WorldBehaviorProfile::ProtectedLobby).unwrap(),
             r#""protected-lobby""#

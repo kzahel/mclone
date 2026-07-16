@@ -268,6 +268,7 @@ fn open_dedicated_server(
         }
     }?;
     server.disable_local_player();
+    server.set_persistence_demo_jump_experience_enabled(true);
     server.set_world_generation_profile(profile)?;
     Ok(server)
 }
