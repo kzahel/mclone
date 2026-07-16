@@ -154,7 +154,6 @@ use mclone_render_session::{
     local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
     render_view_from_world_pose,
 };
-use mclone_server::WorldGenerationProfile;
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,

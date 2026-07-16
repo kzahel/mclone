@@ -80,8 +80,9 @@ Still not full vanilla parity:
   former buried-treasure implementation and the former desert-well,
   monster-room, and fossil feature work belonged to the retired TypeScript
   engine
-- no selectable procedural island generator exists yet; bounded island/table
-  content currently appears only as authored persisted fixtures
+- the first original island generator is intentionally bounded and undecorated;
+  a full original mclone overworld, original biome registry/content, and native
+  structures remain future work
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes

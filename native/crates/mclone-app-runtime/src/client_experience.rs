@@ -107,6 +107,7 @@ impl ClientExperienceController {
             | GameUiAction::SelectWorld(_)
             | GameUiAction::OpenWorld(_)
             | GameUiAction::CreateCatalogWorld
+            | GameUiAction::CycleWorldGenerationProfile
             | GameUiAction::ConfirmDeleteWorld(_)
             | GameUiAction::DeleteWorld(_)
             | GameUiAction::CancelDeleteWorld => {
@@ -141,6 +142,7 @@ impl ClientExperienceController {
                 effects.session = client_session_effects_for_action(
                     action,
                     ClientSessionActionContext {
+                        new_world_generation_profile: self.catalog.new_world_generation_profile(),
                         next_new_world_seed: context.next_new_world_seed,
                         current_join_remote_addr: context.current_join_remote_addr,
                         fallback_remote_addr: context.fallback_remote_addr,
@@ -1523,6 +1525,7 @@ pub enum ClientExperienceActionKind {
     SelectWorld,
     OpenWorld,
     CreateCatalogWorld,
+    CycleWorldGenerationProfile,
     ConfirmDeleteWorld,
     DeleteWorld,
     CancelDeleteWorld,
@@ -1586,6 +1589,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SelectWorld(_) => ClientExperienceActionKind::SelectWorld,
         GameUiAction::OpenWorld(_) => ClientExperienceActionKind::OpenWorld,
         GameUiAction::CreateCatalogWorld => ClientExperienceActionKind::CreateCatalogWorld,
+        GameUiAction::CycleWorldGenerationProfile => {
+            ClientExperienceActionKind::CycleWorldGenerationProfile
+        }
         GameUiAction::ConfirmDeleteWorld(_) => ClientExperienceActionKind::ConfirmDeleteWorld,
         GameUiAction::DeleteWorld(_) => ClientExperienceActionKind::DeleteWorld,
         GameUiAction::CancelDeleteWorld => ClientExperienceActionKind::CancelDeleteWorld,
@@ -1664,6 +1670,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SelectWorld
         | ClientExperienceActionKind::OpenWorld
         | ClientExperienceActionKind::CreateCatalogWorld
+        | ClientExperienceActionKind::CycleWorldGenerationProfile
         | ClientExperienceActionKind::ConfirmDeleteWorld
         | ClientExperienceActionKind::DeleteWorld
         | ClientExperienceActionKind::CancelDeleteWorld

@@ -101,7 +101,7 @@ impl Cli {
                 }
                 "--generation-profile" => {
                     let value = args.next().context(
-                        "--generation-profile requires overworld, flat-grass-v1, or authored-only",
+                        "--generation-profile requires overworld, flat-grass-v1, small-island-v1, or authored-only",
                     )?;
                     cli.world_generation_profile =
                         WorldGenerationProfile::parse_label(&value).map_err(anyhow::Error::msg)?;

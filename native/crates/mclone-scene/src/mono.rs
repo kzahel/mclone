@@ -1793,6 +1793,7 @@ impl McloneSceneHost {
                 ),
                 on_ground: camera.on_ground,
                 seed: self.active_world.scene.seed,
+                generation_profile: self.active_world.scene.world_generation_profile.label(),
                 runtime: runtime.stats(),
                 render: self.active_world.render_stats,
                 frame: context.frame_timing,

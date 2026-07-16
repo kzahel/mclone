@@ -178,12 +178,20 @@ pub enum SessionStartRequest {
 
 impl SessionStartRequest {
     pub fn new_seed_local_world(seed: i64) -> Self {
+        Self::new_seed_local_world_with_generation_profile(seed, WorldGenerationProfile::Overworld)
+    }
+
+    pub fn new_seed_local_world_with_generation_profile(
+        seed: i64,
+        profile: WorldGenerationProfile,
+    ) -> Self {
         Self::CreateLocalWorld {
             options: LocalWorldCreateOptions::new(
                 default_seed_local_world_display_name(seed),
                 seed,
             )
-            .expect("default seed local world display name is valid"),
+            .expect("default seed local world display name is valid")
+            .with_world_generation_profile(profile),
         }
     }
 

@@ -4,8 +4,10 @@ use crate::session::{ActiveSessionDescriptor, SessionStartRequest};
 use crate::world_catalog::{
     LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
     WorldCatalogError, WorldCatalogRequest, WorldCatalogRequestId, WorldCatalogResponse,
-    most_recent_compatible_local_world, sort_local_world_summaries,
+    local_world_generation_profile_display_name, most_recent_compatible_local_world,
+    next_local_world_generation_profile, sort_local_world_summaries,
 };
+use mclone_server::WorldGenerationProfile;
 use mclone_ui::{
     GameStorageAction, GameUiAction, WORLD_CATALOG_UI_ROW_CAPACITY, WorldCatalogUiEntry,
     WorldCatalogUiState, WorldCatalogUiStatus, WorldCatalogUiText, WorldCatalogUiWorldId,
@@ -20,6 +22,7 @@ pub struct ClientCatalogController {
     active_world: Option<LocalWorldId>,
     pending: HashMap<WorldCatalogRequestId, PendingCatalogRequest>,
     next_request_id: u64,
+    new_world_generation_profile: WorldGenerationProfile,
 }
 
 impl Default for ClientCatalogController {
@@ -34,10 +37,11 @@ impl ClientCatalogController {
             capabilities: WorldCatalogCapabilities::default(),
             worlds: Vec::new(),
             entries: Vec::new(),
-            ui: WorldCatalogUiState::default(),
+            ui: world_catalog_ui_state_for_capabilities(WorldCatalogCapabilities::default()),
             active_world: None,
             pending: HashMap::new(),
             next_request_id: 1,
+            new_world_generation_profile: WorldGenerationProfile::Overworld,
         }
     }
 
@@ -70,6 +74,10 @@ impl ClientCatalogController {
 
     pub fn most_recent_compatible_world(&self) -> Option<&LocalWorldSummary> {
         most_recent_compatible_local_world(&self.worlds)
+    }
+
+    pub const fn new_world_generation_profile(&self) -> WorldGenerationProfile {
+        self.new_world_generation_profile
     }
 
     pub fn world_list_pending(&self) -> bool {
@@ -153,6 +161,15 @@ impl ClientCatalogController {
                 ClientCatalogEffects::default()
             }
             GameUiAction::ConfirmDeleteWorld(_) | GameUiAction::CancelDeleteWorld => {
+                self.clear_status();
+                ClientCatalogEffects::default()
+            }
+            GameUiAction::CycleWorldGenerationProfile => {
+                self.new_world_generation_profile =
+                    next_local_world_generation_profile(self.new_world_generation_profile);
+                self.ui.create_generation_profile = WorldCatalogUiText::new(
+                    local_world_generation_profile_display_name(self.new_world_generation_profile),
+                );
                 self.clear_status();
                 ClientCatalogEffects::default()
             }
@@ -278,7 +295,7 @@ impl ClientCatalogController {
             self.ui.create_display_name.as_str()
         };
         let options = match LocalWorldCreateOptions::new(display_name, seed) {
-            Ok(options) => options,
+            Ok(options) => options.with_world_generation_profile(self.new_world_generation_profile),
             Err(error) => {
                 self.set_world_catalog_error(&error);
                 return ClientCatalogEffects::default();
@@ -404,6 +421,9 @@ impl ClientCatalogController {
         if self.capabilities.create_supported && !create_display_name.is_empty() {
             state.create_display_name = create_display_name;
         }
+        state.create_generation_profile = WorldCatalogUiText::new(
+            local_world_generation_profile_display_name(self.new_world_generation_profile),
+        );
         state.selected = previous_selected;
         state.active = self.active_world.as_ref().and_then(|active| {
             cached_entries
@@ -580,6 +600,9 @@ fn world_catalog_ui_state_for_capabilities(
         } else {
             WorldCatalogUiText::empty()
         },
+        create_generation_profile: WorldCatalogUiText::new(
+            local_world_generation_profile_display_name(WorldGenerationProfile::Overworld),
+        ),
         ..WorldCatalogUiState::empty()
     }
 }
@@ -589,6 +612,9 @@ fn world_catalog_ui_entry(
     summary: &LocalWorldSummary,
 ) -> WorldCatalogUiEntry {
     WorldCatalogUiEntry::new(id, &summary.display_name, summary.seed)
+        .with_generation_profile(local_world_generation_profile_display_name(
+            summary.world_generation_profile,
+        ))
         .with_created_unix_millis(summary.created_unix_millis)
         .with_last_played_unix_millis(summary.last_played_unix_millis)
         .locked(summary.locked)
@@ -745,6 +771,37 @@ mod tests {
         assert_eq!(start.summary, created);
         assert_eq!(controller.ui_state().entry_count(), 1);
         assert!(!controller.ui_state().loading);
+    }
+
+    #[test]
+    fn create_action_carries_cycled_generation_profile() {
+        let mut controller = persistent_controller(Vec::new());
+        assert_eq!(
+            controller.ui_state().create_generation_profile.as_str(),
+            "Vanilla 1.17 Overworld"
+        );
+        controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(0));
+        assert_eq!(
+            controller.new_world_generation_profile(),
+            WorldGenerationProfile::FlatGrassV1
+        );
+        controller.apply_ui_action(GameUiAction::CycleWorldGenerationProfile, context(0));
+        assert_eq!(
+            controller.ui_state().create_generation_profile.as_str(),
+            "Small Island"
+        );
+
+        let request = only_request(
+            controller.apply_ui_action(GameUiAction::CreateCatalogWorld, context(-98_765)),
+        );
+        let WorldCatalogRequest::CreateWorld { options } = request.request else {
+            panic!("expected create request");
+        };
+        assert_eq!(options.seed, -98_765);
+        assert_eq!(
+            options.world_generation_profile,
+            WorldGenerationProfile::SmallIslandV1
+        );
     }
 
     #[test]

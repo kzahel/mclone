@@ -15,6 +15,7 @@ pub struct DebugPaneStats {
     pub movement_mode: String,
     pub on_ground: bool,
     pub seed: i64,
+    pub generation_profile: &'static str,
     pub runtime: SingleViewRuntimeStats,
     pub render: RenderStreamStats,
     pub frame: FrameTimingStats,
@@ -89,6 +90,7 @@ impl DebugPaneStats {
             color_profile: self.color_profile,
         });
         overlay.extra_lines = vec![
+            format!("GEN {}", self.generation_profile.to_ascii_uppercase()),
             format!("RENDER SCALE {:.2}", self.render_scale),
             format!(
                 "TICK {} SIM {}",

@@ -23,8 +23,36 @@ pub const LOCAL_WORLD_ID_MAX_LEN: usize = 64;
 pub const LOCAL_WORLD_DISPLAY_NAME_MAX_CHARS: usize = 64;
 pub const NATIVE_WORLD_METADATA_FILE: &str = "world.json";
 pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
+pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 3] = [
+    WorldGenerationProfile::Overworld,
+    WorldGenerationProfile::FlatGrassV1,
+    WorldGenerationProfile::SmallIslandV1,
+];
 
 const DEFAULT_LOCAL_WORLD_ID: &str = "world";
+
+pub const fn local_world_generation_profile_display_name(
+    profile: WorldGenerationProfile,
+) -> &'static str {
+    match profile {
+        WorldGenerationProfile::Overworld => "Vanilla 1.17 Overworld",
+        WorldGenerationProfile::FlatGrassV1 => "Flat Grass",
+        WorldGenerationProfile::SmallIslandV1 => "Small Island",
+        WorldGenerationProfile::AuthoredOnly { .. } => "Authored World",
+    }
+}
+
+pub const fn next_local_world_generation_profile(
+    profile: WorldGenerationProfile,
+) -> WorldGenerationProfile {
+    match profile {
+        WorldGenerationProfile::Overworld => WorldGenerationProfile::FlatGrassV1,
+        WorldGenerationProfile::FlatGrassV1 => WorldGenerationProfile::SmallIslandV1,
+        WorldGenerationProfile::SmallIslandV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
+            WorldGenerationProfile::Overworld
+        }
+    }
+}
 
 pub type WorldCatalogResult<T> = Result<T, WorldCatalogError>;
 
@@ -1119,6 +1147,57 @@ mod tests {
     }
 
     #[test]
+    fn procedural_generation_profile_metadata_is_stable_and_cycles_in_order() {
+        assert_eq!(
+            LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES,
+            [
+                WorldGenerationProfile::Overworld,
+                WorldGenerationProfile::FlatGrassV1,
+                WorldGenerationProfile::SmallIslandV1,
+            ]
+        );
+        assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::Overworld),
+            "Vanilla 1.17 Overworld"
+        );
+        assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::FlatGrassV1),
+            "Flat Grass"
+        );
+        assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::SmallIslandV1),
+            "Small Island"
+        );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::Overworld),
+            WorldGenerationProfile::FlatGrassV1
+        );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::FlatGrassV1),
+            WorldGenerationProfile::SmallIslandV1
+        );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::SmallIslandV1),
+            WorldGenerationProfile::Overworld
+        );
+    }
+
+    #[test]
+    fn alternate_procedural_profiles_round_trip_through_catalog_records() {
+        for profile in [
+            WorldGenerationProfile::FlatGrassV1,
+            WorldGenerationProfile::SmallIslandV1,
+        ] {
+            let options = LocalWorldCreateOptions::new("Alternate", 9)
+                .unwrap()
+                .with_world_generation_profile(profile);
+            let decoded: LocalWorldCreateOptions =
+                serde_json::from_slice(&serde_json::to_vec(&options).unwrap()).unwrap();
+            assert_eq!(decoded.world_generation_profile, profile);
+        }
+    }
+
+    #[test]
     fn create_options_reject_empty_display_name() {
         let error = LocalWorldCreateOptions::new("   ", 1).unwrap_err();
 
@@ -1206,7 +1285,11 @@ mod tests {
             )
             .unwrap();
         let second = catalog
-            .create_world(LocalWorldCreateOptions::new("My World", 456).unwrap())
+            .create_world(
+                LocalWorldCreateOptions::new("My World", 456)
+                    .unwrap()
+                    .with_world_generation_profile(WorldGenerationProfile::SmallIslandV1),
+            )
             .unwrap();
 
         assert_eq!(first.id.as_str(), "my-world");
@@ -1215,6 +1298,10 @@ mod tests {
             WorldGenerationProfile::authored_only()
         );
         assert_eq!(second.id.as_str(), "my-world-2");
+        assert_eq!(
+            second.world_generation_profile,
+            WorldGenerationProfile::SmallIslandV1
+        );
         assert_eq!(
             first.backend_label.as_deref(),
             Some(NATIVE_WORLD_BACKEND_LABEL)
@@ -1236,6 +1323,14 @@ mod tests {
         assert_eq!(opened.summary.id, first.id);
         assert_eq!(opened.dir, catalog.world_dir(&opened.summary.id));
         assert!(opened.database_path().exists());
+        assert_eq!(
+            catalog
+                .open_world(&second.id)
+                .unwrap()
+                .summary
+                .world_generation_profile,
+            WorldGenerationProfile::SmallIslandV1
+        );
 
         let error = catalog
             .delete_world(&opened.summary.id, Some(&opened.summary.id))

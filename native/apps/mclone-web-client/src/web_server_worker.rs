@@ -1803,6 +1803,21 @@ impl WebIndexedDbWorldStoreState {
     }
 }
 
+fn apply_stored_world_metadata_profiles(
+    server: &mut LocalRealmSession,
+    state: &Rc<RefCell<WebIndexedDbWorldStoreState>>,
+) -> Result<(), String> {
+    let metadata = state.borrow().world_metadata.clone();
+    let Some(metadata) = metadata else {
+        return Ok(());
+    };
+    server
+        .set_world_generation_profile(metadata.world_generation_profile)
+        .map_err(|error| error.to_string())?;
+    server.set_world_behavior_profile(metadata.world_behavior_profile);
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 struct WebIndexedDbWorldStore {
     state: Rc<RefCell<WebIndexedDbWorldStoreState>>,
@@ -1956,7 +1971,9 @@ impl McloneWebIntegratedServerWorker {
         )
         .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server = LocalRealmSession::local_integrated_with_world_store(seed, store);
+        let mut server = LocalRealmSession::local_integrated_with_world_store(seed, store);
+        apply_stored_world_metadata_profiles(&mut server, &state)
+            .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
     }
 
@@ -1974,8 +1991,10 @@ impl McloneWebIntegratedServerWorker {
             .map_err(|error| JsValue::from_str(&error))?,
         ));
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server =
+        let mut server =
             LocalRealmSession::local_integrated_with_external_load_world_store(seed, store);
+        apply_stored_world_metadata_profiles(&mut server, &state)
+            .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
     }
 
@@ -1998,11 +2017,13 @@ impl McloneWebIntegratedServerWorker {
         )
         .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server = LocalRealmSession::local_integrated_with_world_store_and_wasm_job_workers(
+        let mut server = LocalRealmSession::local_integrated_with_world_store_and_wasm_job_workers(
             seed,
             store,
             WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
         );
+        apply_stored_world_metadata_profiles(&mut server, &state)
+            .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
     }
 
@@ -2023,12 +2044,14 @@ impl McloneWebIntegratedServerWorker {
             .map_err(|error| JsValue::from_str(&error))?,
         ));
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let server =
+        let mut server =
             LocalRealmSession::local_integrated_with_external_load_world_store_and_wasm_job_workers(
                 seed,
                 store,
                 WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
             );
+        apply_stored_world_metadata_profiles(&mut server, &state)
+            .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
     }
 

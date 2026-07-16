@@ -27,7 +27,8 @@ use mclone_render::chunk::{
 };
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_frame_loop};
 use mclone_server::{
-    LightStatusMailboxMetrics, SqliteWorldStore, WorkerFrameMetrics, initial_spawn_center_for_seed,
+    LightStatusMailboxMetrics, SqliteWorldStore, WorkerFrameMetrics,
+    initial_spawn_center_for_profile,
 };
 
 use crate::camera::{
@@ -3238,7 +3239,10 @@ pub(crate) fn run_loading_settle_perf(
         let expected_target_chunks = square_count(
             i32::try_from(chunk_tracking_radius).context("chunk tracking radius exceeds i32")?,
         )?;
-        let spawn_center = initial_spawn_center_for_seed(options.scene.seed);
+        let spawn_center = initial_spawn_center_for_profile(
+            options.scene.seed,
+            options.scene.world_generation_profile,
+        );
         let mut scene = options.scene.clone();
         scene.chunk_x = spawn_center.x;
         scene.chunk_z = spawn_center.z;
@@ -3568,7 +3572,7 @@ pub(crate) fn run_startup_streaming_perf(
     let asset_source = load_asset_source()?;
     let asset_load_ms = elapsed_ms(asset_start.elapsed());
     let mut scene = options.scene.clone();
-    let spawn_center = initial_spawn_center_for_seed(scene.seed);
+    let spawn_center = initial_spawn_center_for_profile(scene.seed, scene.world_generation_profile);
     scene.chunk_x = spawn_center.x;
     scene.chunk_z = spawn_center.z;
     let world_dir = if options.persisted_world {

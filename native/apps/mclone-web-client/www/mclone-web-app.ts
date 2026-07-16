@@ -31,7 +31,11 @@ import {
   provisionIndexedDbManagedScenarioWorldInWorker,
   setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
-import type { WebLocalWorldSummary } from "./mclone-web-world-catalog.js";
+import type {
+  WebLocalWorldCreateOptions,
+  WebLocalWorldSummary,
+  WebWorldGenerationProfile,
+} from "./mclone-web-world-catalog.js";
 import type { WebSceneHost, WebCompileTiming } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
@@ -378,6 +382,7 @@ class WebFrameDriver {
   managedScenarioLaunchObservedActive: boolean;
   managedOperationDrainActive: boolean;
   managedRuntimeStartCount: number;
+  worldCatalogOperationTail: Promise<void>;
 
   constructor() {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
@@ -425,6 +430,7 @@ class WebFrameDriver {
     this.managedScenarioLaunchObservedActive = false;
     this.managedOperationDrainActive = false;
     this.managedRuntimeStartCount = 0;
+    this.worldCatalogOperationTail = Promise.resolve();
   }
 
   async init(): Promise<void> {
@@ -718,6 +724,7 @@ class WebFrameDriver {
     while (this.tickFrameBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    await this.worldCatalogOperationTail;
     await Promise.allSettled([...this.pendingManagedRuntimeStarts]);
     await Promise.allSettled(
       [...this.pendingTimings.values()]
@@ -1850,7 +1857,14 @@ class WebFrameDriver {
     if (report.catalogRequest !== true) {
       return;
     }
-    void this.completeWorldCatalogRequest(report, options);
+    this.worldCatalogOperationTail = this.worldCatalogOperationTail
+      .then(() => this.completeWorldCatalogRequest(report, options))
+      .catch((error: unknown) => {
+        runtime.state.ok = false;
+        runtime.state.status = stringifyError(error);
+        console.error(error);
+        publishRuntimeState(runtime.state);
+      });
   }
 
   dispatchAssetPackOperation(report: WasmReport): void {
@@ -1986,10 +2000,13 @@ class WebFrameDriver {
         return listIndexedDbCatalogWorlds(db);
       case "createWorld": {
         const seed = Number(report.catalogWorldSeedText ?? report.catalogWorldSeed);
-        const options = {
+        const options: WebLocalWorldCreateOptions = {
           displayName: String(report.catalogDisplayName ?? ""),
           seed,
           requestedId: report.catalogRequestedId ?? null,
+          generationProfile: String(
+            report.catalogGenerationProfile ?? "overworld",
+          ) as WebWorldGenerationProfile,
         };
         return createIndexedDbCatalogWorld(db, options);
       }

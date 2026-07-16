@@ -35,6 +35,18 @@ const bindgenOutDir = join(
   "debug",
   "mclone-web-client-bindgen",
 );
+const generationProfileArgIndex = process.argv.indexOf("--generation-profile");
+const generationProfile = generationProfileArgIndex >= 0
+  ? String(process.argv[generationProfileArgIndex + 1] ?? "")
+  : "";
+if (
+  generationProfile
+  && !["overworld", "flat-grass-v1", "small-island-v1"].includes(generationProfile)
+) {
+  throw new Error(
+    `--generation-profile requires overworld, flat-grass-v1, or small-island-v1; got ${generationProfile}`,
+  );
+}
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
@@ -459,9 +471,12 @@ async function run() {
       const lobbyScenarioQuery = lobbyScenarioProbe
         ? "?debugAuxiliaryPlayerScript=1"
         : "";
-      const appUrl = remoteServer
+      const baseAppUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
         : `${baseUrl}/app.html${indexedDbReloadQuery || farLodQuery || lobbyScenarioQuery}`;
+      const appUrl = generationProfile
+        ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}generationProfile=${encodeURIComponent(generationProfile)}`
+        : baseAppUrl;
       await page.goto(appUrl, { waitUntil: "load" });
       await page.waitForFunction(
         () => typeof globalThis.__mcloneWebApp !== "undefined",
@@ -891,6 +906,7 @@ async function run() {
           canvas,
           baseUrl,
           indexedDbReloadWorldId,
+          generationProfile,
         );
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         let pageScreenshotCaptured = false;
@@ -1196,8 +1212,15 @@ async function run() {
           walkedIntoTerrain,
         };
       }, walkingStart);
-      const targetPreviewProbe = await captureTargetPreviewProbe(page);
-      const blockInteractionProbe = await exerciseBlockInteraction(page, canvas);
+      const generationProfileProbe = generationProfile
+        ? await captureGenerationProfileProbe(page, generationProfile)
+        : null;
+      const targetPreviewProbe = generationProfile
+        ? { ok: true, skippedForGenerationProfile: generationProfile }
+        : await captureTargetPreviewProbe(page);
+      const blockInteractionProbe = generationProfile
+        ? { ok: true, skippedForGenerationProfile: generationProfile }
+        : await exerciseBlockInteraction(page, canvas);
       await canvas.evaluate((element) => element.focus());
       // The shared camera reports movement and collision as separate axes: one
       // physical KeyN transition selects FLY movement with NOCLIP collision.
@@ -1270,6 +1293,7 @@ async function run() {
         pageErrors,
         canvasPixels,
         walkingProbe,
+        generationProfileProbe,
         targetPreviewProbe,
         blockInteractionProbe,
         remoteServer?.websocketUrl ?? null,
@@ -3448,8 +3472,66 @@ async function runBlockEditProbe(page, canvas) {
  * @param {Locator} canvas
  * @param {string} baseUrl
  * @param {string} worldId
+ * @param {string | null} generationProfile
  */
-async function runIndexedDbReloadProbe(page, canvas, baseUrl, worldId) {
+async function runIndexedDbReloadProbe(
+  page,
+  canvas,
+  baseUrl,
+  worldId,
+  generationProfile = null,
+) {
+  if (generationProfile) {
+    await waitForWebAppStreamingSettled(page, 60_000);
+    const beforeReloadProfile = await captureGenerationProfileProbe(page, generationProfile);
+    await installIndexedDbCountHelper(page);
+    const initialMetadata = await waitForBrowserIndexedDbWorldMetadata(page, worldId);
+    await waitForBrowserIndexedDbChunkRecords(page, worldId, 1);
+    const beforeReloadDayTime = await page.evaluate(
+      () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
+    );
+    const backgroundSaveResult = await page.evaluate(
+      () => globalThis.__mcloneWebApp.backgroundSaveForSmoke?.() ?? null,
+    );
+    const savedMetadata = await waitForBrowserIndexedDbWorldMetadata(
+      page,
+      worldId,
+      initialMetadata.worldMetadataBytes,
+    );
+
+    // Carry the descriptor alongside the direct smoke URL just as the product
+    // catalog carries it in the open request. The worker also adopts stored
+    // metadata before initialization, so persistence remains authoritative.
+    const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}&generationProfile=${encodeURIComponent(generationProfile)}`;
+    await page.goto(reloadUrl, { waitUntil: "load" });
+    await waitForWebAppReady(page);
+    await installIndexedDbCountHelper(page);
+    await waitForWebAppStreamingSettled(page, 60_000);
+    const afterReloadProfile = await captureGenerationProfileProbe(page, generationProfile);
+    const afterReloadRecordCounts = await browserIndexedDbWorldRecordCounts(page, worldId);
+    const afterReloadDayTime = await page.evaluate(
+      () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
+    );
+    return {
+      ok: beforeReloadProfile.ok === true
+        && afterReloadProfile.ok === true
+        && afterReloadRecordCounts.chunks > 0
+        && afterReloadRecordCounts.worldMetadata === 1
+        && afterReloadDayTime >= beforeReloadDayTime,
+      worldId,
+      reloadUrl,
+      generationProfile,
+      beforeReloadProfile,
+      afterReloadProfile,
+      beforeReloadDayTime,
+      afterReloadDayTime,
+      initialMetadata,
+      savedMetadata,
+      backgroundSaveResult,
+      afterReloadRecordCounts,
+    };
+  }
+
   await canvas.evaluate((element) => element.focus());
   await canvas.click({ position: { x: 640, y: 360 } });
   try {
@@ -3554,6 +3636,7 @@ async function runCatalogUiProbe(page, canvas) {
   await openNativeWorldList(page, 0);
   const openCreateReport = await clickWorldListFooterButton(page, 1);
   await waitForNativeUiScreen(page, "worldCreate", { openCreateReport });
+  const firstProfileReport = await clickWorldCreateProfile(page);
   await clickWorldCreateCreate(page);
   const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
   const firstWorldId = String(firstSession.sessionWorldId);
@@ -3563,6 +3646,7 @@ async function runCatalogUiProbe(page, canvas) {
   await openNativeWorldList(page, 1);
   await clickWorldListFooterButton(page, 1);
   await waitForNativeUiScreen(page, "worldCreate");
+  const secondProfileReport = await clickWorldCreateProfile(page);
   await clickWorldCreateCreate(page);
   const secondSession = await waitForSessionWorldId(page, { notWorldId: firstWorldId });
   const secondWorldId = String(secondSession.sessionWorldId);
@@ -3592,11 +3676,20 @@ async function runCatalogUiProbe(page, canvas) {
   await waitForNativeUiScreen(page, "worldDeleteConfirm");
   await clickWorldDeleteConfirm(page);
   await waitForNativeUiScreen(page, "worldList");
-  const afterDelete = await waitForBrowserCatalogWorldIds(page, [firstWorldId], [secondWorldId]);
+  await waitForBrowserCatalogWorldIds(page, [firstWorldId], [secondWorldId]);
   const secondRecordsAfterDelete = await waitForBrowserIndexedDbRecordsAtMost(
     page,
     secondWorldId,
     0,
+  );
+  // Activation-recency and delete requests are asynchronous catalog work.
+  // Require the deleted identity to remain absent after the queue settles,
+  // rather than accepting one transient read between transactions.
+  await page.waitForTimeout(250);
+  const afterDelete = await waitForBrowserCatalogWorldIds(
+    page,
+    [firstWorldId],
+    [secondWorldId],
   );
   const finalState = await compactNativeUiState(page);
 
@@ -3605,6 +3698,14 @@ async function runCatalogUiProbe(page, canvas) {
       && firstWorldId.length > 0
       && secondWorldId.length > 0
       && firstWorldId !== secondWorldId
+      && firstProfileReport?.action === "cycleWorldGenerationProfile"
+      && secondProfileReport?.action === "cycleWorldGenerationProfile"
+      && afterFirstCreate.some((/** @type {any} */ world) => (
+        world.id === firstWorldId && world.generationProfile === "flat-grass-v1"
+      ))
+      && afterSecondCreate.some((/** @type {any} */ world) => (
+        world.id === secondWorldId && world.generationProfile === "small-island-v1"
+      ))
       && secondRecords.total > 0
       && openedFirstSession.sessionWorldId === firstWorldId
       && afterDelete.some((/** @type {any} */ world) => world.id === firstWorldId)
@@ -3618,6 +3719,8 @@ async function runCatalogUiProbe(page, canvas) {
     before,
     firstWorldId,
     secondWorldId,
+    firstProfileReport,
+    secondProfileReport,
     firstSession,
     secondSession,
     openedFirstSession,
@@ -4134,6 +4237,11 @@ async function clickWorldCreateCreate(page) {
 }
 
 /** @param {Page} page */
+async function clickWorldCreateProfile(page) {
+  return clickNativeUiPoint(page, worldCreateProfilePoint(await nativeUiGeometry(page)));
+}
+
+/** @param {Page} page */
 async function clickWorldDeleteConfirm(page) {
   await clickNativeUiPoint(page, worldDeleteConfirmPoint(await nativeUiGeometry(page)));
 }
@@ -4257,7 +4365,16 @@ function worldListRowPoint(geometry, index) {
 
 /** @param {{ width: number, height: number }} geometry */
 function worldCreateCreatePoint(geometry) {
-  const panel = centeredPanel(geometry, 320.0, 178.0);
+  const panel = centeredPanel(geometry, 320.0, 202.0);
+  return {
+    x: panel.x + panel.width * 0.5,
+    y: panel.y + 149.0,
+  };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function worldCreateProfilePoint(geometry) {
+  const panel = centeredPanel(geometry, 320.0, 202.0);
   return {
     x: panel.x + panel.width * 0.5,
     y: panel.y + 125.0,
@@ -6167,6 +6284,42 @@ async function captureTargetPreviewProbe(page) {
 
 /**
  * @param {Page} page
+ * @param {string} profile
+ */
+async function captureGenerationProfileProbe(page, profile) {
+  const expectedCameraY = profile === "flat-grass-v1" ? 5.62 : 82.62;
+  await page.waitForFunction(
+    ({ expectedCameraY }) => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.ready === true
+        && state.loadedChunkCount > 0
+        && state.residentSectionCount > 0
+        && Math.abs(Number(state.cameraY) - expectedCameraY) < 0.35;
+    },
+    { expectedCameraY },
+    { timeout: 60_000 },
+  );
+  return page.evaluate(({ profile, expectedCameraY }) => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      ok: state?.ok === true
+        && state.ready === true
+        && state.loadedChunkCount > 0
+        && state.residentSectionCount > 0
+        && Math.abs(Number(state.cameraY) - expectedCameraY) < 0.35,
+      profile,
+      expectedCameraY,
+      cameraY: state.cameraY,
+      loadedChunkCount: state.loadedChunkCount,
+      residentSectionCount: state.residentSectionCount,
+      workerCompileUsed: state.lastCompileReport?.workerCompileUsed === true,
+    };
+  }, { profile, expectedCameraY });
+}
+
+/**
+ * @param {Page} page
  * @param {Locator} canvas
  */
 async function exerciseBlockInteraction(page, canvas) {
@@ -6656,6 +6809,7 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
  * @param {string[]} pageErrors
  * @param {any} canvasPixels
  * @param {any} walkingProbe
+ * @param {any} generationProfileProbe
  * @param {any} targetPreviewProbe
  * @param {any} blockInteractionProbe
  */
@@ -6664,6 +6818,7 @@ function assertAppLoopResult(
   pageErrors,
   canvasPixels,
   walkingProbe,
+  generationProfileProbe,
   targetPreviewProbe,
   blockInteractionProbe,
   remoteWebSocketUrl = null,
@@ -6693,6 +6848,9 @@ function assertAppLoopResult(
   }
   if (!walkingProbe?.ok || walkingProbe.distance <= 0.1) {
     throw new Error(`native web app did not move through the walking/collision path before no-clip streaming:\n${JSON.stringify({ walkingProbe, result }, null, 2)}`);
+  }
+  if (generationProfileProbe && !generationProfileProbe.ok) {
+    throw new Error(`native web app did not start from the selected generation profile:\n${JSON.stringify({ generationProfileProbe, result }, null, 2)}`);
   }
   if (!targetPreviewProbe?.ok) {
     throw new Error(`native web app did not maintain a non-mutating current block target preview:\n${JSON.stringify({ targetPreviewProbe, result }, null, 2)}`);
@@ -6944,11 +7102,13 @@ function assertIndexedDbReloadProbeResult(report, pageErrors, canvasPixels) {
     throw new Error(`native web IndexedDB reload probe failed:\n${JSON.stringify(report, null, 2)}`);
   }
   if (
-    probe.placement?.ok !== true
-    || probe.placedBlock?.blockStateId !== DIRT_BLOCK_STATE_ID
-    || probe.afterReload?.blockStateId !== DIRT_BLOCK_STATE_ID
+    probe.generationProfile
+      ? probe.beforeReloadProfile?.ok !== true || probe.afterReloadProfile?.ok !== true
+      : probe.placement?.ok !== true
+        || probe.placedBlock?.blockStateId !== DIRT_BLOCK_STATE_ID
+        || probe.afterReload?.blockStateId !== DIRT_BLOCK_STATE_ID
   ) {
-    throw new Error(`native web IndexedDB reload probe did not preserve the placed dirt block:\n${JSON.stringify(probe, null, 2)}`);
+    throw new Error(`native web IndexedDB reload probe did not preserve its generated world content:\n${JSON.stringify(probe, null, 2)}`);
   }
   if (
     report.indexedDbReloadWorldId !== probe.worldId

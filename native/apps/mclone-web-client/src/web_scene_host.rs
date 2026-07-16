@@ -1233,6 +1233,7 @@ impl WebSceneHost {
                 .map_err(js_error)?;
         }
         let pending = self.take_pending_session_start()?;
+        let world_generation_profile = pending.scene.world_generation_profile;
         self.start_worker_runtime(
             pending,
             WebIntegratedServerRunnerConfig::new(
@@ -1241,7 +1242,8 @@ impl WebSceneHost {
                 job_worker_url,
                 bindgen_js_url,
                 bindgen_wasm_url,
-            ),
+            )
+            .with_world_generation_profile(world_generation_profile),
         )
         .await
     }
@@ -1276,6 +1278,7 @@ impl WebSceneHost {
                 .map_err(js_error)?;
         }
         let pending = self.take_pending_session_start()?;
+        let world_generation_profile = pending.scene.world_generation_profile;
         self.start_worker_runtime(
             pending,
             WebIntegratedServerRunnerConfig::new(
@@ -1285,7 +1288,8 @@ impl WebSceneHost {
                 bindgen_js_url,
                 bindgen_wasm_url,
             )
-            .with_indexed_db_world(world_id, false),
+            .with_indexed_db_world(world_id, false)
+            .with_world_generation_profile(world_generation_profile),
         )
         .await
     }
@@ -3844,6 +3848,11 @@ fn write_catalog_request(
             report_set_string(object, "catalogDisplayName", &options.display_name)?;
             report_set_number(object, "catalogWorldSeed", options.seed as f64)?;
             report_set_string(object, "catalogWorldSeedText", &options.seed.to_string())?;
+            report_set_string(
+                object,
+                "catalogGenerationProfile",
+                options.world_generation_profile.label(),
+            )?;
             if let Some(id) = &options.requested_id {
                 report_set_string(object, "catalogRequestedId", id.as_str())?;
             }

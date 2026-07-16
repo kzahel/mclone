@@ -682,6 +682,14 @@ impl McloneSceneHost {
         #[allow(unused_mut)]
         let mut lines = vec![
             format!(
+                "GEN {}",
+                self.active_world
+                    .scene
+                    .world_generation_profile
+                    .label()
+                    .to_ascii_uppercase()
+            ),
+            format!(
                 "POS {:.1} {:.1} {:.1}",
                 snapshot.eye.x, snapshot.eye.y, snapshot.eye.z
             ),

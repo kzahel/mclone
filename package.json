@@ -113,6 +113,7 @@
     "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
     "native:web:block-edit-probe": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --block-edit-probe",
     "native:web:indexeddb-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe",
+    "native:web:generator-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop --generation-profile flat-grass-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe --generation-profile small-island-v1",
     "native:web:scene-host-adoption": "node ./scripts/check-web-scene-host-adoption.mjs",
     "native:web:glue": "node ./native/apps/mclone-web-client/scripts/build-web-glue.mjs",
     "native:web:typecheck": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --build-only && tsc --noEmit -p native/apps/mclone-web-client/tsconfig.json",

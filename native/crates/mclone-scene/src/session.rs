@@ -958,6 +958,10 @@ impl McloneSceneHost {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = options.seed;
                 scene.world_generation_profile = options.world_generation_profile;
+                scene.use_initial_spawn_center = options
+                    .world_generation_profile
+                    .authored_missing_chunk()
+                    .is_none();
                 scene.world_dir = None;
                 Ok::<_, anyhow::Error>(scene)
             },
@@ -971,6 +975,10 @@ impl McloneSceneHost {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = summary.seed;
                 scene.world_generation_profile = summary.world_generation_profile;
+                scene.use_initial_spawn_center = summary
+                    .world_generation_profile
+                    .authored_missing_chunk()
+                    .is_none();
                 scene.world_dir = None;
                 Ok((
                     scene,
@@ -1297,6 +1305,10 @@ impl McloneSceneHost {
             scene.seed = seed;
         }
         scene.world_generation_profile = intent.world_generation_profile();
+        scene.use_initial_spawn_center = intent
+            .world_generation_profile()
+            .authored_missing_chunk()
+            .is_none();
         scene.world_dir = intent.world_dir().map(PathBuf::from);
         if intent.suppress_adaptive_chunk_publication_budget() {
             scene.adaptive_chunk_publication_budget = false;
@@ -1898,7 +1910,10 @@ impl McloneSceneHost {
             .primary
             .authored_fixture()
             .context("managed lobby primary must remain an authored fixture")?;
-        let center = mclone_server::initial_spawn_center_for_seed(summary.seed);
+        let center = mclone_server::initial_spawn_center_for_profile(
+            summary.seed,
+            summary.world_generation_profile,
+        );
         let preview_anchor = Vec3d::new(
             f64::from(center.x * 16 + 8),
             96.0,
@@ -2171,8 +2186,10 @@ impl McloneSceneHost {
         scene.world_dir = None;
         scene.world_behavior_profile = destination.destination.world_behavior_profile;
         scene.world_generation_profile = destination.destination.world_generation_profile;
-        scene.use_initial_spawn_center =
-            scene.world_generation_profile == WorldGenerationProfile::Overworld;
+        scene.use_initial_spawn_center = scene
+            .world_generation_profile
+            .authored_missing_chunk()
+            .is_none();
         scene.debug_passive_showcase = self.debug_managed_scenario_auxiliary_player_script;
         scene.debug_auxiliary_player_script = self.debug_managed_scenario_auxiliary_player_script;
         let scene = scene.validated()?;
@@ -2492,8 +2509,10 @@ impl McloneSceneHost {
         };
         scene.world_behavior_profile = request.world_behavior_profile;
         scene.world_generation_profile = request.world_generation_profile;
-        scene.use_initial_spawn_center =
-            scene.world_generation_profile == WorldGenerationProfile::Overworld;
+        scene.use_initial_spawn_center = scene
+            .world_generation_profile
+            .authored_missing_chunk()
+            .is_none();
         scene.debug_passive_showcase = self.debug_managed_scenario_auxiliary_player_script;
         scene.debug_auxiliary_player_script = self.debug_managed_scenario_auxiliary_player_script;
         let scene = scene.validated()?;
@@ -5738,6 +5757,12 @@ impl McloneSceneHost {
             let scene = {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = start.summary.seed;
+                scene.world_generation_profile = start.summary.world_generation_profile;
+                scene.use_initial_spawn_center = start
+                    .summary
+                    .world_generation_profile
+                    .authored_missing_chunk()
+                    .is_none();
                 scene.world_dir = None;
                 scene
             };
@@ -5815,6 +5840,12 @@ impl McloneSceneHost {
             for start in effects.session_starts {
                 let mut scene = self.active_world.scene.clone();
                 scene.seed = start.summary.seed;
+                scene.world_generation_profile = start.summary.world_generation_profile;
+                scene.use_initial_spawn_center = start
+                    .summary
+                    .world_generation_profile
+                    .authored_missing_chunk()
+                    .is_none();
                 scene.world_dir = None;
                 self.status_overlay = StatusOverlay::hidden();
                 self.session.request_start(
@@ -6392,18 +6423,20 @@ pub fn local_integrated_scene_options(
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
     let mut options =
-        LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance);
-    // The seed-derived spawn center is an overworld biome-source policy. An
-    // authored world deliberately has no overworld terrain to search, so its
-    // configured center is the persistence-backed entry hint whose first view
-    // lets the ordinary safe-surface correction choose the exact pose.
+        LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
+            .with_world_generation_profile(scene.world_generation_profile);
+    // Procedural profiles own their preferred initial center. An authored
+    // world instead keeps its persistence-backed entry hint so the ordinary
+    // safe-surface correction can resolve the exact pose from stored chunks.
     if scene.use_initial_spawn_center
-        && scene.world_generation_profile == WorldGenerationProfile::Overworld
+        && scene
+            .world_generation_profile
+            .authored_missing_chunk()
+            .is_none()
     {
         options = options.with_initial_spawn_center();
     }
     let options = options
-        .with_world_generation_profile(scene.world_generation_profile)
         .with_world_behavior_profile(scene.world_behavior_profile)
         .with_freeze_scheduled_fluid_ticks(scene.freeze_scheduled_fluid_ticks)
         .with_day_time(scene.day_time_override)
@@ -6505,6 +6538,7 @@ pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) ->
 #[cfg(test)]
 mod camera_config_tests {
     use super::*;
+    use mclone_server::WorldGenerationProfile;
 
     #[test]
     fn configured_camera_applies_launch_defaults_once() {

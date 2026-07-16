@@ -78,6 +78,18 @@ fn title_flow_screens_route_through_v2_surface() {
         .v2_debug_snapshot()
         .expect("WorldCreate has debug data");
     assert_eq!(snapshot.screen, Some(UiScreenId::WorldCreate));
+    let profile = snapshot
+        .widgets
+        .iter()
+        .find(|widget| widget.id == UI_V2_WORLD_CREATE_PROFILE)
+        .expect("World profile button");
+    assert_eq!(profile.label, "World: Vanilla 1.17 Overworld");
+    assert!(host.pointer_down(point_in(profile.rect)));
+    let (_handled, profile_action) = host.pointer_up(point_in(profile.rect));
+    assert_eq!(
+        profile_action,
+        Some(GameUiAction::CycleWorldGenerationProfile)
+    );
     let create = snapshot
         .widgets
         .iter()

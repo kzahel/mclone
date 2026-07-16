@@ -1,8 +1,10 @@
 use crate::session::{GameSessionState, RemoteSessionEndpoint, SessionStartRequest, SessionStatus};
+use mclone_server::WorldGenerationProfile;
 use mclone_ui::{GameScreen, GameUiAction, LoadingProgressOverlay, StatusOverlay};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientSessionActionContext<'a> {
+    pub new_world_generation_profile: WorldGenerationProfile,
     pub next_new_world_seed: Option<i64>,
     pub current_join_remote_addr: &'a str,
     pub fallback_remote_addr: Option<&'a str>,
@@ -70,7 +72,12 @@ pub fn client_session_effects_for_action(
             ..ClientSessionEffects::default()
         },
         GameUiAction::CreateWorld(seed) => ClientSessionEffects {
-            session_start: Some(SessionStartRequest::new_seed_local_world(seed)),
+            session_start: Some(
+                SessionStartRequest::new_seed_local_world_with_generation_profile(
+                    seed,
+                    context.new_world_generation_profile,
+                ),
+            ),
             ..ClientSessionEffects::default()
         },
         GameUiAction::JoinRemote => ClientSessionEffects {
@@ -185,6 +192,7 @@ mod tests {
 
     fn context() -> ClientSessionActionContext<'static> {
         ClientSessionActionContext {
+            new_world_generation_profile: WorldGenerationProfile::Overworld,
             next_new_world_seed: Some(42),
             current_join_remote_addr: "127.0.0.1:25565",
             fallback_remote_addr: Some("10.0.0.9:25565"),
@@ -214,6 +222,24 @@ mod tests {
             Some(SessionStartRequest::new_seed_local_world(1234))
         );
         assert_eq!(effects.host_action, None);
+    }
+
+    #[test]
+    fn create_world_carries_selected_generation_profile() {
+        let mut context = context();
+        context.new_world_generation_profile = WorldGenerationProfile::SmallIslandV1;
+        let effects =
+            client_session_effects_for_action(GameUiAction::CreateWorld(-98_765), context);
+
+        assert_eq!(
+            effects.session_start,
+            Some(
+                SessionStartRequest::new_seed_local_world_with_generation_profile(
+                    -98_765,
+                    WorldGenerationProfile::SmallIslandV1,
+                )
+            )
+        );
     }
 
     #[test]

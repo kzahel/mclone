@@ -894,6 +894,7 @@ impl Default for WorldCatalogUiText {
 pub struct WorldCatalogUiEntry {
     pub id: WorldCatalogUiWorldId,
     pub display_name: WorldCatalogUiText,
+    pub generation_profile: WorldCatalogUiText,
     pub seed: i64,
     pub created_unix_millis: u64,
     pub last_played_unix_millis: Option<u64>,
@@ -906,12 +907,18 @@ impl WorldCatalogUiEntry {
         Self {
             id,
             display_name: WorldCatalogUiText::new(display_name),
+            generation_profile: WorldCatalogUiText::empty(),
             seed,
             created_unix_millis: 0,
             last_played_unix_millis: None,
             locked: false,
             compatible: true,
         }
+    }
+
+    pub fn with_generation_profile(mut self, generation_profile: &str) -> Self {
+        self.generation_profile = WorldCatalogUiText::new(generation_profile);
+        self
     }
 
     pub const fn with_created_unix_millis(mut self, created_unix_millis: u64) -> Self {
@@ -983,6 +990,7 @@ pub struct WorldCatalogUiState {
     pub active: Option<WorldCatalogUiWorldId>,
     pub status: WorldCatalogUiStatus,
     pub create_display_name: WorldCatalogUiText,
+    pub create_generation_profile: WorldCatalogUiText,
 }
 
 impl WorldCatalogUiState {
@@ -999,6 +1007,7 @@ impl WorldCatalogUiState {
             active: None,
             status: WorldCatalogUiStatus::hidden(),
             create_display_name: WorldCatalogUiText::empty(),
+            create_generation_profile: WorldCatalogUiText::empty(),
         }
     }
 
@@ -1010,6 +1019,7 @@ impl WorldCatalogUiState {
             open_supported: true,
             delete_supported: true,
             create_display_name: WorldCatalogUiText::new("New World"),
+            create_generation_profile: WorldCatalogUiText::new("Vanilla 1.17 Overworld"),
             ..Self::empty()
         };
         state.set_entries(entries);
@@ -1769,6 +1779,7 @@ pub enum GameUiAction {
     OpenNewWorld,
     OpenJoinRemote,
     RerollSeed,
+    CycleWorldGenerationProfile,
     CreateWorld(i64),
     JoinRemote,
     Resume,

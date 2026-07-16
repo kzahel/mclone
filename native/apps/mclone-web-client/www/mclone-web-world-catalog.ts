@@ -28,7 +28,11 @@ type IndexedDbCatalogPolicy = Pick<
 let indexedDbCatalogPolicy: IndexedDbCatalogPolicy | null = null;
 let lastCatalogTimestamp = 0;
 
-export type WebWorldGenerationProfile = "overworld" | "authored-only";
+export type WebWorldGenerationProfile =
+  | "overworld"
+  | "flat-grass-v1"
+  | "small-island-v1"
+  | "authored-only";
 
 function nextCatalogTimestamp(): number {
   lastCatalogTimestamp = Math.max(Date.now(), lastCatalogTimestamp + 1);
@@ -196,13 +200,19 @@ export async function recordIndexedDbCatalogWorldPlayed(
 ): Promise<WebLocalWorldSummary> {
   const policy = requireIndexedDbCatalogPolicy();
   const normalizedId = policy.mclone_web_catalog_validate_world_id(id);
-  const summary = await getIndexedDbCatalogWorld(db, normalizedId);
+  // Keep the existence check and recency update in one read/write transaction.
+  // Otherwise a late activation record can read before a concurrent delete,
+  // then put its stale summary after the delete and resurrect the catalog row.
+  const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
+  const store = transaction.objectStore(WORLD_CATALOG_STORE);
+  const summary = await idbRequest<unknown>(store.get(normalizedId));
   const recorded = policy.mclone_web_catalog_prepare_record_world_played(
     normalizedId,
-    summary,
+    summary ?? null,
     nextCatalogTimestamp(),
   ) as WebLocalWorldSummary;
-  await putIndexedDbCatalogSummary(db, recorded);
+  store.put(recorded);
+  await transactionDone(transaction);
   return recorded;
 }
 

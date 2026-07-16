@@ -2,10 +2,12 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tactical 187 is active through Slice 3. `flat-grass-v1` and
+Status: **Tactical 187 is active through Slice 4. `flat-grass-v1` and
 `small-island-v1` are live, persisted, target-only shared-Rust generators
 beside the unchanged Overworld; authored-only misses still produce void.
-Cross-platform product adoption is next.**
+Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
+multi-dimension, and stored-reopen paths now carry the same profile contract.
+Fork-readiness cleanup is next.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -41,6 +43,13 @@ The stored server-owned `WorldGenerationProfile` has four values:
 The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
+
+Product world creation cycles the three procedural profiles through shared
+catalog policy and generator-agnostic UI text. Scene replacement, warm-world
+startup, managed previews, and all host adapters copy the selected descriptor
+before using the shared profile-aware spawn policy. Native SQLite and browser
+IndexedDB reopen preserve it; the browser Worker applies stored metadata
+profiles before validating or scheduling the world.
 
 Scheduler and worker requests now carry an immutable profile-plus-seed
 descriptor through native messages, WASM codecs, responses, and diagnostics.
@@ -153,14 +162,9 @@ adding profile branches.
 
 ## Next Work
 
-Execute Tactical 187 in order:
+Tactical 187 has completed steps 1 through 5; the remaining step is:
 
-1. correct current-state documentation and lock legacy compatibility;
-2. propagate descriptors and dispatch the unchanged overworld path;
-3. land flat grass;
-4. land seeded small island;
-5. adopt profile selection across hosts/product surfaces;
-6. extract only the biome/rules seams demonstrated necessary for the later
+1. extract only the biome/rules seams demonstrated necessary for the later
    vanilla/mclone fork.
 
 True native structure infrastructure and original mclone structures remain a

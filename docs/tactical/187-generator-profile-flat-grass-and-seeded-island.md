@@ -1,7 +1,7 @@
 # Tactical 187: Generator Profiles, Flat Grass, and Seeded Island
 
 Status: active parent; product direction accepted 2026-07-16. Slices 0 through
-3 are complete; cross-platform product adoption is next.
+4 are complete; the bounded fork-readiness inventory is next.
 
 Topic: `world-generation-profiles`
 
@@ -596,7 +596,7 @@ Execution record:
 
 ### Slice 4: Cross-platform/product selection and lifecycle proof
 
-Status: planned.
+Status: complete 2026-07-17.
 
 - Add shared display metadata for the three procedural choices without making
   apps own behavior.
@@ -614,6 +614,37 @@ Status: planned.
 Gate: every host creates or opens the same stored profile, remote clients are
 generator-agnostic, and no platform contains a private profile-to-algorithm
 switch.
+
+Execution record:
+
+- added shared procedural-profile display metadata and a stable
+  Overworld/flat/island cycle to the catalog controller; desktop, browser,
+  flat Android, and XR consume the same generator-agnostic UI action and
+  catalog text instead of owning terrain switches;
+- catalog and transient create requests now carry the selected profile, world
+  rows show stored profile/version identity, and native SQLite catalog reopen
+  retains `small-island-v1` exactly. The live browser catalog smoke creates a
+  flat world, then an island world, reopens the flat world, and deletes the
+  island without descriptor loss or a late recency update resurrecting it;
+- made scene startup, replacement, managed preview/destination startup, native
+  perf paths, and browser worker runtime configuration copy the selected
+  profile before resolving the profile-owned spawn center;
+- made browser IndexedDB startup adopt stored generation/behavior profiles
+  before metadata validation. The real Worker smoke exposed and then locked
+  this rule by creating and reloading `small-island-v1` through IndexedDB;
+- added a realm test with a flat overworld dimension and an independently
+  seeded island dimension; both load their own exact generated surface at the
+  same chunk coordinate without descriptor leakage;
+- added `GEN <stable profile>` to flat/XR diagnostics and inspected
+  `/tmp/mclone-world-generation-profile-create-idle.png`, the flat Worker
+  frame, and the post-reload island Worker frame. The latter reports
+  `GEN SMALL-ISLAND-V1` at the guaranteed Y `82.62` spawn;
+- `pnpm native:web:generator-smoke` passes a real flat local Worker run plus an
+  island Worker/IndexedDB reload, and `pnpm native:web:catalog-smoke` passes the
+  alternate-profile product flow; the existing dedicated remote test continues
+  to prove clients consume authoritative chunks without generator logic;
+- shared Rust/UI suites, WASM check/typecheck, native Android APK, and Quest XR
+  APK build lanes pass after the startup and UI wiring changes.
 
 ### Slice 5: Fork-readiness cleanup
 

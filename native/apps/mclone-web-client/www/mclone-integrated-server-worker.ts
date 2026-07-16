@@ -32,7 +32,11 @@ interface IntegratedServerWorkerMessage {
   kind?: string;
   requestId?: number;
   seed?: number | string;
-  generationProfile?: "overworld" | "authored-only";
+  generationProfile?:
+    | "overworld"
+    | "flat-grass-v1"
+    | "small-island-v1"
+    | "authored-only";
   behaviorProfile?: "mutable" | "protected-lobby";
   lightStatusBatchSize?: number;
   jobWorkerUrl?: string;
@@ -191,12 +195,14 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   const hasJobWorkers = Boolean(message.jobWorkerUrl)
     && typeof workerConstructor.withJobWorkers === "function";
   const indexedDbMode = message.worldStorage === "indexeddb";
+  let storedWorldMetadataPresent = false;
   if (indexedDbMode) {
     if (
       hasJobWorkers
       && typeof workerConstructor.withJobWorkersAndIndexedDbExternalLoads === "function"
     ) {
       const metadata = await prepareIndexedDbWorldForStart(message);
+      storedWorldMetadataPresent = metadata.worldMetadataRecord !== undefined;
       server = workerConstructor.withJobWorkersAndIndexedDbExternalLoads(
         seed,
         String(message.jobWorkerUrl),
@@ -207,6 +213,7 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
       );
     } else if (typeof workerConstructor.withIndexedDbExternalLoads === "function") {
       const metadata = await prepareIndexedDbWorldForStart(message);
+      storedWorldMetadataPresent = metadata.worldMetadataRecord !== undefined;
       server = workerConstructor.withIndexedDbExternalLoads(
         seed,
         metadata.worldMetadataRecord,
@@ -214,6 +221,7 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
       );
     } else {
       const indexedRecords = await loadIndexedDbWorldForStart(message);
+      storedWorldMetadataPresent = indexedRecords.worldMetadataRecord !== undefined;
       if (
         hasJobWorkers
         && typeof workerConstructor.withJobWorkersAndIndexedDbRecords === "function"
@@ -252,11 +260,17 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
       : new workerConstructor(seed);
   }
   const generationProfile = String(message.generationProfile ?? "overworld");
-  if (typeof (server as any).setWorldGenerationProfile === "function") {
+  if (
+    !storedWorldMetadataPresent
+    && typeof (server as any).setWorldGenerationProfile === "function"
+  ) {
     (server as any).setWorldGenerationProfile(generationProfile);
   }
   const behaviorProfile = String(message.behaviorProfile ?? "mutable");
-  if (typeof (server as any).setWorldBehaviorProfile === "function") {
+  if (
+    !storedWorldMetadataPresent
+    && typeof (server as any).setWorldBehaviorProfile === "function"
+  ) {
     (server as any).setWorldBehaviorProfile(behaviorProfile);
   }
   if (indexedDbMode) {

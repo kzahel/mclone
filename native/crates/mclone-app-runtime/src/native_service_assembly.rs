@@ -28,7 +28,7 @@ use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
     NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
     ServerRunnerDiagnostics, SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile,
-    host_tick_interval_for_rate_hz, initial_spawn_center_for_seed,
+    host_tick_interval_for_rate_hz, initial_spawn_center_for_profile,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -253,7 +253,7 @@ impl LocalIntegratedSceneOptions {
     }
 
     pub fn with_initial_spawn_center(mut self) -> Self {
-        self.center = initial_spawn_center_for_seed(self.seed);
+        self.center = initial_spawn_center_for_profile(self.seed, self.world_generation_profile);
         self
     }
 
@@ -3889,7 +3889,19 @@ mod tests {
         let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 2)
             .with_initial_spawn_center();
 
-        assert_eq!(options.center, initial_spawn_center_for_seed(12345));
+        assert_eq!(
+            options.center,
+            initial_spawn_center_for_profile(12345, WorldGenerationProfile::Overworld)
+        );
+    }
+
+    #[test]
+    fn local_integrated_scene_options_use_selected_profile_spawn_center() {
+        let options = LocalIntegratedSceneOptions::new(12345, ChunkPos::new(19, -20), 2)
+            .with_world_generation_profile(WorldGenerationProfile::SmallIslandV1)
+            .with_initial_spawn_center();
+
+        assert_eq!(options.center, ChunkPos::new(0, 0));
     }
 
     #[test]

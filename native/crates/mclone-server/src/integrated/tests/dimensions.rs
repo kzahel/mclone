@@ -1,5 +1,6 @@
 use super::*;
 use crate::MemoryWorldStore;
+use mclone_worldgen::block::GRASS_BLOCK;
 
 fn moon_record() -> DimensionRecord {
     DimensionRecord {
@@ -191,6 +192,68 @@ fn concurrent_dimension_runtimes_route_players_ticks_and_mutations() {
     assert!(!server.loaded_dimension_keys().contains(&moon));
     assert!(server.register_dimension(moon_record()).unwrap());
     assert!(server.loaded_dimension_keys().contains(&moon));
+}
+
+#[test]
+fn dimensions_generate_with_independent_stored_profiles_and_seeds() {
+    let island = DimensionKey::parse("mclone:small_island").unwrap();
+    let island_record = DimensionRecord {
+        key: island.clone(),
+        codec_version: crate::DIMENSION_RECORD_VERSION,
+        revision: 1,
+        definition: crate::DimensionDefinition::overworld(
+            -98_765,
+            WorldGenerationProfile::SmallIslandV1,
+        ),
+    };
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server
+        .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+        .unwrap();
+    server.set_lighting_enabled(false);
+    assert!(server.register_dimension(island_record).unwrap());
+
+    let flat_player = server.add_player();
+    let island_player = server.add_player_in_dimension(island.clone()).unwrap();
+    request_zero_radius_view(&mut server, flat_player);
+    request_zero_radius_view(&mut server, island_player);
+    wait_for_origin_in_both_dimensions(&mut server, &island);
+
+    let flat = server
+        .dimension_runtime(&DimensionKey::overworld())
+        .unwrap();
+    assert_eq!(
+        flat.definition().generation_profile,
+        WorldGenerationProfile::FlatGrassV1
+    );
+    assert_eq!(flat.definition().seed, 12_345);
+    assert_eq!(
+        flat.scheduler().block_at_world(BlockPos::new(0, 3, 0)),
+        Some(GRASS_BLOCK)
+    );
+    assert_eq!(
+        flat.scheduler().block_at_world(BlockPos::new(0, 4, 0)),
+        Some(AIR)
+    );
+
+    let generated_island = server.dimension_runtime(&island).unwrap();
+    assert_eq!(
+        generated_island.definition().generation_profile,
+        WorldGenerationProfile::SmallIslandV1
+    );
+    assert_eq!(generated_island.definition().seed, -98_765);
+    assert_eq!(
+        generated_island
+            .scheduler()
+            .block_at_world(BlockPos::new(0, 80, 0)),
+        Some(GRASS_BLOCK)
+    );
+    assert_eq!(
+        generated_island
+            .scheduler()
+            .block_at_world(BlockPos::new(0, 81, 0)),
+        Some(AIR)
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
