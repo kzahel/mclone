@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: proposed 2026-07-16; reference/current-state audit complete;
-implementation not started
+Status: active 2026-07-16; reference/current-state audit and Slice 0
+executable locks complete; Slice 1 unified-server cleanup next
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -314,6 +314,22 @@ Host adapters (same RealmServer core)
   deterministic test host
 ```
 
+Shared contract homes are fixed before refactoring:
+
+- `RealmId`, `DimensionKey`, and cross-boundary qualified addresses such as
+  `DimensionChunkPos` live in `mclone-protocol`. They cross server, client,
+  persistence-adapter, diagnostics, and eventual wire boundaries; they do not
+  belong to platform apps or hot coordinate/math primitives in `mclone-core`.
+- persisted `RealmMetadata`, `DimensionDefinition`/record, registry migration,
+  and scoped store handles live in `mclone-server::persistence` (split into
+  focused modules when size warrants).
+- authoritative `RealmServer`, `DimensionRuntime`, player membership,
+  interest, transfer, and unload policy live in `mclone-server`.
+- client replica/subscription state lives in `mclone-client`; session and warm
+  presentation orchestration live in `mclone-scene`.
+- `WorldInstanceId` remains scene-local and cannot convert implicitly into any
+  durable identifier.
+
 One host tick advances realm-global lifecycle once and each loaded dimension
 once. A command resolves its session/player first, then its current
 `DimensionKey`, and is dispatched to exactly that runtime. Global cadence must
@@ -493,7 +509,7 @@ one-realm/one-Overworld path green and fast.
 
 ### Slice 0: Contracts and executable current-state locks
 
-Status: architecture recorded; executable locks not started.
+Status: complete 2026-07-16.
 
 - Add focused source/behavior tests proving the current one-dimension keys,
   hard-coded Overworld player record, and full-player standby behavior before
@@ -501,6 +517,19 @@ Status: architecture recorded; executable locks not started.
 - Decide exact shared homes for `RealmId`, `DimensionKey`, qualified addresses,
   and dimension definitions without adding app/platform dependencies.
 - Record v1 SQLite/IndexedDB migration fixtures.
+
+Evidence:
+
+- `current_single_dimension_runtime_rejects_non_overworld_resume_records`
+  proves the current Overworld-only player-record gate;
+- `sqlite_v1_fixture_reopens_with_unqualified_chunk_keys` constructs an exact
+  v1 database with metadata, chunk, entity-chunk, and player records and
+  reopens it through the production store;
+- `realm_dimension_persistence_lock` pins browser IndexedDB v5
+  `[worldId, x, z]` chunk/entity keys and `[worldId, playerKey]` player keys;
+- `standby_preview_currently_joins_a_full_local_player_not_an_observer` pins
+  the current full-player standby topology;
+- the shared contract homes above prevent platform-local identity policy.
 
 Exit: every implicit singleton that must change is enumerated and guarded.
 

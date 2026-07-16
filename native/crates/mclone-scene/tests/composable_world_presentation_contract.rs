@@ -290,6 +290,28 @@ fn current_local_player_body_is_active_view_policy_not_preview_policy() {
 }
 
 #[test]
+fn standby_preview_currently_joins_a_full_local_player_not_an_observer() {
+    let session = read("src/session.rs");
+    let attach = braced_item(
+        &session,
+        "fn begin_prepared_warm_world_standby_with_native_world_dir(",
+    );
+    assert!(attach.contains("LocalIntegratedStartupPump::with_mesh_assets("));
+
+    let server = read("../mclone-server/src/integrated.rs");
+    let constructor = braced_item(
+        &server,
+        "fn with_scheduler_and_player_chunk_tracking_policy(",
+    );
+    assert!(constructor.contains("chunk_tracking.add_player(ServerPlayerId::LOCAL)"));
+    assert!(constructor.contains("remote_players.add_player(ServerPlayerId::LOCAL)"));
+
+    let scene = read("src/lib.rs");
+    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
+    assert!(preview_collect.contains("local_player_actor_instance("));
+}
+
+#[test]
 fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
     let frame = read("../mclone-app-runtime/src/frame_render.rs");
     let render = braced_item(&frame, "fn render_full_frame_for_view_inner<BuildGuiDraw>(");

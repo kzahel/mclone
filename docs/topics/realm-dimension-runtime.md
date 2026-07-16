@@ -3,8 +3,8 @@
 Topic: `realm-dimension-runtime`
 
 Status: **architecture accepted 2026-07-16; current-state and vanilla audits
-complete; Tactical 185 Slice 0 evidence locks are next, followed by the Slice 1
-shared-topology cleanup before new dimension, observer, or statistics
+and Tactical 185 Slice 0 executable locks are complete. Slice 1 shared-server
+topology cleanup is next, before new dimension, observer, or statistics
 features.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
@@ -289,6 +289,13 @@ Current seams that the first slices must change or protect:
 The shared owner remains `mclone-server`. App crates may assemble transports,
 storage roots, event loops, browser workers, and process lifecycle, but may not
 take ownership of realm/dimension gameplay policy.
+
+Slice 0 now pins the current state with executable receipts: an exact SQLite
+v1 fixture, an IndexedDB v5 key-shape lock, an Overworld-only resume test, and
+a source/behavior lock proving standby preview currently joins a full local
+player. Shared identifiers and qualified cross-boundary addresses will live in
+`mclone-protocol`; authoritative definitions, persistence, runtime membership,
+interest, and transfer remain owned by `mclone-server`.
 
 ## Current Gaps and Ordered Next Work
 

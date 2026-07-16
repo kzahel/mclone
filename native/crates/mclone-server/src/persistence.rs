@@ -4537,6 +4537,149 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn sqlite_v1_fixture_reopens_with_unqualified_chunk_keys() {
+        let root = unique_temp_dir("sqlite-v1-realm-dimension-fixture");
+        let path = root.join("world.sqlite3");
+        let chunk = test_record(ChunkPos::new(-31, 47), 21);
+        let entity_chunk = test_entity_chunk_record(ChunkPos::new(-31, 48), 22);
+        let player = test_player_record(23);
+        let metadata = test_world_metadata(24);
+
+        {
+            fs::create_dir_all(&root).unwrap();
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute_batch(
+                    "CREATE TABLE metadata (
+                        key TEXT PRIMARY KEY,
+                        value TEXT NOT NULL
+                     );
+                     CREATE TABLE world_metadata (
+                        singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                        codec_version INTEGER NOT NULL,
+                        revision TEXT NOT NULL,
+                        record_blob BLOB NOT NULL
+                     );
+                     CREATE TABLE chunk_records (
+                        x INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        codec_version INTEGER NOT NULL,
+                        revision TEXT NOT NULL,
+                        record_blob BLOB NOT NULL,
+                        PRIMARY KEY (x, z)
+                     );
+                     CREATE TABLE entity_chunk_records (
+                        x INTEGER NOT NULL,
+                        z INTEGER NOT NULL,
+                        codec_version INTEGER NOT NULL,
+                        revision TEXT NOT NULL,
+                        record_blob BLOB NOT NULL,
+                        PRIMARY KEY (x, z)
+                     );
+                     CREATE TABLE player_records (
+                        player_key TEXT PRIMARY KEY,
+                        codec_version INTEGER NOT NULL,
+                        revision TEXT NOT NULL,
+                        record_blob BLOB NOT NULL
+                     );
+                     CREATE TABLE saved_data_records (
+                        data_key TEXT PRIMARY KEY,
+                        codec_version INTEGER NOT NULL,
+                        revision TEXT NOT NULL,
+                        record_blob BLOB NOT NULL
+                     );
+                     INSERT INTO metadata (key, value) VALUES ('schema_version', '1');
+                     PRAGMA user_version = 1;",
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO world_metadata
+                        (singleton_id, codec_version, revision, record_blob)
+                     VALUES (1, ?1, ?2, ?3)",
+                    params![
+                        metadata.codec_version,
+                        metadata.revision.to_string(),
+                        encode_world_metadata(&metadata).unwrap()
+                    ],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO chunk_records
+                        (x, z, codec_version, revision, record_blob)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        chunk.pos().x,
+                        chunk.pos().z,
+                        SNAPSHOT_FORMAT_VERSION,
+                        chunk.revision().0.to_string(),
+                        encode_chunk_record(&chunk).unwrap()
+                    ],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO entity_chunk_records
+                        (x, z, codec_version, revision, record_blob)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        entity_chunk.pos.x,
+                        entity_chunk.pos.z,
+                        entity_chunk.codec_version,
+                        entity_chunk.revision.to_string(),
+                        encode_entity_chunk_record(&entity_chunk).unwrap()
+                    ],
+                )
+                .unwrap();
+            connection
+                .execute(
+                    "INSERT INTO player_records
+                        (player_key, codec_version, revision, record_blob)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        player.player.as_str(),
+                        player.codec_version,
+                        player.revision.to_string(),
+                        encode_player_record(&player).unwrap()
+                    ],
+                )
+                .unwrap();
+        }
+
+        {
+            let mut reopened = SqliteWorldStore::new(&path).unwrap();
+            assert_eq!(reopened.load_chunk(chunk.pos()).unwrap(), Some(chunk));
+            assert_eq!(
+                reopened.load_entity_chunk(entity_chunk.pos).unwrap(),
+                Some(entity_chunk)
+            );
+            assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
+            assert_eq!(
+                reopened.load_world_metadata().unwrap().record,
+                Some(metadata)
+            );
+
+            let mut statement = reopened
+                .connection
+                .prepare("PRAGMA table_info(chunk_records)")
+                .unwrap();
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(
+                columns,
+                ["x", "z", "codec_version", "revision", "record_blob"]
+            );
+        }
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn threaded_sqlite_world_store_persists_durable_records_across_reopen() {
         let root = unique_temp_dir("threaded_sqlite_world_store_persists_records");
         let path = root.join("world.sqlite3");

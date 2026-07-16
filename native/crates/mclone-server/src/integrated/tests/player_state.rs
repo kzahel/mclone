@@ -268,6 +268,35 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
 }
 
 #[test]
+fn current_single_dimension_runtime_rejects_non_overworld_resume_records() {
+    let seed = 12_345;
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x43; 16]), "Traveler").unwrap();
+    let mut record = PlayerRecord::new(
+        player_record_key(identity.profile_id),
+        8,
+        identity.display_name.clone(),
+        Vec3d::new(4_096.5, 200.0, -4_096.5),
+    );
+    record.dimension = "mclone:moon".to_owned();
+    record.selected_hotbar_slot = 6;
+    record.total_experience = 41;
+    let mut store = MemoryWorldStore::new();
+    store.save_player(&record).unwrap();
+
+    let mut server = IntegratedServer::with_world_store(seed, Box::new(store));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    request_initial_chunk_view(&mut server);
+    let spawned = wait_for_initial_spawn_update(&mut server);
+
+    assert_ne!(spawned.position, record.position);
+    assert_eq!(server.inventory.selected_hotbar_slot(), 0);
+    assert_eq!(server.local_player_total_experience, 0);
+    assert!(server.local_player_resume_record.is_none());
+}
+
+#[test]
 fn blocked_saved_player_pose_falls_back_to_safe_surface_nearby() {
     let seed = 12_345;
     let mut probe = IntegratedServer::new(seed);
