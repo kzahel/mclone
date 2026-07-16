@@ -1,6 +1,8 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::io;
+use std::rc::Rc;
 
 use std::io::{Read, Write};
 
@@ -1169,10 +1171,10 @@ impl PendingEntityChunkWrite {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 enum PendingWriteKey {
-    Chunk(ChunkPos),
-    EntityChunk(ChunkPos),
+    Chunk(DimensionChunkPos),
+    EntityChunk(DimensionChunkPos),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1185,8 +1187,8 @@ enum ExternalLoadKey {
 #[derive(Debug)]
 pub struct PersistenceActor {
     store: Box<dyn WorldStore>,
-    pending_chunk_writes: BTreeMap<ChunkPos, PendingChunkWrite>,
-    pending_entity_chunk_writes: BTreeMap<ChunkPos, PendingEntityChunkWrite>,
+    pending_chunk_writes: BTreeMap<DimensionChunkPos, PendingChunkWrite>,
+    pending_entity_chunk_writes: BTreeMap<DimensionChunkPos, PendingEntityChunkWrite>,
     completions: VecDeque<WorldStoreCompletion>,
     closed: bool,
 }
@@ -1281,7 +1283,8 @@ impl PersistenceActor {
             return;
         }
 
-        let result = if let Some(pending) = self.pending_chunk_writes.get(&pos) {
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
+        let result = if let Some(pending) = self.pending_chunk_writes.get(&address) {
             Ok(Some(pending.record.clone()))
         } else {
             self.store.load_chunk(&dimension, pos)
@@ -1320,7 +1323,8 @@ impl PersistenceActor {
             record,
             durability,
         };
-        if let Some(existing) = self.pending_chunk_writes.get_mut(&pos) {
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
+        if let Some(existing) = self.pending_chunk_writes.get_mut(&address) {
             if incoming.should_replace(existing) {
                 let superseded_id = existing.request_id;
                 *existing = incoming;
@@ -1343,7 +1347,7 @@ impl PersistenceActor {
             return;
         }
 
-        self.pending_chunk_writes.insert(pos, incoming);
+        self.pending_chunk_writes.insert(address, incoming);
     }
 
     pub fn load_entity_chunk(
@@ -1363,7 +1367,8 @@ impl PersistenceActor {
             return;
         }
 
-        let result = if let Some(pending) = self.pending_entity_chunk_writes.get(&pos) {
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
+        let result = if let Some(pending) = self.pending_entity_chunk_writes.get(&address) {
             Ok(Some(pending.record.clone()))
         } else {
             self.store.load_entity_chunk(&dimension, pos)
@@ -1402,7 +1407,8 @@ impl PersistenceActor {
             record,
             durability,
         };
-        if let Some(existing) = self.pending_entity_chunk_writes.get_mut(&pos) {
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
+        if let Some(existing) = self.pending_entity_chunk_writes.get_mut(&address) {
             if incoming.should_replace(existing) {
                 let superseded_id = existing.request_id;
                 *existing = incoming;
@@ -1425,7 +1431,7 @@ impl PersistenceActor {
             return;
         }
 
-        self.pending_entity_chunk_writes.insert(pos, incoming);
+        self.pending_entity_chunk_writes.insert(address, incoming);
     }
 
     pub fn load_player(&mut self, request_id: PersistenceRequestId, player: PlayerRecordKey) {
@@ -1516,34 +1522,34 @@ impl PersistenceActor {
                 pending.durability.is_durable()
             });
         }
-        for pos in self
+        for address in self
             .pending_chunk_writes
             .keys()
-            .copied()
+            .cloned()
             .collect::<Vec<_>>()
         {
-            if let Some(pending) = self.pending_chunk_writes.remove(&pos) {
+            if let Some(pending) = self.pending_chunk_writes.remove(&address) {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
                         request_id: pending.request_id,
                         dimension: pending.dimension,
-                        pos,
+                        pos: address.pos,
                         result: Ok(StoreWriteOutcome::SkippedOnClose),
                     });
             }
         }
-        for pos in self
+        for address in self
             .pending_entity_chunk_writes
             .keys()
-            .copied()
+            .cloned()
             .collect::<Vec<_>>()
         {
-            if let Some(pending) = self.pending_entity_chunk_writes.remove(&pos) {
+            if let Some(pending) = self.pending_entity_chunk_writes.remove(&address) {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id: pending.request_id,
                         dimension: pending.dimension,
-                        pos,
+                        pos: address.pos,
                         result: Ok(StoreWriteOutcome::SkippedOnClose),
                     });
             }
@@ -1563,11 +1569,11 @@ impl PersistenceActor {
             return false;
         };
         match key {
-            PendingWriteKey::Chunk(pos) => {
-                let _ = self.process_pending_chunk_write_at(pos);
+            PendingWriteKey::Chunk(address) => {
+                let _ = self.process_pending_chunk_write_at(address);
             }
-            PendingWriteKey::EntityChunk(pos) => {
-                let _ = self.process_pending_entity_chunk_write_at(pos);
+            PendingWriteKey::EntityChunk(address) => {
+                let _ = self.process_pending_entity_chunk_write_at(address);
             }
         }
         true
@@ -1586,15 +1592,15 @@ impl PersistenceActor {
         &mut self,
         mut predicate: impl FnMut(&PendingChunkWrite) -> bool,
     ) -> ChunkStoreResult<()> {
-        let positions = self
+        let addresses = self
             .pending_chunk_writes
             .iter()
-            .filter_map(|(pos, pending)| predicate(pending).then_some(*pos))
+            .filter_map(|(address, pending)| predicate(pending).then_some(address.clone()))
             .collect::<Vec<_>>();
         let mut result = Ok(());
-        for pos in positions {
-            if self.pending_chunk_writes.contains_key(&pos) {
-                let write_result = self.process_pending_chunk_write_at(pos);
+        for address in addresses {
+            if self.pending_chunk_writes.contains_key(&address) {
+                let write_result = self.process_pending_chunk_write_at(address);
                 if result.is_ok() {
                     result = write_result;
                 }
@@ -1607,15 +1613,15 @@ impl PersistenceActor {
         &mut self,
         mut predicate: impl FnMut(&PendingEntityChunkWrite) -> bool,
     ) -> ChunkStoreResult<()> {
-        let positions = self
+        let addresses = self
             .pending_entity_chunk_writes
             .iter()
-            .filter_map(|(pos, pending)| predicate(pending).then_some(*pos))
+            .filter_map(|(address, pending)| predicate(pending).then_some(address.clone()))
             .collect::<Vec<_>>();
         let mut result = Ok(());
-        for pos in positions {
-            if self.pending_entity_chunk_writes.contains_key(&pos) {
-                let write_result = self.process_pending_entity_chunk_write_at(pos);
+        for address in addresses {
+            if self.pending_entity_chunk_writes.contains_key(&address) {
+                let write_result = self.process_pending_entity_chunk_write_at(address);
                 if result.is_ok() {
                     result = write_result;
                 }
@@ -1625,37 +1631,44 @@ impl PersistenceActor {
     }
 
     fn next_pending_write_key(&self, include_cache: bool) -> Option<PendingWriteKey> {
-        if let Some(pos) = self
+        if let Some(address) = self
             .pending_chunk_writes
             .iter()
-            .find_map(|(pos, pending)| pending.durability.is_durable().then_some(*pos))
+            .find_map(|(address, pending)| {
+                pending.durability.is_durable().then_some(address.clone())
+            })
         {
-            return Some(PendingWriteKey::Chunk(pos));
+            return Some(PendingWriteKey::Chunk(address));
         }
-        if let Some(pos) = self
-            .pending_entity_chunk_writes
-            .iter()
-            .find_map(|(pos, pending)| pending.durability.is_durable().then_some(*pos))
+        if let Some(address) =
+            self.pending_entity_chunk_writes
+                .iter()
+                .find_map(|(address, pending)| {
+                    pending.durability.is_durable().then_some(address.clone())
+                })
         {
-            return Some(PendingWriteKey::EntityChunk(pos));
+            return Some(PendingWriteKey::EntityChunk(address));
         }
         include_cache.then_some(())?;
         self.pending_chunk_writes
             .keys()
             .next()
-            .copied()
+            .cloned()
             .map(PendingWriteKey::Chunk)
             .or_else(|| {
                 self.pending_entity_chunk_writes
                     .keys()
                     .next()
-                    .copied()
+                    .cloned()
                     .map(PendingWriteKey::EntityChunk)
             })
     }
 
-    fn process_pending_chunk_write_at(&mut self, pos: ChunkPos) -> ChunkStoreResult<()> {
-        let Some(pending) = self.pending_chunk_writes.remove(&pos) else {
+    fn process_pending_chunk_write_at(
+        &mut self,
+        address: DimensionChunkPos,
+    ) -> ChunkStoreResult<()> {
+        let Some(pending) = self.pending_chunk_writes.remove(&address) else {
             return Ok(());
         };
         let result = self.store.save_chunk(&pending.dimension, &pending.record);
@@ -1664,14 +1677,17 @@ impl PersistenceActor {
             .push_back(WorldStoreCompletion::ChunkSaved {
                 request_id: pending.request_id,
                 dimension: pending.dimension,
-                pos,
+                pos: address.pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
             });
         barrier_result
     }
 
-    fn process_pending_entity_chunk_write_at(&mut self, pos: ChunkPos) -> ChunkStoreResult<()> {
-        let Some(pending) = self.pending_entity_chunk_writes.remove(&pos) else {
+    fn process_pending_entity_chunk_write_at(
+        &mut self,
+        address: DimensionChunkPos,
+    ) -> ChunkStoreResult<()> {
+        let Some(pending) = self.pending_entity_chunk_writes.remove(&address) else {
             return Ok(());
         };
         let result = self
@@ -1682,7 +1698,7 @@ impl PersistenceActor {
             .push_back(WorldStoreCompletion::EntityChunkSaved {
                 request_id: pending.request_id,
                 dimension: pending.dimension,
-                pos,
+                pos: address.pos,
                 result: result.map(|_| StoreWriteOutcome::Written),
             });
         barrier_result
@@ -1692,8 +1708,8 @@ impl PersistenceActor {
 #[derive(Debug)]
 struct ExternalLoadPersistenceActor {
     store: Box<dyn WorldStore>,
-    cached_chunk_records: BTreeMap<ChunkPos, PendingChunkWrite>,
-    cached_entity_chunk_records: BTreeMap<ChunkPos, PendingEntityChunkWrite>,
+    cached_chunk_records: BTreeMap<DimensionChunkPos, PendingChunkWrite>,
+    cached_entity_chunk_records: BTreeMap<DimensionChunkPos, PendingEntityChunkWrite>,
     pending_external_loads: BTreeMap<PersistenceRequestId, ExternalLoadKey>,
     external_requests: VecDeque<WorldStoreRequest>,
     completions: VecDeque<WorldStoreCompletion>,
@@ -1857,7 +1873,8 @@ impl ExternalLoadPersistenceActor {
             return;
         }
 
-        if let Some(cached) = self.cached_chunk_records.get(&pos) {
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
+        if let Some(cached) = self.cached_chunk_records.get(&address) {
             self.completions
                 .push_back(WorldStoreCompletion::ChunkLoaded {
                     request_id,
@@ -1871,7 +1888,7 @@ impl ExternalLoadPersistenceActor {
         match self.store.load_chunk(&dimension, pos) {
             Ok(Some(record)) => {
                 self.cached_chunk_records.insert(
-                    pos,
+                    address,
                     PendingChunkWrite {
                         request_id: 0,
                         dimension: dimension.clone(),
@@ -1936,9 +1953,10 @@ impl ExternalLoadPersistenceActor {
             record,
             durability,
         };
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
         if self
             .cached_chunk_records
-            .get(&pos)
+            .get(&address)
             .is_some_and(|existing| !incoming.should_replace(existing))
         {
             self.completions
@@ -1953,7 +1971,7 @@ impl ExternalLoadPersistenceActor {
 
         let result = self.store.save_chunk(&dimension, &incoming.record);
         if result.is_ok() {
-            self.cached_chunk_records.insert(pos, incoming);
+            self.cached_chunk_records.insert(address, incoming);
         }
         self.completions
             .push_back(WorldStoreCompletion::ChunkSaved {
@@ -1995,7 +2013,8 @@ impl ExternalLoadPersistenceActor {
             return;
         }
 
-        if let Some(cached) = self.cached_entity_chunk_records.get(&pos) {
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
+        if let Some(cached) = self.cached_entity_chunk_records.get(&address) {
             self.completions
                 .push_back(WorldStoreCompletion::EntityChunkLoaded {
                     request_id,
@@ -2009,7 +2028,7 @@ impl ExternalLoadPersistenceActor {
         match self.store.load_entity_chunk(&dimension, pos) {
             Ok(Some(record)) => {
                 self.cached_entity_chunk_records.insert(
-                    pos,
+                    address,
                     PendingEntityChunkWrite {
                         request_id: 0,
                         dimension: dimension.clone(),
@@ -2074,9 +2093,10 @@ impl ExternalLoadPersistenceActor {
             record,
             durability,
         };
+        let address = DimensionChunkPos::new(dimension.clone(), pos);
         if self
             .cached_entity_chunk_records
-            .get(&pos)
+            .get(&address)
             .is_some_and(|existing| !incoming.should_replace(existing))
         {
             self.completions
@@ -2091,7 +2111,7 @@ impl ExternalLoadPersistenceActor {
 
         let result = self.store.save_entity_chunk(&dimension, &incoming.record);
         if result.is_ok() {
-            self.cached_entity_chunk_records.insert(pos, incoming);
+            self.cached_entity_chunk_records.insert(address, incoming);
         }
         self.completions
             .push_back(WorldStoreCompletion::EntityChunkSaved {
@@ -2198,17 +2218,6 @@ impl ExternalLoadPersistenceActor {
         self.completions.drain(..).collect()
     }
 
-    fn take_completion(
-        &mut self,
-        request_id: PersistenceRequestId,
-    ) -> Option<WorldStoreCompletion> {
-        let index = self
-            .completions
-            .iter()
-            .position(|completion| completion.request_id() == request_id)?;
-        self.completions.remove(index)
-    }
-
     fn drain_external_requests(&mut self) -> Vec<WorldStoreRequest> {
         self.external_requests.drain(..).collect()
     }
@@ -2284,7 +2293,7 @@ impl ExternalLoadPersistenceActor {
                     )));
                 }
                 self.cached_chunk_records.insert(
-                    pos,
+                    DimensionChunkPos::new(dimension.clone(), pos),
                     PendingChunkWrite {
                         request_id: 0,
                         dimension: dimension.clone(),
@@ -2337,7 +2346,7 @@ impl ExternalLoadPersistenceActor {
                     )));
                 }
                 self.cached_entity_chunk_records.insert(
-                    pos,
+                    DimensionChunkPos::new(dimension.clone(), pos),
                     PendingEntityChunkWrite {
                         request_id: 0,
                         dimension: dimension.clone(),
@@ -2559,18 +2568,6 @@ impl ThreadedPersistenceActor {
         self.completion_buffer.drain(..).collect()
     }
 
-    fn take_completion(
-        &mut self,
-        request_id: PersistenceRequestId,
-    ) -> Option<WorldStoreCompletion> {
-        self.drain_available_completions();
-        let index = self
-            .completion_buffer
-            .iter()
-            .position(|completion| completion.request_id() == request_id)?;
-        self.completion_buffer.remove(index)
-    }
-
     fn drain_available_completions(&mut self) -> bool {
         let mut received = false;
         loop {
@@ -2722,24 +2719,6 @@ impl PersistenceBackend {
         }
     }
 
-    fn take_completion(
-        &mut self,
-        request_id: PersistenceRequestId,
-    ) -> Option<WorldStoreCompletion> {
-        match self {
-            Self::Inline(actor) => {
-                let index = actor
-                    .completions
-                    .iter()
-                    .position(|completion| completion.request_id() == request_id)?;
-                actor.completions.remove(index)
-            }
-            Self::ExternalLoads(actor) => actor.take_completion(request_id),
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::Threaded(actor) => actor.take_completion(request_id),
-        }
-    }
-
     fn drain_external_requests(&mut self) -> Vec<WorldStoreRequest> {
         match self {
             Self::ExternalLoads(actor) => actor.drain_external_requests(),
@@ -2776,10 +2755,17 @@ impl PersistenceBackend {
 }
 
 #[derive(Debug)]
-pub struct PersistenceMailbox {
-    dimension: DimensionKey,
+struct SharedPersistenceBackend {
     backend: PersistenceBackend,
     next_request_id: PersistenceRequestId,
+    completions: VecDeque<WorldStoreCompletion>,
+}
+
+#[derive(Debug)]
+pub struct PersistenceMailbox {
+    dimension: DimensionKey,
+    shared: Rc<RefCell<SharedPersistenceBackend>>,
+    owned_requests: BTreeSet<PersistenceRequestId>,
 }
 
 impl PersistenceMailbox {
@@ -2790,8 +2776,12 @@ impl PersistenceMailbox {
     pub fn in_dimension(dimension: DimensionKey, store: Box<dyn WorldStore>) -> Self {
         Self {
             dimension,
-            backend: PersistenceBackend::Inline(PersistenceActor::new(store)),
-            next_request_id: 1,
+            shared: Rc::new(RefCell::new(SharedPersistenceBackend {
+                backend: PersistenceBackend::Inline(PersistenceActor::new(store)),
+                next_request_id: 1,
+                completions: VecDeque::new(),
+            })),
+            owned_requests: BTreeSet::new(),
         }
     }
 
@@ -2805,8 +2795,14 @@ impl PersistenceMailbox {
     ) -> Self {
         Self {
             dimension,
-            backend: PersistenceBackend::ExternalLoads(ExternalLoadPersistenceActor::new(store)),
-            next_request_id: 1,
+            shared: Rc::new(RefCell::new(SharedPersistenceBackend {
+                backend: PersistenceBackend::ExternalLoads(ExternalLoadPersistenceActor::new(
+                    store,
+                )),
+                next_request_id: 1,
+                completions: VecDeque::new(),
+            })),
+            owned_requests: BTreeSet::new(),
         }
     }
 
@@ -2822,8 +2818,12 @@ impl PersistenceMailbox {
     ) -> ChunkStoreResult<Self> {
         Ok(Self {
             dimension,
-            backend: PersistenceBackend::Threaded(ThreadedPersistenceActor::new(store)?),
-            next_request_id: 1,
+            shared: Rc::new(RefCell::new(SharedPersistenceBackend {
+                backend: PersistenceBackend::Threaded(ThreadedPersistenceActor::new(store)?),
+                next_request_id: 1,
+                completions: VecDeque::new(),
+            })),
+            owned_requests: BTreeSet::new(),
         })
     }
 
@@ -2832,31 +2832,19 @@ impl PersistenceMailbox {
     }
 
     pub fn load_world_metadata(&mut self) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::LoadWorldMetadata { request_id });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::LoadWorldMetadata { request_id })
     }
 
     pub fn save_world_metadata(&mut self, record: WorldMetadata) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::SaveWorldMetadata { request_id, record });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::SaveWorldMetadata { request_id, record })
     }
 
     pub fn load_dimension(&mut self, key: DimensionKey) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::LoadDimension { request_id, key });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::LoadDimension { request_id, key })
     }
 
     pub fn save_dimension(&mut self, record: DimensionRecord) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::SaveDimension { request_id, record });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::SaveDimension { request_id, record })
     }
 
     pub fn memory() -> Self {
@@ -2864,21 +2852,31 @@ impl PersistenceMailbox {
     }
 
     pub fn entity_chunks_supported(&self) -> bool {
-        self.backend.entity_chunks_supported()
+        self.shared.borrow().backend.entity_chunks_supported()
     }
 
     pub fn dimension(&self) -> &DimensionKey {
         &self.dimension
     }
 
+    /// Creates another dimension-scoped view over the same realm store actor.
+    /// Request ids remain globally unique and completions are routed back only
+    /// to the scheduler that issued them.
+    pub fn scoped_to_dimension(&self, dimension: DimensionKey) -> Self {
+        Self {
+            dimension,
+            shared: Rc::clone(&self.shared),
+            owned_requests: BTreeSet::new(),
+        }
+    }
+
     pub fn load_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend.send_request(WorldStoreRequest::LoadChunk {
+        let dimension = self.dimension.clone();
+        self.send_request(|request_id| WorldStoreRequest::LoadChunk {
             request_id,
-            dimension: self.dimension.clone(),
+            dimension,
             pos,
-        });
-        request_id
+        })
     }
 
     pub fn save_chunk(
@@ -2886,25 +2884,22 @@ impl PersistenceMailbox {
         record: ChunkRecord,
         durability: SaveDurability,
     ) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend.send_request(WorldStoreRequest::SaveChunk {
+        let dimension = self.dimension.clone();
+        self.send_request(|request_id| WorldStoreRequest::SaveChunk {
             request_id,
-            dimension: self.dimension.clone(),
+            dimension,
             record,
             durability,
-        });
-        request_id
+        })
     }
 
     pub fn load_entity_chunk(&mut self, pos: ChunkPos) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::LoadEntityChunk {
-                request_id,
-                dimension: self.dimension.clone(),
-                pos,
-            });
-        request_id
+        let dimension = self.dimension.clone();
+        self.send_request(|request_id| WorldStoreRequest::LoadEntityChunk {
+            request_id,
+            dimension,
+            pos,
+        })
     }
 
     pub fn save_entity_chunk(
@@ -2912,53 +2907,43 @@ impl PersistenceMailbox {
         record: EntityChunkRecord,
         durability: SaveDurability,
     ) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::SaveEntityChunk {
-                request_id,
-                dimension: self.dimension.clone(),
-                record,
-                durability,
-            });
-        request_id
+        let dimension = self.dimension.clone();
+        self.send_request(|request_id| WorldStoreRequest::SaveEntityChunk {
+            request_id,
+            dimension,
+            record,
+            durability,
+        })
     }
 
     pub fn load_player(&mut self, player: PlayerRecordKey) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::LoadPlayer { request_id, player });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::LoadPlayer { request_id, player })
     }
 
     pub fn save_player(&mut self, record: PlayerRecord) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::SavePlayer { request_id, record });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::SavePlayer { request_id, record })
     }
 
     pub fn load_saved_data(&mut self, key: String) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::LoadSavedData { request_id, key });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::LoadSavedData { request_id, key })
     }
 
     pub fn flush(&mut self) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend
-            .send_request(WorldStoreRequest::Flush { request_id });
-        request_id
+        self.send_request(|request_id| WorldStoreRequest::Flush { request_id })
     }
 
     pub fn close(&mut self) -> PersistenceRequestId {
-        let request_id = self.next_request_id();
-        self.backend.close(request_id);
+        let request_id = self.next_shared_request_id();
+        self.shared.borrow_mut().backend.close(request_id);
+        self.owned_requests.insert(request_id);
         request_id
     }
 
     pub fn process_one_background_write(&mut self) -> bool {
-        self.backend.process_one_background_write()
+        self.shared
+            .borrow_mut()
+            .backend
+            .process_one_background_write()
     }
 
     pub fn process_all_background_writes(&mut self) {
@@ -2966,29 +2951,57 @@ impl PersistenceMailbox {
     }
 
     pub fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
-        self.backend.drain_completions()
+        self.collect_shared_completions();
+        let mut shared = self.shared.borrow_mut();
+        let mut retained = VecDeque::new();
+        let mut owned = Vec::new();
+        while let Some(completion) = shared.completions.pop_front() {
+            if self.owned_requests.remove(&completion.request_id()) {
+                owned.push(completion);
+            } else {
+                retained.push_back(completion);
+            }
+        }
+        shared.completions = retained;
+        owned
     }
 
     pub fn take_completion(
         &mut self,
         request_id: PersistenceRequestId,
     ) -> Option<WorldStoreCompletion> {
-        self.backend.take_completion(request_id)
+        if !self.owned_requests.contains(&request_id) {
+            return None;
+        }
+        self.collect_shared_completions();
+        let mut shared = self.shared.borrow_mut();
+        let index = shared
+            .completions
+            .iter()
+            .position(|completion| completion.request_id() == request_id)?;
+        self.owned_requests.remove(&request_id);
+        shared.completions.remove(index)
     }
 
     pub fn drain_external_requests(&mut self) -> Vec<WorldStoreRequest> {
-        self.backend.drain_external_requests()
+        self.shared.borrow_mut().backend.drain_external_requests()
     }
 
     pub fn complete_external_request(
         &mut self,
         completion: WorldStoreCompletion,
     ) -> ChunkStoreResult<()> {
-        self.backend.complete_external_request(completion)
+        self.shared
+            .borrow_mut()
+            .backend
+            .complete_external_request(completion)
     }
 
     pub fn pending_external_request_count(&self) -> usize {
-        self.backend.pending_external_request_count()
+        self.shared
+            .borrow()
+            .backend
+            .pending_external_request_count()
     }
 
     pub fn load_chunk_blocking(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
@@ -3137,10 +3150,30 @@ impl PersistenceMailbox {
         }
     }
 
-    fn next_request_id(&mut self) -> PersistenceRequestId {
-        let request_id = self.next_request_id;
-        self.next_request_id = self.next_request_id.saturating_add(1);
+    fn next_shared_request_id(&self) -> PersistenceRequestId {
+        let mut shared = self.shared.borrow_mut();
+        let request_id = shared.next_request_id;
+        shared.next_request_id = shared.next_request_id.saturating_add(1);
         request_id
+    }
+
+    fn send_request(
+        &mut self,
+        request: impl FnOnce(PersistenceRequestId) -> WorldStoreRequest,
+    ) -> PersistenceRequestId {
+        let request_id = self.next_shared_request_id();
+        self.shared
+            .borrow_mut()
+            .backend
+            .send_request(request(request_id));
+        self.owned_requests.insert(request_id);
+        request_id
+    }
+
+    fn collect_shared_completions(&mut self) {
+        let mut shared = self.shared.borrow_mut();
+        let completions = shared.backend.drain_completions();
+        shared.completions.extend(completions);
     }
 
     fn take_or_run_until_completion(
@@ -4932,6 +4965,53 @@ mod tests {
                 pos: actual_pos,
             }] if *actual_id == request_id && dimension == &moon && *actual_pos == pos
         ));
+    }
+
+    #[test]
+    fn scoped_mailboxes_share_one_actor_without_crossing_completions() {
+        let moon = DimensionKey::parse("mclone:moon").unwrap();
+        let pos = ChunkPos::new(0, 0);
+        let mut overworld = PersistenceMailbox::memory();
+        let mut moon_mailbox = overworld.scoped_to_dimension(moon.clone());
+        let overworld_id = overworld.save_chunk(test_record(pos, 1), SaveDurability::Durable);
+        let moon_id = moon_mailbox.save_chunk(test_record(pos, 2), SaveDurability::Durable);
+
+        overworld.process_all_background_writes();
+        let moon_completions = moon_mailbox.drain_completions();
+        let overworld_completions = overworld.drain_completions();
+
+        assert!(matches!(
+            moon_completions.as_slice(),
+            [WorldStoreCompletion::ChunkSaved {
+                request_id,
+                dimension,
+                ..
+            }] if *request_id == moon_id && dimension == &moon
+        ));
+        assert!(matches!(
+            overworld_completions.as_slice(),
+            [WorldStoreCompletion::ChunkSaved {
+                request_id,
+                dimension,
+                ..
+            }] if *request_id == overworld_id && dimension == &DimensionKey::overworld()
+        ));
+        assert_eq!(
+            overworld
+                .load_chunk_blocking(pos)
+                .unwrap()
+                .unwrap()
+                .revision(),
+            ChunkRevision(1)
+        );
+        assert_eq!(
+            moon_mailbox
+                .load_chunk_blocking(pos)
+                .unwrap()
+                .unwrap()
+                .revision(),
+            ChunkRevision(2)
+        );
     }
 
     #[test]

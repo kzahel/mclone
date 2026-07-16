@@ -22,7 +22,7 @@ use mclone_frame_budget::{
     BudgetDecisionFamily, BudgetDecisionReport, BudgetTelemetryWindow, DEFAULT_COST_EWMA_ALPHA,
     EwmaCostEstimator, FamilyBudgetConfig, FrameHostKind, StageId, WorkWindow,
 };
-use mclone_protocol::{ChunkView, SectionBlockUpdate};
+use mclone_protocol::{ChunkView, DimensionKey, SectionBlockUpdate};
 use mclone_worldgen::block::{
     OBSIDIAN, RawBlockId, STONE, block_light_emission, block_light_opacity,
     generated_block_state_id, is_water, material_blocks_motion,
@@ -791,6 +791,13 @@ impl ChunkScheduler {
             next_revision: 1,
             store,
         }
+    }
+
+    pub(crate) fn persistence_scoped_to_dimension(
+        &self,
+        dimension: DimensionKey,
+    ) -> PersistenceMailbox {
+        self.store.scoped_to_dimension(dimension)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -2481,6 +2488,33 @@ impl ChunkScheduler {
             if !made_progress {
                 return Err(ChunkStoreError::InvalidData(format!(
                     "persistence close request {request_id} did not complete"
+                )));
+            }
+        }
+    }
+
+    pub fn flush_persistence(&mut self) -> ChunkStoreResult<()> {
+        let request_id = self.store.flush();
+        loop {
+            let completions = self.store.drain_completions();
+            let mut made_progress = !completions.is_empty();
+            for completion in completions {
+                match completion {
+                    WorldStoreCompletion::FlushComplete {
+                        request_id: completed_id,
+                        result,
+                    } if completed_id == request_id => return result,
+                    other => {
+                        self.handle_persistence_completion(other)?;
+                    }
+                }
+            }
+            if self.store.process_one_background_write() {
+                made_progress = true;
+            }
+            if !made_progress {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "persistence flush request {request_id} did not complete"
                 )));
             }
         }

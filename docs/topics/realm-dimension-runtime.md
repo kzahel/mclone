@@ -2,10 +2,11 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-3 are
+Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-4 are
 complete. Every host uses one `RealmServer`, the integrated player is ordinary,
-and realm/dimension identities plus dimension-qualified native and browser
-persistence are live. Slice 4 multi-dimension runtime ownership is next.**
+realm/dimension persistence is qualified, and one realm can concurrently tick
+players in multiple isolated `DimensionRuntime`s. Slice 5 source-owned
+player/observer interest is next.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -106,8 +107,8 @@ client replica. Those extensions do not change the shared server topology.
 
 ## Verified Current Mclone State
 
-The host topology and persistence model are unified, while live dimension
-ownership is still singleton:
+The host topology, persistence model, and live dimension ownership are
+unified:
 
 - native integrated and browser/Web Worker hosts wrap `RealmServer` in a thin
   `LocalRealmSession`; dedicated TCP/WebSocket hosts own `RealmServer`
@@ -116,8 +117,10 @@ ownership is still singleton:
 - the local adapter allocates one normal `ServerPlayerId` and delegates to the
   same command, publication, persistence, and safe-resume APIs as hosted
   players;
-- the server still owns one scheduler/entity/time/store domain and therefore
-  exactly one current dimension;
+- the server owns a loaded `DimensionRuntime` map; schedulers, holders,
+  scheduled ticks, entities, lighting, physics, interest, and scoped store
+  handles are dimension-local while the game/day clock advances once per
+  realm host tick;
 - `RealmServer` owns an explicit, persisted `RealmId` and one-entry
   `DimensionRegistry`; exact v1 metadata receives a stable generated UUID on
   first open;
@@ -129,14 +132,16 @@ ownership is still singleton:
 - SQLite and IndexedDB chunk/entity records are dimension-qualified, with
   exact v1/v5 rows migrated to `minecraft:overworld` and native collision
   coverage for equal coordinates in different dimensions;
-- `PlayerChunkTracking` reduces player views to one anonymous aggregate chunk
-  set;
+- players carry one current dimension and all command/publication paths route
+  through that runtime; within each runtime `PlayerChunkTracking` still
+  reduces player views to one anonymous aggregate chunk set;
 - the current warm diorama starts a full second joined runtime with a real
   server-side local player. Input suppression makes it non-interactive, not an
   observer.
 
-The next work can therefore multiply live dimension ownership without a
-persistence collision or a second integrated-only gameplay path.
+The next work can therefore replace anonymous player-only interest with
+explicit player and observer sources without a persistence collision or a
+second integrated-only gameplay path.
 
 ## Hard Topology Invariants
 

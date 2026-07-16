@@ -69,7 +69,7 @@ pub use cadence::{
 };
 pub use dimension::DimensionRegistry;
 pub use holder::{ChunkHolder, ChunkStatusSlot};
-pub use integrated::{INITIAL_DAY_TIME, LocalRealmSession, RealmServer};
+pub use integrated::{DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession, RealmServer};
 pub use job_codec::{
     WorldgenJobSession, compute_light_status_job_frame, compute_worldgen_job_frame,
 };

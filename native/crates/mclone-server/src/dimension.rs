@@ -39,6 +39,24 @@ impl DimensionRegistry {
         self.definitions.is_empty()
     }
 
+    pub(crate) fn insert(
+        &mut self,
+        key: DimensionKey,
+        definition: DimensionDefinition,
+    ) -> Result<bool, String> {
+        if let Some(existing) = self.definitions.get(&key) {
+            return if existing == &definition {
+                Ok(false)
+            } else {
+                Err(format!(
+                    "dimension {key} is already registered with a different definition"
+                ))
+            };
+        }
+        self.definitions.insert(key, definition);
+        Ok(true)
+    }
+
     pub(crate) fn set_overworld_generation_profile(
         &mut self,
         generation_profile: WorldGenerationProfile,

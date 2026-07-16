@@ -5,6 +5,7 @@
 //! is the in-memory adapter used by integrated hosts and tests.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 use std::time::Duration;
@@ -99,14 +100,73 @@ fn session_configuration(
 }
 
 #[derive(Debug)]
-pub struct RealmServer {
-    realm_id: RealmId,
-    dimensions: DimensionRegistry,
-    seed: i64,
+pub struct DimensionRuntime {
+    key: DimensionKey,
+    definition: crate::DimensionDefinition,
     biome_source: ServerBiomeSource,
     scheduler: ChunkScheduler,
     block_ticks: BlockTickList,
     pub(crate) liquid_ticks: FluidTickList,
+    chunk_tracking: PlayerChunkTracking,
+    remote_players: RemotePlayerTracking,
+    entities: ServerEntityStore,
+    entity_tracking: EntityTracking,
+    dirty_entity_chunks: BTreeSet<ChunkPos>,
+    #[cfg(feature = "physics-engine")]
+    physics: ServerPhysicsRuntime,
+    #[cfg(feature = "physics-engine")]
+    debug_physics_player_target: Option<CommandTarget>,
+    loading_progress: ChunkLoadingProgress,
+}
+
+impl DimensionRuntime {
+    fn new(
+        key: DimensionKey,
+        definition: crate::DimensionDefinition,
+        scheduler: ChunkScheduler,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> Self {
+        let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
+        Self {
+            key,
+            biome_source: ServerBiomeSource::new(definition.seed),
+            definition,
+            scheduler,
+            block_ticks: BlockTickList::new(),
+            liquid_ticks: FluidTickList::new(),
+            chunk_tracking: PlayerChunkTracking::new(policy),
+            remote_players: RemotePlayerTracking::default(),
+            entities: ServerEntityStore::default(),
+            entity_tracking: EntityTracking::default(),
+            dirty_entity_chunks: BTreeSet::new(),
+            #[cfg(feature = "physics-engine")]
+            physics: ServerPhysicsRuntime::new(),
+            #[cfg(feature = "physics-engine")]
+            debug_physics_player_target: None,
+            loading_progress,
+        }
+    }
+
+    pub fn key(&self) -> &DimensionKey {
+        &self.key
+    }
+
+    pub fn definition(&self) -> &crate::DimensionDefinition {
+        &self.definition
+    }
+
+    pub fn scheduler(&self) -> &ChunkScheduler {
+        &self.scheduler
+    }
+}
+
+#[derive(Debug)]
+pub struct RealmServer {
+    realm_id: RealmId,
+    dimensions: DimensionRegistry,
+    seed: i64,
+    active_dimension: DimensionRuntime,
+    inactive_dimensions: BTreeMap<DimensionKey, DimensionRuntime>,
     simulation_tick: u64,
     day_time: u64,
     do_daylight_cycle: bool,
@@ -121,16 +181,20 @@ pub struct RealmServer {
     persistence_demo_jump_experience_enabled: bool,
     players: ServerPlayerList,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
-    chunk_tracking: PlayerChunkTracking,
-    remote_players: RemotePlayerTracking,
-    entities: ServerEntityStore,
-    entity_tracking: EntityTracking,
-    dirty_entity_chunks: BTreeSet<ChunkPos>,
-    #[cfg(feature = "physics-engine")]
-    physics: ServerPhysicsRuntime,
-    #[cfg(feature = "physics-engine")]
-    debug_physics_player_target: Option<CommandTarget>,
-    loading_progress: ChunkLoadingProgress,
+}
+
+impl Deref for RealmServer {
+    type Target = DimensionRuntime;
+
+    fn deref(&self) -> &Self::Target {
+        &self.active_dimension
+    }
+}
+
+impl DerefMut for RealmServer {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.active_dimension
+    }
 }
 
 #[derive(Clone)]
@@ -402,8 +466,11 @@ impl RealmServer {
         scheduler: ChunkScheduler,
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
-        let chunk_tracking = PlayerChunkTracking::new(policy);
-        let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
+        let overworld_key = DimensionKey::overworld();
+        let overworld_definition =
+            crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::default());
+        let active_dimension =
+            DimensionRuntime::new(overworld_key, overworld_definition, scheduler, policy);
         Self {
             realm_id,
             dimensions: DimensionRegistry::single_overworld(
@@ -411,10 +478,8 @@ impl RealmServer {
                 WorldGenerationProfile::default(),
             ),
             seed,
-            biome_source: ServerBiomeSource::new(seed),
-            scheduler,
-            block_ticks: BlockTickList::new(),
-            liquid_ticks: FluidTickList::new(),
+            active_dimension,
+            inactive_dimensions: BTreeMap::new(),
             simulation_tick: 0,
             day_time: INITIAL_DAY_TIME,
             do_daylight_cycle: true,
@@ -429,16 +494,6 @@ impl RealmServer {
             persistence_demo_jump_experience_enabled: false,
             players: ServerPlayerList::default(),
             debug_auxiliary_player_script: None,
-            chunk_tracking,
-            remote_players: RemotePlayerTracking::default(),
-            entities: ServerEntityStore::default(),
-            entity_tracking: EntityTracking::default(),
-            dirty_entity_chunks: BTreeSet::new(),
-            #[cfg(feature = "physics-engine")]
-            physics: ServerPhysicsRuntime::new(),
-            #[cfg(feature = "physics-engine")]
-            debug_physics_player_target: None,
-            loading_progress,
         }
     }
 
@@ -456,6 +511,141 @@ impl RealmServer {
 
     pub fn dimension_definition(&self, key: &DimensionKey) -> Option<&crate::DimensionDefinition> {
         self.dimensions.get(key)
+    }
+
+    pub fn active_dimension_key(&self) -> &DimensionKey {
+        &self.active_dimension.key
+    }
+
+    pub fn loaded_dimension_keys(&self) -> Vec<DimensionKey> {
+        let mut keys = self.inactive_dimensions.keys().cloned().collect::<Vec<_>>();
+        keys.push(self.active_dimension.key.clone());
+        keys.sort();
+        keys
+    }
+
+    pub fn dimension_runtime(&self, key: &DimensionKey) -> Option<&DimensionRuntime> {
+        if &self.active_dimension.key == key {
+            Some(&self.active_dimension)
+        } else {
+            self.inactive_dimensions.get(key)
+        }
+    }
+
+    pub fn player_dimension(&self, player_id: ServerPlayerId) -> Option<&DimensionKey> {
+        self.players.dimension(player_id)
+    }
+
+    pub fn register_dimension(&mut self, record: DimensionRecord) -> ChunkStoreResult<bool> {
+        let already_registered = if let Some(existing) = self.dimensions.get(&record.key) {
+            if existing != &record.definition {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "dimension {} is already registered with a different definition",
+                    record.key
+                )));
+            }
+            true
+        } else {
+            false
+        };
+
+        if self.dimension_runtime(&record.key).is_some() {
+            return Ok(false);
+        }
+
+        let key = record.key.clone();
+        let definition = record.definition.clone();
+        if !already_registered {
+            match self
+                .active_dimension
+                .scheduler
+                .save_dimension_blocking(record)?
+            {
+                StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+                StoreWriteOutcome::SkippedOnClose => {
+                    return Err(ChunkStoreError::Closed(format!(
+                        "dimension {key} registration was skipped on close"
+                    )));
+                }
+            }
+            self.dimensions
+                .insert(key.clone(), definition.clone())
+                .map_err(ChunkStoreError::InvalidData)?;
+        }
+        let runtime = self.build_dimension_runtime(key.clone(), definition)?;
+        self.inactive_dimensions.insert(key, runtime);
+        Ok(true)
+    }
+
+    fn build_dimension_runtime(
+        &self,
+        key: DimensionKey,
+        definition: crate::DimensionDefinition,
+    ) -> ChunkStoreResult<DimensionRuntime> {
+        let policy = self.active_dimension.chunk_tracking.policy();
+        let lighting_enabled = self.active_dimension.scheduler.lighting_enabled();
+        let light_status_batch_size = self.active_dimension.scheduler.light_status_batch_size();
+        let publication_budget = self.active_dimension.scheduler.publication_budget_config();
+        let mailbox = self
+            .active_dimension
+            .scheduler
+            .persistence_scoped_to_dimension(key.clone());
+        let mut scheduler = ChunkScheduler::with_persistence(definition.seed, mailbox);
+        scheduler.set_world_generation_profile(definition.generation_profile)?;
+        scheduler.set_lighting_enabled(lighting_enabled);
+        scheduler.set_light_status_batch_size(light_status_batch_size);
+        scheduler.set_publication_budget_config(publication_budget);
+        Ok(DimensionRuntime::new(key, definition, scheduler, policy))
+    }
+
+    pub fn unload_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<bool> {
+        if key == &DimensionKey::overworld()
+            || self
+                .players
+                .iter()
+                .any(|(_, player)| &player.dimension == key)
+        {
+            return Ok(false);
+        }
+        if &self.active_dimension.key == key {
+            self.activate_dimension(&DimensionKey::overworld())?;
+        }
+        let Some(mut runtime) = self.inactive_dimensions.remove(key) else {
+            return Ok(false);
+        };
+        save_dirty_dimension_runtime(&mut runtime, self.simulation_tick)?;
+        runtime.scheduler.flush_persistence()?;
+        Ok(true)
+    }
+
+    fn activate_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<()> {
+        if &self.active_dimension.key == key {
+            return Ok(());
+        }
+        if !self.inactive_dimensions.contains_key(key) {
+            let definition = self.dimensions.get(key).cloned().ok_or_else(|| {
+                ChunkStoreError::InvalidData(format!("dimension {key} is not registered"))
+            })?;
+            let runtime = self.build_dimension_runtime(key.clone(), definition)?;
+            self.inactive_dimensions.insert(key.clone(), runtime);
+        }
+        let Some(mut next) = self.inactive_dimensions.remove(key) else {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "dimension {key} is not loaded"
+            )));
+        };
+        std::mem::swap(&mut self.active_dimension, &mut next);
+        self.inactive_dimensions.insert(next.key.clone(), next);
+        Ok(())
+    }
+
+    fn activate_player_dimension(&mut self, player_id: ServerPlayerId) -> ChunkStoreResult<()> {
+        let key = self
+            .players
+            .dimension(player_id)
+            .cloned()
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        self.activate_dimension(&key)
     }
 
     pub const fn simulation_tick(&self) -> u64 {
@@ -513,6 +703,7 @@ impl RealmServer {
         &mut self,
         now_unix_millis: u64,
     ) -> ChunkStoreResult<WorldMetadata> {
+        self.activate_dimension(&DimensionKey::overworld())?;
         if let Some(metadata) = &self.world_metadata {
             return Ok(metadata.clone());
         }
@@ -722,8 +913,9 @@ impl RealmServer {
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
+        let simulation_tick = self.simulation_tick;
         self.liquid_ticks
-            .schedule_tick(pos, fluid, delay, self.simulation_tick);
+            .schedule_tick(pos, fluid, delay, simulation_tick);
     }
 
     pub fn scheduled_block_tick_count(&self) -> usize {
@@ -779,8 +971,8 @@ impl RealmServer {
 
     pub fn set_lighting_enabled(&mut self, enabled: bool) {
         self.scheduler.set_lighting_enabled(enabled);
-        self.loading_progress
-            .set_target_status(runtime_chunk_target_status(&self.scheduler));
+        let target_status = runtime_chunk_target_status(&self.scheduler);
+        self.loading_progress.set_target_status(target_status);
     }
 
     pub fn light_status_batch_size(&self) -> usize {
@@ -808,11 +1000,31 @@ impl RealmServer {
         self.add_player_with_capabilities(SessionCapabilities::DEVELOPMENT_DEFAULT)
     }
 
+    pub fn add_player_in_dimension(
+        &mut self,
+        dimension: DimensionKey,
+    ) -> ChunkStoreResult<ServerPlayerId> {
+        self.add_player_with_capabilities_in_dimension(
+            dimension,
+            SessionCapabilities::DEVELOPMENT_DEFAULT,
+        )
+    }
+
     pub fn add_player_with_capabilities(
         &mut self,
         capabilities: SessionCapabilities,
     ) -> ServerPlayerId {
-        let player_id = self.players.add();
+        self.add_player_with_capabilities_in_dimension(DimensionKey::overworld(), capabilities)
+            .expect("compatibility Overworld dimension must remain loaded")
+    }
+
+    fn add_player_with_capabilities_in_dimension(
+        &mut self,
+        dimension: DimensionKey,
+        capabilities: SessionCapabilities,
+    ) -> ChunkStoreResult<ServerPlayerId> {
+        self.activate_dimension(&dimension)?;
+        let player_id = self.players.add_in_dimension(dimension);
         let configuration = session_configuration(self.chunk_tracking.policy(), capabilities);
         let world_info = self.world_info_update();
         let time_update = self.time_update();
@@ -826,7 +1038,7 @@ impl RealmServer {
         self.chunk_tracking
             .queue_update_for_player(player_id, time_update);
         self.remote_players.add_player(player_id);
-        player_id
+        Ok(player_id)
     }
 
     pub fn add_player_with_identity(
@@ -845,14 +1057,24 @@ impl RealmServer {
         capabilities: SessionCapabilities,
     ) -> ChunkStoreResult<ServerPlayerId> {
         let key = player_record_key(identity.profile_id);
-        let record = self.scheduler.load_player_record_blocking(key)?;
-        let player_id = self.add_player_with_capabilities(capabilities);
+        let record = self
+            .scheduler
+            .load_player_record_blocking(key)?
+            .filter(|record| {
+                player_record_is_usable(record) && self.dimensions.get(&record.dimension).is_some()
+            });
+        let resume_dimension = record
+            .as_ref()
+            .map(|record| record.dimension.clone())
+            .unwrap_or_else(DimensionKey::overworld);
+        let player_id =
+            self.add_player_with_capabilities_in_dimension(resume_dimension, capabilities)?;
         let player = self
             .players
             .get_mut(player_id)
             .expect("new realm player must exist");
         player.identity = Some(identity);
-        if let Some(record) = record.filter(player_record_is_usable) {
+        if let Some(record) = record {
             player.initial_spawn_center = Some(ChunkPos::new(
                 block_to_chunk_coord(record.position.x.floor() as i32),
                 block_to_chunk_coord(record.position.z.floor() as i32),
@@ -877,6 +1099,7 @@ impl RealmServer {
         player_id: ServerPlayerId,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<()> {
+        self.activate_player_dimension(player_id)?;
         let Some(player) = self.players.get_mut(player_id) else {
             return Err(unknown_player_error(player_id));
         };
@@ -891,6 +1114,7 @@ impl RealmServer {
         player_id: ServerPlayerId,
         identity: ClientIdentity,
     ) -> ChunkStoreResult<()> {
+        self.activate_player_dimension(player_id)?;
         let key = player_record_key(identity.profile_id);
         let record = self.scheduler.load_player_record_blocking(key.clone())?;
         let Some(player) = self.players.get_mut(player_id) else {
@@ -925,6 +1149,9 @@ impl RealmServer {
     }
 
     pub fn remove_player(&mut self, player_id: ServerPlayerId) -> bool {
+        if self.activate_player_dimension(player_id).is_err() {
+            return false;
+        }
         if self.players.remove(player_id).is_none() {
             return false;
         }
@@ -944,24 +1171,32 @@ impl RealmServer {
     }
 
     fn mob_player_targets(&self) -> Vec<MobPlayerTarget> {
+        let dimension = &self.active_dimension.key;
         self.players
             .iter()
+            .filter(|(_, entry)| &entry.dimension == dimension)
             .map(|(_, entry)| MobPlayerTarget::from_position(entry.state.position()))
             .collect()
     }
 
     fn natural_spawn_player_positions(&self) -> Vec<Vec3d> {
+        let dimension = &self.active_dimension.key;
         self.players
             .iter()
-            .filter(|(_, entry)| entry.state.has_accepted_position())
+            .filter(|(_, entry)| {
+                &entry.dimension == dimension && entry.state.has_accepted_position()
+            })
             .map(|(_, entry)| entry.state.position())
             .collect()
     }
 
     fn item_pickup_targets(&self) -> Vec<ItemPickupTarget> {
+        let dimension = &self.active_dimension.key;
         self.players
             .iter()
-            .filter(|(_, entry)| entry.state.has_accepted_position())
+            .filter(|(_, entry)| {
+                &entry.dimension == dimension && entry.state.has_accepted_position()
+            })
             .map(|(player_id, entry)| ItemPickupTarget {
                 player_id,
                 position: entry.state.position(),
@@ -974,6 +1209,7 @@ impl RealmServer {
         player_id: ServerPlayerId,
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.activate_player_dimension(player_id)?;
         self.try_handle_command_for_target(CommandTarget::Player(player_id), command)
     }
 
@@ -1036,6 +1272,7 @@ impl RealmServer {
         &mut self,
         player_id: ServerPlayerId,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.activate_player_dimension(player_id)?;
         self.try_poll_for_target(CommandTarget::Player(player_id))
     }
 
@@ -1054,6 +1291,7 @@ impl RealmServer {
         &mut self,
         player_id: ServerPlayerId,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.activate_player_dimension(player_id)?;
         self.drain_chunk_updates_for_target(CommandTarget::Player(player_id))
     }
 
@@ -1061,6 +1299,7 @@ impl RealmServer {
         &mut self,
         target: CommandTarget,
     ) -> ChunkStoreResult<ServerTickReport> {
+        self.activate_player_dimension(target.player_id())?;
         self.ensure_target_exists(target)?;
         let mut report = self.try_tick_report_global()?;
         report.updates = self.drain_chunk_updates_for_target(target)?;
@@ -1070,20 +1309,43 @@ impl RealmServer {
     /// Advances scheduler-owned global work once and routes its publications
     /// to every eligible player without draining any player's stream.
     pub fn try_tick_report_global(&mut self) -> ChunkStoreResult<ServerTickReport> {
+        let selected = self.active_dimension.key.clone();
+        let mut selected_report = None;
+        for key in self.loaded_dimension_keys() {
+            self.activate_dimension(&key)?;
+            let report = match self.try_tick_report_active_dimension() {
+                Ok(report) => report,
+                Err(error) => {
+                    let _ = self.activate_dimension(&selected);
+                    return Err(error);
+                }
+            };
+            if key == selected {
+                selected_report = Some(report);
+            }
+        }
+        self.activate_dimension(&selected)?;
+        selected_report.ok_or_else(|| {
+            ChunkStoreError::InvalidData("realm has no loaded dimension runtime".to_owned())
+        })
+    }
+
+    fn try_tick_report_active_dimension(&mut self) -> ChunkStoreResult<ServerTickReport> {
         let total_start = simulation_timing_start();
         let scheduler_start = simulation_timing_start();
         let simulation_tick = self.simulation_tick;
-        let block_ticks = &self.block_ticks;
-        let liquid_ticks = &self.liquid_ticks;
-        let entities = &self.entities;
-        let dirty_entity_chunks = &self.dirty_entity_chunks;
+        let runtime = &mut self.active_dimension;
+        let block_ticks = &runtime.block_ticks;
+        let liquid_ticks = &runtime.liquid_ticks;
+        let entities = &runtime.entities;
+        let dirty_entity_chunks = &runtime.dirty_entity_chunks;
         let mut chunk_record_builder = |snapshot: &ChunkSnapshot| {
             chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
         };
         let mut entity_record_builder = |pos: ChunkPos, revision: u64| {
             entity_chunk_record_for_persistence(entities, dirty_entity_chunks, pos, revision)
         };
-        let report = self.scheduler.tick_report_with_record_builders(
+        let report = runtime.scheduler.tick_report_with_record_builders(
             &mut chunk_record_builder,
             &mut entity_record_builder,
         )?;
@@ -1140,6 +1402,7 @@ impl RealmServer {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        self.activate_player_dimension(target.player_id())?;
         self.ensure_target_exists(target)?;
         let mut report = self.try_simulation_tick_report_global_with_physics_steps(
             physics_steps,
@@ -1165,27 +1428,60 @@ impl RealmServer {
         physics_steps: u32,
         physics_step_dt_seconds: f64,
     ) -> ChunkStoreResult<ServerSimulationTickReport> {
-        let total_start = simulation_timing_start();
-        let scheduler_start = simulation_timing_start();
-        let tick_report = self.try_tick_report_global()?;
-        let scheduler_tick_us = simulation_timing_elapsed_us(scheduler_start);
-        let tick_timing = tick_report.timing;
-
+        let selected = self.active_dimension.key.clone();
         let simulation_tick = self.simulation_tick.saturating_add(1);
         self.simulation_tick = simulation_tick;
         self.mark_player_tick_boundaries();
-        self.advance_debug_auxiliary_player_script()?;
+        if let Some(player_id) = self
+            .debug_auxiliary_player_script
+            .map(|script| script.player_id)
+        {
+            self.activate_player_dimension(player_id)?;
+            self.advance_debug_auxiliary_player_script()?;
+        }
 
-        // Advance the day/night clock one tick (Java `ServerLevel.tickTime` with
-        // `doDaylightCycle` on). Coupled to the simulation tick cadence, which is
-        // itself frame-driven in the current runtime; revisit if/when ticks are
-        // fixed-step. Skipped while frozen (debug `--freeze-time`).
         if self.daylight_cycle_running() {
             self.day_time = self.day_time.wrapping_add(1);
         }
         if self.world_metadata.is_some() {
             self.world_metadata_dirty = true;
         }
+
+        let mut selected_report = None;
+        for key in self.loaded_dimension_keys() {
+            self.activate_dimension(&key)?;
+            let report = match self.try_simulation_tick_active_dimension_with_physics_steps(
+                simulation_tick,
+                physics_steps,
+                physics_step_dt_seconds,
+            ) {
+                Ok(report) => report,
+                Err(error) => {
+                    let _ = self.activate_dimension(&selected);
+                    return Err(error);
+                }
+            };
+            if key == selected {
+                selected_report = Some(report);
+            }
+        }
+        self.activate_dimension(&selected)?;
+        selected_report.ok_or_else(|| {
+            ChunkStoreError::InvalidData("realm has no loaded dimension runtime".to_owned())
+        })
+    }
+
+    fn try_simulation_tick_active_dimension_with_physics_steps(
+        &mut self,
+        simulation_tick: u64,
+        physics_steps: u32,
+        physics_step_dt_seconds: f64,
+    ) -> ChunkStoreResult<ServerSimulationTickReport> {
+        let total_start = simulation_timing_start();
+        let scheduler_start = simulation_timing_start();
+        let tick_report = self.try_tick_report_active_dimension()?;
+        let scheduler_tick_us = simulation_timing_elapsed_us(scheduler_start);
+        let tick_timing = tick_report.timing;
 
         let block_tick_start = simulation_timing_start();
         let block_tick_chunks = run_noop_simulation_phase(&tick_report.block_ticking_chunks);
@@ -1198,10 +1494,11 @@ impl RealmServer {
             if self.scheduled_fluid_ticks_frozen {
                 self.liquid_ticks.frozen_report()
             } else {
-                self.liquid_ticks.tick(
+                let runtime = &mut self.active_dimension;
+                runtime.liquid_ticks.tick(
                     simulation_tick,
                     &tick_report.entity_ticking_chunks,
-                    &mut self.scheduler,
+                    &mut runtime.scheduler,
                 )
             };
         let fluid_tick_us = simulation_timing_elapsed_us(fluid_tick_start);
@@ -1216,9 +1513,10 @@ impl RealmServer {
             self.tick_natural_spawning(simulation_tick, &tick_report.entity_ticking_chunks);
         let natural_spawning = natural_spawning_tick.diagnostics;
         let mob_player_targets = self.mob_player_targets();
-        let scheduler = &self.scheduler;
+        let runtime = &mut self.active_dimension;
+        let scheduler = &runtime.scheduler;
         let mut entity_updates = natural_spawning_tick.spawned_entities;
-        entity_updates.extend(self.entities.tick_stationary(
+        entity_updates.extend(runtime.entities.tick_stationary(
             &tick_report.entity_ticking_chunks,
             &mob_player_targets,
             |pos| {
@@ -1229,7 +1527,7 @@ impl RealmServer {
         ));
         let item_pickup_targets = self.item_pickup_targets();
         let players = &mut self.players;
-        entity_updates.extend(self.entities.collect_item_entities(
+        entity_updates.extend(self.active_dimension.entities.collect_item_entities(
             &item_pickup_targets,
             |player_id, stack| {
                 players
@@ -1567,7 +1865,9 @@ impl RealmServer {
         &mut self,
         profile: WorldGenerationProfile,
     ) -> ChunkStoreResult<()> {
+        self.activate_dimension(&DimensionKey::overworld())?;
         self.scheduler.set_world_generation_profile(profile)?;
+        self.active_dimension.definition.generation_profile = profile;
         self.dimensions.set_overworld_generation_profile(profile);
         Ok(())
     }
@@ -1600,21 +1900,16 @@ impl RealmServer {
 
     pub fn save_dirty_chunks(&mut self) -> ChunkStoreResult<usize> {
         let simulation_tick = self.simulation_tick;
-        let block_ticks = &self.block_ticks;
-        let liquid_ticks = &self.liquid_ticks;
-        let entities = &self.entities;
-        let dirty_entity_chunks = &self.dirty_entity_chunks;
-        let mut chunk_record_builder = |snapshot: &ChunkSnapshot| {
-            chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
-        };
-        let mut entity_record_builder = |pos: ChunkPos, revision: u64| {
-            entity_chunk_record_for_persistence(entities, dirty_entity_chunks, pos, revision)
-        };
-        let queued = self.scheduler.save_dirty_chunks_with_record_builders(
-            &mut chunk_record_builder,
-            &mut entity_record_builder,
-        )?;
-        self.dirty_entity_chunks.clear();
+        let selected = self.active_dimension.key.clone();
+        let mut queued = 0usize;
+        for key in self.loaded_dimension_keys() {
+            self.activate_dimension(&key)?;
+            queued = queued.saturating_add(save_dirty_dimension_runtime(
+                &mut self.active_dimension,
+                simulation_tick,
+            )?);
+        }
+        self.activate_dimension(&selected)?;
         Ok(queued)
     }
 
@@ -1658,11 +1953,12 @@ impl RealmServer {
             }
         }
         let events = if change.aggregate_changed || change.priority_centers_changed {
-            self.scheduler.apply_player_ticket_positions_with_priority(
-                self.chunk_tracking.aggregate_player_ticket_positions(),
-                self.chunk_tracking
-                    .aggregate_player_ticket_priority_centers(),
-            )?
+            let positions = self.chunk_tracking.aggregate_player_ticket_positions();
+            let centers = self
+                .chunk_tracking
+                .aggregate_player_ticket_priority_centers();
+            self.scheduler
+                .apply_player_ticket_positions_with_priority(positions, centers)?
         } else {
             Vec::new()
         };
@@ -2010,12 +2306,9 @@ impl RealmServer {
                     .block_at_world(request.pos)
                     .map(block_name)
                     .unwrap_or("minecraft:air");
-                self.block_ticks.schedule_tick(
-                    request.pos,
-                    target,
-                    request.delay,
-                    self.simulation_tick,
-                );
+                let simulation_tick = self.simulation_tick;
+                self.block_ticks
+                    .schedule_tick(request.pos, target, request.delay, simulation_tick);
             }
         }
         changed
@@ -2118,12 +2411,14 @@ impl RealmServer {
                         .queue_section_updates_for_tracking_players(pos, section_y, updates);
                 }
                 ChunkSchedulerEvent::FluidTickScheduled { pos, fluid, delay } => {
+                    let simulation_tick = self.simulation_tick;
                     self.liquid_ticks
-                        .schedule_tick(pos, fluid, delay, self.simulation_tick);
+                        .schedule_tick(pos, fluid, delay, simulation_tick);
                 }
                 ChunkSchedulerEvent::BlockTickScheduled { pos, target, delay } => {
+                    let simulation_tick = self.simulation_tick;
                     self.block_ticks
-                        .schedule_tick(pos, target, delay, self.simulation_tick);
+                        .schedule_tick(pos, target, delay, simulation_tick);
                 }
                 ChunkSchedulerEvent::StatusChanged { pos, status, step } => {
                     self.loading_progress
@@ -2154,12 +2449,14 @@ impl RealmServer {
             return;
         }
         let states = self.remote_player_states();
-        let chunk_tracking = &self.chunk_tracking;
-        let routes = self
-            .remote_players
-            .reconcile_observer(observer, &states, |player_id, pos| {
-                chunk_tracking.player_tracks_chunk(player_id, pos)
-            });
+        let runtime = &mut self.active_dimension;
+        let chunk_tracking = &runtime.chunk_tracking;
+        let routes =
+            runtime
+                .remote_players
+                .reconcile_observer(observer, &states, |player_id, pos| {
+                    chunk_tracking.player_tracks_chunk(player_id, pos)
+                });
         self.route_remote_player_updates(routes);
     }
 
@@ -2175,8 +2472,9 @@ impl RealmServer {
             return;
         };
         let observers = self.player_observers();
-        let chunk_tracking = &self.chunk_tracking;
-        let routes = self.remote_players.reconcile_subject(
+        let runtime = &mut self.active_dimension;
+        let chunk_tracking = &runtime.chunk_tracking;
+        let routes = runtime.remote_players.reconcile_subject(
             state,
             observers,
             |player_id, pos| chunk_tracking.player_tracks_chunk(player_id, pos),
@@ -2197,6 +2495,9 @@ impl RealmServer {
 
     fn remote_player_state(&self, player_id: ServerPlayerId) -> Option<RemotePlayerState> {
         let player = self.players.get(player_id)?;
+        if player.dimension != self.active_dimension.key {
+            return None;
+        }
         Some(RemotePlayerState {
             player_id,
             appearance: player.appearance,
@@ -2210,10 +2511,12 @@ impl RealmServer {
 
     fn reconcile_entities_for_target_observer(&mut self, target: CommandTarget) {
         let observer = target.player_id();
-        let states = self.entities.states();
-        let chunk_tracking = &self.chunk_tracking;
+        let runtime = &mut self.active_dimension;
+        let states = runtime.entities.states();
+        let chunk_tracking = &runtime.chunk_tracking;
         let routes =
-            self.entity_tracking
+            runtime
+                .entity_tracking
                 .reconcile_observer(observer, &states, |player_id, pos| {
                     chunk_tracking.player_tracks_chunk(player_id, pos)
                 });
@@ -2226,10 +2529,11 @@ impl RealmServer {
         emit_existing_updates: bool,
     ) {
         let observers = self.player_observers();
-        let chunk_tracking = &self.chunk_tracking;
+        let runtime = &mut self.active_dimension;
+        let chunk_tracking = &runtime.chunk_tracking;
         let mut routes = Vec::new();
         for subject in subjects {
-            routes.extend(self.entity_tracking.reconcile_subject(
+            routes.extend(runtime.entity_tracking.reconcile_subject(
                 subject,
                 observers.iter().copied(),
                 |player_id, pos| chunk_tracking.player_tracks_chunk(player_id, pos),
@@ -2322,15 +2626,19 @@ impl RealmServer {
     }
 
     fn player_observers(&self) -> Vec<ServerPlayerId> {
+        let dimension = &self.active_dimension.key;
         self.players
             .iter()
+            .filter(|(_, player)| &player.dimension == dimension)
             .map(|(player_id, _)| player_id)
             .collect()
     }
 
     fn player_targets(&self) -> Vec<CommandTarget> {
+        let dimension = &self.active_dimension.key;
         self.players
             .iter()
+            .filter(|(_, player)| &player.dimension == dimension)
             .map(|(player_id, _)| CommandTarget::Player(player_id))
             .collect()
     }
@@ -2367,7 +2675,7 @@ impl RealmServer {
 
     fn world_info_update(&self) -> ServerUpdate {
         ServerUpdate::WorldInfo {
-            biome_zoom_seed: obfuscate_biome_zoom_seed(self.seed),
+            biome_zoom_seed: obfuscate_biome_zoom_seed(self.active_dimension.definition.seed),
         }
     }
 
@@ -2416,10 +2724,10 @@ impl RealmServer {
             };
             position
         };
-        let showcase_ids = self.entities.ensure_debug_passive_showcase_near_spawn(
-            position,
-            self.debug_passive_showcase_enabled,
-        );
+        let showcase_enabled = self.debug_passive_showcase_enabled;
+        let showcase_ids = self
+            .entities
+            .ensure_debug_passive_showcase_near_spawn(position, showcase_enabled);
         let showcase_states = showcase_ids
             .into_iter()
             .filter_map(|id| self.entities.state(id))
@@ -2495,7 +2803,9 @@ impl RealmServer {
         key: &PlayerRecordKey,
         record: Option<PlayerRecord>,
     ) -> ChunkStoreResult<()> {
-        let Some(record) = record.filter(player_record_is_usable) else {
+        let Some(record) = record.filter(|record| {
+            player_record_is_usable(record) && self.dimensions.get(&record.dimension).is_some()
+        }) else {
             return Ok(());
         };
         let matched = self.players.iter().find_map(|(player_id, candidate)| {
@@ -2506,6 +2816,7 @@ impl RealmServer {
                 .then_some(player_id)
         });
         if let Some(player_id) = matched {
+            self.relocate_player_membership_for_resume(player_id, record.dimension.clone())?;
             let player = self
                 .players
                 .get_mut(player_id)
@@ -2529,6 +2840,46 @@ impl RealmServer {
                 .expect("loaded realm resume has a spawn center");
             self.retarget_player_view_for_resume(CommandTarget::Player(player_id), center)?;
         }
+        Ok(())
+    }
+
+    fn relocate_player_membership_for_resume(
+        &mut self,
+        player_id: ServerPlayerId,
+        destination: DimensionKey,
+    ) -> ChunkStoreResult<()> {
+        let source = self
+            .players
+            .dimension(player_id)
+            .cloned()
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        if source == destination {
+            return self.activate_dimension(&destination);
+        }
+        self.activate_dimension(&source)?;
+        let queued_updates = self.chunk_tracking.drain_updates(player_id);
+        let routes = self.remote_players.remove_player(player_id);
+        self.route_remote_player_updates(routes);
+        self.entity_tracking.remove_observer(player_id);
+        self.remove_player_chunk_tracking(player_id);
+
+        self.activate_dimension(&destination)?;
+        self.players
+            .get_mut(player_id)
+            .expect("resume player must remain realm-owned")
+            .dimension = destination;
+        self.chunk_tracking.add_player(player_id);
+        self.remote_players.add_player(player_id);
+        for update in queued_updates {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, update);
+        }
+        let world_info = self.world_info_update();
+        let time_update = self.time_update();
+        self.chunk_tracking
+            .queue_update_for_player(player_id, world_info);
+        self.chunk_tracking
+            .queue_update_for_player(player_id, time_update);
         Ok(())
     }
 
@@ -2620,7 +2971,11 @@ impl RealmServer {
 
     fn ensure_target_exists(&self, target: CommandTarget) -> ChunkStoreResult<()> {
         let player_id = target.player_id();
-        if self.players.contains(player_id) {
+        if self
+            .players
+            .get(player_id)
+            .is_some_and(|player| player.dimension == self.active_dimension.key)
+        {
             Ok(())
         } else {
             Err(unknown_player_error(player_id))
@@ -2638,13 +2993,13 @@ impl RealmServer {
         if !change.aggregate_changed {
             return;
         }
+        let positions = self.chunk_tracking.aggregate_player_ticket_positions();
+        let centers = self
+            .chunk_tracking
+            .aggregate_player_ticket_priority_centers();
         let events = self
             .scheduler
-            .apply_player_ticket_positions_with_priority(
-                self.chunk_tracking.aggregate_player_ticket_positions(),
-                self.chunk_tracking
-                    .aggregate_player_ticket_priority_centers(),
-            )
+            .apply_player_ticket_positions_with_priority(positions, centers)
             .expect("failed to reconcile chunk tracking after player disconnect");
         self.route_scheduler_events(events)
             .expect("failed to route scheduler events after player disconnect");
@@ -3019,7 +3374,6 @@ fn chunk_pos_for_player_position(position: Vec3d) -> ChunkPos {
 
 fn player_record_is_usable(record: &PlayerRecord) -> bool {
     record.codec_version == crate::persistence::PLAYER_RECORD_VERSION
-        && record.dimension == DimensionKey::overworld()
         && record.position.is_finite()
         && record.y_rot_degrees.is_finite()
         && record.x_rot_degrees.is_finite()
@@ -3035,6 +3389,7 @@ fn player_record_from_entry(
         let mut record = player.resume_record.clone()?;
         record.revision = revision;
         record.last_known_name = identity.display_name.clone();
+        record.dimension = player.dimension.clone();
         record.selected_hotbar_slot = player.inventory.selected_hotbar_slot();
         record.total_experience = player.total_experience;
         return Some(record);
@@ -3044,7 +3399,7 @@ fn player_record_from_entry(
         codec_version: crate::persistence::PLAYER_RECORD_VERSION,
         revision,
         last_known_name: identity.display_name.clone(),
-        dimension: DimensionKey::overworld(),
+        dimension: player.dimension.clone(),
         position: player.state.position(),
         y_rot_degrees: player.state.y_rot_degrees(),
         x_rot_degrees: player.state.x_rot_degrees(),
@@ -3151,6 +3506,28 @@ fn runtime_chunk_target_status(scheduler: &ChunkScheduler) -> mclone_core::Chunk
     } else {
         mclone_core::ChunkStatus::Features
     }
+}
+
+fn save_dirty_dimension_runtime(
+    runtime: &mut DimensionRuntime,
+    simulation_tick: u64,
+) -> ChunkStoreResult<usize> {
+    let block_ticks = &runtime.block_ticks;
+    let liquid_ticks = &runtime.liquid_ticks;
+    let entities = &runtime.entities;
+    let dirty_entity_chunks = &runtime.dirty_entity_chunks;
+    let mut chunk_record_builder = |snapshot: &ChunkSnapshot| {
+        chunk_record_with_live_ticks(snapshot, block_ticks, liquid_ticks, simulation_tick)
+    };
+    let mut entity_record_builder = |pos: ChunkPos, revision: u64| {
+        entity_chunk_record_for_persistence(entities, dirty_entity_chunks, pos, revision)
+    };
+    let queued = runtime.scheduler.save_dirty_chunks_with_record_builders(
+        &mut chunk_record_builder,
+        &mut entity_record_builder,
+    )?;
+    runtime.dirty_entity_chunks.clear();
+    Ok(queued)
 }
 
 fn chunk_record_with_live_ticks(

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
-use mclone_protocol::{ClientIdentity, PlayerAppearance};
+use mclone_protocol::{ClientIdentity, DimensionKey, PlayerAppearance};
 
 use crate::inventory::ServerInventory;
 use crate::persistence::PlayerRecord;
@@ -32,6 +32,7 @@ impl fmt::Display for ServerPlayerId {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ServerPlayerEntry {
+    pub(crate) dimension: DimensionKey,
     pub(crate) state: ServerPlayerState,
     pub(crate) inventory: ServerInventory,
     pub(crate) appearance: PlayerAppearance,
@@ -45,6 +46,7 @@ pub(crate) struct ServerPlayerEntry {
 impl Default for ServerPlayerEntry {
     fn default() -> Self {
         Self {
+            dimension: DimensionKey::overworld(),
             state: ServerPlayerState::default(),
             inventory: ServerInventory::default(),
             appearance: PlayerAppearance::default(),
@@ -73,13 +75,19 @@ impl Default for ServerPlayerList {
 }
 
 impl ServerPlayerList {
-    pub(crate) fn add(&mut self) -> ServerPlayerId {
+    pub(crate) fn add_in_dimension(&mut self, dimension: DimensionKey) -> ServerPlayerId {
         let id = ServerPlayerId(self.next_id);
         self.next_id = self
             .next_id
             .checked_add(1)
             .expect("exhausted realm server player ids");
-        self.players.insert(id, ServerPlayerEntry::default());
+        self.players.insert(
+            id,
+            ServerPlayerEntry {
+                dimension,
+                ..ServerPlayerEntry::default()
+            },
+        );
         id
     }
 
@@ -115,5 +123,9 @@ impl ServerPlayerList {
 
     pub(crate) fn position(&self, id: ServerPlayerId) -> Option<Vec3d> {
         self.players.get(&id).map(|entry| entry.state.position())
+    }
+
+    pub(crate) fn dimension(&self, id: ServerPlayerId) -> Option<&DimensionKey> {
+        self.players.get(&id).map(|entry| &entry.dimension)
     }
 }

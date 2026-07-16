@@ -1,7 +1,7 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-3 complete; multi-dimension
-authoritative runtime is next in Slice 4
+Status: active 2026-07-16; Slices 0-4 complete; source-owned dimension
+interest is next in Slice 5
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -661,12 +661,44 @@ one Overworld realm on native and web.
 
 ### Slice 4: Multi-dimension authoritative runtime
 
+Status: complete 2026-07-16.
+
 - Extract one `DimensionRuntime` owner from the shared `RealmServer`.
 - Add a realm host map and tick each loaded dimension once per host boundary.
 - Route players and commands through current dimension membership.
 - Prove two real players in different dimensions can move, stream, mutate,
   tick, autosave, disconnect, and resume without state leakage.
 - Keep one-process ownership and bounded dimension load/unload lifecycle.
+
+Evidence:
+
+- `RealmServer` now owns one exported `DimensionRuntime` per loaded
+  `DimensionKey`; each runtime contains its own scheduler, chunk holders,
+  scheduled block/fluid ticks, entities, lighting, interest, physics, and
+  dimension-scoped persistence handle;
+- dimension runtimes share one realm persistence actor with globally unique
+  request ids and per-scheduler completion routing; actor in-flight/cache keys
+  are themselves `DimensionChunkPos`, so equal coordinates cannot supersede
+  each other before reaching SQLite or IndexedDB;
+- one realm simulation tick increments the realm game/day clocks once, marks
+  realm players once, then advances every loaded dimension runtime exactly
+  once; compatibility reports describe the caller's selected dimension;
+- every realm player carries one validated current dimension. Command,
+  polling, update drain, chunk visibility, remote-player/entity publication,
+  spawning, pickup, movement, and mutation paths activate and operate only on
+  that player's runtime;
+- registration persists the dimension definition and constructs a scoped
+  runtime; idle non-Overworld dimensions flush and unload, then lazily rebuild
+  from the retained registry without closing the realm store;
+- `concurrent_dimension_runtimes_route_players_ticks_and_mutations` proves two
+  real players stream equal origin chunks, advance both schedulers under one
+  realm tick, move independently, and mutate one dimension without block or
+  remote-player leakage into the other;
+- `dimension_membership_and_runtime_chunks_resume_from_one_realm_store` proves
+  two dimension-local mutations plus both realm-root player records survive a
+  SQLite close/reopen with exact current-dimension and pose restoration;
+- the complete `mclone-server` suite (427 tests) and native workspace check
+  pass with the ordinary one-Overworld adapters unchanged.
 
 Exit: concurrent players can occupy at least two generated dimensions under
 one realm and one server host.

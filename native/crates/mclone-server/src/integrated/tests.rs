@@ -401,6 +401,7 @@ mod chunk_view;
 mod debug_interactions;
 mod dedicated_players;
 mod diagnostics;
+mod dimensions;
 mod entities;
 mod player_state;
 mod simulation_physics;
