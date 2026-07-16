@@ -3,15 +3,16 @@
 Topic: `compiled-figure-rendering`
 
 Status: target direction selected 2026-07-16. Tactical
-[`181`](../tactical/181-compiled-figure-static-box-proof.md) Slices 0-4 now
-cover the canonical semantic handoff, shared startup compiler, immutable mono
-proof renderer, visually approved Three.js/native comparison, inspected native
-per-eye stereo, and inspected production browser WebGPU pixels. The simpler
-native proof lighting was accepted for this stage. Multiview execution remains
+[`181`](../tactical/181-compiled-figure-static-box-proof.md) is complete: the
+canonical semantic handoff, shared startup compiler, immutable mono renderer,
+visually approved Three.js/native comparison, inspected native per-eye stereo,
+and inspected production browser WebGPU pixels are landed. The simpler native
+proof lighting was accepted for this stage. Multiview execution remains
 capability-skipped on the current Mac with shader/contract validation pending a
-capable adapter. Semantic JSON remains the only persisted runtime format;
-production migration, animation, curved primitives, instancing, LOD, GPU pose
-evaluation, and a disk cache remain deferred.
+capable adapter. Semantic JSON remains the only persisted runtime format. The
+next bounded work is continuously interpolated CPU-palette animation and human
+walk-clip review; production migration, curved primitives, instancing, LOD,
+GPU pose evaluation, and a disk cache remain deferred.
 
 ## Scope
 
@@ -678,7 +679,7 @@ decision.
 - add representative per-figure geometry and pose-cost reports; and
 - retain current pixels and all platform paths.
 
-### Phase 1: startup-prepared static box proof (portability complete)
+### Phase 1: startup-prepared static box proof (complete)
 
 - establish the shared Rust startup compiler and in-memory `PreparedFigure`
   through Tactical
@@ -953,13 +954,11 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Close Tactical [`181`](../tactical/181-compiled-figure-static-box-proof.md) with
-its accounting, malformed-input, provenance, and unchanged-production-path
-evidence. Then open a bounded presentation-rate rigid-part animation tactical:
-evaluate local TRS into a final part palette at the actual presentation time,
-upload only that mutable palette, render a continuously interpolated player
-walk beside the semantic Three.js clip, and stop for human clip review before
-any production actor migration.
+Open a bounded presentation-rate rigid-part animation tactical: evaluate local
+TRS into a final part palette at the actual presentation time, upload only that
+mutable palette, render a continuously interpolated player walk beside the
+semantic Three.js clip, and stop for human clip review before any production
+actor migration.
 
 Curved tessellation extends the same startup compiler and does not reopen
 persistence. Keep it, instancing, LOD, and GPU crowd evaluation out of the

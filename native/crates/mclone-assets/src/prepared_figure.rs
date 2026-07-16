@@ -993,6 +993,10 @@ impl BoxFace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        AssetPackId, AssetPackOrigin, AssetResolutionOrigin, AssetSourceChain, MemoryAssetSource,
+        ProvenanceTrackingAssetSource,
+    };
 
     const PLAYER_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/player.figure.json");
@@ -1028,6 +1032,70 @@ mod tests {
             prepare_figure_asset(&asset).unwrap(),
             prepare_figure_asset(&asset).unwrap()
         );
+    }
+
+    #[test]
+    fn asset_source_replacement_updates_exact_semantic_identity() {
+        let path = crate::default_player_figure_path();
+        let mut fallback = MemoryAssetSource::new();
+        fallback.insert_text(path.clone(), PLAYER_FIGURE_JSON);
+        let original = load_prepared_figure(&fallback, &path).unwrap();
+        assert_eq!(
+            original.diagnostics.semantic_crc32,
+            Some(crc32fast::hash(PLAYER_FIGURE_JSON.as_bytes()))
+        );
+
+        let replacement_bytes = format!("{PLAYER_FIGURE_JSON}\n");
+        let replacement_id = AssetPackId::new("figure-replacement");
+        let mut replacement_source = MemoryAssetSource::new();
+        replacement_source.insert_text(path.clone(), replacement_bytes.clone());
+        let mut chain = AssetSourceChain::new();
+        chain.push_named(
+            replacement_id.clone(),
+            AssetPackOrigin::FirstParty,
+            replacement_source,
+        );
+        chain.push_named(
+            AssetPackId::new("figure-fallback"),
+            AssetPackOrigin::Generated,
+            fallback,
+        );
+        let tracker = ProvenanceTrackingAssetSource::new(&chain);
+        let replacement = load_prepared_figure(&tracker, &path).unwrap();
+        assert_eq!(
+            replacement.diagnostics.semantic_crc32,
+            Some(crc32fast::hash(replacement_bytes.as_bytes()))
+        );
+        assert_eq!(
+            tracker.resolved_origin(&path),
+            Some(AssetResolutionOrigin::named(
+                replacement_id,
+                AssetPackOrigin::FirstParty
+            ))
+        );
+        assert_ne!(
+            original.diagnostics.semantic_crc32,
+            replacement.diagnostics.semantic_crc32
+        );
+        assert_eq!(original.vertices, replacement.vertices);
+        assert_eq!(original.indices, replacement.indices);
+        assert_eq!(original.atlas, replacement.atlas);
+    }
+
+    #[test]
+    fn asset_source_rejects_missing_and_malformed_semantic_input() {
+        let path = crate::default_player_figure_path();
+        let mut source = MemoryAssetSource::new();
+        assert!(matches!(
+            load_prepared_figure(&source, &path),
+            Err(AssetError::MissingAsset(missing)) if missing == path
+        ));
+
+        source.insert_text(path.clone(), "{");
+        assert!(matches!(
+            load_prepared_figure(&source, &path),
+            Err(AssetError::Json { path: malformed, .. }) if malformed == path
+        ));
     }
 
     #[test]

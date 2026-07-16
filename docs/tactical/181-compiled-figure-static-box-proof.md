@@ -1,11 +1,12 @@
 # 181: Startup-Prepared Figure Static-Box Proof
 
-Status: active 2026-07-16. Slices 0-4 are implemented; the paired mono pixels
-and simpler native lighting were visually approved, native per-eye stereo was
-inspected, and production browser WebGPU now presents the same shared prepared
-player. Work moves to Slice 5 closeout before animation. Full-frame multiview
+Status: complete 2026-07-16. Slices 0-5 established the canonical semantic
+handoff, shared startup compiler, immutable mono/per-eye/browser renderer,
+visually approved Three.js/native comparison, and bounded accounting. The
+production CPU-baked actor path remains unchanged. Full-frame multiview
 execution remains capability-skipped on the current Mac, with its shader and
-two-view contract validated pending a capable adapter.
+two-view contract validated pending a capable adapter. The selected follow-up
+is a separate continuously interpolated CPU-palette animation proof.
 
 Topic: `compiled-figure-rendering`
 
@@ -418,7 +419,7 @@ explicit capability skip until a capable adapter or Quest lane runs it. This
 is recorded evidence, not a claim of Mac multiview pixels, and does not block
 the CPU animation proof.
 
-### Slice 5: close the proof and choose the next tactical
+### Slice 5: close the proof and choose the next tactical (complete 2026-07-16)
 
 - Record semantic parse time, startup preparation time, prepared CPU bytes,
   atlas bytes, retained GPU bytes, draw calls, vertices/indices, upload counts,
@@ -439,6 +440,44 @@ Stop after this decision. Choose the next tactical from actual production
 needs: animation semantics, another box-only asset, or curved primitive and
 material parity. Curved tessellation extends the same startup compiler; it
 does not reopen the persistence decision.
+
+Closeout evidence and decision:
+
+- The final player receipt records a combined semantic read/parse/validation/
+  preparation time of `0.480375 ms`, 17,512 prepared CPU bytes, and one-time
+  immutable GPU payloads of 14,976 vertex bytes, 864 index bytes, 520 atlas
+  bytes, and 4,096 fixed proof-palette bytes. Debug headless GPU setup was
+  `61.762459 ms` and three captured/read-back frames totaled `18.301084 ms`;
+  these machine-local proof timings are accounting, not a crowd-performance
+  claim or a reason to add a disk cache.
+- The old player bridge expands 12 source boxes plus 64 texture cells to 1,824
+  vertices and 2,736 indices. At its 40-byte vertex and `u32` index layouts,
+  one full invalidation serializes/uploads about 83,904 bytes. The prepared
+  proof retains 20,456 immutable GPU bytes once per residency and replaces the
+  texture-cell geometry with a 520-byte atlas. Animated mutable-palette cost
+  belongs to the follow-up and is not inferred here.
+- Repeated preparation is byte-for-byte equal. Focused source-chain tests now
+  prove a named replacement pack wins, exact replacement bytes determine the
+  recorded semantic CRC-32, and semantically equivalent bytes prepare equal
+  topology/atlas data. Missing, malformed, curved, cyclic, and over-budget
+  inputs are rejected before GPU setup.
+- One proof residency reports exactly four immutable uploads across all three
+  mono panels, two per-eye draws share those same resources, and the browser
+  reports one upload set plus one view write. No proof path prepares per actor,
+  eye, or frame.
+- Prepared selection exists only in the offscreen/browser diagnostics. The
+  production player, bear, chicken, gameplay, and actor review continue
+  through `ActorMeshCache`; a preparation error cannot replace or remove that
+  path. No feature default, protocol, asset-pack schema, or persisted format
+  changed.
+- The atlas, coordinate conversion, local vertex, rigid part ID, rest palette,
+  mono/per-eye, and browser contracts are ready for animation. The next
+  tactical will evaluate local TRS continuously at presentation time, compose
+  final part matrices, update only mutable palette data, compare a player walk
+  with Three.js, and stop for human clip review before production migration.
+- A disk cache remains rejected for now: the measured combined preparation is
+  sub-millisecond in this diagnostic and there is no startup or compiler-size
+  evidence justifying another persisted representation.
 
 ## Validation Matrix
 

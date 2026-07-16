@@ -20,6 +20,7 @@ pnpm asset-lab:sheet
 pnpm asset-lab:video
 pnpm asset-lab:batch
 pnpm asset-lab:preview
+pnpm asset-lab:compare
 ```
 
 The smoke command writes screenshots under `/tmp/mclone-asset-lab/` by default.
@@ -37,6 +38,13 @@ The batch command discovers `examples/*/figure.ts`, exports each asset, renders
 each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. The initial
 batch contains `piglet`, `sheep`, `dog`, `cat`, `butterfly`, `player`,
 `bearfolk`, and `lionfolk`.
+
+The compare command renders the same canonical semantic JSON through Three.js
+and the shared native startup-prepared renderer. It writes corresponding raw
+panels, an unscaled labeled sheet, the shared review contract, and diagnostic
+receipts under `/tmp/mclone-figure-compare/` by default. The receipts record
+source/compiler identity, framing, topology, atlas, preparation, and immutable
+upload counts; they are review output, not a persisted asset format.
 
 ## Source and generated JSON
 

@@ -24,8 +24,10 @@ first improvement. Start here when looking for high-value, low-hanging work.
 
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 
-**Priority: high. Status: unclaimed. Scope: general actor rendering, not
-embedded worlds. The first index-reuse slice is low-hanging.**
+**Priority: high. Status: CPU-baked fallback cleanup remains unclaimed; the
+startup-prepared static player proof is complete. Scope: general actor
+rendering, not embedded worlds. The first fallback index-reuse slice remains
+low-hanging.**
 
 Tactical 131 already fixed the old per-eye/per-frame GPU allocation defect.
 `ActorMeshCache` now owns reusable CPU scratch plus persistent, grow-only
@@ -66,14 +68,17 @@ The preferred bounded pickup order is:
    selected [`compiled-figure-rendering`](compiled-figure-rendering.md) topic
    owns that broader direction, including real UV/texture compilation,
    presentation-rate rigid-part animation, instancing, and generated figure
-   LODs. Proposed Tactical
-   [`181`](../tactical/181-compiled-figure-static-box-proof.md) deliberately
-   proves the artifact and static renderer before crowd optimization.
+   LODs. Tactical
+   [`181`](../tactical/181-compiled-figure-static-box-proof.md) now proves the
+   artifact and static mono/per-eye/browser renderer without adopting it in
+   production. The next prepared-path slice is continuously interpolated CPU
+   part palettes and a human-reviewed walk clip, still before crowd
+   optimization.
 
 Do not make a large CPU span-cache campaign a prerequisite for the compiled
-Asset Lab path. Index reuse remains the low-risk first win; measurements and
-the compiled-figure contract should decide how much fallback range-update work
-is worthwhile before the static-geometry path is proven.
+Asset Lab path. Index reuse remains the low-risk first fallback win;
+measurements from the prepared animation path should decide how much fallback
+range-update work is worthwhile now that static geometry is proven.
 
 Acceptance evidence should include:
 
