@@ -3446,16 +3446,10 @@ impl ChunkScheduler {
         let plan = self
             .world_generation_profile
             .plan_features(targets.iter().copied());
-        let (target_chunks, feature_centers, prerequisites) =
+        self.schedule_generation_prerequisites(plan.prerequisites());
+        let (target_chunks, feature_centers, dependency_chunks) =
             ordered_generation_plan(plan, priority_centers);
-        let mut dependency_chunks = Vec::with_capacity(prerequisites.len());
-        for requirement in &prerequisites {
-            if dependency_chunks.last() != Some(&requirement.pos) {
-                dependency_chunks.push(requirement.pos);
-            }
-        }
         let seeded_dependencies = self.seeded_dependency_buffers(&dependency_chunks);
-        self.schedule_generation_prerequisites(&prerequisites);
         self.jobs.insert(
             id,
             ChunkStatusJob {
@@ -4045,7 +4039,10 @@ impl ChunkScheduler {
         }
     }
 
-    fn schedule_generation_prerequisites(&mut self, prerequisites: &[ChunkStatusRequirement]) {
+    fn schedule_generation_prerequisites<'a>(
+        &mut self,
+        prerequisites: impl IntoIterator<Item = &'a ChunkStatusRequirement>,
+    ) {
         for requirement in prerequisites {
             self.ensure_dependency_status_scheduled(requirement.pos, requirement.status);
         }
@@ -4238,24 +4235,17 @@ fn block_change_affects_light(old_block: RawBlockId, new_block: RawBlockId) -> b
 fn ordered_generation_plan(
     plan: ChunkGenerationPlan,
     priority_centers: &[ChunkPos],
-) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkStatusRequirement>) {
+) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
     let (target_chunks, backend_work_chunks, prerequisites) = plan.into_parts();
     let target_chunks = sorted_chunk_positions_by_priority(target_chunks, priority_centers);
     let backend_work_chunks =
         sorted_chunk_positions_by_priority(backend_work_chunks, priority_centers);
-    let mut prerequisites = prerequisites.into_iter().collect::<Vec<_>>();
-    if priority_centers.is_empty() {
-        prerequisites
-            .sort_by_key(|requirement| (requirement.pos.z, requirement.pos.x, requirement.status));
-    } else {
-        prerequisites.sort_by_key(|requirement| {
-            (
-                chunk_priority_key(requirement.pos, priority_centers),
-                requirement.status,
-            )
-        });
-    }
-    (target_chunks, backend_work_chunks, prerequisites)
+    let mut dependency_chunks = sorted_chunk_positions_by_priority(
+        prerequisites.into_iter().map(|requirement| requirement.pos),
+        priority_centers,
+    );
+    dependency_chunks.dedup();
+    (target_chunks, backend_work_chunks, dependency_chunks)
 }
 
 fn sorted_chunk_positions_by_priority(
@@ -4441,12 +4431,8 @@ mod tests {
 
         let plan = WorldGenerationProfile::Overworld.plan_features(targets.iter().copied());
         let expected = plan.clone();
-        let (target_chunks, feature_centers, prerequisites) =
+        let (target_chunks, feature_centers, dependency_chunks) =
             ordered_generation_plan(plan, &[ChunkPos::new(5, -3)]);
-        let dependency_chunks = prerequisites
-            .iter()
-            .map(|requirement| requirement.pos)
-            .collect::<Vec<_>>();
 
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
@@ -4500,17 +4486,19 @@ mod tests {
                 ChunkStatusRequirement::new(near, ChunkStatus::Surface),
             ],
         );
-        let (_, _, prerequisites) = ordered_generation_plan(plan, &[center]);
+        let prerequisites = plan.prerequisites().iter().copied().collect::<Vec<_>>();
+        let (_, _, dependency_chunks) = ordered_generation_plan(plan.clone(), &[center]);
+        assert_eq!(dependency_chunks, vec![near, far],);
         assert_eq!(
-            prerequisites,
-            vec![
+            prerequisites.into_iter().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
                 ChunkStatusRequirement::new(near, ChunkStatus::Surface),
                 ChunkStatusRequirement::new(far, ChunkStatus::Terrain),
-            ]
+            ])
         );
 
         let mut scheduler = ChunkScheduler::new(12_345);
-        scheduler.schedule_generation_prerequisites(&prerequisites);
+        scheduler.schedule_generation_prerequisites(plan.prerequisites());
 
         assert_eq!(
             scheduler.holder(near).unwrap().target_status(),
