@@ -15,6 +15,14 @@ counter requirements lives in
 Update this file whenever a performance slice changes the priority order,
 invalidates an older recommendation, or establishes a new baseline.
 
+Tactical
+[`191`](../tactical/191-guarded-generation-planning-refactor.md) applies this
+topic's A/B and frame-tail rules to a behavior-preserving worldgen planning
+refactor. Its preflight adds paired flat-Android AVD `-gpu host` and
+`-gpu auto` pacing canaries while retaining physical Quest RD5 orbit/churn as
+the final hardware gate. AVD numbers are relative Android/shared-path evidence,
+not standalone Quest evidence.
+
 ## High-Priority Known Performance Issues
 
 This is the first pickup list for measured, broadly applicable performance

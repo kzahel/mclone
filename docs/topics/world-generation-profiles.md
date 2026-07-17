@@ -7,6 +7,7 @@ Status: **Tactical 187 is complete. `flat-grass-v1` and
 beside the unchanged Overworld; authored-only misses still produce void.
 Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
 multi-dimension, and stored-reopen paths now carry the same profile contract.
+Tactical 191 now owns the guarded generator-planning ownership refactor;
 Tactical 188 owns the later `mclone-overworld-v1` biome/decoration fork.**
 
 This topic owns the current truth and durable decisions for selectable,
@@ -145,6 +146,14 @@ protocol itself. Flat and island prove the zero-neighbor case. Future
 decoration or structure profiles may request broader dependencies without
 changing holder, light, publication, or client contracts.
 
+Before those broader dependencies land, Tactical
+[`191`](../tactical/191-guarded-generation-planning-refactor.md) moves the
+existing Overworld footprint calculation to one generator-owned pure plan.
+The scheduler retains readiness, priority, cache, admission, publication,
+lighting, and persistence. Exact schedule locks plus host and Android pacing
+baselines guard the ownership-only change; AVD evidence remains a proxy rather
+than a substitute for physical Quest validation.
+
 Spawn policy becomes generator-aware inside shared server/worldgen ownership.
 Desktop, web, Android, and XR accept the authoritative spawn rather than
 adding profile branches.
@@ -184,3 +193,4 @@ dependencies and metadata, but Tactical 187 does not implement them.
 - [`../tactical/135-overworld-biome-palette-matrix.md`](../tactical/135-overworld-biome-palette-matrix.md)
 - [`../tactical/146-overworld-macro-terrain-geometry-parity.md`](../tactical/146-overworld-macro-terrain-geometry-parity.md)
 - [`../tactical/188-mclone-overworld-v1-biome-decoration-fork.md`](../tactical/188-mclone-overworld-v1-biome-decoration-fork.md)
+- [`../tactical/191-guarded-generation-planning-refactor.md`](../tactical/191-guarded-generation-planning-refactor.md)
