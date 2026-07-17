@@ -2,14 +2,15 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tactical 187 is complete. `flat-grass-v1` and
+Status: **Tacticals 187 and 191 are complete. `flat-grass-v1` and
 `small-island-v1` are live, persisted, target-only shared-Rust generators
 beside the unchanged Overworld; authored-only misses still produce void.
 Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
-multi-dimension, and stored-reopen paths now carry the same profile contract.
-Tactical 191 now owns the guarded generator-planning ownership refactor and
-has completed its clean Slice 0 host/Android baseline; Slice 1 is next.
-Tactical 188 owns the later `mclone-overworld-v1` biome/decoration fork.**
+multi-dimension, and stored-reopen paths carry the same profile contract.
+Generator-owned pure plans now declare exact outputs, backend work, and typed
+prerequisites while the scheduler retains readiness, priority, admission,
+publication, lighting, and persistence. Tactical 188 owns the later
+`mclone-overworld-v1` biome/decoration fork.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -58,6 +59,16 @@ descriptor through native messages, WASM codecs, responses, and diagnostics.
 The closed shared-Rust dispatcher selects the unchanged overworld cache, flat
 grass, or seeded island, and resident state resets when either descriptor fact
 changes.
+
+`WorldGenerationProfile::plan_features` is the single closed planning entry.
+It returns a deterministic `ChunkGenerationPlan` containing exact requested
+outputs, generator backend-work chunks, and typed chunk/status prerequisites.
+Overworld declares its existing 3x3 feature-center and 5x5 mutable dependency
+footprints; Flat Grass and Small Island declare target-only work. The scheduler
+consumes every prerequisite generically, then applies its own view priority,
+deduplication, job admission, and publication policy. Planning occurs once per
+admitted batch and adds no worker message, serialization, trait-object dispatch,
+or general graph traversal.
 
 The overworld implementation itself remains concrete:
 
@@ -147,13 +158,13 @@ protocol itself. Flat and island prove the zero-neighbor case. Future
 decoration or structure profiles may request broader dependencies without
 changing holder, light, publication, or client contracts.
 
-Before those broader dependencies land, Tactical
-[`191`](../tactical/191-guarded-generation-planning-refactor.md) moves the
-existing Overworld footprint calculation to one generator-owned pure plan.
-The scheduler retains readiness, priority, cache, admission, publication,
-lighting, and persistence. Exact schedule locks plus host and Android pacing
-baselines guard the ownership-only change; AVD evidence remains a proxy rather
-than a substitute for physical Quest validation.
+Tactical
+[`191`](../tactical/191-guarded-generation-planning-refactor.md) completed the
+move of the existing Overworld footprint calculation to one generator-owned
+pure plan. Exact schedule locks, host A/B probes, browser generator smokes, and
+Android AVD canaries found no output, work, pacing, or policy regression. The
+result is Quest-proxy-clean; physical Quest RD5 confirmation remains pending
+and AVD evidence is not a substitute for it.
 
 Spawn policy becomes generator-aware inside shared server/worldgen ownership.
 Desktop, web, Android, and XR accept the authoritative spawn rather than

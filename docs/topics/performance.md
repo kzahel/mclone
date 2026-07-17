@@ -18,15 +18,20 @@ invalidates an older recommendation, or establishes a new baseline.
 Tactical
 [`191`](../tactical/191-guarded-generation-planning-refactor.md) applies this
 topic's A/B and frame-tail rules to a behavior-preserving worldgen planning
-refactor. Its clean Slice 0 preflight established paired flat-Android AVD
-`-gpu host` and `-gpu auto` pacing canaries plus raw worldgen, scheduler,
-startup-streaming, and movement baselines. On the current Apple host, AVD
-`host` selects Apple M4 Pro Vulkan while `auto` selects software SwiftShader;
-`auto` is about 2.76x slower by average app work, 4.23x slower at p95, and has
-visible black-region artifacts. Treat them as separate adapter-specific lanes,
-with `host` primary and `auto` a compatibility/stress canary. Physical Quest
-RD5 orbit/churn remains the final hardware gate; AVD numbers are relative
-Android/shared-path evidence, not standalone Quest evidence.
+refactor and is now complete and Quest-proxy-clean. Exact target/dependency
+work and cache/output rows stayed unchanged. Current-host release alternation
+found no raw worldgen, scheduler, startup-streaming, movement, or frame-tail
+regression; the final primary AVD host baseline/candidate row was
+16.523/16.542 ms average, 18.531/18.620 ms p95, and 25.255/24.850 ms p99 with
+zero conservation failures. One complete candidate `host`/`auto` pair also
+passed the identical workload. On the current Apple host, AVD `host` selects
+Apple M4 Pro Vulkan while `auto` selects software SwiftShader; retain them as
+separate adapter-specific lanes, with `host` primary and `auto` a
+compatibility/stress canary. Repeated AVD attempts also showed large host and
+emulator-lifecycle variance, so no numeric AVD policy gate was promoted. The
+known SwiftShader black-region artifact remains. Physical Quest RD5
+orbit/churn is still pending and remains the final hardware gate; AVD numbers
+are relative Android/shared-path evidence, not standalone Quest evidence.
 
 ## High-Priority Known Performance Issues
 

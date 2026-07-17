@@ -1,8 +1,10 @@
 # Tactical 191: Guarded Generation Planning Refactor
 
-Status: active 2026-07-17; Slices 0-3 are complete. Slice 4 closeout is next.
+Status: complete 2026-07-17; Slices 0-4 are implemented and validated.
 Worldgen owns footprint calculation, and the scheduler consumes typed
 prerequisites without profile-specific dependency policy or observable change.
+The result is Quest-proxy-clean; physical Quest RD5 confirmation remains
+pending.
 
 Topics: `world-generation-profiles`, `performance`
 
@@ -393,6 +395,111 @@ capacity-policy adjustment.
 
 Gate: all locked contracts pass. The closeout must state whether the result is
 Quest-proxy-clean or physically Quest-validated; those are not interchangeable.
+
+#### Slice 4 result
+
+The final caller audit found one production planning entry:
+`WorldGenerationProfile::plan_features`. There is no concrete second planner
+dispatch caller to centralize, so Slice 4 deliberately added no registry,
+trait-object layer, or dispatch scaffold. The descriptor-keyed worker execution
+dispatcher remains a separate closed enum match because it selects execution
+state rather than dependency planning.
+
+The code candidate validated at clean commit `d6eff2c1`. The closeout also
+fixed one canary ownership defect introduced in Slice 0: Android view churn now
+sets the diagnostic camera before the normal shared input-frame entry instead
+of directly forcing player-pose publication from the platform rim. The
+three-second churn workload is unchanged, and the thin-adapter purity gate now
+passes.
+
+Correctness and platform gates passed:
+
+- the complete native workspace test and doctest sweep;
+- all 220 active worldgen tests and all 469 server tests, with one pre-existing
+  ignored worldgen parity gauntlet;
+- formatting, diff checks, and native/browser thin-adapter purity;
+- the real browser Flat Grass app loop plus Small Island IndexedDB save/reload
+  generator smoke, using shared-memory worldgen, lighting, and render workers;
+- inspected Flat Grass and Small Island browser canvases with the expected
+  profile labels and no black or transparent output;
+- an optimized Android APK through the repository NDK/Gradle lane and inspected
+  hardware-Vulkan and SwiftShader captures.
+
+The final isolated raw-worldgen alternation on the same host removed a noisy
+one-off surface sample:
+
+| Raw worldgen | Current baseline `0ae6b924` | Candidate `d6eff2c1` | Result |
+|---|---:|---:|---|
+| surface | 597.035 chunks/s | 615.525 chunks/s | +3.10%, noise |
+| features cold | 116.603 target chunks/s | 118.811 target chunks/s | +1.89%, noise |
+| features warm | 487.465 target chunks/s | 490.347 target chunks/s | +0.59%, noise |
+
+Cold and warm dependency-cache rows remained exactly `49/0/49/49` and
+`49/49/0/49`, and generated feature output remained 191,610 non-air blocks.
+The final scheduler sample completed in 655.250 ms versus the original
+670.358 ms record. Step max polls were 0.687/0.362/0.405 ms and peak RSS was
+56,800 KiB. The stronger alternating Slice 3 A/B remains the timing authority;
+this final sample stayed in that envelope. Exact work remained three jobs with
+`25/49/81`, then `5/21/45` twice, snapshots `9/3/3`, unloads `0/3/3`, cache
+totals `72/72/99/171`, and final visible/snapshot/dependency-holder/
+ready-dependency counts `9/35/806/99`.
+
+The historical paced-host samples were noisy, so the closeout followed the
+five-percent rule with current-host baseline/candidate alternation:
+
+| Host probe | Current baseline | Candidate | Result |
+|---|---:|---:|---|
+| startup avg / p95 / p99 | 5.152 / 7.412 / 8.862 ms | 4.917 / 7.167 / 8.758 ms | no regression |
+| startup max / over budget | 11.750 ms / 0 | 14.786 ms / 0 | under 16.667 ms budget |
+| playable | 454.330 ms | 460.623 ms | +1.39%, noise |
+| full view | 6,050.635 ms | 6,071.656 ms | +0.35%, noise |
+| render quiescent | 49,587.008 ms | 49,603.160 ms | +0.03%, noise |
+| movement avg / p95 / p99 / max | 2.614 / 4.388 / 4.878 / 5.217 ms | 2.293 / 3.563 / 4.665 / 4.878 ms | no regression |
+
+Both startup and movement stayed at zero over-budget frames and zero frame
+conservation violations. Startup ended with the full target ready and no
+pending scheduler publications or worker jobs.
+
+One complete candidate AVD pair succeeded on the two distinct Vulkan
+adapters:
+
+| AVD mode | Candidate avg / p95 / p99 / max | >2x / >4x | Queue depth / age |
+|---|---:|---:|---:|
+| `host`, Apple M4 Pro | 16.525 / 20.785 / 26.631 / 35.075 ms | 1 / 0 | 42 / 4,599 ms |
+| `auto`, SwiftShader | 45.086 / 80.201 / 88.546 / 137.672 ms | 239 / 56 | 130 / 11,467 ms |
+
+Both had zero frame- and queue-conservation violations. Against the original
+same-adapter scouting rows, host average was flat and its severe tier did not
+grow; auto average and tails were slightly lower. The inspected host capture
+was fully rendered. The auto capture retained the already-baselined
+SwiftShader black-region artifact and unsupported-extension warnings, with no
+Rust, wgpu-validation, or application fatal error.
+
+Repeated AVD attempts demonstrated large emulator/host variance and lifecycle
+fragility rather than a persistent candidate effect: an unchanged candidate
+host run became a 22.912 ms outlier before its auto half failed to produce an
+application marker, and an initially retried baseline attached to that late
+emulator and was discarded. After explicit cleanup, a valid cold baseline host
+run followed immediately by a rebuilt cold candidate host run recorded:
+
+| Primary AVD host lane | Baseline | Candidate |
+|---|---:|---:|
+| average | 16.523 ms | 16.542 ms |
+| p95 / p99 | 18.531 / 25.255 ms | 18.620 / 24.850 ms |
+| >2x / >4x | 0 / 0 | 1 / 0 |
+| queue depth / age | 160 / 5,961 ms | 198 / 4,928 ms |
+
+The average and percentile deltas are below one percent, queue age improved,
+the one severe frame is within the original baseline's observed tier, and
+queue depth did not grow persistently across candidate samples. No numeric AVD
+policy gate is promoted from this evidence. The AVD result is a relative
+shared-path canary, not standalone-XR proof.
+
+All locked behavior, work, ownership, wire, and pacing contracts therefore
+pass without changing a budget, batch, worker, cadence, or platform default.
+The tactical closes as **Quest-proxy-clean**. Physical Quest RD5 orbit and
+chunk-view-churn confirmation remains pending and is still the final
+standalone-XR authority.
 
 ## Deferred Work
 
