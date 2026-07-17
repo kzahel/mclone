@@ -613,6 +613,41 @@ impl WebSceneHost {
                 report.right_resources.mesh.upload_count as usize,
             ),
             (
+                "preparedFigureCount",
+                report.right_resources.prepared_shared.figure_count,
+            ),
+            (
+                "preparedImmutableUploads",
+                report
+                    .right_resources
+                    .prepared_shared
+                    .immutable_upload_count as usize,
+            ),
+            (
+                "rightPreparedRecords",
+                report.right_resources.prepared_world.actor_record_count,
+            ),
+            (
+                "rightPreparedActors",
+                report.right_resources.prepared_world.prepared_actor_count,
+            ),
+            (
+                "rightLegacyActors",
+                report.right_resources.prepared_world.legacy_actor_count,
+            ),
+            (
+                "rightPreparedPoseEvaluations",
+                report.right_resources.prepared_world.pose_evaluation_count as usize,
+            ),
+            (
+                "rightPreparedPaletteWrites",
+                report.right_resources.prepared_world.palette_write_count as usize,
+            ),
+            (
+                "rightPreparedDraws",
+                report.right_resources.prepared_world.draw_count as usize,
+            ),
+            (
                 "placedPipelines",
                 report.left_resources.placed_pipeline_count,
             ),
@@ -2767,6 +2802,7 @@ impl WebSceneHost {
                         match observation.kind {
                             mclone_protocol::EntityKind::Cow => "cow",
                             mclone_protocol::EntityKind::Chicken => "chicken",
+                            mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
                         },
@@ -2851,6 +2887,7 @@ impl WebSceneHost {
                         match to.kind {
                             mclone_protocol::EntityKind::Cow => "cow",
                             mclone_protocol::EntityKind::Chicken => "chicken",
+                            mclone_protocol::EntityKind::Mannequin => "mannequin",
                             mclone_protocol::EntityKind::DebugCube => "debugCube",
                             mclone_protocol::EntityKind::Item => "item",
                         },

@@ -51,8 +51,10 @@ pub use prepared_figure::{
     FigurePoseError, FigurePrepareError, PREPARED_FIGURE_COMPILER_ID, PreparedFigure,
     PreparedFigureAtlas, PreparedFigureBounds, PreparedFigureClip, PreparedFigureClipContact,
     PreparedFigureClipKey, PreparedFigureClipLocomotion, PreparedFigureDiagnostics,
-    PreparedFigureDrawRange, PreparedFigurePart, PreparedFigurePoseSample,
-    PreparedFigurePrimitiveKind, PreparedFigureVertex, evaluate_prepared_figure_clip_into,
+    PreparedFigureDrawRange, PreparedFigurePart, PreparedFigurePartRotationOverride,
+    PreparedFigurePoseSample, PreparedFigurePrimitiveKind, PreparedFigureVertex,
+    evaluate_prepared_figure_clip_into,
+    evaluate_prepared_figure_clip_with_part_rotation_overrides_into,
     evaluate_prepared_figure_rest_pose_into, load_prepared_figure, prepare_figure_asset,
 };
 pub use profile::{

@@ -23,8 +23,9 @@ use crate::composition_fixture::{
     ComplementaryHalfSpaceTerrainStereo,
 };
 use crate::entity::{
-    ActorDrawResourceSnapshot, ActorDrawResources, ActorInstance, ActorRenderStats,
-    ActorSharedResources, ActorTextureAtlas, ActorTextureLayout, ActorTextureRegion,
+    ActorDrawResourceSnapshot, ActorDrawResources, ActorInstance, ActorInstanceId,
+    ActorRenderStats, ActorSharedResources, ActorTextureAtlas, ActorTextureLayout,
+    ActorTextureRegion,
 };
 use crate::placement::{
     CompositionClip, CompositionHalfSpace, WorldCompositionContext, WorldPlacement,
@@ -139,7 +140,12 @@ impl ActorCompositionFixture {
                 chicken_figure_id(),
             )
             .with_dimensions(0.4, 0.7)
+            .with_id(ActorInstanceId::Entity(10))
+            .with_walk_animation_distance(0.36)
             .with_chicken_wing_flap_radians(Some(0.48)),
+            ActorInstance::remote_player(vec3(-998.0, 64.0, -1_000.0), -18.0)
+                .with_id(ActorInstanceId::Entity(11))
+                .with_walk_animation_distance(0.51),
             ActorInstance::local_player(vec3(-1_005.0, 64.0, -1_000.0), 42.0)
                 .with_walk_animation_distance(0.28),
         ];

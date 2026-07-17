@@ -1,7 +1,7 @@
 # 189: Interactive Prepared Actor Runtime
 
-Status: active 2026-07-17. Slices 0-3 are complete; Slice 4 production
-prepared coexistence is next.
+Status: active 2026-07-17. Slices 0-4 are complete; Slice 5 browser,
+persistence, and scale closeout is next.
 
 Topic: `compiled-figure-rendering`
 
@@ -267,7 +267,7 @@ Gate evidence:
   including the moving upright-bear remote-player figure at walk distance
   `0.08`.
 
-### Slice 4: production prepared coexistence
+### Slice 4: production prepared coexistence (complete 2026-07-17)
 
 - Add asset/device-scoped prepared chicken/player resources and world-local
   mutable actor rows/palettes to shared renderer ownership.
@@ -281,6 +281,51 @@ Gate evidence:
 Gate: direct and retained-preview worlds show moving prepared and legacy actors
 together; only bounded actor/palette data changes per presented frame, and the
 second eye performs no duplicate update.
+
+Gate evidence:
+
+- The first-party figure registry now retains startup-prepared player and
+  chicken data beside the legacy compiler result. Semantic JSON is read once
+  and remains the only persisted input; a preparation failure logs an
+  actionable warning and leaves that figure on the legacy path.
+- Asset/device-scoped prepared actor resources own one immutable vertex,
+  index, and atlas upload per promoted figure. Each drawable world owns only
+  stable-ID records with a model/light uniform, a bounded 64-part palette,
+  pose scratch, and per-view uniforms. Resource snapshots price immutable and
+  world-local allocations independently.
+- Stable chicken and mannequin entity IDs select the prepared path. Local and
+  remote players, cows, debug cubes, items, anonymous figures, unsupported
+  figures, and evaluation failures remain explicit `ActorMeshCache` fallback.
+  Both paths draw in the same direct or composed frame.
+- Continuous walk distance drives exact clip evaluation on every presented
+  update. Chicken wing rotation is an additive actor-local channel composed
+  before hierarchy evaluation; focused tests cover valid composition,
+  malformed overrides, and finite actor-sized bounds across 241 samples of a
+  complete walk/flap cycle.
+- Direct, placed, clipped, distinct-slot stereo, and full-frame multiview
+  shaders share packed light, fog, world placement, and half-space semantics.
+  The second per-eye draw reuses the first eye's actor/model/palette state and
+  writes only its distinct view slot.
+- The renderer-owned cross-platform composition fixture now contains a
+  prepared chicken, prepared mannequin, and legacy local player on one side,
+  plus legacy cow/item/player actors on the other. Its native GPU proof reports
+  3,070 actor/control pixel differences and 1,901 left/right-eye differences;
+  immutable prepared uploads remain six across two drawable worlds, the right
+  legacy mesh contains only one actor, and two prepared records draw alongside
+  it. `/tmp/mclone-179-slice4-actor-composition-mono.png` and
+  `/tmp/mclone-179-slice4-actor-composition-stereo.png` were inspected and are
+  coherent. The ordinary production smoke
+  `/tmp/mclone-production-prepared-coexistence.png` was also inspected with
+  prepared chicken/mannequin-compatible resources and legacy actors together.
+- The production browser WebGPU probe runs the identical Rust fixture and
+  reports two prepared records, one legacy record, six immutable uploads, two
+  pose evaluations/palette writes, two prepared draws, and no page errors.
+  `/tmp/mclone-native-web-actor-composition-probe-canvas.png` was inspected;
+  its prepared chicken/mannequin and legacy actors agree with native placement,
+  orientation, clipping, and cuboid-proxy appearance.
+- Full-frame multiview execution remains a capability skip on the current Mac;
+  both WGSL variants validate and the renderer fixture will execute and compare
+  multiview layers to per-eye output when the adapter exposes `MULTIVIEW`.
 
 ### Slice 5: end-to-end and scale evidence
 

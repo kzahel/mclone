@@ -14,6 +14,10 @@ use crate::chunk::{
 };
 use crate::light_texture::FULL_BRIGHT;
 use crate::placement::{CompositionClip, WorldCompositionContext};
+use crate::prepared_actor::{
+    PreparedActorDrawResources, PreparedActorDrawSnapshot, PreparedActorSharedResources,
+    PreparedActorSharedSnapshot,
+};
 use crate::target::RenderFrameTarget;
 use crate::uniform::{
     PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
@@ -356,6 +360,7 @@ pub struct ActorSharedResources {
     texture_layout: ActorTextureLayout,
     atlas_size: [u32; 2],
     actor_figures: ActorFigureSet,
+    prepared: PreparedActorSharedResources,
 }
 
 /// Mutable actor presentation state for exactly one drawable world slot.
@@ -368,6 +373,7 @@ pub struct ActorDrawResources {
     placed_multiview: RefCell<Option<ActorPlacedMultiviewDrawState>>,
     composed_actor_scratch: Vec<ActorInstance>,
     mesh_cache: ActorMeshCache,
+    prepared: PreparedActorDrawResources,
 }
 
 /// Read-only ownership and allocation facts for one actor renderer.
@@ -402,6 +408,8 @@ pub struct ActorDrawResourceSnapshot {
     pub clipped_placed_multiview_pipeline_count: usize,
     pub placed_multiview_uniform_allocated_bytes: u64,
     pub mesh: ActorMeshCacheSnapshot,
+    pub prepared_shared: PreparedActorSharedSnapshot,
+    pub prepared_world: PreparedActorDrawSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -430,12 +438,16 @@ impl ActorSharedResources {
         let renderer = ActorRenderer::new(device, color_format);
         let gpu_atlas =
             GpuActorTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)?;
+        let actor_figures = actor_figures.cloned().unwrap_or_default();
+        let prepared =
+            PreparedActorSharedResources::new(device, queue, color_format, &actor_figures)?;
         Ok(Arc::new(Self {
             renderer,
             atlas: gpu_atlas,
             texture_layout: atlas.layout,
             atlas_size: [atlas.width.max(1), atlas.height.max(1)],
-            actor_figures: actor_figures.cloned().unwrap_or_default(),
+            actor_figures,
+            prepared,
         }))
     }
 }
@@ -467,6 +479,7 @@ impl ActorDrawResources {
             layout: &shared.renderer.uniform_bind_group_layout,
             entries: &[uniforms.bind_group_entry(0)],
         });
+        let prepared = PreparedActorDrawResources::new(device, &shared.prepared);
         Self {
             shared,
             uniforms,
@@ -476,6 +489,7 @@ impl ActorDrawResources {
             placed_multiview: RefCell::new(None),
             composed_actor_scratch: Vec::new(),
             mesh_cache: ActorMeshCache::new(device),
+            prepared,
         }
     }
 
@@ -549,68 +563,85 @@ impl ActorDrawResources {
         if actors.is_empty() {
             return Ok(ActorRenderStats::default());
         }
-        let depth_view = target
-            .depth_view
-            .context("actor render pass requires a depth attachment")?;
-        let prepared = self.mesh_cache.prepare(
-            device,
-            queue,
-            actors,
-            self.shared.texture_layout,
-            self.shared.atlas_size,
-            &self.shared.actor_figures,
-        );
-        let Some(prepared) = prepared else {
-            return Ok(ActorRenderStats {
-                submitted_actor_count: actors.len(),
-                ..ActorRenderStats::default()
-            });
-        };
-
-        let uniform_offset = self.uniforms.write_slot(
-            queue,
-            view_slot,
-            &uniform_bytes(render_view, render_options),
-        );
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mclone_actor_render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target.color_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
-            ..Default::default()
-        });
-        pass.set_pipeline(&self.shared.renderer.pipeline);
-        pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
-        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
-        pass.set_index_buffer(
-            prepared.index_buffer.slice(..prepared.index_byte_len),
-            wgpu::IndexFormat::Uint32,
-        );
-        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
-
-        Ok(ActorRenderStats {
+        if !view_slot.is_right_eye() || self.prepared.prepared_input_count() != actors.len() {
+            self.prepared
+                .prepare(device, queue, &self.shared.prepared, actors);
+        }
+        let mut stats = ActorRenderStats {
             submitted_actor_count: actors.len(),
-            drawn_actor_count: actors.len(),
-            vertex_count: prepared.vertex_count,
-            index_count: prepared.index_count,
             ..ActorRenderStats::default()
-        })
+        };
+        let legacy_actors = self.prepared.legacy_actors();
+        if !legacy_actors.is_empty() {
+            let depth_view = target
+                .depth_view
+                .context("actor render pass requires a depth attachment")?;
+            if let Some(prepared) = self.mesh_cache.prepare(
+                device,
+                queue,
+                legacy_actors,
+                self.shared.texture_layout,
+                self.shared.atlas_size,
+                &self.shared.actor_figures,
+            ) {
+                let uniform_offset = self.uniforms.write_slot(
+                    queue,
+                    view_slot,
+                    &uniform_bytes(render_view, render_options),
+                );
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mclone_actor_render_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&self.shared.renderer.pipeline);
+                pass.set_bind_group(0, &self.bind_group, &[uniform_offset]);
+                pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+                pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+                pass.set_index_buffer(
+                    prepared.index_buffer.slice(..prepared.index_byte_len),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..prepared.index_count, 0, 0..1);
+                stats.drawn_actor_count = legacy_actors.len();
+                stats.vertex_count = prepared.vertex_count;
+                stats.index_count = prepared.index_count;
+            }
+        }
+        let prepared_stats = self.prepared.render_in_slot(
+            queue,
+            encoder,
+            target,
+            render_view,
+            render_options,
+            None,
+            view_slot,
+            &self.shared.prepared,
+        )?;
+        stats.drawn_actor_count = stats
+            .drawn_actor_count
+            .saturating_add(prepared_stats.drawn_actor_count);
+        stats.vertex_count = stats
+            .vertex_count
+            .saturating_add(prepared_stats.vertex_count);
+        stats.index_count = stats.index_count.saturating_add(prepared_stats.index_count);
+        Ok(stats)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -664,72 +695,97 @@ impl ActorDrawResources {
         if self.composed_actor_scratch.is_empty() {
             return Ok(stats);
         }
-        let depth_view = target
-            .depth_view
-            .context("placed actor render pass requires a depth attachment")?;
-        let prepared = self.mesh_cache.prepare(
-            device,
-            queue,
-            &self.composed_actor_scratch,
-            self.shared.texture_layout,
-            self.shared.atlas_size,
-            &self.shared.actor_figures,
-        );
-        let Some(prepared) = prepared else {
-            return Ok(stats);
-        };
-
-        let renderer = self.shared.renderer.placed_renderer(device);
-        if self.placed.borrow().is_none() {
-            *self.placed.borrow_mut() = Some(ActorPlacedDrawState::new(
+        if !view_slot.is_right_eye()
+            || self.prepared.prepared_input_count() != self.composed_actor_scratch.len()
+        {
+            self.prepared.prepare(
                 device,
-                &renderer.uniform_bind_group_layout,
-            ));
+                queue,
+                &self.shared.prepared,
+                &self.composed_actor_scratch,
+            );
         }
-        let placed = self.placed.borrow();
-        let placed = placed
-            .as_ref()
-            .expect("placed actor draw state initialized above");
-        let uniform_offset = placed.uniforms.write_slot(
+        let legacy_actors = self.prepared.legacy_actors();
+        if !legacy_actors.is_empty() {
+            let depth_view = target
+                .depth_view
+                .context("placed actor render pass requires a depth attachment")?;
+            if let Some(prepared) = self.mesh_cache.prepare(
+                device,
+                queue,
+                legacy_actors,
+                self.shared.texture_layout,
+                self.shared.atlas_size,
+                &self.shared.actor_figures,
+            ) {
+                let renderer = self.shared.renderer.placed_renderer(device);
+                if self.placed.borrow().is_none() {
+                    *self.placed.borrow_mut() = Some(ActorPlacedDrawState::new(
+                        device,
+                        &renderer.uniform_bind_group_layout,
+                    ));
+                }
+                let placed = self.placed.borrow();
+                let placed = placed
+                    .as_ref()
+                    .expect("placed actor draw state initialized above");
+                let uniform_offset = placed.uniforms.write_slot(
+                    queue,
+                    view_slot,
+                    &placed_uniform_bytes(physical_render_view, render_options, context),
+                );
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mclone_actor_placed_render_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+                    ..Default::default()
+                });
+                pass.set_pipeline(renderer.pipeline(context.clip()));
+                pass.set_bind_group(0, &placed.bind_group, &[uniform_offset]);
+                pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+                pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+                pass.set_index_buffer(
+                    prepared.index_buffer.slice(..prepared.index_byte_len),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..prepared.index_count, 0, 0..1);
+                stats.drawn_actor_count = legacy_actors.len();
+                stats.vertex_count = prepared.vertex_count;
+                stats.index_count = prepared.index_count;
+            }
+        }
+        let prepared_stats = self.prepared.render_in_slot(
             queue,
+            encoder,
+            target,
+            physical_render_view,
+            render_options,
+            Some(context),
             view_slot,
-            &placed_uniform_bytes(physical_render_view, render_options, context),
-        );
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mclone_actor_placed_render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target.color_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
-            ..Default::default()
-        });
-        pass.set_pipeline(renderer.pipeline(context.clip()));
-        pass.set_bind_group(0, &placed.bind_group, &[uniform_offset]);
-        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
-        pass.set_index_buffer(
-            prepared.index_buffer.slice(..prepared.index_byte_len),
-            wgpu::IndexFormat::Uint32,
-        );
-        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
-
-        stats.drawn_actor_count = self.composed_actor_scratch.len();
-        stats.vertex_count = prepared.vertex_count;
-        stats.index_count = prepared.index_count;
+            &self.shared.prepared,
+        )?;
+        stats.drawn_actor_count = stats
+            .drawn_actor_count
+            .saturating_add(prepared_stats.drawn_actor_count);
+        stats.vertex_count = stats
+            .vertex_count
+            .saturating_add(prepared_stats.vertex_count);
+        stats.index_count = stats.index_count.saturating_add(prepared_stats.index_count);
         Ok(stats)
     }
 
@@ -747,75 +803,89 @@ impl ActorDrawResources {
         if actors.is_empty() {
             return Ok(ActorRenderStats::default());
         }
-        let depth_view = target
-            .depth_view
-            .context("actor multiview render pass requires a depth attachment")?;
-        let prepared = self.mesh_cache.prepare(
-            device,
-            queue,
-            actors,
-            self.shared.texture_layout,
-            self.shared.atlas_size,
-            &self.shared.actor_figures,
-        );
-        let Some(prepared) = prepared else {
-            return Ok(ActorRenderStats {
-                submitted_actor_count: actors.len(),
-                ..ActorRenderStats::default()
-            });
-        };
-
-        let renderer = self.shared.renderer.multiview_renderer(device)?;
-        if self.multiview.borrow().is_none() {
-            *self.multiview.borrow_mut() = Some(ActorMultiviewDrawState::new(
-                device,
-                &renderer.uniform_bind_group_layout,
-            ));
-        }
-        let multiview = self.multiview.borrow();
-        let multiview = multiview
-            .as_ref()
-            .expect("actor multiview draw state initialized above");
-        multiview.write_uniforms(queue, render_views, render_options);
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mclone_actor_multiview_render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target.color_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
-            ..Default::default()
-        });
-        pass.set_pipeline(&renderer.pipeline);
-        pass.set_bind_group(0, &multiview.bind_group, &[]);
-        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
-        pass.set_index_buffer(
-            prepared.index_buffer.slice(..prepared.index_byte_len),
-            wgpu::IndexFormat::Uint32,
-        );
-        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
-
-        Ok(ActorRenderStats {
+        self.prepared
+            .prepare(device, queue, &self.shared.prepared, actors);
+        let mut stats = ActorRenderStats {
             submitted_actor_count: actors.len(),
-            drawn_actor_count: actors.len(),
-            vertex_count: prepared.vertex_count,
-            index_count: prepared.index_count,
             ..ActorRenderStats::default()
-        })
+        };
+        let legacy_actors = self.prepared.legacy_actors();
+        if !legacy_actors.is_empty() {
+            let depth_view = target
+                .depth_view
+                .context("actor multiview render pass requires a depth attachment")?;
+            if let Some(prepared) = self.mesh_cache.prepare(
+                device,
+                queue,
+                legacy_actors,
+                self.shared.texture_layout,
+                self.shared.atlas_size,
+                &self.shared.actor_figures,
+            ) {
+                let renderer = self.shared.renderer.multiview_renderer(device)?;
+                if self.multiview.borrow().is_none() {
+                    *self.multiview.borrow_mut() = Some(ActorMultiviewDrawState::new(
+                        device,
+                        &renderer.uniform_bind_group_layout,
+                    ));
+                }
+                let multiview = self.multiview.borrow();
+                let multiview = multiview
+                    .as_ref()
+                    .expect("actor multiview draw state initialized above");
+                multiview.write_uniforms(queue, render_views, render_options);
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mclone_actor_multiview_render_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+                    ..Default::default()
+                });
+                pass.set_pipeline(&renderer.pipeline);
+                pass.set_bind_group(0, &multiview.bind_group, &[]);
+                pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+                pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+                pass.set_index_buffer(
+                    prepared.index_buffer.slice(..prepared.index_byte_len),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..prepared.index_count, 0, 0..1);
+                stats.drawn_actor_count = legacy_actors.len();
+                stats.vertex_count = prepared.vertex_count;
+                stats.index_count = prepared.index_count;
+            }
+        }
+        let prepared_stats = self.prepared.render_multiview(
+            queue,
+            encoder,
+            target,
+            render_views,
+            render_options,
+            None,
+            &self.shared.prepared,
+        )?;
+        stats.drawn_actor_count = stats
+            .drawn_actor_count
+            .saturating_add(prepared_stats.drawn_actor_count);
+        stats.vertex_count = stats
+            .vertex_count
+            .saturating_add(prepared_stats.vertex_count);
+        stats.index_count = stats.index_count.saturating_add(prepared_stats.index_count);
+        Ok(stats)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -843,72 +913,92 @@ impl ActorDrawResources {
         if self.composed_actor_scratch.is_empty() {
             return Ok(stats);
         }
-        let depth_view = target
-            .depth_view
-            .context("placed actor multiview render pass requires a depth attachment")?;
-        let prepared = self.mesh_cache.prepare(
+        self.prepared.prepare(
             device,
             queue,
+            &self.shared.prepared,
             &self.composed_actor_scratch,
-            self.shared.texture_layout,
-            self.shared.atlas_size,
-            &self.shared.actor_figures,
         );
-        let Some(prepared) = prepared else {
-            return Ok(stats);
-        };
-
-        let renderer = self.shared.renderer.placed_multiview_renderer(device)?;
-        if self.placed_multiview.borrow().is_none() {
-            *self.placed_multiview.borrow_mut() = Some(ActorPlacedMultiviewDrawState::new(
+        let legacy_actors = self.prepared.legacy_actors();
+        if !legacy_actors.is_empty() {
+            let depth_view = target
+                .depth_view
+                .context("placed actor multiview render pass requires a depth attachment")?;
+            if let Some(prepared) = self.mesh_cache.prepare(
                 device,
-                &renderer.uniform_bind_group_layout,
-            ));
+                queue,
+                legacy_actors,
+                self.shared.texture_layout,
+                self.shared.atlas_size,
+                &self.shared.actor_figures,
+            ) {
+                let renderer = self.shared.renderer.placed_multiview_renderer(device)?;
+                if self.placed_multiview.borrow().is_none() {
+                    *self.placed_multiview.borrow_mut() = Some(ActorPlacedMultiviewDrawState::new(
+                        device,
+                        &renderer.uniform_bind_group_layout,
+                    ));
+                }
+                let placed = self.placed_multiview.borrow();
+                let placed = placed
+                    .as_ref()
+                    .expect("placed actor multiview draw state initialized above");
+                queue.write_buffer(
+                    &placed.uniform_buffer,
+                    0,
+                    &placed_multiview_uniform_bytes(physical_render_views, render_options, context),
+                );
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("mclone_actor_placed_multiview_render_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target.color_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
+                    ..Default::default()
+                });
+                pass.set_pipeline(renderer.pipeline(context.clip()));
+                pass.set_bind_group(0, &placed.bind_group, &[]);
+                pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
+                pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
+                pass.set_index_buffer(
+                    prepared.index_buffer.slice(..prepared.index_byte_len),
+                    wgpu::IndexFormat::Uint32,
+                );
+                pass.draw_indexed(0..prepared.index_count, 0, 0..1);
+                stats.drawn_actor_count = legacy_actors.len();
+                stats.vertex_count = prepared.vertex_count;
+                stats.index_count = prepared.index_count;
+            }
         }
-        let placed = self.placed_multiview.borrow();
-        let placed = placed
-            .as_ref()
-            .expect("placed actor multiview draw state initialized above");
-        queue.write_buffer(
-            &placed.uniform_buffer,
-            0,
-            &placed_multiview_uniform_bytes(physical_render_views, render_options, context),
-        );
-
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("mclone_actor_placed_multiview_render_pass"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target.color_view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: depth_view,
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
-            ..Default::default()
-        });
-        pass.set_pipeline(renderer.pipeline(context.clip()));
-        pass.set_bind_group(0, &placed.bind_group, &[]);
-        pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
-        pass.set_vertex_buffer(0, prepared.vertex_buffer.slice(..prepared.vertex_byte_len));
-        pass.set_index_buffer(
-            prepared.index_buffer.slice(..prepared.index_byte_len),
-            wgpu::IndexFormat::Uint32,
-        );
-        pass.draw_indexed(0..prepared.index_count, 0, 0..1);
-
-        stats.drawn_actor_count = self.composed_actor_scratch.len();
-        stats.vertex_count = prepared.vertex_count;
-        stats.index_count = prepared.index_count;
+        let prepared_stats = self.prepared.render_multiview(
+            queue,
+            encoder,
+            target,
+            physical_render_views,
+            render_options,
+            Some(context),
+            &self.shared.prepared,
+        )?;
+        stats.drawn_actor_count = stats
+            .drawn_actor_count
+            .saturating_add(prepared_stats.drawn_actor_count);
+        stats.vertex_count = stats
+            .vertex_count
+            .saturating_add(prepared_stats.vertex_count);
+        stats.index_count = stats.index_count.saturating_add(prepared_stats.index_count);
         Ok(stats)
     }
 
@@ -937,9 +1027,16 @@ impl ActorDrawResources {
             0
         };
         let mesh = self.mesh_cache.snapshot();
+        let prepared_shared = self.shared.prepared.snapshot();
+        let prepared_world = self.prepared.snapshot();
+        let prepared_shared_bytes = prepared_shared
+            .immutable_vertex_bytes
+            .saturating_add(prepared_shared.immutable_index_bytes)
+            .saturating_add(prepared_shared.immutable_atlas_bytes)
+            as usize;
         ActorDrawResourceSnapshot {
             shared_strong_owner_count: Arc::strong_count(&self.shared),
-            shared_known_retained_bytes: atlas_base_bytes,
+            shared_known_retained_bytes: atlas_base_bytes.saturating_add(prepared_shared_bytes),
             mutable_state_allocated_bytes: direct_uniform_allocated_bytes
                 .saturating_add(multiview_uniform_allocated_bytes)
                 .saturating_add(placed_uniform_allocated_bytes)
@@ -949,7 +1046,8 @@ impl ActorDrawResources {
                 .saturating_add(mesh.cpu_vertex_staging_capacity_bytes as u64)
                 .saturating_add(mesh.cpu_index_staging_capacity_bytes as u64)
                 .saturating_add(mesh.gpu_vertex_capacity_bytes)
-                .saturating_add(mesh.gpu_index_capacity_bytes),
+                .saturating_add(mesh.gpu_index_capacity_bytes)
+                .saturating_add(prepared_world.mutable_known_allocated_bytes),
             atlas_size: self.shared.atlas_size,
             atlas_base_bytes,
             figure_count: self.shared.actor_figures.len(),
@@ -969,6 +1067,8 @@ impl ActorDrawResources {
             ),
             placed_multiview_uniform_allocated_bytes,
             mesh,
+            prepared_shared,
+            prepared_world,
         }
     }
 }

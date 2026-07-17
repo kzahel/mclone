@@ -4,7 +4,8 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
     ActorFigureId, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset, FigureClip,
-    FigureClipLocomotion, FigureClipTransform, FigurePart, actor_figure_path, load_figure_asset,
+    FigureClipLocomotion, FigureClipTransform, FigurePart, PreparedFigure, actor_figure_path,
+    load_figure_asset, prepare_figure_asset,
 };
 
 const TEXTURE_OVERLAY_DEPTH: f32 = 0.004;
@@ -22,17 +23,41 @@ pub struct CompiledFigure {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActorFigureSet {
     figures: BTreeMap<ActorFigureId, CompiledFigure>,
+    prepared_figures: BTreeMap<ActorFigureId, PreparedFigure>,
 }
 
 impl ActorFigureSet {
     pub fn new(figures: impl IntoIterator<Item = (ActorFigureId, CompiledFigure)>) -> Self {
         Self {
             figures: figures.into_iter().collect(),
+            prepared_figures: BTreeMap::new(),
+        }
+    }
+
+    fn with_prepared(
+        figures: impl IntoIterator<Item = (ActorFigureId, CompiledFigure)>,
+        prepared_figures: impl IntoIterator<Item = (ActorFigureId, PreparedFigure)>,
+    ) -> Self {
+        Self {
+            figures: figures.into_iter().collect(),
+            prepared_figures: prepared_figures.into_iter().collect(),
         }
     }
 
     pub fn get(&self, id: ActorFigureId) -> Option<&CompiledFigure> {
         self.figures.get(&id)
+    }
+
+    pub fn prepared(&self, id: ActorFigureId) -> Option<&PreparedFigure> {
+        self.prepared_figures.get(&id)
+    }
+
+    pub(crate) fn prepared_figures(
+        &self,
+    ) -> impl Iterator<Item = (ActorFigureId, &PreparedFigure)> {
+        self.prepared_figures
+            .iter()
+            .map(|(id, figure)| (*id, figure))
     }
 
     pub fn len(&self) -> usize {
@@ -129,12 +154,26 @@ pub(crate) fn load_first_party_actor_figures(
     source: &impl mclone_assets::AssetSource,
 ) -> Result<ActorFigureSet> {
     let mut figures = Vec::new();
+    let mut prepared_figures = Vec::new();
     for id in FIRST_PARTY_ACTOR_FIGURE_IDS {
-        figures.push((id, load_compiled_actor_figure(source, id)?));
+        let path = actor_figure_path(id)
+            .with_context(|| format!("unknown actor figure id {}", id.as_str()))?;
+        let asset = load_figure_asset(source, &path)
+            .with_context(|| format!("failed to load actor figure {} at {}", id.as_str(), path))?;
+        figures.push((id, compile_figure_asset(&asset)?));
+        match prepare_figure_asset(&asset) {
+            Ok(prepared) => prepared_figures.push((id, prepared)),
+            Err(error) => log::warn!(
+                "prepared actor figure {} unavailable; legacy fallback remains active: {}",
+                id.as_str(),
+                error
+            ),
+        }
     }
-    Ok(ActorFigureSet::new(figures))
+    Ok(ActorFigureSet::with_prepared(figures, prepared_figures))
 }
 
+#[cfg(test)]
 pub(crate) fn load_compiled_actor_figure(
     source: &impl mclone_assets::AssetSource,
     id: ActorFigureId,

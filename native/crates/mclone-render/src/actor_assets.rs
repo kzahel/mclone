@@ -266,6 +266,13 @@ mod tests {
         assert!(assets.figures.get(default_player_figure_id()).is_some());
         assert!(assets.figures.get(upright_bear_figure_id()).is_some());
         assert!(assets.figures.get(chicken_figure_id()).is_some());
+        assert!(
+            assets
+                .figures
+                .prepared(default_player_figure_id())
+                .is_some()
+        );
+        assert!(assets.figures.prepared(chicken_figure_id()).is_some());
         assert_eq!(assets.figures.len(), 3);
     }
 }

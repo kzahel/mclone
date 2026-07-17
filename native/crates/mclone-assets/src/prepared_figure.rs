@@ -122,6 +122,13 @@ pub struct PreparedFigurePoseSample {
     pub sampled_track_count: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PreparedFigurePartRotationOverride {
+    pub part_id: u16,
+    /// Additive actor-local Euler rotation in semantic source XYZ radians.
+    pub rotation_delta_radians: [f32; 3],
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedFigureDrawRange {
     pub part_id: u16,
@@ -228,7 +235,7 @@ pub fn evaluate_prepared_figure_rest_pose_into(
     figure: &PreparedFigure,
     palette: &mut Vec<[[f32; 4]; 4]>,
 ) -> Result<(), FigurePoseError> {
-    evaluate_prepared_figure_pose_into(figure, None, 0.0, palette).map(|_| ())
+    evaluate_prepared_figure_pose_into(figure, None, 0.0, &[], palette).map(|_| ())
 }
 
 /// Evaluate one prepared clip at an arbitrary presentation timestamp.
@@ -248,13 +255,51 @@ pub fn evaluate_prepared_figure_clip_into(
             figure.name, clip_name
         ))
     })?;
-    evaluate_prepared_figure_pose_into(figure, Some(clip), presentation_time_seconds, palette)
+    evaluate_prepared_figure_pose_into(figure, Some(clip), presentation_time_seconds, &[], palette)
+}
+
+/// Evaluate a prepared clip while composing a small set of independent
+/// actor-local rotation channels before parent hierarchy composition.
+pub fn evaluate_prepared_figure_clip_with_part_rotation_overrides_into(
+    figure: &PreparedFigure,
+    clip_name: &str,
+    presentation_time_seconds: f64,
+    rotation_overrides: &[PreparedFigurePartRotationOverride],
+    palette: &mut Vec<[[f32; 4]; 4]>,
+) -> Result<PreparedFigurePoseSample, FigurePoseError> {
+    let clip = figure.clips.get(clip_name).ok_or_else(|| {
+        FigurePoseError::new(format!(
+            "prepared figure '{}' has no clip '{}'",
+            figure.name, clip_name
+        ))
+    })?;
+    for rotation_override in rotation_overrides {
+        if usize::from(rotation_override.part_id) >= figure.parts.len()
+            || rotation_override
+                .rotation_delta_radians
+                .iter()
+                .any(|value| !value.is_finite())
+        {
+            return Err(FigurePoseError::new(format!(
+                "prepared figure '{}' has an invalid part rotation override for {}",
+                figure.name, rotation_override.part_id
+            )));
+        }
+    }
+    evaluate_prepared_figure_pose_into(
+        figure,
+        Some(clip),
+        presentation_time_seconds,
+        rotation_overrides,
+        palette,
+    )
 }
 
 fn evaluate_prepared_figure_pose_into(
     figure: &PreparedFigure,
     clip: Option<&PreparedFigureClip>,
     presentation_time_seconds: f64,
+    rotation_overrides: &[PreparedFigurePartRotationOverride],
     palette: &mut Vec<[[f32; 4]; 4]>,
 ) -> Result<PreparedFigurePoseSample, FigurePoseError> {
     if !presentation_time_seconds.is_finite() {
@@ -291,7 +336,14 @@ fn evaluate_prepared_figure_pose_into(
             ))
         })?;
         let track = clip.and_then(|clip| clip.tracks.get(&part_id));
-        let local_content = prepared_part_local_content_matrix(part, track, local_time);
+        let rotation_delta = rotation_overrides
+            .iter()
+            .find(|rotation_override| rotation_override.part_id == part_id)
+            .map_or(Vec3::ZERO, |rotation_override| {
+                Vec3::from_array(rotation_override.rotation_delta_radians)
+            });
+        let local_content =
+            prepared_part_local_content_matrix(part, track, local_time, rotation_delta);
         let content = match part.parent {
             Some(parent_id) => {
                 let parent_index = usize::from(parent_id);
@@ -327,17 +379,19 @@ fn prepared_part_local_content_matrix(
     part: &PreparedFigurePart,
     track: Option<&Vec<PreparedFigureClipKey>>,
     local_time: f32,
+    rotation_delta: Vec3,
 ) -> Mat4 {
     let sampled = track
         .filter(|keys| !keys.is_empty())
         .map(|keys| sample_prepared_track(part, keys, local_time));
-    let (translation, rotation, scale) = sampled.unwrap_or_else(|| {
+    let (translation, mut rotation, scale) = sampled.unwrap_or_else(|| {
         (
             Vec3::ZERO,
             mirrored_source_rotation(Vec3::from_array(part.source_base_rotation_radians)),
             Vec3::ONE,
         )
     });
+    rotation *= mirrored_source_rotation(rotation_delta);
     let base_position = Vec3::from_array(part.source_base_position);
     let source_position = base_position + translation;
     let engine_position = mirror_source_vector(source_position);
@@ -1678,6 +1732,70 @@ mod tests {
         evaluate_prepared_figure_clip_into(&prepared, "walk", 1.023, &mut wrapped).unwrap();
         for (expected, actual) in first_copy.into_iter().zip(wrapped) {
             assert_matrix_close(expected, actual, 2.0e-5);
+        }
+    }
+
+    #[test]
+    fn actor_local_rotation_overrides_compose_with_clip_pose() {
+        let asset: FigureAsset = serde_json::from_str(CHICKEN_FIGURE_JSON).unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let wing = prepared
+            .parts
+            .iter()
+            .position(|part| part.name == "wing_l")
+            .unwrap() as u16;
+        let mut clip_only = Vec::new();
+        let mut overridden = Vec::new();
+
+        evaluate_prepared_figure_clip_into(&prepared, "walk", 0.173, &mut clip_only).unwrap();
+        evaluate_prepared_figure_clip_with_part_rotation_overrides_into(
+            &prepared,
+            "walk",
+            0.173,
+            &[PreparedFigurePartRotationOverride {
+                part_id: wing,
+                rotation_delta_radians: [0.0, 0.0, 0.45],
+            }],
+            &mut overridden,
+        )
+        .unwrap();
+
+        assert_eq!(overridden.len(), prepared.parts.len());
+        assert_ne!(overridden[usize::from(wing)], clip_only[usize::from(wing)]);
+        assert!(
+            overridden
+                .iter()
+                .flatten()
+                .flatten()
+                .all(|value| value.is_finite())
+        );
+    }
+
+    #[test]
+    fn actor_local_rotation_overrides_reject_invalid_part_or_rotation() {
+        let asset: FigureAsset = serde_json::from_str(CHICKEN_FIGURE_JSON).unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        let mut palette = Vec::new();
+
+        for rotation_override in [
+            PreparedFigurePartRotationOverride {
+                part_id: prepared.parts.len() as u16,
+                rotation_delta_radians: [0.0; 3],
+            },
+            PreparedFigurePartRotationOverride {
+                part_id: 0,
+                rotation_delta_radians: [f32::NAN, 0.0, 0.0],
+            },
+        ] {
+            let error = evaluate_prepared_figure_clip_with_part_rotation_overrides_into(
+                &prepared,
+                "walk",
+                0.0,
+                &[rotation_override],
+                &mut palette,
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains("invalid part rotation override"));
         }
     }
 

@@ -732,7 +732,7 @@ tier rather than a blocker. Neither changes the persistence decision.
 - support mono, per-eye stereo, and full-frame multiview; and
 - validate first-person body filtering and world-local cache ownership.
 
-### Phase 3: interactive migration with coexistence (in progress)
+### Phase 3: interactive migration with coexistence (closeout in progress)
 
 - placeable chicken and mannequin debug-hotbar tools now use ordinary
   authoritative use-item placement and persistence;
@@ -741,8 +741,13 @@ tier rather than a blocker. Neither changes the persistence decision.
 - stable presentation identity now reaches renderer-neutral actor instances,
   and world-local presentation state derives continuous travel phase from
   interpolated movement instead of authoritative update steps;
-- migrate chicken and mannequin one at a time while preserving mono, per-eye,
-  multiview, browser, replacement, and drawable-world ownership; and
+- chicken and mannequin now use asset/device-scoped immutable prepared
+  geometry with stable-ID world-local model/light/palette records, while the
+  same frame can retain legacy actors;
+- direct, placed, clipped, per-eye, and multiview-aware paths are implemented;
+  native mono/stereo composition pixels, no-second-eye-pose-write counters,
+  and the identical production browser WebGPU fixture pass, while the scale
+  baseline remains the closeout gate; and
 - retain `ActorMeshCache` as an explicit fallback for unsupported figure,
   debug, and item actors.
 
@@ -995,11 +1000,12 @@ drawable milestone. The eventual campaign should include:
 Continue Tactical
 [`189`](../tactical/189-interactive-prepared-actor-runtime.md). Cuboid-proxy
 preparation and authoritative persistent chicken/mannequin tools are complete.
-Stable actor identity and continuously derived travel phase are also complete.
-Next move chicken and mannequin to a coexisting prepared production renderer.
-Stop only after native and browser interactive placement, wandering animation,
-immutable-resource residency, replacement, stereo/multiview contracts, and
-representative-count behavior are recorded.
+Stable actor identity, continuously derived travel phase, and coexisting
+prepared production drawing are also complete, including the shared native and
+production browser WebGPU composition fixture. Next close persistence/
+replacement evidence and record the representative and thousand-chicken
+non-instanced baseline. Stop only after exact native/browser interaction and
+review steps are recorded.
 
 Do not add a persisted compiled format, exact curved tessellation, instancing,
 LOD, or GPU crowd evaluation in that tactical. Its actor-record boundary

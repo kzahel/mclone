@@ -649,12 +649,20 @@ async function run() {
           || Number(actorCompositionProbeResult?.leftSourceRejectedActors) !== 1
           || Number(actorCompositionProbeResult?.leftClipRejectedActors) !== 1
           || Number(actorCompositionProbeResult?.leftFrustumRejectedActors) !== 1
-          || Number(actorCompositionProbeResult?.rightSubmittedActors) !== 2
-          || Number(actorCompositionProbeResult?.rightDrawnActors) !== 2
+          || Number(actorCompositionProbeResult?.rightSubmittedActors) !== 3
+          || Number(actorCompositionProbeResult?.rightDrawnActors) !== 3
           || Number(actorCompositionProbeResult?.leftMeshRebuilds) !== 1
           || Number(actorCompositionProbeResult?.leftMeshUploads) !== 1
           || Number(actorCompositionProbeResult?.rightMeshRebuilds) !== 1
           || Number(actorCompositionProbeResult?.rightMeshUploads) !== 1
+          || Number(actorCompositionProbeResult?.preparedFigureCount) !== 2
+          || Number(actorCompositionProbeResult?.preparedImmutableUploads) !== 6
+          || Number(actorCompositionProbeResult?.rightPreparedRecords) !== 2
+          || Number(actorCompositionProbeResult?.rightPreparedActors) !== 2
+          || Number(actorCompositionProbeResult?.rightLegacyActors) !== 1
+          || Number(actorCompositionProbeResult?.rightPreparedPoseEvaluations) !== 2
+          || Number(actorCompositionProbeResult?.rightPreparedPaletteWrites) !== 2
+          || Number(actorCompositionProbeResult?.rightPreparedDraws) !== 2
           || Number(actorCompositionProbeResult?.placedPipelines) !== 1
           || Number(actorCompositionProbeResult?.clippedPlacedPipelines) !== 1
           || pixels.actorLikePixels <= 500
