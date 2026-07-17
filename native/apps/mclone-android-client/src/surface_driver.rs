@@ -702,11 +702,8 @@ impl AndroidGpuState {
             camera.pitch_radians,
             camera.speed_blocks_per_second,
         );
-        let committed = self
-            .host
-            .force_mono_player_pose_reconcile_for_diagnostics()?;
         log::info!(
-            "MCLONE_ANDROID_PACING_PERF_CHURN label={} center_x={} center_z={} committed={committed}",
+            "MCLONE_ANDROID_PACING_PERF_CHURN label={} center_x={} center_z={}",
             perf.options.label,
             center[0],
             center[1]
