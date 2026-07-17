@@ -1,10 +1,10 @@
 use super::*;
 use crate::{
-    EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay, GameCollisionMode,
-    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameXrTurnMode,
-    GuiDrawCommand, GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus,
-    StorageProfileBackend, StorageProfileUiState, render_flat_hud, render_loading_progress_overlay,
-    render_loading_progress_panel_at,
+    DebugActorTool, EMPTY_BLOCK_PALETTE_ENTRIES, EMPTY_HOTBAR_ICONS, FlatHotbarOverlay,
+    GameCollisionMode, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameXrTurnMode, GuiDrawCommand, GuiTextureUv, LoadingProgressCell,
+    LoadingProgressCellStatus, StorageProfileBackend, StorageProfileUiState, render_flat_hud,
+    render_loading_progress_overlay, render_loading_progress_panel_at,
 };
 use mclone_input::{InputPromptKind, ResolvedFlatInput, TouchControlsMode};
 
@@ -71,6 +71,11 @@ fn block_palette_state(selected_hotbar_slot: u8) -> GameUiRenderState {
     let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
     entries[0] = Some(BlockPaletteEntry::new(91, Some(brick_icon), "Bricks"));
     entries[1] = Some(BlockPaletteEntry::new(41, Some(log_icon), "Oak Log"));
+    entries[2] = Some(BlockPaletteEntry::actor(
+        DebugActorTool::Chicken,
+        Some(brick_icon),
+        "Spawn Chicken",
+    ));
     GameUiRenderState {
         block_palette: BlockPaletteOverlay::visible(selected_hotbar_slot, entries),
         ..GameUiRenderState::default()

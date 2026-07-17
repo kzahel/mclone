@@ -17,10 +17,11 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DimensionKey, InteractionHand,
-    MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind,
-    PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate,
-    SessionCapabilities, SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DebugActorKind,
+    DebugHotbarItem, DimensionKey, EntityKind, InteractionHand, MovePlayerCommand,
+    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind, PlayerProfileId,
+    PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
+    SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
     SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
@@ -41,6 +42,7 @@ use crate::entity::spawning::mob_category::MobCategory;
 use crate::entity::spawning::natural::{
     NaturalSpawnChunkInputs, NaturalSpawnConfig, NaturalSpawnContext, plan_natural_spawns,
 };
+use crate::entity::spawning::placements::check_debug_actor_placement;
 use crate::entity::spawning::spawn_state::SpawnState;
 use crate::entity::{
     EntityTracking, ItemPickupTarget, MobPlayerTarget, RoutedEntityUpdate, ServerEntityState,
@@ -1337,7 +1339,7 @@ impl RealmServer {
         capabilities: SessionCapabilities,
     ) -> ChunkStoreResult<ServerPlayerId> {
         self.activate_dimension(&dimension)?;
-        let player_id = self.players.add_in_dimension(dimension);
+        let player_id = self.players.add_in_dimension(dimension, capabilities);
         let configuration = session_configuration(self.chunk_tracking.policy(), capabilities);
         let world_info = self.world_info_update();
         let time_update = self.time_update();
@@ -2571,6 +2573,9 @@ impl RealmServer {
         target: CommandTarget,
         command: SetDebugHotbarSlotCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self.debug_actions_allowed_for_target(target)? {
+            return Ok(Vec::new());
+        }
         self.inventory_mut_for_target(target)?
             .apply_set_debug_hotbar_slot(command);
         Ok(Vec::new())
@@ -2598,6 +2603,11 @@ impl RealmServer {
         target: CommandTarget,
         command: UseItemOnCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if let Some(DebugHotbarItem::SpawnActor(kind)) =
+            self.inventory_for_target(target)?.selected_debug_item()
+        {
+            return self.handle_debug_actor_use_item_on_for_target(target, command, kind);
+        }
         let placed = if self.world_behavior_profile.allows_player_place() {
             if let Some((target, block_state)) =
                 self.held_item_place_target_for_target(target, command)?
@@ -2620,6 +2630,51 @@ impl RealmServer {
             );
         }
         Ok(updates)
+    }
+
+    fn handle_debug_actor_use_item_on_for_target(
+        &mut self,
+        target: CommandTarget,
+        command: UseItemOnCommand,
+        actor_kind: DebugActorKind,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if command.hand != InteractionHand::MainHand
+            || !self.world_behavior_profile.allows_player_place()
+            || !self.debug_actions_allowed_for_target(target)?
+        {
+            return Ok(Vec::new());
+        }
+        let (player_position, y_rot_degrees) = {
+            let player = self.player_for_target(target)?;
+            (player.position(), player.y_rot_degrees())
+        };
+        let context = ServerInteractionContext::debug_creative(player_position);
+        if !context.may_use_item_on(command.hit) {
+            return Ok(Vec::new());
+        }
+        let feet_block = command.hit.block_pos.relative(command.hit.direction);
+        if !context.may_place_at(feet_block) {
+            return Ok(Vec::new());
+        }
+        let kind = match actor_kind {
+            DebugActorKind::Chicken => EntityKind::Chicken,
+            DebugActorKind::Mannequin => EntityKind::Mannequin,
+        };
+        if check_debug_actor_placement(kind, feet_block, |pos| self.scheduler.block_at_world(pos))
+            .is_err()
+        {
+            return Ok(Vec::new());
+        }
+        let position = Vec3d::new(
+            f64::from(feet_block.x) + 0.5,
+            f64::from(feet_block.y),
+            f64::from(feet_block.z) + 0.5,
+        );
+        let state = self
+            .entities
+            .spawn_persistent_passive_mob(kind, position, y_rot_degrees);
+        self.reconcile_entity_subjects(std::iter::once(state), true);
+        self.drain_chunk_updates_for_target(target)
     }
 
     fn handle_shoot_debug_physics_cube_for_target(
@@ -3468,6 +3523,15 @@ impl RealmServer {
             .ok_or_else(|| unknown_player_error(player_id))
     }
 
+    fn debug_actions_allowed_for_target(&self, target: CommandTarget) -> ChunkStoreResult<bool> {
+        Ok(self
+            .players
+            .get(target.player_id())
+            .ok_or_else(|| unknown_player_error(target.player_id()))?
+            .capabilities
+            .contains(SessionCapabilities::DEBUG_ACTIONS))
+    }
+
     fn inventory_mut_for_target(
         &mut self,
         target: CommandTarget,
@@ -3540,8 +3604,15 @@ pub struct LocalRealmSession {
 }
 
 impl LocalRealmSession {
-    pub fn from_server(mut server: RealmServer) -> Self {
-        let player_id = server.add_player();
+    pub fn from_server(server: RealmServer) -> Self {
+        Self::from_server_with_capabilities(server, SessionCapabilities::DEVELOPMENT_DEFAULT)
+    }
+
+    pub fn from_server_with_capabilities(
+        mut server: RealmServer,
+        capabilities: SessionCapabilities,
+    ) -> Self {
+        let player_id = server.add_player_with_capabilities(capabilities);
         Self {
             server,
             role: LocalRealmSessionRole::Player(player_id),

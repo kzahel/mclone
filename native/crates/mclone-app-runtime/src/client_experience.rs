@@ -10,7 +10,7 @@ use crate::far_lod::{
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    GameCollisionMode, GameFarLodDetailMode, GameFramePacingMode, GameMovementMode,
+    DebugActorTool, GameCollisionMode, GameFarLodDetailMode, GameFramePacingMode, GameMovementMode,
     GamePlayerModel, GameScenarioId, GameSimulationCadence, GameStorageAction, GameTouchSettings,
     GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameXrTurnMode,
 };
@@ -231,6 +231,11 @@ impl ClientExperienceController {
                     .gameplay
                     .push(ClientExperienceGameplayEffect::AssignHotbarBlock { slot, block_state });
             }
+            GameUiAction::AssignHotbarActor { slot, actor } => {
+                effects
+                    .gameplay
+                    .push(ClientExperienceGameplayEffect::AssignHotbarActor { slot, actor });
+            }
             GameUiAction::StartWorld
             | GameUiAction::Resume
             | GameUiAction::OpenBlockPalette
@@ -302,6 +307,7 @@ impl ClientExperienceEffects {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientExperienceGameplayEffect {
     AssignHotbarBlock { slot: u8, block_state: u32 },
+    AssignHotbarActor { slot: u8, actor: DebugActorTool },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1604,7 +1610,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::OpenBlockPalette => ClientExperienceActionKind::OpenBlockPalette,
         GameUiAction::OpenHelp(_) => ClientExperienceActionKind::OpenHelp,
         GameUiAction::CloseHelp(_) => ClientExperienceActionKind::CloseHelp,
-        GameUiAction::AssignHotbarBlock { .. } => ClientExperienceActionKind::AssignHotbarBlock,
+        GameUiAction::AssignHotbarBlock { .. } | GameUiAction::AssignHotbarActor { .. } => {
+            ClientExperienceActionKind::AssignHotbarBlock
+        }
         GameUiAction::OpenOptions(_) => ClientExperienceActionKind::OpenOptions,
         GameUiAction::OpenOptionsCategory(_, _) => ClientExperienceActionKind::OpenOptionsCategory,
         GameUiAction::OpenServerSettings(_) => ClientExperienceActionKind::OpenServerSettings,
@@ -1932,6 +1940,10 @@ mod tests {
                 slot: 0,
                 block_state: 1,
             },
+            GameUiAction::AssignHotbarActor {
+                slot: 1,
+                actor: DebugActorTool::Chicken,
+            },
             GameUiAction::OpenOptions(GameOptionsParent::Title),
             GameUiAction::OpenOptionsCategory(
                 GameOptionsParent::Title,
@@ -1982,7 +1994,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 59);
+        assert_eq!(samples.len(), 60);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2127,6 +2139,21 @@ mod tests {
             vec![ClientExperienceGameplayEffect::AssignHotbarBlock {
                 slot: 2,
                 block_state: 9
+            }]
+        );
+
+        let effects = controller.apply_ui_action(
+            GameUiAction::AssignHotbarActor {
+                slot: 7,
+                actor: DebugActorTool::Mannequin,
+            },
+            context(),
+        );
+        assert_eq!(
+            effects.gameplay,
+            vec![ClientExperienceGameplayEffect::AssignHotbarActor {
+                slot: 7,
+                actor: DebugActorTool::Mannequin,
             }]
         );
     }

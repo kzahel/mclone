@@ -290,6 +290,16 @@ impl ServerEntityStore {
         state
     }
 
+    pub(crate) fn spawn_persistent_passive_mob(
+        &mut self,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
+        let id = self.allocate_entity_id();
+        self.insert_passive_mob(id, kind, position, y_rot_degrees)
+    }
+
     pub(crate) fn discard_volatile_entities_in_chunk(
         &mut self,
         pos: ChunkPos,
@@ -704,6 +714,9 @@ impl ServerEntityStore {
             ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => {
                 self.insert_saved_passive_mob(id, saved, EntityKind::Chicken, Some(*egg_time))?
             }
+            ("mclone:mannequin", EntitySavePayload::Mannequin) => {
+                self.insert_saved_passive_mob(id, saved, EntityKind::Mannequin, None)?
+            }
             (
                 "minecraft:item",
                 EntitySavePayload::Item {
@@ -810,6 +823,7 @@ impl ServerEntityStore {
                     .and_then(MobRuntimeState::chicken_egg_time)
                     .unwrap_or(0),
             },
+            EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
                 pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
@@ -961,6 +975,7 @@ fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
     match kind {
         EntityKind::Cow => Some("minecraft:cow"),
         EntityKind::Chicken => Some("minecraft:chicken"),
+        EntityKind::Mannequin => Some("mclone:mannequin"),
         EntityKind::Item => Some("minecraft:item"),
         EntityKind::DebugCube => None,
     }
@@ -1182,6 +1197,11 @@ mod tests {
             },
             Vec3d::new(5.5, 64.0, 4.5),
         );
+        let mannequin_id = store.insert_passive_mob_for_test(
+            EntityKind::Mannequin,
+            Vec3d::new(6.5, 64.0, 4.5),
+            90.0,
+        );
         store.entities.get_mut(&chicken_id).unwrap().age_ticks = 20;
         store.entities.get_mut(&item_id).unwrap().age_ticks = 30;
         store
@@ -1195,7 +1215,7 @@ mod tests {
 
         assert_eq!(record.pos, chunk);
         assert_eq!(record.revision, 7);
-        assert_eq!(record.entities.len(), 2);
+        assert_eq!(record.entities.len(), 3);
         let chicken_record = record
             .entities
             .iter()
@@ -1217,12 +1237,18 @@ mod tests {
                 pickup_delay: 3,
             }
         );
+        let mannequin_record = record
+            .entities
+            .iter()
+            .find(|entity| entity.kind == "mclone:mannequin")
+            .expect("mannequin record");
+        assert_eq!(mannequin_record.payload, EntitySavePayload::Mannequin);
 
         let mut loaded = ServerEntityStore::default();
         loaded.next_entity_id = 100;
         let loaded_states = loaded.hydrate_entity_chunk_record(&record).unwrap();
 
-        assert_eq!(loaded_states.len(), 2);
+        assert_eq!(loaded_states.len(), 3);
         let loaded_chicken = loaded_states
             .iter()
             .find(|entity| entity.kind == EntityKind::Chicken)
@@ -1233,8 +1259,21 @@ mod tests {
             .find(|entity| entity.kind == EntityKind::Item)
             .copied()
             .expect("loaded item");
+        let loaded_mannequin = loaded_states
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Mannequin)
+            .copied()
+            .expect("loaded mannequin");
         assert_ne!(loaded_chicken.id, chicken_id);
         assert_ne!(loaded_item.id, item_id);
+        assert_ne!(loaded_mannequin.id, mannequin_id);
+        assert_eq!(
+            loaded
+                .mob_state(loaded_mannequin.id)
+                .expect("loaded mannequin mob")
+                .available_goal_count(),
+            3
+        );
         assert_eq!(
             loaded
                 .mobs

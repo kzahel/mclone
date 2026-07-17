@@ -809,8 +809,12 @@ impl McloneSceneHost {
     }
 
     pub fn selected_mono_hotbar_block_state(&self) -> Option<BlockStateId> {
-        self.active_world.interaction.hotbar_items()
+        match self.active_world.interaction.hotbar_items()
             [usize::from(self.active_world.interaction.selected_hotbar_slot())]
+        {
+            Some(mclone_protocol::DebugHotbarItem::Block(block_state)) => Some(block_state),
+            Some(mclone_protocol::DebugHotbarItem::SpawnActor(_)) | None => None,
+        }
     }
 
     pub fn mono_local_world_id_for_ui_id(
@@ -918,6 +922,7 @@ impl McloneSceneHost {
                     | GameUiAction::Resume
                     | GameUiAction::JoinRemote
                     | GameUiAction::AssignHotbarBlock { .. }
+                    | GameUiAction::AssignHotbarActor { .. }
             )
         {
             host.request_mouse_lock(true)?;
@@ -1005,6 +1010,9 @@ impl McloneSceneHost {
             match effect {
                 ClientExperienceGameplayEffect::AssignHotbarBlock { slot, block_state } => {
                     self.assign_debug_hotbar_slot(slot, BlockStateId(block_state))?;
+                }
+                ClientExperienceGameplayEffect::AssignHotbarActor { slot, actor } => {
+                    self.assign_debug_hotbar_actor(slot, actor)?;
                 }
             }
         }

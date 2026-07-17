@@ -124,6 +124,34 @@ where
     Ok(())
 }
 
+pub(crate) fn check_debug_actor_placement<F>(
+    kind: EntityKind,
+    pos: BlockPos,
+    mut block_at: F,
+) -> Result<(), SpawnPlacementFailure>
+where
+    F: FnMut(BlockPos) -> Option<RawBlockId>,
+{
+    let floor_pos = pos.below();
+    let floor = block_at(floor_pos).ok_or(SpawnPlacementFailure::MissingBlockData)?;
+    if !is_valid_spawn_floor(floor, floor_pos) {
+        return Err(SpawnPlacementFailure::InvalidFloor);
+    }
+    let feet = block_at(pos).ok_or(SpawnPlacementFailure::MissingBlockData)?;
+    if !is_valid_empty_spawn_block(feet, pos) {
+        return Err(SpawnPlacementFailure::BlockedFeet);
+    }
+    let head_pos = pos.offset(0, 1, 0);
+    let head = block_at(head_pos).ok_or(SpawnPlacementFailure::MissingBlockData)?;
+    if !is_valid_empty_spawn_block(head, head_pos) {
+        return Err(SpawnPlacementFailure::BlockedHead);
+    }
+    if entity_aabb_collides(kind, pos, &mut block_at)? {
+        return Err(SpawnPlacementFailure::CollisionBlocked);
+    }
+    Ok(())
+}
+
 fn is_valid_spawn_floor(block: RawBlockId, pos: BlockPos) -> bool {
     block_collision_aabb(generated_block_state_id(block), pos).is_some()
 }
@@ -202,6 +230,20 @@ mod tests {
                 SpawnHeightmapType::MotionBlockingNoLeaves
             );
             assert_eq!(placement.predicate, SpawnPredicateKind::Animal);
+        }
+    }
+
+    #[test]
+    fn debug_actor_placement_accepts_supported_clear_floor_without_natural_rules() {
+        let blocks = BTreeMap::from([(BlockPos::new(0, 63, 0), DIRT)]);
+
+        for kind in [EntityKind::Chicken, EntityKind::Mannequin] {
+            assert_eq!(
+                check_debug_actor_placement(kind, BlockPos::new(0, 64, 0), |pos| {
+                    block_map_at(&blocks, pos)
+                }),
+                Ok(())
+            );
         }
     }
 

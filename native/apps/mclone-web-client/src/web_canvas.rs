@@ -3150,6 +3150,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetTouchControlsMode(_) => "setTouchControlsMode",
         GameUiAction::SetServerSimulationCadence(_) => "setServerSimulationCadence",
         GameUiAction::AssignHotbarBlock { .. } => "assignHotbarBlock",
+        GameUiAction::AssignHotbarActor { .. } => "assignHotbarActor",
         GameUiAction::Quit => "quit",
     }
 }

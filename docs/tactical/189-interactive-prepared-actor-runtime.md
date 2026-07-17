@@ -1,7 +1,7 @@
 # 189: Interactive Prepared Actor Runtime
 
-Status: active 2026-07-17. Slices 0-1 are complete; Slice 2 authoritative
-interactive tools and mannequin is next.
+Status: active 2026-07-17. Slices 0-2 are complete; Slice 3 stable
+presentation identity and continuous travel phase is next.
 
 Topic: `compiled-figure-rendering`
 
@@ -172,7 +172,7 @@ Gate evidence:
   capture pass. The final native receipt reports four immutable uploads and
   three view writes; preparation measured 0.706 ms in this diagnostic run.
 
-### Slice 2: authoritative interactive tools and mannequin
+### Slice 2: authoritative interactive tools and mannequin (complete 2026-07-17)
 
 - Generalize protocol/server/client/UI debug-hotbar entries to tagged block or
   actor-spawn content while keeping capability gates and serialization bounds.
@@ -186,6 +186,43 @@ Gate evidence:
 Gate: an integrated native session can assign/select/place both tools; the
 server produces ordinary moving observed actors; restart restores them; a
 client without `DEBUG_ACTIONS` can do neither.
+
+Gate evidence:
+
+- Protocol version 27 replaces the block-only debug hotbar slot with a bounded
+  tagged `Block`/`SpawnActor` item. Default zero-based slots 7 and 8 contain
+  chicken and mannequin tools, and the command codec rejects unknown item,
+  actor, and entity tags.
+- The shared debug palette exposes `Spawn Chicken` and `Spawn Mannequin` as
+  assignable entries with distinct representative icons. The shared UI action,
+  experience effect, scene routing, local command, and Web canvas label all
+  preserve actor identity rather than converting the tool back to a block.
+- `UseItemOn` remains the only placement request. The authoritative realm
+  requires negotiated `DEBUG_ACTIONS`, ordinary reach and hit validation, a
+  mutable world policy, loaded supporting terrain, clear feet/head blocks, and
+  a collision-free entity bounding box before spawning at the adjacent cell
+  center. The client does not synthesize an entity.
+- Chicken placement uses the existing persistent chicken runtime.
+  `EntityKind::Mannequin` uses dimensions `0.6 x 1.8`, eye height `1.62`, speed
+  `0.2`, neutral cow species state, and exactly the same supported random
+  stroll/look-at-player/random-look goal registration as cow. It has no farm
+  animal spawn-table or showcase entry.
+- Mannequin entity payloads use the explicit `mclone:mannequin` persistence
+  identity. Entity-record packing/hydration and binary persistence tests cover
+  chicken, item, and mannequin records, including the restored mannequin's
+  three registered passive goals.
+- Integrated tests place both default tools and observe authoritative entity
+  snapshots with expected positions and dimensions. Dedicated negative tests
+  prove missing capability and occupied target rejection; existing shared
+  reach, world-policy, and bounds validation remains on the same command path.
+- Client, protocol, UI, app-runtime, render-session, and the complete 452-test
+  server suite pass after updating the old slot-8 block assumption. The native
+  `/tmp/mclone-actor-tools-palette.png` capture was inspected after playable
+  startup: the first two assignable cells visibly carry the distinct chicken
+  and mannequin representative icons without a loading overlay.
+- Until Slice 4, both new actors deliberately use the legacy production mesh
+  path. The mannequin already selects the player figure approximation so the
+  interactive fixture remains visible while prepared coexistence lands.
 
 ### Slice 3: stable presentation and continuous travel phase
 

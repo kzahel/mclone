@@ -14,7 +14,7 @@ pub(super) enum MobSpeciesState {
 impl MobSpeciesState {
     pub(super) fn from_spawn(kind: EntityKind, random: &mut SimpleRandomSource) -> Self {
         match kind {
-            EntityKind::Cow => Self::Cow,
+            EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::new(random)),
             EntityKind::DebugCube | EntityKind::Item => {
                 debug_assert!(false, "non-mob entities do not use mob species state");
@@ -29,7 +29,7 @@ impl MobSpeciesState {
         egg_time: Option<i32>,
     ) -> Self {
         match kind {
-            EntityKind::Cow => Self::Cow,
+            EntityKind::Cow | EntityKind::Mannequin => Self::Cow,
             EntityKind::Chicken => Self::Chicken(ChickenRuntimeState::from_saved(
                 egg_time.unwrap_or_else(|| next_egg_time(random)),
             )),

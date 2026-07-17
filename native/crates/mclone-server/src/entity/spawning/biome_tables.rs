@@ -157,6 +157,7 @@ mod tests {
         assert_eq!(VanillaSpawnEntity::Sheep.implemented_kind(), None);
         assert_eq!(VanillaSpawnEntity::Pig.implemented_kind(), None);
         assert_eq!(farm_animal_spawn_for_kind(EntityKind::Item), None);
+        assert_eq!(farm_animal_spawn_for_kind(EntityKind::Mannequin), None);
     }
 
     #[test]

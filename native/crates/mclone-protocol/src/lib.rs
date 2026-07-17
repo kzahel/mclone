@@ -23,21 +23,21 @@ pub use statistics::{
     StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 26;
+pub const PROTOCOL_VERSION: u32 = 27;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
 pub const MAX_DISCONNECT_DETAIL_BYTES: usize = 512;
-pub const DEFAULT_DEBUG_HOTBAR: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] = [
-    Some(BlockStateId(1)),
-    Some(BlockStateId(5)),
-    Some(BlockStateId(4)),
-    Some(BlockStateId(6)),
-    Some(BlockStateId(41)),
-    Some(BlockStateId(42)),
-    Some(BlockStateId(8)),
-    Some(BlockStateId(91)),
-    Some(BlockStateId(100)),
+pub const DEFAULT_DEBUG_HOTBAR: [Option<DebugHotbarItem>; HOTBAR_SLOT_COUNT_USIZE] = [
+    Some(DebugHotbarItem::Block(BlockStateId(1))),
+    Some(DebugHotbarItem::Block(BlockStateId(5))),
+    Some(DebugHotbarItem::Block(BlockStateId(4))),
+    Some(DebugHotbarItem::Block(BlockStateId(6))),
+    Some(DebugHotbarItem::Block(BlockStateId(41))),
+    Some(DebugHotbarItem::Block(BlockStateId(42))),
+    Some(DebugHotbarItem::Block(BlockStateId(8))),
+    Some(DebugHotbarItem::SpawnActor(DebugActorKind::Chicken)),
+    Some(DebugHotbarItem::SpawnActor(DebugActorKind::Mannequin)),
 ];
 
 const CLIENT_COMMAND_SET_CHUNK_VIEW: u8 = 1;
@@ -388,7 +388,19 @@ pub struct SetCarriedItemCommand {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct SetDebugHotbarSlotCommand {
     pub slot: u8,
-    pub block_state: Option<BlockStateId>,
+    pub item: Option<DebugHotbarItem>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DebugHotbarItem {
+    Block(BlockStateId),
+    SpawnActor(DebugActorKind),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DebugActorKind {
+    Chicken,
+    Mannequin,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -498,6 +510,7 @@ pub struct EntityId(pub u64);
 pub enum EntityKind {
     Cow,
     Chicken,
+    Mannequin,
     DebugCube,
     Item,
 }
@@ -1249,6 +1262,7 @@ impl ByteWriter {
             EntityKind::Chicken => 1,
             EntityKind::DebugCube => 2,
             EntityKind::Item => 3,
+            EntityKind::Mannequin => 4,
         });
     }
 
@@ -1351,9 +1365,19 @@ impl ByteWriter {
 
     fn write_set_debug_hotbar_slot(&mut self, command: &SetDebugHotbarSlotCommand) {
         self.write_u8(command.slot);
-        self.write_bool(command.block_state.is_some());
-        if let Some(block_state) = command.block_state {
-            self.write_u32(block_state.0);
+        match command.item {
+            None => self.write_u8(0),
+            Some(DebugHotbarItem::Block(block_state)) => {
+                self.write_u8(1);
+                self.write_u32(block_state.0);
+            }
+            Some(DebugHotbarItem::SpawnActor(kind)) => {
+                self.write_u8(2);
+                self.write_u8(match kind {
+                    DebugActorKind::Chicken => 0,
+                    DebugActorKind::Mannequin => 1,
+                });
+            }
         }
     }
 
@@ -1673,6 +1697,7 @@ impl<'a> ByteReader<'a> {
             1 => Ok(EntityKind::Chicken),
             2 => Ok(EntityKind::DebugCube),
             3 => Ok(EntityKind::Item),
+            4 => Ok(EntityKind::Mannequin),
             kind => Err(ProtocolCodecError::UnknownEntityKind(kind)),
         }
     }
@@ -1814,11 +1839,21 @@ impl<'a> ByteReader<'a> {
 
     fn read_set_debug_hotbar_slot(&mut self) -> ProtocolCodecResult<SetDebugHotbarSlotCommand> {
         let slot = self.read_u8()?;
-        let has_block_state = self.read_bool()?;
-        let block_state = has_block_state
-            .then(|| self.read_u32().map(BlockStateId))
-            .transpose()?;
-        Ok(SetDebugHotbarSlotCommand { slot, block_state })
+        let item = match self.read_u8()? {
+            0 => None,
+            1 => Some(DebugHotbarItem::Block(BlockStateId(self.read_u32()?))),
+            2 => Some(DebugHotbarItem::SpawnActor(match self.read_u8()? {
+                0 => DebugActorKind::Chicken,
+                1 => DebugActorKind::Mannequin,
+                _ => return Err(ProtocolCodecError::InvalidData("unknown debug actor kind")),
+            })),
+            _ => {
+                return Err(ProtocolCodecError::InvalidData(
+                    "unknown debug hotbar item kind",
+                ));
+            }
+        };
+        Ok(SetDebugHotbarSlotCommand { slot, item })
     }
 
     fn read_player_model_kind(&mut self) -> ProtocolCodecResult<PlayerModelKind> {
@@ -2104,8 +2139,15 @@ mod tests {
     }
 
     #[test]
-    fn default_debug_hotbar_exposes_torch_in_final_slot() {
-        assert_eq!(DEFAULT_DEBUG_HOTBAR[8], Some(BlockStateId(100)));
+    fn default_debug_hotbar_exposes_actor_tools_in_final_slots() {
+        assert_eq!(
+            DEFAULT_DEBUG_HOTBAR[7],
+            Some(DebugHotbarItem::SpawnActor(DebugActorKind::Chicken))
+        );
+        assert_eq!(
+            DEFAULT_DEBUG_HOTBAR[8],
+            Some(DebugHotbarItem::SpawnActor(DebugActorKind::Mannequin))
+        );
     }
 
     #[test]
@@ -2221,7 +2263,7 @@ mod tests {
     fn client_command_codec_round_trips_set_debug_hotbar_slot() {
         let command = ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
             slot: 3,
-            block_state: Some(BlockStateId(91)),
+            item: Some(DebugHotbarItem::Block(BlockStateId(91))),
         });
 
         let bytes = encode_client_command(&command).unwrap();
@@ -2230,11 +2272,19 @@ mod tests {
 
         let clear_command = ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
             slot: 8,
-            block_state: None,
+            item: None,
         });
         let clear_bytes = encode_client_command(&clear_command).unwrap();
 
         assert_eq!(decode_client_command(&clear_bytes).unwrap(), clear_command);
+
+        let actor_command = ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
+            slot: 7,
+            item: Some(DebugHotbarItem::SpawnActor(DebugActorKind::Chicken)),
+        });
+        let actor_bytes = encode_client_command(&actor_command).unwrap();
+
+        assert_eq!(decode_client_command(&actor_bytes).unwrap(), actor_command);
     }
 
     #[test]

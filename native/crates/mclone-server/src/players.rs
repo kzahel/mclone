@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
-use mclone_protocol::{ClientIdentity, DimensionKey, PlayerAppearance, PlayerStatistics};
+use mclone_protocol::{
+    ClientIdentity, DimensionKey, PlayerAppearance, PlayerStatistics, SessionCapabilities,
+};
 
 use crate::inventory::ServerInventory;
 use crate::persistence::PlayerRecord;
@@ -42,6 +44,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) total_experience: u64,
     pub(crate) statistics: PlayerStatistics,
     pub(crate) player_record_revision: u64,
+    pub(crate) capabilities: SessionCapabilities,
 }
 
 impl Default for ServerPlayerEntry {
@@ -57,6 +60,7 @@ impl Default for ServerPlayerEntry {
             total_experience: 0,
             statistics: PlayerStatistics::default(),
             player_record_revision: 0,
+            capabilities: SessionCapabilities::NONE,
         }
     }
 }
@@ -77,7 +81,11 @@ impl Default for ServerPlayerList {
 }
 
 impl ServerPlayerList {
-    pub(crate) fn add_in_dimension(&mut self, dimension: DimensionKey) -> ServerPlayerId {
+    pub(crate) fn add_in_dimension(
+        &mut self,
+        dimension: DimensionKey,
+        capabilities: SessionCapabilities,
+    ) -> ServerPlayerId {
         let id = ServerPlayerId(self.next_id);
         self.next_id = self
             .next_id
@@ -87,6 +95,7 @@ impl ServerPlayerList {
             id,
             ServerPlayerEntry {
                 dimension,
+                capabilities,
                 ..ServerPlayerEntry::default()
             },
         );

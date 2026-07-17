@@ -1134,10 +1134,7 @@ fn set_carried_item_command(slot: u8) -> ClientCommand {
 }
 
 fn clear_debug_hotbar_slot_command(slot: u8) -> ClientCommand {
-    ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand {
-        slot,
-        block_state: None,
-    })
+    ClientCommand::SetDebugHotbarSlot(SetDebugHotbarSlotCommand { slot, item: None })
 }
 
 fn has_snapshot(updates: &[ServerUpdate], pos: ChunkPos) -> bool {

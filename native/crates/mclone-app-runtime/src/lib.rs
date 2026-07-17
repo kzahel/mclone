@@ -72,8 +72,9 @@ use mclone_core::{
 use mclone_diagnostics::BudgetDecisionPanelReport;
 use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMetadata};
 use mclone_protocol::{
-    ChunkView, ClientCommand, HOTBAR_SLOT_COUNT_USIZE, PlayerAppearance, PlayerModelKind,
-    PlayerPositionUpdate, ServerUpdate, SetPlayerAppearanceCommand,
+    ChunkView, ClientCommand, DebugActorKind, DebugHotbarItem, HOTBAR_SLOT_COUNT_USIZE,
+    PlayerAppearance, PlayerModelKind, PlayerPositionUpdate, ServerUpdate,
+    SetPlayerAppearanceCommand,
 };
 use mclone_render_session::{
     EngineRenderSession, RenderSectionCacheUpdate, RenderSectionCompileDispatcher,
@@ -94,8 +95,9 @@ use mclone_server::{
     ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics,
 };
 use mclone_ui::{
-    BlockPaletteEntry, BlockPaletteOverlay, EMPTY_BLOCK_PALETTE_ENTRIES, GamePlayerModel,
-    GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus, LoadingProgressOverlay,
+    BlockPaletteEntry, BlockPaletteOverlay, DebugActorTool, EMPTY_BLOCK_PALETTE_ENTRIES,
+    GamePlayerModel, GuiTextureUv, LoadingProgressCell, LoadingProgressCellStatus,
+    LoadingProgressOverlay,
 };
 
 use crate::host_mode::SingleViewHostMode;
@@ -602,11 +604,16 @@ const DEBUG_BLOCK_PALETTE: &[(BlockStateId, &str)] = &[
 ];
 
 pub fn debug_hotbar_icons(
-    items: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE],
+    items: [Option<DebugHotbarItem>; HOTBAR_SLOT_COUNT_USIZE],
     catalog: &TexturedMeshCatalog,
 ) -> [Option<GuiTextureUv>; HOTBAR_SLOT_COUNT_USIZE] {
-    items.map(|state_id| {
-        let uv = catalog.gui_icon_uv(state_id?)?;
+    items.map(|item| {
+        let representative_block = match item? {
+            DebugHotbarItem::Block(block_state) => block_state,
+            DebugHotbarItem::SpawnActor(DebugActorKind::Chicken) => BlockStateId(17),
+            DebugHotbarItem::SpawnActor(DebugActorKind::Mannequin) => BlockStateId(41),
+        };
+        let uv = catalog.gui_icon_uv(representative_block)?;
         Some(GuiTextureUv::new(uv.u0, uv.v0, uv.u1, uv.v1))
     })
 }
@@ -616,12 +623,31 @@ pub fn debug_block_palette_overlay(
     selected_hotbar_slot: u8,
 ) -> BlockPaletteOverlay {
     let mut entries = EMPTY_BLOCK_PALETTE_ENTRIES;
-    for (index, &(block_state, label)) in DEBUG_BLOCK_PALETTE.iter().take(entries.len()).enumerate()
+    for (index, (actor, representative_block, label)) in [
+        (DebugActorTool::Chicken, BlockStateId(17), "Spawn Chicken"),
+        (
+            DebugActorTool::Mannequin,
+            BlockStateId(41),
+            "Spawn Mannequin",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let icon = catalog
+            .gui_icon_uv(representative_block)
+            .map(|uv| GuiTextureUv::new(uv.u0, uv.v0, uv.u1, uv.v1));
+        entries[index] = Some(BlockPaletteEntry::actor(actor, icon, label));
+    }
+    for (offset, &(block_state, label)) in DEBUG_BLOCK_PALETTE
+        .iter()
+        .take(entries.len() - 2)
+        .enumerate()
     {
         let icon = catalog
             .gui_icon_uv(block_state)
             .map(|uv| GuiTextureUv::new(uv.u0, uv.v0, uv.u1, uv.v1));
-        entries[index] = Some(BlockPaletteEntry::new(block_state.0, icon, label));
+        entries[offset + 2] = Some(BlockPaletteEntry::new(block_state.0, icon, label));
     }
     BlockPaletteOverlay::visible(selected_hotbar_slot, entries)
 }

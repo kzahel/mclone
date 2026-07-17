@@ -107,7 +107,7 @@ use mclone_input::{
     TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
-use mclone_protocol::{EntitySnapshot, RemotePlayerUpdate};
+use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -156,10 +156,10 @@ use mclone_render_session::{
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
-    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugOverlay, FlatHotbarOverlay, FlatHud, FlatHudDebugOverlay,
-    GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen,
-    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale,
+    Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
+    FlatHudDebugOverlay, GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel,
+    GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode,
+    GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale,
     LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
     StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
     WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,

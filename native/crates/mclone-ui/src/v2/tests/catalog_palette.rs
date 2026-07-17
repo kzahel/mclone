@@ -251,7 +251,7 @@ fn block_palette_layout_uses_committed_slots_for_actions() {
     surface.set_render_state(state);
 
     let widgets = surface.layout().widgets().to_vec();
-    assert_eq!(widgets.len(), 2);
+    assert_eq!(widgets.len(), 3);
     assert_eq!(widgets[0].id, block_palette_slot_id(0));
     assert_eq!(widgets[0].label, "Bricks");
     assert_eq!(
@@ -267,6 +267,17 @@ fn block_palette_layout_uses_committed_slots_for_actions() {
         Some(GameUiAction::AssignHotbarBlock {
             slot: 4,
             block_state: 91,
+        })
+    );
+
+    let actor_point = point_in(widgets[2].rect);
+    assert!(surface.pointer_down(actor_point, state));
+    let (_handled, action) = surface.pointer_up(actor_point, state);
+    assert_eq!(
+        action,
+        Some(GameUiAction::AssignHotbarActor {
+            slot: 4,
+            actor: DebugActorTool::Chicken,
         })
     );
 }

@@ -129,6 +129,15 @@ pub fn actor_instances_from_presentations(
                     .with_chicken_wing_flap_radians(actor.chicken_wing_flap_radians)
                     .with_packed_light(packed_light)
                 }
+                ActorPresentationKind::Entity(EntityKind::Mannequin) => {
+                    ActorInstance::remote_player(
+                        glam_vec3_from_vec3d(actor.feet_position),
+                        actor.y_rot_degrees,
+                    )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_walk_animation_distance(actor.walk_animation_distance)
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::DebugCube) => ActorInstance::debug_cube(
                     glam_vec3_from_vec3d(actor.feet_position),
                     actor.y_rot_degrees,
@@ -201,6 +210,7 @@ pub fn actor_light_probe_height(actor: &ActorPresentation) -> f64 {
         ActorPresentationKind::RemotePlayer => LOCAL_PLAYER_STANDING_EYE_HEIGHT,
         ActorPresentationKind::Entity(EntityKind::Cow) => 1.3,
         ActorPresentationKind::Entity(EntityKind::Chicken) => f64::from(actor.height) * 0.92,
+        ActorPresentationKind::Entity(EntityKind::Mannequin) => 1.62,
         ActorPresentationKind::Entity(EntityKind::DebugCube) => f64::from(actor.height) * 0.5,
         ActorPresentationKind::Entity(EntityKind::Item) => f64::from(actor.height) * 0.5,
     }

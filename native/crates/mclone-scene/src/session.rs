@@ -5723,6 +5723,13 @@ impl McloneSceneHost {
                         changed
                     );
                 }
+                ClientExperienceGameplayEffect::AssignHotbarActor { slot, actor } => {
+                    let changed = self.assign_debug_hotbar_actor(slot, actor)?;
+                    log::info!(
+                        "XR debug hotbar slot {} assigned actor={actor:?} changed={changed}",
+                        slot + 1,
+                    );
+                }
             }
         }
         for effect in effects.projection {

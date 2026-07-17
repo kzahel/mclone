@@ -174,15 +174,39 @@ impl GuiTextureUv {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BlockPaletteEntry {
-    pub block_state: u32,
+    pub item: DebugPaletteItem,
     pub icon: Option<GuiTextureUv>,
     pub label: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DebugPaletteItem {
+    Block(u32),
+    SpawnActor(DebugActorTool),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DebugActorTool {
+    Chicken,
+    Mannequin,
 }
 
 impl BlockPaletteEntry {
     pub const fn new(block_state: u32, icon: Option<GuiTextureUv>, label: &'static str) -> Self {
         Self {
-            block_state,
+            item: DebugPaletteItem::Block(block_state),
+            icon,
+            label,
+        }
+    }
+
+    pub const fn actor(
+        actor: DebugActorTool,
+        icon: Option<GuiTextureUv>,
+        label: &'static str,
+    ) -> Self {
+        Self {
+            item: DebugPaletteItem::SpawnActor(actor),
             icon,
             label,
         }
@@ -1787,6 +1811,7 @@ pub enum GameUiAction {
     OpenHelp(GameHelpParent),
     CloseHelp(GameHelpParent),
     AssignHotbarBlock { slot: u8, block_state: u32 },
+    AssignHotbarActor { slot: u8, actor: DebugActorTool },
     OpenOptions(GameOptionsParent),
     OpenOptionsCategory(GameOptionsParent, GameOptionsCategory),
     OpenServerSettings(GameOptionsParent),

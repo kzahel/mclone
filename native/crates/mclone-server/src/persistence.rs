@@ -304,6 +304,7 @@ pub struct EntitySaveRecord {
 #[derive(Clone, Debug, PartialEq)]
 pub enum EntitySavePayload {
     Cow,
+    Mannequin,
     Chicken {
         egg_time: i32,
     },
@@ -4366,6 +4367,7 @@ fn write_entity_save_payload(
 ) -> ChunkStoreResult<()> {
     match payload {
         EntitySavePayload::Cow => write_u8(writer, 0),
+        EntitySavePayload::Mannequin => write_u8(writer, 3),
         EntitySavePayload::Chicken { egg_time } => {
             write_u8(writer, 1)?;
             write_i32(writer, *egg_time)
@@ -4391,6 +4393,7 @@ fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySa
             stack: read_item_stack_save_record(reader)?,
             pickup_delay: read_i32(reader)?,
         }),
+        3 => Ok(EntitySavePayload::Mannequin),
         value => Err(ChunkStoreError::InvalidData(format!(
             "unknown entity save payload kind {value}"
         ))),
@@ -4849,6 +4852,18 @@ mod tests {
                     on_ground: false,
                     age_ticks: 77,
                     payload: EntitySavePayload::Chicken { egg_time: 1234 },
+                },
+                EntitySaveRecord {
+                    persistent_id: EntityPersistentId::new(0xABCD, 0x5678),
+                    kind: "mclone:mannequin".to_owned(),
+                    position: Vec3d::new(4.5, 64.0, 4.5),
+                    delta_movement: Vec3d::ZERO,
+                    y_rot_degrees: 90.0,
+                    x_rot_degrees: 0.0,
+                    rotation: None,
+                    on_ground: true,
+                    age_ticks: 12,
+                    payload: EntitySavePayload::Mannequin,
                 },
             ],
         );

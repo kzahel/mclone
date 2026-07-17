@@ -710,7 +710,7 @@ tier rather than a blocker. Neither changes the persistence decision.
   semantic Three.js baseline; and
 - record startup preparation time without creating a persisted geometry file.
 
-### Capability 2A: explicit non-box cuboid proxy
+### Capability 2A: explicit non-box cuboid proxy (complete)
 
 - compile spheres, capsules, and cylinders to their deterministic authored
   bounds while retaining their semantic primitive kinds in diagnostics;
@@ -732,12 +732,12 @@ tier rather than a blocker. Neither changes the persistence decision.
 - support mono, per-eye stereo, and full-frame multiview; and
 - validate first-person body filtering and world-local cache ownership.
 
-### Phase 3: interactive migration with coexistence
+### Phase 3: interactive migration with coexistence (in progress)
 
-- add placeable chicken and mannequin debug-hotbar tools through ordinary
-  authoritative use-item placement;
-- make the mannequin use the player figure and the existing passive-animal
-  goal family so continuous world movement is directly testable;
+- placeable chicken and mannequin debug-hotbar tools now use ordinary
+  authoritative use-item placement and persistence;
+- the mannequin now uses player dimensions/figure selection and the existing
+  cow passive-goal family so continuous world movement is directly testable;
 - propagate stable presentation identity and derive continuous travel phase
   from interpolated movement instead of authoritative update steps;
 - migrate chicken and mannequin one at a time while preserving mono, per-eye,
@@ -991,15 +991,14 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Execute Tactical
-[`189`](../tactical/189-interactive-prepared-actor-runtime.md): compile current
-solid-color non-box primitives as labeled cuboid proxies; add authoritative
-debug-hotbar placement for chickens and a player-figure mannequin that reuses
-passive-animal goals; carry stable actor identity and continuously derived
-travel phase through presentation; and move those two kinds to a coexisting
-prepared production renderer. Stop only after native and browser interactive
-placement, wandering animation, immutable-resource residency, replacement,
-stereo/multiview contracts, and representative-count behavior are recorded.
+Continue Tactical
+[`189`](../tactical/189-interactive-prepared-actor-runtime.md). Cuboid-proxy
+preparation and authoritative persistent chicken/mannequin tools are complete.
+Next carry stable actor identity and continuously derived travel phase through
+presentation, then move those two kinds to a coexisting prepared production
+renderer. Stop only after native and browser interactive placement, wandering
+animation, immutable-resource residency, replacement, stereo/multiview
+contracts, and representative-count behavior are recorded.
 
 Do not add a persisted compiled format, exact curved tessellation, instancing,
 LOD, or GPU crowd evaluation in that tactical. Its actor-record boundary

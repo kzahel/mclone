@@ -1,12 +1,12 @@
 use crate::{
     AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
-    Button, Checkbox, Color, CycleButton, FlatHud, Font, GameHelpParent, GameOptionsCategory,
-    GameOptionsParent, GameScenarioId, GameScreen, GameStorageAction, GameTurnMode, GameUiAction,
-    GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE,
-    Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId, WorldCatalogUiEntry,
-    WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect, block_palette_slot_rect,
-    centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    Button, Checkbox, Color, CycleButton, DebugPaletteItem, FlatHud, Font, GameHelpParent,
+    GameOptionsCategory, GameOptionsParent, GameScenarioId, GameScreen, GameStorageAction,
+    GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv,
+    HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId,
+    WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect,
+    block_palette_slot_rect, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
     far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
     fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
     movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
@@ -2450,7 +2450,8 @@ impl GameUiHost {
             | GameUiAction::Resume
             | GameUiAction::OpenWorld(_)
             | GameUiAction::CreateCatalogWorld
-            | GameUiAction::AssignHotbarBlock { .. } => self.screen = None,
+            | GameUiAction::AssignHotbarBlock { .. }
+            | GameUiAction::AssignHotbarActor { .. } => self.screen = None,
             GameUiAction::EnterScenario(GameScenarioId::LobbyPreview) => {
                 self.screen = Some(GameScreen::PreparingLobby)
             }
@@ -3176,12 +3177,19 @@ fn block_palette_layout(scale: GuiScale, revision: u64, overlay: BlockPaletteOve
         let Some(rect) = block_palette_slot_rect(scale, overlay, index) else {
             continue;
         };
+        let action = match entry.item {
+            DebugPaletteItem::Block(block_state) => GameUiAction::AssignHotbarBlock {
+                slot: overlay.selected_hotbar_slot,
+                block_state,
+            },
+            DebugPaletteItem::SpawnActor(actor) => GameUiAction::AssignHotbarActor {
+                slot: overlay.selected_hotbar_slot,
+                actor,
+            },
+        };
         layout.push(
             UiWidget::palette_slot(block_palette_slot_id(index), rect, entry.label, entry.icon)
-                .action(GameUiAction::AssignHotbarBlock {
-                    slot: overlay.selected_hotbar_slot,
-                    block_state: entry.block_state,
-                }),
+                .action(action),
         );
     }
     layout

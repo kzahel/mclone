@@ -1160,6 +1160,30 @@ impl McloneSceneHost {
             .context("failed to assign XR debug hotbar slot")
     }
 
+    pub(crate) fn assign_debug_hotbar_actor(
+        &mut self,
+        slot: u8,
+        actor: DebugActorTool,
+    ) -> Result<bool> {
+        let actor = match actor {
+            DebugActorTool::Chicken => DebugActorKind::Chicken,
+            DebugActorTool::Mannequin => DebugActorKind::Mannequin,
+        };
+        let Some(command) = self
+            .active_world
+            .interaction
+            .set_debug_hotbar_item(slot, Some(DebugHotbarItem::SpawnActor(actor)))
+        else {
+            return Ok(false);
+        };
+        let Some(runtime) = &mut self.active_world.runtime else {
+            return Ok(false);
+        };
+        runtime
+            .send_gameplay_command(command)
+            .context("failed to assign XR debug actor hotbar slot")
+    }
+
     pub(crate) fn apply_xr_gameplay_interaction_edges(
         &mut self,
         mut edges: XrGameplayInteractionEdges,

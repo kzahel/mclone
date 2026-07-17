@@ -3,8 +3,8 @@ use mclone_core::BlockStateId;
 use mclone_protocol::ItemKind;
 use mclone_protocol::ItemStackSnapshot;
 use mclone_protocol::{
-    DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT, HOTBAR_SLOT_COUNT_USIZE, SetCarriedItemCommand,
-    SetDebugHotbarSlotCommand,
+    DEFAULT_DEBUG_HOTBAR, DebugHotbarItem, HOTBAR_SLOT_COUNT, HOTBAR_SLOT_COUNT_USIZE,
+    SetCarriedItemCommand, SetDebugHotbarSlotCommand,
 };
 
 use crate::item_stack::item_max_stack_size;
@@ -13,7 +13,7 @@ const PLAYER_MAIN_INVENTORY_SLOT_COUNT: usize = 36;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ServerInventory {
-    items: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE],
+    items: [Option<DebugHotbarItem>; HOTBAR_SLOT_COUNT_USIZE],
     item_stacks: [Option<ItemStackSnapshot>; PLAYER_MAIN_INVENTORY_SLOT_COUNT],
     selected: u8,
 }
@@ -50,12 +50,19 @@ impl ServerInventory {
         if command.slot >= HOTBAR_SLOT_COUNT {
             return false;
         }
-        self.items[command.slot as usize] = command.block_state;
+        self.items[command.slot as usize] = command.item;
         true
     }
 
-    pub(crate) fn selected_block_state(&self) -> Option<BlockStateId> {
+    pub(crate) fn selected_debug_item(&self) -> Option<DebugHotbarItem> {
         self.items[self.selected as usize]
+    }
+
+    pub(crate) fn selected_block_state(&self) -> Option<BlockStateId> {
+        match self.selected_debug_item() {
+            Some(DebugHotbarItem::Block(block_state)) => Some(block_state),
+            Some(DebugHotbarItem::SpawnActor(_)) | None => None,
+        }
     }
 
     pub(crate) fn add_item_stack(&mut self, stack: ItemStackSnapshot) -> ItemStackAddResult {
@@ -174,7 +181,7 @@ impl ServerInventory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_worldgen::block::{BRICKS, DIRT, SAND, STONE, TORCH, generated_block_state_id};
+    use mclone_worldgen::block::{DIRT, SAND, STONE, generated_block_state_id};
 
     #[test]
     fn carried_item_packet_updates_only_valid_hotbar_slots() {
@@ -201,21 +208,28 @@ mod tests {
             inventory.selected_block_state(),
             Some(generated_block_state_id(DIRT))
         );
-        assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 8 }));
-        assert_eq!(
-            inventory.selected_block_state(),
-            Some(generated_block_state_id(TORCH))
-        );
+        assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 6 }));
+        assert_eq!(inventory.selected_block_state(), Some(BlockStateId(8)));
     }
 
     #[test]
-    fn debug_hotbar_exposes_bricks_as_a_placeable_block() {
+    fn debug_hotbar_exposes_actor_tools_in_final_slots() {
         let mut inventory = ServerInventory::default();
 
         assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 7 }));
         assert_eq!(
-            inventory.selected_block_state(),
-            Some(generated_block_state_id(BRICKS))
+            inventory.selected_debug_item(),
+            Some(DebugHotbarItem::SpawnActor(
+                mclone_protocol::DebugActorKind::Chicken
+            ))
+        );
+        assert_eq!(inventory.selected_block_state(), None);
+        assert!(inventory.apply_set_carried_item(SetCarriedItemCommand { slot: 8 }));
+        assert_eq!(
+            inventory.selected_debug_item(),
+            Some(DebugHotbarItem::SpawnActor(
+                mclone_protocol::DebugActorKind::Mannequin
+            ))
         );
     }
 
@@ -226,7 +240,7 @@ mod tests {
         assert!(
             inventory.apply_set_debug_hotbar_slot(SetDebugHotbarSlotCommand {
                 slot: 0,
-                block_state: Some(generated_block_state_id(SAND)),
+                item: Some(DebugHotbarItem::Block(generated_block_state_id(SAND))),
             })
         );
         assert_eq!(
@@ -236,7 +250,7 @@ mod tests {
         assert!(
             !inventory.apply_set_debug_hotbar_slot(SetDebugHotbarSlotCommand {
                 slot: HOTBAR_SLOT_COUNT,
-                block_state: Some(generated_block_state_id(STONE)),
+                item: Some(DebugHotbarItem::Block(generated_block_state_id(STONE))),
             })
         );
         assert_eq!(

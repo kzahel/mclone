@@ -66,6 +66,15 @@ impl EntityMetadata {
         client_tracking_range: 10,
     };
 
+    pub(crate) const MANNEQUIN: Self = Self {
+        kind: EntityKind::Mannequin,
+        category: EntityCategory::Creature,
+        dimensions: EntityDimensions::scalable(0.6, 1.8),
+        standing_eye_height: StandingEyeHeight::Fixed(1.62),
+        movement_speed: 0.2,
+        client_tracking_range: 10,
+    };
+
     pub(crate) const ITEM: Self = Self {
         kind: EntityKind::Item,
         category: EntityCategory::Misc,
@@ -79,6 +88,7 @@ impl EntityMetadata {
         match kind {
             EntityKind::Cow => Some(Self::COW),
             EntityKind::Chicken => Some(Self::CHICKEN),
+            EntityKind::Mannequin => Some(Self::MANNEQUIN),
             EntityKind::Item => Some(Self::ITEM),
             EntityKind::DebugCube => None,
         }
@@ -89,7 +99,10 @@ impl EntityMetadata {
     }
 
     pub(crate) const fn is_passive_mob(self) -> bool {
-        matches!(self.kind, EntityKind::Cow | EntityKind::Chicken)
+        matches!(
+            self.kind,
+            EntityKind::Cow | EntityKind::Chicken | EntityKind::Mannequin
+        )
     }
 }
 
@@ -124,6 +137,17 @@ mod tests {
     #[test]
     fn non_vanilla_debug_cube_has_no_passive_mob_metadata() {
         assert_eq!(EntityMetadata::for_kind(EntityKind::DebugCube), None);
+    }
+
+    #[test]
+    fn mannequin_uses_player_dimensions_and_cow_movement_speed() {
+        let metadata = EntityMetadata::for_kind(EntityKind::Mannequin).expect("mannequin");
+
+        assert_eq!(metadata.dimensions, EntityDimensions::scalable(0.6, 1.8));
+        assert_eq!(metadata.standing_eye_height(), 1.62);
+        assert_eq!(metadata.movement_speed, 0.2);
+        assert!(metadata.is_passive_mob());
+        assert!(!PASSIVE_MOB_KINDS.contains(&EntityKind::Mannequin));
     }
 
     #[test]

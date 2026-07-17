@@ -1,12 +1,12 @@
 use mclone_core::BlockStateId;
 use mclone_protocol::{
-    ClientCommand, DEFAULT_DEBUG_HOTBAR, HOTBAR_SLOT_COUNT, HOTBAR_SLOT_COUNT_USIZE,
-    SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    ClientCommand, DEFAULT_DEBUG_HOTBAR, DebugHotbarItem, HOTBAR_SLOT_COUNT,
+    HOTBAR_SLOT_COUNT_USIZE, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientInventory {
-    items: [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE],
+    items: [Option<DebugHotbarItem>; HOTBAR_SLOT_COUNT_USIZE],
     selected: u8,
     sent_carried: u8,
 }
@@ -30,7 +30,7 @@ impl ClientInventory {
         self.selected
     }
 
-    pub const fn hotbar_items(&self) -> [Option<BlockStateId>; HOTBAR_SLOT_COUNT_USIZE] {
+    pub const fn hotbar_items(&self) -> [Option<DebugHotbarItem>; HOTBAR_SLOT_COUNT_USIZE] {
         self.items
     }
 
@@ -47,12 +47,20 @@ impl ClientInventory {
         slot: u8,
         block_state: Option<BlockStateId>,
     ) -> Option<ClientCommand> {
+        self.set_debug_hotbar_item(slot, block_state.map(DebugHotbarItem::Block))
+    }
+
+    pub fn set_debug_hotbar_item(
+        &mut self,
+        slot: u8,
+        item: Option<DebugHotbarItem>,
+    ) -> Option<ClientCommand> {
         if slot >= HOTBAR_SLOT_COUNT {
             return None;
         }
-        self.items[slot as usize] = block_state;
+        self.items[slot as usize] = item;
         Some(ClientCommand::SetDebugHotbarSlot(
-            SetDebugHotbarSlotCommand { slot, block_state },
+            SetDebugHotbarSlotCommand { slot, item },
         ))
     }
 
@@ -100,18 +108,23 @@ mod tests {
     fn debug_hotbar_slot_assignment_updates_client_items_and_emits_command() {
         let mut inventory = ClientInventory::new();
 
-        assert_eq!(inventory.hotbar_items()[0], Some(BlockStateId(1)));
-        assert_eq!(inventory.hotbar_items()[8], Some(BlockStateId(100)));
+        assert_eq!(
+            inventory.hotbar_items()[0],
+            Some(DebugHotbarItem::Block(BlockStateId(1)))
+        );
         assert_eq!(
             inventory.set_debug_hotbar_slot(0, Some(BlockStateId(91))),
             Some(ClientCommand::SetDebugHotbarSlot(
                 SetDebugHotbarSlotCommand {
                     slot: 0,
-                    block_state: Some(BlockStateId(91)),
+                    item: Some(DebugHotbarItem::Block(BlockStateId(91))),
                 }
             ))
         );
-        assert_eq!(inventory.hotbar_items()[0], Some(BlockStateId(91)));
+        assert_eq!(
+            inventory.hotbar_items()[0],
+            Some(DebugHotbarItem::Block(BlockStateId(91)))
+        );
         assert_eq!(
             inventory.set_debug_hotbar_slot(HOTBAR_SLOT_COUNT, Some(BlockStateId(5))),
             None

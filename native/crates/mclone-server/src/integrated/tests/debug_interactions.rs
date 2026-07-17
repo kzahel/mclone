@@ -319,11 +319,11 @@ fn debug_break_schedules_basic_falling_block_above() {
 }
 
 #[test]
-fn debug_place_command_places_bricks_from_selected_hotbar_slot() {
+fn debug_place_command_places_block_from_selected_default_hotbar_slot() {
     let mut server = LocalRealmSession::new(0);
     load_center_chunk(&mut server);
     sync_player(&mut server, Vec3d::new(8.5, 80.0, 8.5));
-    sync_carried_slot(&mut server, 7);
+    sync_carried_slot(&mut server, 0);
     let clicked = BlockPos::new(8, 80, 8);
     let target = clicked.relative(Direction::Up);
     assert!(server.scheduler_mut().set_block_at_world(clicked, STONE));
@@ -338,12 +338,12 @@ fn debug_place_command_places_bricks_from_selected_hotbar_slot() {
         )))
         .expect("place command");
 
-    assert_eq!(server.scheduler().block_at_world(target), Some(BRICKS));
+    assert_eq!(server.scheduler().block_at_world(target), Some(STONE));
     assert!(updates.iter().any(|update| {
         match update {
             ServerUpdate::SectionBlockUpdates { updates, .. } => updates
                 .iter()
-                .any(|update| update.block_state == BlockStateId(BRICKS as u32)),
+                .any(|update| update.block_state == BlockStateId(STONE as u32)),
             _ => false,
         }
     }));
@@ -379,6 +379,104 @@ fn set_debug_hotbar_slot_command_changes_placed_block() {
             _ => false,
         }
     }));
+}
+
+#[test]
+fn actor_hotbar_tools_spawn_authoritative_chicken_and_mannequin() {
+    let mut server = LocalRealmSession::new(0);
+    load_center_chunk(&mut server);
+    sync_player(&mut server, Vec3d::new(8.5, 82.0, 10.5));
+    for clicked in [BlockPos::new(8, 80, 8), BlockPos::new(9, 80, 8)] {
+        server.scheduler_mut().set_block_at_world(clicked, STONE);
+        server
+            .scheduler_mut()
+            .set_block_at_world(clicked.relative(Direction::Up), AIR);
+        server
+            .scheduler_mut()
+            .set_block_at_world(clicked.offset(0, 2, 0), AIR);
+    }
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    sync_carried_slot(&mut server, 7);
+    let chicken_updates = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 81.0, 8.5),
+            Direction::Up,
+            BlockPos::new(8, 80, 8),
+            false,
+        )))
+        .expect("spawn chicken");
+    let chicken = first_entity_snapshot_of_kind(&chicken_updates, EntityKind::Chicken)
+        .expect("authoritative chicken snapshot");
+    assert_eq!(chicken.position, Vec3d::new(8.5, 81.0, 8.5));
+
+    sync_carried_slot(&mut server, 8);
+    let mannequin_updates = server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(9.5, 81.0, 8.5),
+            Direction::Up,
+            BlockPos::new(9, 80, 8),
+            false,
+        )))
+        .expect("spawn mannequin");
+    let mannequin = first_entity_snapshot_of_kind(&mannequin_updates, EntityKind::Mannequin)
+        .expect("authoritative mannequin snapshot");
+    assert_eq!(mannequin.position, Vec3d::new(9.5, 81.0, 8.5));
+    assert_eq!((mannequin.width, mannequin.height), (0.6, 1.8));
+}
+
+#[test]
+fn actor_hotbar_tools_require_debug_capability_and_valid_clear_target() {
+    let mut unauthorized = LocalRealmSession::from_server_with_capabilities(
+        RealmServer::new(0),
+        SessionCapabilities::NONE,
+    );
+    load_center_chunk(&mut unauthorized);
+    sync_player(&mut unauthorized, Vec3d::new(8.5, 82.0, 10.5));
+    let clicked = BlockPos::new(8, 80, 8);
+    unauthorized
+        .scheduler_mut()
+        .set_block_at_world(clicked, STONE);
+    unauthorized
+        .scheduler_mut()
+        .set_block_at_world(clicked.relative(Direction::Up), AIR);
+    unauthorized
+        .scheduler_mut()
+        .set_block_at_world(clicked.offset(0, 2, 0), AIR);
+    unauthorized
+        .scheduler_mut()
+        .drain_pending_block_delta_events();
+    sync_carried_slot(&mut unauthorized, 7);
+
+    let unauthorized_updates = unauthorized
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 81.0, 8.5),
+            Direction::Up,
+            clicked,
+            false,
+        )))
+        .expect("reject unauthorized actor tool");
+    assert!(first_entity_snapshot_of_kind(&unauthorized_updates, EntityKind::Chicken).is_none());
+
+    let mut blocked = LocalRealmSession::new(0);
+    load_center_chunk(&mut blocked);
+    sync_player(&mut blocked, Vec3d::new(8.5, 82.0, 10.5));
+    blocked.scheduler_mut().set_block_at_world(clicked, STONE);
+    blocked
+        .scheduler_mut()
+        .set_block_at_world(clicked.relative(Direction::Up), STONE);
+    blocked.scheduler_mut().drain_pending_block_delta_events();
+    sync_carried_slot(&mut blocked, 8);
+
+    let blocked_updates = blocked
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(8.5, 81.0, 8.5),
+            Direction::Up,
+            clicked,
+            false,
+        )))
+        .expect("reject blocked mannequin placement");
+    assert!(first_entity_snapshot_of_kind(&blocked_updates, EntityKind::Mannequin).is_none());
 }
 
 #[test]

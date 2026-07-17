@@ -373,7 +373,7 @@ fn assign_debug_hotbar_slot(server: &mut LocalRealmSession, slot: u8, block_stat
         .try_handle_command(ClientCommand::SetDebugHotbarSlot(
             SetDebugHotbarSlotCommand {
                 slot,
-                block_state: Some(block_state),
+                item: Some(mclone_protocol::DebugHotbarItem::Block(block_state)),
             },
         ))
         .expect("set debug hotbar slot");
@@ -383,10 +383,7 @@ fn assign_debug_hotbar_slot(server: &mut LocalRealmSession, slot: u8, block_stat
 fn clear_debug_hotbar_slot(server: &mut LocalRealmSession, slot: u8) {
     let updates = server
         .try_handle_command(ClientCommand::SetDebugHotbarSlot(
-            SetDebugHotbarSlotCommand {
-                slot,
-                block_state: None,
-            },
+            SetDebugHotbarSlotCommand { slot, item: None },
         ))
         .expect("clear debug hotbar slot");
     assert!(updates.is_empty());
