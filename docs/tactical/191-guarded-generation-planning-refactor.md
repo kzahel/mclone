@@ -1,7 +1,8 @@
 # Tactical 191: Guarded Generation Planning Refactor
 
-Status: active 2026-07-17; Slice 0 benchmark harness and clean baseline are
-complete. Slice 1 is next. No planner or scheduler behavior has changed yet.
+Status: active 2026-07-17; Slices 0-1 are complete. Slice 2 is next. The pure
+plan vocabulary is live, but production planner/scheduler behavior has not
+changed yet.
 
 Topics: `world-generation-profiles`, `performance`
 
@@ -250,6 +251,32 @@ authority.
 
 Gate: fixture and oracle output is exact; pre-refactor target, dependency, and
 job accounting matches.
+
+#### Slice 1 result
+
+`mclone-worldgen::levelgen::ChunkGenerationPlan` now holds three deterministic
+sets: exact requested outputs, generator backend-work chunks, and typed
+`ChunkStatusRequirement` prerequisites. It has no clocks, I/O, scheduler or
+worker handles, priorities, admission policy, serialization, or dynamic
+dispatch. Overworld and target-only constructors establish the existing
+3x3/5x5 and independent-chunk shapes without changing a production caller.
+
+Exact fixtures cover a single target, a contiguous radius-one region,
+negative coordinates, duplicate/reversed targets, partitioned-target union,
+and target-only Flat/Island semantics. A server-side equivalence assertion
+compares the vocabulary with the still-live scheduler calculation, and a
+separate assertion proves scheduling all 25 Surface prerequisites for one
+target leaves every holder non-client-visible.
+
+Validation at the Slice 1 commit boundary:
+
+- all 220 active `mclone-worldgen` library tests passed (one pre-existing
+  parity gauntlet remains ignored);
+- all 468 `mclone-server` library tests passed;
+- formatting and diff checks passed.
+
+This is vocabulary and executable contract only. Slice 2 performs the first
+production ownership move.
 
 ### Slice 2: One owner for Overworld dependency planning
 

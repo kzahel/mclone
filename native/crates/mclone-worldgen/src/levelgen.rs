@@ -1,6 +1,7 @@
 mod chunk;
 mod feature_batch;
 mod generator;
+mod planning;
 mod profile;
 mod sampler;
 mod settings;
@@ -14,6 +15,7 @@ pub use feature_batch::{
     generate_overworld_features_chunks, generate_overworld_surface_chunk,
 };
 pub use generator::NoiseBasedChunkGenerator;
+pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{
     BEACH_BIOME_ID, FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y, FLAT_GRASS_SURFACE_Y, OCEAN_BIOME_ID,
     PLAINS_BIOME_ID, SMALL_ISLAND_ENVELOPE_RADIUS, SMALL_ISLAND_OCEAN_FLOOR_Y,

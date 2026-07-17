@@ -4445,10 +4445,46 @@ mod tests {
 
         let (target_chunks, feature_centers, dependency_chunks) =
             feature_job_positions(&targets, &[ChunkPos::new(5, -3)]);
+        let plan = mclone_worldgen::levelgen::ChunkGenerationPlan::overworld_features(
+            targets.iter().copied(),
+        );
 
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+        assert_eq!(
+            target_chunks.iter().copied().collect::<BTreeSet<_>>(),
+            *plan.output_chunks()
+        );
+        assert_eq!(
+            feature_centers.iter().copied().collect::<BTreeSet<_>>(),
+            *plan.backend_work_chunks()
+        );
+        assert_eq!(
+            dependency_chunks.iter().copied().collect::<BTreeSet<_>>(),
+            plan.prerequisites()
+                .iter()
+                .map(|requirement| requirement.pos)
+                .collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[test]
+    fn feature_prerequisites_do_not_become_client_visible_outputs() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let target = ChunkPos::new(5, -3);
+
+        let (job_id, _) = scheduler.create_feature_job(&[target], &[target]);
+        let job = scheduler.job(job_id).expect("feature job");
+
+        assert_eq!(job.target_chunks, vec![target]);
+        assert_eq!(job.dependency_chunks.len(), 5 * 5);
+        assert_eq!(scheduler.client_visible_chunk_count(), 0);
+        assert!(job.dependency_chunks.iter().all(|pos| {
+            scheduler
+                .holder(*pos)
+                .is_some_and(|holder| !holder.is_client_visible())
+        }));
     }
 
     #[test]
