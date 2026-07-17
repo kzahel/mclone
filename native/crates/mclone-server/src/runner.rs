@@ -1932,6 +1932,7 @@ mod native {
             assert!(preview_updates.iter().all(|update| !matches!(
                 update,
                 ServerUpdate::PlayerPosition(_)
+                    | ServerUpdate::PlayerLife(_)
                     | ServerUpdate::PlayerExperience { .. }
                     | ServerUpdate::PlayerStatistics { .. }
             )));

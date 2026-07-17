@@ -2708,6 +2708,7 @@ pub struct FlatHud {
     pub gamepad: GamepadHudOverlay,
     pub touch: TouchOverlay,
     pub status: StatusOverlay,
+    pub player_health: Option<PlayerHealthHud>,
     pub player_statistics: Option<PlayerStatisticsHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
@@ -2723,6 +2724,7 @@ impl FlatHud {
             gamepad: GamepadHudOverlay::visible(),
             touch: TouchOverlay::hidden(),
             status: StatusOverlay::hidden(),
+            player_health: None,
             player_statistics: None,
             debug: None,
             frame_pipeline: None,
@@ -2750,6 +2752,7 @@ impl FlatHud {
             || self.effective_gamepad_overlay().visible
             || self.effective_touch_overlay().visible
             || self.status.visible
+            || (self.world_hud_visible && self.player_health.is_some())
             || (self.world_hud_visible && self.player_statistics.is_some())
             || self
                 .debug
@@ -2871,9 +2874,9 @@ pub(crate) fn render_flat_hud_transient_layers(
     draw: &mut GuiDrawList,
     hud: &FlatHud,
 ) {
-    let Some(statistics) = hud.player_statistics.filter(|_| hud.world_hud_visible) else {
+    if !hud.world_hud_visible || (hud.player_health.is_none() && hud.player_statistics.is_none()) {
         return;
-    };
+    }
     let touch = hud.effective_touch_overlay();
     let hotbar_top = if touch.visible && touch.hotbar_visible {
         touch_hotbar_slot_rects(scale)[0].y
@@ -2882,16 +2885,66 @@ pub(crate) fn render_flat_hud_transient_layers(
     } else {
         scale.height - 12.0
     };
-    Font::default().draw_centered_atlas(
-        draw,
-        &format!(
-            "Jumps {}  Placed {}",
-            statistics.jumps, statistics.successful_block_placements
-        ),
-        scale.width * 0.5,
-        (hotbar_top - 14.0).max(4.0),
-        Color::rgba(128, 255, 90, 255),
-    );
+    let health_y = (hotbar_top - 12.0).max(4.0);
+    if let Some(health) = hud.player_health {
+        render_player_health(draw, scale.width * 0.5, health_y, health);
+    }
+    if let Some(statistics) = hud.player_statistics {
+        let y = if hud.player_health.is_some() {
+            health_y - 14.0
+        } else {
+            hotbar_top - 14.0
+        };
+        Font::default().draw_centered_atlas(
+            draw,
+            &format!(
+                "Jumps {}  Placed {}",
+                statistics.jumps, statistics.successful_block_placements
+            ),
+            scale.width * 0.5,
+            y.max(4.0),
+            Color::rgba(128, 255, 90, 255),
+        );
+    }
+}
+
+fn render_player_health(draw: &mut GuiDrawList, center_x: f32, y: f32, health: PlayerHealthHud) {
+    if !health.health.is_finite() || !health.max_health.is_finite() || health.max_health <= 0.0 {
+        return;
+    }
+    let slots = (health.max_health / 2.0).ceil().clamp(1.0, 20.0) as usize;
+    let row_width = slots as f32 * 10.0 - 1.0;
+    let start_x = (center_x - row_width * 0.5).round();
+    let health = health.health.clamp(0.0, health.max_health);
+    for slot in 0..slots {
+        let fill = ((health - slot as f32 * 2.0) / 2.0).clamp(0.0, 1.0);
+        render_player_heart(draw, start_x + slot as f32 * 10.0, y, fill);
+    }
+}
+
+fn render_player_heart(draw: &mut GuiDrawList, x: f32, y: f32, fill: f32) {
+    render_player_heart_shape(draw, x, y, Color::rgba(64, 25, 28, 230));
+    if fill <= 0.0 {
+        return;
+    }
+    draw.push_clip(Rect::new(x, y, (9.0 * fill).ceil(), 9.0));
+    render_player_heart_shape(draw, x, y, Color::rgba(225, 47, 55, 255));
+    draw.pop_clip();
+}
+
+fn render_player_heart_shape(draw: &mut GuiDrawList, x: f32, y: f32, color: Color) {
+    draw.fill(Rect::new(x + 1.0, y, 3.0, 2.0), color);
+    draw.fill(Rect::new(x + 5.0, y, 3.0, 2.0), color);
+    draw.fill(Rect::new(x, y + 1.0, 9.0, 4.0), color);
+    draw.fill(Rect::new(x + 1.0, y + 5.0, 7.0, 2.0), color);
+    draw.fill(Rect::new(x + 2.0, y + 7.0, 5.0, 1.0), color);
+    draw.fill(Rect::new(x + 3.0, y + 8.0, 3.0, 1.0), color);
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlayerHealthHud {
+    pub health: f32,
+    pub max_health: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

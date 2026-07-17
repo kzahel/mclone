@@ -25,8 +25,8 @@ use mclone_core::{
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
-    EntitySnapshot, EntityUpdate, PlayerPositionUpdate, PlayerStatistics, RemotePlayerId,
-    RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate, SessionConfiguration,
+    EntitySnapshot, EntityUpdate, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics,
+    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate, SessionConfiguration,
 };
 
 pub use actor::{
@@ -98,6 +98,7 @@ pub struct ClientRuntime {
     daylight_cycle_running: bool,
     total_experience: u64,
     player_statistics: PlayerStatistics,
+    player_life: PlayerLifeState,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
@@ -124,6 +125,7 @@ impl ClientRuntime {
             daylight_cycle_running: true,
             total_experience: 0,
             player_statistics: PlayerStatistics::default(),
+            player_life: PlayerLifeState::default(),
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
@@ -217,6 +219,7 @@ impl ClientRuntime {
                 if !keep_player_state {
                     self.total_experience = 0;
                     self.player_statistics = PlayerStatistics::default();
+                    self.player_life = PlayerLifeState::default();
                 }
             }
             ServerUpdate::ChunkSnapshot(snapshot) => {
@@ -284,6 +287,11 @@ impl ClientRuntime {
             ServerUpdate::PlayerStatistics { statistics } => {
                 self.player_statistics = statistics;
             }
+            ServerUpdate::PlayerLife(state) => {
+                if state.epoch() >= self.player_life.epoch() {
+                    self.player_life = state;
+                }
+            }
             ServerUpdate::KeepAlive { .. } => {}
             ServerUpdate::Disconnect(reason) => self.apply_disconnect(reason),
         }
@@ -308,6 +316,22 @@ impl ClientRuntime {
 
     pub fn player_statistics(&self) -> &PlayerStatistics {
         &self.player_statistics
+    }
+
+    pub const fn player_life(&self) -> PlayerLifeState {
+        self.player_life
+    }
+
+    pub const fn player_vitals(&self) -> mclone_protocol::PlayerVitals {
+        self.player_life.vitals()
+    }
+
+    pub const fn player_death_cause(&self) -> Option<mclone_protocol::PlayerDamageCause> {
+        self.player_life.death_cause()
+    }
+
+    pub fn player_is_dead(&self) -> bool {
+        self.player_life.is_dead()
     }
 
     pub fn chunk_snapshot(&self, pos: ChunkPos) -> Option<&ChunkSnapshot> {
@@ -1087,6 +1111,45 @@ mod tests {
         });
 
         assert_eq!(runtime.player_statistics(), &statistics);
+    }
+
+    #[test]
+    fn client_runtime_applies_atomic_life_and_rejects_stale_epochs() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let dead = mclone_protocol::PlayerLifeState::new(
+            3,
+            mclone_protocol::PlayerVitals::new(0.0, 20.0).unwrap(),
+            Some(mclone_protocol::PlayerDamageCause::Lava),
+        )
+        .unwrap();
+        runtime.apply_update(ServerUpdate::PlayerLife(dead));
+
+        assert!(runtime.player_is_dead());
+        assert_eq!(
+            runtime.player_death_cause(),
+            Some(mclone_protocol::PlayerDamageCause::Lava)
+        );
+
+        runtime.apply_update(ServerUpdate::PlayerLife(
+            mclone_protocol::PlayerLifeState::new(
+                2,
+                mclone_protocol::PlayerVitals::full_health(),
+                None,
+            )
+            .unwrap(),
+        ));
+        assert!(runtime.player_is_dead());
+
+        runtime.apply_update(ServerUpdate::PlayerLife(
+            mclone_protocol::PlayerLifeState::new(
+                4,
+                mclone_protocol::PlayerVitals::full_health(),
+                None,
+            )
+            .unwrap(),
+        ));
+        assert!(!runtime.player_is_dead());
+        assert_eq!(runtime.player_vitals().health(), 20.0);
     }
 
     #[test]

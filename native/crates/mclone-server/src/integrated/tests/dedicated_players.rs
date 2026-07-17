@@ -90,7 +90,9 @@ fn dedicated_join_orders_negotiated_configuration_before_world_state() {
             ServerUpdate::SessionReady,
             ServerUpdate::WorldInfo { .. },
             ServerUpdate::TimeUpdate { .. },
+            ServerUpdate::PlayerLife(life),
         ]
+        if !life.vitals().is_dead()
     ));
 }
 

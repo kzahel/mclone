@@ -310,10 +310,7 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
     assert!(constructor.contains("players: ServerPlayerList::default()"));
     assert!(!constructor.contains(".add_player("));
 
-    let local_session = braced_item(
-        &server,
-        "pub fn from_server_with_capabilities(",
-    );
+    let local_session = braced_item(&server, "pub fn from_server_with_capabilities(");
     assert!(local_session.contains("server.add_player_with_capabilities(capabilities)"));
     assert!(local_session.contains("LocalRealmSessionRole::Player(player_id)"));
 

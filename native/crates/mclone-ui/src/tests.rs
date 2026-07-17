@@ -585,6 +585,33 @@ fn flat_hud_renders_authoritative_statistics_above_hotbar() {
 }
 
 #[test]
+fn flat_hud_renders_ten_authoritative_health_hearts() {
+    let scale = GuiScale::from_pixels(960, 540);
+    let mut draw = GuiDrawList::new();
+    let mut hud = FlatHud::new(resolved_flat_input(false));
+    hud.hotbar = FlatHotbarOverlay::selected(0);
+    hud.player_health = Some(PlayerHealthHud {
+        health: 15.0,
+        max_health: 20.0,
+    });
+
+    render_flat_hud(scale, &mut draw, &hud);
+
+    let red_commands = draw
+        .commands()
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                GuiDrawCommand::SolidRect { color, .. }
+                    if *color == Color::rgba(225, 47, 55, 255)
+            )
+        })
+        .count();
+    assert_eq!(red_commands, 48);
+}
+
+#[test]
 fn flat_hud_hides_crosshair_when_disabled() {
     let mut draw = GuiDrawList::new();
     let mut hud = FlatHud::new(resolved_flat_input(false));

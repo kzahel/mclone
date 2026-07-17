@@ -50,7 +50,7 @@ impl EngineServerUpdateReport {
                     report.changed = true;
                     report.section_block_updates += 1;
                 }
-                ServerUpdate::PlayerPosition(_) => {
+                ServerUpdate::PlayerPosition(_) | ServerUpdate::PlayerLife(_) => {
                     report.changed = true;
                 }
                 ServerUpdate::DimensionChange { .. } => {
@@ -127,6 +127,7 @@ impl EngineServerUpdateDirtyBatch {
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerExperience { .. } => {}
                 ServerUpdate::PlayerStatistics { .. } => {}
+                ServerUpdate::PlayerLife(_) => {}
                 ServerUpdate::PlayerPosition(_) => {}
                 ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)

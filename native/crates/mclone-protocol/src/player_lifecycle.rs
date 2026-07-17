@@ -92,6 +92,82 @@ pub enum PlayerDamageCause {
     Lava,
 }
 
+/// One atomic owner-only lifecycle snapshot.
+///
+/// Health and the completed-death cause travel together so clients cannot
+/// observe zero health without the screen-driving cause. The monotonic epoch
+/// rejects stale snapshots around later respawns.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlayerLifeState {
+    epoch: u32,
+    vitals: PlayerVitals,
+    death_cause: Option<PlayerDamageCause>,
+}
+
+impl PlayerLifeState {
+    pub fn new(
+        epoch: u32,
+        vitals: PlayerVitals,
+        death_cause: Option<PlayerDamageCause>,
+    ) -> Result<Self, PlayerLifeStateError> {
+        if vitals.is_dead() != death_cause.is_some() {
+            return Err(PlayerLifeStateError::InconsistentDeathCause);
+        }
+        Ok(Self {
+            epoch,
+            vitals,
+            death_cause,
+        })
+    }
+
+    pub const fn living() -> Self {
+        Self {
+            epoch: 0,
+            vitals: PlayerVitals::full_health(),
+            death_cause: None,
+        }
+    }
+
+    pub const fn epoch(self) -> u32 {
+        self.epoch
+    }
+
+    pub const fn vitals(self) -> PlayerVitals {
+        self.vitals
+    }
+
+    pub const fn death_cause(self) -> Option<PlayerDamageCause> {
+        self.death_cause
+    }
+
+    pub fn is_dead(self) -> bool {
+        self.vitals.is_dead()
+    }
+}
+
+impl Default for PlayerLifeState {
+    fn default() -> Self {
+        Self::living()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PlayerLifeStateError {
+    InconsistentDeathCause,
+}
+
+impl fmt::Display for PlayerLifeStateError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InconsistentDeathCause => {
+                f.write_str("player death cause must be present exactly when health is zero")
+            }
+        }
+    }
+}
+
+impl Error for PlayerLifeStateError {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +203,26 @@ mod tests {
             Err(PlayerVitalsError::HealthOutOfRange)
         );
         assert!(PlayerVitals::new(0.0, 20.0).unwrap().is_dead());
+    }
+
+    #[test]
+    fn life_state_keeps_zero_health_and_death_cause_atomic() {
+        let dead = PlayerLifeState::new(
+            7,
+            PlayerVitals::new(0.0, 20.0).unwrap(),
+            Some(PlayerDamageCause::Lava),
+        )
+        .unwrap();
+        assert!(dead.is_dead());
+        assert_eq!(dead.epoch(), 7);
+        assert_eq!(dead.death_cause(), Some(PlayerDamageCause::Lava));
+        assert_eq!(
+            PlayerLifeState::new(
+                8,
+                PlayerVitals::full_health(),
+                Some(PlayerDamageCause::Lava)
+            ),
+            Err(PlayerLifeStateError::InconsistentDeathCause)
+        );
     }
 }

@@ -46,6 +46,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) statistics: PlayerStatistics,
     pub(crate) vitals: PlayerVitals,
     pub(crate) pending_death_cause: Option<PlayerDamageCause>,
+    pub(crate) life_epoch: u32,
     pub(crate) player_record_revision: u64,
     pub(crate) capabilities: SessionCapabilities,
 }
@@ -64,6 +65,7 @@ impl Default for ServerPlayerEntry {
             statistics: PlayerStatistics::default(),
             vitals: PlayerVitals::default(),
             pending_death_cause: None,
+            life_epoch: 0,
             player_record_revision: 0,
             capabilities: SessionCapabilities::NONE,
         }

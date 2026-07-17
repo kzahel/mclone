@@ -15,7 +15,7 @@ use mclone_core::{
 
 pub use player_lifecycle::{
     DEFAULT_PLAYER_MAX_HEALTH, PLAYER_STANDING_HEIGHT, PLAYER_STANDING_WIDTH, PlayerDamageCause,
-    PlayerVitals, PlayerVitalsError,
+    PlayerLifeState, PlayerLifeStateError, PlayerVitals, PlayerVitalsError,
 };
 pub use realm_dimension::{
     DimensionChunkPos, DimensionKey, DimensionKeyError, MAX_DIMENSION_KEY_BYTES,
@@ -28,7 +28,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 27;
+pub const PROTOCOL_VERSION: u32 = 28;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -75,6 +75,7 @@ const SERVER_UPDATE_KEEP_ALIVE: u8 = 16;
 const SERVER_UPDATE_DISCONNECT: u8 = 17;
 const SERVER_UPDATE_DIMENSION_CHANGE: u8 = 18;
 const SERVER_UPDATE_PLAYER_STATISTICS: u8 = 19;
+const SERVER_UPDATE_PLAYER_LIFE: u8 = 20;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -489,6 +490,8 @@ pub enum ServerUpdate {
     PlayerStatistics {
         statistics: PlayerStatistics,
     },
+    /// Owner-only atomic health/death snapshot.
+    PlayerLife(PlayerLifeState),
     KeepAlive {
         id: u64,
     },
@@ -919,6 +922,17 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
                 writer.write_u32(*value);
             }
         }
+        ServerUpdate::PlayerLife(state) => {
+            validate_player_life_state(*state)?;
+            writer.write_u8(SERVER_UPDATE_PLAYER_LIFE);
+            writer.write_u32(state.epoch());
+            writer.write_f32(state.vitals().health());
+            writer.write_f32(state.vitals().max_health());
+            writer.write_u8(match state.death_cause() {
+                None => 0,
+                Some(PlayerDamageCause::Lava) => 1,
+            });
+        }
         ServerUpdate::KeepAlive { id } => {
             writer.write_u8(SERVER_UPDATE_KEEP_ALIVE);
             writer.write_u64(*id);
@@ -1026,6 +1040,25 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             }
             ServerUpdate::PlayerStatistics { statistics }
         }
+        SERVER_UPDATE_PLAYER_LIFE => {
+            let epoch = reader.read_u32()?;
+            let vitals = PlayerVitals::new(reader.read_f32()?, reader.read_f32()?)
+                .map_err(|_| ProtocolCodecError::InvalidData("invalid player vitals"))?;
+            let death_cause = match reader.read_u8()? {
+                0 => None,
+                1 => Some(PlayerDamageCause::Lava),
+                _ => {
+                    return Err(ProtocolCodecError::InvalidData(
+                        "unknown player damage cause",
+                    ));
+                }
+            };
+            ServerUpdate::PlayerLife(
+                PlayerLifeState::new(epoch, vitals, death_cause).map_err(|_| {
+                    ProtocolCodecError::InvalidData("inconsistent player life state")
+                })?,
+            )
+        }
         SERVER_UPDATE_KEEP_ALIVE => ServerUpdate::KeepAlive {
             id: reader.read_u64()?,
         },
@@ -1098,6 +1131,14 @@ fn validate_remote_player_update(update: &RemotePlayerUpdate) -> ProtocolCodecRe
             "remote player update contains non-finite value",
         ));
     }
+    Ok(())
+}
+
+fn validate_player_life_state(state: PlayerLifeState) -> ProtocolCodecResult<()> {
+    PlayerVitals::new(state.vitals().health(), state.vitals().max_health())
+        .map_err(|_| ProtocolCodecError::InvalidData("invalid player vitals"))?;
+    PlayerLifeState::new(state.epoch(), state.vitals(), state.death_cause())
+        .map_err(|_| ProtocolCodecError::InvalidData("inconsistent player life state"))?;
     Ok(())
 }
 
@@ -2416,6 +2457,22 @@ mod tests {
         statistics.set(StatisticKey::jump(), 42);
         statistics.set(StatisticKey::successful_block_placement(), 17);
         let update = ServerUpdate::PlayerStatistics { statistics };
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_atomic_player_life() {
+        let update = ServerUpdate::PlayerLife(
+            PlayerLifeState::new(
+                9,
+                PlayerVitals::new(0.0, 20.0).unwrap(),
+                Some(PlayerDamageCause::Lava),
+            )
+            .unwrap(),
+        );
 
         let bytes = encode_server_update(&update).unwrap();
 

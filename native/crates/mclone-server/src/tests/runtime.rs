@@ -59,6 +59,10 @@ fn integrated_server_publishes_interested_chunks() {
         updates.get(3),
         Some(ServerUpdate::TimeUpdate { .. })
     ));
+    assert!(matches!(
+        updates.get(4),
+        Some(ServerUpdate::PlayerLife(life)) if !life.vitals().is_dead()
+    ));
 
     assert_eq!(
         updates
@@ -341,7 +345,7 @@ fn integrated_server_publishes_interested_chunks() {
             Some(job.id)
         );
     }
-    assert!(updates.iter().skip(4).all(|update| {
+    assert!(updates.iter().skip(5).all(|update| {
         matches!(
             update,
             ServerUpdate::ChunkSnapshot(_) | ServerUpdate::EntitySnapshot(_)

@@ -426,6 +426,13 @@ fn accepted_lava_contact_kills_once_and_gates_physical_commands() {
     );
     assert!(updates.iter().any(|update| matches!(
         update,
+        ServerUpdate::PlayerLife(life)
+            if life.epoch() == 1
+                && life.vitals().is_dead()
+                && life.death_cause() == Some(mclone_protocol::PlayerDamageCause::Lava)
+    )));
+    assert!(updates.iter().any(|update| matches!(
+        update,
         ServerUpdate::PlayerStatistics { statistics }
             if statistics.death_count() == 1
     )));
@@ -504,6 +511,13 @@ fn server_tick_kills_a_stationary_player_when_lava_appears() {
     let report = server.try_simulation_tick_report().unwrap();
 
     assert!(server.player_vitals().is_dead());
+    assert!(report.updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerLife(life)
+            if life.epoch() == 1
+                && life.vitals().is_dead()
+                && life.death_cause() == Some(mclone_protocol::PlayerDamageCause::Lava)
+    )));
     assert!(report.updates.iter().any(|update| matches!(
         update,
         ServerUpdate::PlayerStatistics { statistics }

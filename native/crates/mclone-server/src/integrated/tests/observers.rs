@@ -93,6 +93,7 @@ fn residency_observer_overlaps_player_without_becoming_a_player() {
     assert!(updates.iter().all(|update| !matches!(
         update,
         ServerUpdate::PlayerPosition(_)
+            | ServerUpdate::PlayerLife(_)
             | ServerUpdate::PlayerExperience { .. }
             | ServerUpdate::PlayerStatistics { .. }
     )));
@@ -143,7 +144,10 @@ fn residency_observer_overlaps_player_without_becoming_a_player() {
             .try_drain_updates_for_observer(observer)
             .unwrap()
             .iter()
-            .all(|update| !matches!(update, ServerUpdate::PlayerStatistics { .. }))
+            .all(|update| !matches!(
+                update,
+                ServerUpdate::PlayerLife(_) | ServerUpdate::PlayerStatistics { .. }
+            ))
     );
     let block = BlockPos::new(8, 80, 8);
     assert!(server.scheduler_mut().set_block_at_world(block, DIRT));

@@ -19,10 +19,10 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DebugActorKind,
     DebugHotbarItem, DimensionKey, EntityKind, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerModelKind,
-    PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate,
-    SessionCapabilities, SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
-    SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
+    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState,
+    PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand,
+    ServerUpdate, SessionCapabilities, SessionConfiguration, SetCarriedItemCommand,
+    SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -1332,6 +1332,13 @@ impl RealmServer {
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerStatistics { statistics });
         }
+        let life = player_life_state(
+            self.players
+                .get(player_id)
+                .expect("transfer player must remain realm-owned"),
+        );
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
         view.center = destination_center;
         let updates = self.set_chunk_view_for_target(CommandTarget::Player(player_id), view)?;
         for update in updates {
@@ -1360,6 +1367,13 @@ impl RealmServer {
             .queue_update_for_player(player_id, world_info);
         self.chunk_tracking
             .queue_update_for_player(player_id, time_update);
+        let life = player_life_state(
+            self.players
+                .get(player_id)
+                .expect("new realm player must remain registered"),
+        );
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
         self.remote_players.add_player(player_id);
         Ok(player_id)
     }
@@ -1426,6 +1440,13 @@ impl RealmServer {
             self.chunk_tracking
                 .queue_update_for_player(player_id, ServerUpdate::PlayerStatistics { statistics });
         }
+        let life = player_life_state(
+            self.players
+                .get(player_id)
+                .expect("identity player must remain registered"),
+        );
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
         Ok(player_id)
     }
 
@@ -3431,6 +3452,7 @@ impl RealmServer {
             player.resume_record = Some(record);
             let total_experience = player.total_experience;
             let statistics = player.statistics.clone();
+            let life = player_life_state(player);
             self.chunk_tracking.queue_update_for_player(
                 player_id,
                 ServerUpdate::PlayerExperience { total_experience },
@@ -3441,6 +3463,8 @@ impl RealmServer {
                     ServerUpdate::PlayerStatistics { statistics },
                 );
             }
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
             let center = self
                 .players
                 .get(player_id)
@@ -3661,7 +3685,7 @@ impl RealmServer {
         cause: PlayerDamageCause,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let player_id = target.player_id();
-        let statistics = {
+        let (life, statistics) = {
             let player = self
                 .players
                 .get_mut(player_id)
@@ -3674,13 +3698,17 @@ impl RealmServer {
                 .with_health(0.0)
                 .expect("zero health must be valid for positive maximum health");
             player.pending_death_cause = Some(cause);
+            player.life_epoch = player.life_epoch.saturating_add(1);
             player.statistics.increment(StatisticKey::deaths(), 1);
-            player.statistics.clone()
+            (player_life_state(player), player.statistics.clone())
         };
         self.pending_dimension_transfers.remove(&player_id);
         self.reconcile_remote_player_subject(player_id, true);
         self.save_player_record(player_id)?;
-        Ok(vec![ServerUpdate::PlayerStatistics { statistics }])
+        Ok(vec![
+            ServerUpdate::PlayerLife(life),
+            ServerUpdate::PlayerStatistics { statistics },
+        ])
     }
 
     fn mark_player_tick_boundaries(&mut self) {
@@ -4380,6 +4408,11 @@ fn command_is_allowed_while_dead(command: &ClientCommand) -> bool {
             | ClientCommand::KeepAlive { .. }
             | ClientCommand::Disconnect(_)
     )
+}
+
+fn player_life_state(player: &crate::players::ServerPlayerEntry) -> PlayerLifeState {
+    PlayerLifeState::new(player.life_epoch, player.vitals, player.pending_death_cause)
+        .expect("server player lifecycle state must remain internally consistent")
 }
 
 fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {

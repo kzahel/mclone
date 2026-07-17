@@ -1777,6 +1777,11 @@ impl McloneSceneHost {
             ),
         );
         hud.status = self.session_projection().status_overlay;
+        let vitals = runtime.client().player_vitals();
+        hud.player_health = Some(mclone_ui::PlayerHealthHud {
+            health: vitals.health(),
+            max_health: vitals.max_health(),
+        });
         let statistics = runtime.client().player_statistics();
         hud.player_statistics = Some(mclone_ui::PlayerStatisticsHud {
             jumps: statistics.jump_count(),
