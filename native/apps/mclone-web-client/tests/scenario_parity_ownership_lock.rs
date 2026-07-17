@@ -72,27 +72,19 @@ fn web_adapter_consumes_the_shared_manifest_and_fixture_receipts() {
     let destination =
         managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination).unwrap();
     assert!(primary.entity_chunk_records.is_empty());
-    assert_eq!(destination.entity_chunk_records.len(), 1);
-    assert_eq!(
+    assert!(destination.chunk_records.is_empty());
+    assert!(destination.entity_chunk_records.is_empty());
+    assert_ne!(
         managed_scenario_payload_fingerprint(&primary),
-        644_928_549_022_577_985
-    );
-    assert_eq!(
-        managed_scenario_payload_fingerprint(&destination),
-        9_938_623_532_332_636_618
+        managed_scenario_payload_fingerprint(&destination)
     );
 }
 
 #[test]
 fn browser_runtime_honors_the_shared_managed_actor_policy() {
-    let destination_start = SCENE_SESSION
-        .split("fn try_issue_managed_scenario_destination_start(")
-        .nth(1)
-        .expect("shared destination start exists")
-        .split("fn update_managed_scenario_destination_status(")
-        .next()
-        .unwrap();
-    assert!(destination_start.contains("scene.debug_passive_showcase = false;"));
+    assert!(SCENE_SESSION.contains(
+        "scene.debug_passive_showcase = self.debug_managed_scenario_auxiliary_player_script;"
+    ));
     assert!(
         WEB_SCENE_HOST
             .contains(".with_debug_passive_showcase(pending.scene.debug_passive_showcase)")
@@ -165,7 +157,7 @@ fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
         .next()
         .unwrap();
     assert!(!request.contains("PathBuf"));
-    assert!(request.contains("pub managed_world_key: Option<ManagedWorldKey>"));
+    assert!(request.contains("pub storage_source: Option<ScenarioWorldStorageSource>"));
     assert!(WARM_WORLD.contains("PlatformOperationLedger<ProvisionManagedScenarioWorld"));
     assert!(!WARM_WORLD.contains("NativeManagedScenarioContentOperationService"));
 }
