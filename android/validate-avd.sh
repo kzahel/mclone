@@ -19,6 +19,10 @@ BUILD_ABIS="${MCLONE_ANDROID_ABIS:-}"
 SKIP_BUILD=0
 KEEP_EMULATOR=0
 HEADLESS=1
+GPU_MODE="auto"
+NO_SNAPSHOT=0
+RESET_APP_DATA=0
+REQUIRE_PACING_PERF=0
 SERIAL=""
 STARTED_EMULATOR=0
 EMULATOR_PID=""
@@ -40,6 +44,9 @@ Options:
   --abis LIST         Build for comma- or space-separated Android ABIs.
   --keep-emulator     Leave an emulator started by this script running.
   --window            Show the emulator window instead of using -no-window.
+  --gpu MODE          Pass MODE to the emulator's -gpu option (auto or host).
+  --no-snapshot       Disable loading and saving emulator snapshots.
+  --reset-app-data    Clear package data after install and before asset staging.
   --screenshot PATH   Local screenshot output path.
   --log PATH          Local logcat output path.
   --timeout SECONDS   Boot/device wait timeout.
@@ -63,6 +70,16 @@ Options:
                       Add --fullbright VALUE to startup argv.
   --render-color-profile PROFILE
                       Add --render-color-profile PROFILE to startup argv.
+  --pacing-perf-label LABEL
+                      Label one bounded flat-Android pacing sample.
+  --pacing-perf-warmup-seconds N
+                      Warm up for N seconds after the first rendered frame.
+  --pacing-perf-seconds N
+                      Record N seconds and require the summary log marker.
+  --pacing-perf-churn-interval-seconds N
+                      Alternate interest centers every N seconds.
+  --pacing-perf-churn-offset-chunks N
+                      Offset the alternating interest center by N chunks.
   --screenshot-eye X,Y,Z
                       Add --screenshot-eye X,Y,Z to startup argv.
   --screenshot-target X,Y,Z
@@ -109,6 +126,19 @@ while [[ $# -gt 0 ]]; do
             HEADLESS=0
             shift
             ;;
+        --gpu)
+            mclone_require_arg "$1" "${2:-}"
+            GPU_MODE="$2"
+            shift 2
+            ;;
+        --no-snapshot)
+            NO_SNAPSHOT=1
+            shift
+            ;;
+        --reset-app-data)
+            RESET_APP_DATA=1
+            shift
+            ;;
         --screenshot)
             mclone_require_arg "$1" "${2:-}"
             SCREENSHOT_PATH="$2"
@@ -143,9 +173,15 @@ while [[ $# -gt 0 ]]; do
             MCLONE_ANDROID_REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile|--screenshot-eye|--screenshot-target)
+        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile|--generation-profile|--screenshot-eye|--screenshot-target|--pacing-perf-label|--pacing-perf-warmup-seconds|--pacing-perf-churn-interval-seconds|--pacing-perf-churn-offset-chunks)
             mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_STARTUP_ARGV+=("$1" "$2")
+            shift 2
+            ;;
+        --pacing-perf-seconds)
+            mclone_require_arg "$1" "${2:-}"
+            MCLONE_ANDROID_STARTUP_ARGV+=("$1" "$2")
+            REQUIRE_PACING_PERF=1
             shift 2
             ;;
         --freeze-time)
@@ -174,6 +210,14 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+case "$GPU_MODE" in
+    auto|host) ;;
+    *) mclone_die "--gpu must be auto or host, got '$GPU_MODE'" ;;
+esac
+
+export MCLONE_ANDROID_RESET_APP_DATA="$RESET_APP_DATA"
+export MCLONE_ANDROID_REQUIRE_PACING_PERF="$REQUIRE_PACING_PERF"
 
 if [[ "${#EXPLICIT_ABIS[@]}" -gt 0 ]]; then
     BUILD_ABIS="${EXPLICIT_ABIS[*]}"
@@ -216,6 +260,13 @@ cleanup() {
     if [[ "$STARTED_EMULATOR" == "1" && "$KEEP_EMULATOR" != "1" && -n "$SERIAL" ]]; then
         mclone_note "Stopping emulator $SERIAL"
         "$ADB" -s "$SERIAL" emu kill >/dev/null 2>&1 || true
+        for _ in $(seq 1 30); do
+            if ! "$ADB" devices 2>/dev/null | tr -d '\r' | awk '$2 == "device" { print $1 }' \
+                | grep -Fx "$SERIAL" >/dev/null; then
+                break
+            fi
+            sleep 1
+        done
     elif [[ "$STARTED_EMULATOR" == "1" && "$KEEP_EMULATOR" != "1" && -n "$EMULATOR_PID" ]]; then
         kill "$EMULATOR_PID" >/dev/null 2>&1 || true
     fi
@@ -252,7 +303,12 @@ if [[ -z "$SERIAL" ]]; then
         mclone_die "attached Android device(s) are unauthorized: $unauthorized_devices"
     fi
 
-    emulator_args=(-avd "$AVD_NAME" -no-audio -no-boot-anim -no-snapshot-save)
+    emulator_args=(-avd "$AVD_NAME" -no-audio -no-boot-anim -gpu "$GPU_MODE")
+    if [[ "$NO_SNAPSHOT" == "1" ]]; then
+        emulator_args+=(-no-snapshot)
+    else
+        emulator_args+=(-no-snapshot-save)
+    fi
     if [[ "$HEADLESS" == "1" ]]; then
         emulator_args+=(-no-window)
     fi

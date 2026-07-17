@@ -116,6 +116,23 @@ It captures:
 /tmp/mclone-android-avd-touch-logcat.txt
 ```
 
+Run the bounded pacing canary in paired emulator GPU modes:
+
+```bash
+pnpm native:android:avd-pacing:perf
+```
+
+This cold-boots the same AVD without snapshots, clears app data before each
+run, and executes the same seeded local-integrated chunk-view-churn workload
+with `-gpu host` and `-gpu auto`. Each log contains one
+`MCLONE_ANDROID_PACING_PERF_SUMMARY` JSON marker, and the paired command prints
+both markers. Raw captures live under `/tmp/mclone-android-avd-pacing-*`.
+
+The AVD lane is a relative Android/shared-engine regression canary. It does
+not reproduce Quest ARM scheduling, OpenXR, stereo/multiview, the Meta
+compositor, or headset thermals and must not be recorded as Quest performance
+evidence.
+
 Run against a dedicated server reachable from the AVD:
 
 ```bash

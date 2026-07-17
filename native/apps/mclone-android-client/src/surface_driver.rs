@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use glam::Vec2;
@@ -21,7 +21,8 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint,
 };
 use mclone_audio::{AudioEngine, AudioSettings};
-use mclone_diagnostics::FrameHostKind;
+use mclone_core::{CHUNK_WIDTH, Vec3d};
+use mclone_diagnostics::{FrameHostKind, FramePipelineReport};
 use mclone_input::{
     FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
     InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection, PointerButton,
@@ -52,7 +53,9 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::AndroidSceneHost;
-use crate::startup::{AndroidStartupOptions, apply_startup_camera_options};
+use crate::startup::{
+    AndroidPacingPerfOptions, AndroidStartupOptions, apply_startup_camera_options,
+};
 
 const ANDROID_FIXED_FPS_CAP: u32 = 60;
 const ANDROID_TARGET_FRAME_MS: f64 = 1_000.0 / ANDROID_FIXED_FPS_CAP as f64;
@@ -328,6 +331,7 @@ struct AndroidGpuState {
     ui_touch_id: Option<u64>,
     frame_timing: FrameTimingStats,
     frame_pipeline: FramePipelineAccountant,
+    pacing_perf: Option<AndroidPacingPerfState>,
     last_frame: Instant,
     frame_index: u64,
     announced_session: Option<ActiveSessionDescriptor>,
@@ -363,6 +367,7 @@ impl AndroidGpuState {
                 .context("create Android wgpu device")?;
             Ok::<_, anyhow::Error>((adapter, device, queue))
         })?;
+        let adapter_info = adapter.get_info();
         let caps = surface.get_capabilities(&adapter);
         let format = RenderConfig::preferred_surface_format_for_profile(
             &caps,
@@ -446,8 +451,8 @@ impl AndroidGpuState {
 
         log::info!(
             "Mclone Android wgpu adapter '{}' backend={:?} format={format:?}",
-            adapter.get_info().name,
-            adapter.get_info().backend
+            adapter_info.name,
+            adapter_info.backend
         );
         let announced_session = Some(startup.remote_addr.as_ref().map_or_else(
             || ActiveSessionDescriptor::new_seed_local_world(startup.scene.seed),
@@ -475,6 +480,13 @@ impl AndroidGpuState {
             frame_pipeline: FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(
                 Some(ANDROID_FIXED_FPS_CAP as f64),
             )),
+            pacing_perf: startup.pacing_perf.map(|options| {
+                AndroidPacingPerfState::new(
+                    options,
+                    adapter_info.name,
+                    format!("{:?}", adapter_info.backend),
+                )
+            }),
             last_frame: Instant::now(),
             frame_index: 0,
             announced_session,
@@ -550,6 +562,8 @@ impl AndroidGpuState {
         self.last_frame = frame_start;
         self.frame_timing
             .begin_frame(frame_ms, Some(ANDROID_TARGET_FRAME_MS));
+        self.prepare_pacing_perf_frame(frame_start)
+            .map_err(AndroidRenderError::Render)?;
         self.drive_held_input(frame_ms / 1_000.0)
             .map_err(AndroidRenderError::Render)?;
         self.host.set_mono_ui_context(self.ui_context());
@@ -603,6 +617,7 @@ impl AndroidGpuState {
             present_ms,
             &summary,
         );
+        self.finish_pacing_perf_frame(frame_start);
         self.announce_session_change();
         if self.frame_index == 0 {
             log::info!(
@@ -618,6 +633,114 @@ impl AndroidGpuState {
         }
         self.frame_index = self.frame_index.saturating_add(1);
         Ok(())
+    }
+
+    fn prepare_pacing_perf_frame(&mut self, now: Instant) -> Result<()> {
+        let Some(perf) = self.pacing_perf.as_mut() else {
+            return Ok(());
+        };
+        if perf.completed {
+            return Ok(());
+        }
+        let first_frame = *perf.first_frame.get_or_insert(now);
+        if perf.active_started.is_none()
+            && now.saturating_duration_since(first_frame)
+                >= Duration::from_secs(perf.options.warmup_seconds)
+        {
+            perf.active_started = Some(now);
+            self.frame_pipeline = FramePipelineAccountant::new(
+                xr_frame_pipeline_accounting_config(Some(ANDROID_FIXED_FPS_CAP as f64)),
+            );
+            log::info!(
+                "MCLONE_ANDROID_PACING_PERF_START label={} workload=chunk-view-churn warmup_seconds={} sample_seconds={} churn_interval_seconds={:.3} churn_offset_chunks={} target_hz={} adapter={} backend={}",
+                perf.options.label,
+                perf.options.warmup_seconds,
+                perf.options.sample_seconds,
+                perf.options.churn_interval_seconds,
+                perf.options.churn_offset_chunks,
+                ANDROID_FIXED_FPS_CAP,
+                perf.adapter_name,
+                perf.adapter_backend
+            );
+        }
+        let Some(active_started) = perf.active_started else {
+            return Ok(());
+        };
+        let elapsed_seconds = now.saturating_duration_since(active_started).as_secs_f64();
+        let step = (elapsed_seconds / perf.options.churn_interval_seconds).floor() as u64;
+        let offset = if step % 2 == 0 {
+            0
+        } else {
+            perf.options.churn_offset_chunks
+        };
+        let center = [
+            perf.options.base_chunk_x.saturating_add(offset),
+            perf.options.base_chunk_z,
+        ];
+        if perf.last_center == Some(center) {
+            return Ok(());
+        }
+        perf.last_center = Some(center);
+
+        let camera = self.host.camera_snapshot();
+        let eye = Vec3d::new(
+            f64::from(
+                center[0]
+                    .saturating_mul(CHUNK_WIDTH)
+                    .saturating_add(CHUNK_WIDTH / 2),
+            ),
+            camera.eye.y,
+            f64::from(
+                center[1]
+                    .saturating_mul(CHUNK_WIDTH)
+                    .saturating_add(CHUNK_WIDTH / 2),
+            ),
+        );
+        self.host.set_mono_capture_camera(
+            eye,
+            camera.yaw_radians,
+            camera.pitch_radians,
+            camera.speed_blocks_per_second,
+        );
+        let committed = self
+            .host
+            .force_mono_player_pose_reconcile_for_diagnostics()?;
+        log::info!(
+            "MCLONE_ANDROID_PACING_PERF_CHURN label={} center_x={} center_z={} committed={committed}",
+            perf.options.label,
+            center[0],
+            center[1]
+        );
+        Ok(())
+    }
+
+    fn finish_pacing_perf_frame(&mut self, now: Instant) {
+        let Some(perf) = self.pacing_perf.as_mut() else {
+            return;
+        };
+        let Some(active_started) = perf.active_started else {
+            return;
+        };
+        let Some((report, _)) = self.frame_pipeline.latest_report() else {
+            return;
+        };
+        perf.max_queue_depth = perf.max_queue_depth.max(
+            report
+                .queue_panel
+                .queues
+                .iter()
+                .map(|queue| queue.depth)
+                .max()
+                .unwrap_or(0),
+        );
+        if perf.completed
+            || now.saturating_duration_since(active_started)
+                < Duration::from_secs(perf.options.sample_seconds)
+        {
+            return;
+        }
+        log_android_pacing_perf_summary(perf, &report);
+        perf.completed = true;
     }
 
     fn record_frame_timing(
@@ -1010,6 +1133,84 @@ impl AndroidGpuState {
         }
         self.announced_session = Some(session.clone());
     }
+}
+
+#[derive(Clone, Debug)]
+struct AndroidPacingPerfState {
+    options: AndroidPacingPerfOptions,
+    adapter_name: String,
+    adapter_backend: String,
+    first_frame: Option<Instant>,
+    active_started: Option<Instant>,
+    last_center: Option<[i32; 2]>,
+    max_queue_depth: u64,
+    completed: bool,
+}
+
+impl AndroidPacingPerfState {
+    fn new(
+        options: AndroidPacingPerfOptions,
+        adapter_name: String,
+        adapter_backend: String,
+    ) -> Self {
+        Self {
+            options,
+            adapter_name,
+            adapter_backend,
+            first_frame: None,
+            active_started: None,
+            last_center: None,
+            max_queue_depth: 0,
+            completed: false,
+        }
+    }
+}
+
+fn log_android_pacing_perf_summary(perf: &AndroidPacingPerfState, report: &FramePipelineReport) {
+    let frames = &report.frame_summary;
+    let queue_conservation_violations = report
+        .queue_panel
+        .queues
+        .iter()
+        .map(|queue| queue.conservation_violations)
+        .sum::<u64>();
+    let max_queue_age_ms = report
+        .queue_panel
+        .queues
+        .iter()
+        .map(|queue| queue.max_oldest_age_ms)
+        .max_by(f64::total_cmp)
+        .unwrap_or(0.0);
+    let summary = serde_json::json!({
+        "schemaVersion": report.schema_version,
+        "label": perf.options.label,
+        "workload": "chunk-view-churn",
+        "adapter": perf.adapter_name,
+        "backend": perf.adapter_backend,
+        "targetHz": frames.target_hz,
+        "warmupSeconds": perf.options.warmup_seconds,
+        "sampleSeconds": perf.options.sample_seconds,
+        "churnIntervalSeconds": perf.options.churn_interval_seconds,
+        "churnOffsetChunks": perf.options.churn_offset_chunks,
+        "frames": frames.frames,
+        "renderedFrames": frames.rendered_frames,
+        "appWorkAverageMs": frames.app_work.average_ms,
+        "appWorkP50Ms": frames.app_work.p50_ms,
+        "appWorkP95Ms": frames.app_work.p95_ms,
+        "appWorkP99Ms": frames.app_work.p99_ms,
+        "appWorkMaxMs": frames.app_work.max_ms,
+        "headroomAverageMs": frames.headroom.average_ms,
+        "headroomP05Ms": frames.headroom.p05_ms,
+        "headroomMinMs": frames.headroom.min_ms,
+        "overBudget": frames.over_budget,
+        "appOverPeriodFrames": frames.app_over_period_frames,
+        "appOverPeriodPct": frames.app_over_period_pct,
+        "frameConservationViolations": frames.conservation_violations.total(),
+        "queueConservationViolations": queue_conservation_violations,
+        "maxQueueDepth": perf.max_queue_depth,
+        "maxQueueAgeMs": max_queue_age_ms,
+    });
+    log::info!("MCLONE_ANDROID_PACING_PERF_SUMMARY {summary}");
 }
 
 #[allow(clippy::too_many_arguments)]

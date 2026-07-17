@@ -721,6 +721,10 @@ mclone_install_launch_smoke() {
     mclone_note "Using $(mclone_device_summary "$serial")"
     mclone_note "Installing $APK_PATH"
     "$ADB" -s "$serial" install -r "$APK_PATH"
+    if [[ "${MCLONE_ANDROID_RESET_APP_DATA:-0}" == "1" ]]; then
+        mclone_note "Clearing Android app data for cold-run validation"
+        "$ADB" -s "$serial" shell pm clear "$MCLONE_ANDROID_APP_ID" >/dev/null
+    fi
     mclone_reset_android_worlds_for_persist_smoke "$serial"
 
     if [[ "${STAGE_ASSETS:-1}" == "1" ]]; then
@@ -800,6 +804,10 @@ mclone_install_launch_smoke() {
     if [[ "${MCLONE_ANDROID_REQUIRE_RENDERED_FRAME:-1}" == "1" ]] \
         && ! grep -E "Mclone Android rendered .* frame" "$log_path" >/dev/null 2>&1; then
         mclone_die "no Mclone rendered-frame marker found in $log_path"
+    fi
+    if [[ "${MCLONE_ANDROID_REQUIRE_PACING_PERF:-0}" == "1" ]] \
+        && ! grep -F "MCLONE_ANDROID_PACING_PERF_SUMMARY" "$log_path" >/dev/null 2>&1; then
+        mclone_die "no Android pacing-perf summary marker found in $log_path"
     fi
     mclone_capture_screenshot "$serial" "$screenshot_path"
     mclone_note "Screenshot: $screenshot_path"

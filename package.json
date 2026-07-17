@@ -121,6 +121,7 @@
     "native:android:apk": "node ./scripts/run-native-bash.mjs ./android/build-apk.sh",
     "native:android:apk:avd": "node ./scripts/run-native-bash.mjs ./android/build-apk.sh --abis arm64-v8a,x86_64",
     "native:android:avd-smoke": "node ./scripts/run-native-bash.mjs ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-chunk.png --log /tmp/mclone-android-avd-logcat.txt --smoke-seconds 15",
+    "native:android:avd-pacing:perf": "node ./scripts/run-native-bash.mjs ./android/benchmark-avd-pacing.sh",
     "native:android:avd-touch-smoke": "node ./scripts/run-native-bash.mjs ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-touch.png --log /tmp/mclone-android-avd-touch-logcat.txt --smoke-seconds 15 --touch-swipe 1280,820,1680,680,500",
     "native:android:avd-session-smoke": "node ./scripts/run-native-bash.mjs ./android/validate-avd.sh --avd jstorrent-tablet --screenshot /tmp/mclone-android-avd-session.png --log /tmp/mclone-android-avd-session-logcat.txt --smoke-seconds 15 --session-smoke new-world",
     "native:android:quest-flat": "node ./scripts/run-native-bash.mjs ./android/validate-quest-flat.sh",

@@ -1,4 +1,6 @@
 use std::ffi::{CStr, CString, c_char};
+use std::fmt::Display;
+use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
 use mclone_android_platform::{android_app_data_world_root, normalize_android_legacy_remote_addr};
@@ -20,6 +22,10 @@ const REMOTE_ADDR_PROPERTY: &str = "debug.mclone.remote_addr";
 const ANDROID_PROPERTY_VALUE_MAX: usize = 92;
 const ANDROID_MIN_RENDER_DISTANCE: u32 = 1;
 const ANDROID_MAX_RENDER_DISTANCE: u32 = 16;
+const DEFAULT_PACING_PERF_WARMUP_SECONDS: u64 = 5;
+const DEFAULT_PACING_PERF_CHURN_INTERVAL_SECONDS: f64 = 3.0;
+const DEFAULT_PACING_PERF_CHURN_OFFSET_CHUNKS: i32 = 16;
+const MAX_PACING_PERF_SECONDS: u64 = 300;
 
 #[allow(unsafe_code)]
 unsafe extern "C" {
@@ -32,6 +38,18 @@ pub(crate) struct AndroidStartupOptions {
     pub(crate) remote_addr: Option<String>,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) camera: StartupCameraOptions,
+    pub(crate) pacing_perf: Option<AndroidPacingPerfOptions>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct AndroidPacingPerfOptions {
+    pub(crate) label: String,
+    pub(crate) warmup_seconds: u64,
+    pub(crate) sample_seconds: u64,
+    pub(crate) churn_interval_seconds: f64,
+    pub(crate) churn_offset_chunks: i32,
+    pub(crate) base_chunk_x: i32,
+    pub(crate) base_chunk_z: i32,
 }
 
 pub(crate) fn prepare_android_startup(app: &AndroidApp) -> Result<AndroidStartupOptions> {
@@ -101,6 +119,18 @@ pub(crate) fn prepare_android_startup(app: &AndroidApp) -> Result<AndroidStartup
         options.render_options.force_fullbright,
         options.render_options.color_profile.as_str()
     );
+    if let Some(perf) = &options.pacing_perf {
+        log::info!(
+            "Mclone Android pacing perf: label={} warmup_seconds={} sample_seconds={} churn_interval_seconds={:.3} churn_offset_chunks={} base_center=({}, {})",
+            perf.label,
+            perf.warmup_seconds,
+            perf.sample_seconds,
+            perf.churn_interval_seconds,
+            perf.churn_offset_chunks,
+            perf.base_chunk_x,
+            perf.base_chunk_z
+        );
+    }
     Ok(options)
 }
 
@@ -111,11 +141,39 @@ fn parse_android_startup_options(
         android_startup_scene_defaults(),
         TexturedSectionRenderOptions::default(),
     );
+    let mut pacing_perf_label = None;
+    let mut pacing_perf_warmup_seconds = None;
+    let mut pacing_perf_sample_seconds = None;
+    let mut pacing_perf_churn_interval_seconds = None;
+    let mut pacing_perf_churn_offset_chunks = None;
     if let Some(json) = startup_argv_json.filter(|json| !json.trim().is_empty()) {
         let argv =
             serde_json::from_str::<Vec<String>>(json).context("parse Android startup argv JSON")?;
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
+            match arg.as_str() {
+                "--pacing-perf-label" => {
+                    pacing_perf_label = Some(parse_android_arg(&mut argv, &arg)?);
+                    continue;
+                }
+                "--pacing-perf-warmup-seconds" => {
+                    pacing_perf_warmup_seconds = Some(parse_android_arg(&mut argv, &arg)?);
+                    continue;
+                }
+                "--pacing-perf-seconds" => {
+                    pacing_perf_sample_seconds = Some(parse_android_arg(&mut argv, &arg)?);
+                    continue;
+                }
+                "--pacing-perf-churn-interval-seconds" => {
+                    pacing_perf_churn_interval_seconds = Some(parse_android_arg(&mut argv, &arg)?);
+                    continue;
+                }
+                "--pacing-perf-churn-offset-chunks" => {
+                    pacing_perf_churn_offset_chunks = Some(parse_android_arg(&mut argv, &arg)?);
+                    continue;
+                }
+                _ => {}
+            }
             if shared_args.parse_next_arg(
                 &arg,
                 &mut argv,
@@ -140,6 +198,15 @@ fn parse_android_startup_options(
         shared_args.apply_render_compile_capacity_report(&report);
     }
     let parsed = shared_args.finish();
+    let pacing_perf = android_pacing_perf_options(
+        pacing_perf_label,
+        pacing_perf_warmup_seconds,
+        pacing_perf_sample_seconds,
+        pacing_perf_churn_interval_seconds,
+        pacing_perf_churn_offset_chunks,
+        parsed.scene.chunk_x,
+        parsed.scene.chunk_z,
+    )?;
     let storage = parsed.storage.project(None);
     let default_world_root_enabled = storage.default_world_root_enabled;
     let remote_addr = parsed.scene.remote_addr.clone();
@@ -155,9 +222,88 @@ fn parse_android_startup_options(
             remote_addr,
             render_options: parsed.render_options,
             camera: parsed.camera,
+            pacing_perf,
         },
         default_world_root_enabled,
     ))
+}
+
+fn parse_android_arg<T>(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<T>
+where
+    T: FromStr,
+    T::Err: Display,
+{
+    let value = args
+        .next()
+        .with_context(|| format!("{flag} requires a value"))?;
+    value
+        .parse::<T>()
+        .map_err(|error| anyhow::anyhow!("invalid {flag} value `{value}`: {error}"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn android_pacing_perf_options(
+    label: Option<String>,
+    warmup_seconds: Option<u64>,
+    sample_seconds: Option<u64>,
+    churn_interval_seconds: Option<f64>,
+    churn_offset_chunks: Option<i32>,
+    base_chunk_x: i32,
+    base_chunk_z: i32,
+) -> Result<Option<AndroidPacingPerfOptions>> {
+    let any_perf_arg = label.is_some()
+        || warmup_seconds.is_some()
+        || churn_interval_seconds.is_some()
+        || churn_offset_chunks.is_some();
+    let Some(sample_seconds) = sample_seconds else {
+        if any_perf_arg {
+            bail!("Android pacing perf options require --pacing-perf-seconds");
+        }
+        return Ok(None);
+    };
+    if sample_seconds == 0 || sample_seconds > MAX_PACING_PERF_SECONDS {
+        bail!(
+            "--pacing-perf-seconds must be between 1 and {MAX_PACING_PERF_SECONDS}, got {sample_seconds}"
+        );
+    }
+    let warmup_seconds = warmup_seconds.unwrap_or(DEFAULT_PACING_PERF_WARMUP_SECONDS);
+    if warmup_seconds > MAX_PACING_PERF_SECONDS {
+        bail!(
+            "--pacing-perf-warmup-seconds must be <= {MAX_PACING_PERF_SECONDS}, got {warmup_seconds}"
+        );
+    }
+    let churn_interval_seconds =
+        churn_interval_seconds.unwrap_or(DEFAULT_PACING_PERF_CHURN_INTERVAL_SECONDS);
+    if !churn_interval_seconds.is_finite() || churn_interval_seconds <= 0.0 {
+        bail!(
+            "--pacing-perf-churn-interval-seconds must be finite and positive, got {churn_interval_seconds}"
+        );
+    }
+    let churn_offset_chunks =
+        churn_offset_chunks.unwrap_or(DEFAULT_PACING_PERF_CHURN_OFFSET_CHUNKS);
+    if churn_offset_chunks <= 0 {
+        bail!("--pacing-perf-churn-offset-chunks must be positive, got {churn_offset_chunks}");
+    }
+    let label = label.unwrap_or_else(|| "android-flat".to_owned());
+    if label.is_empty()
+        || label.len() > 48
+        || !label
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+    {
+        bail!(
+            "--pacing-perf-label must be 1..=48 ASCII letters, digits, '.', '-', or '_', got `{label}`"
+        );
+    }
+    Ok(Some(AndroidPacingPerfOptions {
+        label,
+        warmup_seconds,
+        sample_seconds,
+        churn_interval_seconds,
+        churn_offset_chunks,
+        base_chunk_x,
+        base_chunk_z,
+    }))
 }
 
 fn android_startup_scene_defaults() -> StartupSceneOptions {
