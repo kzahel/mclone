@@ -2,7 +2,7 @@
 
 Topic: `compiled-figure-rendering`
 
-Status: target direction selected 2026-07-16. Tactical
+Status: production migration direction selected 2026-07-17. Tactical
 [`181`](../tactical/181-compiled-figure-static-box-proof.md) is complete: the
 canonical semantic handoff, shared startup compiler, immutable mono renderer,
 visually approved Three.js/native comparison, inspected native per-eye stereo,
@@ -11,13 +11,16 @@ proof lighting was accepted for this stage. Multiview execution remains
 capability-skipped on the current Mac with shader/contract validation pending a
 capable adapter. Semantic JSON remains the only persisted runtime format.
 Tactical
-[`186`](../tactical/186-prepared-figure-continuous-animation-proof.md) Slices
-0-2 now own startup-compiled indexed tracks, cadence-independent local TRS/
-hierarchy evaluation, resident mutable-palette rendering, and a synchronized
-Three.js/native three-quarter walk sheet and two-cycle clip. Those artifacts
-are at the human review checkpoint; no production migration may start until
-they are accepted or corrected. Curved primitives, instancing, LOD, GPU pose
-evaluation, and a disk cache remain deferred.
+[`186`](../tactical/186-prepared-figure-continuous-animation-proof.md) now owns
+startup-compiled indexed tracks, cadence-independent local TRS/hierarchy
+evaluation, resident mutable-palette rendering, and the human-approved
+synchronized Three.js/native walk comparison. Tactical
+[`189`](../tactical/189-interactive-prepared-actor-runtime.md) owns the next
+production step: explicit cuboid proxies for current solid-color non-box
+primitives, placeable chicken and passive-goal mannequin fixtures, stable
+presentation identity, continuous travel phase, and prepared/legacy actor
+coexistence. Exact rounded tessellation, instancing, LOD, GPU pose evaluation,
+and a disk cache remain deferred.
 
 ## Scope
 
@@ -209,15 +212,17 @@ figure, never once per actor or presentation frame. A later disk cache is a
 discardable optimization keyed by semantic content and compiler version, and
 is justified only by measured startup, streaming, or compiler-size cost.
 
-Three.js retains semantic authority in this pipeline even where it loses
-runtime-production duty. Asset Lab exists so that AI agents and humans can author
+Three.js retains semantic authoring authority even where it loses runtime-
+production duty. Asset Lab exists so that AI agents and humans can author
 figures fluently, and that fluency comes from Three.js scene semantics being
 deeply familiar: an author writing `figure.ts` knows what `CapsuleGeometry`
-parameters produce without running anything. "What a figure looks like" is
-therefore defined as what Three.js renders for the semantic description, the
-authoring preview stays Three.js-shaped, and the startup compiler's job is to
-reproduce those semantics deterministically. Pinned cross-language fixtures
-guard the result; dropping the Three.js authoring dependency is not a goal.
+parameters produce without running anything. The exact prepared quality tier
+must reproduce those semantics deterministically, and pinned cross-language
+fixtures guard it. A renderer may also choose an explicit lower-detail variant
+such as the initial cuboid proxy, but diagnostics and comparisons must label
+that choice and must not present it as Three.js visual parity. Dropping the
+Three.js authoring dependency or changing the persisted primitive is not a
+goal.
 
 Curved primitives are orthogonal to persistence. Spheres, capsules, and
 cylinders make the startup compiler more involved than boxes, but the same
@@ -250,10 +255,17 @@ coordinate conversion, topology, normals, UVs, material ranges, atlas data,
 part indices, and bounds. `mclone-render` uploads that prepared data without
 performing a second semantic compilation.
 
-Spheres, capsules, and cylinders later extend the same compiler and fixtures.
-They do not trigger a persistence decision. If interactive prepared-output
-review becomes valuable, expose the shared compiler to Asset Lab through a
-native diagnostic or Rust/WASM rather than creating a second implementation.
+Spheres, capsules, and cylinders first enter the same compiler as an explicit
+low-cost cuboid-proxy variant: sphere bounds are `2r` on each axis, capsule
+bounds are `2r` by `length + 2r` by `2r`, and cylinder bounds use twice the
+larger radius by `length` by twice the larger radius. This preserves the
+existing acceptable in-engine silhouette while enabling the prepared runtime
+contract. The source primitive kind and approximation count remain visible in
+diagnostics. Exact curved tessellation later extends the same compiler and
+fixtures as a quality tier; neither choice triggers a persistence decision.
+If interactive prepared-output review becomes valuable, expose the shared
+compiler to Asset Lab through a native diagnostic or Rust/WASM rather than
+creating a second implementation.
 
 Likewise, a shared sampled phase palette is a runtime-derived cache, not
 canonical authored animation data. Semantic JSON retains the clip tracks and
@@ -663,9 +675,9 @@ actor shapes to coexist without merging mutable caches across drawable worlds.
 
 This is the current staged direction. Each phase should become a bounded
 tactical only when its contract and evidence are clear. After Phase 1,
-curved-primitive parity and animation are independent capability slices whose
-order should follow the next production proof. Neither changes the persistence
-decision.
+animation and an explicit non-box proxy are the bounded bridge to an
+interactive production proof. Exact curved parity becomes an optional quality
+tier rather than a blocker. Neither changes the persistence decision.
 
 ### Semantic source/output prerequisite (complete)
 
@@ -698,15 +710,16 @@ decision.
   semantic Three.js baseline; and
 - record startup preparation time without creating a persisted geometry file.
 
-### Capability 2A: true primitive and material parity
+### Capability 2A: explicit non-box cuboid proxy
 
-- compile spheres, capsules, and cylinders with deterministic segments;
-- preserve Three.js positions, normals, indices, and default UV attributes;
-- keep curved primitives on solid materials and reject authored curved
-  textures unless a later concrete asset opens that separate contract;
-- define the supported non-texture material subset;
-- prove a rounded animal against Asset Lab; and
-- add compiler budgets and deterministic repeated-preparation validation.
+- compile spheres, capsules, and cylinders to their deterministic authored
+  bounds while retaining their semantic primitive kinds in diagnostics;
+- keep current curved primitives on solid materials and reject authored
+  curved textures rather than inventing a UV authoring contract;
+- label prepared comparisons as cuboid proxies instead of claiming Three.js
+  silhouette parity;
+- prove promoted chicken and upright-bear preparation deterministically; and
+- leave true rounded tessellation as an independent later quality tier.
 
 ### Capability 2B: rigid-part animation
 
@@ -719,14 +732,27 @@ decision.
 - support mono, per-eye stereo, and full-frame multiview; and
 - validate first-person body filtering and world-local cache ownership.
 
-### Phase 3: migration and removal of approximations
+### Phase 3: interactive migration with coexistence
 
-- migrate player, upright bear, and chicken one at a time;
-- preserve figure selection, remote appearance, walk review, and browser/XR
-  behavior;
-- remove texture-cell cuboids and non-box bounding-cuboid compilation only
-  after the promoted assets no longer depend on them; and
-- retain a deliberate fallback for non-figure debug/item actors.
+- add placeable chicken and mannequin debug-hotbar tools through ordinary
+  authoritative use-item placement;
+- make the mannequin use the player figure and the existing passive-animal
+  goal family so continuous world movement is directly testable;
+- propagate stable presentation identity and derive continuous travel phase
+  from interpolated movement instead of authoritative update steps;
+- migrate chicken and mannequin one at a time while preserving mono, per-eye,
+  multiview, browser, replacement, and drawable-world ownership; and
+- retain `ActorMeshCache` as an explicit fallback for unsupported figure,
+  debug, and item actors.
+
+### Optional exact curved quality tier
+
+- compile spheres, capsules, and cylinders with deterministic segments;
+- preserve Three.js positions, normals, indices, and default UV attributes;
+- keep curved textures unsupported until a concrete asset requires a bounded
+  mapping policy;
+- prove a rounded animal against Asset Lab; and
+- add compiler budgets and deterministic repeated-preparation validation.
 
 ### Phase 4: instancing and LOD
 
@@ -852,6 +878,12 @@ Closed 2026-07-16 during the pre-landing design review.
    persisted figure representation. Initial acceptance is human review of
    projection, silhouette, grounding, face placement, and UV orientation;
    exact RGB equality is not required across different lighting pipelines.
+9. **Initial non-box production policy.** Current sphere, capsule, and cylinder
+   parts compile as explicitly diagnosed cuboid proxies matching their authored
+   bounds. This is an accepted low-cost visual style for the first interactive
+   prepared actors, not a silent claim of Three.js parity. It changes neither
+   semantic JSON nor authoring. Exact curved topology remains an optional
+   quality tier, and non-box textures remain rejected meanwhile.
 
 ## Open Decisions
 
@@ -959,13 +991,17 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Open a bounded presentation-rate rigid-part animation tactical: evaluate local
-TRS into a final part palette at the actual presentation time, upload only that
-mutable palette, render a continuously interpolated player walk beside the
-semantic Three.js clip, and stop for human clip review before any production
-actor migration.
+Execute Tactical
+[`189`](../tactical/189-interactive-prepared-actor-runtime.md): compile current
+solid-color non-box primitives as labeled cuboid proxies; add authoritative
+debug-hotbar placement for chickens and a player-figure mannequin that reuses
+passive-animal goals; carry stable actor identity and continuously derived
+travel phase through presentation; and move those two kinds to a coexisting
+prepared production renderer. Stop only after native and browser interactive
+placement, wandering animation, immutable-resource residency, replacement,
+stereo/multiview contracts, and representative-count behavior are recorded.
 
-Curved tessellation extends the same startup compiler and does not reopen
-persistence. Keep it, instancing, LOD, and GPU crowd evaluation out of the
-first CPU-palette animation proof. A real high-count fixture should establish
-the GPU evaluator crossover later.
+Do not add a persisted compiled format, exact curved tessellation, instancing,
+LOD, or GPU crowd evaluation in that tactical. Its actor-record boundary
+should make those later optimizations additive, and a real high-count fixture
+should establish their crossover.

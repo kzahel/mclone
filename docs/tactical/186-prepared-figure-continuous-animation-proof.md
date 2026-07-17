@@ -1,7 +1,10 @@
 # 186: Prepared Figure Continuous Animation Proof
 
-Status: human review checkpoint 2026-07-16. Slices 0-2 are implemented. The
-comparison sheet and clip are ready; stop here before production migration.
+Status: complete and human-approved 2026-07-17. Slices 0-2 are implemented;
+the comparison sheet and clip were accepted for motion, hierarchy, grounding,
+loop continuity, interpolation, and the already-understood lighting difference.
+Production follow-up is owned by Tactical
+[`189`](189-interactive-prepared-actor-runtime.md).
 
 Topic: `compiled-figure-rendering`
 
@@ -162,7 +165,7 @@ Gate evidence:
   prepared-render tests and the figure-review check pass. No production actor,
   browser, or XR selector changed.
 
-### Slice 2: synchronized Three.js/native clip review (review ready 2026-07-16)
+### Slice 2: synchronized Three.js/native clip review (approved 2026-07-17)
 
 - Extend the review contract with `walk`, duration, exact sample times, and an
   animation output cadence used only for capture—not runtime evaluation.
@@ -179,7 +182,7 @@ Gate and stop condition: present the sheet/video and receipts to the human.
 Pause work for approval or correction. Do not begin production migration based
 only on numerical tests or self-inspection.
 
-Gate evidence awaiting human approval:
+Gate evidence and human acceptance:
 
 - Asset Lab now resets authored scale on every update, samples sparse
   translation/rotation/scale channels independently, and shortest-path slerps
@@ -211,13 +214,20 @@ Gate evidence awaiting human approval:
 - The MP4 is verified as 720x480, 60 fps, 108 frames, and 1.8 seconds. Asset Lab
   tests/typecheck and the native figure-review check pass. Production remains
   on `ActorMeshCache`; no gameplay/browser/XR selector changed.
+- The human reviewer accepted the comparison as presented on 2026-07-17:
+  "Looks perfect." This accepts the matching limb phase, inherited part
+  motion, pivots, grounding, wrap continuity, and continuously interpolated
+  motion. The different native lighting remains acceptable and non-authority
+  for this campaign.
 
-### Slice 3: post-review decision only
+### Slice 3: post-review decision (complete 2026-07-17)
 
-After approval, update the topic with accepted differences and write the next
-bounded tactical. Likely choices are an opt-in production player path with
-remote/world transform interpolation, or a second asset/curved primitive
-proof. Do not implement either inside this tactical.
+The accepted proof advances into Tactical
+[`189`](189-interactive-prepared-actor-runtime.md). That tactical deliberately
+uses labeled cuboid proxies for current solid-color non-box primitives, adds
+interactive chicken and passive-goal mannequin placement, and migrates those
+two actor kinds into a coexisting prepared production path. Exact rounded
+tessellation, instancing, LOD, and GPU crowd evaluation remain later work.
 
 ## Validation Matrix
 
