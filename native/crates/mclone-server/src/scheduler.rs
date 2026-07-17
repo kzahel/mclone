@@ -27,9 +27,9 @@ use mclone_worldgen::block::{
     OBSIDIAN, RawBlockId, STONE, block_light_emission, block_light_opacity,
     generated_block_state_id, is_water, material_blocks_motion,
 };
-use mclone_worldgen::feature::{FEATURES_BLOCK_DEPENDENCY_RADIUS, FEATURES_WRITE_RADIUS_CUTOFF};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming, ScheduledTick,
+    ChunkGenerationPlan, GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureBatchTiming,
+    ScheduledTick,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -3443,12 +3443,21 @@ impl ChunkScheduler {
     ) -> (ChunkJobId, Vec<MutableChunkBlockBuffer>) {
         let id = ChunkJobId(self.next_job_id);
         self.next_job_id += 1;
-        let (target_chunks, feature_centers, dependency_chunks) = match self
-            .world_generation_profile
-        {
-            WorldGenerationProfile::Overworld => feature_job_positions(targets, priority_centers),
+        let plan = feature_generation_plan(self.world_generation_profile, targets);
+        let (target_chunks, feature_centers, prerequisites) = plan.into_parts();
+        let target_chunks = sorted_chunk_positions_by_priority(target_chunks, priority_centers);
+        let feature_centers = sorted_chunk_positions_by_priority(feature_centers, priority_centers);
+        let dependency_chunks = match self.world_generation_profile {
+            WorldGenerationProfile::Overworld => sorted_chunk_positions_by_priority(
+                prerequisites.into_iter().map(|requirement| {
+                    debug_assert_eq!(requirement.status, ChunkStatus::Surface);
+                    requirement.pos
+                }),
+                priority_centers,
+            ),
             WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::SmallIslandV1 => {
-                (targets.to_vec(), targets.to_vec(), Vec::new())
+                debug_assert!(prerequisites.is_empty());
+                Vec::new()
             }
             WorldGenerationProfile::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
@@ -4231,39 +4240,25 @@ fn block_change_affects_light(old_block: RawBlockId, new_block: RawBlockId) -> b
         || block_light_emission(old_block) != block_light_emission(new_block)
 }
 
-fn feature_job_positions(
+fn feature_generation_plan(
+    profile: WorldGenerationProfile,
     targets: &[ChunkPos],
-    priority_centers: &[ChunkPos],
-) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
-    let target_chunks = targets.iter().copied().collect::<BTreeSet<_>>();
-    let mut feature_centers = BTreeSet::new();
-    let mut dependency_chunks = BTreeSet::new();
-
-    for target in &target_chunks {
-        for dz in -FEATURES_WRITE_RADIUS_CUTOFF..=FEATURES_WRITE_RADIUS_CUTOFF {
-            for dx in -FEATURES_WRITE_RADIUS_CUTOFF..=FEATURES_WRITE_RADIUS_CUTOFF {
-                feature_centers.insert(ChunkPos::new(target.x + dx, target.z + dz));
-            }
+) -> ChunkGenerationPlan {
+    match profile {
+        WorldGenerationProfile::Overworld => {
+            ChunkGenerationPlan::overworld_features(targets.iter().copied())
+        }
+        WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::SmallIslandV1 => {
+            ChunkGenerationPlan::target_only(targets.iter().copied())
+        }
+        WorldGenerationProfile::AuthoredOnly { .. } => {
+            unreachable!("authored-only misses bypass procedural job creation")
         }
     }
-
-    for center in &feature_centers {
-        for dz in -FEATURES_BLOCK_DEPENDENCY_RADIUS..=FEATURES_BLOCK_DEPENDENCY_RADIUS {
-            for dx in -FEATURES_BLOCK_DEPENDENCY_RADIUS..=FEATURES_BLOCK_DEPENDENCY_RADIUS {
-                dependency_chunks.insert(ChunkPos::new(center.x + dx, center.z + dz));
-            }
-        }
-    }
-
-    (
-        sorted_chunk_positions_by_priority(target_chunks, priority_centers),
-        sorted_chunk_positions_by_priority(feature_centers, priority_centers),
-        sorted_chunk_positions_by_priority(dependency_chunks, priority_centers),
-    )
 }
 
 fn sorted_chunk_positions_by_priority(
-    positions: BTreeSet<ChunkPos>,
+    positions: impl IntoIterator<Item = ChunkPos>,
     priority_centers: &[ChunkPos],
 ) -> Vec<ChunkPos> {
     if priority_centers.is_empty() {
@@ -4298,7 +4293,7 @@ fn chunk_priority_key(pos: ChunkPos, priority_centers: &[ChunkPos]) -> (i64, i64
     (chebyshev_distance, manhattan_distance, pos.z, pos.x)
 }
 
-fn sorted_chunk_positions_z_major(positions: BTreeSet<ChunkPos>) -> Vec<ChunkPos> {
+fn sorted_chunk_positions_z_major(positions: impl IntoIterator<Item = ChunkPos>) -> Vec<ChunkPos> {
     let mut positions = positions.into_iter().collect::<Vec<_>>();
     positions.sort_by_key(|pos| (pos.z, pos.x));
     positions
@@ -4438,15 +4433,20 @@ mod tests {
     }
 
     #[test]
-    fn feature_job_positions_keep_target_and_dependency_lists_center_first() {
+    fn generation_plan_keeps_target_and_dependency_lists_center_first() {
         let targets = square(ChunkPos::new(5, -3), 1)
             .into_iter()
             .collect::<Vec<_>>();
 
-        let (target_chunks, feature_centers, dependency_chunks) =
-            feature_job_positions(&targets, &[ChunkPos::new(5, -3)]);
-        let plan = mclone_worldgen::levelgen::ChunkGenerationPlan::overworld_features(
-            targets.iter().copied(),
+        let plan = feature_generation_plan(WorldGenerationProfile::Overworld, &targets);
+        let (target_chunks, feature_centers, prerequisites) = plan.clone().into_parts();
+        let target_chunks =
+            sorted_chunk_positions_by_priority(target_chunks, &[ChunkPos::new(5, -3)]);
+        let feature_centers =
+            sorted_chunk_positions_by_priority(feature_centers, &[ChunkPos::new(5, -3)]);
+        let dependency_chunks = sorted_chunk_positions_by_priority(
+            prerequisites.iter().map(|requirement| requirement.pos),
+            &[ChunkPos::new(5, -3)],
         );
 
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));

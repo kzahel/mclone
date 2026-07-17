@@ -27,9 +27,9 @@ use crate::block::{
     VINE_NORTH, VINE_SOUTH, VINE_UP, VINE_WEST, WATER, WHITE_TULIP, is_air_like, is_water,
 };
 use crate::feature::{FEATURES_WRITE_RADIUS_CUTOFF, FeatureRegion, FeatureWorld};
+use crate::levelgen::ChunkGenerationPlan;
 use crate::levelgen::feature_batch::{
-    FeatureBatchPlan, generate_overworld_liquid_carved_buffer_with_biome_source,
-    sorted_chunk_positions_z_major,
+    generate_overworld_liquid_carved_buffer_with_biome_source, sorted_chunk_positions_z_major,
 };
 use crate::noise::{BlendedNoise, PerlinNoise, SimplexNoise};
 use crate::prng::WorldgenRandom;

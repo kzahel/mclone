@@ -37,24 +37,30 @@ fn generated_features_chunk_adds_visible_decoration_blocks() {
 }
 
 #[test]
-fn feature_batch_plan_reuses_overlapping_dependency_windows() {
-    let single = FeatureBatchPlan::new([ChunkPos::new(0, 0)]);
-    assert_eq!(single.targets.len(), 1);
-    assert_eq!(single.feature_centers.len(), 3 * 3);
-    assert_eq!(single.dependency_chunks.len(), 5 * 5);
+fn chunk_generation_plan_reuses_overlapping_dependency_windows() {
+    let single = ChunkGenerationPlan::overworld_features([ChunkPos::new(0, 0)]);
+    assert_eq!(single.output_chunks().len(), 1);
+    assert_eq!(single.backend_work_chunks().len(), 3 * 3);
+    assert_eq!(single.prerequisites().len(), 5 * 5);
 
     let radius_one_targets = (-1..=1).flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)));
-    let radius_one = FeatureBatchPlan::new(radius_one_targets);
+    let radius_one = ChunkGenerationPlan::overworld_features(radius_one_targets);
 
-    assert_eq!(radius_one.targets.len(), 3 * 3);
-    assert_eq!(radius_one.feature_centers.len(), 5 * 5);
-    assert_eq!(radius_one.dependency_chunks.len(), 7 * 7);
+    assert_eq!(radius_one.output_chunks().len(), 3 * 3);
+    assert_eq!(radius_one.backend_work_chunks().len(), 5 * 5);
+    assert_eq!(radius_one.prerequisites().len(), 7 * 7);
     assert!(
         radius_one
-            .dependency_chunks
-            .contains(&ChunkPos::new(-3, -3))
+            .prerequisites()
+            .iter()
+            .any(|requirement| requirement.pos == ChunkPos::new(-3, -3))
     );
-    assert!(radius_one.dependency_chunks.contains(&ChunkPos::new(3, 3)));
+    assert!(
+        radius_one
+            .prerequisites()
+            .iter()
+            .any(|requirement| requirement.pos == ChunkPos::new(3, 3))
+    );
 }
 
 #[test]
@@ -66,14 +72,20 @@ fn feature_center_order_matches_vanilla_scheduler_trace_for_spawn_bootstrap() {
     assert_eq!(trace.target_radius, FEATURES_WRITE_RADIUS_CUTOFF);
     assert_eq!(trace.stop_status, "FEATURES");
 
-    let plan = FeatureBatchPlan::new([ChunkPos::new(trace.target_chunk_x, trace.target_chunk_z)]);
+    let plan = ChunkGenerationPlan::overworld_features([ChunkPos::new(
+        trace.target_chunk_x,
+        trace.target_chunk_z,
+    )]);
     let expected = trace
         .feature_completion_order_3x3
         .into_iter()
         .map(|entry| ChunkPos::new(entry.chunk_x, entry.chunk_z))
         .collect::<Vec<_>>();
 
-    assert_eq!(plan.ordered_feature_centers(), expected);
+    assert_eq!(
+        sorted_chunk_positions_z_major(plan.backend_work_chunks().iter().copied()),
+        expected
+    );
 }
 
 #[test]

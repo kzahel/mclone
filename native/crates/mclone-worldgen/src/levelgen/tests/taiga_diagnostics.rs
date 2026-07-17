@@ -170,42 +170,46 @@ pub(super) fn taiga_tree_index_shift_diagnostics(
     target: ChunkPos,
 ) -> Vec<TaigaTreeIndexShiftCenterDiagnostic> {
     let biome_source = OverworldBiomeSource::new(seed, false, false);
-    FeatureBatchPlan::new([target])
-        .ordered_feature_centers()
-        .into_iter()
-        .filter_map(|center| {
-            let biome_key = chunk_primary_biome_key(&biome_source, center);
-            if !is_taiga_vegetation_biome(biome_key) {
-                return None;
-            }
+    sorted_chunk_positions_z_major(
+        ChunkGenerationPlan::overworld_features([target])
+            .backend_work_chunks()
+            .iter()
+            .copied(),
+    )
+    .into_iter()
+    .filter_map(|center| {
+        let biome_key = chunk_primary_biome_key(&biome_source, center);
+        if !is_taiga_vegetation_biome(biome_key) {
+            return None;
+        }
 
-            let current = target_tree_blocks_after_taiga_vegetation_center(
-                seed,
-                target,
-                center,
-                crate::feature::test_support::CURRENT_TAIGA_VEGETATION_FEATURE_INDEX,
-            );
-            let java = target_tree_blocks_after_taiga_vegetation_center(
-                seed,
-                target,
-                center,
-                crate::feature::test_support::JAVA_TAIGA_VEGETATION_FEATURE_INDEX,
-            );
-            let shared_tree_blocks = current
-                .iter()
-                .filter(|(pos, block_id)| java.get(pos) == Some(block_id))
-                .count();
-            Some(TaigaTreeIndexShiftCenterDiagnostic {
-                center,
-                biome_key,
-                current_tree_blocks: current.len(),
-                java_tree_blocks: java.len(),
-                shared_tree_blocks,
-                current_only_tree_blocks: current.len() - shared_tree_blocks,
-                java_only_tree_blocks: java.len() - shared_tree_blocks,
-            })
+        let current = target_tree_blocks_after_taiga_vegetation_center(
+            seed,
+            target,
+            center,
+            crate::feature::test_support::CURRENT_TAIGA_VEGETATION_FEATURE_INDEX,
+        );
+        let java = target_tree_blocks_after_taiga_vegetation_center(
+            seed,
+            target,
+            center,
+            crate::feature::test_support::JAVA_TAIGA_VEGETATION_FEATURE_INDEX,
+        );
+        let shared_tree_blocks = current
+            .iter()
+            .filter(|(pos, block_id)| java.get(pos) == Some(block_id))
+            .count();
+        Some(TaigaTreeIndexShiftCenterDiagnostic {
+            center,
+            biome_key,
+            current_tree_blocks: current.len(),
+            java_tree_blocks: java.len(),
+            shared_tree_blocks,
+            current_only_tree_blocks: current.len() - shared_tree_blocks,
+            java_only_tree_blocks: java.len() - shared_tree_blocks,
         })
-        .collect()
+    })
+    .collect()
 }
 
 pub(super) fn taiga_full_table_tree_delta_diagnostics(
@@ -213,24 +217,32 @@ pub(super) fn taiga_full_table_tree_delta_diagnostics(
     target: ChunkPos,
 ) -> Vec<TaigaFullTableTreeDeltaDiagnostic> {
     let biome_source = OverworldBiomeSource::new(seed, false, false);
-    let plan = FeatureBatchPlan::new([target]);
-    let chunks = sorted_chunk_positions_z_major(plan.dependency_chunks.iter().copied())
-        .into_iter()
-        .map(|pos| {
-            generate_overworld_liquid_carved_buffer_with_biome_source(
-                seed,
-                pos.x,
-                pos.z,
-                biome_source.clone(),
-            )
-        })
-        .collect::<Vec<_>>();
-    let first_target = *plan.targets.iter().next().expect("non-empty target plan");
+    let plan = ChunkGenerationPlan::overworld_features([target]);
+    let chunks = sorted_chunk_positions_z_major(
+        plan.prerequisites()
+            .iter()
+            .map(|requirement| requirement.pos),
+    )
+    .into_iter()
+    .map(|pos| {
+        generate_overworld_liquid_carved_buffer_with_biome_source(
+            seed,
+            pos.x,
+            pos.z,
+            biome_source.clone(),
+        )
+    })
+    .collect::<Vec<_>>();
+    let first_target = *plan
+        .output_chunks()
+        .iter()
+        .next()
+        .expect("non-empty target plan");
     let mut region = FeatureRegion::new(first_target.x, first_target.z, chunks);
     let feature_biomes = crate::feature::OverworldFeatureBiomeResolver::new(seed, &biome_source);
     let mut diagnostics = Vec::new();
 
-    for center in plan.ordered_feature_centers() {
+    for center in sorted_chunk_positions_z_major(plan.backend_work_chunks().iter().copied()) {
         region.set_center(center.x, center.z);
         let biome = biome_source.get_primary_biome_definition(center.x, center.z);
         let biome_key = biome.key();
