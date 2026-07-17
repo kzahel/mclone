@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod player_lifecycle;
 mod realm_dimension;
 mod statistics;
 
@@ -12,6 +13,9 @@ use mclone_core::{
     SECTION_HEIGHT, Vec3d,
 };
 
+pub use player_lifecycle::{
+    DEFAULT_PLAYER_MAX_HEALTH, PlayerDamageCause, PlayerVitals, PlayerVitalsError,
+};
 pub use realm_dimension::{
     DimensionChunkPos, DimensionKey, DimensionKeyError, MAX_DIMENSION_KEY_BYTES,
     OVERWORLD_DIMENSION_KEY, RealmId, RealmIdError,

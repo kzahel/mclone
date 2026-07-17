@@ -349,6 +349,7 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     record.on_ground = true;
     record.selected_hotbar_slot = 4;
     record.total_experience = 19;
+    record.health = 13.5;
     let mut store = MemoryWorldStore::new();
     store.save_player(&record).unwrap();
 
@@ -365,6 +366,40 @@ fn saved_player_pose_and_selected_slot_resume_for_stable_identity() {
     assert!(server.player().on_ground());
     assert_eq!(server.inventory().selected_hotbar_slot(), 4);
     assert_eq!(server.total_experience(), 19);
+    assert_eq!(server.player_vitals().health(), 13.5);
+    assert_eq!(server.pending_death_cause(), None);
+}
+
+#[test]
+fn persisted_zero_health_restores_a_typed_dead_player_state() {
+    let seed = 12_345;
+    let mut probe = LocalRealmSession::new(seed);
+    request_initial_chunk_view(&mut probe);
+    let safe_spawn = wait_for_initial_spawn_update(&mut probe).position;
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x47; 16]), "Swimmer").unwrap();
+    let mut record = PlayerRecord::new(
+        player_record_key(identity.profile_id),
+        9,
+        identity.display_name.clone(),
+        safe_spawn,
+    );
+    record.health = 0.0;
+    record.pending_death_cause = Some(mclone_protocol::PlayerDamageCause::Lava);
+    let mut store = MemoryWorldStore::new();
+    store.save_player(&record).unwrap();
+
+    let mut server = LocalRealmSession::with_world_store(seed, Box::new(store));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    request_initial_chunk_view(&mut server);
+    let _ = wait_for_initial_spawn_update(&mut server);
+
+    assert!(server.player_vitals().is_dead());
+    assert_eq!(
+        server.pending_death_cause(),
+        Some(mclone_protocol::PlayerDamageCause::Lava)
+    );
 }
 
 #[test]

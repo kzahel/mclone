@@ -21,9 +21,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
 use mclone_protocol::{
-    DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot,
-    MAX_PLAYER_STATISTIC_ENTRIES, MAX_STATISTIC_RESOURCE_KEY_BYTES, PlayerStatistics, RealmId,
-    StatisticKey,
+    DEFAULT_PLAYER_MAX_HEALTH, DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot,
+    MAX_PLAYER_STATISTIC_ENTRIES, MAX_STATISTIC_RESOURCE_KEY_BYTES, PlayerDamageCause,
+    PlayerStatistics, PlayerVitals, RealmId, StatisticKey,
 };
 
 use crate::{WorldBehaviorProfile, WorldGenerationProfile};
@@ -46,7 +46,8 @@ pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
-pub const PLAYER_RECORD_VERSION: u32 = 2;
+const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
+pub const PLAYER_RECORD_VERSION: u32 = 3;
 pub const DIMENSION_RECORD_VERSION: u32 = 1;
 pub const WORLD_METADATA_VERSION: u32 = 2;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
@@ -365,6 +366,8 @@ pub struct PlayerRecord {
     pub selected_hotbar_slot: u8,
     pub total_experience: u64,
     pub statistics: PlayerStatistics,
+    pub health: f32,
+    pub pending_death_cause: Option<PlayerDamageCause>,
 }
 
 impl PlayerRecord {
@@ -387,6 +390,8 @@ impl PlayerRecord {
             selected_hotbar_slot: 0,
             total_experience: 0,
             statistics: PlayerStatistics::default(),
+            health: DEFAULT_PLAYER_MAX_HEALTH,
+            pending_death_cause: None,
         }
     }
 }
@@ -4007,6 +4012,7 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
             "player record pose must be finite".to_owned(),
         ));
     }
+    validate_player_lifecycle_record(record.health, record.pending_death_cause)?;
     writer.write_all(PLAYER_RECORD_MAGIC)?;
     write_u32(writer, PLAYER_RECORD_VERSION)?;
     write_string(writer, record.player.as_str(), "player key")?;
@@ -4020,6 +4026,8 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_u8(writer, record.selected_hotbar_slot)?;
     write_u64(writer, record.total_experience)?;
     write_player_statistics(writer, &record.statistics)?;
+    write_f32(writer, record.health)?;
+    write_player_damage_cause(writer, record.pending_death_cause)?;
     writer.flush()?;
     Ok(())
 }
@@ -4238,10 +4246,7 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         ));
     }
     let codec_version = read_u32(reader)?;
-    if !matches!(
-        codec_version,
-        LEGACY_PLAYER_RECORD_VERSION | PLAYER_RECORD_VERSION
-    ) {
+    if !(LEGACY_PLAYER_RECORD_VERSION..=PLAYER_RECORD_VERSION).contains(&codec_version) {
         return Err(ChunkStoreError::InvalidData(format!(
             "unsupported player record codec version {codec_version}"
         )));
@@ -4261,10 +4266,20 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         on_ground: read_bool(reader)?,
         selected_hotbar_slot: read_u8(reader)?,
         total_experience: read_u64(reader)?,
-        statistics: if codec_version >= PLAYER_RECORD_VERSION {
+        statistics: if codec_version >= STATISTICS_PLAYER_RECORD_VERSION {
             read_player_statistics(reader)?
         } else {
             PlayerStatistics::default()
+        },
+        health: if codec_version >= PLAYER_RECORD_VERSION {
+            read_f32(reader)?
+        } else {
+            DEFAULT_PLAYER_MAX_HEALTH
+        },
+        pending_death_cause: if codec_version >= PLAYER_RECORD_VERSION {
+            read_player_damage_cause(reader)?
+        } else {
+            None
         },
     };
     if !record.position.is_finite()
@@ -4275,7 +4290,45 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
             "player record pose must be finite".to_owned(),
         ));
     }
+    validate_player_lifecycle_record(record.health, record.pending_death_cause)?;
     Ok(record)
+}
+
+fn validate_player_lifecycle_record(
+    health: f32,
+    pending_death_cause: Option<PlayerDamageCause>,
+) -> ChunkStoreResult<()> {
+    let vitals = PlayerVitals::new(health, DEFAULT_PLAYER_MAX_HEALTH)
+        .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+    if vitals.is_dead() != pending_death_cause.is_some() {
+        return Err(ChunkStoreError::InvalidData(
+            "player death cause must be present exactly when health is zero".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn write_player_damage_cause(
+    writer: &mut impl Write,
+    cause: Option<PlayerDamageCause>,
+) -> ChunkStoreResult<()> {
+    write_u8(
+        writer,
+        match cause {
+            None => 0,
+            Some(PlayerDamageCause::Lava) => 1,
+        },
+    )
+}
+
+fn read_player_damage_cause(reader: &mut impl Read) -> ChunkStoreResult<Option<PlayerDamageCause>> {
+    match read_u8(reader)? {
+        0 => Ok(None),
+        1 => Ok(Some(PlayerDamageCause::Lava)),
+        tag => Err(ChunkStoreError::InvalidData(format!(
+            "unknown player damage cause tag {tag}"
+        ))),
+    }
 }
 
 fn write_player_statistics(
@@ -4886,6 +4939,18 @@ mod tests {
     }
 
     #[test]
+    fn dead_player_record_roundtrips_typed_pending_cause() {
+        let mut record = test_player_record(44);
+        record.health = 0.0;
+        record.pending_death_cause = Some(PlayerDamageCause::Lava);
+
+        let bytes = encode_player_record(&record).unwrap();
+        let decoded = decode_player_record(&bytes).unwrap();
+
+        assert_eq!(decoded, record);
+    }
+
+    #[test]
     fn legacy_player_record_migrates_with_empty_statistics() {
         let record = test_player_record(43);
         let mut bytes = Vec::new();
@@ -4906,9 +4971,56 @@ mod tests {
 
         assert_eq!(decoded.codec_version, PLAYER_RECORD_VERSION);
         assert!(decoded.statistics.is_empty());
+        assert_eq!(decoded.health, DEFAULT_PLAYER_MAX_HEALTH);
+        assert_eq!(decoded.pending_death_cause, None);
         assert_eq!(decoded.player, record.player);
         assert_eq!(decoded.position, record.position);
         assert_eq!(decoded.total_experience, record.total_experience);
+    }
+
+    #[test]
+    fn statistics_player_record_migrates_with_full_health() {
+        let record = test_player_record(45);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(PLAYER_RECORD_MAGIC);
+        write_u32(&mut bytes, STATISTICS_PLAYER_RECORD_VERSION).unwrap();
+        write_string(&mut bytes, record.player.as_str(), "player key").unwrap();
+        write_u64(&mut bytes, record.revision).unwrap();
+        write_string(&mut bytes, &record.last_known_name, "player name").unwrap();
+        write_string(&mut bytes, record.dimension.as_str(), "player dimension").unwrap();
+        write_vec3d(&mut bytes, record.position).unwrap();
+        write_f32(&mut bytes, record.y_rot_degrees).unwrap();
+        write_f32(&mut bytes, record.x_rot_degrees).unwrap();
+        write_bool(&mut bytes, record.on_ground).unwrap();
+        write_u8(&mut bytes, record.selected_hotbar_slot).unwrap();
+        write_u64(&mut bytes, record.total_experience).unwrap();
+        write_player_statistics(&mut bytes, &record.statistics).unwrap();
+
+        let decoded = decode_player_record(&bytes).unwrap();
+
+        assert_eq!(decoded.codec_version, PLAYER_RECORD_VERSION);
+        assert_eq!(decoded.statistics, record.statistics);
+        assert_eq!(decoded.health, DEFAULT_PLAYER_MAX_HEALTH);
+        assert_eq!(decoded.pending_death_cause, None);
+    }
+
+    #[test]
+    fn player_record_codec_rejects_invalid_lifecycle_combinations() {
+        let mut record = test_player_record(46);
+        record.health = f32::NAN;
+        assert!(encode_player_record(&record).is_err());
+
+        record.health = 0.0;
+        assert!(encode_player_record(&record).is_err());
+
+        record.health = DEFAULT_PLAYER_MAX_HEALTH;
+        record.pending_death_cause = Some(PlayerDamageCause::Lava);
+        assert!(encode_player_record(&record).is_err());
+
+        record.health = 0.0;
+        let mut bytes = encode_player_record(&record).unwrap();
+        *bytes.last_mut().unwrap() = 99;
+        assert!(decode_player_record(&bytes).is_err());
     }
 
     #[test]
@@ -5942,6 +6054,8 @@ mod tests {
                 statistics.set(StatisticKey::successful_block_placement(), 45);
                 statistics
             },
+            health: 13.5,
+            pending_death_cause: None,
         }
     }
 

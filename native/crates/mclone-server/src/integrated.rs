@@ -1399,6 +1399,12 @@ impl RealmServer {
                 .restore_selected_hotbar_slot(record.selected_hotbar_slot);
             player.total_experience = record.total_experience;
             player.statistics = record.statistics.clone();
+            player.vitals = mclone_protocol::PlayerVitals::new(
+                record.health,
+                mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
+            )
+            .expect("usable player record must contain valid health");
+            player.pending_death_cause = record.pending_death_cause;
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
         }
@@ -3383,6 +3389,12 @@ impl RealmServer {
                 .restore_selected_hotbar_slot(record.selected_hotbar_slot);
             player.total_experience = record.total_experience;
             player.statistics = record.statistics.clone();
+            player.vitals = mclone_protocol::PlayerVitals::new(
+                record.health,
+                mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
+            )
+            .expect("usable player record must contain valid health");
+            player.pending_death_cause = record.pending_death_cause;
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
             let total_experience = player.total_experience;
@@ -4197,6 +4209,23 @@ impl LocalRealmSession {
     }
 
     #[cfg(test)]
+    pub(crate) fn player_vitals(&self) -> mclone_protocol::PlayerVitals {
+        self.server
+            .players
+            .get(self.player_id())
+            .map(|player| player.vitals)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
+    pub(crate) fn pending_death_cause(&self) -> Option<mclone_protocol::PlayerDamageCause> {
+        self.server
+            .players
+            .get(self.player_id())
+            .and_then(|player| player.pending_death_cause)
+    }
+
+    #[cfg(test)]
     pub(crate) fn resume_record(&self) -> Option<&PlayerRecord> {
         self.server
             .players
@@ -4277,6 +4306,12 @@ fn player_record_is_usable(record: &PlayerRecord) -> bool {
         && record.position.is_finite()
         && record.y_rot_degrees.is_finite()
         && record.x_rot_degrees.is_finite()
+        && mclone_protocol::PlayerVitals::new(
+            record.health,
+            mclone_protocol::DEFAULT_PLAYER_MAX_HEALTH,
+        )
+        .is_ok()
+        && (record.health == 0.0) == record.pending_death_cause.is_some()
 }
 
 fn player_record_from_entry(
@@ -4293,6 +4328,8 @@ fn player_record_from_entry(
         record.selected_hotbar_slot = player.inventory.selected_hotbar_slot();
         record.total_experience = player.total_experience;
         record.statistics = player.statistics.clone();
+        record.health = player.vitals.health();
+        record.pending_death_cause = player.pending_death_cause;
         return Some(record);
     }
     Some(PlayerRecord {
@@ -4308,6 +4345,8 @@ fn player_record_from_entry(
         selected_hotbar_slot: player.inventory.selected_hotbar_slot(),
         total_experience: player.total_experience,
         statistics: player.statistics.clone(),
+        health: player.vitals.health(),
+        pending_death_cause: player.pending_death_cause,
     })
 }
 

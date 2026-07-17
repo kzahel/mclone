@@ -3,7 +3,8 @@ use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_protocol::{
-    ClientIdentity, DimensionKey, PlayerAppearance, PlayerStatistics, SessionCapabilities,
+    ClientIdentity, DimensionKey, PlayerAppearance, PlayerDamageCause, PlayerStatistics,
+    PlayerVitals, SessionCapabilities,
 };
 
 use crate::inventory::ServerInventory;
@@ -43,6 +44,8 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) resume_record: Option<PlayerRecord>,
     pub(crate) total_experience: u64,
     pub(crate) statistics: PlayerStatistics,
+    pub(crate) vitals: PlayerVitals,
+    pub(crate) pending_death_cause: Option<PlayerDamageCause>,
     pub(crate) player_record_revision: u64,
     pub(crate) capabilities: SessionCapabilities,
 }
@@ -59,6 +62,8 @@ impl Default for ServerPlayerEntry {
             resume_record: None,
             total_experience: 0,
             statistics: PlayerStatistics::default(),
+            vitals: PlayerVitals::default(),
+            pending_death_cause: None,
             player_record_revision: 0,
             capabilities: SessionCapabilities::NONE,
         }
