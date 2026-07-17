@@ -1,6 +1,6 @@
 # Tactical 185: Realm, Dimension, and Observer Runtime
 
-Status: active 2026-07-16; Slices 0-7 complete; Slice 8 is next
+Status: complete 2026-07-17; Slices 0-8 landed
 
 Workstream: native Rust, shared server/runtime/persistence/protocol first;
 native web/WASM adapters in the same slices
@@ -370,7 +370,9 @@ dimension_records(dimension_key, codec_version, revision, record_blob)
 chunk_records(dimension_key, x, z, codec_version, revision, record_blob)
 entity_chunk_records(dimension_key, x, z, codec_version, revision, record_blob)
 player_records(player_key, codec_version, revision, record_blob)
-player_statistics(player_key, codec_version, revision, record_blob)  # later
+# The current v2 player-record envelope embeds the independently typed
+# statistics map. A separate player_statistics table remains a compatible
+# future storage split rather than a gameplay or protocol boundary.
 saved_data_records(data_key, ...)
 ```
 
@@ -873,6 +875,8 @@ Exit: inspection and tests prove no preview-only player exists server-side.
 
 ### Slice 8: Realm-scoped statistics canary
 
+Status: complete 2026-07-17.
+
 - Add a vanilla-shaped typed statistics map with
   `minecraft:custom/minecraft:jump` and an explicitly mclone-namespaced
   successful-block-placement counter.
@@ -882,6 +886,49 @@ Exit: inspection and tests prove no preview-only player exists server-side.
   and remain independent in another realm using the same profile UUID.
 - Retire or quarantine the non-vanilla jump-grants-XP proof once the statistics
   proof supersedes it.
+
+Evidence:
+
+- the vanilla 1.17.1 `Stats`, `StatType`, `Stat`, `StatsCounter`,
+  `ServerStatsCounter`, `Player.jumpFromGround`, and `BlockItem.place` paths
+  establish typed `(statistic type, value)` keys, a signed-int saturation
+  limit, server-owned awards, and save-root `stats/<uuid>.json` ownership;
+- protocol v26 adds a bounded `PlayerStatistics` map with
+  `minecraft:custom/minecraft:jump` and
+  `mclone:custom/mclone:successful_block_placements`. The mclone aggregate is
+  intentionally not presented as vanilla's per-block item-used statistic;
+- the realm server increments jump only after accepting the grounded-to-rising
+  movement transition and increments placement only when an allowed use-item
+  command actually changes a block. Rejected lobby commands and observer
+  sessions cannot increment or receive either counter;
+- `PlayerStatistics` remains independently modeled, but player-record codec v2
+  currently embeds it in the realm-root player envelope. This reuses the same
+  transactional SQLite/IndexedDB lifecycle without making statistics
+  dimension-local; codec v1 records migrate to an empty map. A later split to
+  a vanilla-like separate statistics record family does not require gameplay
+  or wire changes;
+- owner-only statistics snapshots flow through the local, native runner,
+  browser Worker, TCP, and WebSocket protocol paths. `ClientRuntime` retains
+  them across `keep_player_state` dimension changes and shared flat HUD policy
+  renders `Jumps N  Placed N` on native and browser clients;
+- A-to-B-to-A transfer coverage proves the same map follows one realm player,
+  SQLite close/reopen coverage proves both counters survive restart, and a
+  second realm with the same profile UUID starts independently at zero;
+- the production IndexedDB reload probe performs a real authoritative block
+  placement, observes the counter advance from 0 to 1, background-saves,
+  reloads the page, and restores both the placed block and `Placed 1` from the
+  same realm container;
+- the non-vanilla jump-grants-XP configuration and behavior flag are removed.
+  Existing XP state remains available for a future real experience system but
+  no longer changes on jump;
+- the complete protocol (42), client (115), UI (84), and server (448) suites
+  pass, as do the focused dedicated-server restart test, cross-dimension and
+  cross-realm persistence tests, browser IndexedDB reload smoke, browser
+  lifecycle smoke, TypeScript check, and native workspace checks. Changed
+  browser HUD captures were inspected at zero and persisted-one values. No
+  physical XR hardware was available for this final canary; Slice 7 already
+  validated the shared HUD/presentation owners through synthetic stereo and
+  the established per-eye/multiview paths.
 
 Exit: the realm/dimension ownership boundary is visible and restart-tested.
 

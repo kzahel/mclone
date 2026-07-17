@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 
 use mclone_core::{ChunkPos, Vec3d};
-use mclone_protocol::{ClientIdentity, DimensionKey, PlayerAppearance};
+use mclone_protocol::{ClientIdentity, DimensionKey, PlayerAppearance, PlayerStatistics};
 
 use crate::inventory::ServerInventory;
 use crate::persistence::PlayerRecord;
@@ -40,6 +40,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) identity: Option<ClientIdentity>,
     pub(crate) resume_record: Option<PlayerRecord>,
     pub(crate) total_experience: u64,
+    pub(crate) statistics: PlayerStatistics,
     pub(crate) player_record_revision: u64,
 }
 
@@ -54,6 +55,7 @@ impl Default for ServerPlayerEntry {
             identity: None,
             resume_record: None,
             total_experience: 0,
+            statistics: PlayerStatistics::default(),
             player_record_revision: 0,
         }
     }

@@ -269,7 +269,6 @@ fn open_dedicated_server(
                 .with_context(|| format!("failed to open dedicated world at {}", dir.display()))
         }
     }?;
-    server.set_persistence_demo_jump_experience_enabled(true);
     server.set_world_generation_profile(profile)?;
     if matches!(world, DedicatedWorldSelection::Persistent { .. }) {
         server
@@ -1473,7 +1472,7 @@ mod tests {
     }
 
     #[test]
-    fn stable_identity_resumes_pose_and_experience_after_dedicated_restart() {
+    fn stable_identity_resumes_pose_and_statistics_after_dedicated_restart() {
         let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
         let root = unique_temp_dir("dedicated-player-record-restart");
         let world = DedicatedWorldSelection::Persistent { dir: root.clone() };
@@ -1504,32 +1503,36 @@ mod tests {
                     on_ground: true,
                 }))
                 .unwrap();
-            let saved_position = spawn.position.add(Vec3d::new(0.0, 0.42, 0.0));
+            let jump_position = spawn.position.add(Vec3d::new(0.0, 0.42, 0.0));
             session
                 .send_command_only(ClientCommand::move_player(MovePlayerCommand::Pos {
-                    position: saved_position,
+                    position: jump_position,
                     on_ground: false,
                 }))
                 .unwrap();
-            let experience = wait_for_remote_updates(&mut session, |updates| {
+            let statistics = wait_for_remote_updates(&mut session, |updates| {
                 updates.iter().any(|update| {
                     matches!(
                         update,
-                        ServerUpdate::PlayerExperience {
-                            total_experience: 1
-                        }
+                        ServerUpdate::PlayerStatistics { statistics }
+                            if statistics.jump_count() == 1
                     )
                 })
             });
-            assert!(experience.iter().any(|update| matches!(
+            assert!(statistics.iter().any(|update| matches!(
                 update,
-                ServerUpdate::PlayerExperience {
-                    total_experience: 1
-                }
+                ServerUpdate::PlayerStatistics { statistics }
+                    if statistics.jump_count() == 1
             )));
+            session
+                .send_command_only(ClientCommand::move_player(MovePlayerCommand::Pos {
+                    position: spawn.position,
+                    on_ground: true,
+                }))
+                .unwrap();
             drop(session);
             server.join().unwrap().unwrap();
-            saved_position
+            spawn.position
         };
 
         let (server, addr) = spawn_serve_once_server(DEFAULT_SEED, world);
@@ -1551,9 +1554,8 @@ mod tests {
                 && updates.iter().any(|update| {
                     matches!(
                         update,
-                        ServerUpdate::PlayerExperience {
-                            total_experience: 1
-                        }
+                        ServerUpdate::PlayerStatistics { statistics }
+                            if statistics.jump_count() == 1
                     )
                 })
         });

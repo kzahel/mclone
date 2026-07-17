@@ -3555,6 +3555,9 @@ async function runIndexedDbReloadProbe(
   }
   await installIndexedDbCountHelper(page);
   const initialMetadata = await waitForBrowserIndexedDbWorldMetadata(page, worldId);
+  const beforePlacementStatistic = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.playerSuccessfulBlockPlacementStatistic) || 0,
+  );
 
   await page.keyboard.press("2");
   await page.waitForFunction(
@@ -3567,6 +3570,21 @@ async function runIndexedDbReloadProbe(
     expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
     expectedCarriedItemSynced: true,
   });
+  try {
+    await page.waitForFunction(
+      (before) => Number(
+        globalThis.__mcloneWebApp?.state?.playerSuccessfulBlockPlacementStatistic,
+      ) === before + 1,
+      beforePlacementStatistic,
+      { timeout: 10_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `placement statistic did not advance: ${String(error)}\n${JSON.stringify(state, null, 2)}`,
+    );
+  }
+  const afterPlacementStatistic = beforePlacementStatistic + 1;
   const placedCandidates = placedBlockCandidates(placement?.interaction);
   const beforeReloadCandidates = [];
   for (const candidate of placedCandidates) {
@@ -3593,6 +3611,13 @@ async function runIndexedDbReloadProbe(
   await waitForWebAppReady(page);
   await installIndexedDbCountHelper(page);
   await waitForWebAppStreamingSettled(page, 60_000);
+  await page.waitForFunction(
+    (expected) => Number(
+      globalThis.__mcloneWebApp?.state?.playerSuccessfulBlockPlacementStatistic,
+    ) === expected,
+    afterPlacementStatistic,
+    { timeout: 60_000 },
+  );
   const afterReload = await waitForBlockStateAt(page, placedBlock, DIRT_BLOCK_STATE_ID);
   const afterReloadRecordCounts = await browserIndexedDbWorldRecordCounts(page, worldId);
   const afterReloadDayTime = await page.evaluate(
@@ -3604,10 +3629,13 @@ async function runIndexedDbReloadProbe(
       && afterReload?.blockStateId === DIRT_BLOCK_STATE_ID
       && afterReloadRecordCounts.chunks > 0
       && afterReloadRecordCounts.worldMetadata === 1
+      && afterPlacementStatistic === beforePlacementStatistic + 1
       && afterReloadDayTime >= beforeReloadDayTime,
     worldId,
     reloadUrl,
     placement,
+    beforePlacementStatistic,
+    afterPlacementStatistic,
     placedCandidates,
     beforeReloadCandidates,
     placedBlock,

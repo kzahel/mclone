@@ -63,6 +63,7 @@ impl EngineServerUpdateReport {
                 | ServerUpdate::WorldInfo { .. }
                 | ServerUpdate::TimeUpdate { .. }
                 | ServerUpdate::PlayerExperience { .. }
+                | ServerUpdate::PlayerStatistics { .. }
                 | ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)
                 | ServerUpdate::RemotePlayerRemove { .. }
@@ -125,6 +126,7 @@ impl EngineServerUpdateDirtyBatch {
                 | ServerUpdate::DimensionChange { .. } => {}
                 ServerUpdate::TimeUpdate { .. } => {}
                 ServerUpdate::PlayerExperience { .. } => {}
+                ServerUpdate::PlayerStatistics { .. } => {}
                 ServerUpdate::PlayerPosition(_) => {}
                 ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)

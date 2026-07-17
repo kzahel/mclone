@@ -176,6 +176,8 @@ const runtime: AppRuntime = {
     height: 0,
     dayTime: 0,
     timeOfDay: 0,
+    playerJumpStatistic: 0,
+    playerSuccessfulBlockPlacementStatistic: 0,
     skyRendered: false,
     actorCount: 0,
     drawnActorCount: 0,
@@ -1176,6 +1178,10 @@ class WebFrameDriver {
     runtime.state.height = report.height;
     runtime.state.dayTime = report.dayTime;
     runtime.state.timeOfDay = report.timeOfDay;
+    runtime.state.playerJumpStatistic = Number(report.playerJumpStatistic) || 0;
+    runtime.state.playerSuccessfulBlockPlacementStatistic = Number(
+      report.playerSuccessfulBlockPlacementStatistic,
+    ) || 0;
     runtime.state.skyRendered = Boolean(report.skyRendered);
     runtime.state.actorCount = report.actorCount;
     runtime.state.drawnActorCount = report.drawnActorCount;

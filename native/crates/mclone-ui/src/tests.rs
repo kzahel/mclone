@@ -566,18 +566,21 @@ fn flat_hud_uses_flat_hotbar_when_touch_controls_are_hidden() {
 }
 
 #[test]
-fn flat_hud_renders_authoritative_experience_above_hotbar() {
+fn flat_hud_renders_authoritative_statistics_above_hotbar() {
     let scale = GuiScale::from_pixels(960, 540);
     let mut draw = GuiDrawList::new();
     let mut hud = FlatHud::new(resolved_flat_input(false));
     hud.hotbar = FlatHotbarOverlay::selected(0);
-    hud.total_experience = Some(37);
+    hud.player_statistics = Some(PlayerStatisticsHud {
+        jumps: 37,
+        successful_block_placements: 12,
+    });
 
     render_flat_hud(scale, &mut draw, &hud);
 
     assert!(draw.commands().iter().any(|command| matches!(
         command,
-        GuiDrawCommand::Text { text, .. } if text == "XP 37"
+        GuiDrawCommand::Text { text, .. } if text == "Jumps 37  Placed 12"
     )));
 }
 

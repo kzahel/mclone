@@ -2,13 +2,12 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **architecture accepted 2026-07-16; Tactical 185 Slices 0-7 are
-complete and Slice 8 is the next boundary. Every host uses one `RealmServer`,
-the integrated player is ordinary, realm/dimension persistence is qualified,
-and one realm can concurrently tick players in multiple isolated
-`DimensionRuntime`s. Source-owned player and non-player observer interest,
-A-to-B-to-A player transfer, and observer-backed retained dioramas with
-covered player/observer authority exchange are live.**
+Status: **implemented 2026-07-17; Tactical 185 Slices 0-8 are complete. Every
+host uses one `RealmServer`, the integrated player is ordinary,
+realm/dimension persistence is qualified, and one realm can concurrently tick
+players in multiple isolated `DimensionRuntime`s. Source-owned player and
+non-player observer interest, A-to-B-to-A player transfer, observer-backed
+retained dioramas, and realm-scoped typed statistics are live.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -161,10 +160,20 @@ unified:
   without duplicate players or preview-only persistence;
 - the server and scene resolve preview framing and resumed entry through the
   ordinary safe-surface rules. Unsupported saved poses fall back to a nearby
-  safe spawn rather than admitting a falling return position.
-
-The next work can use realm-scoped jump and placement statistics as the small
-acceptance canary for the completed topology.
+  safe spawn rather than admitting a falling return position;
+- `PlayerStatistics` is a typed, bounded realm-player map. Accepted grounded
+  jumps award `minecraft:custom/minecraft:jump`; successful authoritative
+  placements award the explicitly mclone-specific aggregate
+  `mclone:custom/mclone:successful_block_placements`;
+- statistics publish only to their owning player, follow that player through
+  A-to-B-to-A dimension transfer, survive SQLite and IndexedDB restart, and
+  remain independent between realms for the same client-global profile UUID;
+- player-record codec v2 currently carries the typed statistics map inside
+  the realm-root player envelope, with codec v1 defaulting to an empty map.
+  This differs physically from vanilla's separate `stats/<uuid>.json` while
+  preserving the same realm scope and an uncomplicated future storage split;
+- the retired persistence demo no longer grants XP for jumping. The shared HUD
+  now exposes jump and placement canaries directly.
 
 ## Hard Topology Invariants
 
@@ -252,10 +261,13 @@ A dimension transfer updates current dimension and pose while retaining the
 loaded realm player/statistics state. A cross-realm transition leaves/saves
 realm A and separately joins/loads realm B.
 
-Jumps and successful block placements will be the first statistics canary only
-after this topology, identity, persistence, dimension, and transfer structure
-is real. The counters must follow one player across dimensions, survive realm
+Jumps and successful block placements are the first statistics canary over
+this topology. The counters follow one player across dimensions, survive realm
 restart, and remain independent in another realm for the same profile UUID.
+Vanilla stores a separate JSON statistics file at the save root; mclone
+currently embeds the separately typed map in player-record codec v2 so SQLite
+and IndexedDB can reuse their transactional player-save lifecycle. Neither
+shape makes the statistics dimension-local.
 
 ## Warm Destination Contract
 
@@ -337,10 +349,9 @@ migration evidence. Shared identifiers and qualified cross-boundary addresses
 live in `mclone-protocol`; authoritative definitions, persistence, runtime
 membership, interest, and transfer remain owned by `mclone-server`.
 
-## Current Gaps and Ordered Next Work
+## Completed Implementation Order
 
-Tactical 185 owns the bounded implementation sequence. The order is
-architectural:
+Tactical 185 followed this architectural order:
 
 1. lock current behavior and migration fixtures;
 2. unify the realm server name/ownership and ordinary local session path;
@@ -352,12 +363,11 @@ architectural:
 8. adopt observers for dioramas;
 9. add realm-scoped jump/place statistics as the acceptance canary.
 
-Do not start with the statistics feature simply because its record is small.
-Its purpose is to prove the scope above, and implementing it before the scope
-would encode accidental singleton behavior.
-
-Steps 1-8 are complete. Step 9, the realm-scoped statistics canary, is the
-active next boundary.
+All nine steps are complete. New gameplay systems can now use the executable
+realm/dimension boundary rather than preserving a singleton assumption.
+Inventory/vitals, real portal travel and richer statistics are separate
+feature tacticals. Tactical 184 already closed the bounded session-liveness
+work; further networking changes should use a new follow-up.
 
 ## Related
 

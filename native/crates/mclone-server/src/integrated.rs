@@ -19,9 +19,9 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DimensionKey, InteractionHand,
     MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind,
-    PlayerProfileId, RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
-    SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
-    SetPlayerAppearanceCommand, UseItemOnCommand,
+    PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate,
+    SessionCapabilities, SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -229,7 +229,6 @@ pub struct RealmServer {
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
     world_behavior_profile: WorldBehaviorProfile,
-    persistence_demo_jump_experience_enabled: bool,
     players: ServerPlayerList,
     observers: BTreeMap<ObserverId, DimensionKey>,
     next_observer_id: u64,
@@ -545,7 +544,6 @@ impl RealmServer {
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
             world_behavior_profile: WorldBehaviorProfile::default(),
-            persistence_demo_jump_experience_enabled: false,
             players: ServerPlayerList::default(),
             observers: BTreeMap::new(),
             next_observer_id: 0,
@@ -1008,16 +1006,6 @@ impl RealmServer {
         self.world_behavior_profile = profile;
     }
 
-    /// Enables the deliberately non-vanilla persistence proof that awards one
-    /// total experience point for an accepted upward jump transition.
-    pub fn set_persistence_demo_jump_experience_enabled(&mut self, enabled: bool) {
-        self.persistence_demo_jump_experience_enabled = enabled;
-    }
-
-    pub const fn persistence_demo_jump_experience_enabled(&self) -> bool {
-        self.persistence_demo_jump_experience_enabled
-    }
-
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
         let simulation_tick = self.simulation_tick;
         self.liquid_ticks
@@ -1324,6 +1312,16 @@ impl RealmServer {
             player_id,
             ServerUpdate::PlayerExperience { total_experience },
         );
+        let statistics = self
+            .players
+            .get(player_id)
+            .expect("transfer player must remain realm-owned")
+            .statistics
+            .clone();
+        if !statistics.is_empty() {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::PlayerStatistics { statistics });
+        }
         view.center = destination_center;
         let updates = self.set_chunk_view_for_target(CommandTarget::Player(player_id), view)?;
         for update in updates {
@@ -1398,14 +1396,20 @@ impl RealmServer {
                 .inventory
                 .restore_selected_hotbar_slot(record.selected_hotbar_slot);
             player.total_experience = record.total_experience;
+            player.statistics = record.statistics.clone();
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
         }
         let total_experience = player.total_experience;
+        let statistics = player.statistics.clone();
         self.chunk_tracking.queue_update_for_player(
             player_id,
             ServerUpdate::PlayerExperience { total_experience },
         );
+        if !statistics.is_empty() {
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::PlayerStatistics { statistics });
+        }
         Ok(player_id)
     }
 
@@ -1485,6 +1489,10 @@ impl RealmServer {
 
     pub fn player_position(&self, player_id: ServerPlayerId) -> Option<Vec3d> {
         self.players.position(player_id)
+    }
+
+    pub fn player_statistics(&self, player_id: ServerPlayerId) -> Option<&PlayerStatistics> {
+        self.players.get(player_id).map(|player| &player.statistics)
     }
 
     fn mob_player_targets(&self) -> Vec<MobPlayerTarget> {
@@ -2327,10 +2335,6 @@ impl RealmServer {
         command: SequencedMovePlayerCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
-        let jump_demo_enabled = self.persistence_demo_jump_experience_enabled
-            && self
-                .world_behavior_profile
-                .allows_persistence_demo_jump_experience();
         let (result, recognized_jump, pending_correction) = {
             let player = self.player_mut_for_target(target)?;
             let before_position = player.position();
@@ -2338,8 +2342,7 @@ impl RealmServer {
             let before_position_accepted = player.has_accepted_position();
             let movement = command.movement;
             let result = player.apply_sequenced_move_player(command);
-            let recognized_jump = jump_demo_enabled
-                && result == MovePlayerApplyResult::Accepted
+            let recognized_jump = result == MovePlayerApplyResult::Accepted
                 && before_position_accepted
                 && before_on_ground
                 && movement.has_position()
@@ -2355,8 +2358,7 @@ impl RealmServer {
             .into_iter()
             .collect::<Vec<_>>();
         if recognized_jump {
-            let total_experience = self.award_persistence_demo_jump_experience(target)?;
-            updates.push(ServerUpdate::PlayerExperience { total_experience });
+            updates.push(self.increment_player_statistic(target, StatisticKey::jump())?);
         }
         if result == MovePlayerApplyResult::Accepted {
             self.reconcile_remote_player_subject(target.player_id(), true);
@@ -2364,17 +2366,20 @@ impl RealmServer {
         Ok(updates)
     }
 
-    fn award_persistence_demo_jump_experience(
+    fn increment_player_statistic(
         &mut self,
         target: CommandTarget,
-    ) -> ChunkStoreResult<u64> {
+        key: StatisticKey,
+    ) -> ChunkStoreResult<ServerUpdate> {
         let player_id = target.player_id();
         let player = self
             .players
             .get_mut(player_id)
             .ok_or_else(|| unknown_player_error(player_id))?;
-        player.total_experience = player.total_experience.saturating_add(1);
-        Ok(player.total_experience)
+        player.statistics.increment(key, 1);
+        Ok(ServerUpdate::PlayerStatistics {
+            statistics: player.statistics.clone(),
+        })
     }
 
     fn advance_debug_auxiliary_player_script(&mut self) -> ChunkStoreResult<()> {
@@ -2593,16 +2598,28 @@ impl RealmServer {
         target: CommandTarget,
         command: UseItemOnCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        if self.world_behavior_profile.allows_player_place() {
+        let placed = if self.world_behavior_profile.allows_player_place() {
             if let Some((target, block_state)) =
                 self.held_item_place_target_for_target(target, command)?
             {
-                self.set_block_debug(target, block_state);
+                self.set_block_debug(target, block_state)
+            } else {
+                false
             }
         } else {
             self.ensure_target_exists(target)?;
+            false
+        };
+        let mut updates = self.drain_pending_block_delta_updates_for_target(target)?;
+        if placed {
+            updates.push(
+                self.increment_player_statistic(
+                    target,
+                    StatisticKey::successful_block_placement(),
+                )?,
+            );
         }
-        self.drain_pending_block_delta_updates_for_target(target)
+        Ok(updates)
     }
 
     fn handle_shoot_debug_physics_cube_for_target(
@@ -3310,13 +3327,21 @@ impl RealmServer {
                 .inventory
                 .restore_selected_hotbar_slot(record.selected_hotbar_slot);
             player.total_experience = record.total_experience;
+            player.statistics = record.statistics.clone();
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
             let total_experience = player.total_experience;
+            let statistics = player.statistics.clone();
             self.chunk_tracking.queue_update_for_player(
                 player_id,
                 ServerUpdate::PlayerExperience { total_experience },
             );
+            if !statistics.is_empty() {
+                self.chunk_tracking.queue_update_for_player(
+                    player_id,
+                    ServerUpdate::PlayerStatistics { statistics },
+                );
+            }
             let center = self
                 .players
                 .get(player_id)
@@ -4092,6 +4117,15 @@ impl LocalRealmSession {
     }
 
     #[cfg(test)]
+    pub(crate) fn player_statistics(&self) -> &PlayerStatistics {
+        self.server
+            .players
+            .get(self.player_id())
+            .map(|player| &player.statistics)
+            .expect("local realm session player must exist")
+    }
+
+    #[cfg(test)]
     pub(crate) fn resume_record(&self) -> Option<&PlayerRecord> {
         self.server
             .players
@@ -4187,6 +4221,7 @@ fn player_record_from_entry(
         record.dimension = player.dimension.clone();
         record.selected_hotbar_slot = player.inventory.selected_hotbar_slot();
         record.total_experience = player.total_experience;
+        record.statistics = player.statistics.clone();
         return Some(record);
     }
     Some(PlayerRecord {
@@ -4201,6 +4236,7 @@ fn player_record_from_entry(
         on_ground: player.state.on_ground(),
         selected_hotbar_slot: player.inventory.selected_hotbar_slot(),
         total_experience: player.total_experience,
+        statistics: player.statistics.clone(),
     })
 }
 

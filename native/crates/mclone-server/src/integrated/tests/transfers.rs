@@ -158,6 +158,18 @@ fn player_transfers_a_to_b_to_a_with_one_realm_record_and_replica_reset() {
     admit_player(&mut server, overworld_peer);
     admit_player(&mut server, moon_peer);
     server.players.get_mut(traveler).unwrap().total_experience = 37;
+    server
+        .players
+        .get_mut(traveler)
+        .unwrap()
+        .statistics
+        .increment(StatisticKey::jump(), 4);
+    server
+        .players
+        .get_mut(traveler)
+        .unwrap()
+        .statistics
+        .increment(StatisticKey::successful_block_placement(), 9);
 
     server
         .try_handle_command_for_player(
@@ -203,6 +215,12 @@ fn player_transfers_a_to_b_to_a_with_one_realm_record_and_replica_reset() {
         ServerUpdate::PlayerExperience {
             total_experience: 37
         }
+    )));
+    assert!(moon_updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerStatistics { statistics }
+            if statistics.jump_count() == 4
+                && statistics.successful_block_placement_count() == 9
     )));
     assert_eq!(
         server.realm_interest_diagnostics().transfers[0].phase,
@@ -253,9 +271,19 @@ fn player_transfers_a_to_b_to_a_with_one_realm_record_and_replica_reset() {
         Some(&DimensionKey::overworld())
     );
     assert_eq!(server.players.get(traveler).unwrap().total_experience, 37);
+    assert_eq!(server.player_statistics(traveler).unwrap().jump_count(), 4);
+    assert_eq!(
+        server
+            .player_statistics(traveler)
+            .unwrap()
+            .successful_block_placement_count(),
+        9
+    );
     let record = player_record_from_entry(server.players.get_mut(traveler).unwrap()).unwrap();
     assert_eq!(record.dimension, DimensionKey::overworld());
     assert_eq!(record.total_experience, 37);
+    assert_eq!(record.statistics.jump_count(), 4);
+    assert_eq!(record.statistics.successful_block_placement_count(), 9);
 }
 
 #[test]

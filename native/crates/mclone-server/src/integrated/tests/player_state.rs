@@ -155,6 +155,100 @@ fn sqlite_restart_resumes_exact_game_and_day_time() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sqlite_restart_preserves_statistics_and_another_realm_is_independent() {
+    let first_root = world_time_temp_dir("sqlite-statistics-restart");
+    let second_root = world_time_temp_dir("sqlite-statistics-other-realm");
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x71; 16]), "Statistician").unwrap();
+    let first_realm_id;
+    {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(12_345, &first_root).unwrap();
+        server
+            .initialize_world_metadata_at_unix_millis(1_000)
+            .unwrap();
+        first_realm_id = server.realm_id();
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 82.0, 8.5));
+        sync_carried_slot(&mut server, 1);
+        let clicked = BlockPos::new(8, 80, 8);
+        let target = clicked.relative(Direction::Up);
+        server.scheduler_mut().set_block_at_world(clicked, STONE);
+        server.scheduler_mut().set_block_at_world(target, AIR);
+        server.scheduler_mut().drain_pending_block_delta_events();
+        server
+            .try_handle_command(use_held_item_on(BlockHitResult::new(
+                Vec3d::new(8.5, 81.0, 8.5),
+                Direction::Up,
+                clicked,
+                false,
+            )))
+            .unwrap();
+        server
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: Vec3d::new(8.5, 82.42, 8.5),
+                on_ground: false,
+            }))
+            .unwrap();
+        assert_eq!(server.player_statistics().jump_count(), 1);
+        assert_eq!(
+            server
+                .player_statistics()
+                .successful_block_placement_count(),
+            1
+        );
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(12_345, &first_root).unwrap();
+        reopened
+            .initialize_world_metadata_at_unix_millis(2_000)
+            .unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        assert_eq!(reopened.realm_id(), first_realm_id);
+        assert_eq!(reopened.player_statistics().jump_count(), 1);
+        assert_eq!(
+            reopened
+                .player_statistics()
+                .successful_block_placement_count(),
+            1
+        );
+        let updates = reopened.try_drain_updates().unwrap();
+        assert!(updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::PlayerStatistics { statistics }
+                if statistics.jump_count() == 1
+                    && statistics.successful_block_placement_count() == 1
+        )));
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut other_realm =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(12_345, &second_root).unwrap();
+        other_realm
+            .initialize_world_metadata_at_unix_millis(1_000)
+            .unwrap();
+        other_realm
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        assert_ne!(other_realm.realm_id(), first_realm_id);
+        assert!(other_realm.player_statistics().is_empty());
+        other_realm.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(first_root).unwrap();
+    std::fs::remove_dir_all(second_root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn world_time_temp_dir(name: &str) -> std::path::PathBuf {
     static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -407,9 +501,8 @@ fn move_player_command_updates_server_player_state_without_world_updates() {
 }
 
 #[test]
-fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
+fn jump_statistic_increments_once_per_accepted_upward_jump() {
     let mut server = LocalRealmSession::new(0);
-    server.set_persistence_demo_jump_experience_enabled(true);
     send_player_move(&mut server, Vec3d::new(1.0, 64.0, 1.0));
 
     let updates = server
@@ -418,12 +511,12 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
             on_ground: false,
         }))
         .unwrap();
-    assert_eq!(
-        updates,
-        vec![ServerUpdate::PlayerExperience {
-            total_experience: 1
-        }]
-    );
+    assert!(matches!(
+        updates.as_slice(),
+        [ServerUpdate::PlayerStatistics { statistics }]
+            if statistics.jump_count() == 1
+                && statistics.successful_block_placement_count() == 0
+    ));
 
     let duplicate = server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
@@ -450,51 +543,34 @@ fn persistence_demo_awards_exactly_one_point_per_accepted_upward_jump() {
             .unwrap()
             .is_empty()
     );
-    assert_eq!(server.total_experience(), 1);
+    assert_eq!(server.player_statistics().jump_count(), 1);
+    assert_eq!(server.total_experience(), 0);
 }
 
 #[test]
-fn persistence_demo_is_explicit_and_protected_worlds_never_award_jump_experience() {
+fn rejected_movement_does_not_increment_jump_statistic() {
     let mut server = LocalRealmSession::new(0);
     send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
     assert!(
         server
             .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
-                position: Vec3d::new(0.0, 64.42, 0.0),
+                position: Vec3d::new(0.0, f64::NAN, 0.0),
                 on_ground: false,
             }))
             .unwrap()
             .is_empty()
     );
-
-    server.set_persistence_demo_jump_experience_enabled(true);
-    server.set_world_behavior_profile(WorldBehaviorProfile::ProtectedLobby);
-    server
-        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::StatusOnly {
-            on_ground: true,
-        }))
-        .unwrap();
-    assert!(
-        server
-            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
-                position: Vec3d::new(0.0, 64.84, 0.0),
-                on_ground: false,
-            }))
-            .unwrap()
-            .is_empty()
-    );
-    assert_eq!(server.total_experience(), 0);
+    assert!(server.player_statistics().is_empty());
 }
 
 #[test]
-fn awarded_demo_experience_is_written_to_the_identity_player_record() {
+fn awarded_jump_statistic_is_written_to_the_identity_player_record() {
     let identity = ClientIdentity::new(PlayerProfileId::new([0x55; 16]), "Jumper").unwrap();
     let key = player_record_key(identity.profile_id);
     let mut server = LocalRealmSession::with_world_store(0, Box::new(MemoryWorldStore::new()));
     server
         .configure_local_player_identity_blocking(identity)
         .unwrap();
-    server.set_persistence_demo_jump_experience_enabled(true);
     send_player_move(&mut server, Vec3d::new(0.0, 64.0, 0.0));
     server
         .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
@@ -510,7 +586,8 @@ fn awarded_demo_experience_is_written_to_the_identity_player_record() {
         .unwrap()
         .expect("saved player record");
 
-    assert_eq!(record.total_experience, 1);
+    assert_eq!(record.statistics.jump_count(), 1);
+    assert_eq!(record.total_experience, 0);
     assert_eq!(record.position, Vec3d::new(0.0, 64.42, 0.0));
 }
 

@@ -646,7 +646,6 @@ mod native {
         pub seed: i64,
         pub world_generation_profile: WorldGenerationProfile,
         pub world_behavior_profile: WorldBehaviorProfile,
-        pub persistence_demo_jump_experience_enabled: bool,
         pub lighting_enabled: bool,
         pub light_status_batch_size: usize,
         pub day_time: Option<u64>,
@@ -669,7 +668,6 @@ mod native {
                 seed,
                 world_generation_profile: WorldGenerationProfile::default(),
                 world_behavior_profile: WorldBehaviorProfile::default(),
-                persistence_demo_jump_experience_enabled: false,
                 lighting_enabled: true,
                 light_status_batch_size: crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
                 day_time: None,
@@ -699,11 +697,6 @@ mod native {
 
         pub fn with_world_behavior_profile(mut self, profile: WorldBehaviorProfile) -> Self {
             self.world_behavior_profile = profile;
-            self
-        }
-
-        pub fn with_persistence_demo_jump_experience_enabled(mut self, enabled: bool) -> Self {
-            self.persistence_demo_jump_experience_enabled = enabled;
             self
         }
 
@@ -1229,9 +1222,6 @@ mod native {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
         }
-        server.set_persistence_demo_jump_experience_enabled(
-            config.persistence_demo_jump_experience_enabled,
-        );
         if let Some(identity) = config.local_player_identity.clone()
             && let Err(error) = server.configure_local_player_identity_blocking(identity)
         {
@@ -1941,7 +1931,9 @@ mod native {
                 load_chunk_snapshot(&mut runner, ChunkPos::new(0, 0));
             assert!(preview_updates.iter().all(|update| !matches!(
                 update,
-                ServerUpdate::PlayerPosition(_) | ServerUpdate::PlayerExperience { .. }
+                ServerUpdate::PlayerPosition(_)
+                    | ServerUpdate::PlayerExperience { .. }
+                    | ServerUpdate::PlayerStatistics { .. }
             )));
 
             runner.promote_observer_to_player().unwrap();

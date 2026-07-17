@@ -21,7 +21,9 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
 use mclone_protocol::{
-    DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot, RealmId,
+    DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot,
+    MAX_PLAYER_STATISTIC_ENTRIES, MAX_STATISTIC_RESOURCE_KEY_BYTES, PlayerStatistics, RealmId,
+    StatisticKey,
 };
 
 use crate::{WorldBehaviorProfile, WorldGenerationProfile};
@@ -43,7 +45,8 @@ pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
-pub const PLAYER_RECORD_VERSION: u32 = 1;
+const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
+pub const PLAYER_RECORD_VERSION: u32 = 2;
 pub const DIMENSION_RECORD_VERSION: u32 = 1;
 pub const WORLD_METADATA_VERSION: u32 = 2;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
@@ -226,7 +229,14 @@ pub fn encode_player_record(record: &PlayerRecord) -> ChunkStoreResult<Vec<u8>> 
 
 pub fn decode_player_record(bytes: &[u8]) -> ChunkStoreResult<PlayerRecord> {
     let mut reader = bytes;
-    read_player_record(&mut reader)
+    let record = read_player_record(&mut reader)?;
+    if !reader.is_empty() {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "player record had {} trailing bytes",
+            reader.len()
+        )));
+    }
+    Ok(record)
 }
 
 pub fn encode_world_metadata(record: &WorldMetadata) -> ChunkStoreResult<Vec<u8>> {
@@ -353,6 +363,7 @@ pub struct PlayerRecord {
     pub on_ground: bool,
     pub selected_hotbar_slot: u8,
     pub total_experience: u64,
+    pub statistics: PlayerStatistics,
 }
 
 impl PlayerRecord {
@@ -374,6 +385,7 @@ impl PlayerRecord {
             on_ground: false,
             selected_hotbar_slot: 0,
             total_experience: 0,
+            statistics: PlayerStatistics::default(),
         }
     }
 }
@@ -4006,6 +4018,7 @@ fn write_player_record(writer: &mut impl Write, record: &PlayerRecord) -> ChunkS
     write_bool(writer, record.on_ground)?;
     write_u8(writer, record.selected_hotbar_slot)?;
     write_u64(writer, record.total_experience)?;
+    write_player_statistics(writer, &record.statistics)?;
     writer.flush()?;
     Ok(())
 }
@@ -4224,7 +4237,10 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         ));
     }
     let codec_version = read_u32(reader)?;
-    if codec_version != PLAYER_RECORD_VERSION {
+    if !matches!(
+        codec_version,
+        LEGACY_PLAYER_RECORD_VERSION | PLAYER_RECORD_VERSION
+    ) {
         return Err(ChunkStoreError::InvalidData(format!(
             "unsupported player record codec version {codec_version}"
         )));
@@ -4232,7 +4248,7 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
     let player = PlayerRecordKey::Uuid(read_string(reader)?);
     let record = PlayerRecord {
         player,
-        codec_version,
+        codec_version: PLAYER_RECORD_VERSION,
         revision: read_u64(reader)?,
         last_known_name: read_string(reader)?,
         dimension: DimensionKey::parse(read_string(reader)?).map_err(|error| {
@@ -4244,6 +4260,11 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         on_ground: read_bool(reader)?,
         selected_hotbar_slot: read_u8(reader)?,
         total_experience: read_u64(reader)?,
+        statistics: if codec_version >= PLAYER_RECORD_VERSION {
+            read_player_statistics(reader)?
+        } else {
+            PlayerStatistics::default()
+        },
     };
     if !record.position.is_finite()
         || !record.y_rot_degrees.is_finite()
@@ -4254,6 +4275,47 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
         ));
     }
     Ok(record)
+}
+
+fn write_player_statistics(
+    writer: &mut impl Write,
+    statistics: &PlayerStatistics,
+) -> ChunkStoreResult<()> {
+    if statistics.len() > MAX_PLAYER_STATISTIC_ENTRIES {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "player statistics contain {} entries; maximum is {}",
+            statistics.len(),
+            MAX_PLAYER_STATISTIC_ENTRIES
+        )));
+    }
+    write_len(writer, statistics.len(), "player statistic entries")?;
+    for (key, value) in statistics.iter() {
+        write_string(writer, key.statistic_type(), "statistic type")?;
+        write_string(writer, key.value(), "statistic value")?;
+        write_u32(writer, *value)?;
+    }
+    Ok(())
+}
+
+fn read_player_statistics(reader: &mut impl Read) -> ChunkStoreResult<PlayerStatistics> {
+    let count = read_len(reader)?;
+    if count > MAX_PLAYER_STATISTIC_ENTRIES {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "player statistics contain {count} entries; maximum is {MAX_PLAYER_STATISTIC_ENTRIES}"
+        )));
+    }
+    let mut statistics = PlayerStatistics::default();
+    for _ in 0..count {
+        let statistic_type =
+            read_bounded_string(reader, MAX_STATISTIC_RESOURCE_KEY_BYTES, "statistic type")?;
+        let value =
+            read_bounded_string(reader, MAX_STATISTIC_RESOURCE_KEY_BYTES, "statistic value")?;
+        let key = StatisticKey::new(statistic_type, value).map_err(|error| {
+            ChunkStoreError::InvalidData(format!("invalid player statistic key: {error}"))
+        })?;
+        statistics.set(key, read_u32(reader)?);
+    }
+    Ok(statistics)
 }
 
 fn write_entity_save_record(
@@ -4447,6 +4509,23 @@ fn read_string(reader: &mut impl Read) -> ChunkStoreResult<String> {
     String::from_utf8(bytes).map_err(|error| {
         ChunkStoreError::InvalidData(format!("scheduled tick target was not UTF-8: {error}"))
     })
+}
+
+fn read_bounded_string(
+    reader: &mut impl Read,
+    max_len: usize,
+    name: &str,
+) -> ChunkStoreResult<String> {
+    let len = read_len(reader)?;
+    if len > max_len {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "{name} is {len} bytes; maximum is {max_len}"
+        )));
+    }
+    let mut bytes = vec![0; len];
+    reader.read_exact(&mut bytes)?;
+    String::from_utf8(bytes)
+        .map_err(|error| ChunkStoreError::InvalidData(format!("{name} was not UTF-8: {error}")))
 }
 
 fn write_optional_u32(writer: &mut impl Write, value: Option<u32>) -> ChunkStoreResult<()> {
@@ -4789,6 +4868,32 @@ mod tests {
         let decoded = decode_player_record(&bytes).unwrap();
 
         assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn legacy_player_record_migrates_with_empty_statistics() {
+        let record = test_player_record(43);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(PLAYER_RECORD_MAGIC);
+        write_u32(&mut bytes, LEGACY_PLAYER_RECORD_VERSION).unwrap();
+        write_string(&mut bytes, record.player.as_str(), "player key").unwrap();
+        write_u64(&mut bytes, record.revision).unwrap();
+        write_string(&mut bytes, &record.last_known_name, "player name").unwrap();
+        write_string(&mut bytes, record.dimension.as_str(), "player dimension").unwrap();
+        write_vec3d(&mut bytes, record.position).unwrap();
+        write_f32(&mut bytes, record.y_rot_degrees).unwrap();
+        write_f32(&mut bytes, record.x_rot_degrees).unwrap();
+        write_bool(&mut bytes, record.on_ground).unwrap();
+        write_u8(&mut bytes, record.selected_hotbar_slot).unwrap();
+        write_u64(&mut bytes, record.total_experience).unwrap();
+
+        let decoded = decode_player_record(&bytes).unwrap();
+
+        assert_eq!(decoded.codec_version, PLAYER_RECORD_VERSION);
+        assert!(decoded.statistics.is_empty());
+        assert_eq!(decoded.player, record.player);
+        assert_eq!(decoded.position, record.position);
+        assert_eq!(decoded.total_experience, record.total_experience);
     }
 
     #[test]
@@ -5816,6 +5921,12 @@ mod tests {
             on_ground: false,
             selected_hotbar_slot: 4,
             total_experience: 987,
+            statistics: {
+                let mut statistics = PlayerStatistics::default();
+                statistics.set(StatisticKey::jump(), 123);
+                statistics.set(StatisticKey::successful_block_placement(), 45);
+                statistics
+            },
         }
     }
 

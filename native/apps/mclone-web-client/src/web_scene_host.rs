@@ -2474,6 +2474,19 @@ impl WebSceneHost {
                 f64::from(host.mono_time_of_day()) * 24_000.0,
             )?;
             report_set_number(&object, "sunAngle", f64::from(host.mono_sun_angle()))?;
+            if let Some(client) = host.mono_client() {
+                let statistics = client.player_statistics();
+                report_set_number(
+                    &object,
+                    "playerJumpStatistic",
+                    f64::from(statistics.jump_count()),
+                )?;
+                report_set_number(
+                    &object,
+                    "playerSuccessfulBlockPlacementStatistic",
+                    f64::from(statistics.successful_block_placement_count()),
+                )?;
+            }
             report_set_number(
                 &object,
                 "activeAssetEpoch",

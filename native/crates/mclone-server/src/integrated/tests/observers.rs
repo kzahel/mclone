@@ -92,7 +92,9 @@ fn residency_observer_overlaps_player_without_becoming_a_player() {
     );
     assert!(updates.iter().all(|update| !matches!(
         update,
-        ServerUpdate::PlayerPosition(_) | ServerUpdate::PlayerExperience { .. }
+        ServerUpdate::PlayerPosition(_)
+            | ServerUpdate::PlayerExperience { .. }
+            | ServerUpdate::PlayerStatistics { .. }
     )));
 
     let player_updates = server.try_drain_updates_for_player(player).unwrap();
@@ -123,6 +125,26 @@ fn residency_observer_overlaps_player_without_becoming_a_player() {
         update,
         ServerUpdate::RemotePlayerAdd(_) | ServerUpdate::RemotePlayerUpdate(_)
     )));
+    let owner_updates = server
+        .try_handle_command_for_player(
+            player,
+            ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: Vec3d::new(8.5, 80.42, 8.5),
+                on_ground: false,
+            }),
+        )
+        .unwrap();
+    assert!(owner_updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerStatistics { statistics } if statistics.jump_count() == 1
+    )));
+    assert!(
+        server
+            .try_drain_updates_for_observer(observer)
+            .unwrap()
+            .iter()
+            .all(|update| !matches!(update, ServerUpdate::PlayerStatistics { .. }))
+    );
     let block = BlockPos::new(8, 80, 8);
     assert!(server.scheduler_mut().set_block_at_world(block, DIRT));
     server.scheduler_mut().drain_pending_block_delta_events();

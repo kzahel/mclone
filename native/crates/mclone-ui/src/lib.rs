@@ -2683,7 +2683,7 @@ pub struct FlatHud {
     pub gamepad: GamepadHudOverlay,
     pub touch: TouchOverlay,
     pub status: StatusOverlay,
-    pub total_experience: Option<u64>,
+    pub player_statistics: Option<PlayerStatisticsHud>,
     pub debug: Option<FlatHudDebugOverlay>,
     pub frame_pipeline: Option<FramePipelineHudOverlay>,
 }
@@ -2698,7 +2698,7 @@ impl FlatHud {
             gamepad: GamepadHudOverlay::visible(),
             touch: TouchOverlay::hidden(),
             status: StatusOverlay::hidden(),
-            total_experience: None,
+            player_statistics: None,
             debug: None,
             frame_pipeline: None,
         }
@@ -2725,7 +2725,7 @@ impl FlatHud {
             || self.effective_gamepad_overlay().visible
             || self.effective_touch_overlay().visible
             || self.status.visible
-            || (self.world_hud_visible && self.total_experience.is_some())
+            || (self.world_hud_visible && self.player_statistics.is_some())
             || self
                 .debug
                 .as_ref()
@@ -2846,7 +2846,7 @@ pub(crate) fn render_flat_hud_transient_layers(
     draw: &mut GuiDrawList,
     hud: &FlatHud,
 ) {
-    let Some(total_experience) = hud.total_experience.filter(|_| hud.world_hud_visible) else {
+    let Some(statistics) = hud.player_statistics.filter(|_| hud.world_hud_visible) else {
         return;
     };
     let touch = hud.effective_touch_overlay();
@@ -2859,11 +2859,20 @@ pub(crate) fn render_flat_hud_transient_layers(
     };
     Font::default().draw_centered_atlas(
         draw,
-        &format!("XP {total_experience}"),
+        &format!(
+            "Jumps {}  Placed {}",
+            statistics.jumps, statistics.successful_block_placements
+        ),
         scale.width * 0.5,
         (hotbar_top - 14.0).max(4.0),
         Color::rgba(128, 255, 90, 255),
     );
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PlayerStatisticsHud {
+    pub jumps: u32,
+    pub successful_block_placements: u32,
 }
 
 pub fn render_debug_overlay(scale: GuiScale, draw: &mut GuiDrawList, overlay: &DebugOverlay) {

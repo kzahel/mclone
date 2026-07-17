@@ -1769,7 +1769,11 @@ impl McloneSceneHost {
             ),
         );
         hud.status = self.session_projection().status_overlay;
-        hud.total_experience = Some(runtime.client().total_experience());
+        let statistics = runtime.client().player_statistics();
+        hud.player_statistics = Some(mclone_ui::PlayerStatisticsHud {
+            jumps: statistics.jump_count(),
+            successful_block_placements: statistics.successful_block_placement_count(),
+        });
         hud.touch = context.touch_overlay;
         hud.frame_pipeline = self
             .diagnostic_panel

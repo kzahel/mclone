@@ -64,6 +64,12 @@ fn protected_lobby_rejects_forged_break_and_place_commands() {
     assert_eq!(server.scheduler().block_at_world(target), Some(AIR));
     assert!(break_updates.is_empty());
     assert!(place_updates.is_empty());
+    assert_eq!(
+        server
+            .player_statistics()
+            .successful_block_placement_count(),
+        0
+    );
 }
 
 #[test]
@@ -204,6 +210,17 @@ fn debug_place_command_places_adjacent_to_hit_face() {
             _ => false,
         }
     }));
+    assert!(updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerStatistics { statistics }
+            if statistics.successful_block_placement_count() == 1
+    )));
+    assert_eq!(
+        server
+            .player_statistics()
+            .successful_block_placement_count(),
+        1
+    );
 }
 
 #[test]

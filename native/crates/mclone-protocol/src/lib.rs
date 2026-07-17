@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod realm_dimension;
+mod statistics;
 
 use std::error::Error;
 use std::fmt;
@@ -15,8 +16,14 @@ pub use realm_dimension::{
     DimensionChunkPos, DimensionKey, DimensionKeyError, MAX_DIMENSION_KEY_BYTES,
     OVERWORLD_DIMENSION_KEY, RealmId, RealmIdError,
 };
+pub use statistics::{
+    CUSTOM_STATISTIC_TYPE_KEY, JUMP_STATISTIC_VALUE_KEY, MAX_PLAYER_STATISTIC_ENTRIES,
+    MAX_PLAYER_STATISTIC_VALUE, MAX_STATISTIC_RESOURCE_KEY_BYTES, MCLONE_CUSTOM_STATISTIC_TYPE_KEY,
+    PlayerStatistics, SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey,
+    StatisticKeyError,
+};
 
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 26;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -62,6 +69,7 @@ const SERVER_UPDATE_SESSION_READY: u8 = 15;
 const SERVER_UPDATE_KEEP_ALIVE: u8 = 16;
 const SERVER_UPDATE_DISCONNECT: u8 = 17;
 const SERVER_UPDATE_DIMENSION_CHANGE: u8 = 18;
+const SERVER_UPDATE_PLAYER_STATISTICS: u8 = 19;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -458,6 +466,11 @@ pub enum ServerUpdate {
     /// only the total; vanilla level/progress semantics remain future work.
     PlayerExperience {
         total_experience: u64,
+    },
+    /// Owner-only authoritative statistics snapshot. Keys retain vanilla's
+    /// statistic-type/value shape while allowing mclone-namespaced entries.
+    PlayerStatistics {
+        statistics: PlayerStatistics,
     },
     KeepAlive {
         id: u64,
@@ -874,6 +887,20 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
             writer.write_u8(SERVER_UPDATE_PLAYER_EXPERIENCE);
             writer.write_u64(*total_experience);
         }
+        ServerUpdate::PlayerStatistics { statistics } => {
+            writer.write_u8(SERVER_UPDATE_PLAYER_STATISTICS);
+            if statistics.len() > MAX_PLAYER_STATISTIC_ENTRIES {
+                return Err(ProtocolCodecError::InvalidData(
+                    "too many player statistic entries",
+                ));
+            }
+            writer.write_len("player statistics", statistics.len())?;
+            for (key, value) in statistics.iter() {
+                writer.write_string("statistic type", key.statistic_type())?;
+                writer.write_string("statistic value", key.value())?;
+                writer.write_u32(*value);
+            }
+        }
         ServerUpdate::KeepAlive { id } => {
             writer.write_u8(SERVER_UPDATE_KEEP_ALIVE);
             writer.write_u64(*id);
@@ -962,6 +989,25 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
         SERVER_UPDATE_PLAYER_EXPERIENCE => ServerUpdate::PlayerExperience {
             total_experience: reader.read_u64()?,
         },
+        SERVER_UPDATE_PLAYER_STATISTICS => {
+            let count = reader.read_len()?;
+            if count > MAX_PLAYER_STATISTIC_ENTRIES {
+                return Err(ProtocolCodecError::InvalidData(
+                    "too many player statistic entries",
+                ));
+            }
+            let mut statistics = PlayerStatistics::default();
+            for _ in 0..count {
+                let statistic_type =
+                    reader.read_string("statistic type", MAX_STATISTIC_RESOURCE_KEY_BYTES)?;
+                let value =
+                    reader.read_string("statistic value", MAX_STATISTIC_RESOURCE_KEY_BYTES)?;
+                let key = StatisticKey::new(statistic_type, value)
+                    .map_err(|_| ProtocolCodecError::InvalidData("invalid statistic key"))?;
+                statistics.set(key, reader.read_u32()?);
+            }
+            ServerUpdate::PlayerStatistics { statistics }
+        }
         SERVER_UPDATE_KEEP_ALIVE => ServerUpdate::KeepAlive {
             id: reader.read_u64()?,
         },
@@ -2303,6 +2349,18 @@ mod tests {
             teleport_id: 42,
             dismount_vehicle: true,
         });
+
+        let bytes = encode_server_update(&update).unwrap();
+
+        assert_eq!(decode_server_update(&bytes).unwrap(), update);
+    }
+
+    #[test]
+    fn server_update_codec_round_trips_player_statistics() {
+        let mut statistics = PlayerStatistics::default();
+        statistics.set(StatisticKey::jump(), 42);
+        statistics.set(StatisticKey::successful_block_placement(), 17);
+        let update = ServerUpdate::PlayerStatistics { statistics };
 
         let bytes = encode_server_update(&update).unwrap();
 

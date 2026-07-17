@@ -25,8 +25,8 @@ use mclone_core::{
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
-    EntitySnapshot, EntityUpdate, PlayerPositionUpdate, RemotePlayerId, RemotePlayerUpdate,
-    SectionBlockUpdate, ServerUpdate, SessionConfiguration,
+    EntitySnapshot, EntityUpdate, PlayerPositionUpdate, PlayerStatistics, RemotePlayerId,
+    RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate, SessionConfiguration,
 };
 
 pub use actor::{
@@ -97,6 +97,7 @@ pub struct ClientRuntime {
     day_time: u64,
     daylight_cycle_running: bool,
     total_experience: u64,
+    player_statistics: PlayerStatistics,
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
@@ -122,6 +123,7 @@ impl ClientRuntime {
             day_time: 0,
             daylight_cycle_running: true,
             total_experience: 0,
+            player_statistics: PlayerStatistics::default(),
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
@@ -214,6 +216,7 @@ impl ClientRuntime {
                 self.biome_zoom_seed = Some(biome_zoom_seed);
                 if !keep_player_state {
                     self.total_experience = 0;
+                    self.player_statistics = PlayerStatistics::default();
                 }
             }
             ServerUpdate::ChunkSnapshot(snapshot) => {
@@ -278,6 +281,9 @@ impl ClientRuntime {
             ServerUpdate::PlayerExperience { total_experience } => {
                 self.total_experience = total_experience;
             }
+            ServerUpdate::PlayerStatistics { statistics } => {
+                self.player_statistics = statistics;
+            }
             ServerUpdate::KeepAlive { .. } => {}
             ServerUpdate::Disconnect(reason) => self.apply_disconnect(reason),
         }
@@ -298,6 +304,10 @@ impl ClientRuntime {
 
     pub const fn total_experience(&self) -> u64 {
         self.total_experience
+    }
+
+    pub fn player_statistics(&self) -> &PlayerStatistics {
+        &self.player_statistics
     }
 
     pub fn chunk_snapshot(&self, pos: ChunkPos) -> Option<&ChunkSnapshot> {
@@ -982,6 +992,9 @@ mod tests {
         runtime.apply_update(ServerUpdate::PlayerExperience {
             total_experience: 37,
         });
+        let mut statistics = PlayerStatistics::default();
+        statistics.set(mclone_protocol::StatisticKey::jump(), 11);
+        runtime.apply_update(ServerUpdate::PlayerStatistics { statistics });
 
         assert_eq!(
             runtime.loaded_chunk_positions().collect::<Vec<_>>(),
@@ -999,6 +1012,7 @@ mod tests {
         assert_eq!(runtime.biome_zoom_seed(), Some(987_654));
         assert_eq!(runtime.chunk_view(), Some(&view));
         assert_eq!(runtime.total_experience(), 37);
+        assert_eq!(runtime.player_statistics().jump_count(), 11);
         assert_eq!(runtime.loaded_chunk_count(), 0);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
         assert_eq!(runtime.remote_player_count(), 0);
@@ -1056,6 +1070,23 @@ mod tests {
         });
 
         assert_eq!(runtime.total_experience(), 37);
+    }
+
+    #[test]
+    fn client_runtime_tracks_authoritative_player_statistics() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let mut statistics = PlayerStatistics::default();
+        statistics.set(mclone_protocol::StatisticKey::jump(), 37);
+        statistics.set(
+            mclone_protocol::StatisticKey::successful_block_placement(),
+            12,
+        );
+
+        runtime.apply_update(ServerUpdate::PlayerStatistics {
+            statistics: statistics.clone(),
+        });
+
+        assert_eq!(runtime.player_statistics(), &statistics);
     }
 
     #[test]

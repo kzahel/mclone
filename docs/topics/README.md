@@ -41,9 +41,9 @@ series implements the same concern, normally reuse the document slug in its
   `RealmServer` topology for integrated, Web Worker, dedicated, and test hosts;
   realm-scoped players/statistics, open-ended concurrent dimensions,
   dimension-local persistence/interest, ordinary local sessions, observer
-  previews, and warm transfer as client presentation. Tactical
-  [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) begins with
-  the topology cleanup before adding dimension or statistics features.
+  previews, warm transfer as client presentation, and typed statistics proven
+  across transfer and restart. Tactical
+  [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) is complete.
 - [`world-generation-profiles.md`](world-generation-profiles.md): accepted
   direction for stable, versioned procedural generator profiles; current
   overworld/authored-only truth, the flat-grass and seeded-island proofs, and
