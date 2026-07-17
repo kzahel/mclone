@@ -69,7 +69,9 @@ use crate::player_chunk_tracking::{
 use crate::player_lifecycle::player_body_touches_lava;
 use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
-use crate::spawn::{SpawnColumnOrder, find_safe_surface_spawn_with_column_order};
+use crate::spawn::{
+    SpawnColumnOrder, find_safe_surface_spawn_with_column_order, initial_spawn_center_for_profile,
+};
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
     ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
@@ -214,6 +216,13 @@ struct PendingDimensionTransfer {
     phase: PlayerDimensionTransferPhase,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PendingPlayerRespawn {
+    destination: DimensionKey,
+    spawn_center: ChunkPos,
+    phase: PlayerDimensionTransferPhase,
+}
+
 #[derive(Debug)]
 pub struct RealmServer {
     realm_id: RealmId,
@@ -236,6 +245,7 @@ pub struct RealmServer {
     observers: BTreeMap<ObserverId, DimensionKey>,
     next_observer_id: u64,
     pending_dimension_transfers: BTreeMap<ServerPlayerId, PendingDimensionTransfer>,
+    pending_player_respawns: BTreeMap<ServerPlayerId, PendingPlayerRespawn>,
     debug_auxiliary_player_script: Option<DebugAuxiliaryPlayerScript>,
 }
 
@@ -551,6 +561,7 @@ impl RealmServer {
             observers: BTreeMap::new(),
             next_observer_id: 0,
             pending_dimension_transfers: BTreeMap::new(),
+            pending_player_respawns: BTreeMap::new(),
             debug_auxiliary_player_script: None,
         }
     }
@@ -1512,6 +1523,7 @@ impl RealmServer {
             return false;
         }
         self.pending_dimension_transfers.remove(&player_id);
+        self.pending_player_respawns.remove(&player_id);
         let routes = self.remote_players.remove_player(player_id);
         self.route_remote_player_updates(routes);
         self.entity_tracking
@@ -1617,7 +1629,12 @@ impl RealmServer {
         target: CommandTarget,
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
-        if self.player_is_dead(target)? && !command_is_allowed_while_dead(&command) {
+        if (self.player_is_dead(target)?
+            || self
+                .pending_player_respawns
+                .contains_key(&target.player_id()))
+            && !command_is_allowed_during_dead_lifecycle(&command)
+        {
             return Ok(Vec::new());
         }
         match command {
@@ -1646,9 +1663,8 @@ impl RealmServer {
             ClientCommand::ShootDebugPhysicsCube => {
                 self.handle_shoot_debug_physics_cube_for_target(target)
             }
-            ClientCommand::KeepAlive { .. }
-            | ClientCommand::Respawn
-            | ClientCommand::Disconnect(_) => Ok(Vec::new()),
+            ClientCommand::Respawn => self.handle_respawn_for_target(target),
+            ClientCommand::KeepAlive { .. } | ClientCommand::Disconnect(_) => Ok(Vec::new()),
         }
     }
 
@@ -2592,11 +2608,161 @@ impl RealmServer {
         let accepted = self.player_mut_for_target(target)?.accept_teleport(id);
         if accepted {
             self.pending_dimension_transfers.remove(&target.player_id());
+            if self
+                .pending_player_respawns
+                .remove(&target.player_id())
+                .is_some()
+            {
+                self.players
+                    .get_mut(target.player_id())
+                    .ok_or_else(|| unknown_player_error(target.player_id()))?
+                    .resume_record = None;
+                self.save_player_record(target.player_id())?;
+            }
             let updates = self.kill_player_if_touching_lava(target)?;
             self.reconcile_remote_player_subject(target.player_id(), true);
             return Ok(updates);
         }
         Ok(Vec::new())
+    }
+
+    fn handle_respawn_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let player_id = target.player_id();
+        if !self.player_is_dead(target)? || self.pending_player_respawns.contains_key(&player_id) {
+            return Ok(Vec::new());
+        }
+
+        let source = self
+            .players
+            .dimension(player_id)
+            .cloned()
+            .ok_or_else(|| unknown_player_error(player_id))?;
+        let destination = DimensionKey::overworld();
+        let destination_definition =
+            self.dimensions.get(&destination).cloned().ok_or_else(|| {
+                ChunkStoreError::InvalidData(
+                    "realm primary Overworld dimension is not registered".to_owned(),
+                )
+            })?;
+        let spawn_center = initial_spawn_center_for_profile(
+            destination_definition.seed,
+            destination_definition.generation_profile,
+        );
+        // Match the ordinary dimension-transfer invariant: prove the
+        // destination runtime can be activated before detaching source
+        // membership, then return to the source to read its current view.
+        self.activate_dimension(&destination)?;
+        self.activate_dimension(&source)?;
+        let (mut view, y_rot_degrees, x_rot_degrees) = {
+            let player = self
+                .players
+                .get(player_id)
+                .ok_or_else(|| unknown_player_error(player_id))?;
+            let view = self
+                .chunk_tracking
+                .accepted_view(player_id)
+                .cloned()
+                .unwrap_or(ChunkView {
+                    center: spawn_center,
+                    render_distance: 0,
+                    chunk_tracking_radius: 0,
+                });
+            (
+                view,
+                player.state.y_rot_degrees(),
+                player.state.x_rot_degrees(),
+            )
+        };
+        let crosses_dimension = source != destination;
+
+        if crosses_dimension {
+            let routes = self.remote_players.remove_player(player_id);
+            self.route_remote_player_updates(routes);
+            self.entity_tracking
+                .remove_observer(DimensionInterestSource::Player(player_id));
+            self.remove_player_chunk_tracking(player_id);
+        }
+
+        {
+            let player = self
+                .players
+                .get_mut(player_id)
+                .expect("validated respawn player must remain realm-owned");
+            player.dimension = destination.clone();
+            player.initial_spawn_center = Some(spawn_center);
+            player.resume_record = None;
+            player.state.begin_dimension_change();
+        }
+
+        self.activate_dimension(&destination)?;
+        if crosses_dimension {
+            self.chunk_tracking.add_player(player_id);
+            self.remote_players.add_player(player_id);
+            self.pending_dimension_transfers.insert(
+                player_id,
+                PendingDimensionTransfer {
+                    source,
+                    destination: destination.clone(),
+                    preferred_position: Vec3d::new(
+                        f64::from(spawn_center.x) * 16.0 + 0.5,
+                        0.0,
+                        f64::from(spawn_center.z) * 16.0 + 0.5,
+                    ),
+                    y_rot_degrees,
+                    x_rot_degrees,
+                    phase: PlayerDimensionTransferPhase::LoadingDestination,
+                },
+            );
+            let biome_zoom_seed = obfuscate_biome_zoom_seed(destination_definition.seed);
+            let time_update = self.time_update();
+            let (total_experience, statistics, life) = {
+                let player = self
+                    .players
+                    .get(player_id)
+                    .expect("respawn player must remain realm-owned");
+                (
+                    player.total_experience,
+                    player.statistics.clone(),
+                    player_life_state(player),
+                )
+            };
+            self.chunk_tracking.queue_update_for_player(
+                player_id,
+                ServerUpdate::DimensionChange {
+                    dimension: destination.clone(),
+                    biome_zoom_seed,
+                    keep_player_state: true,
+                },
+            );
+            self.chunk_tracking
+                .queue_update_for_player(player_id, time_update);
+            self.chunk_tracking.queue_update_for_player(
+                player_id,
+                ServerUpdate::PlayerExperience { total_experience },
+            );
+            if !statistics.is_empty() {
+                self.chunk_tracking.queue_update_for_player(
+                    player_id,
+                    ServerUpdate::PlayerStatistics { statistics },
+                );
+            }
+            self.chunk_tracking
+                .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
+        }
+
+        self.pending_player_respawns.insert(
+            player_id,
+            PendingPlayerRespawn {
+                destination,
+                spawn_center,
+                phase: PlayerDimensionTransferPhase::LoadingDestination,
+            },
+        );
+        view.center = spawn_center;
+        self.set_chunk_view_for_target(target, view)
     }
 
     fn handle_set_carried_item_for_target(
@@ -3271,6 +3437,9 @@ impl RealmServer {
         let Some(center) = self.initial_spawn_center_for_target(target)? else {
             return Ok(None);
         };
+        if self.pending_player_respawns.contains_key(&player_id) {
+            return self.respawn_position_update_for_target(target);
+        }
         let resume = self.resume_record_for_target(target)?.cloned();
         let transfer = self.pending_dimension_transfers.get(&player_id).cloned();
         if let Some(record) = resume.as_ref()
@@ -3361,6 +3530,75 @@ impl RealmServer {
         }
         self.take_resume_record_for_target(target)?;
         Ok(Some(update))
+    }
+
+    fn respawn_position_update_for_target(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Option<mclone_protocol::PlayerPositionUpdate>> {
+        let player_id = target.player_id();
+        let Some(respawn) = self.pending_player_respawns.get(&player_id).cloned() else {
+            return Ok(None);
+        };
+        if respawn.phase != PlayerDimensionTransferPhase::LoadingDestination {
+            return Ok(None);
+        }
+        if self.active_dimension.key != respawn.destination {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "respawn destination {} is not the active player dimension",
+                respawn.destination
+            )));
+        }
+        let column_order = if matches!(
+            self.scheduler.world_generation_profile(),
+            WorldGenerationProfile::AuthoredOnly { .. }
+        ) {
+            SpawnColumnOrder::CenterFirst
+        } else {
+            SpawnColumnOrder::Scan
+        };
+        let Some(position) = find_safe_surface_spawn_with_column_order(
+            respawn.spawn_center,
+            |pos| self.scheduler.block_at_world(pos),
+            |x, z| self.biome_source.block_position_biome_definition(x, z),
+            |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
+            column_order,
+        ) else {
+            return Ok(None);
+        };
+
+        let simulation_tick = self.simulation_tick;
+        let (position_update, life, record) = {
+            let player = self
+                .players
+                .get_mut(player_id)
+                .ok_or_else(|| unknown_player_error(player_id))?;
+            let position_update =
+                player
+                    .state
+                    .initial_position_update(position, 0.0, 0.0, simulation_tick);
+            player.vitals = mclone_protocol::PlayerVitals::default();
+            player.pending_death_cause = None;
+            player.life_epoch = player.life_epoch.saturating_add(1);
+            let life = player_life_state(player);
+            let record = player_record_from_current_state(player);
+            player.resume_record = record.clone();
+            (position_update, life, record)
+        };
+        if let Some(record) = record {
+            self.scheduler.save_player_record(record);
+        }
+        self.chunk_tracking
+            .queue_update_for_player(player_id, ServerUpdate::PlayerLife(life));
+        self.pending_player_respawns
+            .get_mut(&player_id)
+            .expect("respawn must remain pending until teleport acknowledgement")
+            .phase = PlayerDimensionTransferPhase::AwaitingTeleportAck;
+        if let Some(transfer) = self.pending_dimension_transfers.get_mut(&player_id) {
+            transfer.phase = PlayerDimensionTransferPhase::AwaitingTeleportAck;
+            transfer.preferred_position = position;
+        }
+        Ok(Some(position_update))
     }
 
     fn resume_record_for_target(
@@ -3705,6 +3943,7 @@ impl RealmServer {
             (player_life_state(player), player.statistics.clone())
         };
         self.pending_dimension_transfers.remove(&player_id);
+        self.pending_player_respawns.remove(&player_id);
         self.reconcile_remote_player_subject(player_id, true);
         self.save_player_record(player_id)?;
         Ok(vec![
@@ -4401,7 +4640,7 @@ impl CommandTarget {
     }
 }
 
-fn command_is_allowed_while_dead(command: &ClientCommand) -> bool {
+fn command_is_allowed_during_dead_lifecycle(command: &ClientCommand) -> bool {
     matches!(
         command,
         ClientCommand::SetChunkView(_)
@@ -4494,6 +4733,23 @@ fn player_record_from_entry(
         record.pending_death_cause = player.pending_death_cause;
         return Some(record);
     }
+    player_record_from_current_state_with_revision(player, revision)
+}
+
+fn player_record_from_current_state(
+    player: &mut crate::players::ServerPlayerEntry,
+) -> Option<PlayerRecord> {
+    player.identity.as_ref()?;
+    let revision = player.player_record_revision.saturating_add(1);
+    player.player_record_revision = revision;
+    player_record_from_current_state_with_revision(player, revision)
+}
+
+fn player_record_from_current_state_with_revision(
+    player: &crate::players::ServerPlayerEntry,
+    revision: u64,
+) -> Option<PlayerRecord> {
+    let identity = player.identity.as_ref()?;
     Some(PlayerRecord {
         player: player_record_key(identity.profile_id),
         codec_version: crate::persistence::PLAYER_RECORD_VERSION,

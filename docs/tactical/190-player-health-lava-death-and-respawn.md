@@ -1,6 +1,6 @@
 # Tactical 190: Player Health, Lava Death, and Respawn
 
-Status: active 2026-07-17; Slices 0-4 complete
+Status: active 2026-07-17; Slices 0-5 complete
 
 Workstream: native Rust, shared protocol/server/client/UI/persistence first;
 native web/WASM and platform adapters through the same contracts

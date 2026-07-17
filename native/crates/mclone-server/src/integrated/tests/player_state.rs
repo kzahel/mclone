@@ -563,6 +563,182 @@ fn lava_death_immediately_enqueues_the_identity_player_record() {
 }
 
 #[test]
+fn explicit_respawn_restores_one_safe_life_without_resetting_realm_state() {
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x49; 16]), "Returner").unwrap();
+    let key = player_record_key(identity.profile_id);
+    let mut server = LocalRealmSession::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    load_center_chunk(&mut server);
+    server
+        .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
+            slot: 4,
+        }))
+        .unwrap();
+    let player_id = server.player_id();
+    let player = server.server.players.get_mut(player_id).unwrap();
+    player.total_experience = 23;
+    player.statistics.increment(StatisticKey::jump(), 7);
+
+    let death_position = Vec3d::new(8.5, 80.0, 8.5);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::containing(death_position), LAVA)
+    );
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+            position: death_position,
+            on_ground: false,
+        }))
+        .unwrap();
+    assert!(server.player_vitals().is_dead());
+
+    let mut updates = server.try_handle_command(ClientCommand::Respawn).unwrap();
+    assert!(
+        server
+            .try_handle_command(ClientCommand::Respawn)
+            .unwrap()
+            .is_empty(),
+        "a duplicate in-flight respawn request must be ignored"
+    );
+    let mut position_update = None;
+    for _ in 0..60_000 {
+        position_update = position_update.or_else(|| {
+            updates.iter().find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(*update),
+                _ => None,
+            })
+        });
+        if position_update.is_some() {
+            break;
+        }
+        server.try_tick_report_global().unwrap();
+        updates.extend(server.try_drain_updates_for_player(player_id).unwrap());
+        if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+        }
+    }
+    let position_update = position_update.expect("timed out waiting for safe respawn position");
+
+    let life_index = updates
+        .iter()
+        .position(|update| {
+            matches!(
+                update,
+                ServerUpdate::PlayerLife(life)
+                    if life.epoch() == 2
+                        && !life.vitals().is_dead()
+                        && life.death_cause().is_none()
+            )
+        })
+        .expect("respawn must publish a newer living life epoch");
+    let position_index = updates
+        .iter()
+        .position(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
+        .unwrap();
+    assert!(life_index < position_index);
+    assert!(
+        updates
+            .iter()
+            .all(|update| !matches!(update, ServerUpdate::DimensionChange { .. }))
+    );
+    assert!(server.player_pose_has_clearance(position_update.position));
+    assert_ne!(position_update.position, death_position);
+    assert_eq!(server.player_vitals().health(), 20.0);
+    assert_eq!(server.pending_death_cause(), None);
+    assert_eq!(server.inventory().selected_hotbar_slot(), 4);
+    assert_eq!(server.total_experience(), 23);
+    assert_eq!(server.player_statistics().jump_count(), 7);
+    assert_eq!(server.player_statistics().death_count(), 1);
+    assert!(
+        server
+            .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
+                slot: 1
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(server.inventory().selected_hotbar_slot(), 4);
+
+    server.scheduler_mut().flush_persistence().unwrap();
+    let record = server
+        .scheduler_mut()
+        .load_player_record_blocking(key)
+        .unwrap()
+        .expect("safe respawn publication must immediately persist the living pose");
+    assert_eq!(record.position, position_update.position);
+    assert_eq!(record.health, 20.0);
+    assert_eq!(record.pending_death_cause, None);
+    assert_eq!(record.selected_hotbar_slot, 4);
+    assert_eq!(record.total_experience, 23);
+    assert_eq!(record.statistics.jump_count(), 7);
+    assert_eq!(record.statistics.death_count(), 1);
+
+    assert!(
+        server
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: position_update.teleport_id.wrapping_add(1),
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!server.player().has_accepted_position());
+    server
+        .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+            id: position_update.teleport_id,
+        }))
+        .unwrap();
+    assert!(server.player().has_accepted_position());
+}
+
+#[test]
+fn respawn_waits_dead_until_the_safe_spawn_area_is_published() {
+    let mut server = RealmServer::new(12_345);
+    server.set_lighting_enabled(false);
+    let player_id = server.add_player();
+    server
+        .kill_player(CommandTarget::Player(player_id), PlayerDamageCause::Lava)
+        .unwrap();
+
+    let mut updates = server
+        .try_handle_command_for_player(player_id, ClientCommand::Respawn)
+        .unwrap();
+    assert!(server.player_vitals(player_id).unwrap().is_dead());
+    assert!(
+        updates
+            .iter()
+            .all(|update| !matches!(update, ServerUpdate::PlayerPosition(_)))
+    );
+    assert!(updates.iter().all(|update| !matches!(
+        update,
+        ServerUpdate::PlayerLife(life) if life.epoch() >= 2 && !life.vitals().is_dead()
+    )));
+
+    let mut safe_position = None;
+    for _ in 0..60_000 {
+        server.try_tick_report_global().unwrap();
+        updates.extend(server.try_drain_updates_for_player(player_id).unwrap());
+        safe_position = safe_position.or_else(|| {
+            updates.iter().find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(*update),
+                _ => None,
+            })
+        });
+        if safe_position.is_some() {
+            break;
+        }
+        if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+        }
+    }
+    let safe_position = safe_position.expect("safe spawn search must eventually complete");
+    assert_eq!(server.player_vitals(player_id).unwrap().health(), 20.0);
+    assert!(server.player_pose_has_clearance(safe_position.position));
+}
+
+#[test]
 fn current_single_dimension_runtime_rejects_non_overworld_resume_records() {
     let seed = 12_345;
     let identity = ClientIdentity::new(PlayerProfileId::new([0x43; 16]), "Traveler").unwrap();

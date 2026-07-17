@@ -287,6 +287,165 @@ fn player_transfers_a_to_b_to_a_with_one_realm_record_and_replica_reset() {
 }
 
 #[test]
+fn dead_player_respawns_from_another_dimension_with_one_boundary_and_body() {
+    let moon_record = moon_record();
+    let moon = moon_record.key.clone();
+    let mut server = RealmServer::with_world_store(12_345, Box::new(fixture_store(&moon)));
+    server
+        .set_world_generation_profile(WorldGenerationProfile::authored_only())
+        .unwrap();
+    server.set_lighting_enabled(false);
+    server.register_dimension(moon_record).unwrap();
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x62; 16]), "Returner").unwrap();
+    let traveler = server.add_player_with_identity(identity).unwrap();
+    let overworld_peer = server.add_player();
+    let moon_peer = server.add_player_in_dimension(moon.clone()).unwrap();
+    let overworld_position = admit_player(&mut server, traveler);
+    admit_player(&mut server, overworld_peer);
+    admit_player(&mut server, moon_peer);
+    server
+        .try_handle_command_for_player(
+            traveler,
+            ClientCommand::SetCarriedItem(SetCarriedItemCommand { slot: 5 }),
+        )
+        .unwrap();
+    let player = server.players.get_mut(traveler).unwrap();
+    player.total_experience = 31;
+    player.statistics.increment(StatisticKey::jump(), 6);
+
+    assert!(
+        server
+            .transfer_player_dimension(traveler, moon.clone(), overworld_position)
+            .unwrap()
+    );
+    let moon_updates = wait_for_transfer_updates(&mut server, traveler);
+    let moon_position = transfer_position_update(&moon_updates);
+    server
+        .try_handle_command_for_player(
+            traveler,
+            ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: moon_position.teleport_id,
+            }),
+        )
+        .unwrap();
+    server.try_drain_updates_for_player(overworld_peer).unwrap();
+    server.try_drain_updates_for_player(moon_peer).unwrap();
+
+    server
+        .kill_player(CommandTarget::Player(traveler), PlayerDamageCause::Lava)
+        .unwrap();
+    let moon_peer_death = server.try_drain_updates_for_player(moon_peer).unwrap();
+    assert!(moon_peer_death.iter().any(|update| matches!(
+        update,
+        ServerUpdate::RemotePlayerRemove { id }
+            if *id == RemotePlayerId(traveler.as_u64())
+    )));
+
+    let mut respawn_updates = server
+        .try_handle_command_for_player(traveler, ClientCommand::Respawn)
+        .unwrap();
+    assert!(
+        server
+            .try_handle_command_for_player(traveler, ClientCommand::Respawn)
+            .unwrap()
+            .is_empty()
+    );
+    let mut respawn_position = None;
+    for _ in 0..60_000 {
+        respawn_position = respawn_position.or_else(|| {
+            respawn_updates.iter().find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(*update),
+                _ => None,
+            })
+        });
+        if respawn_position.is_some() {
+            break;
+        }
+        server.try_tick_report_global().unwrap();
+        respawn_updates.extend(server.try_drain_updates_for_player(traveler).unwrap());
+        if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+        }
+    }
+    let respawn_position =
+        respawn_position.expect("timed out waiting for cross-dimension respawn position");
+
+    assert_dimension_change_precedes_destination_replica(
+        &respawn_updates,
+        &DimensionKey::overworld(),
+    );
+    let life_index = respawn_updates
+        .iter()
+        .position(|update| {
+            matches!(
+                update,
+                ServerUpdate::PlayerLife(life)
+                    if life.epoch() == 2 && !life.vitals().is_dead()
+            )
+        })
+        .unwrap();
+    let position_index = respawn_updates
+        .iter()
+        .position(|update| matches!(update, ServerUpdate::PlayerPosition(_)))
+        .unwrap();
+    assert!(life_index < position_index);
+    assert_eq!(
+        server.player_dimension(traveler),
+        Some(&DimensionKey::overworld())
+    );
+    assert!(server.player_pose_has_clearance(respawn_position.position));
+    let player = server.players.get(traveler).unwrap();
+    assert_eq!(player.vitals.health(), 20.0);
+    assert_eq!(player.pending_death_cause, None);
+    assert_eq!(player.inventory.selected_hotbar_slot(), 5);
+    assert_eq!(player.total_experience, 31);
+    assert_eq!(player.statistics.jump_count(), 6);
+    assert_eq!(player.statistics.death_count(), 1);
+    let before_ack = server.try_drain_updates_for_player(overworld_peer).unwrap();
+    assert!(remote_player_add(&before_ack, traveler).is_none());
+
+    server
+        .try_handle_command_for_player(
+            traveler,
+            ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: respawn_position.teleport_id,
+            }),
+        )
+        .unwrap();
+    let after_ack = server.try_drain_updates_for_player(overworld_peer).unwrap();
+    assert_eq!(
+        after_ack
+            .iter()
+            .filter(|update| matches!(
+                update,
+                ServerUpdate::RemotePlayerAdd(remote)
+                    if remote.id == RemotePlayerId(traveler.as_u64())
+            ))
+            .count(),
+        1
+    );
+    assert!(
+        server
+            .try_handle_command_for_player(traveler, ClientCommand::Respawn)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        server
+            .try_handle_command_for_player(
+                traveler,
+                ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                    id: respawn_position.teleport_id,
+                }),
+            )
+            .unwrap()
+            .is_empty()
+    );
+    let duplicate_publications = server.try_drain_updates_for_player(overworld_peer).unwrap();
+    assert!(remote_player_add(&duplicate_publications, traveler).is_none());
+}
+
+#[test]
 fn disconnect_during_transfer_cancels_pending_membership_cleanly() {
     let moon_record = moon_record();
     let moon = moon_record.key.clone();
