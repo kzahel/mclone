@@ -1,8 +1,8 @@
 # Tactical 191: Guarded Generation Planning Refactor
 
-Status: active 2026-07-17; Slices 0-1 are complete. Slice 2 is next. The pure
-plan vocabulary is live, but production planner/scheduler behavior has not
-changed yet.
+Status: active 2026-07-17; Slices 0-2 are complete. Slice 3 is next. Worldgen
+now solely owns the Overworld footprint calculation; scheduler policy and
+observable work remain unchanged.
 
 Topics: `world-generation-profiles`, `performance`
 
@@ -289,6 +289,35 @@ production ownership move.
 
 Gate: exact schedule trace, cache report, oracle fixtures, raw worldgen, and
 server scheduler A/B rows remain inside the locked envelope.
+
+#### Slice 2 result
+
+Commit `9d0ceb07` removed `scheduler::feature_job_positions`. Both Overworld
+feature execution/cache retention and scheduler job preparation now call the
+single `mclone-worldgen` plan implementation. The scheduler receives unordered
+deterministic sets and still applies its existing view-priority order afterward.
+Flat and Island still use the same target-only shape. No worker request,
+response, job, publication, or cache wire field changed.
+
+All 220 active worldgen tests and all 468 server library tests passed again,
+including the Java scheduler-trace order and generated-output fixtures. The
+clean release A/B from baseline `0ae6b924` to candidate `9d0ceb07` recorded:
+
+| Metric | Baseline | Slice 2 | Result |
+|---|---:|---:|---|
+| raw feature cold | 116.515 chunks/s | 138.725 chunks/s | no regression |
+| raw feature warm | 471.115 chunks/s | 468.922 chunks/s | -0.47%, noise |
+| scheduler total | 670.358 ms | 670.299 ms | flat |
+| scheduler step max polls | 0.657 / 0.382 / 0.370 ms | 0.520 / 0.420 / 0.342 ms | no tail regression |
+| peak RSS | 56,768 KiB | 56,624 KiB | flat |
+
+Exact work was identical: jobs remained `25/49/81`, then `5/21/45` twice for
+targets/feature centers/dependencies; snapshots remained `9/3/3`, unloads
+`0/3/3`, cache totals `72` hits / `99` misses / `171` retained, and the final
+client-visible/loaded/dependency-holder/ready-dependency counts remained
+`9/35/806/99`. Raw worldgen cold and warm cache rows stayed exactly
+`49/0/49/49` and `49/49/0/49`, and both generated the same 191,610 non-air
+feature blocks. Slice 2 therefore passes its behavior and raw-performance gate.
 
 ### Slice 3: Generic scheduler prerequisite consumption
 
