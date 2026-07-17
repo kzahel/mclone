@@ -2498,12 +2498,10 @@ impl McloneSceneHost {
                 None,
                 Some(mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(id)),
             ) => Some(
-                mclone_app_runtime::world_catalog::NativeWorldCatalog::new(
-                    catalog_world_root
-                        .as_deref()
-                        .context("catalog destination requires a native world root")?,
-                )
-                .world_dir(id),
+                catalog_world_root
+                    .as_deref()
+                    .context("catalog destination requires a native world root")?
+                    .join(id.as_str()),
             ),
             (None, None) => None,
         };
