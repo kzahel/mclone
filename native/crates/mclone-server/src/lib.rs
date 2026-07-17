@@ -29,6 +29,7 @@ mod physics_terrain;
 mod placement;
 mod player;
 mod player_chunk_tracking;
+mod player_lifecycle;
 mod players;
 mod remote_players;
 mod runner;

@@ -403,6 +403,152 @@ fn persisted_zero_health_restores_a_typed_dead_player_state() {
 }
 
 #[test]
+fn accepted_lava_contact_kills_once_and_gates_physical_commands() {
+    let mut server = LocalRealmSession::new(12_345);
+    load_center_chunk(&mut server);
+    let position = Vec3d::new(8.5, 80.0, 8.5);
+    let lava_pos = BlockPos::containing(position);
+    assert!(server.scheduler_mut().set_block_at_world(lava_pos, LAVA));
+
+    let updates = server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
+            position,
+            y_rot_degrees: 15.0,
+            x_rot_degrees: 0.0,
+            on_ground: false,
+        }))
+        .unwrap();
+
+    assert!(server.player_vitals().is_dead());
+    assert_eq!(
+        server.pending_death_cause(),
+        Some(mclone_protocol::PlayerDamageCause::Lava)
+    );
+    assert!(updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerStatistics { statistics }
+            if statistics.death_count() == 1
+    )));
+
+    let dead_position = server.player().position();
+    assert!(
+        server
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: Vec3d::new(9.5, 90.0, 9.5),
+                on_ground: false,
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(server.player().position(), dead_position);
+
+    let selected_slot = server.inventory().selected_hotbar_slot();
+    assert!(
+        server
+            .try_handle_command(ClientCommand::SetCarriedItem(SetCarriedItemCommand {
+                slot: selected_slot.saturating_add(1),
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(server.inventory().selected_hotbar_slot(), selected_slot);
+
+    assert!(
+        server
+            .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+                pos: lava_pos,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }))
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(server.scheduler().block_at_world(lava_pos), Some(LAVA));
+    let player_id = server.player_id();
+    assert!(
+        !server
+            .transfer_player_dimension(
+                player_id,
+                DimensionKey::parse("mclone:unregistered").unwrap(),
+                Vec3d::new(0.5, 80.0, 0.5),
+            )
+            .unwrap()
+    );
+
+    let repeated = server.try_simulation_tick_report().unwrap();
+    assert!(!repeated.updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerStatistics { statistics }
+            if statistics.death_count() > 1
+    )));
+    assert_eq!(server.player_statistics().death_count(), 1);
+}
+
+#[test]
+fn server_tick_kills_a_stationary_player_when_lava_appears() {
+    let mut server = LocalRealmSession::new(12_345);
+    load_center_chunk(&mut server);
+    let position = Vec3d::new(8.5, 80.0, 8.5);
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+            position,
+            on_ground: true,
+        }))
+        .unwrap();
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::containing(position), LAVA)
+    );
+
+    let report = server.try_simulation_tick_report().unwrap();
+
+    assert!(server.player_vitals().is_dead());
+    assert!(report.updates.iter().any(|update| matches!(
+        update,
+        ServerUpdate::PlayerStatistics { statistics }
+            if statistics.death_count() == 1
+    )));
+}
+
+#[test]
+fn lava_death_immediately_enqueues_the_identity_player_record() {
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x48; 16]), "Persistent").unwrap();
+    let key = player_record_key(identity.profile_id);
+    let mut server = LocalRealmSession::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    load_center_chunk(&mut server);
+    let position = Vec3d::new(8.5, 80.0, 8.5);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::containing(position), LAVA)
+    );
+
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+            position,
+            on_ground: false,
+        }))
+        .unwrap();
+    server.scheduler_mut().flush_persistence().unwrap();
+    let record = server
+        .scheduler_mut()
+        .load_player_record_blocking(key)
+        .unwrap()
+        .expect("death transition must persist an identity record");
+
+    assert_eq!(record.health, 0.0);
+    assert_eq!(
+        record.pending_death_cause,
+        Some(mclone_protocol::PlayerDamageCause::Lava)
+    );
+    assert_eq!(record.statistics.death_count(), 1);
+}
+
+#[test]
 fn current_single_dimension_runtime_rejects_non_overworld_resume_records() {
     let seed = 12_345;
     let identity = ClientIdentity::new(PlayerProfileId::new([0x43; 16]), "Traveler").unwrap();

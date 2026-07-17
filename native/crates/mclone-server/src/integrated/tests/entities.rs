@@ -89,6 +89,45 @@ fn local_and_dedicated_players_pair_symmetrically() {
 }
 
 #[test]
+fn lava_death_removes_the_remote_body_without_disconnecting_interest() {
+    let mut server = LocalRealmSession::new(12_345);
+    load_center_chunk(&mut server);
+    let local_player = server.player_id();
+    let position = Vec3d::new(8.5, 80.0, 8.5);
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+            position,
+            on_ground: true,
+        }))
+        .unwrap();
+
+    let observer = server.add_player();
+    let observer_updates =
+        set_dedicated_chunk_view_and_poll(&mut server, observer, ChunkPos::new(0, 0), 0);
+    assert!(remote_player_add(&observer_updates, local_player).is_some());
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::containing(position), LAVA)
+    );
+
+    server
+        .try_handle_command(ClientCommand::move_player(MovePlayerCommand::StatusOnly {
+            on_ground: false,
+        }))
+        .unwrap();
+    let observer_updates = server.try_drain_updates_for_player(observer).unwrap();
+
+    assert!(has_remote_player_remove(&observer_updates, local_player));
+    assert_eq!(server.player_count(), 2);
+    assert!(
+        RealmServer::player_vitals(&server, local_player)
+            .unwrap()
+            .is_dead()
+    );
+}
+
+#[test]
 fn shared_auxiliary_player_script_uses_authoritative_commands() {
     let mut server = LocalRealmSession::new(12_345);
     load_center_chunk(&mut server);

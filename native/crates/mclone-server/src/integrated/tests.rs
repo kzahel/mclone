@@ -14,8 +14,8 @@ use mclone_protocol::{
     ServerUpdate,
 };
 use mclone_worldgen::block::{
-    AIR, BRICKS, DIRT, GRASS, OAK_LOG_X, OAK_LOG_Z, SAND, SNOW, STONE, TORCH, WALL_TORCH_EAST,
-    WATER, generated_block_state_id, has_fluid, material_blocks_motion,
+    AIR, BRICKS, DIRT, GRASS, LAVA, OAK_LOG_X, OAK_LOG_Z, SAND, SNOW, STONE, TORCH,
+    WALL_TORCH_EAST, WATER, generated_block_state_id, has_fluid, material_blocks_motion,
 };
 
 fn last_time_update(report: &ServerSimulationTickReport) -> u64 {

@@ -2,6 +2,8 @@ use std::error::Error;
 use std::fmt;
 
 pub const DEFAULT_PLAYER_MAX_HEALTH: f32 = 20.0;
+pub const PLAYER_STANDING_WIDTH: f64 = 0.6;
+pub const PLAYER_STANDING_HEIGHT: f64 = 1.8;
 
 /// Authoritative health facts for one player life.
 ///
@@ -45,6 +47,10 @@ impl PlayerVitals {
 
     pub fn is_dead(self) -> bool {
         self.health <= 0.0
+    }
+
+    pub fn with_health(self, health: f32) -> Result<Self, PlayerVitalsError> {
+        Self::new(health, self.max_health)
     }
 }
 

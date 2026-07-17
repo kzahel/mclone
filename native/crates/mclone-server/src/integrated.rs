@@ -19,9 +19,9 @@ use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DebugActorKind,
     DebugHotbarItem, DimensionKey, EntityKind, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerModelKind, PlayerProfileId,
-    PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities,
-    SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
+    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerModelKind,
+    PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand, ServerUpdate,
+    SessionCapabilities, SessionConfiguration, SetCarriedItemCommand, SetDebugHotbarSlotCommand,
     SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
@@ -66,6 +66,7 @@ use crate::player_chunk_tracking::{
     DimensionInterestSource, ObserverId, ObserverSimulationInterest, PlayerChunkTracking,
     PlayerChunkTrackingPolicy,
 };
+use crate::player_lifecycle::player_body_touches_lava;
 use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
 use crate::spawn::{SpawnColumnOrder, find_safe_surface_spawn_with_column_order};
@@ -1218,6 +1219,13 @@ impl RealmServer {
             .dimension(player_id)
             .cloned()
             .ok_or_else(|| unknown_player_error(player_id))?;
+        if self
+            .players
+            .get(player_id)
+            .is_some_and(|player| player.vitals.is_dead())
+        {
+            return Ok(false);
+        }
         if source == destination {
             return Ok(false);
         }
@@ -1503,11 +1511,24 @@ impl RealmServer {
         self.players.get(player_id).map(|player| &player.statistics)
     }
 
+    pub fn player_vitals(
+        &self,
+        player_id: ServerPlayerId,
+    ) -> Option<mclone_protocol::PlayerVitals> {
+        self.players.get(player_id).map(|player| player.vitals)
+    }
+
+    pub fn player_death_cause(&self, player_id: ServerPlayerId) -> Option<PlayerDamageCause> {
+        self.players
+            .get(player_id)
+            .and_then(|player| player.pending_death_cause)
+    }
+
     fn mob_player_targets(&self) -> Vec<MobPlayerTarget> {
         let dimension = &self.active_dimension.key;
         self.players
             .iter()
-            .filter(|(_, entry)| &entry.dimension == dimension)
+            .filter(|(_, entry)| &entry.dimension == dimension && !entry.vitals.is_dead())
             .map(|(_, entry)| MobPlayerTarget::from_position(entry.state.position()))
             .collect()
     }
@@ -1517,7 +1538,9 @@ impl RealmServer {
         self.players
             .iter()
             .filter(|(_, entry)| {
-                &entry.dimension == dimension && entry.state.has_accepted_position()
+                &entry.dimension == dimension
+                    && !entry.vitals.is_dead()
+                    && entry.state.has_accepted_position()
             })
             .map(|(_, entry)| entry.state.position())
             .collect()
@@ -1528,7 +1551,9 @@ impl RealmServer {
         self.players
             .iter()
             .filter(|(_, entry)| {
-                &entry.dimension == dimension && entry.state.has_accepted_position()
+                &entry.dimension == dimension
+                    && !entry.vitals.is_dead()
+                    && entry.state.has_accepted_position()
             })
             .map(|(player_id, entry)| ItemPickupTarget {
                 player_id,
@@ -1571,6 +1596,9 @@ impl RealmServer {
         target: CommandTarget,
         command: ClientCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if self.player_is_dead(target)? && !command_is_allowed_while_dead(&command) {
+            return Ok(Vec::new());
+        }
         match command {
             ClientCommand::SetChunkView(view) => self.set_chunk_view_for_target(target, view),
             ClientCommand::MovePlayer(command) => {
@@ -1838,6 +1866,7 @@ impl RealmServer {
         self.entities.on_blocks_changed(&fluid_mutated_positions);
         fluid_events.extend(self.scheduler.drain_pending_block_delta_events());
         let fluid_event_count = fluid_events.len();
+        self.kill_players_touching_lava_in_active_dimension()?;
 
         let entity_chunks_before_tick = self.entities.persistent_entity_chunk_positions();
         let entity_tick_start = simulation_timing_start();
@@ -2369,6 +2398,7 @@ impl RealmServer {
             updates.push(self.increment_player_statistic(target, StatisticKey::jump())?);
         }
         if result == MovePlayerApplyResult::Accepted {
+            updates.extend(self.kill_player_if_touching_lava(target)?);
             self.reconcile_remote_player_subject(target.player_id(), true);
         }
         Ok(updates)
@@ -2539,7 +2569,9 @@ impl RealmServer {
         let accepted = self.player_mut_for_target(target)?.accept_teleport(id);
         if accepted {
             self.pending_dimension_transfers.remove(&target.player_id());
+            let updates = self.kill_player_if_touching_lava(target)?;
             self.reconcile_remote_player_subject(target.player_id(), true);
+            return Ok(updates);
         }
         Ok(Vec::new())
     }
@@ -3002,7 +3034,7 @@ impl RealmServer {
             y_rot_degrees: player.state.y_rot_degrees(),
             x_rot_degrees: player.state.x_rot_degrees(),
             on_ground: player.state.on_ground(),
-            publishable: player.state.has_accepted_position(),
+            publishable: player.state.has_accepted_position() && !player.vitals.is_dead(),
         })
     }
 
@@ -3331,8 +3363,8 @@ impl RealmServer {
     }
 
     fn player_pose_has_clearance(&self, position: Vec3d) -> bool {
-        const PLAYER_RADIUS: f64 = 0.299;
-        const PLAYER_HEIGHT: f64 = 1.799;
+        const PLAYER_RADIUS: f64 = mclone_protocol::PLAYER_STANDING_WIDTH * 0.5 - 0.001;
+        const PLAYER_HEIGHT: f64 = mclone_protocol::PLAYER_STANDING_HEIGHT - 0.001;
         let xs = [position.x - PLAYER_RADIUS, position.x + PLAYER_RADIUS];
         let ys = [position.y, position.y + PLAYER_HEIGHT];
         let zs = [position.z - PLAYER_RADIUS, position.z + PLAYER_RADIUS];
@@ -3566,6 +3598,89 @@ impl RealmServer {
         } else {
             Err(unknown_player_error(player_id))
         }
+    }
+
+    fn player_is_dead(&self, target: CommandTarget) -> ChunkStoreResult<bool> {
+        let player_id = target.player_id();
+        self.players
+            .get(player_id)
+            .map(|player| player.vitals.is_dead())
+            .ok_or_else(|| unknown_player_error(player_id))
+    }
+
+    fn kill_player_if_touching_lava(
+        &mut self,
+        target: CommandTarget,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let player_id = target.player_id();
+        let Some(player) = self.players.get(player_id) else {
+            return Err(unknown_player_error(player_id));
+        };
+        if player.dimension != self.active_dimension.key
+            || player.vitals.is_dead()
+            || !player.state.has_accepted_position()
+        {
+            return Ok(Vec::new());
+        }
+        let position = player.state.position();
+        let touching_lava = player_body_touches_lava(position, |pos| {
+            self.scheduler
+                .block_at_world(pos)
+                .map(|block| BlockStateId(u32::from(block)))
+        });
+        if !touching_lava {
+            return Ok(Vec::new());
+        }
+        self.kill_player(target, PlayerDamageCause::Lava)
+    }
+
+    fn kill_players_touching_lava_in_active_dimension(&mut self) -> ChunkStoreResult<()> {
+        let player_ids = self
+            .players
+            .iter()
+            .filter(|(_, player)| {
+                player.dimension == self.active_dimension.key
+                    && !player.vitals.is_dead()
+                    && player.state.has_accepted_position()
+            })
+            .map(|(player_id, _)| player_id)
+            .collect::<Vec<_>>();
+        for player_id in player_ids {
+            let updates = self.kill_player_if_touching_lava(CommandTarget::Player(player_id))?;
+            for update in updates {
+                self.chunk_tracking
+                    .queue_update_for_player(player_id, update);
+            }
+        }
+        Ok(())
+    }
+
+    fn kill_player(
+        &mut self,
+        target: CommandTarget,
+        cause: PlayerDamageCause,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        let player_id = target.player_id();
+        let statistics = {
+            let player = self
+                .players
+                .get_mut(player_id)
+                .ok_or_else(|| unknown_player_error(player_id))?;
+            if player.vitals.is_dead() {
+                return Ok(Vec::new());
+            }
+            player.vitals = player
+                .vitals
+                .with_health(0.0)
+                .expect("zero health must be valid for positive maximum health");
+            player.pending_death_cause = Some(cause);
+            player.statistics.increment(StatisticKey::deaths(), 1);
+            player.statistics.clone()
+        };
+        self.pending_dimension_transfers.remove(&player_id);
+        self.reconcile_remote_player_subject(player_id, true);
+        self.save_player_record(player_id)?;
+        Ok(vec![ServerUpdate::PlayerStatistics { statistics }])
     }
 
     fn mark_player_tick_boundaries(&mut self) {
@@ -4254,6 +4369,17 @@ impl CommandTarget {
             Self::Player(player_id) => player_id,
         }
     }
+}
+
+fn command_is_allowed_while_dead(command: &ClientCommand) -> bool {
+    matches!(
+        command,
+        ClientCommand::SetChunkView(_)
+            | ClientCommand::AcceptTeleport(_)
+            | ClientCommand::SetPlayerAppearance(_)
+            | ClientCommand::KeepAlive { .. }
+            | ClientCommand::Disconnect(_)
+    )
 }
 
 fn unknown_player_error(player_id: ServerPlayerId) -> ChunkStoreError {

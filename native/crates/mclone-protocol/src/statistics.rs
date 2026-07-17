@@ -8,6 +8,7 @@ pub const MAX_PLAYER_STATISTIC_VALUE: u32 = i32::MAX as u32;
 
 pub const CUSTOM_STATISTIC_TYPE_KEY: &str = "minecraft:custom";
 pub const JUMP_STATISTIC_VALUE_KEY: &str = "minecraft:jump";
+pub const DEATHS_STATISTIC_VALUE_KEY: &str = "minecraft:deaths";
 pub const MCLONE_CUSTOM_STATISTIC_TYPE_KEY: &str = "mclone:custom";
 pub const SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY: &str =
     "mclone:successful_block_placements";
@@ -46,6 +47,11 @@ impl StatisticKey {
             SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY,
         )
         .expect("built-in block-placement statistic key must remain valid")
+    }
+
+    pub fn deaths() -> Self {
+        Self::new(CUSTOM_STATISTIC_TYPE_KEY, DEATHS_STATISTIC_VALUE_KEY)
+            .expect("built-in death statistic key must remain valid")
     }
 
     pub fn statistic_type(&self) -> &str {
@@ -116,6 +122,10 @@ impl PlayerStatistics {
 
     pub fn successful_block_placement_count(&self) -> u32 {
         self.get(&StatisticKey::successful_block_placement())
+    }
+
+    pub fn death_count(&self) -> u32 {
+        self.get(&StatisticKey::deaths())
     }
 
     pub fn set(&mut self, key: StatisticKey, value: u32) {
@@ -196,6 +206,10 @@ mod tests {
         let placed = StatisticKey::successful_block_placement();
         assert_eq!(placed.statistic_type(), "mclone:custom");
         assert_eq!(placed.value(), "mclone:successful_block_placements");
+
+        let deaths = StatisticKey::deaths();
+        assert_eq!(deaths.statistic_type(), "minecraft:custom");
+        assert_eq!(deaths.value(), "minecraft:deaths");
     }
 
     #[test]
