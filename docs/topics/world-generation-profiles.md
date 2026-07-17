@@ -7,7 +7,8 @@ Status: **Tactical 187 is complete. `flat-grass-v1` and
 beside the unchanged Overworld; authored-only misses still produce void.
 Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
 multi-dimension, and stored-reopen paths now carry the same profile contract.
-Tactical 191 now owns the guarded generator-planning ownership refactor;
+Tactical 191 now owns the guarded generator-planning ownership refactor and
+has completed its clean Slice 0 host/Android baseline; Slice 1 is next.
 Tactical 188 owns the later `mclone-overworld-v1` biome/decoration fork.**
 
 This topic owns the current truth and durable decisions for selectable,

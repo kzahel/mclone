@@ -18,10 +18,15 @@ invalidates an older recommendation, or establishes a new baseline.
 Tactical
 [`191`](../tactical/191-guarded-generation-planning-refactor.md) applies this
 topic's A/B and frame-tail rules to a behavior-preserving worldgen planning
-refactor. Its preflight adds paired flat-Android AVD `-gpu host` and
-`-gpu auto` pacing canaries while retaining physical Quest RD5 orbit/churn as
-the final hardware gate. AVD numbers are relative Android/shared-path evidence,
-not standalone Quest evidence.
+refactor. Its clean Slice 0 preflight established paired flat-Android AVD
+`-gpu host` and `-gpu auto` pacing canaries plus raw worldgen, scheduler,
+startup-streaming, and movement baselines. On the current Apple host, AVD
+`host` selects Apple M4 Pro Vulkan while `auto` selects software SwiftShader;
+`auto` is about 2.76x slower by average app work, 4.23x slower at p95, and has
+visible black-region artifacts. Treat them as separate adapter-specific lanes,
+with `host` primary and `auto` a compatibility/stress canary. Physical Quest
+RD5 orbit/churn remains the final hardware gate; AVD numbers are relative
+Android/shared-path evidence, not standalone Quest evidence.
 
 ## High-Priority Known Performance Issues
 

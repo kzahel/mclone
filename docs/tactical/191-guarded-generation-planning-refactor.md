@@ -1,7 +1,7 @@
 # Tactical 191: Guarded Generation Planning Refactor
 
-Status: active 2026-07-17; Slice 0 benchmark harness and clean baseline in
-progress. No planner or scheduler behavior has changed yet.
+Status: active 2026-07-17; Slice 0 benchmark harness and clean baseline are
+complete. Slice 1 is next. No planner or scheduler behavior has changed yet.
 
 Topics: `world-generation-profiles`, `performance`
 
@@ -173,6 +173,69 @@ Gate: the benchmark is bounded, emits no marker outside explicit perf mode,
 reports zero conservation violations, and paired modes complete the identical
 workload. No worldgen/scheduler production behavior changes in this slice.
 
+#### Slice 0 result: clean baseline at `0ae6b924`
+
+The baseline was captured on 2026-07-17 from clean commit `0ae6b924` on an
+arm64 Apple M4 Pro host running macOS 26.5.1. Raw JSON and logcat output remain
+under `/tmp/mclone-191-*`; those transient paths are evidence pointers, not
+repository artifacts.
+
+The new Android canary is deliberately bounded and opt-in. It resets the
+production `FramePipelineAccountant` after a five-second warmup, alternates
+the authoritative mono camera between chunk X 0 and 16 every three seconds,
+samples for 15 seconds at RD5 and seed 12345, and emits exactly one compact
+`MCLONE_ANDROID_PACING_PERF_SUMMARY` marker. The paired wrapper cold-boots the
+same `jstorrent-tablet` arm64-v8a AVD without a saved snapshot and clears app
+data before each mode.
+
+The GPU-mode hypothesis did not hold: `-gpu host` and `-gpu auto` resolve to
+different Vulkan adapters on this AVD and produce materially different pacing
+and pixels.
+
+| AVD mode | Vulkan adapter | Frames | App avg | App p95 | App p99 | Max | > period | >2x / >4x | Queue depth / age |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `host` | Apple M4 Pro | 901 | 16.516 ms | 19.180 ms | 24.491 ms | 53.332 ms | 40.07% | 1 / 0 | 186 / 2,424 ms |
+| `auto` | SwiftShader Device | 331 | 45.516 ms | 81.208 ms | 88.853 ms | 138.477 ms | 99.09% | 243 / 53 | 238 / 11,499 ms |
+
+Both modes reported zero frame- and queue-conservation violations. `auto` was
+about 2.76x slower by average app work and 4.23x slower at p95. The inspected
+`host` screenshot rendered the terrain normally; the inspected `auto`
+screenshot contained large black regions. Logcat contained no fatal or wgpu
+validation error, while the emulator reported SwiftShader unsupported Vulkan
+extension warnings. This is an emulator/backend distinction, not evidence of
+an Mclone planner regression.
+
+Consequently, `host` is the primary hardware-Vulkan AVD pacing canary for this
+series. `auto` remains a separate software-backend compatibility/stress lane.
+Each candidate is compared only with the matching adapter baseline; their
+numbers must not be averaged or treated as interchangeable product evidence.
+One paired scouting sample does not establish binding numeric timing gates,
+but changed work, conservation failures, persistent queue growth, or new
+severe-frame tiers remain blockers.
+
+The existing release host baselines completed from the same clean commit:
+
+| Probe | Pre-refactor result |
+|---|---|
+| raw worldgen, radius 1 | surface 701.859 chunks/s; features cold 116.515 target chunks/s; features warm 471.115 target chunks/s |
+| raw worldgen dependency cache | cold 49 requested / 0 hit / 49 generated / 49 retained; warm 49 / 49 / 0 / 49 |
+| scheduler, three radius-1 steps | 670.358 ms total; step max polls 0.657 / 0.382 / 0.370 ms; 3 feature jobs; 9 + 3 + 3 snapshots; 0 + 3 + 3 unloads; peak RSS 56,768 KiB |
+| scheduler exact work | initial job 25 targets / 49 feature centers / 81 dependencies; moved jobs each 5 / 21 / 45; final cache 72 hits / 99 misses / 171 retained |
+| startup streaming, RD10 at 60 Hz | playable 514.305 ms; full view 6,147.597 ms; render quiescent 49,647.138 ms; frame avg/p95/p99/max 4.916/7.421/9.063/14.315 ms; 0 over budget |
+| startup queue/work | max scheduler publish poll 11.239 ms; 1,280 feature chunks and 1,446 light statuses published; 7,917 submitted / 7,907 completed compiles; 2,970 uploads; 0 update-pump stalls |
+| movement, RD5 at 120 Hz | 240 frames; avg/p95/p99/max 2.231/3.047/3.300/3.388 ms; 0 over budget; frame-accounting app-work p95 1.504 ms |
+
+Startup streaming ended with 529/529 target chunks ready, no pending server
+jobs or publications, and an empty update queue. Both paced host probes
+reported zero frame-accounting conservation violations. The startup lane's
+standard 6,000-frame run continued after render quiescence and ended at
+130,516 ms; the quiescence timestamp, not final wall time, is the comparison
+metric.
+
+Slice 0 therefore passes as an initial regression baseline. Physical Quest
+RD5 orbit/churn remains pending and is still the final standalone-XR pacing
+authority.
+
 ### Slice 1: Pure plan vocabulary and exact fixtures
 
 - introduce the smallest value vocabulary for exact outputs, backend work,
@@ -257,4 +320,3 @@ Android paired baseline uses the Tactical 191 AVD pacing command with explicit
 pnpm native:android-xr:perf:orbit:rd5:metrics
 pnpm native:android-xr:perf:churn:rd5:metrics
 ```
-
