@@ -34,6 +34,18 @@ pub struct ChunkGenerationPlan {
 }
 
 impl ChunkGenerationPlan {
+    pub fn from_parts(
+        output_chunks: impl IntoIterator<Item = ChunkPos>,
+        backend_work_chunks: impl IntoIterator<Item = ChunkPos>,
+        prerequisites: impl IntoIterator<Item = ChunkStatusRequirement>,
+    ) -> Self {
+        Self {
+            output_chunks: output_chunks.into_iter().collect(),
+            backend_work_chunks: backend_work_chunks.into_iter().collect(),
+            prerequisites: prerequisites.into_iter().collect(),
+        }
+    }
+
     /// Current Overworld FEATURES footprint: requested outputs, the 3x3
     /// feature-center expansion, and the 5x5 Surface dependency expansion for
     /// a single target.
@@ -43,7 +55,7 @@ impl ChunkGenerationPlan {
         let prerequisites = expand_chunks(&backend_work_chunks, FEATURES_BLOCK_DEPENDENCY_RADIUS)
             .into_iter()
             .map(|pos| ChunkStatusRequirement::new(pos, ChunkStatus::Surface))
-            .collect();
+            .collect::<BTreeSet<_>>();
 
         Self {
             output_chunks,

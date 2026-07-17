@@ -1,3 +1,5 @@
+use mclone_core::ChunkPos;
+use mclone_worldgen::levelgen::ChunkGenerationPlan;
 use serde::{Deserialize, Serialize};
 
 pub const AUTHORED_WORLD_MIN_Y: i32 = 0;
@@ -50,6 +52,22 @@ impl WorldGenerationProfile {
         match self {
             Self::Overworld | Self::FlatGrassV1 | Self::SmallIslandV1 => None,
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
+        }
+    }
+
+    /// Closed built-in dispatch for the pure FEATURES-stage generation plan.
+    /// Scheduler priority and readiness policy are intentionally applied only
+    /// after this generator-owned declaration returns.
+    pub(crate) fn plan_features(
+        self,
+        targets: impl IntoIterator<Item = ChunkPos>,
+    ) -> ChunkGenerationPlan {
+        match self {
+            Self::Overworld => ChunkGenerationPlan::overworld_features(targets),
+            Self::FlatGrassV1 | Self::SmallIslandV1 => ChunkGenerationPlan::target_only(targets),
+            Self::AuthoredOnly { .. } => {
+                unreachable!("authored-only misses bypass procedural job creation")
+            }
         }
     }
 
