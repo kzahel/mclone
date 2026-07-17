@@ -245,22 +245,22 @@ fn actor_composition_is_opt_in_shared_and_portable() {
 }
 
 #[test]
-fn scene_current_actor_path_is_raw_active_only_and_slot_cached() {
+fn scene_current_actor_path_is_interpolated_active_only_and_slot_cached() {
     let scene = read("src/lib.rs");
     let host = braced_item(&scene, "pub struct McloneSceneHost {");
     let slot = braced_item(&scene, "struct DrawableWorldSlot {");
-    let collect = braced_item(&scene, "fn current_actor_instances(&self)");
+    let collect = braced_item(&scene, "fn current_actor_instances(&mut self)");
 
     assert!(!host.contains("actors: ActorDrawResources"));
     assert!(slot.contains("actors: Option<ActorDrawResources>"));
-    assert!(!slot.contains("ActorInterpolationState"));
+    assert!(slot.contains("ActorInterpolationState"));
+    assert!(slot.contains("last_actor_presentation_update"));
     assert!(collect.contains("self.active_world"));
-    assert!(collect.contains("runtime.client().actor_presentations()"));
+    assert!(collect.contains("interpolated_actor_presentations"));
     assert!(collect.contains("local_player_actor_instance_for_view("));
     assert!(collect.contains("self.active_world.camera"));
     assert!(collect.contains("self.active_world.player_model"));
     assert!(!collect.contains("standby_world"));
-    assert!(!collect.contains("ActorInterpolationState"));
 }
 
 #[test]
@@ -274,12 +274,12 @@ fn current_local_player_body_is_active_view_policy_and_preview_observers_have_no
     assert!(local.contains("with_first_person_body_only(true)"));
 
     let scene = read("src/lib.rs");
-    let collect = braced_item(&scene, "fn current_actor_instances(&self)");
+    let collect = braced_item(&scene, "fn current_actor_instances(&mut self)");
     assert!(collect.contains("self.active_world.camera"));
     assert!(!collect.contains("standby_world"));
     assert!(!collect.contains("source-local"));
 
-    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
+    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&mut self)");
     assert!(preview_collect.contains(".standby_world"));
     assert!(preview_collect.contains("EmbeddedWorldPreviewPhase::Visible"));
     assert!(preview_collect.contains("actor_instances_from_presentations"));
@@ -310,8 +310,11 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
     assert!(constructor.contains("players: ServerPlayerList::default()"));
     assert!(!constructor.contains(".add_player("));
 
-    let local_session = braced_item(&server, "pub fn from_server(mut server: RealmServer)");
-    assert!(local_session.contains("let player_id = server.add_player()"));
+    let local_session = braced_item(
+        &server,
+        "pub fn from_server_with_capabilities(",
+    );
+    assert!(local_session.contains("server.add_player_with_capabilities(capabilities)"));
     assert!(local_session.contains("LocalRealmSessionRole::Player(player_id)"));
 
     let observe = braced_item(&server, "pub fn begin_observing(");
@@ -331,7 +334,7 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
     assert!(demote.contains("self.server.add_observer("));
 
     let scene = read("src/lib.rs");
-    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
+    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&mut self)");
     assert!(!preview_collect.contains("local_player_actor_instance("));
     assert!(preview_collect.contains("source_local_player_count: 0"));
 }
@@ -364,14 +367,14 @@ fn retained_destination_presentations_exist_below_scene_omission() {
     assert!(presentations.contains("self.entities"));
 
     let scene = read("src/lib.rs");
-    let collect = braced_item(&scene, "fn current_actor_instances(&self)");
+    let collect = braced_item(&scene, "fn current_actor_instances(&mut self)");
     assert!(!collect.contains("standby_world"));
     assert!(!collect.contains("embedded_world_preview"));
 
-    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&self)");
+    let preview_collect = braced_item(&scene, "fn current_preview_actor_instances(&mut self)");
     assert!(preview_collect.contains("standby_world"));
     assert!(preview_collect.contains("runtime.client()"));
-    assert!(preview_collect.contains("client.actor_presentations()"));
+    assert!(preview_collect.contains("interpolated_actor_presentations"));
     assert!(preview_collect.contains("client.entity_count()"));
     assert!(preview_collect.contains("client.remote_player_count()"));
 }

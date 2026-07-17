@@ -1,7 +1,7 @@
 # 189: Interactive Prepared Actor Runtime
 
-Status: active 2026-07-17. Slices 0-2 are complete; Slice 3 stable
-presentation identity and continuous travel phase is next.
+Status: active 2026-07-17. Slices 0-3 are complete; Slice 4 production
+prepared coexistence is next.
 
 Topic: `compiled-figure-rendering`
 
@@ -224,7 +224,7 @@ Gate evidence:
   path. The mannequin already selects the player figure approximation so the
   interactive fixture remains visible while prepared coexistence lands.
 
-### Slice 3: stable presentation and continuous travel phase
+### Slice 3: stable presentation and continuous travel phase (complete 2026-07-17)
 
 - Carry stable actor identity into the renderer-neutral actor instance.
 - Make movement-derived travel phase follow smoothed presentation displacement
@@ -235,6 +235,37 @@ Gate evidence:
 
 Gate: a wandering mannequin and chicken animate continuously between network
 updates; no authored-key-rate or display-rate hold exists.
+
+Gate evidence:
+
+- Renderer-neutral `ActorInstanceId` distinguishes local player, remote player,
+  and entity identities. The presentation-to-render boundary copies protocol
+  IDs explicitly; a prepared actor record never needs a vector index or world
+  position as identity.
+- Each `DrawableWorldSlot` owns its own `ActorInterpolationState` and last
+  presentation instant. Active and retained-preview worlds reconcile and step
+  independently, replacement/install resets the state, and one actor list is
+  prepared before both eyes consume it.
+- Chicken and mannequin walk distance now accumulates only the finite
+  horizontal displacement actually presented by the exponential interpolation
+  step. Reconciliation does not copy an authoritative distance jump onto a
+  partially interpolated position. Paused actors retain phase, while despawn
+  followed by a new actor track resets it.
+- Chicken wing animation remains an independent derived channel and composes
+  with travel phase. Remote-player interpolation uses the same movement-derived
+  rule while retaining its existing source-distance field as the initial phase
+  seed for compatibility.
+- Exact tests cover target reconciliation before a frame step, 60 Hz versus
+  500 Hz over the same elapsed second, actor input reordering, unequal per-ID
+  travel, pause stability, and despawn/respawn reset. The 500 Hz path produces
+  the same presented position and phase within floating-point tolerance; there
+  is no authored sampling or display-frequency ceiling.
+- All 118 client tests, all 113 render-session tests, the 14-test composable
+  world presentation contract, focused legacy actor-mesh tests, and workspace
+  check pass. The rebuilt native production actor smoke captured and inspected
+  `/tmp/mclone-stable-actor-presentation.png`; all three actors draw coherently,
+  including the moving upright-bear remote-player figure at walk distance
+  `0.08`.
 
 ### Slice 4: production prepared coexistence
 

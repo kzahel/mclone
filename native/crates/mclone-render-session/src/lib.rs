@@ -6,12 +6,13 @@ use anyhow::{Context, Result, bail};
 use glam::{Quat, Vec3};
 use mclone_assets::ActorFigureId;
 use mclone_client::{
-    ActorPresentation, ActorPresentationKind, BlockInteractionTarget, ClientInteractionController,
-    ClientRuntime, CollisionMovementResult, FlyingMovementStep, HAND_PUSH_DEFAULT_HAND_RADIUS,
-    HandPushLocomotionController, HandPushMovementStep, HandPushPose,
-    LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT, LOCAL_PLAYER_TICKS_PER_SECOND,
-    LocalPlayerController, LocalPlayerDimensions, LocalPlayerPose, NoClipMovementStep,
-    PlayerInputKey, ThrusterHandInput, ThrusterMovementStep, ThrusterTuning, WalkingMovementStep,
+    ActorPresentation, ActorPresentationId, ActorPresentationKind, BlockInteractionTarget,
+    ClientInteractionController, ClientRuntime, CollisionMovementResult, FlyingMovementStep,
+    HAND_PUSH_DEFAULT_HAND_RADIUS, HandPushLocomotionController, HandPushMovementStep,
+    HandPushPose, LOCAL_PLAYER_STANDING_EYE_HEIGHT, LOCAL_PLAYER_STANDING_HEIGHT,
+    LOCAL_PLAYER_TICKS_PER_SECOND, LocalPlayerController, LocalPlayerDimensions, LocalPlayerPose,
+    NoClipMovementStep, PlayerInputKey, ThrusterHandInput, ThrusterMovementStep, ThrusterTuning,
+    WalkingMovementStep,
 };
 use mclone_core::{
     AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME,
@@ -30,7 +31,7 @@ use mclone_protocol::{
     ClientCommand, EntityKind, ItemKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
 };
 use mclone_render::chunk::{ChunkCamera, PerspectiveRenderPose};
-use mclone_render::entity::ActorInstance;
+use mclone_render::entity::{ActorInstance, ActorInstanceId};
 use mclone_render::gui::WorldGuiLine;
 
 const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR2\0";

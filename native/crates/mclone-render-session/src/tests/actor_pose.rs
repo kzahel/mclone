@@ -122,6 +122,10 @@ fn chicken_entity_actor_uses_chicken_figure() {
 
     assert_eq!(actors.len(), 1);
     assert_eq!(
+        actors[0].id,
+        Some(mclone_render::entity::ActorInstanceId::Entity(7))
+    );
+    assert_eq!(
         actors[0].shape,
         mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::chicken_figure_id())
     );
@@ -129,6 +133,40 @@ fn chicken_entity_actor_uses_chicken_figure() {
     assert_eq!(actors[0].height, 0.7);
     assert!(actors[0].animation.is_some());
     assert_eq!(actors[0].chicken_wing_flap_radians, Some(0.4));
+}
+
+#[test]
+fn actor_instance_identity_is_stable_across_presentation_reordering() {
+    let client = ClientRuntime::local_integrated();
+    let make = |id, kind| ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(id)),
+        kind: ActorPresentationKind::Entity(kind),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        feet_position: Vec3d::new(id as f64, 64.0, 2.0),
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.6,
+        height: 1.8,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+    let presentations = [
+        make(22, mclone_protocol::EntityKind::Mannequin),
+        make(11, mclone_protocol::EntityKind::Chicken),
+    ];
+
+    let actors = actor_instances_from_presentations(&presentations, &client);
+
+    assert_eq!(
+        actors.iter().map(|actor| actor.id).collect::<Vec<_>>(),
+        vec![
+            Some(mclone_render::entity::ActorInstanceId::Entity(22)),
+            Some(mclone_render::entity::ActorInstanceId::Entity(11)),
+        ]
+    );
 }
 
 #[test]

@@ -738,8 +738,9 @@ tier rather than a blocker. Neither changes the persistence decision.
   authoritative use-item placement and persistence;
 - the mannequin now uses player dimensions/figure selection and the existing
   cow passive-goal family so continuous world movement is directly testable;
-- propagate stable presentation identity and derive continuous travel phase
-  from interpolated movement instead of authoritative update steps;
+- stable presentation identity now reaches renderer-neutral actor instances,
+  and world-local presentation state derives continuous travel phase from
+  interpolated movement instead of authoritative update steps;
 - migrate chicken and mannequin one at a time while preserving mono, per-eye,
   multiview, browser, replacement, and drawable-world ownership; and
 - retain `ActorMeshCache` as an explicit fallback for unsupported figure,
@@ -994,11 +995,11 @@ drawable milestone. The eventual campaign should include:
 Continue Tactical
 [`189`](../tactical/189-interactive-prepared-actor-runtime.md). Cuboid-proxy
 preparation and authoritative persistent chicken/mannequin tools are complete.
-Next carry stable actor identity and continuously derived travel phase through
-presentation, then move those two kinds to a coexisting prepared production
-renderer. Stop only after native and browser interactive placement, wandering
-animation, immutable-resource residency, replacement, stereo/multiview
-contracts, and representative-count behavior are recorded.
+Stable actor identity and continuously derived travel phase are also complete.
+Next move chicken and mannequin to a coexisting prepared production renderer.
+Stop only after native and browser interactive placement, wandering animation,
+immutable-resource residency, replacement, stereo/multiview contracts, and
+representative-count behavior are recorded.
 
 Do not add a persisted compiled format, exact curved tessellation, instancing,
 LOD, or GPU crowd evaluation in that tactical. Its actor-record boundary

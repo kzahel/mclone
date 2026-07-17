@@ -182,11 +182,12 @@ impl ActorTrack {
         Self {
             rendered: actor,
             target: actor,
-            derived: ActorDerivedAnimationState::default(),
+            derived: ActorDerivedAnimationState::new(actor),
         }
     }
 
     fn set_target(&mut self, actor: ActorPresentation) {
+        let previous_kind = self.rendered.kind;
         self.target = actor;
         self.rendered.id = actor.id;
         self.rendered.kind = actor.kind;
@@ -195,7 +196,14 @@ impl ActorTrack {
         self.rendered.on_ground = actor.on_ground;
         self.rendered.width = actor.width;
         self.rendered.height = actor.height;
-        self.rendered.walk_animation_distance = actor.walk_animation_distance;
+        if uses_movement_derived_travel_phase(actor.kind) {
+            if actor.kind != previous_kind {
+                self.derived = ActorDerivedAnimationState::new(actor);
+                self.rendered.walk_animation_distance = actor.walk_animation_distance;
+            }
+        } else {
+            self.rendered.walk_animation_distance = actor.walk_animation_distance;
+        }
         if !matches!(
             self.rendered.kind,
             ActorPresentationKind::Entity(EntityKind::Chicken)
@@ -206,7 +214,7 @@ impl ActorTrack {
     }
 
     fn step(&mut self, factor: f32, dt_seconds: f32) {
-        let previous_y = self.rendered.feet_position.y;
+        let previous_position = self.rendered.feet_position;
         self.rendered.feet_position = lerp_vec3d(
             self.rendered.feet_position,
             self.target.feet_position,
@@ -227,11 +235,14 @@ impl ActorTrack {
         self.rendered.on_ground = self.target.on_ground;
         self.derived.step(
             self.rendered.kind,
-            previous_y,
-            self.rendered.feet_position.y,
+            previous_position,
+            self.rendered.feet_position,
             self.rendered.on_ground,
             dt_seconds,
         );
+        if uses_movement_derived_travel_phase(self.rendered.kind) {
+            self.rendered.walk_animation_distance = self.derived.travel_distance;
+        }
         self.rendered.chicken_wing_flap_radians =
             self.derived.chicken_wing_flap_radians(self.rendered.kind);
     }
@@ -239,30 +250,62 @@ impl ActorTrack {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct ActorDerivedAnimationState {
+    travel_distance: f32,
     chicken: ChickenWingAnimationState,
 }
 
 impl ActorDerivedAnimationState {
+    fn new(actor: ActorPresentation) -> Self {
+        Self {
+            travel_distance: actor.walk_animation_distance.max(0.0),
+            chicken: ChickenWingAnimationState::default(),
+        }
+    }
+
     fn step(
         &mut self,
         kind: ActorPresentationKind,
-        previous_y: f64,
-        current_y: f64,
+        previous_position: Vec3d,
+        current_position: Vec3d,
         on_ground: bool,
         dt_seconds: f32,
     ) {
+        if uses_movement_derived_travel_phase(kind) {
+            let distance = horizontal_distance(previous_position, current_position);
+            if distance.is_finite() {
+                self.travel_distance += distance;
+            }
+        }
         if !matches!(kind, ActorPresentationKind::Entity(EntityKind::Chicken)) {
             self.chicken = ChickenWingAnimationState::default();
             return;
         }
-        self.chicken
-            .step(previous_y, current_y, on_ground, dt_seconds);
+        self.chicken.step(
+            previous_position.y,
+            current_position.y,
+            on_ground,
+            dt_seconds,
+        );
     }
 
     fn chicken_wing_flap_radians(self, kind: ActorPresentationKind) -> Option<f32> {
         matches!(kind, ActorPresentationKind::Entity(EntityKind::Chicken))
             .then_some(self.chicken.wing_flap_radians())
     }
+}
+
+const fn uses_movement_derived_travel_phase(kind: ActorPresentationKind) -> bool {
+    matches!(
+        kind,
+        ActorPresentationKind::RemotePlayer
+            | ActorPresentationKind::Entity(EntityKind::Chicken | EntityKind::Mannequin)
+    )
+}
+
+fn horizontal_distance(from: Vec3d, to: Vec3d) -> f32 {
+    let dx = to.x - from.x;
+    let dz = to.z - from.z;
+    dx.mul_add(dx, dz * dz).sqrt() as f32
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -410,6 +453,24 @@ mod tests {
             on_ground,
             width: 0.4,
             height: 0.7,
+            walk_animation_distance: 0.0,
+            chicken_wing_flap_radians: None,
+        }
+    }
+
+    fn mannequin_actor(id: u64, x: f64) -> ActorPresentation {
+        ActorPresentation {
+            id: ActorPresentationId::Entity(EntityId(id)),
+            kind: ActorPresentationKind::Entity(EntityKind::Mannequin),
+            appearance: ActorAppearance::NONE,
+            item_stack: None,
+            feet_position: Vec3d::new(x, 64.0, 0.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.6,
+            height: 1.8,
             walk_animation_distance: 0.0,
             chicken_wing_flap_radians: None,
         }
@@ -600,5 +661,94 @@ mod tests {
             .chicken_wing_flap_radians
             .expect("grounded chicken keeps local animation field");
         assert!(grounded_flap < airborne_flap);
+    }
+
+    #[test]
+    fn actor_interpolation_derives_travel_phase_from_presented_displacement() {
+        let mut state = ActorInterpolationState::from_authoritative([mannequin_actor(1, 0.0)]);
+        state.reconcile_authoritative([mannequin_actor(1, 8.0)]);
+        assert_eq!(state.presentations()[0].walk_animation_distance, 0.0);
+
+        state.step(
+            1.0 / 120.0,
+            ActorInterpolationConfig {
+                half_life_seconds: 0.08,
+            },
+        );
+        let presented = state.presentations()[0];
+        assert!(presented.feet_position.x > 0.0);
+        assert!(
+            (presented.walk_animation_distance as f64 - presented.feet_position.x).abs() < 1.0e-6
+        );
+
+        let phase_before_reconcile = presented.walk_animation_distance;
+        state.reconcile_authoritative([mannequin_actor(1, 12.0)]);
+        assert_eq!(
+            state.presentations()[0].walk_animation_distance,
+            phase_before_reconcile
+        );
+    }
+
+    #[test]
+    fn movement_derived_phase_has_no_display_frequency_ceiling() {
+        fn simulate(dt_seconds: f32, frame_count: usize) -> ActorPresentation {
+            let mut state = ActorInterpolationState::from_authoritative([mannequin_actor(1, 0.0)]);
+            state.reconcile_authoritative([mannequin_actor(1, 4.0)]);
+            for _ in 0..frame_count {
+                state.step(
+                    dt_seconds,
+                    ActorInterpolationConfig {
+                        half_life_seconds: 0.08,
+                    },
+                );
+            }
+            state.presentations()[0]
+        }
+
+        let sixty_hz = simulate(1.0 / 60.0, 60);
+        let five_hundred_hz = simulate(1.0 / 500.0, 500);
+
+        assert!((sixty_hz.feet_position.x - five_hundred_hz.feet_position.x).abs() < 1.0e-6);
+        assert!(
+            (sixty_hz.walk_animation_distance - five_hundred_hz.walk_animation_distance).abs()
+                < 1.0e-5
+        );
+    }
+
+    #[test]
+    fn movement_derived_phase_is_identity_stable_and_resets_after_despawn() {
+        let mut state = ActorInterpolationState::from_authoritative([
+            mannequin_actor(2, 10.0),
+            mannequin_actor(1, 0.0),
+        ]);
+        state.reconcile_authoritative([mannequin_actor(1, 1.0), mannequin_actor(2, 13.0)]);
+        state.step(
+            1.0,
+            ActorInterpolationConfig {
+                half_life_seconds: 0.0,
+            },
+        );
+        let presentations = state.presentations();
+        assert_eq!(
+            presentations[0].id,
+            ActorPresentationId::Entity(EntityId(1))
+        );
+        assert_eq!(presentations[0].walk_animation_distance, 1.0);
+        assert_eq!(
+            presentations[1].id,
+            ActorPresentationId::Entity(EntityId(2))
+        );
+        assert_eq!(presentations[1].walk_animation_distance, 3.0);
+
+        state.reconcile_authoritative([mannequin_actor(2, 13.0)]);
+        state.reconcile_authoritative([mannequin_actor(1, 20.0), mannequin_actor(2, 13.0)]);
+        assert_eq!(state.presentations()[0].walk_animation_distance, 0.0);
+
+        state.step(1.0 / 500.0, ActorInterpolationConfig::default());
+        let phase = state.presentations()[1].walk_animation_distance;
+        for _ in 0..500 {
+            state.step(1.0 / 500.0, ActorInterpolationConfig::default());
+        }
+        assert_eq!(state.presentations()[1].walk_animation_distance, phase);
     }
 }

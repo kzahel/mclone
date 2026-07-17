@@ -50,6 +50,9 @@ const MODEL_FEET_Y_PIXELS: f32 = 24.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ActorInstance {
+    /// Stable source identity. Prepared actor records must never use the
+    /// transient position in an input vector as identity.
+    pub id: Option<ActorInstanceId>,
     pub feet_position: Vec3,
     /// Native world yaw in radians. Local actor +Z is the forward/front side.
     pub yaw_radians: f32,
@@ -65,6 +68,13 @@ pub struct ActorInstance {
     pub packed_light: u32,
     pub animation: Option<ActorAnimation>,
     pub chicken_wing_flap_radians: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum ActorInstanceId {
+    LocalPlayer,
+    RemotePlayer(u64),
+    Entity(u64),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -99,6 +109,7 @@ impl ActorInstance {
         figure: ActorFigureId,
     ) -> Self {
         Self {
+            id: Some(ActorInstanceId::LocalPlayer),
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
@@ -118,6 +129,7 @@ impl ActorInstance {
 
     pub fn remote_player(feet_position: Vec3, y_rot_degrees: f32) -> Self {
         Self {
+            id: None,
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
@@ -153,6 +165,7 @@ impl ActorInstance {
         height: f32,
     ) -> Self {
         Self {
+            id: None,
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
@@ -172,6 +185,7 @@ impl ActorInstance {
 
     pub fn cow_model(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
         Self {
+            id: None,
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
@@ -196,6 +210,7 @@ impl ActorInstance {
         height: f32,
     ) -> Self {
         Self {
+            id: None,
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
@@ -222,6 +237,7 @@ impl ActorInstance {
         height: f32,
     ) -> Self {
         Self {
+            id: None,
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: x_rot_degrees.to_radians(),
@@ -241,6 +257,7 @@ impl ActorInstance {
 
     pub fn item_egg(feet_position: Vec3, y_rot_degrees: f32, width: f32, height: f32) -> Self {
         Self {
+            id: None,
             feet_position,
             yaw_radians: -y_rot_degrees.to_radians(),
             pitch_radians: 0.0,
@@ -260,6 +277,11 @@ impl ActorInstance {
 
     pub fn with_packed_light(mut self, packed_light: u32) -> Self {
         self.packed_light = packed_light;
+        self
+    }
+
+    pub fn with_id(mut self, id: ActorInstanceId) -> Self {
+        self.id = Some(id);
         self
     }
 

@@ -89,7 +89,7 @@ pub fn actor_instances_from_presentations(
         .map(|actor| {
             let packed_light =
                 client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
-            match actor.kind {
+            let instance = match actor.kind {
                 ActorPresentationKind::RemotePlayer => actor
                     .appearance
                     .figure
@@ -158,7 +158,12 @@ pub fn actor_instances_from_presentations(
                         .with_packed_light(packed_light),
                     }
                 }
-            }
+            };
+            let id = match actor.id {
+                ActorPresentationId::RemotePlayer(id) => ActorInstanceId::RemotePlayer(id.0),
+                ActorPresentationId::Entity(id) => ActorInstanceId::Entity(id.0),
+            };
+            instance.with_id(id)
         })
         .collect()
 }

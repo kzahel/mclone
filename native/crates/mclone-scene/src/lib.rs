@@ -93,10 +93,11 @@ use mclone_assets::{ActorFigureId, AssetPackCatalog, AssetPackSelection};
 use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{AudioOutputCapability, landing_playback_for_impact};
 use mclone_client::{
-    BlockInteractionTarget, ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS,
-    TeleportCollisionSnapshot, TeleportConfig, TeleportIntent, TeleportPreview,
-    TeleportPreviewCapability, TeleportPreviewRequestId, TeleportPreviewResult,
-    TeleportValidityReason, sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
+    ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, BlockInteractionTarget,
+    ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS, TeleportCollisionSnapshot,
+    TeleportConfig, TeleportIntent, TeleportPreview, TeleportPreviewCapability,
+    TeleportPreviewRequestId, TeleportPreviewResult, TeleportValidityReason,
+    sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
 use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
 use mclone_diagnostics::{
@@ -372,6 +373,8 @@ struct DrawableWorldSlot {
     player_model: GamePlayerModel,
     draw: TexturedSectionDrawResources,
     actors: Option<ActorDrawResources>,
+    actor_interpolation: ActorInterpolationState,
+    last_actor_presentation_update: Option<MonotonicInstant>,
     traversal_ready_sections: TraversalReadySectionCache,
     section_uploads: RenderSectionUploadCoordinator,
     far_lod: FarTerrainLodRenderer,
@@ -475,6 +478,8 @@ impl DrawableWorldSlot {
             player_model: GamePlayerModel::default(),
             draw: install.draw,
             actors: install.actors,
+            actor_interpolation: ActorInterpolationState::new(),
+            last_actor_presentation_update: None,
             traversal_ready_sections: TraversalReadySectionCache::default(),
             section_uploads: RenderSectionUploadCoordinator::default(),
             far_lod,
@@ -499,6 +504,8 @@ impl DrawableWorldSlot {
         self.camera = install.camera;
         self.draw = install.draw;
         self.actors = install.actors;
+        self.actor_interpolation = ActorInterpolationState::new();
+        self.last_actor_presentation_update = None;
         self.render_stats = install.render_stats;
         self.accepted_entry_pose = install.accepted_entry_pose;
         self.pending_startup_sections = install.pending_startup_sections;
@@ -534,6 +541,30 @@ impl DrawableWorldSlot {
         self.camera = camera;
         self.pending_startup_sections = pending_startup_sections;
         self.render_stats = RenderStreamStats::default();
+        self.actor_interpolation = ActorInterpolationState::new();
+        self.last_actor_presentation_update = None;
+    }
+
+    fn interpolated_actor_presentations(
+        &mut self,
+        now: MonotonicInstant,
+    ) -> Vec<ActorPresentation> {
+        let Some(runtime) = self.runtime.as_ref() else {
+            self.actor_interpolation.reconcile_authoritative([]);
+            self.last_actor_presentation_update = None;
+            return Vec::new();
+        };
+        self.actor_interpolation
+            .reconcile_authoritative(runtime.client().actor_presentations());
+        let dt_seconds = self
+            .last_actor_presentation_update
+            .replace(now)
+            .map_or(0.0, |last| {
+                now.saturating_duration_since(last).as_secs_f32()
+            });
+        self.actor_interpolation
+            .step(dt_seconds, ActorInterpolationConfig::default());
+        self.actor_interpolation.presentations()
     }
 }
 
@@ -3598,18 +3629,19 @@ impl McloneSceneHost {
             })
     }
 
-    fn current_actor_instances(&self) -> Vec<ActorInstance> {
+    fn current_actor_instances(&mut self) -> Vec<ActorInstance> {
         if self.active_world.scene.skip_actors {
             return Vec::new();
         }
+        let presentations = self
+            .active_world
+            .interpolated_actor_presentations(self.services.clock.now());
         self.active_world
             .runtime
             .as_ref()
             .map_or_else(Vec::new, |runtime| {
-                let instances = actor_instances_from_presentations(
-                    &runtime.client().actor_presentations(),
-                    runtime.client(),
-                );
+                let instances =
+                    actor_instances_from_presentations(&presentations, runtime.client());
                 if self.mono_ui_context.is_some() {
                     instances
                         .into_iter()
@@ -3625,21 +3657,22 @@ impl McloneSceneHost {
             })
     }
 
-    fn current_preview_actor_instances(&self) -> Option<PreviewActorInstances> {
-        let preview = self
+    fn current_preview_actor_instances(&mut self) -> Option<PreviewActorInstances> {
+        let (source_world, context) = self
             .embedded_world_preview
             .as_ref()
-            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
+            .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+            .map(|preview| (preview.source_world, preview.context))?;
         let slot = self
             .standby_world
-            .as_ref()
-            .filter(|slot| slot.id == preview.source_world)?;
+            .as_mut()
+            .filter(|slot| slot.id == source_world)?;
         if slot.scene.skip_actors {
             return None;
         }
+        let presentations = slot.interpolated_actor_presentations(self.services.clock.now());
         let runtime = slot.runtime.as_ref()?;
         let client = runtime.client();
-        let presentations = client.actor_presentations();
         let instances = actor_instances_from_presentations(&presentations, client);
         let entity_observations = presentations
             .iter()
@@ -3653,9 +3686,7 @@ impl McloneSceneHost {
                     entity_id,
                     kind: snapshot.kind,
                     source_feet_position: snapshot.position,
-                    composition_feet_position: preview
-                        .context
-                        .source_to_composition(snapshot.position),
+                    composition_feet_position: context.source_to_composition(snapshot.position),
                     age_ticks: snapshot.age_ticks,
                     source_packed_light: instance.packed_light,
                 })
@@ -3674,9 +3705,7 @@ impl McloneSceneHost {
                     player_id,
                     appearance: update.appearance,
                     source_feet_position: update.position,
-                    composition_feet_position: preview
-                        .context
-                        .source_to_composition(update.position),
+                    composition_feet_position: context.source_to_composition(update.position),
                     y_rot_degrees: update.y_rot_degrees,
                     x_rot_degrees: update.x_rot_degrees,
                     on_ground: update.on_ground,
@@ -3688,7 +3717,7 @@ impl McloneSceneHost {
         let entity_count = client.entity_count();
         let remote_player_count = client.remote_player_count();
         Some(PreviewActorInstances {
-            source_world: slot.id,
+            source_world,
             instances,
             entity_count,
             remote_player_count,
