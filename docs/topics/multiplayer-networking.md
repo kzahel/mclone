@@ -4,7 +4,7 @@ Topic: multiplayer-networking
 
 Status: first production push milestone complete 2026-07-13; shared client
 pose-publication follow-up complete 2026-07-14; stable local identity,
-world-scoped player persistence, safe resume, and the persistence-demo XP
+realm-scoped player persistence, safe resume, and the persistence-demo XP
 proof complete 2026-07-16. Tactical
 [`176`](../tactical/176-dedicated-autonomous-push-runtime.md) delivered
 autonomous dedicated ticking, native TCP/direct WebSocket push,
@@ -24,6 +24,11 @@ typed close, and movement sequence plumbing on 2026-07-16. Tactical 185
 Slice 1 then removed the privileged local-player path: integrated, Web Worker,
 TCP, and WebSocket hosts now share one `RealmServer` authority and ordinary
 player registry, with local/TCP/WebSocket join/command trace coverage.
+Tactical
+[`190`](../tactical/190-player-health-lava-death-and-respawn.md) completed the
+first survival lifecycle on 2026-07-17: ordered owner life state, persistent
+lava death, dead-command gating, shared death UI, and explicit safe respawn
+now use those same local and hosted paths.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -40,19 +45,20 @@ transfer contract live in the focused
 [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) owns the
 implementation sequence.
 
-## Current state (verified 2026-07-16)
+## Current state (verified 2026-07-17)
 
 Tactical 182's core proof is live. Each installation/browser origin owns one
 unauthenticated local UUID profile. Integrated, native TCP, direct WebSocket,
 and browser-worker joins carry that identity; a dedicated world rejects a
-second live connection claiming the same UUID. World-scoped player records
-persist accepted pose/rotation, selected slot, display name, and total
-experience in memory, SQLite, and IndexedDB. Valid saved poses resume exactly,
-including airborne poses, while blocked poses reuse the deterministic safe
-surface search. Protocol v23 publishes owner-only experience, and an explicit
-non-vanilla behavior flag awards one point for one accepted grounded-to-upward
-jump transition. A dedicated TCP restart test proves the same UUID resumes its
-exact saved airborne pose and XP.
+second live connection claiming the same UUID. Realm-scoped player records
+persist accepted pose/rotation, selected slot, display name, total experience,
+typed statistics, health, and an optional pending death cause in memory,
+SQLite, and IndexedDB. Valid saved poses resume exactly, including airborne
+poses, while blocked poses reuse the deterministic safe surface search.
+Protocol v29 publishes owner-only experience, statistics, and ordered life
+state; it accepts an explicit `Respawn` command. Dedicated TCP and SQLite
+restart tests prove the same UUID resumes durable pose, XP, statistics, and
+dead-or-respawned lifecycle state.
 
 The opened world store now owns typed metadata v1: target version, seed,
 generation/behavior profiles, creation/last-played timestamps, revision, both
@@ -60,7 +66,7 @@ world clocks, and the daylight-cycle rule. New worlds start both clocks at
 zero; legacy mclone stores preserve the prior day-time 1000 convention once.
 SQLite and IndexedDB load and validate those facts before generation, reject
 later seed/profile reinterpretation, autosave every 6000 game ticks, and flush
-on normal lifecycle close. Protocol v23 carries `game_time`, `day_time`, and
+on normal lifecycle close. Protocol v29 carries `game_time`, `day_time`, and
 daylight running state; the shared client advances its replica at 20 Hz between
 join/tick-1/20-tick authoritative corrections.
 
@@ -112,7 +118,7 @@ variant, while the 20-publication-attempt position reminder corresponds to
 about one second at the default rate. Immediate interaction, teleport, and
 offscreen-diagnostic reconciles remain explicit scene-owned operations.
 
-Protocol v24 now negotiates optional capability bits during native/WebSocket
+Protocol v29 negotiates optional capability bits during native/WebSocket
 handshake and publishes `SessionConfiguration` then `SessionReady` before
 ordinary world facts. The shared replica exposes Connecting, Configuring,
 Playing, and first-reason-wins Disconnected state to the UI. Dedicated sessions
@@ -120,8 +126,10 @@ challenge remote peers every 15 seconds, native TCP retains a 30-second read
 timeout, and native/browser I/O actors echo without drawable-frame polling.
 Clean quit and server rejection are ordered protocol messages; unexpected EOF
 is converted to a visible typed reason. `MovePlayer` carries a client sequence
-and corrections echo the latest accepted value. Debug actions are rejected
-unless their capability was negotiated.
+and corrections echo the latest accepted value. Owner-only `PlayerLife`
+updates carry a life epoch, health, and typed death cause; `Respawn` returns
+through the same full-duplex command path. Debug actions are rejected unless
+their capability was negotiated.
 
 This cadence controls when a pose is selected and enqueued; it does not define
 what XR pose means. Current XR behavior still publishes the existing combined
@@ -134,13 +142,14 @@ intended production shape, but broader session and world durability work
 remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, strict
-  `PROTOCOL_VERSION = 24` equality check. The transport handshake now carries
+  `PROTOCOL_VERSION = 29` equality check. The transport handshake now carries
   the local profile UUID/display name plus supported capabilities, and
-  `PlayerExperience` is an owner-only
-  update alongside chunk view/snapshots/unloads, section block deltas,
+  `PlayerExperience`, `PlayerStatistics`, and `PlayerLife` are owner-only
+  updates alongside chunk view/snapshots/unloads, section block deltas,
   vanilla-shaped move/teleport-ack, remote players, entities, two-clock time,
-  and obfuscated-seed world info. No serde; every decode validates and rejects
-  trailing bytes. No compression, no varints.
+  and obfuscated-seed world info. `Respawn` is an explicit client command. No
+  serde; every decode validates and rejects trailing bytes. No compression,
+  no varints.
 - **Transports**: in-process mpsc channels (native local integrated,
   `mclone-server/src/runner.rs:830-991`), length-prefixed TCP
   (`mclone-net/src/lib.rs:347-1146`), direct dedicated WebSocket adapter
@@ -174,9 +183,9 @@ remain:
    replica are not.
 2. **World/player durability is still incomplete.** Authoritative metadata,
    seed/profiles, game/day clocks, the daylight rule, player pose/rotation,
-   selected slot, display name, and XP persist. Inventory contents, spawn/bed
-   state, health, hunger, abilities, effects, and advancement/statistic state
-   do not yet persist.
+   selected slot, display name, XP, typed statistics, health, and pending death
+   cause persist. Inventory contents, personal spawn/bed state, hunger,
+   abilities, effects, and advancement state do not yet persist.
 3. **Debug vocabulary remains on the wire but is capability-gated**:
    `ShootDebugPhysicsCube`, `SetDebugHotbarSlot`, and debug instant-break are
    rejected unless `DEBUG_ACTIONS` was negotiated. `EntityKind::DebugCube` and
@@ -298,7 +307,7 @@ first?":
   keyed by the durable local profile UUID. Typed world metadata owns and
   validates the seed/profiles before generation, and durable game/day clocks
   plus the daylight rule ride through SQLite and IndexedDB lifecycle saves.
-- **Documentation cleanup is current.** `protocol.md` records version 24 and
+- **Documentation cleanup is current.** `protocol.md` records version 29 and
   autonomous publication framing; `multiplayer-hosting.md` records persistent
   worlds and direct WebSocket hosting; platform docs record the one shared
   native/browser semantic boundary.

@@ -3125,6 +3125,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::BackToTitle => "backToTitle",
         GameUiAction::BackToPause => "backToPause",
         GameUiAction::QuitToTitle => "quitToTitle",
+        GameUiAction::Respawn => "respawn",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::ToggleFarLod => "toggleFarLod",

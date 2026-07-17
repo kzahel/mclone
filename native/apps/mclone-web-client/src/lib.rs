@@ -65,6 +65,53 @@ const COMMAND_COUNT_SHIFT: u32 = 8;
 const UPDATE_COUNT_SHIFT: u32 = 16;
 const LOADED_CHUNK_COUNT_SHIFT: u32 = 24;
 
+/// Build a Rust-owned dead-player blob for the browser persistence smoke.
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+pub fn mclone_web_dead_player_record_fixture(
+    profile_id: js_sys::Uint8Array,
+    display_name: String,
+) -> Result<js_sys::Uint8Array, JsValue> {
+    let bytes: [u8; 16] = profile_id
+        .to_vec()
+        .try_into()
+        .map_err(|_| JsValue::from_str("player record fixture UUID must contain 16 bytes"))?;
+    let key = mclone_server::PlayerRecordKey::Uuid(format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0],
+        bytes[1],
+        bytes[2],
+        bytes[3],
+        bytes[4],
+        bytes[5],
+        bytes[6],
+        bytes[7],
+        bytes[8],
+        bytes[9],
+        bytes[10],
+        bytes[11],
+        bytes[12],
+        bytes[13],
+        bytes[14],
+        bytes[15],
+    ));
+    let mut record = mclone_server::PlayerRecord::new(
+        key,
+        1,
+        display_name,
+        mclone_core::Vec3d::new(0.5, 93.0, 0.5),
+    );
+    record.on_ground = true;
+    record.health = 0.0;
+    record.pending_death_cause = Some(mclone_protocol::PlayerDamageCause::Lava);
+    record
+        .statistics
+        .increment(mclone_protocol::StatisticKey::deaths(), 1);
+    let encoded = mclone_server::encode_player_record(&record)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    Ok(js_sys::Uint8Array::from(encoded.as_slice()))
+}
+
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn mclone_web_remote_handshake_frame(
@@ -802,7 +849,7 @@ pub fn try_run_web_runtime_smoke() -> ProtocolCodecResult<WebSmokeReport> {
         && transport_drained
         && protocol_codec_roundtrip
         && command_count == 2
-        && update_count == 12
+        && update_count == 13
         && loaded_chunk_count == 1;
 
     Ok(WebSmokeReport {
@@ -987,7 +1034,7 @@ mod tests {
                 previous_chunk_unloaded: true,
                 protocol_codec_roundtrip: true,
                 command_count: 2,
-                update_count: 12,
+                update_count: 13,
                 loaded_chunk_count: 1,
             }
         );
@@ -1012,12 +1059,17 @@ mod tests {
                 .unwrap(),
             WebRuntimeStepReport {
                 command_count: 1,
-                update_count: 6,
+                update_count: 9,
                 loaded_chunk_count: 1,
                 protocol_codec_roundtrip: true,
                 transport_drained: true,
             }
         );
+        assert_eq!(
+            runtime.client().player_vitals(),
+            mclone_protocol::PlayerVitals::full_health()
+        );
+        assert!(!runtime.client().player_is_dead());
         assert!(
             runtime
                 .client()
@@ -1088,6 +1140,6 @@ mod tests {
 
     #[test]
     fn packed_smoke_report_has_stable_browser_layout() {
-        assert_eq!(mclone_web_smoke(), 0x010a_02ff);
+        assert_eq!(mclone_web_smoke(), 0x010d_02ff);
     }
 }

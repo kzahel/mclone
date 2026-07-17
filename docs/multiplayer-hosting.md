@@ -44,7 +44,7 @@ over every carrier.
 ## Current Implementation
 
 `mclone-dedicated-server` is a native Rust headless host with no renderer. It
-builds directly on `mclone-server::IntegratedServer` and drives clients through
+builds directly on `mclone-server::RealmServer` and drives clients through
 the same protocol/client/server boundary as singleplayer.
 
 - **Default listener:** native TCP on `127.0.0.1:25565`.
@@ -68,12 +68,14 @@ the same protocol/client/server boundary as singleplayer.
   pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION = 23` is negotiated with strict equality. The handshake
+- `PROTOCOL_VERSION = 29` is negotiated with strict equality. The handshake
   also carries the client's unauthenticated stable local UUID/display name;
-  persistent worlds save pose, selected slot, and XP under that UUID. Time
-  updates carry durable game/day clocks plus daylight running state (see
+  persistent realms save pose, selected slot, XP, typed statistics, health,
+  and a pending typed death cause under that UUID. Ordered owner life updates
+  and explicit respawn use the same TCP/WebSocket streams. Time updates carry
+  durable game/day clocks plus daylight running state (see
   [`protocol.md`](./protocol.md)).
-- Browser singleplayer uses IndexedDB v5 with catalog, chunk, entity, player,
+- Browser singleplayer uses IndexedDB v6 with catalog, chunk, entity, player,
   and singleton world-metadata stores. Metadata is preloaded and validated
   before generation; background lifecycle and graceful worker shutdown queue
   the same completion-driven flush used by other records.

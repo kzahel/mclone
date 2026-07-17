@@ -112,6 +112,7 @@
     "native:web:mobile-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --mobile-app-loop",
     "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
     "native:web:block-edit-probe": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --block-edit-probe",
+    "native:web:death-ui-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --death-ui-probe",
     "native:web:indexeddb-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe",
     "native:web:generator-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop --generation-profile flat-grass-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe --generation-profile small-island-v1",
     "native:web:scene-host-adoption": "node ./scripts/check-web-scene-host-adoption.mjs",

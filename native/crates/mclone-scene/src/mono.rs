@@ -466,9 +466,13 @@ impl McloneSceneHost {
         let Some(runtime) = self.active_world.runtime.as_mut() else {
             return false;
         };
-        runtime
+        let applied = runtime
             .core_mut()
-            .apply_server_updates(vec![mclone_protocol::ServerUpdate::PlayerLife(life)])
+            .apply_server_updates(vec![mclone_protocol::ServerUpdate::PlayerLife(life)]);
+        if applied {
+            self.sync_player_lifecycle_ui();
+        }
+        applied
     }
 
     pub fn set_mono_new_world_seed(&mut self, seed: i64) {

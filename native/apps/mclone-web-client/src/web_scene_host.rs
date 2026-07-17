@@ -3817,6 +3817,7 @@ fn screen_label(screen: Option<GameScreen>) -> &'static str {
         Some(GameScreen::NewWorld) => "newWorld",
         Some(GameScreen::JoinRemote) => "joinRemote",
         Some(GameScreen::Pause) => "pause",
+        Some(GameScreen::Death { .. }) => "death",
         Some(GameScreen::Help { .. }) => "help",
         Some(GameScreen::BlockPalette) => "blockPalette",
         Some(GameScreen::Options { .. }) => "options",

@@ -42,7 +42,7 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `24`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `29`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.
@@ -50,7 +50,7 @@ with `ProtocolVersionMismatch`.
 The same handshake carries the unauthenticated local player profile UUID,
 display name, and a `u64` supported-capability mask. The server accepts the
 known client/server intersection and returns it in the handshake response.
-`DEBUG_ACTIONS` is the first optional bit. The UUID selects one world-scoped
+`DEBUG_ACTIONS` is the first optional bit. The UUID selects one realm-scoped
 player record, while the display name is last-seen presentation metadata. A
 dedicated world rejects a second live connection claiming an already active
 UUID. This is stable local identity and optional-feature negotiation, not
@@ -80,6 +80,7 @@ model.
 | `SetCarriedItem` | select the active hotbar slot |
 | `AcceptTeleport` | acknowledge a server `PlayerPosition` teleport id |
 | `SetPlayerAppearance` | publish the player's current model/appearance choice |
+| `Respawn` | explicitly request revival after an authoritative death; ignored while living |
 | `SetDebugHotbarSlot` | debug-only mutation of one server-owned hotbar slot |
 | `ShootDebugPhysicsCube` | debug-only request to spawn a physics test entity |
 | `KeepAlive` | immediate echo of the server's pending 64-bit liveness challenge |
@@ -103,7 +104,9 @@ commands are intents, not client-owned state mutations.
 | `SectionBlockUpdates` | block mutations within a loaded section after the baseline |
 | `TimeUpdate` | authoritative game time, day time, and daylight-cycle-running state; the client advances both 20 Hz between join/tick-1/20-tick corrections, conditionally advancing day time |
 | `PlayerPosition` | authoritative local-player position/rotation correction with relative flags, latest accepted movement sequence, and teleport id |
-| `PlayerExperience` | owner-only authoritative total experience restored from and dirtied into the world-scoped player record |
+| `PlayerExperience` | owner-only authoritative total experience restored from and dirtied into the realm-scoped player record |
+| `PlayerStatistics` | owner-only typed realm statistics, including jumps, successful placements, and deaths |
+| `PlayerLife` | owner-only ordered life epoch, finite/clamped health, maximum health, and optional typed death cause |
 | `RemotePlayerAdd` / `RemotePlayerUpdate` / `RemotePlayerRemove` | other players entering / moving in / leaving the client's tracked view |
 | `EntitySnapshot` | entity baseline for a visible chunk; passive mobs are stackless, item entities carry an `ItemStackSnapshot` |
 | `EntityUpdate` | partial entity position/rotation/age update after a baseline; item entities also carry their current `ItemStackSnapshot` when stack data is present |

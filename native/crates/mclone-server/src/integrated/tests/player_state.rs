@@ -249,6 +249,118 @@ fn sqlite_restart_preserves_statistics_and_another_realm_is_independent() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sqlite_restart_restores_dead_then_respawned_player_lifecycle() {
+    let root = world_time_temp_dir("sqlite-player-death-respawn-restart");
+    let seed = 12_345;
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x72; 16]), "Persistent").unwrap();
+    let death_position = Vec3d::new(8.5, 80.0, 8.5);
+
+    {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        load_center_chunk(&mut server);
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(BlockPos::containing(death_position), LAVA)
+        );
+        server
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: death_position,
+                on_ground: false,
+            }))
+            .unwrap();
+        assert!(server.player_vitals().is_dead());
+        assert_eq!(server.player_statistics().death_count(), 1);
+        server.shutdown_persistence().unwrap();
+    }
+
+    let respawn_position;
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        assert!(reopened.player_vitals().is_dead());
+        assert_eq!(
+            reopened.pending_death_cause(),
+            Some(PlayerDamageCause::Lava)
+        );
+        assert_eq!(reopened.player_statistics().death_count(), 1);
+        let joined = reopened.try_drain_updates().unwrap();
+        assert!(joined.iter().any(|update| matches!(
+            update,
+            ServerUpdate::PlayerLife(life)
+                if life.vitals().is_dead()
+                    && life.death_cause() == Some(PlayerDamageCause::Lava)
+        )));
+        request_initial_chunk_view(&mut reopened);
+        let restored_death_pose = wait_for_initial_spawn_update(&mut reopened);
+        reopened
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: restored_death_pose.teleport_id,
+            }))
+            .unwrap();
+
+        let mut updates = reopened.try_handle_command(ClientCommand::Respawn).unwrap();
+        let mut position_update = None;
+        for _ in 0..60_000 {
+            position_update = position_update.or_else(|| {
+                updates.iter().find_map(|update| match update {
+                    ServerUpdate::PlayerPosition(update) => Some(*update),
+                    _ => None,
+                })
+            });
+            if position_update.is_some() {
+                break;
+            }
+            reopened.try_tick_report_global().unwrap();
+            updates.extend(reopened.try_drain_updates().unwrap());
+            if reopened.pending_job_count() > 0 && reopened.pending_publication_count() == 0 {
+                reopened.wait_for_worldgen_completion(Duration::from_secs(1));
+            }
+        }
+        let update = position_update.expect("reopened dead player must safely respawn");
+        respawn_position = update.position;
+        assert!(updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::PlayerLife(life)
+                if !life.vitals().is_dead() && life.death_cause().is_none()
+        )));
+        reopened
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: update.teleport_id,
+            }))
+            .unwrap();
+        assert_eq!(reopened.player_vitals().health(), 20.0);
+        assert_eq!(reopened.player_statistics().death_count(), 1);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        assert_eq!(reopened.player_vitals().health(), 20.0);
+        assert_eq!(reopened.pending_death_cause(), None);
+        assert_eq!(reopened.player_statistics().death_count(), 1);
+        request_initial_chunk_view(&mut reopened);
+        let resumed = wait_for_initial_spawn_update(&mut reopened);
+        assert_eq!(resumed.position, respawn_position);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn world_time_temp_dir(name: &str) -> std::path::PathBuf {
     static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
     let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

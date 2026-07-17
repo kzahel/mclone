@@ -636,7 +636,7 @@ mod tests {
         let mut stream = ScriptedStream::new(request);
         let mut server = RealmServer::new(DEFAULT_SEED);
 
-        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 5);
+        assert_eq!(serve_connection(&mut stream, &mut server).unwrap(), 6);
 
         let written = stream.written();
         let mut publications = std::io::Cursor::new(written);
@@ -656,6 +656,11 @@ mod tests {
             first
                 .iter()
                 .any(|update| matches!(update, ServerUpdate::TimeUpdate { .. }))
+        );
+        assert!(
+            first
+                .iter()
+                .any(|update| matches!(update, ServerUpdate::PlayerLife(_)))
         );
         assert!(second.is_empty());
     }

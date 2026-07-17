@@ -51,6 +51,8 @@ const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
+const deathUiProbe = process.argv.includes("--death-ui-probe")
+  || process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE === "1";
 const indexedDbReloadProbe = process.argv.includes("--indexeddb-reload-probe")
   || process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE === "1";
 const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
@@ -103,6 +105,7 @@ const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const appLoop = movementPerf
   || blockEditProbe
+  || deathUiProbe
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
@@ -127,6 +130,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-movement-perf.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe.png"
+    : deathUiProbe
+    ? "/tmp/mclone-native-web-death-screen.png"
     : indexedDbReloadProbe
     ? "/tmp/mclone-native-web-indexeddb-reload-probe.png"
     : catalogUiProbe
@@ -153,6 +158,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-movement-perf-canvas.png"
     : blockEditProbe
     ? "/tmp/mclone-native-web-block-edit-probe-canvas.png"
+    : deathUiProbe
+    ? "/tmp/mclone-native-web-death-screen-canvas.png"
     : indexedDbReloadProbe
     ? "/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png"
     : catalogUiProbe
@@ -190,6 +197,8 @@ const movementPerfReportPath = process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_REPOR
   ?? "/tmp/mclone-native-web-movement-perf.json";
 const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_REPORT
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
+const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-death-screen.json";
 const indexedDbReloadProbeReportPath = process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE_REPORT
   ?? "/tmp/mclone-native-web-indexeddb-reload-probe.json";
 const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_REPORT
@@ -295,6 +304,16 @@ async function run() {
           hasTouch: true,
         }
       : undefined);
+    if (deathUiProbe) {
+      await page.addInitScript(() => {
+        globalThis.localStorage?.setItem("mclone.playerProfile.v1", JSON.stringify({
+          schema: 1,
+          profileId: "73737373-7373-7373-7373-737373737373",
+          displayName: "Browser",
+          createdAtUnixMs: 1,
+        }));
+      });
+    }
     if (mobileAppLoop) {
       await page.addInitScript(() => {
         globalThis.sessionStorage?.setItem("mclone.fullscreenRequestCount", "0");
@@ -462,6 +481,12 @@ async function run() {
       const indexedDbReloadQuery = indexedDbReloadProbe
         ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(indexedDbReloadWorldId)}&clearWorldStorage=1`
         : "";
+      const deathUiWorldId = deathUiProbe
+        ? `death-ui-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
+        : "";
+      const deathUiQuery = deathUiProbe
+        ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(deathUiWorldId)}&clearWorldStorage=1`
+        : "";
       const farLodWorldId = farLodIndexedDb
         ? `far-lod-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
         : "";
@@ -473,7 +498,7 @@ async function run() {
         : "";
       const baseAppUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-        : `${baseUrl}/app.html${indexedDbReloadQuery || farLodQuery || lobbyScenarioQuery}`;
+        : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || farLodQuery || lobbyScenarioQuery}`;
       const appUrl = generationProfile
         ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}generationProfile=${encodeURIComponent(generationProfile)}`
         : baseAppUrl;
@@ -539,6 +564,176 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (deathUiProbe) {
+        await page.evaluate(() => globalThis.__mcloneWebApp.pauseRendering?.());
+        await page.waitForTimeout(50);
+        const initialShutdown = await page.evaluate(
+          async () => await globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        const deadRecordBytes = await page.evaluate(async (worldId) => {
+          // @ts-ignore browser-page-relative import resolved by the staged app root.
+          const module = await import("./pkg/mclone_web_client.js");
+          const record = module.mclone_web_dead_player_record_fixture(
+            new Uint8Array(16).fill(0x73),
+            "Browser",
+          );
+          const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open("mclone-web-worlds");
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB"));
+          });
+          try {
+            await new Promise((resolve, reject) => {
+              const transaction = db.transaction("players", "readwrite");
+              transaction.objectStore("players").put({
+                worldId,
+                playerKey: "73737373-7373-7373-7373-737373737373",
+                record,
+              });
+              transaction.oncomplete = () => resolve(undefined);
+              transaction.onerror = () => reject(
+                transaction.error ?? new Error("failed to seed dead player record"),
+              );
+              transaction.onabort = transaction.onerror;
+            });
+          } finally {
+            db.close();
+          }
+          return Array.from(record);
+        }, deathUiWorldId);
+        const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(deathUiWorldId)}`;
+        await page.goto(reloadUrl, { waitUntil: "load" });
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.ready === true
+            && globalThis.__mcloneWebApp?.state?.ok === true,
+          undefined,
+          { timeout: 60_000 },
+        );
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.state?.nativeUiScreen === "death",
+          undefined,
+          { timeout: 60_000 },
+        );
+        await page.waitForTimeout(250);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        const deadResult = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        await clickCanvasFraction(canvas, 0.5, 0.625);
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.nativeUiScreen === "none"
+              && state?.lastUiAction?.action === "respawn";
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+        await page.waitForFunction(
+          async ({ worldId, deadRecordBytes }) => {
+            const db = await new Promise((resolve, reject) => {
+              const request = indexedDB.open("mclone-web-worlds");
+              request.onsuccess = () => resolve(request.result);
+              request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB"));
+            });
+            try {
+              const stored = await new Promise((resolve, reject) => {
+                const transaction = db.transaction("players", "readonly");
+                const request = transaction.objectStore("players").get([
+                  worldId,
+                  "73737373-7373-7373-7373-737373737373",
+                ]);
+                request.onsuccess = () => resolve(request.result ?? null);
+                request.onerror = () => reject(request.error ?? new Error("failed to read player"));
+              });
+              const bytes = stored?.record instanceof Uint8Array
+                ? Array.from(stored.record)
+                : [];
+              return bytes.length > 0
+                && JSON.stringify(bytes) !== JSON.stringify(deadRecordBytes);
+            } finally {
+              db.close();
+            }
+          },
+          { worldId: deathUiWorldId, deadRecordBytes },
+          { timeout: 60_000 },
+        );
+        const respawnCanvasScreenshotPath =
+          "/tmp/mclone-native-web-respawned-player-canvas.png";
+        const respawnCanvasPng = await canvas.screenshot({
+          path: respawnCanvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const respawnPixels = analyzePng(respawnCanvasPng);
+        const respawnResult = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        await page.evaluate(() => globalThis.__mcloneWebApp.pauseRendering?.());
+        await page.waitForTimeout(50);
+        const respawnShutdown = await page.evaluate(
+          async () => await globalThis.__mcloneWebApp.shutdownForSmoke?.() ?? null,
+        );
+        await page.goto(reloadUrl, { waitUntil: "load" });
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.ready === true
+            && globalThis.__mcloneWebApp?.state?.ok === true,
+          undefined,
+          { timeout: 60_000 },
+        );
+        await page.waitForTimeout(250);
+        const restartResult = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const plannedShutdownErrors = pageErrors.filter(
+          (error) => error === "scene host is shut down",
+        );
+        const unexpectedPageErrors = pageErrors.filter(
+          (error) => error !== "scene host is shut down",
+        );
+        const report = {
+          url: appUrl,
+          reloadUrl,
+          deathUiWorldId,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          deathUiProbeReportPath,
+          initialShutdown,
+          deadRecordByteLength: deadRecordBytes.length,
+          canvasPixels,
+          deadResult,
+          respawnCanvasScreenshotPath,
+          respawnPixels,
+          respawnResult,
+          respawnShutdown,
+          restartResult,
+          pageErrors,
+          plannedShutdownErrors,
+          unexpectedPageErrors,
+        };
+        await writeFile(deathUiProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        if (
+          initialShutdown?.shutdownComplete !== true
+          || deadRecordBytes.length === 0
+          || deadResult?.nativeUiScreen !== "death"
+          || Number(deadResult?.guiCommandCount) < 4
+          || canvasPixels.nonClearInteriorPixelCount <= 128
+          || respawnResult?.nativeUiScreen !== "none"
+          || respawnResult?.lastUiAction?.action !== "respawn"
+          || respawnPixels.nonClearInteriorPixelCount <= 128
+          || respawnShutdown?.shutdownComplete !== true
+          || restartResult?.nativeUiScreen !== "none"
+          || plannedShutdownErrors.length > 2
+          || unexpectedPageErrors.length > 0
+        ) {
+          throw new Error(`browser death UI probe failed:\n${JSON.stringify(report, null, 2)}`);
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (preparedFigureProbe) {
         const preparedFigureProbeResult = await page.evaluate(
           async () => await globalThis.__mcloneWebApp.renderPreparedFigureProof?.() ?? null,

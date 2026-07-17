@@ -1,6 +1,6 @@
 # Tactical 190: Player Health, Lava Death, and Respawn
 
-Status: active 2026-07-17; Slices 0-5 complete
+Status: complete 2026-07-17; Slices 0-6 implemented and validated
 
 Workstream: native Rust, shared protocol/server/client/UI/persistence first;
 native web/WASM and platform adapters through the same contracts
@@ -435,6 +435,71 @@ platform or transport exception.
 These are separate vertical slices. This tactical must leave typed extension
 points for them, but must not implement placeholder versions merely to make
 the first lava/respawn loop appear broader.
+
+## Completion Evidence
+
+Implemented state:
+
+- player-record codec v3 persists finite/clamped health and an optional typed
+  pending death cause beside realm statistics; v1/v2 records migrate to living
+  20-point health;
+- protocol v29 carries ordered owner-only `PlayerLife` updates with a life
+  epoch and the explicit `Respawn` command across local memory, native TCP,
+  native/direct WebSocket, browser Worker, and browser WebSocket adapters;
+- source and flowing lava use one authoritative body/fluid intersection and
+  one idempotent lethal transition. The dead connection and chunk interest
+  remain live while physical commands are rejected;
+- the shared UI owns ten health hearts, the non-dismissible lava death screen,
+  Respawn, and quit-to-title. Flat, browser, stereo, and multiview projection
+  consume the same draw/action model; and
+- successful respawn reuses the safe-spawn search in the realm-primary
+  Overworld, restores 20 health, preserves identity/statistics/experience and
+  selected slot, and uses the existing dimension boundary only when needed.
+
+Automated evidence captured on 2026-07-17:
+
+- `cargo test --manifest-path native/Cargo.toml --no-fail-fast`: 79 test and
+  doc-test groups, 2,245 passed, 0 failed, and 10 intentionally ignored;
+- `mclone-server`: 467 passed, including source/flowing and adjacent lava,
+  moving/stationary/mutated lava, one-shot death statistics, dead-command
+  rejection, same/cross-dimension respawn, and the three-open SQLite sequence
+  dead restart -> explicit respawn -> living restart;
+- dedicated local/TCP/WebSocket trace tests include `Respawn`, and the
+  persistent command-frame test explicitly requires the initial authoritative
+  `PlayerLife` update;
+- browser source locks require IndexedDB player values to remain opaque
+  Rust-authored blobs with no JavaScript-owned death cause; and
+- `pnpm native:web:death-ui-smoke` completed a real IndexedDB three-open
+  sequence: seed a Rust-encoded dead record, restore the death screen, click
+  Respawn, observe a changed persisted record, and reload living with no
+  unexpected page errors. `pnpm native:web:build` and
+  `pnpm native:web:typecheck` also passed.
+
+Rendered and platform evidence captured and inspected on 2026-07-17:
+
+- flat native living and death frames, browser WebGPU death and post-respawn
+  frames, and the flat Android AVD frame showed the respective shared HUD or
+  screen;
+- `pnpm native:desktop-offscreen:smoke` passed and its 2560x1600 frame was
+  inspected;
+- `pnpm native:xr-emulation:smoke` passed with two eye UI composites and
+  249,679 differing eye pixels; its side-by-side frame was inspected;
+- `pnpm native:xr:check` compiled the desktop OpenXR feature;
+- `pnpm native:android:apk`, `pnpm native:android:apk:avd`, and
+  `pnpm native:android:avd-smoke -- --skip-build` passed; and
+- `pnpm native:android-xr:apk` produced the Quest/OpenXR release APK.
+
+Physical Quest/headset validation was unavailable. No separate XR lifecycle
+implementation was introduced: the compiled Quest full-frame multiview path
+and synthetic stereo path consume the same scene/UI state. A future attached
+headset run should manually verify controller activation of Respawn and the
+full-frame multiview death overlay.
+
+Intentional product deviations remain exactly those agreed above: lava contact
+is immediately lethal, there is no fire continuation, only the realm-primary
+safe spawn exists, and the first-person copy says `You tried to swim in lava`
+rather than interpolating the display name. All broader damage, hunger,
+inventory, drop, bed/anchor, and death-animation systems remain deferred.
 
 ## Completion Gate
 

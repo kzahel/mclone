@@ -405,31 +405,36 @@ mod tests {
             join_trace
         );
 
-        let command = ClientCommand::SetChunkView(ChunkView {
-            center: ChunkPos::new(2, -3),
-            render_distance: 1,
-            chunk_tracking_radius: 1,
-        });
-        assert!(local.try_handle_command(command.clone()).is_ok());
+        let commands = [
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(2, -3),
+                render_distance: 1,
+                chunk_tracking_radius: 1,
+            }),
+            ClientCommand::Respawn,
+        ];
+        for command in commands {
+            assert!(local.try_handle_command(command.clone()).is_ok());
 
-        native.send_command_only(command.clone()).unwrap();
-        match network.recv().unwrap() {
-            DedicatedNetworkEvent::Command {
-                command: received, ..
-            } => assert_eq!(received, command),
-            event => panic!("expected native command, got {event:?}"),
-        }
+            native.send_command_only(command.clone()).unwrap();
+            match network.recv().unwrap() {
+                DedicatedNetworkEvent::Command {
+                    command: received, ..
+                } => assert_eq!(received, command),
+                event => panic!("expected native command, got {event:?}"),
+            }
 
-        websocket
-            .send(Message::Binary(
-                encode_websocket_client_command(&command).unwrap().into(),
-            ))
-            .unwrap();
-        match network.recv().unwrap() {
-            DedicatedNetworkEvent::Command {
-                command: received, ..
-            } => assert_eq!(received, command),
-            event => panic!("expected websocket command, got {event:?}"),
+            websocket
+                .send(Message::Binary(
+                    encode_websocket_client_command(&command).unwrap().into(),
+                ))
+                .unwrap();
+            match network.recv().unwrap() {
+                DedicatedNetworkEvent::Command {
+                    command: received, ..
+                } => assert_eq!(received, command),
+                event => panic!("expected websocket command, got {event:?}"),
+            }
         }
         websocket.close(None).unwrap();
     }

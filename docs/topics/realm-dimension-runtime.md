@@ -2,12 +2,13 @@
 
 Topic: `realm-dimension-runtime`
 
-Status: **implemented 2026-07-17; Tactical 185 Slices 0-8 are complete. Every
-host uses one `RealmServer`, the integrated player is ordinary,
-realm/dimension persistence is qualified, and one realm can concurrently tick
-players in multiple isolated `DimensionRuntime`s. Source-owned player and
-non-player observer interest, A-to-B-to-A player transfer, observer-backed
-retained dioramas, and realm-scoped typed statistics are live.**
+Status: **implemented 2026-07-17; Tactical 185 Slices 0-8 and Tactical 190
+Slices 0-6 are complete. Every host uses one `RealmServer`, the integrated
+player is ordinary, realm/dimension persistence is qualified, and one realm
+can concurrently tick players in multiple isolated `DimensionRuntime`s.
+Source-owned player and non-player observer interest, A-to-B-to-A player
+transfer, observer-backed retained dioramas, realm-scoped typed statistics,
+and the persistent health/death/safe-respawn lifecycle are live.**
 
 This topic owns the durable server-topology contract for realms, dimensions,
 players, persistence, interest, and warm destination presentation. Detailed
@@ -168,10 +169,21 @@ unified:
 - statistics publish only to their owning player, follow that player through
   A-to-B-to-A dimension transfer, survive SQLite and IndexedDB restart, and
   remain independent between realms for the same client-global profile UUID;
-- player-record codec v2 currently carries the typed statistics map inside
-  the realm-root player envelope, with codec v1 defaulting to an empty map.
-  This differs physically from vanilla's separate `stats/<uuid>.json` while
-  preserving the same realm scope and an uncomplicated future storage split;
+- player-record codec v3 carries the typed statistics map, finite/clamped
+  health, and an optional typed pending death cause inside the realm-root
+  player envelope. Codec v1 defaults statistics to empty, while v1/v2 default
+  to living 20-point health with no cause. This differs physically from
+  vanilla's separate `stats/<uuid>.json` while preserving the same realm scope
+  and an uncomplicated future storage split;
+- authoritative player-body overlap with source or flowing lava performs one
+  idempotent lethal transition, increments
+  `minecraft:custom/minecraft:deaths` once, rejects physical commands while
+  dead, and retains the connected player and chunk interest;
+- an explicit owner `Respawn` command restores 20-point health at the existing
+  safe spawn in the realm-primary Overworld. Same-dimension respawn retains
+  the replica; cross-dimension respawn composes the existing dimension
+  boundary while identity, statistics, selected slot, and placeholder
+  experience remain intact;
 - the retired persistence demo no longer grants XP for jumping. The shared HUD
   now exposes jump and placement canaries directly.
 
@@ -265,9 +277,12 @@ Jumps and successful block placements are the first statistics canary over
 this topology. The counters follow one player across dimensions, survive realm
 restart, and remain independent in another realm for the same profile UUID.
 Vanilla stores a separate JSON statistics file at the save root; mclone
-currently embeds the separately typed map in player-record codec v2 so SQLite
-and IndexedDB can reuse their transactional player-save lifecycle. Neither
-shape makes the statistics dimension-local.
+currently embeds the separately typed map in player-record codec v3 so SQLite
+and IndexedDB can reuse their transactional player-save lifecycle. The same
+record now carries authoritative health and a typed pending death cause. A
+dead reconnect remains dead; explicit respawn routes to the realm-primary
+Overworld safe spawn without changing UUID, realm statistics, or session.
+Neither shape makes these facts dimension-local.
 
 ## Warm Destination Contract
 

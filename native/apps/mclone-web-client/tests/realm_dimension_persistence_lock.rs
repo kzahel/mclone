@@ -29,3 +29,21 @@ fn indexed_db_v6_qualifies_dimension_records_and_migrates_v5_to_overworld() {
     assert!(SERVER_WORKER.contains("set_number(&object, \"x\", f64::from(pos.x))?;"));
     assert!(SERVER_WORKER.contains("set_number(&object, \"z\", f64::from(pos.z))?;"));
 }
+
+#[test]
+fn indexed_db_player_lifecycle_records_remain_opaque_rust_owned_blobs() {
+    assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"playerKey\"]"));
+    assert!(INTEGRATED_SERVER_WORKER.contains("request.kind === \"player\""));
+    assert!(INTEGRATED_SERVER_WORKER.contains("key = [worldId, request.playerKey];"));
+    assert!(INTEGRATED_SERVER_WORKER.contains("putIndexedDbPlayerRecords"));
+    assert!(INTEGRATED_SERVER_WORKER.contains("normalizeIndexedDbPlayerRecord"));
+    assert!(SERVER_WORKER.contains("decode_player_record"));
+    assert!(SERVER_WORKER.contains("encode_player_record(record)"));
+    assert!(SERVER_WORKER.contains("\"indexedDbPlayers\""));
+
+    for platform_source in [WORLD_CATALOG, INTEGRATED_SERVER_WORKER] {
+        assert!(!platform_source.contains("pending_death_cause"));
+        assert!(!platform_source.contains("pendingDeathCause"));
+        assert!(!platform_source.contains("PlayerDamageCause"));
+    }
+}
