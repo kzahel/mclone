@@ -1078,7 +1078,26 @@ fn f32_array_bytes<const FLOATS: usize, const BYTES: usize>(values: [f32; FLOATS
 
 #[cfg(test)]
 mod tests {
+    use std::time::Instant;
+
     use super::*;
+
+    fn prepared_actor_figures() -> ActorFigureSet {
+        let mut source = mclone_assets::MemoryAssetSource::new();
+        source.insert_text(
+            mclone_assets::default_player_figure_path(),
+            include_str!("../../../../assets/mclone/figures/player.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::upright_bear_figure_path(),
+            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::chicken_figure_path(),
+            include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
+        );
+        crate::asset_lab_figure::load_first_party_actor_figures(&source).unwrap()
+    }
 
     fn prepared_chicken() -> PreparedFigure {
         let asset: mclone_assets::FigureAsset = serde_json::from_str(include_str!(
@@ -1182,5 +1201,161 @@ mod tests {
         )
         .validate(&multiview)
         .expect("multiview WGSL validates");
+    }
+
+    #[test]
+    #[ignore = "GPU scale characterization; run explicitly on a host with a wgpu adapter"]
+    fn thousand_chicken_non_instanced_baseline_and_residency() -> Result<()> {
+        const ACTOR_COUNT: usize = 1_000;
+        let (device, queue) = crate::headless::create_headless_device()?;
+        let figures = prepared_actor_figures();
+        let shared = PreparedActorSharedResources::new(
+            &device,
+            &queue,
+            crate::headless::HEADLESS_FORMAT,
+            &figures,
+        )?;
+        let immutable = shared.snapshot();
+        let immutable_bytes = immutable
+            .immutable_vertex_bytes
+            .saturating_add(immutable.immutable_index_bytes)
+            .saturating_add(immutable.immutable_atlas_bytes);
+        let mut world = PreparedActorDrawResources::new(&device, &shared);
+        let mut other_world = PreparedActorDrawResources::new(&device, &shared);
+        let mut actors = (0..ACTOR_COUNT)
+            .map(|index| {
+                let x = (index % 40) as f32 * 0.7 - 14.0;
+                let z = (index / 40) as f32 * 0.7 - 8.0;
+                ActorInstance::remote_player_with_figure(
+                    Vec3::new(x, 0.0, z),
+                    (index % 360) as f32,
+                    chicken_figure_id(),
+                )
+                .with_id(ActorInstanceId::Entity(index as u64 + 1))
+                .with_dimensions(0.4, 0.7)
+                .with_walk_animation_distance(index as f32 * 0.013)
+                .with_chicken_wing_flap_radians(Some((index as f32 * 0.17).sin() * 0.8))
+            })
+            .collect::<Vec<_>>();
+
+        let first_prepare_start = Instant::now();
+        world.prepare(&device, &queue, &shared, &actors);
+        let first_prepare_ms = first_prepare_start.elapsed().as_secs_f64() * 1_000.0;
+        let first = world.snapshot();
+        assert_eq!(first.actor_record_count, ACTOR_COUNT);
+        assert_eq!(first.prepared_actor_count, ACTOR_COUNT);
+        assert_eq!(first.legacy_actor_count, 0);
+        assert_eq!(first.pose_evaluation_count, ACTOR_COUNT as u64);
+        assert_eq!(first.palette_write_count, ACTOR_COUNT as u64);
+        assert_eq!(first.actor_write_count, ACTOR_COUNT as u64);
+        assert!(first.mutable_known_allocated_bytes >= ACTOR_COUNT as u64 * 4_176);
+        assert_eq!(shared.snapshot(), immutable);
+
+        for actor in &mut actors {
+            actor.feet_position.x += 0.01;
+            if let Some(animation) = actor.animation.as_mut() {
+                animation.distance += 0.01;
+            }
+        }
+        let steady_prepare_start = Instant::now();
+        world.prepare(&device, &queue, &shared, &actors);
+        let steady_prepare_ms = steady_prepare_start.elapsed().as_secs_f64() * 1_000.0;
+        assert_eq!(world.snapshot().actor_record_count, ACTOR_COUNT);
+        assert_eq!(shared.snapshot(), immutable);
+
+        other_world.prepare(&device, &queue, &shared, &actors[..1]);
+        assert_eq!(other_world.snapshot().actor_record_count, 1);
+        assert_eq!(world.snapshot().actor_record_count, ACTOR_COUNT);
+        assert_eq!(shared.snapshot(), immutable);
+
+        let color = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_thousand_chicken_color"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: crate::headless::HEADLESS_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let color_view = color.create_view(&Default::default());
+        let depth = crate::chunk::ChunkDepthTarget::new(&device, 64, 64);
+        let target = RenderFrameTarget::color(&color_view, [64, 64]).with_depth(&depth.view);
+        let render_view = crate::chunk::ChunkCamera {
+            eye: [0.0, 8.0, 24.0],
+            target: [0.0, 2.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 256.0,
+        }
+        .render_view(64, 64);
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_thousand_chicken_encoder"),
+        });
+        {
+            let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_thousand_chicken_clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(crate::chunk::REVERSED_Z_DEPTH_CLEAR),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+        }
+        let encode_submit_start = Instant::now();
+        let stats = world.render_in_slot(
+            &queue,
+            &mut encoder,
+            target,
+            render_view,
+            TexturedSectionRenderOptions::default(),
+            None,
+            crate::uniform::SINGLE_VIEW_SLOT,
+            &shared,
+        )?;
+        let submission = queue.submit(std::iter::once(encoder.finish()));
+        device
+            .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+            .or_else(|_| device.poll(wgpu::PollType::Wait))?;
+        let encode_submit_wait_ms = encode_submit_start.elapsed().as_secs_f64() * 1_000.0;
+        assert_eq!(stats.drawn_actor_count, ACTOR_COUNT);
+        assert_eq!(world.snapshot().draw_count, ACTOR_COUNT as u64);
+        assert_eq!(shared.snapshot(), immutable);
+
+        world.prepare(&device, &queue, &shared, &actors[..ACTOR_COUNT / 2]);
+        assert_eq!(world.snapshot().actor_record_count, ACTOR_COUNT / 2);
+        world.prepare(&device, &queue, &shared, &actors);
+        let final_snapshot = world.snapshot();
+        assert_eq!(final_snapshot.actor_record_count, ACTOR_COUNT);
+        assert_eq!(shared.snapshot(), immutable);
+
+        eprintln!(
+            "prepared actor 1000 baseline: first-prepare={first_prepare_ms:.3}ms \
+             steady-prepare={steady_prepare_ms:.3}ms \
+             encode-submit-wait={encode_submit_wait_ms:.3}ms draws={} \
+             mutable-bytes={} immutable-bytes={} immutable-uploads={}",
+            final_snapshot.draw_count,
+            final_snapshot.mutable_known_allocated_bytes,
+            immutable_bytes,
+            immutable.immutable_upload_count,
+        );
+        Ok(())
     }
 }

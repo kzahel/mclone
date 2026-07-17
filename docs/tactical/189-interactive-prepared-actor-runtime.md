@@ -1,7 +1,7 @@
 # 189: Interactive Prepared Actor Runtime
 
-Status: active 2026-07-17. Slices 0-4 are complete; Slice 5 browser,
-persistence, and scale closeout is next.
+Status: complete 2026-07-17. Slices 0-5 are implemented and validated; the
+next decision is the human review checkpoint below.
 
 Topic: `compiled-figure-rendering`
 
@@ -327,7 +327,7 @@ Gate evidence:
   both WGSL variants validate and the renderer fixture will execute and compare
   multiview layers to per-eye output when the adapter exposes `MULTIVIEW`.
 
-### Slice 5: end-to-end and scale evidence
+### Slice 5: end-to-end and scale evidence (complete 2026-07-17)
 
 - Add deterministic integrated fixtures for interactive placement, autonomous
   movement, restart, replacement, and mixed prepared/legacy actors.
@@ -345,6 +345,44 @@ Gate and human checkpoint: provide exact native/browser interaction steps,
 screenshots/receipts under `/tmp`, test results, and the measured scale baseline
 for review. Pause before starting instancing, LOD, exact curved topology, or GPU
 crowd work.
+
+Gate evidence:
+
+- The native scripted gameplay lane selected zero-based hotbar slot 8 (key 9),
+  issued the ordinary `Use` action against a clear terrain surface, and
+  captured three submitted/drawn actors. The inspected
+  `/tmp/mclone-scripted-mannequin-gameplay.png` visibly shows the newly placed
+  prepared mannequin at the interaction target with the selected hotbar cell.
+- A threaded-SQLite integration test now places both default actor tools
+  through `UseItemOn`, shuts down persistence, opens the same world directory,
+  reloads the entity chunk, and finds the chicken and mannequin at their exact
+  saved positions. The restored mannequin has its three passive goals. The
+  existing negative fixture still proves missing `DEBUG_ACTIONS` and occupied
+  headroom reject placement.
+- Rebuilding the first-party actor registry after a semantic player JSON
+  replacement changes both the legacy and prepared in-memory figures while
+  retaining the selected compiler identity. A fresh asset/device epoch creates
+  fresh shared GPU ownership; no prepared representation is persisted or
+  treated as a compatibility format.
+- The production browser WebGPU composition probe passes with no page errors
+  and its inspected canvas agrees with native. Shared client/server/UI code for
+  actor-tool selection and `UseItemOn` also compiles in the WASM lane; the
+  WASM-only entity-kind reports now label mannequin explicitly.
+- The explicit 1,000-chicken characterization keeps six immutable uploads and
+  44,116 immutable bytes unchanged through movement, animation, a second
+  drawable world, despawn, and respawn. It retains 1,000 stable records,
+  allocates 4,177,536 known mutable bytes, and encodes 1,000 direct draws.
+  On this Mac, one diagnostic run measured 12.026 ms for first preparation,
+  7.300 ms for a steady all-actor pose/update, and 11.549 ms for 64x64 draw
+  encoding, submission, and GPU wait. These are characterization numbers, not
+  portable thresholds; they make instancing and later crowd-pose work clearly
+  worthwhile rather than claiming the current path makes 1,000 actors cheap.
+- All 62 `mclone-assets`, all 453 `mclone-server`, and all 156 non-GPU
+  `mclone-render` tests pass. Focused actor-tool authority, SQLite restart,
+  semantic replacement, native GPU mono/stereo, browser WebGPU, and the
+  ignored 1,000-actor GPU characterization also pass. Full-frame multiview
+  execution remains capability-skipped on this adapter after shader and
+  contract validation.
 
 ## Validation Matrix
 
@@ -377,6 +415,29 @@ At the end, the reviewer should be able to:
 The next human decision is whether this interactive visual/behavioral/runtime
 baseline is good enough to begin instancing and LOD, or whether a figure,
 movement, UI, or proxy-quality correction should land first.
+
+## Interactive Review Steps
+
+For a persistent native review world:
+
+```bash
+cd native
+cargo run -p mclone-native-client --bin mclone-native-client -- \
+  --world-dir /tmp/mclone-prepared-actor-review
+```
+
+After the world becomes playable, aim at the top of clear solid ground. Press
+`8` for the chicken tool or `9` for the mannequin tool, then right-click. Both
+actors should appear authoritatively, wander using passive goals, and animate
+smoothly. Place several, close normally, and run the same command again to
+verify they reload. `F1` opens the in-game controls reference; the debug
+palette can restore either actor tool if its default hotbar cell was replaced.
+
+For browser interaction, run `pnpm native:web:serve`, open the printed local
+URL, and use the same `8`/`9` plus right-click flow. The automated production
+browser comparison receipt and canvas are
+`/tmp/mclone-native-web-actor-composition-probe.json` and
+`/tmp/mclone-native-web-actor-composition-probe-canvas.png`.
 
 ## Code And Documentation Map
 

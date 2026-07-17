@@ -425,6 +425,90 @@ fn actor_hotbar_tools_spawn_authoritative_chicken_and_mannequin() {
     assert_eq!((mannequin.width, mannequin.height), (0.6, 1.8));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn placed_chicken_and_mannequin_survive_sqlite_restart() {
+    let root = actor_tool_temp_dir("actor-tools-restart");
+    let seed = 0;
+    {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        server.set_debug_passive_showcase_enabled(false);
+        load_center_chunk(&mut server);
+        sync_player(&mut server, Vec3d::new(8.5, 82.0, 10.5));
+        for clicked in [BlockPos::new(8, 80, 8), BlockPos::new(9, 80, 8)] {
+            server.scheduler_mut().set_block_at_world(clicked, STONE);
+            server
+                .scheduler_mut()
+                .set_block_at_world(clicked.relative(Direction::Up), AIR);
+            server
+                .scheduler_mut()
+                .set_block_at_world(clicked.offset(0, 2, 0), AIR);
+        }
+        server.scheduler_mut().drain_pending_block_delta_events();
+
+        for (slot, clicked) in [(7, BlockPos::new(8, 80, 8)), (8, BlockPos::new(9, 80, 8))] {
+            sync_carried_slot(&mut server, slot);
+            server
+                .try_handle_command(use_held_item_on(BlockHitResult::new(
+                    Vec3d::new(clicked.x as f64 + 0.5, 81.0, clicked.z as f64 + 0.5),
+                    Direction::Up,
+                    clicked,
+                    false,
+                )))
+                .expect("spawn persistent actor tool entity");
+        }
+        let states = server.entities.states();
+        assert!(
+            states
+                .iter()
+                .any(|entity| entity.kind == EntityKind::Chicken)
+        );
+        assert!(
+            states
+                .iter()
+                .any(|entity| entity.kind == EntityKind::Mannequin)
+        );
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        reopened.set_debug_passive_showcase_enabled(false);
+        load_center_chunk(&mut reopened);
+        let restored = reopened.entities.states();
+        let chicken = restored
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Chicken)
+            .expect("restored chicken");
+        let mannequin = restored
+            .iter()
+            .find(|entity| entity.kind == EntityKind::Mannequin)
+            .expect("restored mannequin");
+        assert_eq!(chicken.position, Vec3d::new(8.5, 81.0, 8.5));
+        assert_eq!(mannequin.position, Vec3d::new(9.5, 81.0, 8.5));
+        assert_eq!(
+            reopened
+                .entities
+                .mob_state(mannequin.id)
+                .expect("restored mannequin goals")
+                .available_goal_count(),
+            3
+        );
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn actor_tool_temp_dir(name: &str) -> std::path::PathBuf {
+    static NEXT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let id = NEXT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!("mclone-{name}-{}-{id}", std::process::id()))
+}
+
 #[test]
 fn actor_hotbar_tools_require_debug_capability_and_valid_clear_target() {
     let mut unauthorized = LocalRealmSession::from_server_with_capabilities(

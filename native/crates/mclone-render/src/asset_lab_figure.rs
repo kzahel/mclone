@@ -1122,6 +1122,27 @@ mod tests {
     }
 
     #[test]
+    fn first_party_actor_registry_recompiles_semantic_replacement() {
+        let original_source = first_party_memory_source(PLAYER_FIGURE_JSON);
+        let original = load_first_party_actor_figures(&original_source).unwrap();
+        let replacement_json = PLAYER_FIGURE_JSON.replace("#2878b8", "#ff00ff");
+        let replacement_source = first_party_memory_source(&replacement_json);
+        let replacement = load_first_party_actor_figures(&replacement_source).unwrap();
+        let id = mclone_assets::default_player_figure_id();
+
+        assert_ne!(original.get(id), replacement.get(id));
+        assert_ne!(original.prepared(id), replacement.prepared(id));
+        assert_eq!(
+            replacement
+                .prepared(id)
+                .expect("replacement prepared player")
+                .diagnostics
+                .compiler_id,
+            mclone_assets::PREPARED_FIGURE_COMPILER_ID
+        );
+    }
+
+    #[test]
     fn actor_figure_load_reports_unknown_ids() {
         let source = mclone_assets::MemoryAssetSource::new();
         let error = load_compiled_actor_figure(
@@ -1221,6 +1242,17 @@ mod tests {
     fn compile_test_player_figure() -> CompiledFigure {
         let asset: FigureAsset = serde_json::from_str(PLAYER_FIGURE_JSON).unwrap();
         compile_figure_asset(&asset).unwrap()
+    }
+
+    fn first_party_memory_source(player_json: &str) -> mclone_assets::MemoryAssetSource {
+        let mut source = mclone_assets::MemoryAssetSource::new();
+        source.insert_text(mclone_assets::default_player_figure_path(), player_json);
+        source.insert_text(
+            mclone_assets::upright_bear_figure_path(),
+            include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
+        );
+        source.insert_text(mclone_assets::chicken_figure_path(), CHICKEN_FIGURE_JSON);
+        source
     }
 
     fn compiled_bounds(figure: &CompiledFigure) -> Bounds {

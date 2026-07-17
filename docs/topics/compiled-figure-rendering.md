@@ -2,7 +2,7 @@
 
 Topic: `compiled-figure-rendering`
 
-Status: production migration direction selected 2026-07-17. Tactical
+Status: first interactive production migration complete 2026-07-17. Tactical
 [`181`](../tactical/181-compiled-figure-static-box-proof.md) is complete: the
 canonical semantic handoff, shared startup compiler, immutable mono renderer,
 visually approved Three.js/native comparison, inspected native per-eye stereo,
@@ -15,12 +15,13 @@ Tactical
 startup-compiled indexed tracks, cadence-independent local TRS/hierarchy
 evaluation, resident mutable-palette rendering, and the human-approved
 synchronized Three.js/native walk comparison. Tactical
-[`189`](../tactical/189-interactive-prepared-actor-runtime.md) owns the next
-production step: explicit cuboid proxies for current solid-color non-box
-primitives, placeable chicken and passive-goal mannequin fixtures, stable
-presentation identity, continuous travel phase, and prepared/legacy actor
-coexistence. Exact rounded tessellation, instancing, LOD, GPU pose evaluation,
-and a disk cache remain deferred.
+[`189`](../tactical/189-interactive-prepared-actor-runtime.md) completed
+explicit cuboid proxies for current solid-color non-box primitives, placeable
+chicken and passive-goal mannequin fixtures, stable presentation identity,
+continuous travel phase, prepared/legacy actor coexistence, browser WebGPU,
+persistence, and the non-instanced thousand-chicken baseline. Exact rounded
+tessellation, instancing, LOD, GPU pose evaluation, and a disk cache remain
+deferred.
 
 ## Scope
 
@@ -732,7 +733,7 @@ tier rather than a blocker. Neither changes the persistence decision.
 - support mono, per-eye stereo, and full-frame multiview; and
 - validate first-person body filtering and world-local cache ownership.
 
-### Phase 3: interactive migration with coexistence (closeout in progress)
+### Phase 3: interactive migration with coexistence (complete)
 
 - placeable chicken and mannequin debug-hotbar tools now use ordinary
   authoritative use-item placement and persistence;
@@ -746,8 +747,8 @@ tier rather than a blocker. Neither changes the persistence decision.
   same frame can retain legacy actors;
 - direct, placed, clipped, per-eye, and multiview-aware paths are implemented;
   native mono/stereo composition pixels, no-second-eye-pose-write counters,
-  and the identical production browser WebGPU fixture pass, while the scale
-  baseline remains the closeout gate; and
+  the identical production browser WebGPU fixture, SQLite restart, semantic
+  replacement, and the explicit thousand-chicken baseline pass; and
 - retain `ActorMeshCache` as an explicit fallback for unsupported figure,
   debug, and item actors.
 
@@ -997,15 +998,13 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Continue Tactical
-[`189`](../tactical/189-interactive-prepared-actor-runtime.md). Cuboid-proxy
-preparation and authoritative persistent chicken/mannequin tools are complete.
-Stable actor identity, continuously derived travel phase, and coexisting
-prepared production drawing are also complete, including the shared native and
-production browser WebGPU composition fixture. Next close persistence/
-replacement evidence and record the representative and thousand-chicken
-non-instanced baseline. Stop only after exact native/browser interaction and
-review steps are recorded.
+Review the completed Tactical
+[`189`](../tactical/189-interactive-prepared-actor-runtime.md) interactively.
+Its current thousand-chicken run uses 1,000 direct draws and about 4.18 MB of
+mutable actor state despite sharing only about 44 KB of immutable prepared
+data, so instancing is the strongest next performance slice if the current
+proxy appearance and behavior are accepted. LOD and a measured sampled/GPU
+pose path remain independent follow-ups.
 
 Do not add a persisted compiled format, exact curved tessellation, instancing,
 LOD, or GPU crowd evaluation in that tactical. Its actor-record boundary
