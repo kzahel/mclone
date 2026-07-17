@@ -456,6 +456,21 @@ impl McloneSceneHost {
         self.ui.set_screen(screen);
     }
 
+    /// Inject an already-authoritative life update for deterministic visual
+    /// diagnostics. Interactive clients receive this only through their
+    /// ordered server stream.
+    pub fn apply_mono_player_life_for_diagnostics(
+        &mut self,
+        life: mclone_protocol::PlayerLifeState,
+    ) -> bool {
+        let Some(runtime) = self.active_world.runtime.as_mut() else {
+            return false;
+        };
+        runtime
+            .core_mut()
+            .apply_server_updates(vec![mclone_protocol::ServerUpdate::PlayerLife(life)])
+    }
+
     pub fn set_mono_new_world_seed(&mut self, seed: i64) {
         self.ui.set_new_world_seed(seed);
     }
@@ -847,6 +862,10 @@ impl McloneSceneHost {
         self.ui.is_active()
     }
 
+    pub fn mono_ui_covers_world(&self) -> bool {
+        self.ui.covers_world()
+    }
+
     pub fn mono_ui_screen(&self) -> Option<GameScreen> {
         self.ui.screen()
     }
@@ -912,6 +931,14 @@ impl McloneSceneHost {
             self.cancel_warm_world_standby("managed scenario title cancellation");
         }
         if self.active_world.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
+            return Ok(MonoUiActionOutcome::default());
+        }
+        if matches!(self.ui.screen(), Some(GameScreen::Death { .. }))
+            && !matches!(
+                action,
+                GameUiAction::Respawn | GameUiAction::QuitToTitle | GameUiAction::Quit
+            )
+        {
             return Ok(MonoUiActionOutcome::default());
         }
 
@@ -1013,6 +1040,11 @@ impl McloneSceneHost {
                 }
                 ClientExperienceGameplayEffect::AssignHotbarActor { slot, actor } => {
                     self.assign_debug_hotbar_actor(slot, actor)?;
+                }
+                ClientExperienceGameplayEffect::Respawn => {
+                    if let Some(runtime) = self.active_world.runtime.as_mut() {
+                        runtime.send_gameplay_command(mclone_protocol::ClientCommand::Respawn)?;
+                    }
                 }
             }
         }
@@ -1306,6 +1338,7 @@ impl McloneSceneHost {
             frame_deadline,
             &mut timing,
         )?;
+        self.sync_player_lifecycle_ui();
 
         // Frame-input assembly reuses the shared accessors. The shared
         // `render_full_frame_for_view*` entry applies sky-darken and underwater
@@ -1726,14 +1759,15 @@ impl McloneSceneHost {
                 draw.append(&panel.overlay_draw);
                 let mut hud_cache = UiDrawCacheStats::default();
                 // A full-screen menu covers the world; a bare HUD does not.
-                let covers_world = self.ui.is_active();
-                if let Some(hud) = self.mono_flat_hud(covers_world) {
+                let menu_active = self.ui.is_active();
+                let covers_world = self.ui.covers_world();
+                if let Some(hud) = self.mono_flat_hud(menu_active) {
                     let hud_draw = self.ui.render_flat_hud_draw_list(gui_scale, &hud);
                     draw.append(&hud_draw.draw);
                     hud_cache = hud_draw.retained_cache;
                 }
                 if self.diagnostic_panel.debug_diagnostics_visible()
-                    && !covers_world
+                    && !menu_active
                     && let Some(progress) = self
                         .active_world
                         .runtime

@@ -2023,6 +2023,20 @@ fn configure_screenshot_scene(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
 ) -> Result<()> {
+    if matches!(options.ui, HeadlessScreenshotUi::Death) {
+        let life = mclone_protocol::PlayerLifeState::new(
+            1,
+            mclone_protocol::PlayerVitals::default().with_health(0.0)?,
+            Some(mclone_protocol::PlayerDamageCause::Lava),
+        )?;
+        if !host
+            .driver
+            .host_mut()
+            .apply_mono_player_life_for_diagnostics(life)
+        {
+            bail!("death screenshot requires an active player runtime");
+        }
+    }
     if matches!(
         options.ui,
         HeadlessScreenshotUi::NewWorld | HeadlessScreenshotUi::WorldCreate
@@ -2031,9 +2045,11 @@ fn configure_screenshot_scene(
             .host_mut()
             .set_mono_new_world_seed(options.scene.seed);
     }
-    host.driver
-        .host_mut()
-        .set_mono_ui_screen(options.ui.game_screen());
+    if !matches!(options.ui, HeadlessScreenshotUi::Death) {
+        host.driver
+            .host_mut()
+            .set_mono_ui_screen(options.ui.game_screen());
+    }
     if let Some(day_time) = options.scene.day_time_override {
         host.force_day_time(day_time);
     }

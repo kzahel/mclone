@@ -676,6 +676,10 @@ fn parse_screenshot_ui_accepts_named_screens() {
         HeadlessScreenshotUi::JoinRemote
     );
     assert_eq!(
+        parse_screenshot_ui_arg("--screenshot-ui", Some("death".to_owned())).unwrap(),
+        HeadlessScreenshotUi::Death
+    );
+    assert_eq!(
         parse_screenshot_ui_arg("--screenshot-ui", Some("help".to_owned())).unwrap(),
         HeadlessScreenshotUi::Help
     );

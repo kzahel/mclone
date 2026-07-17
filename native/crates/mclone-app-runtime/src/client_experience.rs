@@ -236,6 +236,9 @@ impl ClientExperienceController {
                     .gameplay
                     .push(ClientExperienceGameplayEffect::AssignHotbarActor { slot, actor });
             }
+            GameUiAction::Respawn => effects
+                .gameplay
+                .push(ClientExperienceGameplayEffect::Respawn),
             GameUiAction::StartWorld
             | GameUiAction::Resume
             | GameUiAction::OpenBlockPalette
@@ -308,6 +311,7 @@ impl ClientExperienceEffects {
 pub enum ClientExperienceGameplayEffect {
     AssignHotbarBlock { slot: u8, block_state: u32 },
     AssignHotbarActor { slot: u8, actor: DebugActorTool },
+    Respawn,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1541,6 +1545,7 @@ pub enum ClientExperienceActionKind {
     CreateWorld,
     JoinRemote,
     Resume,
+    Respawn,
     OpenBlockPalette,
     OpenHelp,
     CloseHelp,
@@ -1607,6 +1612,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::CreateWorld(_) => ClientExperienceActionKind::CreateWorld,
         GameUiAction::JoinRemote => ClientExperienceActionKind::JoinRemote,
         GameUiAction::Resume => ClientExperienceActionKind::Resume,
+        GameUiAction::Respawn => ClientExperienceActionKind::Respawn,
         GameUiAction::OpenBlockPalette => ClientExperienceActionKind::OpenBlockPalette,
         GameUiAction::OpenHelp(_) => ClientExperienceActionKind::OpenHelp,
         GameUiAction::CloseHelp(_) => ClientExperienceActionKind::CloseHelp,
@@ -1696,6 +1702,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::CreateWorld
         | ClientExperienceActionKind::JoinRemote
         | ClientExperienceActionKind::AssignHotbarBlock
+        | ClientExperienceActionKind::Respawn
         | ClientExperienceActionKind::BackToTitle
         | ClientExperienceActionKind::QuitToTitle
         | ClientExperienceActionKind::ToggleSectionOcclusion
@@ -1933,6 +1940,7 @@ mod tests {
             GameUiAction::CreateWorld(1),
             GameUiAction::JoinRemote,
             GameUiAction::Resume,
+            GameUiAction::Respawn,
             GameUiAction::OpenBlockPalette,
             GameUiAction::OpenHelp(GameHelpParent::Title),
             GameUiAction::CloseHelp(GameHelpParent::Title),
@@ -1994,7 +2002,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 60);
+        assert_eq!(samples.len(), 61);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2014,6 +2022,21 @@ mod tests {
             classify_game_ui_action(GameUiAction::Quit),
             ClientExperienceActionClassification::HostEffectAction
         );
+    }
+
+    #[test]
+    fn respawn_is_one_shared_gameplay_effect() {
+        let mut controller =
+            ClientExperienceController::new(desktop_native_client_experience_profile());
+
+        let effects = controller.apply_ui_action(GameUiAction::Respawn, context());
+
+        assert_eq!(
+            effects.gameplay,
+            vec![ClientExperienceGameplayEffect::Respawn]
+        );
+        assert!(effects.session.is_empty());
+        assert!(effects.projection.is_empty());
     }
 
     #[test]

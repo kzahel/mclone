@@ -28,7 +28,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 28;
+pub const PROTOCOL_VERSION: u32 = 29;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -56,6 +56,7 @@ const CLIENT_COMMAND_SHOOT_DEBUG_PHYSICS_CUBE: u8 = 8;
 const CLIENT_COMMAND_SET_PLAYER_APPEARANCE: u8 = 9;
 const CLIENT_COMMAND_KEEP_ALIVE: u8 = 10;
 const CLIENT_COMMAND_DISCONNECT: u8 = 11;
+const CLIENT_COMMAND_RESPAWN: u8 = 12;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -271,6 +272,7 @@ pub enum ClientCommand {
     UseItemOn(UseItemOnCommand),
     ShootDebugPhysicsCube,
     KeepAlive { id: u64 },
+    Respawn,
     Disconnect(ClientDisconnectReason),
 }
 
@@ -755,6 +757,7 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u8(CLIENT_COMMAND_KEEP_ALIVE);
             writer.write_u64(*id);
         }
+        ClientCommand::Respawn => writer.write_u8(CLIENT_COMMAND_RESPAWN),
         ClientCommand::Disconnect(reason) => {
             writer.write_u8(CLIENT_COMMAND_DISCONNECT);
             writer.write_client_disconnect_reason(*reason);
@@ -796,6 +799,7 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
         CLIENT_COMMAND_KEEP_ALIVE => ClientCommand::KeepAlive {
             id: reader.read_u64()?,
         },
+        CLIENT_COMMAND_RESPAWN => ClientCommand::Respawn,
         CLIENT_COMMAND_DISCONNECT => {
             ClientCommand::Disconnect(reader.read_client_disconnect_reason()?)
         }
@@ -2280,6 +2284,7 @@ mod tests {
     fn client_control_commands_round_trip() {
         for command in [
             ClientCommand::KeepAlive { id: 0x1234_5678 },
+            ClientCommand::Respawn,
             ClientCommand::Disconnect(ClientDisconnectReason::Quit),
         ] {
             let bytes = encode_client_command(&command).unwrap();

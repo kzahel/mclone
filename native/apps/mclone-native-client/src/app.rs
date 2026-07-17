@@ -1531,6 +1531,16 @@ impl ApplicationHandler for ChunkApp {
                         if let Some(driver) = &mut self.scene_driver {
                             driver.record_frame_pipeline(frame_wall_ms, rendered, scene_summary);
                         }
+                        if self.mouse_locked
+                            && self
+                                .scene_driver
+                                .as_ref()
+                                .is_some_and(WinitFrameDriver::ui_is_active)
+                        {
+                            self.mouse_lock_requested = false;
+                            self.sync_mouse_lock();
+                            self.clear_flat_gameplay_input();
+                        }
                         if let Some(requested) = self
                             .scene_driver
                             .as_mut()

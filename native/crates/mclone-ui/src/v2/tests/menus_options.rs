@@ -47,6 +47,55 @@ fn pause_render_uses_committed_layout() {
 }
 
 #[test]
+fn death_screen_is_non_dismissible_and_keeps_world_visible() {
+    let screen = GameScreen::Death {
+        cause: GameDeathCause::Lava,
+    };
+    let mut host = GameUiHost::new_ingame();
+    host.set_screen(Some(screen));
+
+    let (handled, action) = host.key_pressed(GuiKey::Escape);
+    host.apply_action(GameUiAction::Resume);
+    host.open_pause();
+
+    assert!(handled);
+    assert_eq!(action, None);
+    assert_eq!(host.screen(), Some(screen));
+    assert!(!host.covers_world());
+}
+
+#[test]
+fn death_screen_renders_typed_cause_and_only_terminal_actions() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::Death {
+        cause: GameDeathCause::Lava,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let buttons = surface.layout().widgets().to_vec();
+
+    assert_eq!(buttons.len(), 2);
+    for (button, expected) in buttons
+        .iter()
+        .zip([GameUiAction::Respawn, GameUiAction::QuitToTitle])
+    {
+        let point = point_in(button.rect);
+        assert!(surface.pointer_down(point, GameUiRenderState::default()));
+        let (_, action) = surface.pointer_up(point, GameUiRenderState::default());
+        assert_eq!(action, Some(expected));
+    }
+
+    let draw = surface.render_draw_list(GameUiRenderState::default());
+    assert!(draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, .. } if text == "YOU DIED!"
+    )));
+    assert!(draw.commands().iter().any(|command| matches!(
+        command,
+        GuiDrawCommand::Text { text, .. } if text == "You tried to swim in lava"
+    )));
+}
+
+#[test]
 fn options_hub_lists_categories_and_navigation_only() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::Options {

@@ -1646,7 +1646,9 @@ impl RealmServer {
             ClientCommand::ShootDebugPhysicsCube => {
                 self.handle_shoot_debug_physics_cube_for_target(target)
             }
-            ClientCommand::KeepAlive { .. } | ClientCommand::Disconnect(_) => Ok(Vec::new()),
+            ClientCommand::KeepAlive { .. }
+            | ClientCommand::Respawn
+            | ClientCommand::Disconnect(_) => Ok(Vec::new()),
         }
     }
 
@@ -4406,6 +4408,7 @@ fn command_is_allowed_while_dead(command: &ClientCommand) -> bool {
             | ClientCommand::AcceptTeleport(_)
             | ClientCommand::SetPlayerAppearance(_)
             | ClientCommand::KeepAlive { .. }
+            | ClientCommand::Respawn
             | ClientCommand::Disconnect(_)
     )
 }

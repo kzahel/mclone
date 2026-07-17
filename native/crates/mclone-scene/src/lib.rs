@@ -158,10 +158,10 @@ use mclone_render_session::{
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
-    FlatHudDebugOverlay, GameCollisionMode, GameFramePacingMode, GameMovementMode, GamePlayerModel,
-    GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode,
-    GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    FlatHudDebugOverlay, GameCollisionMode, GameDeathCause, GameFramePacingMode, GameMovementMode,
+    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey,
+    GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
     StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
     WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
@@ -947,6 +947,7 @@ impl McloneSceneHost {
         left_target: XrTerrainEyeTarget<'_>,
         right_target: XrTerrainEyeTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
+        self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
         let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
@@ -986,6 +987,7 @@ impl McloneSceneHost {
         eye_fovs: [XrFov; 2],
         target: XrTerrainMultiviewTarget<'_>,
     ) -> Result<XrTerrainFrameSummary> {
+        self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
         let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
@@ -2881,9 +2883,31 @@ impl McloneSceneHost {
             &policy,
             timing,
         )?;
+        self.sync_player_lifecycle_ui();
         self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
         self.synchronize_world_gate_state();
         Ok(upload)
+    }
+
+    fn sync_player_lifecycle_ui(&mut self) {
+        let death_cause = self
+            .active_world
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.client().player_death_cause());
+        let death_screen = death_cause.map(|cause| GameScreen::Death {
+            cause: match cause {
+                mclone_protocol::PlayerDamageCause::Lava => GameDeathCause::Lava,
+            },
+        });
+        match (death_screen, self.ui.screen()) {
+            (Some(screen), current) if current != Some(screen) => self.ui.set_screen(Some(screen)),
+            (None, Some(GameScreen::Death { .. })) => {
+                self.ui.close();
+                self.clear_menu_input_state();
+            }
+            _ => {}
+        }
     }
 
     fn prepare_world_slot(

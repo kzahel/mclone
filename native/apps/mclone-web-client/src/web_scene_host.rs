@@ -3284,7 +3284,7 @@ impl WebSceneHost {
             let ui_state = host.mono_ui_render_state();
             let world_catalog = ui_state.world_catalog;
             report_set_bool(&object, "uiActive", host.mono_ui_is_active())?;
-            report_set_bool(&object, "uiCoversWorld", host.mono_ui_is_active())?;
+            report_set_bool(&object, "uiCoversWorld", host.mono_ui_covers_world())?;
             report_set_string(&object, "uiScreen", screen_label(host.mono_ui_screen()))?;
             if let Some(parent) = screen_options_parent(host.mono_ui_screen()) {
                 report_set_string(&object, "uiOptionsParent", parent)?;

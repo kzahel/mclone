@@ -5655,6 +5655,14 @@ impl McloneSceneHost {
         if self.active_world.local_startup.is_some() {
             return Ok(false);
         }
+        if matches!(self.ui.screen(), Some(GameScreen::Death { .. }))
+            && !matches!(
+                action,
+                GameUiAction::Respawn | GameUiAction::QuitToTitle | GameUiAction::Quit
+            )
+        {
+            return Ok(false);
+        }
         let settings_state = self.client_experience_settings_state();
         self.client_experience.set_settings_state(settings_state);
 
@@ -5729,6 +5737,11 @@ impl McloneSceneHost {
                         "XR debug hotbar slot {} assigned actor={actor:?} changed={changed}",
                         slot + 1,
                     );
+                }
+                ClientExperienceGameplayEffect::Respawn => {
+                    if let Some(runtime) = self.active_world.runtime.as_mut() {
+                        runtime.send_gameplay_command(mclone_protocol::ClientCommand::Respawn)?;
+                    }
                 }
             }
         }

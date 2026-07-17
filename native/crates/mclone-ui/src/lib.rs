@@ -1265,6 +1265,19 @@ impl Default for AssetPacksUiState {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameDeathCause {
+    Lava,
+}
+
+impl GameDeathCause {
+    pub const fn message(self) -> &'static str {
+        match self {
+            Self::Lava => "You tried to swim in lava",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameScreen {
     Title,
     PreparingLobby,
@@ -1276,6 +1289,9 @@ pub enum GameScreen {
     NewWorld,
     JoinRemote,
     Pause,
+    Death {
+        cause: GameDeathCause,
+    },
     Help {
         parent: GameHelpParent,
     },
@@ -1807,6 +1823,7 @@ pub enum GameUiAction {
     CreateWorld(i64),
     JoinRemote,
     Resume,
+    Respawn,
     OpenBlockPalette,
     OpenHelp(GameHelpParent),
     CloseHelp(GameHelpParent),

@@ -1,22 +1,23 @@
 use crate::{
     AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
-    Button, Checkbox, Color, CycleButton, DebugPaletteItem, FlatHud, Font, GameHelpParent,
-    GameOptionsCategory, GameOptionsParent, GameScenarioId, GameScreen, GameStorageAction,
-    GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey, GuiScale, GuiTextureUv,
-    HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point, Rect, Slider, WidgetId,
-    WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect,
-    block_palette_slot_rect, centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
-    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
-    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
-    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
-    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
-    render_flat_hud_debug_layer, render_flat_hud_frame_pipeline_layer,
-    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
-    render_flat_hud_status_layer, render_flat_hud_transient_layers,
-    render_loading_progress_overlay, render_loading_progress_panel_at,
-    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
-    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
+    Button, Checkbox, Color, CycleButton, DebugPaletteItem, FlatHud, Font, GameDeathCause,
+    GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId, GameScreen,
+    GameStorageAction, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
+    GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point,
+    Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
+    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
+    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
+    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
+    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
+    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
+    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
+    render_flat_hud_frame_pipeline_layer, render_flat_hud_hotbar_layer,
+    render_flat_hud_prompt_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
+    render_flat_hud_transient_layers, render_loading_progress_overlay,
+    render_loading_progress_panel_at, render_palette_slot_contents, render_touch_panel,
+    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
+    touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -35,6 +36,9 @@ pub enum UiScreenId {
     NewWorld,
     JoinRemote,
     Pause,
+    Death {
+        cause: GameDeathCause,
+    },
     BlockPalette,
     Options {
         parent: GameOptionsParent,
@@ -69,6 +73,7 @@ impl UiScreenId {
             Some(GameScreen::NewWorld) => Some(Self::NewWorld),
             Some(GameScreen::JoinRemote) => Some(Self::JoinRemote),
             Some(GameScreen::Pause) => Some(Self::Pause),
+            Some(GameScreen::Death { cause }) => Some(Self::Death { cause }),
             Some(GameScreen::BlockPalette) => Some(Self::BlockPalette),
             Some(GameScreen::Options { parent }) => Some(Self::Options { parent }),
             Some(GameScreen::OptionsCategory { parent, category }) => {
@@ -699,6 +704,7 @@ impl UiSurface {
             (Some(UiScreenId::Pause), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::Pause)))
             }
+            (Some(UiScreenId::Death { .. }), _) => (true, None),
             (Some(UiScreenId::BlockPalette), GuiKey::Escape) => (true, Some(GameUiAction::Resume)),
             (Some(UiScreenId::BlockPalette), GuiKey::F1) => {
                 (true, Some(GameUiAction::OpenHelp(GameHelpParent::Pause)))
@@ -763,6 +769,7 @@ impl UiSurface {
             Some(UiScreenId::NewWorld) => self.render_new_world(&mut draw),
             Some(UiScreenId::JoinRemote) => self.render_join_remote(&mut draw),
             Some(UiScreenId::Pause) => self.render_pause(&mut draw),
+            Some(UiScreenId::Death { cause }) => self.render_death(&mut draw, cause),
             Some(UiScreenId::BlockPalette) => self.render_block_palette(&mut draw),
             Some(UiScreenId::Options { parent }) => self.render_options(&mut draw, parent),
             Some(UiScreenId::OptionsCategory { parent, category }) => {
@@ -817,6 +824,9 @@ impl UiSurface {
             Some(UiScreenId::NewWorld) => new_world_layout(self.scale, self.layout_revision),
             Some(UiScreenId::JoinRemote) => join_remote_layout(self.scale, self.layout_revision),
             Some(UiScreenId::Pause) => pause_layout(self.scale, self.layout_revision),
+            Some(UiScreenId::Death { cause }) => {
+                death_layout(self.scale, self.layout_revision, cause)
+            }
             Some(UiScreenId::BlockPalette) => block_palette_layout(
                 self.scale,
                 self.layout_revision,
@@ -1230,6 +1240,32 @@ impl UiSurface {
             self.scale.width * 0.5,
             self.scale.height * 0.25,
             Color::rgba(245, 252, 234, 255),
+        );
+        let interaction = self.interaction();
+        for widget in self.layout.widgets() {
+            self.render_widget(draw, widget, interaction);
+        }
+    }
+
+    fn render_death(&self, draw: &mut GuiDrawList, cause: GameDeathCause) {
+        draw.fill_gradient(
+            Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
+            Color::rgba(96, 0, 0, 160),
+            Color::rgba(30, 0, 0, 190),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            "YOU DIED!",
+            self.scale.width * 0.5,
+            self.scale.height * 0.25,
+            Color::rgba(255, 255, 255, 255),
+        );
+        self.font.draw_centered_atlas(
+            draw,
+            cause.message(),
+            self.scale.width * 0.5,
+            self.scale.height * 0.25 + 24.0,
+            Color::rgba(235, 235, 235, 255),
         );
         let interaction = self.interaction();
         for widget in self.layout.widgets() {
@@ -2395,6 +2431,9 @@ impl GameUiHost {
     }
 
     pub fn open_pause(&mut self) {
+        if matches!(self.screen, Some(GameScreen::Death { .. })) {
+            return;
+        }
         self.screen = Some(GameScreen::Pause);
         self.sync_surface_screen();
     }
@@ -2445,6 +2484,14 @@ impl GameUiHost {
     }
 
     pub fn apply_action(&mut self, action: GameUiAction) {
+        if matches!(self.screen, Some(GameScreen::Death { .. }))
+            && !matches!(
+                action,
+                GameUiAction::Respawn | GameUiAction::QuitToTitle | GameUiAction::Quit
+            )
+        {
+            return;
+        }
         match action {
             GameUiAction::StartWorld
             | GameUiAction::Resume
@@ -2501,7 +2548,9 @@ impl GameUiHost {
             }
             GameUiAction::BackToPause => self.screen = Some(GameScreen::Pause),
             GameUiAction::CreateWorld(_) | GameUiAction::JoinRemote => self.screen = None,
-            GameUiAction::RerollSeed | GameUiAction::CycleWorldGenerationProfile => {}
+            GameUiAction::Respawn
+            | GameUiAction::RerollSeed
+            | GameUiAction::CycleWorldGenerationProfile => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::ApplyAssetPacks
@@ -2695,6 +2744,8 @@ const UI_V2_JOIN_REMOTE_BACK: UiWidgetId = UiWidgetId(602);
 const UI_V2_PAUSE_RESUME: UiWidgetId = UiWidgetId(1);
 const UI_V2_PAUSE_OPTIONS: UiWidgetId = UiWidgetId(2);
 const UI_V2_PAUSE_QUIT_TO_TITLE: UiWidgetId = UiWidgetId(3);
+const UI_V2_DEATH_RESPAWN: UiWidgetId = UiWidgetId(4);
+const UI_V2_DEATH_QUIT_TO_TITLE: UiWidgetId = UiWidgetId(5);
 const UI_V2_OPTIONS_OCCLUSION: UiWidgetId = UiWidgetId(101);
 const UI_V2_OPTIONS_FULLBRIGHT: UiWidgetId = UiWidgetId(102);
 const UI_V2_OPTIONS_FAR_LOD: UiWidgetId = UiWidgetId(103);
@@ -3073,6 +3124,24 @@ fn pause_layout(scale: GuiScale, revision: u64) -> UiLayout {
         UiWidget::button(
             UI_V2_PAUSE_QUIT_TO_TITLE,
             menu_button_rect(scale, y + 48.0),
+            "Quit To Title",
+        )
+        .action(GameUiAction::QuitToTitle),
+    );
+    layout
+}
+
+fn death_layout(scale: GuiScale, revision: u64, cause: GameDeathCause) -> UiLayout {
+    let mut layout = UiLayout::new(Some(UiScreenId::Death { cause }), revision);
+    let y = scale.height * 0.5 + 20.0;
+    layout.push(
+        UiWidget::button(UI_V2_DEATH_RESPAWN, menu_button_rect(scale, y), "Respawn")
+            .action(GameUiAction::Respawn),
+    );
+    layout.push(
+        UiWidget::button(
+            UI_V2_DEATH_QUIT_TO_TITLE,
+            menu_button_rect(scale, y + 24.0),
             "Quit To Title",
         )
         .action(GameUiAction::QuitToTitle),
