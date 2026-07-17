@@ -1,8 +1,8 @@
 # Tactical 191: Guarded Generation Planning Refactor
 
-Status: active 2026-07-17; Slices 0-2 are complete. Slice 3 is next. Worldgen
-now solely owns the Overworld footprint calculation; scheduler policy and
-observable work remain unchanged.
+Status: active 2026-07-17; Slices 0-3 are complete. Slice 4 closeout is next.
+Worldgen owns footprint calculation, and the scheduler consumes typed
+prerequisites without profile-specific dependency policy or observable change.
 
 Topics: `world-generation-profiles`, `performance`
 
@@ -330,6 +330,56 @@ feature blocks. Slice 2 therefore passes its behavior and raw-performance gate.
 
 Gate: scheduler unit/integration suites, native worker codec, browser worker,
 persistence, and host performance rows pass without policy adjustment.
+
+#### Slice 3 result
+
+Commits `20cb6b38` and `f8be81dd` moved built-in plan dispatch behind the
+closed `WorldGenerationProfile` facade and made the scheduler schedule every
+typed prerequisite at its declared status. Target and backend-work ordering
+still occurs afterward under scheduler-owned view priority. Existing
+`ChunkStatusJob`, mailbox request/response, resident cache, batching,
+publication, light, and persistence shapes remain unchanged.
+
+The first implementation kept a second transient vector while translating
+typed requirements back to the existing job position list. It was removed
+before closeout: the scheduler now schedules directly from the plan set, then
+consumes that set into the one existing priority-sorted position vector. A
+mixed Terrain/Surface fixture proves generic status consumption and target
+holders remain non-client-visible.
+
+Validation passed:
+
+- 220 active worldgen and 469 server library tests, including native worker
+  codecs, SQLite persistence, Overworld fixtures, and Flat/Island target-only
+  paths;
+- `mclone-web-client` for `wasm32-unknown-unknown`;
+- the real threaded browser smoke with shared Wasm memory, web server,
+  worldgen/light workers, movement/unload, WebGPU, and zero pending worker
+  work at shutdown;
+- formatting and diff checks.
+
+The browser gate initially exposed an unrelated stale exact count: the prior
+player-life closeout added one initial `PlayerLife` update but the base smoke
+still required 12 updates. Commit `7d81ad1f` corrected the harness to the
+current exact count of 13; two failures were identical before the correction,
+and the same threaded lane passed afterward.
+
+An initial candidate-only scheduler sample had a sub-millisecond max poll of
+0.853 ms versus the older 0.657 ms record. Rather than infer from unmatched
+one-off runs, a detached `0ae6b924` worktree was alternated with clean candidate
+`f8be81dd` on the same host:
+
+| Pair | Baseline total / max polls | Slice 3 total / max polls |
+|---|---|---|
+| 1 | 669.850 ms / 0.443, 0.358, 0.340 ms | 653.390 ms / 0.448, 0.375, 0.343 ms |
+| 2 | 663.188 ms / 0.454, 0.350, 0.395 ms | 647.568 ms / 0.443, 0.376, 0.369 ms |
+
+Candidate completion improved 2.46% and 2.36%; matched max polls, poll totals,
+main-thread scheduler time, and RSS remained in the same envelope. Both pairs
+kept exact `25/49/81`, `5/21/45`, `5/21/45` work, `72/72/99/171`
+seed/hit/miss/retained cache totals, and `9/35/806/99` final visible/snapshot/
+dependency-holder/ready-dependency counts. Slice 3 passes without a pacing or
+capacity-policy adjustment.
 
 ### Slice 4: Dispatch cleanup and platform closeout
 
