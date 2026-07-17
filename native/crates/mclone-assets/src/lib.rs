@@ -51,9 +51,9 @@ pub use prepared_figure::{
     FigurePoseError, FigurePrepareError, PREPARED_FIGURE_COMPILER_ID, PreparedFigure,
     PreparedFigureAtlas, PreparedFigureBounds, PreparedFigureClip, PreparedFigureClipContact,
     PreparedFigureClipKey, PreparedFigureClipLocomotion, PreparedFigureDiagnostics,
-    PreparedFigureDrawRange, PreparedFigurePart, PreparedFigurePoseSample, PreparedFigureVertex,
-    evaluate_prepared_figure_clip_into, evaluate_prepared_figure_rest_pose_into,
-    load_prepared_figure, prepare_figure_asset,
+    PreparedFigureDrawRange, PreparedFigurePart, PreparedFigurePoseSample,
+    PreparedFigurePrimitiveKind, PreparedFigureVertex, evaluate_prepared_figure_clip_into,
+    evaluate_prepared_figure_rest_pose_into, load_prepared_figure, prepare_figure_asset,
 };
 pub use profile::{
     AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor, AssetPackDiscovery, AssetPackId,

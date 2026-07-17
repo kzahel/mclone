@@ -6,7 +6,7 @@ use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 
 use crate::{AssetError, AssetPath, AssetResult, AssetSource, FigureAsset, FigurePart};
 
-pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-box-v0";
+pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-cuboid-proxy-v1";
 
 const MAX_PARTS: usize = 256;
 const MAX_VERTICES: usize = u16::MAX as usize;
@@ -43,6 +43,7 @@ pub struct PreparedFigurePart {
     pub name: String,
     pub parent: Option<u16>,
     pub first_person_visible: bool,
+    pub primitive_kind: PreparedFigurePrimitiveKind,
     /// Semantic source-space group position (`part.at + pivot`).
     pub source_base_position: [f32; 3],
     /// Semantic source-space base Euler rotation in XYZ radians.
@@ -51,6 +52,29 @@ pub struct PreparedFigurePart {
     pub source_pivot: [f32; 3],
     /// Global rest-pose content transform in normalized actor-local space.
     pub rest_matrix: [[f32; 4]; 4],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PreparedFigurePrimitiveKind {
+    Box,
+    SphereCuboidProxy,
+    CapsuleCuboidProxy,
+    CylinderCuboidProxy,
+}
+
+impl PreparedFigurePrimitiveKind {
+    pub const fn source_kind(self) -> &'static str {
+        match self {
+            Self::Box => "box",
+            Self::SphereCuboidProxy => "sphere",
+            Self::CapsuleCuboidProxy => "capsule",
+            Self::CylinderCuboidProxy => "cylinder",
+        }
+    }
+
+    pub const fn is_cuboid_proxy(self) -> bool {
+        !matches!(self, Self::Box)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -129,6 +153,10 @@ pub struct PreparedFigureDiagnostics {
     pub vertex_count: usize,
     pub index_count: usize,
     pub draw_range_count: usize,
+    pub box_primitive_count: usize,
+    pub sphere_cuboid_proxy_count: usize,
+    pub capsule_cuboid_proxy_count: usize,
+    pub cylinder_cuboid_proxy_count: usize,
     pub atlas_bytes: usize,
     pub prepared_cpu_bytes: usize,
 }
@@ -398,7 +426,7 @@ fn prepare_figure_asset_with_crc(
     let raw_parts = build_raw_parts(asset, &part_names)?;
     let content_matrices = content_matrices(&raw_parts)?;
     let evaluation_order = part_evaluation_order(&raw_parts)?;
-    let raw_bounds = raw_figure_bounds(asset, &content_matrices)?;
+    let raw_bounds = raw_figure_bounds(asset, &raw_parts, &content_matrices)?;
     let height = raw_bounds.max.y - raw_bounds.min.y;
     if !height.is_finite() || height <= 0.0 {
         return Err(FigurePrepareError::new(format!(
@@ -424,6 +452,7 @@ fn prepare_figure_asset_with_crc(
             name: part.name.clone(),
             parent: part.parent.map(|index| index as u16),
             first_person_visible: part.first_person_visible,
+            primitive_kind: part.primitive_kind,
             source_base_position: part.base_position.to_array(),
             source_base_rotation_radians: part.base_rotation.to_array(),
             source_pivot: part.pivot.to_array(),
@@ -438,9 +467,10 @@ fn prepare_figure_asset_with_crc(
     let mut indices = Vec::with_capacity(asset.parts.len() * 36);
     let mut draw_ranges = Vec::with_capacity(asset.parts.len() * 6);
     for (part_index, part) in asset.parts.iter().enumerate() {
-        append_box(
+        append_prepared_cuboid(
             asset,
             part,
+            raw_parts[part_index].prepared_size,
             part_index as u16,
             &materials,
             &atlas_regions,
@@ -479,6 +509,22 @@ fn prepare_figure_asset_with_crc(
         vertex_count: vertices.len(),
         index_count: indices.len(),
         draw_range_count: draw_ranges.len(),
+        box_primitive_count: raw_parts
+            .iter()
+            .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::Box)
+            .count(),
+        sphere_cuboid_proxy_count: raw_parts
+            .iter()
+            .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::SphereCuboidProxy)
+            .count(),
+        capsule_cuboid_proxy_count: raw_parts
+            .iter()
+            .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::CapsuleCuboidProxy)
+            .count(),
+        cylinder_cuboid_proxy_count: raw_parts
+            .iter()
+            .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::CylinderCuboidProxy)
+            .count(),
         atlas_bytes: atlas.rgba.len(),
         prepared_cpu_bytes,
     };
@@ -734,6 +780,8 @@ struct RawPart {
     base_rotation: Vec3,
     pivot: Vec3,
     first_person_visible: bool,
+    primitive_kind: PreparedFigurePrimitiveKind,
+    prepared_size: Vec3,
 }
 
 fn build_raw_parts(
@@ -742,17 +790,21 @@ fn build_raw_parts(
 ) -> Result<Vec<RawPart>, FigurePrepareError> {
     let mut parts = Vec::with_capacity(asset.parts.len());
     for part in &asset.parts {
-        if part.primitive.kind != "box" {
+        let (primitive_kind, prepared_size) = prepared_primitive_size(asset, part)?;
+        if primitive_kind.is_cuboid_proxy() && part.texture.is_some() {
             return Err(FigurePrepareError::new(format!(
-                "figure '{}' part '{}' uses unsupported prepared primitive '{}'; this proof accepts only boxes",
-                asset.name, part.name, part.primitive.kind
+                "figure '{}' part '{}' applies a texture to {}; cuboid-proxy non-box primitives support solid materials only",
+                asset.name,
+                part.name,
+                primitive_kind.source_kind()
             )));
         }
-        let size = finite_positive_vec3(part.primitive.size, asset, part, "size")?;
-        if size.min_element() <= 0.0 {
+        if primitive_kind.is_cuboid_proxy() && part.primitive.faces.is_some() {
             return Err(FigurePrepareError::new(format!(
-                "figure '{}' box part '{}' has non-positive size {:?}",
-                asset.name, part.name, size
+                "figure '{}' part '{}' declares box faces on {}; cuboid-proxy non-box primitives do not support face overrides",
+                asset.name,
+                part.name,
+                primitive_kind.source_kind()
             )));
         }
         if let Some(faces) = &part.primitive.faces {
@@ -801,6 +853,8 @@ fn build_raw_parts(
             ),
             pivot,
             first_person_visible: false,
+            primitive_kind,
+            prepared_size,
         });
     }
     let mut visibility_cache = vec![None; parts.len()];
@@ -810,6 +864,82 @@ fn build_raw_parts(
             first_person_visible(index, &parts, &mut visibility_cache, &mut visiting)?;
     }
     Ok(parts)
+}
+
+fn prepared_primitive_size(
+    asset: &FigureAsset,
+    part: &FigurePart,
+) -> Result<(PreparedFigurePrimitiveKind, Vec3), FigurePrepareError> {
+    let (kind, size) = match part.primitive.kind.as_str() {
+        "box" => (
+            PreparedFigurePrimitiveKind::Box,
+            finite_positive_vec3(part.primitive.size, asset, part, "size")?,
+        ),
+        "sphere" => {
+            let radius = finite_positive_scalar(part.primitive.radius, asset, part, "radius")?;
+            (
+                PreparedFigurePrimitiveKind::SphereCuboidProxy,
+                Vec3::splat(radius * 2.0),
+            )
+        }
+        "capsule" => {
+            let radius = finite_positive_scalar(part.primitive.radius, asset, part, "radius")?;
+            let length = finite_positive_scalar(part.primitive.length, asset, part, "length")?;
+            (
+                PreparedFigurePrimitiveKind::CapsuleCuboidProxy,
+                Vec3::new(radius * 2.0, length + radius * 2.0, radius * 2.0),
+            )
+        }
+        "cylinder" => {
+            let radius_top =
+                finite_positive_scalar(part.primitive.radius_top, asset, part, "radiusTop")?;
+            let radius_bottom =
+                finite_positive_scalar(part.primitive.radius_bottom, asset, part, "radiusBottom")?;
+            let length = finite_positive_scalar(part.primitive.length, asset, part, "length")?;
+            let diameter = radius_top.max(radius_bottom) * 2.0;
+            (
+                PreparedFigurePrimitiveKind::CylinderCuboidProxy,
+                Vec3::new(diameter, length, diameter),
+            )
+        }
+        other => {
+            return Err(FigurePrepareError::new(format!(
+                "figure '{}' part '{}' uses unsupported prepared primitive '{}'",
+                asset.name, part.name, other
+            )));
+        }
+    };
+    if size.min_element() <= 0.0 || !size.is_finite() {
+        return Err(FigurePrepareError::new(format!(
+            "figure '{}' {} part '{}' has invalid prepared cuboid size {:?}",
+            asset.name,
+            kind.source_kind(),
+            part.name,
+            size
+        )));
+    }
+    Ok((kind, size))
+}
+
+fn finite_positive_scalar(
+    value: Option<f32>,
+    asset: &FigureAsset,
+    part: &FigurePart,
+    field: &str,
+) -> Result<f32, FigurePrepareError> {
+    let value = value.ok_or_else(|| {
+        FigurePrepareError::new(format!(
+            "figure '{}' part '{}' is missing {}",
+            asset.name, part.name, field
+        ))
+    })?;
+    if !value.is_finite() || value <= 0.0 {
+        return Err(FigurePrepareError::new(format!(
+            "figure '{}' part '{}' has non-positive or non-finite {}",
+            asset.name, part.name, field
+        )));
+    }
+    Ok(value)
 }
 
 fn finite_positive_vec3(
@@ -969,12 +1099,13 @@ struct Bounds {
 
 fn raw_figure_bounds(
     asset: &FigureAsset,
+    raw_parts: &[RawPart],
     content_matrices: &[Mat4],
 ) -> Result<Bounds, FigurePrepareError> {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
-    for (part, matrix) in asset.parts.iter().zip(content_matrices) {
-        let size = Vec3::from_array(part.primitive.size.expect("box size validated"));
+    for (part, matrix) in raw_parts.iter().zip(content_matrices) {
+        let size = part.prepared_size;
         let half = size * 0.5;
         for x in [-half.x, half.x] {
             for y in [-half.y, half.y] {
@@ -1164,9 +1295,10 @@ fn material_colors(asset: &FigureAsset) -> Result<HashMap<String, [f32; 4]>, Fig
 }
 
 #[allow(clippy::too_many_arguments)]
-fn append_box(
+fn append_prepared_cuboid(
     asset: &FigureAsset,
     part: &FigurePart,
+    size: Vec3,
     part_id: u16,
     materials: &HashMap<String, [f32; 4]>,
     atlas_regions: &BTreeMap<String, AtlasRegion>,
@@ -1176,7 +1308,6 @@ fn append_box(
     indices: &mut Vec<u16>,
     draw_ranges: &mut Vec<PreparedFigureDrawRange>,
 ) -> Result<(), FigurePrepareError> {
-    let size = Vec3::from_array(part.primitive.size.expect("box size validated"));
     for face in BoxFace::ALL {
         let override_face = part
             .primitive
@@ -1451,6 +1582,10 @@ mod tests {
 
     const PLAYER_FIGURE_JSON: &str =
         include_str!("../../../../assets/mclone/figures/player.figure.json");
+    const CHICKEN_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/chicken.figure.json");
+    const UPRIGHT_BEAR_FIGURE_JSON: &str =
+        include_str!("../../../../assets/mclone/figures/upright_bear.figure.json");
 
     #[test]
     fn prepares_player_as_static_box_geometry() {
@@ -1830,20 +1965,112 @@ mod tests {
     }
 
     #[test]
-    fn rejects_curved_primitives_in_static_box_proof() {
+    fn prepares_curved_primitives_as_explicit_cuboid_proxies() {
         let asset: FigureAsset = serde_json::from_str(
             r##"{
               "schemaVersion": 1,
-              "name": "sphere",
+              "name": "proxy-shapes",
               "materials": {},
               "textures": {},
-              "parts": [{ "name": "body", "primitive": { "kind": "sphere", "radius": 1 } }],
+              "parts": [
+                { "name": "sphere", "primitive": { "kind": "sphere", "radius": 1 } },
+                { "name": "capsule", "at": [3, 0, 0],
+                  "primitive": { "kind": "capsule", "radius": 0.5, "length": 2 } },
+                { "name": "cylinder", "at": [6, 0, 0],
+                  "primitive": {
+                    "kind": "cylinder", "radiusTop": 0.25,
+                    "radiusBottom": 0.75, "length": 3
+                  } }
+              ],
               "clips": {}
             }"##,
         )
         .unwrap();
-        let error = prepare_figure_asset(&asset).unwrap_err().to_string();
-        assert!(error.contains("accepts only boxes"));
+        let prepared = prepare_figure_asset(&asset).unwrap();
+
+        assert_eq!(prepared.vertices.len(), 3 * 24);
+        assert_eq!(prepared.indices.len(), 3 * 36);
+        assert_eq!(prepared.diagnostics.box_primitive_count, 0);
+        assert_eq!(prepared.diagnostics.sphere_cuboid_proxy_count, 1);
+        assert_eq!(prepared.diagnostics.capsule_cuboid_proxy_count, 1);
+        assert_eq!(prepared.diagnostics.cylinder_cuboid_proxy_count, 1);
+        assert_eq!(
+            prepared
+                .parts
+                .iter()
+                .map(|part| part.primitive_kind)
+                .collect::<Vec<_>>(),
+            vec![
+                PreparedFigurePrimitiveKind::SphereCuboidProxy,
+                PreparedFigurePrimitiveKind::CapsuleCuboidProxy,
+                PreparedFigurePrimitiveKind::CylinderCuboidProxy,
+            ]
+        );
+        assert_eq!(prepared.vertices[0].position[0].abs(), 1.0);
+        assert_eq!(prepared.vertices[24].position[0].abs(), 0.5);
+        assert_eq!(prepared.vertices[24].position[1].abs(), 1.5);
+        assert_eq!(prepared.vertices[48].position[0].abs(), 0.75);
+        assert_eq!(prepared.vertices[48].position[1].abs(), 1.5);
+    }
+
+    #[test]
+    fn rejects_textures_and_face_overrides_on_non_box_primitives() {
+        for part in [
+            serde_json::json!({
+                "name": "textured",
+                "texture": "face",
+                "primitive": { "kind": "sphere", "radius": 1 }
+            }),
+            serde_json::json!({
+                "name": "faces",
+                "primitive": {
+                    "kind": "capsule",
+                    "radius": 1,
+                    "length": 1,
+                    "faces": { "north": { "material": "white" } }
+                }
+            }),
+        ] {
+            let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+                "schemaVersion": 1,
+                "name": "invalid-curved-texture",
+                "materials": { "white": { "color": "#ffffff" } },
+                "textures": {
+                    "face": { "palette": { "x": "#ffffff" }, "pixels": ["x"] }
+                },
+                "parts": [part],
+                "clips": {}
+            }))
+            .unwrap();
+            let error = prepare_figure_asset(&asset).unwrap_err().to_string();
+            assert!(error.contains("non-box primitives"));
+        }
+    }
+
+    #[test]
+    fn promoted_animals_prepare_deterministically_with_proxy_accounting() {
+        let chicken: FigureAsset = serde_json::from_str(CHICKEN_FIGURE_JSON).unwrap();
+        let first = prepare_figure_asset(&chicken).unwrap();
+        let second = prepare_figure_asset(&chicken).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(first.parts.len(), 21);
+        assert_eq!(first.vertices.len(), 21 * 24);
+        assert_eq!(first.indices.len(), 21 * 36);
+        assert_eq!(first.diagnostics.box_primitive_count, 6);
+        assert_eq!(first.diagnostics.sphere_cuboid_proxy_count, 11);
+        assert_eq!(first.diagnostics.capsule_cuboid_proxy_count, 3);
+        assert_eq!(first.diagnostics.cylinder_cuboid_proxy_count, 1);
+        assert!(first.clips.contains_key("walk"));
+
+        let bear: FigureAsset = serde_json::from_str(UPRIGHT_BEAR_FIGURE_JSON).unwrap();
+        let prepared_bear = prepare_figure_asset(&bear).unwrap();
+        assert_eq!(prepared_bear.parts.len(), 15);
+        assert_eq!(prepared_bear.diagnostics.box_primitive_count, 15);
+        assert_eq!(prepared_bear.diagnostics.sphere_cuboid_proxy_count, 0);
+        assert_eq!(
+            prepared_bear,
+            prepare_figure_asset(&bear).expect("repeat bear preparation")
+        );
     }
 
     #[test]

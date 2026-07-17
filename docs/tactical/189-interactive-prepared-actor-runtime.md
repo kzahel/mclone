@@ -1,6 +1,7 @@
 # 189: Interactive Prepared Actor Runtime
 
-Status: active 2026-07-17.
+Status: active 2026-07-17. Slices 0-1 are complete; Slice 2 authoritative
+interactive tools and mannequin is next.
 
 Topic: `compiled-figure-rendering`
 
@@ -125,7 +126,7 @@ exact curved parity, LOD, or a thousand-chicken optimization yet.
 Gate: documentation states what is semantic authority, what is an explicit
 runtime approximation, and what still requires later quality/performance work.
 
-### Slice 1: deterministic cuboid-proxy preparation
+### Slice 1: deterministic cuboid-proxy preparation (complete 2026-07-17)
 
 - Extend `mclone-assets` preparation to accept current solid-color spheres,
   capsules, and cylinders using the binding bounds policy.
@@ -139,6 +140,37 @@ runtime approximation, and what still requires later quality/performance work.
 Gate: player output is unchanged; chicken and upright bear prepare repeatedly
 with finite exact accounting; the inspected animal proxy is coherent and is
 never mislabeled as Three.js parity.
+
+Gate evidence:
+
+- `PreparedFigure` now records each part as an exact box or a sphere/capsule/
+  cylinder cuboid proxy. Its compiler identity is
+  `mclone-prepared-figure-cuboid-proxy-v1`, and diagnostics report exact counts
+  for all four categories without changing schema-v1 semantic JSON.
+- One validated size function implements the selected bounds math for raw
+  bounds and emitted cuboid topology. Missing, non-positive, non-finite, and
+  unknown primitive parameters fail preparation. A texture or box-face
+  override on a non-box primitive fails with an explicit solid-material-only
+  diagnostic.
+- Player remains 12 exact boxes, 288 vertices, 432 indices, and 72 ranges.
+  Chicken prepares deterministically as 21 parts, 504 vertices, 756 indices,
+  and 126 ranges: 6 exact boxes plus 11 sphere, 3 capsule, and 1 cylinder
+  proxies. Upright bear remains 15 exact boxes. Both promoted animals retain
+  their compiled walk clips.
+- The generalized comparison command accepts any promoted figure path and
+  emits the geometry variant and proxy count in its receipt and visible labels.
+  `/tmp/mclone-prepared-chicken-comparison/comparison.png` shows corresponding
+  semantic Three.js and prepared cuboid-proxy front/right/three-quarter panels;
+  the sheet explicitly labels all 15 approximated chicken parts.
+- The sheet and raw mono/stereo images were inspected immediately. The proxy
+  chicken is grounded, recognizable, correctly oriented, hierarchically
+  coherent, and consistent between stereo eyes. Its intentionally blockier
+  breast, neck, head, comb, beak, wattle, and legs are the selected proxy style,
+  not an unnoticed parity defect.
+- All focused preparation tests, `mclone-figure-review` check, Asset Lab
+  typecheck, native GPU review, labeled comparison lane, and portability
+  capture pass. The final native receipt reports four immutable uploads and
+  three view writes; preparation measured 0.706 ms in this diagnostic run.
 
 ### Slice 2: authoritative interactive tools and mannequin
 

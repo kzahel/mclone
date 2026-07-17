@@ -9,7 +9,9 @@ const execFileAsync = promisify(execFile);
 const VIEW_NAMES = ["front", "right", "three-quarter"] as const;
 const repoRoot = path.resolve(assetLabRoot, "../..");
 const args = parseArgs(process.argv.slice(2));
-const input = path.resolve(args.input);
+const input = path.isAbsolute(args.input)
+  ? args.input
+  : path.resolve(repoRoot, args.input);
 const relativeAssetPath = path.relative(repoRoot, input).split(path.sep).join("/");
 if (relativeAssetPath.startsWith("../") || !relativeAssetPath.endsWith(".json")) {
   throw new Error(
@@ -72,6 +74,7 @@ const comparisonReceipt = {
   semanticSha256: threeReceipt.semanticSha256,
   semanticCrc32: engineReceipt.semanticCrc32,
   compilerId: engineReceipt.compilerId,
+  engineGeometryVariant: engineReceipt.geometryVariant,
   engineImageAlignment: "horizontal-reflection",
   comparison: path.basename(comparisonPath),
   views: VIEW_NAMES,
@@ -82,6 +85,9 @@ const comparisonReceipt = {
     indices: engineReceipt.indexCount,
     drawRanges: engineReceipt.drawRangeCount,
     atlas: [engineReceipt.atlasWidth, engineReceipt.atlasHeight],
+    cuboidProxies: engineReceipt.sphereCuboidProxyCount
+      + engineReceipt.capsuleCuboidProxyCount
+      + engineReceipt.cylinderCuboidProxyCount,
   },
   preparationMs: engineReceipt.preparationMs,
   immutableUploadCount: engineReceipt.immutableUploadCount,
@@ -89,7 +95,7 @@ const comparisonReceipt = {
   checks: {
     figureIdentity: true,
     sharedReviewContract: true,
-    expectedPlayerGeometry: true,
+    expectedPreparedGeometry: true,
     oneResidencyUploadSet: true,
     oneViewWritePerPanel: true,
   },
@@ -130,12 +136,17 @@ interface EngineReceipt {
   figure: string;
   assetPath: string;
   compilerId: string;
+  geometryVariant: "exact-box" | "cuboid-proxy";
   semanticCrc32?: string;
   preparationMs: number;
   partCount: number;
   vertexCount: number;
   indexCount: number;
   drawRangeCount: number;
+  boxPrimitiveCount: number;
+  sphereCuboidProxyCount: number;
+  capsuleCuboidProxyCount: number;
+  cylinderCuboidProxyCount: number;
   atlasWidth: number;
   atlasHeight: number;
   review: ReviewContract;
@@ -228,13 +239,31 @@ function validateReceipts(
   if (three.contract.panelWidth !== width || three.contract.panelHeight !== height) {
     throw new Error("Figure review output dimensions differ from the requested dimensions");
   }
-  if (engine.partCount !== 12 || engine.vertexCount !== 288 || engine.indexCount !== 432) {
+  if (
+    engine.vertexCount !== engine.partCount * 24
+    || engine.indexCount !== engine.partCount * 36
+    || engine.drawRangeCount !== engine.partCount * 6
+  ) {
     throw new Error(
-      `Prepared player reported ${engine.partCount} parts, ${engine.vertexCount} vertices, and ${engine.indexCount} indices`,
+      `Prepared ${engine.figure} reported inconsistent cuboid geometry: `
+      + `${engine.partCount} parts, ${engine.vertexCount} vertices, `
+      + `${engine.indexCount} indices, and ${engine.drawRangeCount} ranges`,
+    );
+  }
+  const proxyCount = engine.sphereCuboidProxyCount
+    + engine.capsuleCuboidProxyCount
+    + engine.cylinderCuboidProxyCount;
+  if (engine.boxPrimitiveCount + proxyCount !== engine.partCount) {
+    throw new Error("Prepared primitive accounting does not match the part count");
+  }
+  const expectedVariant = proxyCount === 0 ? "exact-box" : "cuboid-proxy";
+  if (engine.geometryVariant !== expectedVariant) {
+    throw new Error(
+      `Prepared geometry variant '${engine.geometryVariant}' should be '${expectedVariant}'`,
     );
   }
   if (engine.immutableUploadCount !== 4 || engine.viewUniformWriteCount !== VIEW_NAMES.length) {
-    throw new Error("Prepared player did not retain immutable resources across review views");
+    throw new Error("Prepared figure did not retain immutable resources across review views");
   }
   if (three.views.join(",") !== VIEW_NAMES.join(",")) {
     throw new Error("Asset Lab review view order changed");
@@ -274,7 +303,7 @@ async function writeComparisonSheet(
       <h2>${escapeHtml(viewLabel(view))}</h2>
       <div class="pair">
         <figure><figcaption>Three.js semantic</figcaption><img src="${images.get(`three-${view}`)}"></figure>
-        <figure class="engine"><figcaption>Mclone prepared engine (view-aligned)</figcaption><img src="${images.get(`engine-${view}`)}"></figure>
+        <figure class="engine"><figcaption>${engineCaption(engine)}</figcaption><img src="${images.get(`engine-${view}`)}"></figure>
       </div>
     </section>
   `).join("");
@@ -299,14 +328,14 @@ async function writeComparisonSheet(
         h2 { margin: 0 0 5px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.04em; }
         .pair { display: grid; grid-template-columns: ${panelWidth}px ${panelWidth}px; gap: 8px; }
         figure { margin: 0; border: 1px solid #9aaab8; background: #edf1f4; }
-        figcaption { height: 26px; padding: 4px 7px; background: #dbe5ec; font-size: 12px; font-weight: 700; }
+        figcaption { height: 38px; padding: 4px 7px; background: #dbe5ec; font-size: 12px; font-weight: 700; }
         img { display: block; width: ${panelWidth}px; height: ${panelHeight}px; image-rendering: auto; }
         .engine img { transform: scaleX(-1); }
         footer { color: #475569; font-size: 11px; line-height: 1.35; }
       </style></head><body>
         <main id="comparison">
           <header>
-            <h1>${escapeHtml(engine.figure)} — semantic vs prepared engine</h1>
+            <h1>${escapeHtml(engine.figure)} — semantic vs ${escapeHtml(engine.geometryVariant)}</h1>
             <p>${escapeHtml(engine.compilerId)} · ${engine.partCount} parts · ${engine.vertexCount} vertices · ${engine.indexCount} indices · ${engine.preparationMs.toFixed(3)} ms preparation</p>
           </header>
           ${rows}
@@ -317,6 +346,16 @@ async function writeComparisonSheet(
   } finally {
     await browser.close();
   }
+}
+
+function engineCaption(engine: EngineReceipt): string {
+  if (engine.geometryVariant === "cuboid-proxy") {
+    const proxies = engine.sphereCuboidProxyCount
+      + engine.capsuleCuboidProxyCount
+      + engine.cylinderCuboidProxyCount;
+    return `Mclone prepared cuboid proxy (${proxies} approximated parts, view-aligned)`;
+  }
+  return "Mclone prepared exact boxes (view-aligned)";
 }
 
 function viewLabel(view: typeof VIEW_NAMES[number]): string {

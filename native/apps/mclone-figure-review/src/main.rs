@@ -851,6 +851,7 @@ struct ReviewReceipt<'a> {
     figure: &'a str,
     asset_path: &'a str,
     compiler_id: &'a str,
+    geometry_variant: &'static str,
     semantic_crc32: Option<String>,
     preparation_ms: f64,
     gpu_setup_ms: f64,
@@ -859,6 +860,10 @@ struct ReviewReceipt<'a> {
     vertex_count: usize,
     index_count: usize,
     draw_range_count: usize,
+    box_primitive_count: usize,
+    sphere_cuboid_proxy_count: usize,
+    capsule_cuboid_proxy_count: usize,
+    cylinder_cuboid_proxy_count: usize,
     prepared_cpu_bytes: usize,
     atlas_width: u32,
     atlas_height: u32,
@@ -890,6 +895,15 @@ impl<'a> ReviewReceipt<'a> {
             figure: &figure.name,
             asset_path: options.figure_path.as_str(),
             compiler_id: figure.diagnostics.compiler_id,
+            geometry_variant: if figure
+                .parts
+                .iter()
+                .any(|part| part.primitive_kind.is_cuboid_proxy())
+            {
+                "cuboid-proxy"
+            } else {
+                "exact-box"
+            },
             semantic_crc32: figure
                 .diagnostics
                 .semantic_crc32
@@ -901,6 +915,10 @@ impl<'a> ReviewReceipt<'a> {
             vertex_count: figure.vertices.len(),
             index_count: figure.indices.len(),
             draw_range_count: figure.draw_ranges.len(),
+            box_primitive_count: figure.diagnostics.box_primitive_count,
+            sphere_cuboid_proxy_count: figure.diagnostics.sphere_cuboid_proxy_count,
+            capsule_cuboid_proxy_count: figure.diagnostics.capsule_cuboid_proxy_count,
+            cylinder_cuboid_proxy_count: figure.diagnostics.cylinder_cuboid_proxy_count,
             prepared_cpu_bytes: figure.diagnostics.prepared_cpu_bytes,
             atlas_width: figure.atlas.width,
             atlas_height: figure.atlas.height,
