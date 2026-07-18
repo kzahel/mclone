@@ -6,6 +6,7 @@ mod planning;
 mod profile;
 mod sampler;
 mod settings;
+mod surface_dependency_cache;
 mod timing;
 
 pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};

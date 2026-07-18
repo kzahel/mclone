@@ -1,9 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use mclone_core::{ChunkPos, chunk_min_block_coord};
 
 use crate::feature::FeatureRegion;
 use crate::levelgen::feature_batch::sorted_chunk_positions_z_major;
+use crate::levelgen::surface_dependency_cache::{
+    PreparedSurfaceDependencies, SurfaceDependencyCache, SurfaceDependencyCacheReport,
+};
 use crate::levelgen::{ChunkGenerationPlan, GeneratedChunk, MutableChunkBlockBuffer};
 
 use super::decoration::decorate_mclone_overworld_center;
@@ -26,8 +29,7 @@ pub struct McloneOverworldFeatureBatchResult {
 
 #[derive(Debug, Default)]
 pub struct McloneOverworldFeatureDependencyCache {
-    seed: Option<i64>,
-    chunks: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    cache: SurfaceDependencyCache,
 }
 
 impl McloneOverworldFeatureDependencyCache {
@@ -36,16 +38,15 @@ impl McloneOverworldFeatureDependencyCache {
     }
 
     pub fn retained_chunk_count(&self) -> usize {
-        self.chunks.len()
+        self.cache.retained_chunk_count()
     }
 
-    pub fn resident_positions(&self) -> BTreeSet<ChunkPos> {
-        self.chunks.keys().copied().collect()
+    pub fn resident_positions(&self) -> std::collections::BTreeSet<ChunkPos> {
+        self.cache.resident_positions()
     }
 
     pub fn clear(&mut self) {
-        self.seed = None;
-        self.chunks.clear();
+        self.cache.clear();
     }
 
     pub fn generate_features_chunks(
@@ -62,44 +63,15 @@ impl McloneOverworldFeatureDependencyCache {
         targets: impl IntoIterator<Item = ChunkPos>,
         dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
     ) -> McloneOverworldFeatureBatchResult {
-        if self.seed != Some(seed) {
-            self.seed = Some(seed);
-            self.chunks.clear();
-        }
-        for dependency in dependencies {
-            self.chunks.insert(
-                ChunkPos::new(dependency.chunk_x, dependency.chunk_z),
-                dependency,
-            );
-        }
-
         let plan = ChunkGenerationPlan::mclone_overworld_features(targets);
-        let mut cache_report = McloneOverworldFeatureDependencyCacheReport {
-            requested_dependency_chunks: plan.prerequisites().len(),
-            ..McloneOverworldFeatureDependencyCacheReport::default()
-        };
-        let required_positions = plan
-            .prerequisites()
-            .iter()
-            .map(|requirement| requirement.pos)
-            .collect::<BTreeSet<_>>();
-        let mut region_chunks = Vec::with_capacity(required_positions.len());
-        for pos in sorted_chunk_positions_z_major(required_positions.iter().copied()) {
-            if let Some(chunk) = self.chunks.get(&pos) {
-                cache_report.cache_hits += 1;
-                region_chunks.push(chunk.clone());
-            } else {
-                let chunk = generate_mclone_overworld_surface_buffer(seed, pos.x, pos.z);
-                self.chunks.insert(pos, chunk.clone());
-                region_chunks.push(chunk);
-                cache_report.generated_dependency_chunks += 1;
-            }
-        }
-
-        self.chunks
-            .retain(|pos, _| required_positions.contains(pos));
-        cache_report.retained_dependency_chunks = self.chunks.len();
-        let retained_dependencies = self.chunks.clone();
+        let PreparedSurfaceDependencies {
+            region_chunks,
+            retained_dependencies,
+            report,
+        } = self.cache.prepare(seed, &plan, dependencies, |pos| {
+            generate_mclone_overworld_surface_buffer(seed, pos.x, pos.z)
+        });
+        let cache_report = mclone_overworld_cache_report(report);
 
         if plan.output_chunks().is_empty() {
             return McloneOverworldFeatureBatchResult {
@@ -145,6 +117,17 @@ impl McloneOverworldFeatureDependencyCache {
             retained_dependencies,
             cache_report,
         }
+    }
+}
+
+fn mclone_overworld_cache_report(
+    report: SurfaceDependencyCacheReport,
+) -> McloneOverworldFeatureDependencyCacheReport {
+    McloneOverworldFeatureDependencyCacheReport {
+        requested_dependency_chunks: report.requested_dependency_chunks,
+        cache_hits: report.cache_hits,
+        generated_dependency_chunks: report.generated_dependency_chunks,
+        retained_dependency_chunks: report.retained_dependency_chunks,
     }
 }
 

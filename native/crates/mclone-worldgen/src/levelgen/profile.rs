@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord, expected_chunk_biome_count};
 
@@ -11,6 +11,9 @@ use crate::noise::{SeedDomain, ValueNoise2d};
 
 use super::chunk::sample_column_biome_payload;
 use super::feature_batch::sorted_chunk_positions_z_major;
+use super::surface_dependency_cache::{
+    PreparedSurfaceDependencies, SurfaceDependencyCache, SurfaceDependencyCacheReport,
+};
 use super::{ChunkGenerationPlan, GeneratedChunk, MutableChunkBlockBuffer};
 
 pub const FLAT_GRASS_MIN_Y: i32 = 0;
@@ -183,8 +186,7 @@ pub struct SmallIslandFeatureBatchResult {
 
 #[derive(Debug, Default)]
 pub struct SmallIslandFeatureDependencyCache {
-    seed: Option<i64>,
-    chunks: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    cache: SurfaceDependencyCache,
 }
 
 impl SmallIslandFeatureDependencyCache {
@@ -193,16 +195,15 @@ impl SmallIslandFeatureDependencyCache {
     }
 
     pub fn retained_chunk_count(&self) -> usize {
-        self.chunks.len()
+        self.cache.retained_chunk_count()
     }
 
-    pub fn resident_positions(&self) -> BTreeSet<ChunkPos> {
-        self.chunks.keys().copied().collect()
+    pub fn resident_positions(&self) -> std::collections::BTreeSet<ChunkPos> {
+        self.cache.resident_positions()
     }
 
     pub fn clear(&mut self) {
-        self.seed = None;
-        self.chunks.clear();
+        self.cache.clear();
     }
 
     pub fn generate_features_chunks(
@@ -219,44 +220,15 @@ impl SmallIslandFeatureDependencyCache {
         targets: impl IntoIterator<Item = ChunkPos>,
         dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
     ) -> SmallIslandFeatureBatchResult {
-        if self.seed != Some(seed) {
-            self.seed = Some(seed);
-            self.chunks.clear();
-        }
-        for dependency in dependencies {
-            self.chunks.insert(
-                ChunkPos::new(dependency.chunk_x, dependency.chunk_z),
-                dependency,
-            );
-        }
-
         let plan = ChunkGenerationPlan::small_island_features(targets);
-        let mut cache_report = SmallIslandFeatureDependencyCacheReport {
-            requested_dependency_chunks: plan.prerequisites().len(),
-            ..SmallIslandFeatureDependencyCacheReport::default()
-        };
-        let required_positions = plan
-            .prerequisites()
-            .iter()
-            .map(|requirement| requirement.pos)
-            .collect::<BTreeSet<_>>();
-        let mut region_chunks = Vec::with_capacity(required_positions.len());
-        for pos in sorted_chunk_positions_z_major(required_positions.iter().copied()) {
-            if let Some(chunk) = self.chunks.get(&pos) {
-                cache_report.cache_hits += 1;
-                region_chunks.push(chunk.clone());
-            } else {
-                let chunk = generate_small_island_surface_buffer(seed, pos.x, pos.z);
-                self.chunks.insert(pos, chunk.clone());
-                region_chunks.push(chunk);
-                cache_report.generated_dependency_chunks += 1;
-            }
-        }
-
-        self.chunks
-            .retain(|pos, _| required_positions.contains(pos));
-        cache_report.retained_dependency_chunks = self.chunks.len();
-        let retained_dependencies = self.chunks.clone();
+        let PreparedSurfaceDependencies {
+            region_chunks,
+            retained_dependencies,
+            report,
+        } = self.cache.prepare(seed, &plan, dependencies, |pos| {
+            generate_small_island_surface_buffer(seed, pos.x, pos.z)
+        });
+        let cache_report = small_island_cache_report(report);
 
         if plan.output_chunks().is_empty() {
             return SmallIslandFeatureBatchResult {
@@ -308,6 +280,17 @@ impl SmallIslandFeatureDependencyCache {
             retained_dependencies,
             cache_report,
         }
+    }
+}
+
+fn small_island_cache_report(
+    report: SurfaceDependencyCacheReport,
+) -> SmallIslandFeatureDependencyCacheReport {
+    SmallIslandFeatureDependencyCacheReport {
+        requested_dependency_chunks: report.requested_dependency_chunks,
+        cache_hits: report.cache_hits,
+        generated_dependency_chunks: report.generated_dependency_chunks,
+        retained_dependency_chunks: report.retained_dependency_chunks,
     }
 }
 
