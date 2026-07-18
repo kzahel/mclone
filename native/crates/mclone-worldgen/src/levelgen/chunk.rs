@@ -7,7 +7,7 @@ use crate::block::{
 use crate::placement::HeightmapType;
 use mclone_core::{
     BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus, SECTION_HEIGHT,
-    chunk_block_index, validate_chunk_biomes,
+    chunk_block_index, expected_chunk_biome_count, validate_chunk_biomes,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -29,6 +29,32 @@ impl ScheduledTick {
             delay,
         }
     }
+}
+
+/// Sample a column generator's 2.5D biome field into the canonical chunk
+/// payload order.
+///
+/// The sampler owns biome policy. This helper owns only the shared payload
+/// shape: Y-major quart sections containing Z-major, then X-major samples at
+/// the center of each 4x4 block cell.
+pub(crate) fn sample_column_biome_payload(
+    min_x: i32,
+    min_z: i32,
+    height: i32,
+    mut biome_at: impl FnMut(i32, i32) -> i32,
+) -> Vec<i32> {
+    debug_assert_eq!(height.rem_euclid(4), 0);
+    let quart_height = height / 4;
+    let quart_width = CHUNK_WIDTH / 4;
+    let mut biomes = Vec::with_capacity(expected_chunk_biome_count(height));
+    for _quart_y in 0..quart_height {
+        for quart_z in 0..quart_width {
+            for quart_x in 0..quart_width {
+                biomes.push(biome_at(min_x + quart_x * 4 + 2, min_z + quart_z * 4 + 2));
+            }
+        }
+    }
+    biomes
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -453,4 +479,31 @@ pub(super) fn world_surface_height(
         }
     }
     chunk.min_y
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn column_biomes_preserve_payload_order_and_sampling_shape() {
+        let mut sample_count = 0;
+        let biomes = sample_column_biome_payload(-16, 32, 16, |x, z| {
+            sample_count += 1;
+            x + z * 100
+        });
+
+        assert_eq!(sample_count, 64);
+        assert_eq!(biomes.len(), expected_chunk_biome_count(16));
+        assert_eq!(
+            &biomes[..16],
+            &[
+                3_386, 3_390, 3_394, 3_398, 3_786, 3_790, 3_794, 3_798, 4_186, 4_190, 4_194, 4_198,
+                4_586, 4_590, 4_594, 4_598,
+            ]
+        );
+        for quart_y in 1..4 {
+            assert_eq!(&biomes[quart_y * 16..quart_y * 16 + 16], &biomes[..16]);
+        }
+    }
 }

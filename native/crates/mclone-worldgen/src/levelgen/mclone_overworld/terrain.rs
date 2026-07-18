@@ -1,8 +1,9 @@
-use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord, expected_chunk_biome_count};
+use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
 use crate::block::{BEDROCK, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
 
 use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldSampler};
+use crate::levelgen::chunk::sample_column_biome_payload;
 use crate::levelgen::profile::{
     BEACH_BIOME_ID, FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
 };
@@ -75,19 +76,9 @@ fn mclone_overworld_chunk_biomes(
     min_x: i32,
     min_z: i32,
 ) -> Vec<i32> {
-    let quart_height = FLAT_GRASS_HEIGHT / 4;
-    let mut biomes = Vec::with_capacity(expected_chunk_biome_count(FLAT_GRASS_HEIGHT));
-    for _quart_y in 0..quart_height {
-        for quart_z in 0..4 {
-            for quart_x in 0..4 {
-                let surface_y = sampler
-                    .sample(min_x + quart_x * 4 + 2, min_z + quart_z * 4 + 2)
-                    .surface_y;
-                biomes.push(biome_id_for_surface(surface_y));
-            }
-        }
-    }
-    biomes
+    sample_column_biome_payload(min_x, min_z, FLAT_GRASS_HEIGHT, |world_x, world_z| {
+        biome_id_for_surface(sampler.sample(world_x, world_z).surface_y)
+    })
 }
 
 #[cfg(test)]

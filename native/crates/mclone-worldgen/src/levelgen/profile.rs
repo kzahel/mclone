@@ -9,6 +9,7 @@ use crate::feature::{
 };
 use crate::noise::{SeedDomain, ValueNoise2d};
 
+use super::chunk::sample_column_biome_payload;
 use super::feature_batch::sorted_chunk_positions_z_major;
 use super::{ChunkGenerationPlan, GeneratedChunk, MutableChunkBlockBuffer};
 
@@ -400,20 +401,9 @@ pub fn small_island_biome_id(seed: i64, world_x: i32, world_z: i32) -> i32 {
 fn small_island_chunk_biomes(seed: i64, chunk_x: i32, chunk_z: i32) -> Vec<i32> {
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
-    let quart_height = FLAT_GRASS_HEIGHT / 4;
-    let mut biomes = Vec::with_capacity(expected_chunk_biome_count(FLAT_GRASS_HEIGHT));
-    for _quart_y in 0..quart_height {
-        for quart_z in 0..4 {
-            for quart_x in 0..4 {
-                biomes.push(small_island_biome_id(
-                    seed,
-                    min_x + quart_x * 4 + 2,
-                    min_z + quart_z * 4 + 2,
-                ));
-            }
-        }
-    }
-    biomes
+    sample_column_biome_payload(min_x, min_z, FLAT_GRASS_HEIGHT, |world_x, world_z| {
+        small_island_biome_id(seed, world_x, world_z)
+    })
 }
 
 fn smoothstep(value: f64) -> f64 {
