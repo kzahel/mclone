@@ -1,8 +1,8 @@
 # Tactical 188: Mclone Overworld V1 Terrain Foundation
 
-Status: planned first implementation tactical for
-[`mclone-overworld-generation`](../topics/mclone-overworld-generation.md). No
-profile identity or terrain behavior has landed yet.
+Status: Slice 0 complete 2026-07-18; Slice 1 is next. No profile identity or
+terrain behavior has landed yet. Durable direction lives in
+[`mclone-overworld-generation`](../topics/mclone-overworld-generation.md).
 
 Topic: `mclone-overworld-generation`
 
@@ -54,21 +54,79 @@ profile enum with placeholder terrain while those decisions remain open.
 
 ### Slice 0: design, inventory, and baselines
 
-- [ ] Approve the product rule, scale vocabulary, and non-goals.
-- [ ] Select at least three contrasting seeds, including a negative seed, and
+- [x] Approve the product rule, scale vocabulary, and non-goals.
+- [x] Select at least three contrasting seeds, including a negative seed, and
   positive/negative region centers.
-- [ ] Define only the structured field values and stable seed domains needed
+- [x] Define only the structured field values and stable seed domains needed
   by the first terrain rule.
-- [ ] Classify relevant reference Overworld and Small Island mechanisms as
+- [x] Classify relevant reference Overworld and Small Island mechanisms as
   reuse-as-is, extraction candidate with output locks, or profile-owned.
-- [ ] Identify affected compatibility-safety ledger rows.
-- [ ] Capture clean Overworld oracle/order results and Small Island
+- [x] Identify affected compatibility-safety ledger rows.
+- [x] Capture clean Overworld oracle/order results and Small Island
   fingerprints/cards before shared changes.
-- [ ] Define field hashes/ranges, terrain distributions, and a performance
+- [x] Define field hashes/ranges, terrain distributions, and a performance
   comparison command.
 
 Gate: approve the aesthetic target, reuse inventory, evidence commands, and
 review matrix. No generator identity lands in this slice.
+
+Execution record 2026-07-18:
+
+- approved the quoted temperate-world product rule above. The first scale
+  vocabulary is broad land/ocean regions over roughly 768-2,048 blocks,
+  coastline transitions over tens of blocks, rolling relief over roughly
+  96-384 blocks, sea level 63, lowlands near 64-73, and first-slice uplands
+  near 74-96. These are design ranges, not frozen output values;
+- selected seeds `12345`, `-98765`, and `8675309`. The core review matrix is
+  seed `12345` at chunk centers `(0,0)`, `(96,-64)`, and `(-128,80)`, plus the
+  other two seeds at `(0,0)`. This distinguishes seed variation from spatial
+  continuity without requiring a full seed-by-center cross product;
+- limited the first production sample to signed `continentalness`, signed
+  `relief`, and derived integer `surface_y`. One seeded sampler exposes pure
+  point sampling and a bounded row-major region request/response using the
+  same implementation. Temperature, moisture, ridges, rivers, biome choice,
+  and 3D density remain absent;
+- reserved independent stable domains for continentalness and relief. The
+  exact domain constants land with tests in Slice 1 and then become part of
+  the internal profile fingerprint;
+- defined the regional evidence as stable field/grid hashes, min/max, height
+  percentiles, land/water/shore column counts, slope counts at one- and
+  three-block thresholds, and generation elapsed time. Slice 3 adds biome and
+  feature proportions;
+- the compatibility ledger rows in scope are reference-locked `overworld`,
+  internal-mutable `small-island-v1`, and planned-unallocated
+  `mclone-overworld-v1`. Flat Grass and authored-only behavior are
+  non-regression checks but require no rule update in this slice.
+
+Reuse inventory:
+
+| Existing mechanism | Slice 1 decision | Evidence boundary |
+|---|---|---|
+| `SeedDomain` and `ValueNoise2d` | reuse as-is | pinned positive/negative coordinate tests |
+| `GeneratedChunk`, mutable buffer, biome payload, heightmaps, ticks | reuse as-is | worldgen and server suites |
+| `ChunkGenerationPlan::target_only` | reuse for the undecorated foundation | exact plan tests; scheduler remains generic |
+| descriptor, worker frame, persistence, and catalog transport | extend closed identity dispatch | preserve old labels/tags/bytes |
+| Small Island radial envelope, spawn patch, and material rules | keep profile-owned | existing island fingerprints/cards |
+| reference `NoiseSampler`, Java PRNG, biome and surface tables | keep reference-owned | Java oracle and order locks |
+| octave/region helper | do not extract yet | reconsider with two working callers in Slice 2 |
+| feature-region execution and placed/configured features | defer reuse to Slice 3 | Small Island dependency/order locks |
+
+Clean baseline at commit `9b9910b3` on arm64 macOS 26.5.1, Rust 1.92.0:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen`: 226
+  passed, zero failed, one known active-gauntlet test ignored;
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server`: 470 passed,
+  zero failed;
+- release `worldgen_perf`, seed `12345`, center `(0,0)`, radius 1, three
+  iterations: Surface 1,036.458 chunks/s, cold Features 149.023 target
+  chunks/s, warm Features 492.162 target chunks/s. Use the same command after
+  shared changes; add the mclone target-only phase when Slice 1 lands;
+- inspected complete render-distance-16 Small Island cards for all three
+  review seeds under `/tmp/mclone-worldgen-showcase`. Every receipt reported
+  1,225/1,225 client-visible and target-ready chunks before capture. Warmup was
+  1,388-1,422 frames and 7.79-7.95 seconds. The cards preserve the expected
+  bounded island, surrounding water, coastline, relief, and decoration while
+  visibly varying the shoreline between seeds.
 
 ### Slice 1: first continuous terrain caller
 
