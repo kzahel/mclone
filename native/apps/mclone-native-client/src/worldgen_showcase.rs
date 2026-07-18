@@ -197,7 +197,12 @@ pub(crate) fn run_worldgen_showcase(
     }
 
     let profile = options.scene.world_generation_profile.label();
-    let output_prefix = showcase_output_prefix(profile, options.scene.seed);
+    let output_prefix = showcase_output_prefix(
+        profile,
+        options.scene.seed,
+        options.scene.chunk_x,
+        options.scene.chunk_z,
+    );
     let mut panels = Vec::with_capacity(SHOWCASE_VIEW_COUNT);
     for (((view, pixels), drawn_section_count), index) in state
         .views
@@ -322,7 +327,7 @@ fn showcase_views(center_x: f32, surface_y: f32, center_z: f32) -> [WorldgenShow
             fov_y_degrees: 42.0,
         },
         WorldgenShowcaseView {
-            slug: "coast",
+            slug: "landscape",
             label: "LOW LANDSCAPE",
             eye: Vec3::new(center_x, surface_y + 8.0, center_z - 200.0),
             target: Vec3::new(center_x, surface_y - 6.0, center_z),
@@ -727,13 +732,23 @@ fn draw_text(
     }
 }
 
-fn showcase_output_prefix(profile: &str, seed: i64) -> String {
+fn showcase_output_prefix(profile: &str, seed: i64, chunk_x: i32, chunk_z: i32) -> String {
     let seed = if seed < 0 {
         format!("neg{}", seed.unsigned_abs())
     } else {
         seed.to_string()
     };
-    format!("{profile}-seed-{seed}")
+    let chunk_x = signed_file_component(chunk_x);
+    let chunk_z = signed_file_component(chunk_z);
+    format!("{profile}-seed-{seed}-chunk-{chunk_x}-{chunk_z}")
+}
+
+fn signed_file_component(value: i32) -> String {
+    if value < 0 {
+        format!("neg{}", value.unsigned_abs())
+    } else {
+        value.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -741,18 +756,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn output_prefix_is_stable_for_positive_and_negative_seeds() {
+    fn output_prefix_is_stable_for_seed_and_center() {
         assert_eq!(
-            showcase_output_prefix("small-island-v1", 12345),
-            "small-island-v1-seed-12345"
+            showcase_output_prefix("small-island-v1", 12345, 0, 0),
+            "small-island-v1-seed-12345-chunk-0-0"
         );
         assert_eq!(
-            showcase_output_prefix("small-island-v1", -42),
-            "small-island-v1-seed-neg42"
+            showcase_output_prefix("small-island-v1", -42, 96, -64),
+            "small-island-v1-seed-neg42-chunk-96-neg64"
         );
         assert_eq!(
-            showcase_output_prefix("small-island-v1", i64::MIN),
-            "small-island-v1-seed-neg9223372036854775808"
+            showcase_output_prefix("small-island-v1", i64::MIN, i32::MIN, i32::MAX),
+            "small-island-v1-seed-neg9223372036854775808-chunk-neg2147483648-2147483647"
         );
     }
 
@@ -800,7 +815,10 @@ mod tests {
     #[test]
     fn showcase_views_include_near_vertical_and_two_landscape_angles() {
         let views = showcase_views(32.0, 70.0, -16.0);
-        assert_eq!(views.map(|view| view.slug), ["top", "coast", "elevated"]);
+        assert_eq!(
+            views.map(|view| view.slug),
+            ["top", "landscape", "elevated"]
+        );
         assert!(views[0].eye.y - views[0].target.y > 300.0);
         assert!(views[1].eye.y - views[1].target.y < 30.0);
         assert!(views[2].eye.y - views[2].target.y > 100.0);

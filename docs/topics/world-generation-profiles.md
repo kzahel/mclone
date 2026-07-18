@@ -271,9 +271,9 @@ elevated opposing landscape. The chunk interest remains fixed on the requested
 `--chunk-x`/`--chunk-z` center while detached diagnostic cameras render from
 above or outside that region. It writes the labeled comparison card, the three
 source PNGs, and a schema-versioned JSON receipt under
-`/tmp/mclone-worldgen-showcase`. Output names include the profile and seed, so
-running the command again with another seed accumulates directly comparable
-cards instead of overwriting the previous seed.
+`/tmp/mclone-worldgen-showcase`. Output names include the profile, seed, and
+interest-center chunk, so another seed or region accumulates a directly
+comparable card instead of overwriting prior evidence.
 
 The command defaults to `small-island-v1`, minimum render distance 16, frozen
 daytime, disabled passive showcase actors, disabled lighting, and fullbright
