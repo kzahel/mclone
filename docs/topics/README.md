@@ -44,6 +44,11 @@ series implements the same concern, normally reuse the document slug in its
   previews, warm transfer as client presentation, and typed statistics proven
   across transfer and restart. Tactical
   [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) is complete.
+- [`bounded-world-topology.md`](bounded-world-topology.md): accepted design for
+  exact locally Euclidean finite and looping dimensions, including bounded
+  planes and cylinders, flat tori, observer-local lifts, topology-aware
+  generation, presentation-only visual bending, a fog-capped cube atlas, and
+  deliberate deferral of true spherical regional rasterization.
 - [`world-generation-profiles.md`](world-generation-profiles.md): accepted
   generator-profile direction and authoritative compatibility safety ledger;
   current reference-locked Overworld versus internal-mutable flat-grass,

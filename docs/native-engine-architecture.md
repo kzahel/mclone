@@ -96,6 +96,32 @@ Platform app crates own:
 - platform input collection and translation
 - platform storage, transport setup, package scripts, and device validation
 
+## Dimension Topology and Presentation Geometry
+
+World topology is a dimension-scoped shared-engine fact, independent of the
+generation profile and platform. The current Overworld remains an unbounded
+Euclidean grid. Future bounded dimensions may use finite horizontal extents,
+one periodic axis for a cylinder, two periodic axes for a flat torus, or a
+validated atlas of finite square-grid patches joined by exact translations and
+quarter-turn frame transforms.
+
+All accessible simulation remains locally Euclidean: one block of movement,
+collision, reach, adjacency, lighting, fluid flow, and path cost retains its
+ordinary meaning. `DimensionRuntime` owns authoritative bounds, exclusions,
+canonical spatial identity, topology-aware neighborhood and interest, while
+generation consumes the same canonical topology without owning it. Client
+replicas retain canonical facts; scene/render-session code selects
+observer-local lifts for presentation. App/platform crates do not interpret
+topology or wrapping.
+
+Optional cylindrical horizons or other apparent curvature are presentation
+transforms applied only after a local lift is chosen. They cannot affect server
+poses, generation, collision, persistence, or protocol semantics, and every
+enabled world-space rendering path must remain mono, per-eye, and multiview
+aware. The detailed accepted direction, finite/cylinder/torus/cube sequence,
+hard invariants, validation ledger, and spherical deferral live in
+[`topics/bounded-world-topology.md`](topics/bounded-world-topology.md).
+
 ## Host Shapes
 
 All display clients share one `mclone-scene::McloneSceneHost`, configured with
