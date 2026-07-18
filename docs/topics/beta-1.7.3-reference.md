@@ -5,7 +5,7 @@ Topic: `beta-1.7.3-reference`
 Status: **Minecraft Java Beta 1.7.3 is the selected Beta specimen. Its mapped
 client/server merge is reproducibly decompiled and its world-generation source
 has been traced and measured against Alpha v1.1.2_01. The source study is
-complete; the separately scoped native implementation is now active under
+complete; the separately scoped native implementation is now complete under
 [`beta-world-generation.md`](beta-world-generation.md) and Tactical
 [`194`](../tactical/194-beta-v1-world-generation.md).**
 
@@ -353,12 +353,12 @@ These systems explain part of the whole-source growth but do not need to be
 ported to reproduce terrain inside mclone's existing persistence/scheduler
 architecture.
 
-## What A Future Native Port Would Actually Add
+## Implemented Native Port Boundary
 
-No implementation is authorized yet, but the source gives a useful boundary
-for the later discussion.
+Tactical 194 subsequently implemented this source-derived boundary as the
+standalone `beta-v1` profile.
 
-Reusable from the completed Alpha work:
+Neutral infrastructure reused from the completed Alpha work:
 
 - Java `Random` behavior and seed-domain helpers;
 - the 5 by 17 by 5 density/interpolation shape;
@@ -369,7 +369,7 @@ Reusable from the completed Alpha work:
 - the engine's existing sandstone, lapis, birch/spruce, dead-bush, pumpkin,
   grass/fern, snow, and ice content.
 
-New or Beta-specific work:
+Beta-owned work now implemented:
 
 - the dedicated Beta 2D `ImprovedNoise` branch;
 - simplex/perlin-simplex climate streams and biome lookup;
@@ -408,7 +408,7 @@ before any feature approximation.
 
 ## Evidence And Validation
 
-Completed in this research slice:
+Completed across the research and implementation slices:
 
 - official client SHA-1 verification;
 - pinned Feather mapping/decompile completion;
@@ -416,16 +416,17 @@ Completed in this research slice:
 - direct trace of Overworld, biome, noise, cave, feature, dimension, chunk, and
   region-storage source;
 - file/line measurements against the pinned Alpha source; and
-- explicit absence search for ravines and structure generators.
+- explicit absence search for ravines and structure generators;
+- staged Java climate/biome, terrain, surface, and cave probes with committed
+  receipts;
+- exact native semantic equality for the pinned origin and mixed-sign cases;
+- a standalone native `beta-v1` profile with persisted binary tag `7`;
+- deterministic flavor-close population with batch/order independence;
+- inspected warm-desert and cold-taiga worldgen cards; and
+- native, dedicated, browser Web Worker, and IndexedDB reopen validation.
 
-Not yet built, by design:
-
-- a Beta Java terrain/biome/surface/cave oracle;
-- committed Beta output receipts;
-- a native profile or binary/persistence identity;
-- a parity policy for population;
-- Beta screenshots; or
-- Nether/Skylands scope and product decisions.
+Nether and Skylands remain excluded product scopes rather than missing parts
+of the implemented Beta Overworld profile.
 
 ## Resolved Implementation Boundary
 

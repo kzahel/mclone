@@ -2,8 +2,8 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tacticals 187, 188, 191, and 193 are complete, and Tactical 194 is
-active. `flat-grass-v1`, `small-island-v1`, `alpha-v1`, `beta-v1`, and the
+Status: **Tacticals 187, 188, 191, 193, and 194 are complete.
+`flat-grass-v1`, `small-island-v1`, `alpha-v1`, `beta-v1`, and the
 first `mclone-overworld-v1` terrain language are live, persisted shared-Rust
 generators beside the unchanged Overworld; authored-only misses still produce
 void. Small Island now
