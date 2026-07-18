@@ -1843,6 +1843,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             section_revisions,
             snapshots: upserts,
             biome_zoom_seed,
+            topology: _,
         } = request;
 
         if staged_delta.reset {

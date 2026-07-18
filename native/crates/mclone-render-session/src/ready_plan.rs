@@ -36,7 +36,7 @@ pub fn render_section_neighbor_readiness(
     key: RenderSectionKey,
     camera_position: Vec3,
 ) -> RenderSectionNeighborReadiness {
-    if render_section_horizontal_distance_sq(key, camera_position)
+    if render_section_horizontal_distance_sq_in(client.topology(), key, camera_position)
         <= RENDER_NEIGHBOR_READY_DISTANCE_SQ
     {
         return RenderSectionNeighborReadiness::ReadyNearCamera;
@@ -100,8 +100,24 @@ fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f
     render_section_center(key).distance_squared(camera_position)
 }
 
-fn render_section_horizontal_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
-    let center = render_section_center(key);
+fn render_section_horizontal_distance_sq_in(
+    topology: HorizontalTopology,
+    key: RenderSectionKey,
+    camera_position: Vec3,
+) -> f32 {
+    let lifted = topology.nearest_chunk_lift(
+        ChunkPos::new(key.chunk_x, key.chunk_z),
+        Vec3d::new(
+            f64::from(camera_position.x),
+            f64::from(camera_position.y),
+            f64::from(camera_position.z),
+        ),
+    );
+    let center = Vec3::new(
+        lifted.x as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5,
+        render_section_center(key).y,
+        lifted.z as f32 * CHUNK_WIDTH as f32 + CHUNK_WIDTH as f32 * 0.5,
+    );
     let dx = center.x - camera_position.x;
     let dz = center.z - camera_position.z;
     dx * dx + dz * dz
@@ -117,14 +133,14 @@ fn render_chunk_distance_sq(pos: ChunkPos, camera_position: Vec3) -> f32 {
 }
 
 fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> bool {
-    [
-        ChunkPos::new(pos.x - 1, pos.z),
-        ChunkPos::new(pos.x + 1, pos.z),
-        ChunkPos::new(pos.x, pos.z - 1),
-        ChunkPos::new(pos.x, pos.z + 1),
-    ]
-    .into_iter()
-    .all(|neighbor| client.chunk_snapshot(neighbor).is_some())
+    [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        .into_iter()
+        .all(|(dx, dz)| {
+            client
+                .topology()
+                .neighbor_chunk(pos, dx, dz)
+                .is_some_and(|neighbor| client.chunk_snapshot(neighbor).is_some())
+        })
 }
 
 /// Distance-sort loaded dirty chunk positions nearest-first (camera-relative), with a

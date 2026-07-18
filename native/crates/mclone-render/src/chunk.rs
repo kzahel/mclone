@@ -10,8 +10,8 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Quat, Vec3, Vec4};
 use mclone_core::{
-    Vec3d, block_to_chunk_coord, block_to_section_coord, chunk_middle_block_coord,
-    chunk_min_block_coord,
+    HorizontalTopology, Vec3d, block_to_chunk_coord, block_to_section_coord,
+    chunk_middle_block_coord, chunk_min_block_coord,
 };
 use mclone_diagnostics::GpuPassId;
 use mclone_mesh::{
@@ -551,6 +551,9 @@ pub struct TexturedSectionRenderOptions {
     pub sky_darken: f32,
     pub fog: RenderFog,
     pub color_profile: RenderColorProfile,
+    /// Active dimension topology used only for observer-local presentation.
+    /// Canonical mesh/upload identity remains unchanged.
+    pub topology: HorizontalTopology,
 }
 
 impl Default for TexturedSectionRenderOptions {
@@ -561,6 +564,7 @@ impl Default for TexturedSectionRenderOptions {
             sky_darken: 1.0,
             fog: RenderFog::none(),
             color_profile: RenderColorProfile::default(),
+            topology: HorizontalTopology::UNBOUNDED,
         }
     }
 }
@@ -578,6 +582,11 @@ impl TexturedSectionRenderOptions {
 
     pub fn with_color_profile(mut self, color_profile: RenderColorProfile) -> Self {
         self.color_profile = color_profile;
+        self
+    }
+
+    pub fn with_topology(mut self, topology: HorizontalTopology) -> Self {
+        self.topology = topology;
         self
     }
 }
@@ -1122,7 +1131,7 @@ fn cull_textured_sections(
     options: TexturedSectionRenderOptions,
     scratch: &mut CullScratch,
 ) -> TexturedSectionCullingResult {
-    let frustum = ClipFrustum::from_render_view(render_view);
+    let frustum = ClipFrustum::from_render_view(render_view, options.topology);
     cull_textured_sections_with_frustum(prepared, render_view, options, scratch, &frustum)
 }
 
@@ -1170,7 +1179,12 @@ fn cull_textured_sections_with_frustum(
         }
     }
 
-    let start_keys = traversal_start_keys(records, frustum_keys, render_view.camera_position);
+    let start_keys = traversal_start_keys(
+        records,
+        frustum_keys,
+        render_view.camera_position,
+        options.topology,
+    );
     if start_keys.is_empty() {
         stats.drawn_section_count = ready_frustum_keys
             .iter()
@@ -1218,7 +1232,10 @@ fn cull_textured_sections_with_frustum(
                 continue;
             }
 
-            let neighbor_key = section_neighbor_key(key, direction);
+            let Some(neighbor_key) = section_neighbor_key_in(options.topology, key, direction)
+            else {
+                continue;
+            };
             let Some(neighbor_record) = records.get(&neighbor_key) else {
                 continue;
             };
@@ -1268,7 +1285,8 @@ fn cull_textured_sections_stereo_union(
     options: [TexturedSectionRenderOptions; 2],
     scratch: &mut CullScratch,
 ) -> TexturedSectionStereoCullingResult {
-    let frustums = render_views.map(ClipFrustum::from_render_view);
+    let frustums =
+        render_views.map(|view| ClipFrustum::from_render_view(view, options[0].topology));
     cull_textured_sections_stereo_union_with_frustums(
         prepared,
         render_views,
@@ -1349,7 +1367,8 @@ fn cull_textured_sections_stereo_union_with_frustums(
     }
 
     let center_position = stereo_center_position(render_views);
-    let start_keys = traversal_start_keys(records, frustum_keys, center_position);
+    let start_keys =
+        traversal_start_keys(records, frustum_keys, center_position, options[0].topology);
     if start_keys.is_empty() {
         stats.drawn_section_count = ready_frustum_keys
             .iter()
@@ -1401,7 +1420,10 @@ fn cull_textured_sections_stereo_union_with_frustums(
                 continue;
             }
 
-            let neighbor_key = section_neighbor_key(key, direction);
+            let Some(neighbor_key) = section_neighbor_key_in(options[0].topology, key, direction)
+            else {
+                continue;
+            };
             let Some(neighbor_record) = records.get(&neighbor_key) else {
                 continue;
             };
@@ -1519,8 +1541,9 @@ fn traversal_start_keys(
     records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
     frustum_keys: &FxHashSet<RenderSectionKey>,
     camera_position: Vec3,
+    topology: HorizontalTopology,
 ) -> Vec<RenderSectionKey> {
-    let Some(camera_key) = render_section_key_containing(camera_position) else {
+    let Some(camera_key) = render_section_key_containing_in(topology, camera_position) else {
         return Vec::new();
     };
     if records
@@ -1534,13 +1557,14 @@ fn traversal_start_keys(
     // through retained empty neighbors to the visible terrain. Native keeps a
     // sparse resident graph, so an empty camera record may have no continuous
     // path to the surface and cannot safely be the sole traversal seed.
-    outside_retained_section_start_keys(records, frustum_keys, camera_position)
+    outside_retained_section_start_keys(records, frustum_keys, camera_position, topology)
 }
 
 fn outside_retained_section_start_keys(
     records: &BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
     frustum_keys: &FxHashSet<RenderSectionKey>,
     camera_position: Vec3,
+    topology: HorizontalTopology,
 ) -> Vec<RenderSectionKey> {
     if !camera_position.is_finite() {
         return Vec::new();
@@ -1583,8 +1607,10 @@ fn outside_retained_section_start_keys(
     }
     let mut starts = starts_by_column.into_values().collect::<Vec<_>>();
     starts.sort_by(|a, b| {
-        let a_distance = render_section_center(*a).distance_squared(camera_position);
-        let b_distance = render_section_center(*b).distance_squared(camera_position);
+        let a_distance = render_section_center_in(*a, camera_position, topology)
+            .distance_squared(camera_position);
+        let b_distance = render_section_center_in(*b, camera_position, topology)
+            .distance_squared(camera_position);
         a_distance.total_cmp(&b_distance)
     });
     starts
@@ -1601,36 +1627,63 @@ fn can_see_through_source(
     })
 }
 
-fn render_section_key_containing(position: Vec3) -> Option<RenderSectionKey> {
+fn render_section_key_containing_in(
+    topology: HorizontalTopology,
+    position: Vec3,
+) -> Option<RenderSectionKey> {
     if !position.is_finite() {
         return None;
     }
     let block_x = position.x.floor() as i32;
     let block_y = position.y.floor() as i32;
     let block_z = position.z.floor() as i32;
-    Some(RenderSectionKey::new(
+    let chunk = topology.canonicalize_chunk(mclone_core::ChunkPos::new(
         block_to_chunk_coord(block_x),
-        block_to_section_coord(block_y),
         block_to_chunk_coord(block_z),
+    ))?;
+    Some(RenderSectionKey::new(
+        chunk.x,
+        block_to_section_coord(block_y),
+        chunk.z,
     ))
 }
 
-fn section_neighbor_key(key: RenderSectionKey, face: SectionFace) -> RenderSectionKey {
+fn section_neighbor_key_in(
+    topology: HorizontalTopology,
+    key: RenderSectionKey,
+    face: SectionFace,
+) -> Option<RenderSectionKey> {
     let [dx, dy, dz] = face.section_delta();
-    RenderSectionKey::new(key.chunk_x + dx, key.section_y + dy, key.chunk_z + dz)
+    let chunk =
+        topology.neighbor_chunk(mclone_core::ChunkPos::new(key.chunk_x, key.chunk_z), dx, dz)?;
+    Some(RenderSectionKey::new(chunk.x, key.section_y + dy, chunk.z))
 }
 
-fn render_section_center(key: RenderSectionKey) -> Vec3 {
+fn render_section_center_in(
+    key: RenderSectionKey,
+    observer: Vec3,
+    topology: HorizontalTopology,
+) -> Vec3 {
+    let lifted = topology.nearest_chunk_lift(
+        mclone_core::ChunkPos::new(key.chunk_x, key.chunk_z),
+        Vec3d::new(
+            f64::from(observer.x),
+            f64::from(observer.y),
+            f64::from(observer.z),
+        ),
+    );
     Vec3::new(
-        chunk_middle_block_coord(key.chunk_x) as f32,
+        lifted.x as f32 * MESH_CHUNK_WIDTH as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
         key.min_y() as f32 + RENDER_SECTION_HEIGHT as f32 * 0.5,
-        chunk_middle_block_coord(key.chunk_z) as f32,
+        lifted.z as f32 * MESH_CHUNK_WIDTH as f32 + MESH_CHUNK_WIDTH as f32 * 0.5,
     )
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ClipFrustum {
     view_projection: Mat4,
+    camera_position: Vec3,
+    topology: HorizontalTopology,
 }
 
 trait RenderSectionFrustum {
@@ -1638,9 +1691,11 @@ trait RenderSectionFrustum {
 }
 
 impl ClipFrustum {
-    fn from_render_view(render_view: ChunkRenderView) -> Self {
+    fn from_render_view(render_view: ChunkRenderView, topology: HorizontalTopology) -> Self {
         Self {
             view_projection: render_view.view_projection,
+            camera_position: render_view.camera_position,
+            topology,
         }
     }
 
@@ -1653,11 +1708,13 @@ impl ClipFrustum {
 
 impl RenderSectionFrustum for ClipFrustum {
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
-        let min = Vec3::new(
-            chunk_min_block_coord(key.chunk_x) as f32,
-            key.min_y() as f32,
-            chunk_min_block_coord(key.chunk_z) as f32,
+        let center = render_section_center_in(key, self.camera_position, self.topology);
+        let half = Vec3::new(
+            MESH_CHUNK_WIDTH as f32 * 0.5,
+            RENDER_SECTION_HEIGHT as f32 * 0.5,
+            MESH_CHUNK_WIDTH as f32 * 0.5,
         );
+        let min = center - half;
         let max = min
             + Vec3::new(
                 MESH_CHUNK_WIDTH as f32,
@@ -5126,7 +5183,7 @@ impl TexturedSectionDrawResources {
             }
             let translucent_sort_start = timing.as_ref().map(|_| timing_now());
             translucent_sections.sort_by(|(left_key, _), (right_key, _)| {
-                compare_translucent_sections(**left_key, **right_key, render_view)
+                compare_translucent_sections(**left_key, **right_key, render_view, options.topology)
             });
             if let (Some(timing), Some(translucent_sort_start)) =
                 (&mut timing, translucent_sort_start)
@@ -5224,8 +5281,9 @@ impl TexturedSectionDrawResources {
         }
         let translucent_sort_start = timing.as_ref().map(|_| timing_now());
         let sort_view = stereo_translucent_sort_view(render_views);
-        translucent_keys
-            .sort_by(|left, right| compare_translucent_sections(*left, *right, sort_view));
+        translucent_keys.sort_by(|left, right| {
+            compare_translucent_sections(*left, *right, sort_view, options[0].topology)
+        });
         if let (Some(timing), Some(translucent_sort_start)) = (&mut timing, translucent_sort_start)
         {
             timing.translucent_sort_ms = timing_elapsed_ms(translucent_sort_start);
@@ -5415,9 +5473,10 @@ fn compare_translucent_sections(
     left: RenderSectionKey,
     right: RenderSectionKey,
     render_view: ChunkRenderView,
+    topology: HorizontalTopology,
 ) -> Ordering {
-    let left_depth = section_depth_along_view(left, render_view);
-    let right_depth = section_depth_along_view(right, render_view);
+    let left_depth = section_depth_along_view(left, render_view, topology);
+    let right_depth = section_depth_along_view(right, render_view, topology);
     right_depth
         .partial_cmp(&left_depth)
         .unwrap_or(Ordering::Equal)
@@ -5438,8 +5497,12 @@ fn compare_placed_translucent_sections(
         .then_with(|| right.cmp(&left))
 }
 
-fn section_depth_along_view(key: RenderSectionKey, render_view: ChunkRenderView) -> f32 {
-    let center = section_center(key);
+fn section_depth_along_view(
+    key: RenderSectionKey,
+    render_view: ChunkRenderView,
+    topology: HorizontalTopology,
+) -> f32 {
+    let center = render_section_center_in(key, render_view.camera_position, topology);
     (center - render_view.camera_position).dot(render_view.camera_forward)
 }
 
@@ -5568,9 +5631,26 @@ fn uniform_bytes(
         let start = 96 + index * 4;
         bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
     }
-    for (index, value) in [options.fog.start, options.fog.end, 0.0, 0.0]
-        .into_iter()
-        .enumerate()
+    let topology_period_blocks = [
+        options
+            .topology
+            .x
+            .period_chunks()
+            .map_or(0.0, |period| period as f32 * MESH_CHUNK_WIDTH as f32),
+        options
+            .topology
+            .z
+            .period_chunks()
+            .map_or(0.0, |period| period as f32 * MESH_CHUNK_WIDTH as f32),
+    ];
+    for (index, value) in [
+        options.fog.start,
+        options.fog.end,
+        topology_period_blocks[0],
+        topology_period_blocks[1],
+    ]
+    .into_iter()
+    .enumerate()
     {
         let start = 112 + index * 4;
         bytes[start..start + 4].copy_from_slice(&value.to_ne_bytes());
@@ -5718,21 +5798,45 @@ mod tests {
     }
 
     #[test]
+    fn terrain_uniform_serializes_periods_without_growing_the_direct_path() {
+        let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        let plane = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let cylinder = uniform_bytes(
+            render_view,
+            TexturedSectionRenderOptions::default()
+                .with_topology(HorizontalTopology::cylinder_x(0, 32)),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let read_f32 = |bytes: &[u8], offset: usize| {
+            f32::from_ne_bytes(bytes[offset..offset + 4].try_into().unwrap())
+        };
+
+        assert_eq!(read_f32(&plane, 120), 0.0);
+        assert_eq!(read_f32(&plane, 124), 0.0);
+        assert_eq!(read_f32(&cylinder, 120), 512.0);
+        assert_eq!(read_f32(&cylinder, 124), 0.0);
+    }
+
+    #[test]
     fn direct_terrain_uniforms_and_shaders_remain_unplaced() {
         assert_eq!(UNIFORM_BYTE_LEN, 128);
         assert_eq!(MULTIVIEW_UNIFORM_BYTE_LEN, 256);
 
         let mono = include_str!("shaders/chunk_textured.wgsl");
-        assert!(mono.contains(
-            "output.position = uniforms.view_projection * vec4<f32>(input.position, 1.0);"
-        ));
-        assert!(mono.contains("output.world_position = input.position;"));
+        assert!(mono.contains("let world_position = observer_local_position(input.position);"));
+        assert!(mono.contains("output.world_position = world_position;"));
 
         let multiview = include_str!("shaders/chunk_textured_multiview.wgsl");
-        assert!(multiview.contains(
-            "output.position = uniforms.view_projection * vec4<f32>(input.position, 1.0);"
-        ));
-        assert!(multiview.contains("output.world_position = input.position;"));
+        assert!(
+            multiview.contains(
+                "let world_position = observer_local_position(input.position, uniforms);"
+            )
+        );
+        assert!(multiview.contains("output.world_position = world_position;"));
 
         for source in [mono, multiview] {
             for placed_uniform in [
@@ -6532,6 +6636,7 @@ mod tests {
             &prepared.records,
             &frustum_keys,
             Vec3::new(8.0, 128.0, 8.0),
+            HorizontalTopology::UNBOUNDED,
         );
 
         assert_eq!(starts.len(), 3);
@@ -6578,7 +6683,12 @@ mod tests {
         );
         let frustum_keys = records.keys().copied().collect();
 
-        let starts = traversal_start_keys(&records, &frustum_keys, Vec3::new(8.0, 200.0, 8.0));
+        let starts = traversal_start_keys(
+            &records,
+            &frustum_keys,
+            Vec3::new(8.0, 200.0, 8.0),
+            HorizontalTopology::UNBOUNDED,
+        );
 
         assert_eq!(
             starts.into_iter().collect::<BTreeSet<_>>(),
@@ -6619,6 +6729,42 @@ mod tests {
         assert_eq!(stats.drawn_section_count, 2);
         assert_eq!(stats.graph_culled_section_count, 1);
         assert_eq!(stats.graph_culled_index_count, 6);
+    }
+
+    #[test]
+    fn periodic_culling_draws_canonical_last_chunk_beside_zero() {
+        let sections = vec![
+            fake_section(
+                RenderSectionKey::new(0, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+            fake_section(
+                RenderSectionKey::new(31, 0, 0),
+                6,
+                VisibilitySet::all_visible(),
+            ),
+        ];
+        let camera = ChunkCamera {
+            eye: [8.0, 8.0, 8.0],
+            target: [-16.0, 8.0, 8.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 90.0_f32.to_radians(),
+            z_near: 0.05,
+            z_far: 80.0,
+        };
+        let options = TexturedSectionRenderOptions::default()
+            .with_topology(HorizontalTopology::cylinder_x(0, 32));
+
+        let stats = textured_section_visibility_stats_with_options(
+            &sections,
+            camera.render_view(800, 600),
+            options,
+        );
+
+        assert_eq!(stats.frustum_section_count, 2);
+        assert_eq!(stats.drawn_section_count, 2);
+        assert_eq!(stats.graph_culled_section_count, 0);
     }
 
     #[test]
@@ -6888,7 +7034,10 @@ mod tests {
             z_near: 0.05,
             z_far: 700.0,
         };
-        let frustum = ClipFrustum::from_render_view(camera.render_view(1280, 720));
+        let frustum = ClipFrustum::from_render_view(
+            camera.render_view(1280, 720),
+            HorizontalTopology::UNBOUNDED,
+        );
 
         assert!(frustum.is_render_section_visible(RenderSectionKey::new(0, 3, 0)));
     }
@@ -6903,7 +7052,10 @@ mod tests {
             z_near: 0.05,
             z_far: 700.0,
         };
-        let frustum = ClipFrustum::from_render_view(camera.render_view(1280, 720));
+        let frustum = ClipFrustum::from_render_view(
+            camera.render_view(1280, 720),
+            HorizontalTopology::UNBOUNDED,
+        );
 
         assert!(!frustum.is_render_section_visible(RenderSectionKey::new(0, 3, -8)));
     }

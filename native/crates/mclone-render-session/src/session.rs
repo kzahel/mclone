@@ -55,8 +55,12 @@ impl EngineRenderSession {
 
     pub fn mark_chunk_neighborhood_dirty(&mut self, pos: ChunkPos) -> usize {
         let client = &self.client;
+        let positions = render_dirty_chunk_neighborhood(pos)
+            .into_iter()
+            .filter_map(|pos| client.topology().canonicalize_chunk(pos))
+            .collect::<BTreeSet<_>>();
         self.render_session
-            .mark_chunk_neighborhood_dirty_with_loaded_sections(pos, |dirty_pos| {
+            .mark_chunks_dirty_with_loaded_sections(positions, |dirty_pos| {
                 client
                     .chunk_snapshot(dirty_pos)
                     .map(render_section_keys_for_snapshot)
@@ -84,7 +88,16 @@ impl EngineRenderSession {
         policy: EngineServerUpdateDirtyPolicy,
     ) -> EngineServerUpdateReport {
         let report = EngineServerUpdateReport::classify(updates);
-        let dirty_batch = EngineServerUpdateDirtyBatch::collect(updates, policy);
+        let topology = updates
+            .iter()
+            .filter_map(|update| match update {
+                ServerUpdate::WorldInfo { topology, .. }
+                | ServerUpdate::DimensionChange { topology, .. } => Some(*topology),
+                _ => None,
+            })
+            .next_back()
+            .unwrap_or_else(|| self.client.topology());
+        let dirty_batch = EngineServerUpdateDirtyBatch::collect(updates, policy, topology);
         let client = &self.client;
         self.render_session
             .mark_chunks_dirty_with_loaded_sections_and_forced(

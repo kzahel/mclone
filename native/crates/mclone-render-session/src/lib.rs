@@ -15,10 +15,10 @@ use mclone_client::{
     WalkingMovementStep,
 };
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, Aabb, BlockHitResult, BlockPos, BlockStateId, CHUNK_SECTION_VOLUME,
-    CHUNK_WIDTH, ChunkPos, ChunkSnapshot, PackedChunkSection, PackedLightSection, SECTION_HEIGHT,
-    Vec3d, block_to_chunk_coord, block_to_section_coord, chunk_block_coord,
-    chunk_middle_block_coord,
+    AIR_BLOCK_STATE_ID, Aabb, AxisTopology, BlockHitResult, BlockPos, BlockStateId,
+    CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, HorizontalTopology,
+    PackedChunkSection, PackedLightSection, SECTION_HEIGHT, Vec3d, block_to_chunk_coord,
+    block_to_section_coord, chunk_block_coord, chunk_middle_block_coord,
 };
 use mclone_mesh::{
     RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,

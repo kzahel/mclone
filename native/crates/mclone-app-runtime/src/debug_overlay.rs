@@ -1,4 +1,5 @@
 use glam::Vec3;
+use mclone_core::{AxisTopology, CHUNK_WIDTH, HorizontalTopology, block_to_chunk_coord};
 use mclone_ui::{
     FlatDebugActorCounts, FlatDebugChunkCounts, FlatDebugDrawCounts, FlatDebugOverlay,
     FlatDebugRenderOptions, FlatDebugRunner, FlatDebugView, FlatHudDebugOverlay,
@@ -24,6 +25,7 @@ pub struct DebugPaneStats {
     pub force_fullbright: bool,
     pub color_profile: &'static str,
     pub render_scale: f32,
+    pub topology: HorizontalTopology,
 }
 
 impl DebugPaneStats {
@@ -170,6 +172,9 @@ impl DebugPaneStats {
                 self.pacing.active_present_mode_label.to_ascii_uppercase()
             ),
         ];
+        if let Some(topology) = topology_debug_line(self.topology, self.position) {
+            overlay.extra_lines.insert(1, topology);
+        }
         overlay
     }
 
@@ -182,4 +187,40 @@ impl DebugPaneStats {
     pub fn hud_debug_overlay(&self) -> FlatHudDebugOverlay {
         FlatHudDebugOverlay::new(self.overlay().to_debug_overlay())
     }
+}
+
+fn topology_debug_line(topology: HorizontalTopology, position: Vec3) -> Option<String> {
+    let (axis_name, minimum_chunk, period_chunks, coordinate) = match (topology.x, topology.z) {
+        (
+            AxisTopology::Periodic {
+                minimum_chunk,
+                period_chunks,
+            },
+            _,
+        ) => ("X", minimum_chunk, period_chunks, position.x),
+        (
+            _,
+            AxisTopology::Periodic {
+                minimum_chunk,
+                period_chunks,
+            },
+        ) => ("Z", minimum_chunk, period_chunks, position.z),
+        _ if topology.is_unbounded() => return None,
+        _ => return Some("TOPO FINITE".to_owned()),
+    };
+    let minimum_block = minimum_chunk as f32 * CHUNK_WIDTH as f32;
+    let period_blocks = period_chunks as f32 * CHUNK_WIDTH as f32;
+    let canonical = minimum_block + (coordinate - minimum_block).rem_euclid(period_blocks);
+    let from_minimum = canonical - minimum_block;
+    let to_maximum = period_blocks - from_minimum;
+    let (direction, seam_distance) = if from_minimum <= to_maximum {
+        ("-", from_minimum)
+    } else {
+        ("+", to_maximum)
+    };
+    Some(format!(
+        "TOPO CYL-{axis_name} P{period_chunks} C{} {direction}{seam_distance:.1}B L{}",
+        block_to_chunk_coord(canonical.floor() as i32),
+        (period_chunks.saturating_sub(1)) / 2,
+    ))
 }

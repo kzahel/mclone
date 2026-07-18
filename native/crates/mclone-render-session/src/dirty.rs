@@ -67,6 +67,7 @@ impl RenderSectionDirtyState {
             section_revisions,
             snapshots,
             biome_zoom_seed: None,
+            topology: HorizontalTopology::UNBOUNDED,
         }
     }
 

@@ -13,7 +13,7 @@ use mclone_render::actor_assets::load_actor_texture_assets as load_actor_texture
 use mclone_render_session::{
     RenderSectionCompileQueueHealth, RenderSectionCompileRequest, RenderSectionCompileResult,
     RenderSectionCompileSubmitTiming, RenderSectionCompiler,
-    build_render_sections_from_snapshots_with_biome_zoom_seed,
+    build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology,
 };
 
 use crate::elapsed_ms;
@@ -819,11 +819,12 @@ fn compile_render_section_request(
     catalog: &TexturedMeshCatalog,
     request: RenderSectionCompileRequest,
 ) -> RenderSectionCompileResult {
-    let result = build_render_sections_from_snapshots_with_biome_zoom_seed(
+    let result = build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology(
         &request.snapshots,
         catalog,
         &request.target_sections,
         request.biome_zoom_seed,
+        request.topology,
     )
     .map_err(|error| format!("{error:#}"));
     RenderSectionCompileResult {
@@ -1249,6 +1250,7 @@ mod tests {
             section_revisions: BTreeMap::new(),
             snapshots: Vec::new(),
             biome_zoom_seed: None,
+            topology: mclone_core::HorizontalTopology::UNBOUNDED,
         }
     }
 

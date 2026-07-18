@@ -345,7 +345,9 @@ impl ClientRuntime {
     }
 
     pub fn chunk_snapshot(&self, pos: ChunkPos) -> Option<&ChunkSnapshot> {
-        self.chunks.get(&pos)
+        self.topology
+            .canonicalize_chunk(pos)
+            .and_then(|canonical| self.chunks.get(&canonical))
     }
 
     pub fn chunk_snapshots(&self) -> impl Iterator<Item = &ChunkSnapshot> {
@@ -353,6 +355,9 @@ impl ClientRuntime {
     }
 
     pub fn packed_light_at_world_or_fullbright(&self, pos: BlockPos) -> u32 {
+        let Some(pos) = self.topology.canonicalize_block(pos) else {
+            return mclone_light::FULL_BRIGHT;
+        };
         let Some(snapshot) = self.chunks.get(&pos.chunk_pos()) else {
             return mclone_light::FULL_BRIGHT;
         };
@@ -858,6 +863,35 @@ mod tests {
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
         assert_eq!(runtime.drain_deferred_chunk_drop_items(1), 1);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
+    }
+
+    #[test]
+    fn periodic_client_replica_resolves_lifts_to_one_canonical_snapshot() {
+        let mut runtime = ClientRuntime::local_integrated();
+        runtime.apply_update(ServerUpdate::WorldInfo {
+            dimension: DimensionKey::overworld(),
+            biome_zoom_seed: 12_345,
+            topology: HorizontalTopology::cylinder_x(0, 32),
+        });
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(31, 0),
+            ChunkStatus::Full,
+            ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+        runtime.apply_update(ServerUpdate::ChunkSnapshot(snapshot.clone()));
+
+        assert_eq!(runtime.loaded_chunk_count(), 1);
+        assert_eq!(
+            runtime.chunk_snapshot(ChunkPos::new(-1, 0)),
+            Some(&snapshot)
+        );
+        assert_eq!(
+            runtime.chunk_snapshot(ChunkPos::new(31, 0)),
+            Some(&snapshot)
+        );
     }
 
     #[test]

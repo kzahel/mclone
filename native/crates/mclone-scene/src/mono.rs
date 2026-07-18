@@ -1621,6 +1621,17 @@ impl McloneSceneHost {
                 &self.active_world.camera,
                 EngineDebugVisualOptions::new(self.player_collision_box_visible),
             );
+            if self.diagnostic_panel.debug_diagnostics_visible() {
+                world_lines.extend(topology_debug_world_lines(
+                    self.active_world
+                        .runtime
+                        .as_ref()
+                        .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                            runtime.client().topology()
+                        }),
+                    selection_view.camera_position,
+                ));
+            }
             if let Some(preview) = self.mono_blink_debug.preview.as_ref() {
                 world_lines.extend(mono_blink_lines(preview));
             }
@@ -1857,6 +1868,7 @@ impl McloneSceneHost {
                 force_fullbright: render_options.force_fullbright,
                 color_profile: render_options.color_profile.label(),
                 render_scale: context.render_scale,
+                topology: runtime.client().topology(),
             }
             .overlay();
             let mut debug_overlay = debug.to_debug_overlay();

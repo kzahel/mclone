@@ -459,9 +459,11 @@ fn compile_snapshots_for_target_sections(
 ) -> Vec<ChunkSnapshot> {
     let mut positions = BTreeSet::new();
     for key in target_sections {
-        positions.extend(mclone_render_session::render_dirty_chunk_neighborhood(
-            render_section_chunk_pos(*key),
-        ));
+        positions.extend(
+            mclone_render_session::render_dirty_chunk_neighborhood(render_section_chunk_pos(*key))
+                .into_iter()
+                .filter_map(|pos| client.topology().canonicalize_chunk(pos)),
+        );
     }
     positions
         .into_iter()
@@ -1644,7 +1646,11 @@ impl SingleViewRuntime {
             .engine
             .render_session()
             .build_ready_plan_compile_request(&sync_plan.ready_plan, snapshots)
-            .map(|request| request.with_biome_zoom_seed(self.client().biome_zoom_seed()))
+            .map(|request| {
+                request
+                    .with_biome_zoom_seed(self.client().biome_zoom_seed())
+                    .with_topology(self.client().topology())
+            })
         else {
             timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());
 

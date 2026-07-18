@@ -1,10 +1,12 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: in progress 2026-07-18. Slices 0-3 are complete: the Euclidean
+Status: in progress 2026-07-18. Slices 0-4 are complete: the Euclidean
 baseline, caller inventory, shared topology operations, persisted descriptor,
 protocol ordering, canonical client dimension fact, and finite-bound authority
 canary have landed. The periodic authority and scheduling proof now maintains
-one canonical X ring. Slice 4 is the client-lift and first-pixels proof.
+one canonical X ring. Observer-local terrain lifts, seam-aware meshing and
+dirtying, and the first inspected seam pixels have landed. Slice 5 is the
+movement, interaction, fluid, and actor-crossing proof.
 
 Topic: `bounded-world-topology`
 
@@ -421,6 +423,42 @@ and all 292 `mclone-app-runtime` library tests pass. Every native workspace test
 target compiles. Client draw placement is intentionally still canonical at this
 checkpoint; Slice 4 owns the observer lift and the first seam pixels.
 
+### Slice 4 client replica, observer lifts, and first pixels (2026-07-18)
+
+The client replica now resolves every supplied lift back to one canonical
+snapshot and packed-light identity. Render dirty neighborhoods, section-border
+invalidation, readiness, compile snapshot collection, and renderer traversal
+canonicalize and deduplicate through the active topology. Meshing borrows the
+two canonical seam columns under lifted compile coordinates only while building
+the boundary sections, so ordinary face culling, ambient occlusion, biome tint,
+packed light, and fluid-neighbor reads see the wrapped neighbor without cloning
+the snapshot, mesh, or upload authority.
+
+Terrain retains the existing 128-byte direct uniform and one canonical GPU
+upload. Two previously unused fog-vector lanes carry the X/Z block periods;
+the mono and multiview vertex paths choose the nearest periodic image relative
+to their own camera before projection and fog. CPU culling, traversal, outside
+ordering, and translucent sorting use the same lifted section bounds. Crossing
+the canonical seam therefore performs no world remesh, bulk coordinate shift,
+or upload replacement: the observer and existing geometry simply select the
+neighboring image of the same canonical ring.
+
+The shared debug HUD reports topology, period, canonical chunk, seam distance,
+and the one-lift limit. A cyan observer-local seam grid uses the existing world
+GUI line path in mono, per-eye, and full-frame multiview modes. The inspected
+1280x720 debug capture at
+`/tmp/mclone-cylinder-seam-slice4-angle.png` reported 107 resident sections,
+11 drawn sections, and 467 GUI commands; terrain remained continuous through
+the marked seam. The matching ordinary capture at
+`/tmp/mclone-cylinder-flat-slice4.png` reported the same resident/drawn counts
+with zero GUI commands and no visible seam or crack.
+
+Focused tests cover canonical client snapshot lookup, wrapped dirty-neighbor
+deduplication, seam compile aliases, lifted traversal, and zero-cost uniform
+size preservation. The browser build consumes the extended compile request but
+does not yet enable cylinder meshing; browser cylinder startup and platform
+closeout remain Slice 6 work.
+
 ## Execution Checklist
 
 ### Slice 0: contract audit and clean baseline
@@ -481,16 +519,16 @@ identity even before the client draws a wrapped neighbor.
 
 ### Slice 4: client replica, observer lifts, and first pixels
 
-- [ ] Install topology before client chunks and retain canonical replica facts.
-- [ ] Select one nearest lift per visible chunk and separate canonical render
+- [x] Install topology before client chunks and retain canonical replica facts.
+- [x] Select one nearest lift per visible chunk and separate canonical render
   section identity from draw placement.
-- [ ] Rebase/draw canonical `P - 1` beside canonical `0` without duplicating the
+- [x] Rebase/draw canonical `P - 1` beside canonical `0` without duplicating the
   chunk, mesh, or upload authority.
-- [ ] Make seam neighbor snapshots drive face culling, AO, biome tint, packed
+- [x] Make seam neighbor snapshots drive face culling, AO, biome tint, packed
   light, dirty invalidation, and render traversal.
-- [ ] Add the HUD and initial world-space seam diagnostic through a compatible
+- [x] Add the HUD and initial world-space seam diagnostic through a compatible
   mono/per-eye/multiview-aware path.
-- [ ] Capture and inspect the first seam view before adding actor crossings.
+- [x] Capture and inspect the first seam view before adding actor crossings.
 
 Gate: the cylinder is visibly seamless, canonical/draw counts reconcile, and
 the ordinary direct render path remains unchanged.

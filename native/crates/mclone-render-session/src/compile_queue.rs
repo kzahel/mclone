@@ -6,6 +6,7 @@ pub struct RenderSectionCompileRequest {
     pub section_revisions: BTreeMap<RenderSectionKey, u64>,
     pub snapshots: Vec<ChunkSnapshot>,
     pub biome_zoom_seed: Option<i64>,
+    pub topology: HorizontalTopology,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -21,6 +22,11 @@ pub struct RenderSectionCompileRequestPayloadStats {
 impl RenderSectionCompileRequest {
     pub fn with_biome_zoom_seed(mut self, biome_zoom_seed: Option<i64>) -> Self {
         self.biome_zoom_seed = biome_zoom_seed;
+        self
+    }
+
+    pub fn with_topology(mut self, topology: HorizontalTopology) -> Self {
+        self.topology = topology;
         self
     }
 
@@ -408,6 +414,7 @@ impl<C> RenderSectionCompileRequestState<C> {
                 section_revisions,
                 snapshots: Vec::new(),
                 biome_zoom_seed: None,
+                topology: HorizontalTopology::UNBOUNDED,
             },
         )
     }

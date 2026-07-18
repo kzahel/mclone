@@ -84,23 +84,31 @@ pub(crate) struct EngineServerUpdateDirtyBatch {
 }
 
 impl EngineServerUpdateDirtyBatch {
-    pub(crate) fn collect(updates: &[ServerUpdate], policy: EngineServerUpdateDirtyPolicy) -> Self {
+    pub(crate) fn collect(
+        updates: &[ServerUpdate],
+        policy: EngineServerUpdateDirtyPolicy,
+        topology: HorizontalTopology,
+    ) -> Self {
         let mut batch = Self::default();
         for update in updates {
             match update {
                 ServerUpdate::ChunkSnapshot(snapshot) => {
                     if policy.dirty_chunk_snapshots {
                         batch.force_dirty_chunks.insert(snapshot.pos);
-                        batch
-                            .dirty_chunks
-                            .extend(render_dirty_chunk_neighborhood(snapshot.pos));
+                        batch.dirty_chunks.extend(
+                            render_dirty_chunk_neighborhood(snapshot.pos)
+                                .into_iter()
+                                .filter_map(|pos| topology.canonicalize_chunk(pos)),
+                        );
                     }
                 }
                 ServerUpdate::ChunkUnload { pos } => {
                     if policy.dirty_chunk_unloads {
-                        batch
-                            .dirty_chunks
-                            .extend(render_dirty_chunk_neighborhood(*pos));
+                        batch.dirty_chunks.extend(
+                            render_dirty_chunk_neighborhood(*pos)
+                                .into_iter()
+                                .filter_map(|pos| topology.canonicalize_chunk(pos)),
+                        );
                     }
                 }
                 ServerUpdate::SectionBlockUpdates {
@@ -113,7 +121,15 @@ impl EngineServerUpdateDirtyBatch {
                             batch.dirty_sections.extend(
                                 render_dirty_section_keys_for_block_update(
                                     *pos, *section_y, update,
-                                ),
+                                )
+                                .into_iter()
+                                .filter_map(|key| {
+                                    topology
+                                        .canonicalize_chunk(ChunkPos::new(key.chunk_x, key.chunk_z))
+                                        .map(|chunk| {
+                                            RenderSectionKey::new(chunk.x, key.section_y, chunk.z)
+                                        })
+                                }),
                             );
                         }
                     }
@@ -162,4 +178,30 @@ pub fn render_dirty_section_keys_for_block_update(
         }
     }
     keys
+}
+
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
+
+    #[test]
+    fn periodic_snapshot_dirtying_wraps_and_deduplicates_the_seam_neighbor() {
+        let snapshot = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            mclone_core::ChunkStatus::Full,
+            mclone_core::ChunkRevision(1),
+            0,
+            16,
+            &vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME],
+        );
+        let batch = EngineServerUpdateDirtyBatch::collect(
+            &[ServerUpdate::ChunkSnapshot(snapshot)],
+            EngineServerUpdateDirtyPolicy::ALL,
+            HorizontalTopology::cylinder_x(0, 32),
+        );
+
+        assert!(batch.dirty_chunks.contains(&ChunkPos::new(31, 0)));
+        assert!(!batch.dirty_chunks.contains(&ChunkPos::new(-1, 0)));
+        assert_eq!(batch.dirty_chunks.len(), 5);
+    }
 }

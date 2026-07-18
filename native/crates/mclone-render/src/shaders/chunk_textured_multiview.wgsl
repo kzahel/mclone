@@ -104,6 +104,21 @@ fn lightmap_color(block_light_level: f32, sky_light_level: f32, sky_darken_value
     return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
+fn nearest_periodic_lift(value: f32, observer: f32, period: f32) -> f32 {
+    if (period <= 0.0) {
+        return value;
+    }
+    return observer + (value - observer) - round((value - observer) / period) * period;
+}
+
+fn observer_local_position(position: vec3<f32>, uniforms: ViewUniforms) -> vec3<f32> {
+    return vec3<f32>(
+        nearest_periodic_lift(position.x, uniforms.camera_position.x, uniforms.fog_distances.z),
+        position.y,
+        nearest_periodic_lift(position.z, uniforms.camera_position.z, uniforms.fog_distances.w),
+    );
+}
+
 @vertex
 fn vs_main(
     input: VertexInput,
@@ -111,10 +126,11 @@ fn vs_main(
 ) -> VertexOutput {
     let uniforms = stereo_uniforms.views[u32(view_index)];
     var output: VertexOutput;
-    output.position = uniforms.view_projection * vec4<f32>(input.position, 1.0);
+    let world_position = observer_local_position(input.position, uniforms);
+    output.position = uniforms.view_projection * vec4<f32>(world_position, 1.0);
     output.uv = input.uv;
     output.color = input.color;
-    output.world_position = input.position;
+    output.world_position = world_position;
     output.view_index = view_index;
     let block_light = f32((input.packed_light >> 4u) & 15u);
     let sky_light = f32((input.packed_light >> 20u) & 15u);

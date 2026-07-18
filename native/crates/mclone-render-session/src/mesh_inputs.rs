@@ -31,6 +31,24 @@ pub fn build_render_sections_from_snapshots_with_biome_zoom_seed<
     target_sections: &BTreeSet<RenderSectionKey>,
     biome_zoom_seed: Option<i64>,
 ) -> Result<TexturedRenderSectionBuildReport> {
+    build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology(
+        snapshots,
+        catalog,
+        target_sections,
+        biome_zoom_seed,
+        HorizontalTopology::UNBOUNDED,
+    )
+}
+
+pub fn build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology<
+    S: std::borrow::Borrow<ChunkSnapshot>,
+>(
+    snapshots: &[S],
+    catalog: &TexturedMeshCatalog,
+    target_sections: &BTreeSet<RenderSectionKey>,
+    biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
+) -> Result<TexturedRenderSectionBuildReport> {
     // Generic over `Borrow<ChunkSnapshot>` so a caller holding owned snapshots
     // (`&[ChunkSnapshot]`, desktop + the web full-view helpers) and one holding borrowed
     // snapshots (`&[&ChunkSnapshot]`, the web worker's resident mirror, 067 Stage 4) both
@@ -39,7 +57,8 @@ pub fn build_render_sections_from_snapshots_with_biome_zoom_seed<
         .iter()
         .map(|snapshot| snapshot_mesh_block_state_ids(snapshot.borrow()))
         .collect::<Result<Vec<_>>>()?;
-    let inputs = textured_mesh_inputs_with_biome_zoom_seed(&chunks, biome_zoom_seed);
+    let inputs =
+        textured_mesh_inputs_with_biome_zoom_seed_and_topology(&chunks, biome_zoom_seed, topology);
     build_textured_render_sections_for_section_set_with_stats(&inputs, catalog, target_sections)
         .context("failed to build queued textured render sections")
 }
@@ -59,25 +78,100 @@ pub fn textured_mesh_inputs_with_biome_zoom_seed(
     chunks: &[MeshChunkBlocks],
     biome_zoom_seed: Option<i64>,
 ) -> Vec<TexturedChunkMeshInput<'_>> {
-    chunks
-        .iter()
-        .map(|chunk| {
-            let input = TexturedChunkMeshInput::new(
-                chunk.chunk_x,
-                chunk.chunk_z,
-                chunk.min_y,
-                chunk.height,
-                &chunk.blocks,
-            )
-            .with_biomes(&chunk.biomes)
-            .with_light_sections(&chunk.light_sections);
-            if let Some(seed) = biome_zoom_seed {
-                input.with_biome_zoom_seed(seed)
-            } else {
-                input
+    textured_mesh_inputs_with_biome_zoom_seed_and_topology(
+        chunks,
+        biome_zoom_seed,
+        HorizontalTopology::UNBOUNDED,
+    )
+}
+
+pub fn textured_mesh_inputs_with_biome_zoom_seed_and_topology(
+    chunks: &[MeshChunkBlocks],
+    biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
+) -> Vec<TexturedChunkMeshInput<'_>> {
+    let mut inputs = Vec::new();
+    for chunk in chunks {
+        let x_coordinates = seam_alias_coordinates(topology.x, chunk.chunk_x);
+        let z_coordinates = seam_alias_coordinates(topology.z, chunk.chunk_z);
+        for chunk_x in x_coordinates {
+            for chunk_z in z_coordinates.iter().copied() {
+                let input = TexturedChunkMeshInput::new(
+                    chunk_x,
+                    chunk_z,
+                    chunk.min_y,
+                    chunk.height,
+                    &chunk.blocks,
+                )
+                .with_biomes(&chunk.biomes)
+                .with_light_sections(&chunk.light_sections);
+                inputs.push(if let Some(seed) = biome_zoom_seed {
+                    input.with_biome_zoom_seed(seed)
+                } else {
+                    input
+                });
             }
-        })
-        .collect()
+        }
+    }
+    inputs
+}
+
+fn seam_alias_coordinates(axis: AxisTopology, canonical: i32) -> Vec<i32> {
+    let mut coordinates = vec![canonical];
+    if let AxisTopology::Periodic {
+        minimum_chunk,
+        period_chunks,
+    } = axis
+    {
+        let period = i32::try_from(period_chunks).expect("validated topology period fits i32");
+        if canonical == minimum_chunk {
+            coordinates.push(canonical + period);
+        }
+        if canonical == minimum_chunk + period - 1 {
+            coordinates.push(canonical - period);
+        }
+    }
+    coordinates
+}
+
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
+
+    #[test]
+    fn cylinder_mesh_inputs_alias_only_the_two_canonical_seam_columns() {
+        let blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        let chunks = [
+            MeshChunkBlocks {
+                chunk_x: 0,
+                chunk_z: 0,
+                min_y: 0,
+                height: SECTION_HEIGHT,
+                blocks: blocks.clone(),
+                biomes: Vec::new(),
+                light_sections: Vec::new(),
+            },
+            MeshChunkBlocks {
+                chunk_x: 31,
+                chunk_z: 0,
+                min_y: 0,
+                height: SECTION_HEIGHT,
+                blocks,
+                biomes: Vec::new(),
+                light_sections: Vec::new(),
+            },
+        ];
+
+        let inputs = textured_mesh_inputs_with_biome_zoom_seed_and_topology(
+            &chunks,
+            None,
+            HorizontalTopology::cylinder_x(0, 32),
+        );
+        assert_eq!(
+            inputs.iter().map(|input| input.chunk_x).collect::<Vec<_>>(),
+            vec![0, 32, 31, -1]
+        );
+    }
 }
 
 pub fn actor_instances_from_presentations(

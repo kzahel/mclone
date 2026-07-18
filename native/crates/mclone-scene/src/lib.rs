@@ -99,7 +99,9 @@ use mclone_client::{
     TeleportPreviewRequestId, TeleportPreviewResult, TeleportValidityReason,
     sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
-use mclone_core::{Aabb, BlockStateId, ChunkPos, Vec3d, time};
+use mclone_core::{
+    Aabb, AxisTopology, BlockStateId, CHUNK_WIDTH, ChunkPos, HorizontalTopology, Vec3d, time,
+};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
 };
@@ -670,6 +672,65 @@ struct QualifiedTerrainTranslucentSubmission {
     source: TerrainCompositionSource,
     section: RenderSectionKey,
     composition_center: Vec3,
+}
+
+fn topology_debug_world_lines(topology: HorizontalTopology, observer: Vec3) -> Vec<WorldGuiLine> {
+    const HALF_SPAN: f32 = 48.0;
+    const HALF_HEIGHT: f32 = 32.0;
+    const COLOR: [f32; 4] = [0.1, 0.95, 1.0, 0.95];
+    let mut lines = Vec::new();
+    let bottom = observer.y - HALF_HEIGHT;
+    let top = observer.y + HALF_HEIGHT;
+
+    if let AxisTopology::Periodic {
+        minimum_chunk,
+        period_chunks,
+    } = topology.x
+    {
+        let minimum = minimum_chunk as f32 * CHUNK_WIDTH as f32;
+        let period = period_chunks as f32 * CHUNK_WIDTH as f32;
+        let seam = minimum + ((observer.x - minimum) / period).round() * period;
+        for offset in (-3..=3).map(|step| step as f32 * 16.0) {
+            let z = observer.z + offset;
+            lines.push(WorldGuiLine::new(
+                Vec3::new(seam, bottom, z),
+                Vec3::new(seam, top, z),
+                COLOR,
+            ));
+        }
+        for y in [bottom, observer.y, top] {
+            lines.push(WorldGuiLine::new(
+                Vec3::new(seam, y, observer.z - HALF_SPAN),
+                Vec3::new(seam, y, observer.z + HALF_SPAN),
+                COLOR,
+            ));
+        }
+    }
+    if let AxisTopology::Periodic {
+        minimum_chunk,
+        period_chunks,
+    } = topology.z
+    {
+        let minimum = minimum_chunk as f32 * CHUNK_WIDTH as f32;
+        let period = period_chunks as f32 * CHUNK_WIDTH as f32;
+        let seam = minimum + ((observer.z - minimum) / period).round() * period;
+        for offset in (-3..=3).map(|step| step as f32 * 16.0) {
+            let x = observer.x + offset;
+            lines.push(WorldGuiLine::new(
+                Vec3::new(x, bottom, seam),
+                Vec3::new(x, top, seam),
+                COLOR,
+            ));
+        }
+        for y in [bottom, observer.y, top] {
+            lines.push(WorldGuiLine::new(
+                Vec3::new(observer.x - HALF_SPAN, y, seam),
+                Vec3::new(observer.x + HALF_SPAN, y, seam),
+                COLOR,
+            ));
+        }
+    }
+    lines
 }
 
 /// Merge per-store translucent records at the scene boundary, where durable
@@ -2652,6 +2713,19 @@ impl McloneSceneHost {
             &self.active_world.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
+        if self.diagnostic_panel.debug_diagnostics_visible() {
+            let observer =
+                (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+            world_lines.extend(topology_debug_world_lines(
+                self.active_world
+                    .runtime
+                    .as_ref()
+                    .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                        runtime.client().topology()
+                    }),
+                observer,
+            ));
+        }
         if let Some(gameplay_ray) = self
             .xr_gameplay_controller_ray_line()
             .context("build XR gameplay controller ray visual")?
@@ -4045,6 +4119,17 @@ impl McloneSceneHost {
             &self.active_world.camera,
             EngineDebugVisualOptions::new(self.player_collision_box_visible),
         );
+        if self.diagnostic_panel.debug_diagnostics_visible() {
+            world_lines.extend(topology_debug_world_lines(
+                self.active_world
+                    .runtime
+                    .as_ref()
+                    .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                        runtime.client().topology()
+                    }),
+                render_view.camera_position,
+            ));
+        }
         if let Some(gameplay_ray) = self
             .xr_gameplay_controller_ray_line()
             .context("build XR gameplay controller ray visual")?
@@ -4332,6 +4417,13 @@ impl McloneSceneHost {
 
     fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
         let mut options = self.render_options;
+        options.topology = self
+            .active_world
+            .runtime
+            .as_ref()
+            .map_or(mclone_core::HorizontalTopology::UNBOUNDED, |runtime| {
+                runtime.client().topology()
+            });
         if self.camera_inside_occluding_block(camera_position) {
             options.section_occlusion_culling = false;
         }
