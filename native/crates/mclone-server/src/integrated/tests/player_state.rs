@@ -1,5 +1,5 @@
 use super::*;
-use crate::MemoryWorldStore;
+use crate::{ChunkResidency, MemoryWorldStore};
 
 #[test]
 fn new_world_metadata_starts_at_vanilla_zero_and_tracks_both_clocks() {
@@ -354,6 +354,108 @@ fn sqlite_restart_restores_dead_then_respawned_player_lifecycle() {
         request_initial_chunk_view(&mut reopened);
         let resumed = wait_for_initial_spawn_update(&mut reopened);
         assert_eq!(resumed.position, respawn_position);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sqlite_restart_restores_mclone_profile_before_unseen_generation() {
+    let root = world_time_temp_dir("sqlite-mclone-profile-restart");
+    let seed = 12_345;
+    let stored_chunk = ChunkPos::new(0, 0);
+    let unseen_chunk = ChunkPos::new(128, -127);
+    let edited = BlockPos::new(8, 64, 8);
+    let replacement;
+
+    {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        server
+            .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .unwrap();
+        let metadata = server
+            .initialize_world_metadata_at_unix_millis(1_000)
+            .unwrap();
+        assert_eq!(
+            metadata.world_generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        load_chunk_view(&mut server, stored_chunk);
+        replacement = if server.scheduler().block_at_world(edited) == Some(STONE) {
+            DIRT
+        } else {
+            STONE
+        };
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(edited, replacement)
+        );
+        server.scheduler_mut().flush_persistence().unwrap();
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut reopened =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir(seed, &root).unwrap();
+        reopened
+            .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .unwrap();
+        let metadata = reopened
+            .initialize_world_metadata_at_unix_millis(2_000)
+            .unwrap();
+        assert_eq!(
+            metadata.world_generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
+
+        load_chunk_view(&mut reopened, stored_chunk);
+        assert_eq!(
+            reopened.scheduler().block_at_world(edited),
+            Some(replacement)
+        );
+        assert_eq!(
+            reopened
+                .scheduler()
+                .holder(stored_chunk)
+                .map(ChunkHolder::residency),
+            Some(ChunkResidency::LoadedFromStore)
+        );
+        assert!(reopened.scheduler().holder(unseen_chunk).is_none());
+
+        let expected = mclone_worldgen::levelgen::generate_mclone_overworld_chunk(
+            seed,
+            unseen_chunk.x,
+            unseen_chunk.z,
+        );
+        let local_x = 8;
+        let local_z = 8;
+        let expected_surface_y = (expected.min_y..expected.min_y + expected.height)
+            .rev()
+            .find(|y| expected.block_at_y(local_x, *y, local_z).0 != mclone_worldgen::block::AIR)
+            .expect("Mclone unseen chunk column should contain terrain");
+
+        load_chunk_view(&mut reopened, unseen_chunk);
+        let world_x = unseen_chunk.min_block_x() + local_x;
+        let world_z = unseen_chunk.min_block_z() + local_z;
+        assert_eq!(
+            reopened.scheduler().block_at_world(BlockPos::new(
+                world_x,
+                expected_surface_y,
+                world_z
+            )),
+            Some(expected.block_at_y(local_x, expected_surface_y, local_z).0)
+        );
+        assert_eq!(
+            reopened
+                .scheduler()
+                .holder(unseen_chunk)
+                .map(ChunkHolder::residency),
+            Some(ChunkResidency::Generated)
+        );
         reopened.shutdown_persistence().unwrap();
     }
 
