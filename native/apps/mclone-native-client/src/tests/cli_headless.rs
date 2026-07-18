@@ -2,6 +2,60 @@ use super::*;
 use mclone_app_runtime::startup_args::StartupSceneOptions;
 
 #[test]
+fn cli_parses_repeatable_worldgen_showcase_defaults() {
+    let cli = Cli::parse([
+        "--worldgen-showcase-card".to_owned(),
+        "/tmp/mclone-worldgen-showcase".to_owned(),
+        "--generation-profile".to_owned(),
+        "small-island-v1".to_owned(),
+        "--seed".to_owned(),
+        "-42".to_owned(),
+        "--render-distance".to_owned(),
+        "6".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::WorldgenShowcase { options } = cli else {
+        panic!("expected worldgen showcase CLI mode");
+    };
+    assert_eq!(
+        options.directory,
+        PathBuf::from("/tmp/mclone-worldgen-showcase")
+    );
+    assert_eq!([options.width, options.height], [640, 400]);
+    assert_eq!(options.scene.seed, -42);
+    assert_eq!(options.scene.render_distance, 16);
+    assert_eq!(
+        options.scene.world_generation_profile,
+        mclone_server::WorldGenerationProfile::SmallIslandV1
+    );
+    assert_eq!(options.scene.day_time_override, Some(6000));
+    assert!(options.scene.freeze_time);
+    assert!(!options.scene.debug_passive_showcase);
+}
+
+#[test]
+fn cli_rejects_worldgen_showcase_for_persisted_or_remote_worlds() {
+    for storage in [
+        ["--world-dir", "/tmp/persisted"],
+        ["--remote-addr", "127.0.0.1:25565"],
+    ] {
+        let error = Cli::parse([
+            "--worldgen-showcase-card".to_owned(),
+            "/tmp/mclone-worldgen-showcase".to_owned(),
+            storage[0].to_owned(),
+            storage[1].to_owned(),
+        ])
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("requires a transient local integrated world")
+        );
+    }
+}
+
+#[test]
 fn cli_parses_warm_world_swap_smoke_options() {
     let cli = Cli::parse([
         "--warm-world-swap-smoke".to_owned(),

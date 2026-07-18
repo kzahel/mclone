@@ -622,6 +622,21 @@ impl OffscreenDriver {
         Ok(summary)
     }
 
+    /// Render an explicit diagnostic view without moving the scene camera or
+    /// its server-side chunk interest. This keeps capture framing independent
+    /// from the region being generated and retained.
+    pub(crate) fn render_detached_chunk_camera_frozen(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        camera: ChunkCamera,
+        ui: MonoUiPresentation,
+    ) -> Result<MonoSceneFrameSummary> {
+        let view = camera.render_view(frame.target.size[0], frame.target.size[1]);
+        let summary = self.render_view_inner(frame, view, ui, false, true)?;
+        self.captured.push(summary.clone());
+        Ok(summary)
+    }
+
     pub(crate) fn drive_to_wait_policy(
         &mut self,
         device: &wgpu::Device,

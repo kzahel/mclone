@@ -23,6 +23,7 @@ mod render_compile_capacity;
 mod scene_runtime;
 mod torch_light_probe;
 mod winit_frame_driver;
+mod worldgen_showcase;
 mod xr_emulation;
 
 use crate::app::run_window;
@@ -53,6 +54,7 @@ use crate::perf::{
 };
 use crate::remote_player_visual_smoke::run_remote_player_visual_smoke;
 use crate::torch_light_probe::run_torch_light_probe;
+use crate::worldgen_showcase::run_worldgen_showcase;
 use crate::xr_emulation::run_lobby_scenario_stereo_smoke;
 use crate::xr_emulation::run_xr_emulation_screenshot;
 use anyhow::Result;
@@ -125,6 +127,22 @@ fn main() -> Result<()> {
                 report.far_lod_region_draw_count,
                 report.far_lod_uploaded_bytes,
                 report.underwater
+            );
+            Ok(())
+        }
+        Cli::WorldgenShowcase { options } => {
+            let report = run_worldgen_showcase(&options)?;
+            println!(
+                "worldgen showcase card saved to {} (profile={}, seed={}, card={}x{}, panels={}x{}, views={}, receipt={})",
+                report.card_path.display(),
+                report.profile,
+                report.seed,
+                report.card_width,
+                report.card_height,
+                report.panel_width,
+                report.panel_height,
+                report.panels.len(),
+                report.receipt_path.display(),
             );
             Ok(())
         }

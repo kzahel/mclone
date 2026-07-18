@@ -30,6 +30,7 @@
     "native:worldgen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:find-biome-seed": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin find_biome_seed --",
+    "native:worldgen:card": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --worldgen-showcase-card /tmp/mclone-worldgen-showcase --generation-profile small-island-v1 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 16 --width 640 --height 400 --day-time 6000 --freeze-time --transient --debug-passive-showcase false --lighting false --fullbright true",
     "native:runtime:smoke": "pnpm native:scheduler:smoke",
     "native:runtime:perf": "pnpm native:scheduler:perf",
     "native:movement:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --movement-perf",

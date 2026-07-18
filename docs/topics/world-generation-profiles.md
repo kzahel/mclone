@@ -238,6 +238,38 @@ save/reopen, dedicated spawn, and inspected overview/shoreline captures form a
 strong accidental-regression baseline. They may be intentionally updated under
 the safety ledger.
 
+### Reusable visual review card
+
+`pnpm native:worldgen:card --seed 12345` renders three fixed views from one
+fully warmed transient world: near-vertical top-down, low coastline, and an
+elevated opposing landscape. The chunk interest remains fixed on the requested
+`--chunk-x`/`--chunk-z` center while detached diagnostic cameras render from
+above or outside that region. It writes the labeled comparison card, the three
+source PNGs, and a schema-versioned JSON receipt under
+`/tmp/mclone-worldgen-showcase`. Output names include the profile and seed, so
+running the command again with another seed accumulates directly comparable
+cards instead of overwriting the previous seed.
+
+The command defaults to `small-island-v1`, minimum render distance 16, frozen
+daytime, disabled passive showcase actors, disabled lighting, and fullbright
+rendering. Radius 16 covers the island's 192-block support radius plus 64
+blocks of surrounding water on every axis. Smaller requested render distances
+are raised to 16; this is also the current shared scene maximum, so larger
+values are rejected by normal scene validation. Arguments appended to the
+package command override seed, profile, dimensions, center, time, and other
+rendering options. The underlying
+`--worldgen-showcase-card <directory>` mode rejects remote and persistent worlds
+so stored chunks cannot silently contaminate a generator review.
+
+Before rendering any view, the capture requires the complete 35-by-35 tracked
+region to be client-visible and ready, and requires all work for the 33-by-33
+render target to be compiled and uploaded. Feature-dependency work outside that
+capture target may still exist; the receipt reports it separately instead of
+mistaking it for incomplete visible terrain. The receipt also records the fixed
+interest center, coverage radius, warmup cost, camera poses/lenses, and per-view
+drawn-section counts. These cards are visual review evidence under the safety
+ledger, not pixel-locked compatibility fixtures.
+
 ## Architecture Direction
 
 ```text

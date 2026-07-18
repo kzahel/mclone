@@ -617,6 +617,14 @@ impl OffscreenFlatClientHost {
             .drive_until_streamed_at_output_size(device, queue)
     }
 
+    pub(crate) fn drive_until_target_complete(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
+        self.driver.drive_until_target_complete(device, queue)
+    }
+
     pub(crate) fn drive_until_embedded_preview_idle(
         &mut self,
         device: &wgpu::Device,
@@ -676,6 +684,12 @@ impl OffscreenFlatClientHost {
         self.driver.host().pending_stream_work(self.camera.position)
     }
 
+    pub(crate) fn target_render_work_stats(&self) -> mclone_app_runtime::TargetRenderWorkStats {
+        self.driver
+            .host()
+            .mono_target_render_work_stats(self.camera.position)
+    }
+
     pub(crate) fn latest_budget_decision_panel(
         &self,
     ) -> mclone_diagnostics::BudgetDecisionPanelReport {
@@ -705,6 +719,17 @@ impl OffscreenFlatClientHost {
                 .render(frame, MonoUiPresentation::ScreenSpaceHud, options.hud)?
         };
         Ok(summary.render)
+    }
+
+    pub(crate) fn render_detached_chunk_camera(
+        &mut self,
+        frame: mclone_render::target::RenderFrameContext<'_>,
+        camera: mclone_render::chunk::ChunkCamera,
+    ) -> Result<FullFrameRenderSummary> {
+        Ok(self
+            .driver
+            .render_detached_chunk_camera_frozen(frame, camera, MonoUiPresentation::None)?
+            .render)
     }
 
     pub(crate) fn run_script(
@@ -768,7 +793,7 @@ impl OffscreenFlatClientHost {
         Ok(report)
     }
 
-    fn force_day_time(&mut self, day_time: u64) {
+    pub(crate) fn force_day_time(&mut self, day_time: u64) {
         self.driver.host_mut().force_mono_day_time(day_time);
     }
 
