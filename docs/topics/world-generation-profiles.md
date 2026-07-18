@@ -2,9 +2,10 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tacticals 187 and 191 are complete. `flat-grass-v1` and
-`small-island-v1` are live, persisted shared-Rust generators beside the
-unchanged Overworld; authored-only misses still produce void. Small Island now
+Status: **Tacticals 187 and 191 are complete. `flat-grass-v1`,
+`small-island-v1`, and the first `mclone-overworld-v1` terrain caller are live,
+persisted shared-Rust generators beside the unchanged Overworld; authored-only
+misses still produce void. Small Island now
 exercises the reusable value-noise primitive, typed scheduler/worker request
 contract, dependency cache, mutable feature region, and a real cross-chunk
 decoration stage.
@@ -14,9 +15,8 @@ Generator-owned pure plans now declare exact outputs, backend work, and typed
 prerequisites while the scheduler retains readiness, priority, admission,
 publication, lighting, and persistence. The alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
-regression guards rather than release compatibility promises. Tactical 188
-owns the first `mclone-overworld-v1` terrain foundation; the creative terrain
-direction lives in
+regression guards rather than release compatibility promises. Tactical 188 is
+at its first terrain review; the creative terrain direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md).**
 
 This topic owns the current truth and durable decisions for selectable,
@@ -38,11 +38,12 @@ The first alternate generators are intentionally smaller:
 - seeded small island proves original, nontrivial, position-dependent terrain,
   shoreline continuity, biome output, guaranteed spawn, and neighbor-aware
   decoration;
-- neither is the final mclone overworld.
+- mclone overworld now proves an unbounded target-only terrain caller while
+  deliberately deferring biome and decoration breadth.
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has four values:
+The stored server-owned `WorldGenerationProfile` has five values:
 
 - `Overworld`: current procedural vanilla-1.17-shaped generation;
 - `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
@@ -50,13 +51,16 @@ The stored server-owned `WorldGenerationProfile` has four values:
 - `SmallIslandV1`: a bounded original seeded radial/noise field with a safe
   central grass patch, sand shoreline, ocean, and a dependency-bearing
   oak/grass/flower feature stage;
+- `McloneOverworldV1`: continuous original ocean, coast, grass lowland, and
+  rolling upland terrain from inspectable profile-owned fields, currently with
+  a target-only plan and no decoration;
 - `AuthoredOnly`: persistence-backed content whose true misses become void.
 
 The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-Product world creation cycles the three procedural profiles through shared
+Product world creation cycles the four procedural profiles through shared
 catalog policy and generator-agnostic UI text. Scene replacement, warm-world
 startup, managed previews, and all host adapters copy the selected descriptor
 before using the shared profile-aware spawn policy. Native SQLite and browser
@@ -65,20 +69,20 @@ profiles before validating or scheduling the world.
 
 Scheduler and worker requests carry an immutable profile-plus-seed descriptor
 through native messages, WASM codecs, responses, and diagnostics. The closed
-shared-Rust executor selects the unchanged Overworld cache, flat grass, or the
-Small Island cache, and resident state resets when either descriptor fact
-changes.
+shared-Rust executor selects the unchanged Overworld cache, flat grass, the
+Small Island cache, or the concrete Mclone Overworld terrain caller, and
+resident state resets when either descriptor fact changes.
 
 `WorldGenerationProfile::plan_features` is the single closed planning entry.
 It returns a deterministic `ChunkGenerationPlan` containing exact requested
 outputs, generator backend-work chunks, and typed chunk/status prerequisites.
 Overworld and Small Island declare a 3x3 feature-center and 5x5 mutable Surface
-dependency footprint for one target; Flat Grass declares target-only work. The
-scheduler consumes every prerequisite generically, then applies its own view
-priority, deduplication, job admission, and publication policy. Planning occurs
-once for scheduler admission and is recomputed once by the worker as request
-validation; it adds no worker round trip, trait-object dispatch, or general
-graph traversal and never runs per poll or publication.
+dependency footprint for one target; Flat Grass and Mclone Overworld declare
+target-only work. The scheduler consumes every prerequisite generically, then
+applies its own view priority, deduplication, job admission, and publication
+policy. Planning occurs once for scheduler admission and is recomputed once by
+the worker as request validation; it adds no worker round trip, trait-object
+dispatch, or general graph traversal and never runs per poll or publication.
 
 The scheduler/worker seam now has two explicit request layers:
 
@@ -151,7 +155,7 @@ Dispositions mean:
 | `flat-grass-v1` | `internal-mutable` | Layers, biome, seed use, label, tag, planning shape, and implementation may change in place | It is an internal proof generator with no shipped worlds or external consumers | Update focused fixtures/tests/docs and discard or migrate affected internal worlds |
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
-| provisional `mclone-overworld-v1` | `planned-unallocated` | Identity, tag, seed domains, fixtures, and algorithm are freely designable | No live profile or retained world uses it | Update Tactical 188 and this ledger when the profile becomes live |
+| `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, spawn, planning shape, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
 
 For a proposed change, resolve every affected row before editing. The most
 restrictive disposition wins when a shared primitive affects multiple rows. If
@@ -187,9 +191,10 @@ fingerprint.
 2. `flat-grass-v1` and `small-island-v1` are current internal identities, not
    release freezes. They may change in place under the safety ledger while no
    preservation consumer exists.
-3. A later original overworld provisionally uses `mclone-overworld-v1` so it
-   remains distinct from the reference `overworld`; its exact compatibility
-   promise begins only when the safety ledger records a freeze.
+3. The original overworld uses internal `mclone-overworld-v1` so it remains
+   distinct from reference `overworld`; its exact compatibility promise begins
+   only when the safety ledger records a concrete preservation consumer and
+   freeze.
 4. Persistence hits win for every profile. Profiles govern only what a true
    missing chunk produces.
 5. Generator dependency footprints are separate from lighting and publication
@@ -240,6 +245,24 @@ save/reopen, dedicated spawn, and inspected overview/shoreline captures form a
 strong accidental-regression baseline. They may be intentionally updated under
 the safety ledger.
 
+### Mclone overworld v1 terrain foundation
+
+- independent stable continentalness and relief seed domains;
+- pure absolute-coordinate point samples and bounded row-major region samples
+  through the production sampler;
+- continuous ocean, sand coast, grass lowland, and rolling upland terrain;
+- existing ocean, beach, and plains biome IDs with canonical heightmaps and
+  empty ticks;
+- deterministic dry-upland spawn search;
+- target-only planning with no terrain knowledge in scheduler or TypeScript;
+- exact field, seam, negative-coordinate, request-order, partition, worker
+  codec, and different-seed regression locks;
+- no decoration, carvers, caves, mountains, rivers, or structures yet.
+
+These locks guard accidental drift while the profile is internal-mutable. The
+first approved multi-seed/region field-map and landscape-card review is the
+next Tactical 188 gate.
+
 ### Reusable visual review card
 
 `pnpm native:worldgen:card --seed 12345` renders three fixed views from one
@@ -269,8 +292,10 @@ render target to be compiled and uploaded. Feature-dependency work outside that
 capture target may still exist; the receipt reports it separately instead of
 mistaking it for incomplete visible terrain. The receipt also records the fixed
 interest center, coverage radius, warmup cost, camera poses/lenses, and per-view
-drawn-section counts. These cards are visual review evidence under the safety
-ledger, not pixel-locked compatibility fixtures.
+drawn-section counts. Its profile-aware coverage metadata distinguishes the
+bounded Small Island support/water margin from unbounded profiles. These cards
+are visual review evidence under the safety ledger, not pixel-locked
+compatibility fixtures.
 
 ## Architecture Direction
 
@@ -317,10 +342,12 @@ adding profile branches.
 
 ## Next Work
 
-Execute
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md)
-when beginning the original overworld. The accepted terrain, reuse, module,
-review, and long-term content direction lives in
+Continue Review 1 in
+[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
+render the approved seed/region matrix from production fields, inspect scale
+and artifacts, and record the accept/tune decision before extracting shared
+mechanisms. The accepted terrain, reuse, module, review, and long-term content
+direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
 tactical adds real continuous terrain and pauses for explicit reuse/refactor
 reviews before broadening biome and decoration rules.

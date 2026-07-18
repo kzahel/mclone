@@ -2,8 +2,8 @@
 
 Living status page for native Rust world generation. Live procedural profiles
 are the Minecraft Java 1.17.1-shaped overworld, the deliberately minimal
-`flat-grass-v1` proof generator, and the original seeded
-`small-island-v1` proof generator.
+`flat-grass-v1` proof generator, the seeded `small-island-v1` proof generator,
+and the first continuous `mclone-overworld-v1` terrain caller.
 
 The current `overworld` profile's durable target is seed parity against vanilla
 1.17.1 overworld output. The accepted follow-up direction is to preserve that
@@ -14,14 +14,15 @@ and
 [`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
 The original terrain direction lives in
 [`topics/mclone-overworld-generation.md`](topics/mclone-overworld-generation.md),
-and its first bounded foundation is planned in
+and its first bounded foundation is in progress in
 [`tactical/188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md).
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
-The project is currently internal and unshipped: Flat Grass, Small Island, and
-authored-only fixtures are mutable proving surfaces, while `overworld` remains
-locked because Java 1.17.1 parity is its external correctness target.
+The project is currently internal and unshipped: Flat Grass, Small Island,
+Mclone Overworld, and authored-only fixtures are mutable proving surfaces,
+while `overworld` remains locked because Java 1.17.1 parity is its external
+correctness target.
 
 The implementation lives primarily in `native/crates/mclone-worldgen`, with
 scheduler/publication integration in `native/crates/mclone-server` and shared
@@ -42,15 +43,19 @@ Landed native coverage:
 - Scheduler-owned `FEATURES` publication and clean fixture comparisons for the current target chunks.
 - Generated scheduled tick carry-through for fluids.
 - A stored, descriptor-driven `WorldGenerationProfile` boundary with
-  `Overworld`, `FlatGrassV1`, `SmallIslandV1`, and `AuthoredOnly`; flat grass
-  and small island are target-only, while authored-only maps true persistence
-  misses to void.
+  `Overworld`, `FlatGrassV1`, `SmallIslandV1`, `McloneOverworldV1`, and
+  `AuthoredOnly`; flat grass and the first Mclone Overworld caller are
+  target-only, while authored-only maps true persistence misses to void.
 - Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
   payloads, origin spawn policy, native/dedicated publication, and save/reopen
   coverage.
 - Bounded `small-island-v1` world-coordinate terrain with seeded shoreline and
   relief, a guaranteed central spawn patch, plains/beach/ocean biomes,
   native/dedicated publication, seam/partition locks, and save/reopen coverage.
+- Continuous `mclone-overworld-v1` ocean, coast, grass lowland, and rolling
+  upland terrain from pure production point/region samples, with a
+  deterministic dry-upland spawn, target-only worker execution, and field,
+  seam, order, partition, codec, native, and browser regression evidence.
 - Profile-qualified worker results: dependency-cache and generation-timing
   diagnostics are explicitly optional and exist only for the Overworld path;
   target-only flat and island jobs do not synthesize Overworld reports.
@@ -93,10 +98,10 @@ Still not full vanilla parity:
   former buried-treasure implementation and the former desert-well,
   monster-room, and fossil feature work belonged to the retired TypeScript
   engine
-- the first original island generator is intentionally bounded and has a
-  deliberately narrow biome/decoration palette; a continuous original mclone
-  overworld, broader original biome content, and native structures remain
-  future work
+- the first original island generator remains intentionally bounded; the
+  continuous mclone overworld now exists but has only a deliberately narrow
+  terrain/material/biome palette and no decoration, mountains, rivers, caves,
+  or structures
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes

@@ -4962,6 +4962,73 @@ mod tests {
     }
 
     #[test]
+    fn mclone_overworld_profile_uses_target_only_continuous_terrain() {
+        let seed = -98_765;
+        let center = crate::spawn::initial_spawn_center_for_profile(
+            seed,
+            WorldGenerationProfile::McloneOverworldV1,
+        );
+        let mut scheduler = ChunkScheduler::new(seed);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .unwrap();
+        scheduler.set_lighting_enabled(false);
+        scheduler
+            .apply_interest(ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+
+        let mut ready = None;
+        for _ in 0..100 {
+            for event in scheduler.poll().unwrap() {
+                if let ChunkSchedulerEvent::SnapshotReady(snapshot) = event {
+                    ready = Some(snapshot);
+                }
+            }
+            if ready.is_some() {
+                break;
+            }
+            if scheduler.worldgen_mailbox_pending_count() > 0 {
+                assert!(scheduler.wait_for_worldgen_completion(Duration::from_secs(5)));
+            }
+            std::thread::yield_now();
+        }
+
+        let snapshot = ready.expect("mclone overworld should publish through the scheduler");
+        assert_eq!(snapshot.pos, center);
+        assert_eq!(snapshot.status, ChunkStatus::Features);
+        assert!(snapshot.biomes.contains(&1));
+        let x = center.min_block_x() + 8;
+        let z = center.min_block_z() + 8;
+        let surface_y = mclone_worldgen::levelgen::McloneOverworldSampler::new(seed)
+            .sample(x, z)
+            .surface_y;
+        assert!(surface_y > mclone_worldgen::levelgen::MCLONE_OVERWORLD_SEA_LEVEL);
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(x, surface_y, z)),
+            Some(GRASS_BLOCK)
+        );
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(x, surface_y + 1, z)),
+            Some(AIR)
+        );
+
+        let job = scheduler.jobs().next().expect("mclone generation job");
+        assert_eq!(
+            job.generation_descriptor,
+            WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, seed)
+        );
+        assert!(job.dependency_requirements.is_empty());
+        assert!(job.dependency_chunks.is_empty());
+        assert_eq!(job.seeded_dependency_chunks, 0);
+        assert_eq!(job.retained_dependency_chunks, 0);
+        assert!(scheduler.job_timing(job.id).is_none());
+    }
+
+    #[test]
     fn generation_profile_cannot_change_after_chunk_scheduling_begins() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler

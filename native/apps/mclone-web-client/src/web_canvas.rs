@@ -207,6 +207,12 @@ impl WebStartupConfig {
             self.options.render_options.color_profile.as_str(),
         )
         .map_err(JsValue::from)?;
+        set_string(
+            &object,
+            "generationProfile",
+            self.options.scene.world_generation_profile.label(),
+        )
+        .map_err(JsValue::from)?;
         if let Some(remote_addr) = &self.options.scene.remote_addr {
             set_string(&object, "remoteWebSocketUrl", remote_addr).map_err(JsValue::from)?;
         }

@@ -67,6 +67,7 @@ interface WebStartupPlan extends WasmReport {
   sectionOcclusionCulling: boolean;
   forceFullbright: boolean;
   renderColorProfile: string;
+  generationProfile: string;
 }
 
 type WebStartupConfig = ReturnType<WasmModule["mclone_web_startup_options_from_query"]>;
@@ -476,6 +477,7 @@ class WebFrameDriver {
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
     runtime.state.renderColorProfile = startupPlan.renderColorProfile;
+    runtime.state.generationProfile = startupPlan.generationProfile;
 
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
@@ -2409,6 +2411,7 @@ function startupOptionsFromLocation(
       sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
       forceFullbright: Boolean(raw.forceFullbright),
       renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
+      generationProfile: String(raw.generationProfile ?? "overworld"),
     },
   };
 }

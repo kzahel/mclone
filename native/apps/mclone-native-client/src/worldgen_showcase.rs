@@ -237,8 +237,20 @@ pub(crate) fn run_worldgen_showcase(
     save_rgba_png(&card_path, card_width, card_height, &card_pixels)?;
 
     let receipt_path = options.directory.join(format!("{output_prefix}-card.json"));
+    let profile_coverage = if options.scene.world_generation_profile
+        == mclone_server::WorldGenerationProfile::SmallIslandV1
+    {
+        serde_json::json!({
+            "kind": "bounded-small-island",
+            "supportRadiusBlocks": SMALL_ISLAND_SUPPORT_RADIUS,
+            "waterMarginBlocks": f64::from(state.readiness.coverage_radius_blocks)
+                - SMALL_ISLAND_SUPPORT_RADIUS,
+        })
+    } else {
+        serde_json::json!({ "kind": "unbounded" })
+    };
     let receipt = serde_json::json!({
-        "schema": 2,
+        "schema": 3,
         "profile": profile,
         "seed": options.scene.seed,
         "centerChunk": [options.scene.chunk_x, options.scene.chunk_z],
@@ -265,9 +277,7 @@ pub(crate) fn run_worldgen_showcase(
             "residentSections": state.readiness.resident_sections,
             "warmupFrames": state.readiness.warmup_frames,
             "warmupElapsedMs": state.readiness.warmup_elapsed_ms,
-            "smallIslandSupportRadiusBlocks": SMALL_ISLAND_SUPPORT_RADIUS,
-            "smallIslandWaterMarginBlocks": f64::from(state.readiness.coverage_radius_blocks)
-                - SMALL_ISLAND_SUPPORT_RADIUS,
+            "profileCoverage": profile_coverage,
         },
         "backgroundWorkOutsideCaptureTarget": {
             "pendingGeneration": state.readiness.background_pending_generation_work,

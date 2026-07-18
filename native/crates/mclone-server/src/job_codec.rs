@@ -10,6 +10,7 @@ use mclone_worldgen::levelgen::{
     OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, ScheduledTick, SmallIslandFeatureDependencyCache,
     SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming, generate_flat_grass_chunk,
+    generate_mclone_overworld_chunk,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -169,9 +170,9 @@ impl WorldGenerationExecutor {
         match profile {
             WorldGenerationProfile::Overworld => self.overworld_cache.resident_positions(),
             WorldGenerationProfile::SmallIslandV1 => self.small_island_cache.resident_positions(),
-            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
-                BTreeSet::new()
-            }
+            WorldGenerationProfile::FlatGrassV1
+            | WorldGenerationProfile::McloneOverworldV1
+            | WorldGenerationProfile::AuthoredOnly { .. } => BTreeSet::new(),
         }
     }
 
@@ -179,7 +180,9 @@ impl WorldGenerationExecutor {
         match profile {
             WorldGenerationProfile::Overworld => self.overworld_cache.retained_chunk_count(),
             WorldGenerationProfile::SmallIslandV1 => self.small_island_cache.retained_chunk_count(),
-            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => 0,
+            WorldGenerationProfile::FlatGrassV1
+            | WorldGenerationProfile::McloneOverworldV1
+            | WorldGenerationProfile::AuthoredOnly { .. } => 0,
         }
     }
 
@@ -268,6 +271,29 @@ impl WorldGenerationExecutor {
                         cache_report: result.cache_report.into(),
                         overworld_timing: None,
                     }),
+                })
+            }
+            WorldGenerationProfile::McloneOverworldV1 => {
+                if !dependencies.is_empty() {
+                    return Err(format!(
+                        "mclone-overworld-v1 is target-only but received {} dependency chunks",
+                        dependencies.len()
+                    ));
+                }
+                let chunks = targets
+                    .iter()
+                    .copied()
+                    .map(|pos| {
+                        (
+                            pos,
+                            generate_mclone_overworld_chunk(descriptor.seed, pos.x, pos.z),
+                        )
+                    })
+                    .collect();
+                Ok(WorldGenerationBatchResult {
+                    chunks,
+                    retained_dependencies: BTreeMap::new(),
+                    diagnostics: None,
                 })
             }
             WorldGenerationProfile::AuthoredOnly { .. } => Err(
@@ -1410,6 +1436,16 @@ mod tests {
         .unwrap();
         assert!(flat.diagnostics.is_none());
 
+        let mclone = full_worldgen_frame(
+            ChunkJobId(10),
+            WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, 12_345),
+            &target,
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        assert!(mclone.diagnostics.is_none());
+
         let island = full_worldgen_frame(
             ChunkJobId(9),
             WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, 12_345),
@@ -1715,6 +1751,56 @@ mod tests {
             descriptor.seed + 1,
         );
         let changed = full_worldgen_frame(ChunkJobId(9), other_seed, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        assert_ne!(batch.generated_chunks, changed.generated_chunks);
+    }
+
+    #[test]
+    fn mclone_overworld_frames_are_target_only_partition_and_order_independent() {
+        let descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, -98_765);
+        let targets = [
+            ChunkPos::new(7, -9),
+            ChunkPos::new(-2, 3),
+            ChunkPos::new(0, 0),
+        ];
+        let batch = full_worldgen_frame(ChunkJobId(1), descriptor, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        let reversed = full_worldgen_frame(
+            ChunkJobId(2),
+            descriptor,
+            &[targets[2], targets[1], targets[0]],
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        let partitioned = targets
+            .iter()
+            .copied()
+            .enumerate()
+            .flat_map(|(index, target)| {
+                full_worldgen_frame(ChunkJobId(index as u64 + 3), descriptor, &[target])
+                    .and_then(|frame| compute_worldgen_job_frame(&frame))
+                    .and_then(|frame| decode_worldgen_response(&frame))
+                    .unwrap()
+                    .generated_chunks
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(batch.descriptor, descriptor);
+        assert_eq!(batch.generated_chunks, reversed.generated_chunks);
+        assert_eq!(batch.generated_chunks, partitioned);
+        assert!(batch.retained_dependencies.is_empty());
+        assert!(batch.retained_dependency_positions.is_empty());
+        assert!(batch.diagnostics.is_none());
+
+        let changed_descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, -98_764);
+        let changed = full_worldgen_frame(ChunkJobId(9), changed_descriptor, &targets)
             .and_then(|frame| compute_worldgen_job_frame(&frame))
             .and_then(|frame| decode_worldgen_response(&frame))
             .unwrap();

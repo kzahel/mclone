@@ -32,6 +32,7 @@ export type WebWorldGenerationProfile =
   | "overworld"
   | "flat-grass-v1"
   | "small-island-v1"
+  | "mclone-overworld-v1"
   | "authored-only";
 
 function nextCatalogTimestamp(): number {

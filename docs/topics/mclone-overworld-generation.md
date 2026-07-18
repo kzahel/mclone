@@ -2,11 +2,11 @@
 
 Topic: `mclone-overworld-generation`
 
-Status: accepted direction, not yet implemented. The original generator will
-land as a separate provisional `mclone-overworld-v1` profile while the current
-`overworld` remains the Minecraft Java 1.17.1 reference path. Tactical
-[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) owns the
-first bounded continuous-terrain foundation.
+Status: the first continuous-terrain caller landed 2026-07-18 as the separate
+internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
+Minecraft Java 1.17.1 reference path. Tactical
+[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is at its
+first terrain and field-map review before any reuse extraction or decoration.
 
 ## Scope
 
@@ -29,8 +29,9 @@ not change the reference target recorded in
   profile to mutate.
 - `small-island-v1` remains an internal, bounded proving ground for reusable
   noise, surfaces, placed features, dependency planning, and visual review.
-- provisional `mclone-overworld-v1` becomes the continuous, explorable,
-  original terrain profile.
+- `mclone-overworld-v1` is the live internal continuous, explorable, original
+  terrain profile. Its current output may still change in place under the
+  compatibility safety ledger.
 
 Small Island must not gradually become the full Overworld. It should pressure
 the new profile toward useful shared mechanisms while keeping its own bounded
@@ -123,6 +124,12 @@ and geological modifiers need a path to profile-owned 3D density or material
 sampling. Small Island may remain columnar if forcing it through a density
 pipeline adds no value.
 
+The live first request/response type contains only `continentalness: f64`,
+`relief: f64`, and `surface_y: i32`. Point and bounded row-major region
+requests call the same production sampler used by chunk generation. The
+region form is deliberately an in-process worldgen inspection seam, not a
+second scheduler/Worker protocol.
+
 ## Reuse Boundary
 
 Reuse mechanisms and data contracts; do not accidentally reuse the reference
@@ -209,7 +216,7 @@ subsystem horizontally.
      the first cross-chunk landmark requires them.
 
 Each stage may add a new profile version after release freeze. While the
-profile remains `planned-unallocated` or internal-mutable, fixtures are
+profile remains internal-mutable, fixtures are
 determinism/regression evidence rather than user-save compatibility promises.
 
 ## Reuse And Refactoring Review Protocol

@@ -16,6 +16,8 @@ pub enum WorldGenerationProfile {
     FlatGrassV1,
     #[serde(rename = "small-island-v1")]
     SmallIslandV1,
+    #[serde(rename = "mclone-overworld-v1")]
+    McloneOverworldV1,
     AuthoredOnly {
         #[serde(rename = "missingChunk")]
         missing_chunk: AuthoredMissingChunk,
@@ -34,6 +36,7 @@ impl WorldGenerationProfile {
             Self::Overworld => "overworld",
             Self::FlatGrassV1 => "flat-grass-v1",
             Self::SmallIslandV1 => "small-island-v1",
+            Self::McloneOverworldV1 => "mclone-overworld-v1",
             Self::AuthoredOnly { .. } => "authored-only",
         }
     }
@@ -43,16 +46,21 @@ impl WorldGenerationProfile {
             "overworld" | "default" => Ok(Self::Overworld),
             "flat-grass-v1" | "flat_grass_v1" | "flatGrassV1" => Ok(Self::FlatGrassV1),
             "small-island-v1" | "small_island_v1" | "smallIslandV1" => Ok(Self::SmallIslandV1),
+            "mclone-overworld-v1" | "mclone_overworld_v1" | "mcloneOverworldV1" => {
+                Ok(Self::McloneOverworldV1)
+            }
             "authored-only" | "authored_only" | "authoredOnly" => Ok(Self::authored_only()),
             value => Err(format!(
-                "world generation profile must be overworld, flat-grass-v1, small-island-v1, or authored-only, got `{value}`"
+                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, or authored-only, got `{value}`"
             )),
         }
     }
 
     pub const fn authored_missing_chunk(self) -> Option<AuthoredMissingChunk> {
         match self {
-            Self::Overworld | Self::FlatGrassV1 | Self::SmallIslandV1 => None,
+            Self::Overworld | Self::FlatGrassV1 | Self::SmallIslandV1 | Self::McloneOverworldV1 => {
+                None
+            }
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
         }
     }
@@ -65,6 +73,7 @@ impl WorldGenerationProfile {
             Self::Overworld => ChunkGenerationPlan::overworld_features(targets),
             Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
+            Self::McloneOverworldV1 => ChunkGenerationPlan::target_only(targets),
             Self::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
             }
@@ -77,6 +86,7 @@ impl WorldGenerationProfile {
             Self::AuthoredOnly { .. } => 1,
             Self::FlatGrassV1 => 2,
             Self::SmallIslandV1 => 3,
+            Self::McloneOverworldV1 => 4,
         }
     }
 
@@ -86,6 +96,7 @@ impl WorldGenerationProfile {
             1 => Some(Self::authored_only()),
             2 => Some(Self::FlatGrassV1),
             3 => Some(Self::SmallIslandV1),
+            4 => Some(Self::McloneOverworldV1),
             _ => None,
         }
     }
@@ -230,6 +241,10 @@ mod tests {
             "small-island-v1"
         );
         assert_eq!(
+            WorldGenerationProfile::McloneOverworldV1.label(),
+            "mclone-overworld-v1"
+        );
+        assert_eq!(
             WorldGenerationProfile::authored_only().label(),
             "authored-only"
         );
@@ -250,6 +265,10 @@ mod tests {
             WorldGenerationProfile::SmallIslandV1
         );
         assert_eq!(
+            WorldGenerationProfile::parse_label("mclone-overworld-v1").unwrap(),
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::Overworld).unwrap(),
             r#""overworld""#
         );
@@ -264,6 +283,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::SmallIslandV1).unwrap(),
             r#""small-island-v1""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::McloneOverworldV1).unwrap(),
+            r#""mclone-overworld-v1""#
         );
         assert_eq!(
             serde_json::from_str::<WorldGenerationProfile>("\"overworld\"").unwrap(),

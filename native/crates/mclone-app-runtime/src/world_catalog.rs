@@ -23,10 +23,11 @@ pub const LOCAL_WORLD_ID_MAX_LEN: usize = 64;
 pub const LOCAL_WORLD_DISPLAY_NAME_MAX_CHARS: usize = 64;
 pub const NATIVE_WORLD_METADATA_FILE: &str = "world.json";
 pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
-pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 3] = [
+pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 4] = [
     WorldGenerationProfile::Overworld,
     WorldGenerationProfile::FlatGrassV1,
     WorldGenerationProfile::SmallIslandV1,
+    WorldGenerationProfile::McloneOverworldV1,
 ];
 
 const DEFAULT_LOCAL_WORLD_ID: &str = "world";
@@ -38,6 +39,7 @@ pub const fn local_world_generation_profile_display_name(
         WorldGenerationProfile::Overworld => "Vanilla 1.17 Overworld",
         WorldGenerationProfile::FlatGrassV1 => "Flat Grass",
         WorldGenerationProfile::SmallIslandV1 => "Small Island",
+        WorldGenerationProfile::McloneOverworldV1 => "Mclone Overworld",
         WorldGenerationProfile::AuthoredOnly { .. } => "Authored World",
     }
 }
@@ -48,7 +50,8 @@ pub const fn next_local_world_generation_profile(
     match profile {
         WorldGenerationProfile::Overworld => WorldGenerationProfile::FlatGrassV1,
         WorldGenerationProfile::FlatGrassV1 => WorldGenerationProfile::SmallIslandV1,
-        WorldGenerationProfile::SmallIslandV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
+        WorldGenerationProfile::SmallIslandV1 => WorldGenerationProfile::McloneOverworldV1,
+        WorldGenerationProfile::McloneOverworldV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
             WorldGenerationProfile::Overworld
         }
     }
@@ -1154,6 +1157,7 @@ mod tests {
                 WorldGenerationProfile::Overworld,
                 WorldGenerationProfile::FlatGrassV1,
                 WorldGenerationProfile::SmallIslandV1,
+                WorldGenerationProfile::McloneOverworldV1,
             ]
         );
         assert_eq!(
@@ -1169,6 +1173,10 @@ mod tests {
             "Small Island"
         );
         assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::McloneOverworldV1),
+            "Mclone Overworld"
+        );
+        assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::Overworld),
             WorldGenerationProfile::FlatGrassV1
         );
@@ -1178,6 +1186,10 @@ mod tests {
         );
         assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::SmallIslandV1),
+            WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::McloneOverworldV1),
             WorldGenerationProfile::Overworld
         );
     }
@@ -1187,6 +1199,7 @@ mod tests {
         for profile in [
             WorldGenerationProfile::FlatGrassV1,
             WorldGenerationProfile::SmallIslandV1,
+            WorldGenerationProfile::McloneOverworldV1,
         ] {
             let options = LocalWorldCreateOptions::new("Alternate", 9)
                 .unwrap()

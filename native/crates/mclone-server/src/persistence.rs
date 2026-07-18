@@ -5070,11 +5070,22 @@ mod tests {
             WorldGenerationProfile::SmallIslandV1
         );
 
+        let mut mclone_overworld = Vec::new();
+        write_world_generation_profile(
+            &mut mclone_overworld,
+            WorldGenerationProfile::McloneOverworldV1,
+        )
+        .unwrap();
+        assert_eq!(mclone_overworld, [4]);
+        assert_eq!(
+            read_world_generation_profile(&mut mclone_overworld.as_slice()).unwrap(),
+            WorldGenerationProfile::McloneOverworldV1
+        );
         assert!(
-            read_world_generation_profile(&mut [4].as_slice())
+            read_world_generation_profile(&mut [5].as_slice())
                 .unwrap_err()
                 .to_string()
-                .contains("unknown world generation profile tag 4")
+                .contains("unknown world generation profile tag 5")
         );
     }
 

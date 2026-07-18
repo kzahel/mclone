@@ -22,6 +22,7 @@ fn browser_job_worker_delegates_worldgen_frames_to_shared_rust() {
         "generate_overworld",
         "generate_flat_grass",
         "generate_small_island",
+        "generate_mclone_overworld",
         "block_state_ids",
         "setBlock",
     ] {

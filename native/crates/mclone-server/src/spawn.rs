@@ -3,6 +3,7 @@ use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource, get_layered_
 use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
+use mclone_worldgen::levelgen::{mclone_overworld_biome_id, mclone_overworld_spawn_chunk};
 use mclone_worldgen::surface::overworld_surface_top_material;
 
 use crate::WorldGenerationProfile;
@@ -21,6 +22,7 @@ pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
 pub fn initial_spawn_center_for_profile(seed: i64, profile: WorldGenerationProfile) -> ChunkPos {
     match profile {
         WorldGenerationProfile::Overworld => initial_spawn_center_for_seed(seed),
+        WorldGenerationProfile::McloneOverworldV1 => mclone_overworld_spawn_chunk(seed),
         WorldGenerationProfile::FlatGrassV1
         | WorldGenerationProfile::SmallIslandV1
         | WorldGenerationProfile::AuthoredOnly { .. } => ChunkPos::new(0, 0),
@@ -42,6 +44,7 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
         profile,
         WorldGenerationProfile::FlatGrassV1
             | WorldGenerationProfile::SmallIslandV1
+            | WorldGenerationProfile::McloneOverworldV1
             | WorldGenerationProfile::AuthoredOnly { .. }
     ) {
         SpawnColumnOrder::CenterFirst
@@ -55,6 +58,9 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
         |x, z| match profile {
             WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::SmallIslandV1 => {
                 get_layered_biome_by_id(1)
+            }
+            WorldGenerationProfile::McloneOverworldV1 => {
+                get_layered_biome_by_id(mclone_overworld_biome_id(seed, x, z))
             }
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
                 biome_source.get_block_position_biome_definition(seed, x, z)
@@ -280,6 +286,7 @@ mod tests {
 
     use mclone_worldgen::biome::get_layered_biome_by_id;
     use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, STONE, WATER};
+    use mclone_worldgen::levelgen::generate_mclone_overworld_chunk;
 
     use super::*;
 
@@ -327,6 +334,49 @@ mod tests {
 
         assert_eq!(scan, Vec3d::new(1.5, 65.0, 8.5));
         assert_eq!(center_first, Vec3d::new(7.5, 65.0, 7.5));
+    }
+
+    #[test]
+    fn mclone_overworld_profile_selects_a_loaded_dry_spawn() {
+        for seed in [12_345, -98_765, 8_675_309] {
+            let profile = WorldGenerationProfile::McloneOverworldV1;
+            let center = initial_spawn_center_for_profile(seed, profile);
+            let chunk = generate_mclone_overworld_chunk(seed, center.x, center.z);
+            let spawn = find_safe_surface_spawn_for_loaded_profile(
+                seed,
+                profile,
+                center,
+                |pos| {
+                    (pos.chunk_pos() == center).then(|| {
+                        chunk
+                            .block_at_y(
+                                pos.x - center.min_block_x(),
+                                pos.y,
+                                pos.z - center.min_block_z(),
+                            )
+                            .0
+                    })
+                },
+                |pos| pos == center,
+            )
+            .unwrap_or_else(|| panic!("seed {seed} had no safe spawn in {center:?}"));
+            let floor = BlockPos::new(
+                spawn.x.floor() as i32,
+                spawn.y.floor() as i32 - 1,
+                spawn.z.floor() as i32,
+            );
+            assert_eq!(floor.chunk_pos(), center);
+            assert_eq!(
+                chunk
+                    .block_at_y(
+                        floor.x - center.min_block_x(),
+                        floor.y,
+                        floor.z - center.min_block_z()
+                    )
+                    .0,
+                GRASS_BLOCK
+            );
+        }
     }
 
     #[test]

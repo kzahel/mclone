@@ -41,10 +41,10 @@ const generationProfile = generationProfileArgIndex >= 0
   : "";
 if (
   generationProfile
-  && !["overworld", "flat-grass-v1", "small-island-v1"].includes(generationProfile)
+  && !["overworld", "flat-grass-v1", "small-island-v1", "mclone-overworld-v1"].includes(generationProfile)
 ) {
   throw new Error(
-    `--generation-profile requires overworld, flat-grass-v1, or small-island-v1; got ${generationProfile}`,
+    `--generation-profile requires overworld, flat-grass-v1, small-island-v1, or mclone-overworld-v1; got ${generationProfile}`,
   );
 }
 const movementPerf = process.argv.includes("--movement-perf")
@@ -6518,35 +6518,41 @@ async function captureTargetPreviewProbe(page) {
  * @param {string} profile
  */
 async function captureGenerationProfileProbe(page, profile) {
-  const expectedCameraY = profile === "flat-grass-v1" ? 5.62 : 82.62;
   await page.waitForFunction(
-    ({ expectedCameraY }) => {
+    ({ profile }) => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.ok === true
         && state.ready === true
+        && state.generationProfile === profile
         && state.loadedChunkCount > 0
         && state.residentSectionCount > 0
-        && Math.abs(Number(state.cameraY) - expectedCameraY) < 0.35;
+        && Number.isFinite(Number(state.cameraY))
+        && state.onGround === true
+        && state.lastReport?.onGround === true;
     },
-    { expectedCameraY },
+    { profile },
     { timeout: 60_000 },
   );
-  return page.evaluate(({ profile, expectedCameraY }) => {
+  return page.evaluate(({ profile }) => {
     const state = globalThis.__mcloneWebApp.state;
     return {
       ok: state?.ok === true
         && state.ready === true
+        && state.generationProfile === profile
         && state.loadedChunkCount > 0
         && state.residentSectionCount > 0
-        && Math.abs(Number(state.cameraY) - expectedCameraY) < 0.35,
+        && Number.isFinite(Number(state.cameraY))
+        && state.onGround === true
+        && state.lastReport?.onGround === true,
       profile,
-      expectedCameraY,
+      activeGenerationProfile: state.generationProfile,
       cameraY: state.cameraY,
+      onGround: state.onGround,
       loadedChunkCount: state.loadedChunkCount,
       residentSectionCount: state.residentSectionCount,
       workerCompileUsed: state.lastCompileReport?.workerCompileUsed === true,
     };
-  }, { profile, expectedCameraY });
+  }, { profile });
 }
 
 /**

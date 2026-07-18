@@ -36,6 +36,7 @@ interface IntegratedServerWorkerMessage {
     | "overworld"
     | "flat-grass-v1"
     | "small-island-v1"
+    | "mclone-overworld-v1"
     | "authored-only";
   behaviorProfile?: "mutable" | "protected-lobby";
   lightStatusBatchSize?: number;

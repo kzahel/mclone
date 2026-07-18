@@ -1,7 +1,8 @@
 # Tactical 188: Mclone Overworld V1 Terrain Foundation
 
-Status: Slice 0 complete 2026-07-18; Slice 1 is next. No profile identity or
-terrain behavior has landed yet. Durable direction lives in
+Status: Slices 0 and 1 complete 2026-07-18; Review 1 is next. The live
+internal profile now provides undecorated continuous terrain through the
+generic target-only plan. Durable direction lives in
 [`mclone-overworld-generation`](../topics/mclone-overworld-generation.md).
 
 Topic: `mclone-overworld-generation`
@@ -130,20 +131,58 @@ Clean baseline at commit `9b9910b3` on arm64 macOS 26.5.1, Rust 1.92.0:
 
 ### Slice 1: first continuous terrain caller
 
-- [ ] Add the profile label/tag and catalog, protocol, persistence, and
+- [x] Add the profile label/tag and catalog, protocol, persistence, and
   descriptor round trips without changing old values.
-- [ ] Add pure absolute-coordinate single-point and bounded-region sampling
+- [x] Add pure absolute-coordinate single-point and bounded-region sampling
   through the same implementation used by chunk generation.
-- [ ] Generate continuous ocean, coast, lowland, and rolling-upland terrain
+- [x] Generate continuous ocean, coast, lowland, and rolling-upland terrain
   with correct water, blocks, biomes, heightmaps, and ticks.
-- [ ] Add generator-aware safe spawn over dry traversable terrain.
-- [ ] Carry descriptor-keyed sessions through native workers and browser
+- [x] Add generator-aware safe spawn over dry traversable terrain.
+- [x] Carry descriptor-keyed sessions through native workers and browser
   codecs.
-- [ ] Pin seam, negative-coordinate, repeated/reversed/partitioned batch, and
+- [x] Pin seam, negative-coordinate, repeated/reversed/partitioned batch, and
   native/browser-equivalence fingerprints.
 
 Gate: the profile produces real continuous terrain, opens at a safe spawn, and
 leaves reference Overworld output exact.
+
+Execution record 2026-07-18:
+
+- appended stored binary tag `4` for `mclone-overworld-v1` while preserving
+  tags `0..=3`, routed the identity through catalogs, CLI startup, native
+  jobs, WASM frames, and the production browser Worker, and added it to the
+  shared procedural-profile cycle;
+- added one profile-owned sampler with pure point requests and bounded
+  row-major region requests. `continentalness`, `relief`, and `surface_y`
+  use independent stable seed domains and the existing `SeedDomain` and
+  `ValueNoise2d` mechanisms without changing those shared primitives;
+- generated unbounded ocean, sand coast, grass lowland, and rolling upland
+  columns with existing ocean/beach/plains biome IDs, canonical heightmaps,
+  an empty tick payload, and a target-only generation plan. The profile has no
+  decoration, carvers, structures, or generator prerequisites yet;
+- added a deterministic profile-owned spawn search for dry grass at least
+  five blocks above sea level. Native and browser startup both use the
+  resulting authoritative spawn rather than interpreting terrain rules;
+- pinned seam and negative-coordinate samples, point/region equivalence,
+  repeated/reversed/partitioned requests, different-seed output, exact worker
+  frames, and region fingerprints `3503757461131335250`,
+  `13898607341532105566`, and `17278483164450982141` for the three review
+  seeds;
+- full validation passed: worldgen 232 passed with one known ignored test,
+  server 473 passed, app runtime 290 passed plus integrations, native client
+  170 passed, web client 11 passed plus ownership locks, WASM check,
+  formatting, and TypeScript check. The production Web Worker app-loop smoke
+  selected the profile reported by Rust, generated and rendered 49 resident
+  chunks, and reached generated ground at seed `12345`;
+- the release target-only probe produced 2,894.796 chunks/s at seed `12345`,
+  center `(0,0)`, radius 1, three iterations. This dirty-tree measurement is a
+  comparison receipt, not a performance promise;
+- inspected the first complete native card at
+  `/tmp/mclone-worldgen-showcase/mclone-overworld-v1-seed-12345-card.png`.
+  It shows coherent broad rolling grass terrain at the spawn region. The
+  sparse palette is intentional; the approved multi-seed/region review and
+  production field maps remain Review 1 rather than being inferred from this
+  first drawable milestone.
 
 ### Review 1: terrain before abstraction
 

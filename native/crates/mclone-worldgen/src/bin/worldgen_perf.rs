@@ -6,7 +6,7 @@ use mclone_worldgen::feature::DecorationStep;
 use mclone_worldgen::levelgen::{
     OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, SurfaceFillTiming,
-    generate_overworld_surface_chunk,
+    generate_mclone_overworld_chunk, generate_overworld_surface_chunk,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -29,6 +29,7 @@ fn run() -> Result<(), String> {
     let positions = square_positions(config.chunk_x, config.chunk_z, config.radius);
     let total_start = Instant::now();
     let surface = run_surface_phase(&config, &positions);
+    let mclone_overworld = run_mclone_overworld_phase(&config, &positions);
     let features_cold = run_features_phase(&config, &positions, FeatureCacheMode::Cold);
     let features_warm = run_features_phase(&config, &positions, FeatureCacheMode::Warm);
     let total_elapsed_ms = elapsed_ms(total_start.elapsed());
@@ -37,6 +38,7 @@ fn run() -> Result<(), String> {
         positions.len(),
         total_elapsed_ms,
         &surface,
+        &mclone_overworld,
         &features_cold,
         &features_warm,
     );
@@ -132,6 +134,24 @@ fn run_surface_phase(config: &Config, positions: &[ChunkPos]) -> SurfacePhaseRep
     }
 }
 
+fn run_mclone_overworld_phase(config: &Config, positions: &[ChunkPos]) -> SurfacePhaseReport {
+    let start = Instant::now();
+    let mut generated_chunks = 0_usize;
+    let mut non_air_blocks = 0_usize;
+    for _ in 0..config.iterations {
+        for pos in positions {
+            let chunk = generate_mclone_overworld_chunk(config.seed, pos.x, pos.z);
+            generated_chunks += 1;
+            non_air_blocks += chunk.non_air_block_count();
+        }
+    }
+    SurfacePhaseReport {
+        elapsed_ms: elapsed_ms(start.elapsed()),
+        generated_chunks,
+        non_air_blocks,
+    }
+}
+
 fn run_features_phase(
     config: &Config,
     positions: &[ChunkPos],
@@ -200,6 +220,7 @@ fn print_json(
     target_chunk_count: usize,
     total_elapsed_ms: f64,
     surface: &SurfacePhaseReport,
+    mclone_overworld: &SurfacePhaseReport,
     features_cold: &FeaturePhaseReport,
     features_warm: &FeaturePhaseReport,
 ) {
@@ -216,6 +237,7 @@ fn print_json(
     println!("  \"total_elapsed_ms\": {:.3},", total_elapsed_ms);
     println!("  \"phases\": {{");
     print_surface_phase_json("    ", "surface", surface, true);
+    print_surface_phase_json("    ", "mclone_overworld_v1_target", mclone_overworld, true);
     print_feature_phase_json("    ", "features_cold", features_cold, true);
     print_feature_phase_json("    ", "features_warm", features_warm, false);
     println!("  }}");
