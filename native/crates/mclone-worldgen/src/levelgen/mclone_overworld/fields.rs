@@ -3,6 +3,7 @@ use mclone_core::ChunkPos;
 use crate::noise::{SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-1";
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
 const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
@@ -32,6 +33,7 @@ pub struct McloneOverworldSampleRegionRequest {
     pub min_z: i32,
     pub width: u32,
     pub depth: u32,
+    pub step: u32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -110,9 +112,16 @@ impl McloneOverworldSampler {
                 "mclone overworld sample region has {sample_count} points, maximum is {MAX_REGION_SAMPLE_COUNT}"
             ));
         }
+        let step = i32::try_from(request.step)
+            .map_err(|_| "mclone overworld sample region step exceeds i32 coordinates")?;
+        if step == 0 {
+            return Err("mclone overworld sample region step must be at least 1".to_owned());
+        }
         if let Some(max_offset_x) = request.width.checked_sub(1) {
             let max_offset_x = i32::try_from(max_offset_x)
-                .map_err(|_| "mclone overworld sample region width exceeds i32 coordinates")?;
+                .map_err(|_| "mclone overworld sample region width exceeds i32 coordinates")?
+                .checked_mul(step)
+                .ok_or("mclone overworld sample region x step overflow")?;
             request
                 .min_x
                 .checked_add(max_offset_x)
@@ -120,7 +129,9 @@ impl McloneOverworldSampler {
         }
         if let Some(max_offset_z) = request.depth.checked_sub(1) {
             let max_offset_z = i32::try_from(max_offset_z)
-                .map_err(|_| "mclone overworld sample region depth exceeds i32 coordinates")?;
+                .map_err(|_| "mclone overworld sample region depth exceeds i32 coordinates")?
+                .checked_mul(step)
+                .ok_or("mclone overworld sample region z step overflow")?;
             request
                 .min_z
                 .checked_add(max_offset_z)
@@ -134,10 +145,12 @@ impl McloneOverworldSampler {
                     self.sample(
                         request.min_x
                             + i32::try_from(offset_x)
-                                .expect("validated mclone overworld sample x offset"),
+                                .expect("validated mclone overworld sample x offset")
+                                * step,
                         request.min_z
                             + i32::try_from(offset_z)
-                                .expect("validated mclone overworld sample z offset"),
+                                .expect("validated mclone overworld sample z offset")
+                                * step,
                     ),
                 );
             }
@@ -194,6 +207,7 @@ mod tests {
             min_z: 27,
             width: 5,
             depth: 3,
+            step: 7,
         };
         let region = sampler.sample_region(request).unwrap();
 
@@ -203,8 +217,8 @@ mod tests {
                 assert_eq!(
                     region.sample(offset_x, offset_z),
                     Some(sampler.sample(
-                        request.min_x + offset_x as i32,
-                        request.min_z + offset_z as i32
+                        request.min_x + offset_x as i32 * request.step as i32,
+                        request.min_z + offset_z as i32 * request.step as i32
                     ))
                 );
             }
@@ -222,6 +236,7 @@ mod tests {
                     min_z: 0,
                     width: 4_097,
                     depth: 4_097,
+                    step: 1,
                 })
                 .is_err()
         );
@@ -232,6 +247,18 @@ mod tests {
                     min_z: 0,
                     width: 2,
                     depth: 1,
+                    step: 1,
+                })
+                .is_err()
+        );
+        assert!(
+            sampler
+                .sample_region(McloneOverworldSampleRegionRequest {
+                    min_x: 0,
+                    min_z: 0,
+                    width: 1,
+                    depth: 1,
+                    step: 0,
                 })
                 .is_err()
         );
