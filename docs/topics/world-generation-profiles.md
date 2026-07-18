@@ -345,12 +345,13 @@ adding profile branches.
 
 ## Next Work
 
-Continue Slice 2 in
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-compare the working Mclone terrain caller with Small Island and reference
-Overworld, extract only mechanisms with real consumers and evidence, and keep
-profile rule composition concrete. The accepted terrain, reuse, module,
-review, and long-term content direction lives in
+Continue Slice 3 in
+[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md): add
+the first profile-owned biome, surface, and decoration language through the
+existing generic planning and feature-execution contracts. The preceding
+checkpoint shared only the output-identical columnar biome payload traversal;
+profile rule composition remains concrete. The accepted terrain, reuse,
+module, review, and long-term content direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
 tactical adds real continuous terrain and pauses for explicit reuse/refactor
 reviews before broadening biome and decoration rules.

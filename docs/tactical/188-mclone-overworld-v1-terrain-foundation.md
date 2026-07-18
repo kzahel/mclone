@@ -235,18 +235,50 @@ Execution record 2026-07-18:
 
 ### Slice 2: first reuse and refactoring checkpoint
 
-- [ ] Compare working terrain code with Small Island and reference Overworld.
-- [ ] Extract only mechanisms with two concrete consumers or an already
+- [x] Compare working terrain code with Small Island and reference Overworld.
+- [x] Extract only mechanisms with two concrete consumers or an already
   frozen boundary.
-- [ ] Keep radial island composition, mclone macro composition, rule tables,
+- [x] Keep radial island composition, mclone macro composition, rule tables,
   and seed domains profile-owned.
-- [ ] Separate behavior-preserving extraction from intentional tuning.
-- [ ] Re-run exact Overworld locks and both original-profile fingerprints
+- [x] Separate behavior-preserving extraction from intentional tuning.
+- [x] Re-run exact Overworld locks and both original-profile fingerprints
   after every shared extraction.
-- [ ] Reject helpers that add material allocation, payload, or cache cost.
+- [x] Reject helpers that add material allocation, payload, or cache cost.
 
 Gate: every extraction names its consumers and evidence. Extracting nothing is
 an acceptable review result.
+
+Execution record 2026-07-18:
+
+- extracted one mechanism: `sample_column_biome_payload` owns the canonical
+  Y-major quart-section, Z-major, then X-major 2.5D chunk payload traversal.
+  Its concrete consumers are Small Island and Mclone Overworld; each supplies
+  its own absolute-coordinate biome rule. A direct boundary test pins sample
+  coordinates, count, ordering, and vertical replication;
+- preserved the original loop count and one exact-capacity `Vec` allocation.
+  The helper adds no payload, cache, profile dispatch, or runtime state. The
+  release target-only probe produced 2,934.743 chunks/s versus the 2,767.279
+  pre-refactor receipt, which is sufficient evidence of no material
+  throughput regression rather than a claim of improvement;
+- deliberately did not extract the shared-looking biome thresholds, material
+  columns, octave composition, interpolation helpers, or spawn searches.
+  Those are profile policy, already differ at important edges, or need the
+  Slice 3 surface/decoration caller before a useful boundary is visible. The
+  reference Overworld retains its three-dimensional `NoiseBiomeSource`,
+  Java-owned surface rules, and PRNG/order path;
+- full worldgen validation passed 233 tests with the known gauntlet ignored;
+  server validation passed 473 tests. This re-ran reference oracle locks,
+  Small Island seam/order and seed fingerprints, Mclone field fingerprints,
+  worker codec/partition locks, and scheduler plan tests without changing an
+  expected value;
+- inspected clean commit `3df1890a` RD16 cards for both consumers at seed
+  `12345`. Each reached 1,225/1,225 visible and target-ready chunks with zero
+  target stream or render work pending. Small Island warmed in 1,375 frames
+  and 7.915 seconds; Mclone warmed in 1,356 frames and 7.805 seconds. Both
+  retained their pre-refactor terrain, biome, and decoration appearance;
+- no safety-ledger disposition changed. This was an output-identical shared
+  implementation refactor across two `internal-mutable` profiles; the
+  `reference-locked` path was validated but did not adopt the helper.
 
 ### Slice 3: first terrain language
 

@@ -2,11 +2,12 @@
 
 Topic: `mclone-overworld-generation`
 
-Status: the first continuous-terrain caller and terrain review completed
-2026-07-18 as the separate internal-mutable `mclone-overworld-v1` profile while
-`overworld` remains the Minecraft Java 1.17.1 reference path. Tactical
-[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is at its
-first explicit reuse/refactor checkpoint before decoration.
+Status: the first continuous-terrain caller, terrain review, and concrete
+reuse checkpoint completed 2026-07-18 as the separate internal-mutable
+`mclone-overworld-v1` profile while `overworld` remains the Minecraft Java
+1.17.1 reference path. Tactical
+[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is entering
+its first biome, surface, and decoration language slice.
 
 ## Scope
 
@@ -149,6 +150,7 @@ profile's rule ownership.
 | Scheduler, readiness, lighting, publication, unload policy | keep profile-neutral |
 | `SeedDomain`, value/Perlin/simplex noise, coordinate math | reuse and extend when a concrete field needs it |
 | Chunk buffers, heightmaps, biomes, ticks, snapshots | reuse unchanged |
+| Columnar 2.5D biome payload traversal | share `sample_column_biome_payload`; callers retain absolute-coordinate biome rules |
 | `FeatureRegion`, configured/placed features, cross-chunk execution | reuse the executor |
 | Vanilla feature and surface tables | keep reference-owned; assemble mclone tables separately |
 | Vanilla `NoiseSampler` biome depth/scale composition | reference implementation, not the mclone terrain foundation |
@@ -159,6 +161,15 @@ profile's rule ownership.
 The strongest constraint wins when a shared primitive also affects the
 reference-locked `overworld`. Any extraction from that path requires exact
 oracle/output locks. New mclone rule data never enters vanilla fixtures.
+
+The first post-terrain checkpoint extracted only the columnar biome payload
+traversal, whose concrete consumers are Small Island and Mclone Overworld. It
+preserves the original sampling count, order, and allocation shape.
+Shared-looking biome thresholds, material writers, octave composition,
+interpolation, and spawn searches remain concrete profile policy until
+another real caller proves a smaller mechanism boundary. Reference Overworld
+keeps its distinct three-dimensional biome source and Java-owned
+surface/ordering path.
 
 ## Module Direction
 
@@ -308,10 +319,11 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Execute
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md).
-Its first gate is a planning/reuse review and concrete aesthetic target, not a
-generator identity with placeholder behavior.
+Continue Slice 3 of
+[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
+add the smallest profile-owned biome, surface, and decoration language through
+the existing planning and feature-execution contracts, then pause for another
+visual and distribution review.
 
 ## Related
 
