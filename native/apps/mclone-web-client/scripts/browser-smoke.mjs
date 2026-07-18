@@ -3704,6 +3704,9 @@ async function runIndexedDbReloadProbe(
     const beforeReloadProfile = await captureGenerationProfileProbe(page, generationProfile);
     await installIndexedDbCountHelper(page);
     const initialMetadata = await waitForBrowserIndexedDbWorldMetadata(page, worldId);
+    const cylinderEdit = worldTopology?.startsWith("cylinder-x")
+      ? await placeCylinderIndexedDbEditForSmoke(page, canvas, worldTopology)
+      : null;
     await waitForBrowserIndexedDbChunkRecords(page, worldId, 1);
     const beforeReloadDayTime = await page.evaluate(
       () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
@@ -3732,6 +3735,20 @@ async function runIndexedDbReloadProbe(
     await installIndexedDbCountHelper(page);
     await waitForWebAppStreamingSettled(page, 60_000);
     const afterReloadProfile = await captureGenerationProfileProbe(page, generationProfile);
+    const afterReloadCylinderEdit = cylinderEdit
+      ? {
+          canonical: await waitForBlockStateAt(
+            page,
+            cylinderEdit.placedBlock,
+            DIRT_BLOCK_STATE_ID,
+          ),
+          liftedAlias: await waitForBlockStateAt(
+            page,
+            cylinderEdit.liftedAlias,
+            DIRT_BLOCK_STATE_ID,
+          ),
+        }
+      : null;
     const afterReloadRecordCounts = await browserIndexedDbWorldRecordCounts(page, worldId);
     const afterReloadDayTime = await page.evaluate(
       () => Number(globalThis.__mcloneWebApp?.state?.dayTime) || 0,
@@ -3742,6 +3759,9 @@ async function runIndexedDbReloadProbe(
         && afterReloadRecordCounts.chunks > 0
         && afterReloadRecordCounts.dimensions === 1
         && afterReloadRecordCounts.worldMetadata === 1
+        && (!cylinderEdit
+          || (afterReloadCylinderEdit?.canonical?.blockStateId === DIRT_BLOCK_STATE_ID
+            && afterReloadCylinderEdit?.liftedAlias?.blockStateId === DIRT_BLOCK_STATE_ID))
         && afterReloadDayTime >= beforeReloadDayTime,
       worldId,
       reloadUrl,
@@ -3749,6 +3769,8 @@ async function runIndexedDbReloadProbe(
       worldTopology,
       beforeReloadProfile,
       afterReloadProfile,
+      cylinderEdit,
+      afterReloadCylinderEdit,
       beforeReloadDayTime,
       afterReloadDayTime,
       initialMetadata,
@@ -3872,6 +3894,98 @@ async function runIndexedDbReloadProbe(
     backgroundSaveResult,
     afterReload,
     afterReloadRecordCounts,
+  };
+}
+
+/**
+ * Leave one ordinary authoritative edit in a cylinder save and prove that its
+ * neighboring observer lift resolves to the same canonical block before the
+ * save/reopen boundary.
+ *
+ * @param {Page} page
+ * @param {Locator} canvas
+ * @param {string} worldTopology
+ */
+async function placeCylinderIndexedDbEditForSmoke(page, canvas, worldTopology) {
+  await canvas.evaluate((element) => element.focus());
+  await canvas.click({ position: { x: 640, y: 360 } });
+  // Generated-profile review cameras intentionally look toward the horizon.
+  // Exercise the ordinary pointer-look input to acquire a nearby grass target
+  // rather than adding a smoke-only mutation API.
+  await page.mouse.down();
+  await page.mouse.move(640, 600);
+  await page.mouse.up();
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.ready === true
+          && state.streamingSettled === true
+          && state.currentTarget?.ok === true
+          && state.currentTarget.hit === true
+          && typeof globalThis.__mcloneWebApp?.blockStateAt === "function"
+          && state.pendingCompileJobCount === 0;
+      },
+      undefined,
+      { timeout: 20_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `cylinder IndexedDB world did not become targetable: ${String(error)}\n${JSON.stringify(state, null, 2)}`,
+    );
+  }
+
+  await page.keyboard.press("2");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 1,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const placement = await clickBlockInteraction(page, canvas, "right", "place", {
+    expectedSelectedHotbarSlot: 1,
+    expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedCarriedItemSynced: true,
+  });
+  const placedCandidates = placedBlockCandidates(placement?.interaction);
+  const beforeReloadCandidates = [];
+  for (const candidate of placedCandidates) {
+    beforeReloadCandidates.push(await blockStateAt(page, candidate));
+  }
+  const placedBlock = beforeReloadCandidates.find(
+    (candidate) => candidate?.blockStateId === DIRT_BLOCK_STATE_ID,
+  ) ?? beforeReloadCandidates[0];
+  if (placement?.ok !== true || placedBlock?.blockStateId !== DIRT_BLOCK_STATE_ID) {
+    throw new Error(`cylinder IndexedDB edit did not place dirt:\n${JSON.stringify({
+      placement,
+      placedCandidates,
+      beforeReloadCandidates,
+    }, null, 2)}`);
+  }
+
+  const periodChunksText = worldTopology.split(":", 2)[1];
+  const periodChunks = periodChunksText ? Number(periodChunksText) : 32;
+  if (!Number.isSafeInteger(periodChunks) || periodChunks <= 0) {
+    throw new Error(`invalid cylinder period in IndexedDB smoke: ${worldTopology}`);
+  }
+  const liftedAlias = {
+    x: placedBlock.x + periodChunks * 16,
+    y: placedBlock.y,
+    z: placedBlock.z,
+  };
+  const beforeReloadLiftedAlias = await waitForBlockStateAt(
+    page,
+    liftedAlias,
+    DIRT_BLOCK_STATE_ID,
+  );
+  return {
+    placement,
+    placedCandidates,
+    beforeReloadCandidates,
+    placedBlock,
+    liftedAlias,
+    beforeReloadLiftedAlias,
   };
 }
 
