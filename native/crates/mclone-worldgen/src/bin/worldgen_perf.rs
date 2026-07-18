@@ -4,9 +4,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use mclone_core::ChunkPos;
 use mclone_worldgen::feature::DecorationStep;
 use mclone_worldgen::levelgen::{
+    McloneOverworldFeatureDependencyCache, McloneOverworldFeatureDependencyCacheReport,
     OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, SurfaceFillTiming,
-    generate_mclone_overworld_chunk, generate_overworld_surface_chunk,
+    generate_mclone_overworld_surface_chunk, generate_overworld_surface_chunk,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -29,7 +30,11 @@ fn run() -> Result<(), String> {
     let positions = square_positions(config.chunk_x, config.chunk_z, config.radius);
     let total_start = Instant::now();
     let surface = run_surface_phase(&config, &positions);
-    let mclone_overworld = run_mclone_overworld_phase(&config, &positions);
+    let mclone_overworld_surface = run_mclone_overworld_surface_phase(&config, &positions);
+    let mclone_features_cold =
+        run_mclone_features_phase(&config, &positions, FeatureCacheMode::Cold);
+    let mclone_features_warm =
+        run_mclone_features_phase(&config, &positions, FeatureCacheMode::Warm);
     let features_cold = run_features_phase(&config, &positions, FeatureCacheMode::Cold);
     let features_warm = run_features_phase(&config, &positions, FeatureCacheMode::Warm);
     let total_elapsed_ms = elapsed_ms(total_start.elapsed());
@@ -38,7 +43,9 @@ fn run() -> Result<(), String> {
         positions.len(),
         total_elapsed_ms,
         &surface,
-        &mclone_overworld,
+        &mclone_overworld_surface,
+        &mclone_features_cold,
+        &mclone_features_warm,
         &features_cold,
         &features_warm,
     );
@@ -116,6 +123,14 @@ struct FeaturePhaseReport {
     timing: OverworldFeatureBatchTiming,
 }
 
+#[derive(Clone, Debug)]
+struct McloneFeaturePhaseReport {
+    elapsed_ms: f64,
+    generated_target_chunks: usize,
+    non_air_blocks: usize,
+    cache_report: McloneOverworldFeatureDependencyCacheReport,
+}
+
 fn run_surface_phase(config: &Config, positions: &[ChunkPos]) -> SurfacePhaseReport {
     let start = Instant::now();
     let mut generated_chunks = 0_usize;
@@ -134,13 +149,16 @@ fn run_surface_phase(config: &Config, positions: &[ChunkPos]) -> SurfacePhaseRep
     }
 }
 
-fn run_mclone_overworld_phase(config: &Config, positions: &[ChunkPos]) -> SurfacePhaseReport {
+fn run_mclone_overworld_surface_phase(
+    config: &Config,
+    positions: &[ChunkPos],
+) -> SurfacePhaseReport {
     let start = Instant::now();
     let mut generated_chunks = 0_usize;
     let mut non_air_blocks = 0_usize;
     for _ in 0..config.iterations {
         for pos in positions {
-            let chunk = generate_mclone_overworld_chunk(config.seed, pos.x, pos.z);
+            let chunk = generate_mclone_overworld_surface_chunk(config.seed, pos.x, pos.z);
             generated_chunks += 1;
             non_air_blocks += chunk.non_air_block_count();
         }
@@ -149,6 +167,55 @@ fn run_mclone_overworld_phase(config: &Config, positions: &[ChunkPos]) -> Surfac
         elapsed_ms: elapsed_ms(start.elapsed()),
         generated_chunks,
         non_air_blocks,
+    }
+}
+
+fn run_mclone_features_phase(
+    config: &Config,
+    positions: &[ChunkPos],
+    mode: FeatureCacheMode,
+) -> McloneFeaturePhaseReport {
+    let mut start = Instant::now();
+    let mut generated_target_chunks = 0_usize;
+    let mut non_air_blocks = 0_usize;
+    let mut cache_report = McloneOverworldFeatureDependencyCacheReport::default();
+
+    match mode {
+        FeatureCacheMode::Cold => {
+            for _ in 0..config.iterations {
+                let mut cache = McloneOverworldFeatureDependencyCache::new();
+                let result = cache.generate_features_chunks(config.seed, positions.iter().copied());
+                generated_target_chunks += result.chunks.len();
+                non_air_blocks += result
+                    .chunks
+                    .values()
+                    .map(|chunk| chunk.non_air_block_count())
+                    .sum::<usize>();
+                add_mclone_cache_report(&mut cache_report, result.cache_report);
+            }
+        }
+        FeatureCacheMode::Warm => {
+            let mut cache = McloneOverworldFeatureDependencyCache::new();
+            let _warmup = cache.generate_features_chunks(config.seed, positions.iter().copied());
+            start = Instant::now();
+            for _ in 0..config.iterations {
+                let result = cache.generate_features_chunks(config.seed, positions.iter().copied());
+                generated_target_chunks += result.chunks.len();
+                non_air_blocks += result
+                    .chunks
+                    .values()
+                    .map(|chunk| chunk.non_air_block_count())
+                    .sum::<usize>();
+                add_mclone_cache_report(&mut cache_report, result.cache_report);
+            }
+        }
+    }
+
+    McloneFeaturePhaseReport {
+        elapsed_ms: elapsed_ms(start.elapsed()),
+        generated_target_chunks,
+        non_air_blocks,
+        cache_report,
     }
 }
 
@@ -215,12 +282,24 @@ fn add_cache_report(
     target.retained_dependency_chunks += source.retained_dependency_chunks;
 }
 
+fn add_mclone_cache_report(
+    target: &mut McloneOverworldFeatureDependencyCacheReport,
+    source: McloneOverworldFeatureDependencyCacheReport,
+) {
+    target.requested_dependency_chunks += source.requested_dependency_chunks;
+    target.cache_hits += source.cache_hits;
+    target.generated_dependency_chunks += source.generated_dependency_chunks;
+    target.retained_dependency_chunks += source.retained_dependency_chunks;
+}
+
 fn print_json(
     config: &Config,
     target_chunk_count: usize,
     total_elapsed_ms: f64,
     surface: &SurfacePhaseReport,
-    mclone_overworld: &SurfacePhaseReport,
+    mclone_overworld_surface: &SurfacePhaseReport,
+    mclone_features_cold: &McloneFeaturePhaseReport,
+    mclone_features_warm: &McloneFeaturePhaseReport,
     features_cold: &FeaturePhaseReport,
     features_warm: &FeaturePhaseReport,
 ) {
@@ -237,11 +316,50 @@ fn print_json(
     println!("  \"total_elapsed_ms\": {:.3},", total_elapsed_ms);
     println!("  \"phases\": {{");
     print_surface_phase_json("    ", "surface", surface, true);
-    print_surface_phase_json("    ", "mclone_overworld_v1_target", mclone_overworld, true);
+    print_surface_phase_json(
+        "    ",
+        "mclone_overworld_v1_surface",
+        mclone_overworld_surface,
+        true,
+    );
+    print_mclone_feature_phase_json(
+        "    ",
+        "mclone_overworld_v1_features_cold",
+        mclone_features_cold,
+        true,
+    );
+    print_mclone_feature_phase_json(
+        "    ",
+        "mclone_overworld_v1_features_warm",
+        mclone_features_warm,
+        true,
+    );
     print_feature_phase_json("    ", "features_cold", features_cold, true);
     print_feature_phase_json("    ", "features_warm", features_warm, false);
     println!("  }}");
     println!("}}");
+}
+
+fn print_mclone_feature_phase_json(
+    indent: &str,
+    name: &str,
+    report: &McloneFeaturePhaseReport,
+    trailing_comma: bool,
+) {
+    println!("{indent}\"{name}\": {{");
+    println!("{indent}  \"elapsed_ms\": {:.3},", report.elapsed_ms);
+    println!(
+        "{indent}  \"target_chunks\": {},",
+        report.generated_target_chunks
+    );
+    println!(
+        "{indent}  \"target_chunks_per_second\": {:.3},",
+        chunks_per_second(report.generated_target_chunks, report.elapsed_ms)
+    );
+    println!("{indent}  \"non_air_blocks\": {},", report.non_air_blocks);
+    print_mclone_cache_report_json(&format!("{indent}  "), report.cache_report, false);
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
 }
 
 fn print_surface_phase_json(
@@ -291,6 +409,29 @@ fn print_feature_phase_json(
 fn print_cache_report_json(
     indent: &str,
     report: OverworldFeatureDependencyCacheReport,
+    trailing_comma: bool,
+) {
+    println!("{indent}\"cache\": {{");
+    println!(
+        "{indent}  \"requested_dependency_chunks\": {},",
+        report.requested_dependency_chunks
+    );
+    println!("{indent}  \"cache_hits\": {},", report.cache_hits);
+    println!(
+        "{indent}  \"generated_dependency_chunks\": {},",
+        report.generated_dependency_chunks
+    );
+    println!(
+        "{indent}  \"retained_dependency_chunks\": {}",
+        report.retained_dependency_chunks
+    );
+    let suffix = if trailing_comma { "," } else { "" };
+    println!("{indent}}}{suffix}");
+}
+
+fn print_mclone_cache_report_json(
+    indent: &str,
+    report: McloneOverworldFeatureDependencyCacheReport,
     trailing_comma: bool,
 ) {
     println!("{indent}\"cache\": {{");
