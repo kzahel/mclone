@@ -4,8 +4,9 @@ use std::collections::BTreeSet;
 
 use crate::ChunkHolder;
 use mclone_core::{
-    BlockHitResult, BlockStateId, ChunkSnapshot, Direction, PackedLightSection, Vec3d,
-    block_to_section_coord, local_block_coord, local_section_block_coord,
+    AxisTopology, BlockHitResult, BlockStateId, ChunkSnapshot, Direction, HorizontalTopology,
+    PackedLightSection, Vec3d, block_to_section_coord, local_block_coord,
+    local_section_block_coord,
 };
 use mclone_light::LightLayer;
 use mclone_protocol::{

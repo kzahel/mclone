@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use mclone_core::{
     BlockStateId, CHUNK_SECTION_VOLUME, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
-    LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, block_to_section_coord, chunk_section_index,
-    local_block_coord, local_section_block_coord,
+    HorizontalTopology, LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, block_to_section_coord,
+    chunk_section_index, local_block_coord, local_section_block_coord,
 };
 use mclone_frame_budget::{
     BudgetController, BudgetControllerConfig, BudgetControllerInput, BudgetDecisionAddress,
@@ -52,7 +52,7 @@ use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::loading_progress::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
-    PLAYABLE_GATE_RADIUS, playable_gate_ready_chunk_count,
+    PLAYABLE_GATE_RADIUS,
 };
 use crate::persistence::{
     ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore, ChunkStoreError, ChunkStoreResult,
@@ -60,7 +60,6 @@ use crate::persistence::{
     PlayerRecordKey, SaveDurability, ScheduledTickRecord, StoreWriteOutcome, WorldMetadata,
     WorldMetadataLoad, WorldStore, WorldStoreCompletion, WorldStoreRequest,
 };
-use crate::player_chunk_tracking::chunk_positions_for_view;
 use crate::timing::{
     ChunkSchedulerPublicationDiagnostics, ChunkSchedulerTickReport, ChunkSchedulerTickTiming,
     simulation_timing_elapsed_us, simulation_timing_start,
@@ -180,6 +179,13 @@ pub struct ChunkSchedulerMetrics {
     pub total_light_status_publication_us: u128,
     pub max_light_status_publication_us: u128,
     pub total_light_status_publication_units: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TopologyChunkState {
+    OutsideTopology,
+    ValidUnloaded { canonical: ChunkPos },
+    Loaded { canonical: ChunkPos },
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -486,6 +492,7 @@ struct PendingEntityChunkSave {
 pub struct ChunkScheduler {
     seed: i64,
     world_generation_profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
     lighting_enabled: bool,
     light_status_batch_size: usize,
     holders: BTreeMap<ChunkPos, ChunkHolder>,
@@ -753,6 +760,7 @@ impl ChunkScheduler {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             holders: BTreeMap::new(),
@@ -812,6 +820,7 @@ impl ChunkScheduler {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
             holders: BTreeMap::new(),
@@ -863,6 +872,61 @@ impl ChunkScheduler {
         self.world_generation_profile
     }
 
+    pub const fn topology(&self) -> HorizontalTopology {
+        self.topology
+    }
+
+    pub fn set_topology(&mut self, topology: HorizontalTopology) -> ChunkStoreResult<()> {
+        topology.validate().map_err(|error| {
+            ChunkStoreError::InvalidData(format!("invalid scheduler topology: {error}"))
+        })?;
+        self.world_generation_profile
+            .validate_topology(topology)
+            .map_err(ChunkStoreError::InvalidData)?;
+        if self.topology == topology {
+            return Ok(());
+        }
+        if !self.holders.is_empty()
+            || !self.pending_chunk_loads.is_empty()
+            || !self.stored_chunk_misses.is_empty()
+            || !self.jobs.is_empty()
+            || !self.pending_worldgen_publications.is_empty()
+            || !self.pending_light_status_batches.is_empty()
+            || self.worldgen_mailbox.pending_count() != 0
+            || self.light_mailbox.pending_count() != 0
+        {
+            return Err(ChunkStoreError::InvalidData(
+                "dimension topology must be selected before chunk scheduling begins".to_owned(),
+            ));
+        }
+        self.topology = topology;
+        Ok(())
+    }
+
+    fn canonical_chunk_or_error(
+        &self,
+        pos: ChunkPos,
+        operation: &str,
+    ) -> ChunkStoreResult<ChunkPos> {
+        self.topology.canonicalize_chunk(pos).ok_or_else(|| {
+            ChunkStoreError::InvalidData(format!(
+                "{operation} ({}, {}) is outside the dimension topology",
+                pos.x, pos.z
+            ))
+        })
+    }
+
+    fn canonical_chunk_set(
+        &self,
+        positions: BTreeSet<ChunkPos>,
+        operation: &str,
+    ) -> ChunkStoreResult<BTreeSet<ChunkPos>> {
+        positions
+            .into_iter()
+            .map(|pos| self.canonical_chunk_or_error(pos, operation))
+            .collect()
+    }
+
     pub const fn world_generation_descriptor(&self) -> WorldGenerationDescriptor {
         WorldGenerationDescriptor::new(self.world_generation_profile, self.seed)
     }
@@ -871,6 +935,9 @@ impl ChunkScheduler {
         &mut self,
         profile: WorldGenerationProfile,
     ) -> ChunkStoreResult<()> {
+        profile
+            .validate_topology(self.topology)
+            .map_err(ChunkStoreError::InvalidData)?;
         if self.world_generation_profile == profile {
             return Ok(());
         }
@@ -925,12 +992,10 @@ impl ChunkScheduler {
         &mut self,
         view: ChunkView,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        let positions = chunk_positions_for_view(&view);
-        self.apply_player_ticket_positions_with_priority(
-            positions.clone(),
-            positions,
-            vec![view.center],
-        )
+        let positions =
+            crate::player_chunk_tracking::chunk_positions_for_view_in(self.topology, &view);
+        let center = self.canonical_chunk_or_error(view.center, "chunk view center")?;
+        self.apply_player_ticket_positions_with_priority(positions.clone(), positions, vec![center])
     }
 
     pub(crate) fn apply_player_ticket_positions_with_priority(
@@ -939,6 +1004,13 @@ impl ChunkScheduler {
         simulation_positions: BTreeSet<ChunkPos>,
         priority_centers: Vec<ChunkPos>,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let resident_positions = self.canonical_chunk_set(resident_positions, "resident ticket")?;
+        let simulation_positions =
+            self.canonical_chunk_set(simulation_positions, "simulation ticket")?;
+        let priority_centers = priority_centers
+            .into_iter()
+            .map(|pos| self.canonical_chunk_or_error(pos, "ticket priority center"))
+            .collect::<ChunkStoreResult<Vec<_>>>()?;
         self.distance_manager
             .set_aggregate_interest_positions_with_priority(
                 resident_positions,
@@ -1146,6 +1218,7 @@ impl ChunkScheduler {
         pos: ChunkPos,
         distance: i32,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let pos = self.canonical_chunk_or_error(pos, "region ticket")?;
         self.distance_manager.add_region_ticket(
             ticket_type,
             pos,
@@ -1161,6 +1234,7 @@ impl ChunkScheduler {
         pos: ChunkPos,
         distance: i32,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let pos = self.canonical_chunk_or_error(pos, "region ticket")?;
         self.distance_manager.remove_region_ticket(
             ticket_type,
             pos,
@@ -1175,6 +1249,7 @@ impl ChunkScheduler {
         pos: ChunkPos,
         forced: bool,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
+        let pos = self.canonical_chunk_or_error(pos, "forced chunk ticket")?;
         if forced {
             self.distance_manager.add_ticket(
                 ChunkTicketType::Forced,
@@ -1194,54 +1269,66 @@ impl ChunkScheduler {
     }
 
     pub fn holder(&self, pos: ChunkPos) -> Option<&ChunkHolder> {
-        self.holders.get(&pos)
+        self.topology
+            .canonicalize_chunk(pos)
+            .and_then(|pos| self.holders.get(&pos))
+    }
+
+    pub fn topology_chunk_state(&self, pos: ChunkPos) -> TopologyChunkState {
+        let Some(canonical) = self.topology.canonicalize_chunk(pos) else {
+            return TopologyChunkState::OutsideTopology;
+        };
+        if self.holders.contains_key(&canonical) {
+            TopologyChunkState::Loaded { canonical }
+        } else {
+            TopologyChunkState::ValidUnloaded { canonical }
+        }
     }
 
     pub(crate) fn view_readiness_snapshot(&self, view: &ChunkView) -> ChunkLoadingProgressSnapshot {
         let target_status = self.runtime_chunk_target_status();
-        let radius = i32::try_from(view.chunk_tracking_radius)
-            .expect("chunk tracking radius must fit into i32");
-        let target_chunk_count = {
-            let side = radius as usize * 2 + 1;
-            side * side
-        };
-        let mut target_ready_chunks = 0;
-        let playable_gate_ready_chunks = playable_gate_ready_chunk_count(
-            |pos| {
+        let target_chunks = self
+            .topology
+            .chunk_view(view.center, view.chunk_tracking_radius)
+            .expect("accepted chunk view must satisfy the topology contract");
+        let playable_chunks = self
+            .topology
+            .chunk_view(view.center, PLAYABLE_GATE_RADIUS)
+            .expect("playable loading gate must satisfy the topology contract");
+        let target_chunk_count = target_chunks.len();
+        let playable_gate_chunk_count = playable_chunks.len();
+        let playable_gate_ready_chunks = playable_chunks
+            .iter()
+            .filter(|entry| {
                 self.holders
-                    .get(&pos)
+                    .get(&entry.canonical)
                     .and_then(ChunkHolder::highest_ready_status)
-            },
-            view.center,
-            target_status,
-        );
-        let playable_gate_chunk_count = {
-            let side = PLAYABLE_GATE_RADIUS as usize * 2 + 1;
-            side * side
-        };
+                    .is_some_and(|status| status >= target_status)
+            })
+            .count();
         let playable_chunk_ready = playable_gate_ready_chunks == playable_gate_chunk_count;
         let mut cells = Vec::with_capacity(target_chunk_count);
+        let mut target_ready_chunks = 0;
 
-        for relative_z in -radius..=radius {
-            for relative_x in -radius..=radius {
-                let pos = ChunkPos::new(view.center.x + relative_x, view.center.z + relative_z);
-                let status = self
-                    .holders
-                    .get(&pos)
-                    .and_then(ChunkHolder::highest_ready_status);
-                let target_ready = status.is_some_and(|status| status >= target_status);
-                let playable = pos == view.center;
-                if target_ready {
-                    target_ready_chunks += 1;
-                }
-                cells.push(ChunkLoadingProgressCell {
-                    relative_x,
-                    relative_z,
-                    status,
-                    target_ready,
-                    playable,
-                });
+        for entry in target_chunks {
+            let status = self
+                .holders
+                .get(&entry.canonical)
+                .and_then(ChunkHolder::highest_ready_status);
+            let target_ready = status.is_some_and(|status| status >= target_status);
+            let playable = entry.canonical == view.center;
+            if target_ready {
+                target_ready_chunks += 1;
             }
+            cells.push(ChunkLoadingProgressCell {
+                relative_x: i32::try_from(entry.lifted.x - i64::from(view.center.x))
+                    .expect("accepted chunk view relative X must fit i32"),
+                relative_z: i32::try_from(entry.lifted.z - i64::from(view.center.z))
+                    .expect("accepted chunk view relative Z must fit i32"),
+                status,
+                target_ready,
+                playable,
+            });
         }
 
         ChunkLoadingProgressSnapshot {
@@ -1262,6 +1349,7 @@ impl ChunkScheduler {
     }
 
     pub(crate) fn client_visible_snapshot(&self, pos: ChunkPos) -> Option<ChunkSnapshot> {
+        let pos = self.topology.canonicalize_chunk(pos)?;
         let holder = self.holders.get(&pos)?;
         if !holder.client_visible {
             return None;
@@ -1440,15 +1528,25 @@ impl ChunkScheduler {
     }
 
     pub fn ticket_count_at(&self, pos: ChunkPos) -> usize {
-        self.distance_manager.ticket_count_at(pos)
+        self.topology
+            .canonicalize_chunk(pos)
+            .map_or(0, |pos| self.distance_manager.ticket_count_at(pos))
     }
 
     pub fn ticket_level_at(&self, pos: ChunkPos) -> i32 {
-        self.distance_manager.ticket_level_at(pos)
+        self.topology
+            .canonicalize_chunk(pos)
+            .map_or(UNLOADED_CHUNK_LEVEL, |pos| {
+                self.distance_manager.ticket_level_at(pos)
+            })
     }
 
     pub fn active_ticket_level_at(&self, pos: ChunkPos) -> i32 {
-        self.distance_manager.active_level_at(pos)
+        self.topology
+            .canonicalize_chunk(pos)
+            .map_or(UNLOADED_CHUNK_LEVEL, |pos| {
+                self.distance_manager.active_level_at(pos)
+            })
     }
 
     pub fn job(&self, id: ChunkJobId) -> Option<&ChunkStatusJob> {
@@ -1718,6 +1816,7 @@ impl ChunkScheduler {
     }
 
     pub(crate) fn block_at_world(&self, pos: WorldBlockPos) -> Option<RawBlockId> {
+        let pos = self.topology.canonicalize_block(pos)?;
         let chunk_pos = pos.chunk_pos();
         let local_x = local_block_coord(pos.x);
         let local_z = local_block_coord(pos.z);
@@ -1734,6 +1833,7 @@ impl ChunkScheduler {
     }
 
     pub(crate) fn raw_brightness_at_world(&self, pos: WorldBlockPos, sky_darken: u8) -> Option<u8> {
+        let pos = self.topology.canonicalize_block(pos)?;
         let chunk_pos = pos.chunk_pos();
         let local_x = local_block_coord(pos.x);
         let local_z = local_block_coord(pos.z);
@@ -1764,6 +1864,7 @@ impl ChunkScheduler {
         pos: ChunkPos,
         section_y: i32,
     ) -> Option<mclone_physics::PhysicsTerrainSection> {
+        let pos = self.topology.canonicalize_chunk(pos)?;
         self.holders
             .get(&pos)
             .and_then(|holder| holder.live_blocks.as_ref())
@@ -1780,10 +1881,14 @@ impl ChunkScheduler {
         &self,
         pos: WorldBlockPos,
     ) -> Option<mclone_physics::PhysicsTerrainSection> {
+        let pos = self.topology.canonicalize_block(pos)?;
         self.physics_terrain_section(pos.chunk_pos(), block_to_section_coord(pos.y))
     }
 
     pub(crate) fn set_block_at_world(&mut self, pos: WorldBlockPos, block_id: RawBlockId) -> bool {
+        let Some(pos) = self.topology.canonicalize_block(pos) else {
+            return false;
+        };
         let chunk_pos = pos.chunk_pos();
         let local_x = local_block_coord(pos.x);
         let local_z = local_block_coord(pos.z);
@@ -4330,6 +4435,7 @@ fn dedupe_chunk_positions_preserving_order(chunks: Vec<ChunkPos>) -> Vec<ChunkPo
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_core::BlockPos;
     use mclone_worldgen::block::{AIR, BEDROCK, DIRT, GRASS_BLOCK};
 
     fn light_layer_with_value(index: usize, value: u8) -> Vec<u8> {
@@ -4389,6 +4495,47 @@ mod tests {
                 (-radius..=radius).map(move |x| ChunkPos::new(center.x + x, center.z + z))
             })
             .collect()
+    }
+
+    #[test]
+    fn finite_topology_rejects_outside_tickets_and_clips_interest() {
+        let topology = HorizontalTopology::new(
+            mclone_core::AxisTopology::finite(0, 2),
+            mclone_core::AxisTopology::finite(0, 2),
+        );
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+            .unwrap();
+        scheduler.set_topology(topology).unwrap();
+
+        assert!(
+            scheduler
+                .add_region_ticket(ChunkTicketType::Forced, ChunkPos::new(-1, 0), 0)
+                .unwrap_err()
+                .to_string()
+                .contains("outside the dimension topology")
+        );
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 2,
+                chunk_tracking_radius: 2,
+            })
+            .unwrap();
+        assert_eq!(scheduler.metrics().direct_ticket_chunks, 4);
+        assert!(
+            scheduler
+                .distance_manager
+                .player_interest_positions()
+                .iter()
+                .all(|pos| topology.canonicalize_chunk(*pos) == Some(*pos))
+        );
+        assert_eq!(
+            scheduler.client_visible_snapshot(ChunkPos::new(-1, 0)),
+            None
+        );
+        assert!(!scheduler.set_block_at_world(BlockPos::new(-1, 64, 0), DIRT));
     }
 
     #[test]

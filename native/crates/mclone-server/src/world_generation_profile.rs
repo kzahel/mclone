@@ -1,4 +1,4 @@
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_worldgen::levelgen::{
     ChunkGenerationPlan, ChunkStatusRequirement, MutableChunkBlockBuffer,
 };
@@ -89,6 +89,21 @@ impl WorldGenerationProfile {
             | Self::AlphaV1 { .. }
             | Self::BetaV1 => None,
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
+        }
+    }
+
+    pub(crate) fn validate_topology(self, topology: HorizontalTopology) -> Result<(), String> {
+        topology
+            .validate()
+            .map_err(|error| format!("invalid dimension topology: {error}"))?;
+        if topology.is_unbounded() || matches!(self, Self::FlatGrassV1 | Self::AuthoredOnly { .. })
+        {
+            Ok(())
+        } else {
+            Err(format!(
+                "world generation profile {} does not support finite or periodic topology",
+                self.label()
+            ))
         }
     }
 
@@ -381,6 +396,40 @@ mod tests {
             WorldGenerationProfile::from_codec_tag(7),
             Some(WorldGenerationProfile::BetaV1)
         );
+    }
+
+    #[test]
+    fn bounded_topology_support_is_explicit_per_profile() {
+        let finite = HorizontalTopology::new(
+            mclone_core::AxisTopology::finite(0, 2),
+            mclone_core::AxisTopology::finite(0, 2),
+        );
+
+        assert!(
+            WorldGenerationProfile::FlatGrassV1
+                .validate_topology(finite)
+                .is_ok()
+        );
+        assert!(
+            WorldGenerationProfile::authored_only()
+                .validate_topology(finite)
+                .is_ok()
+        );
+        for profile in [
+            WorldGenerationProfile::Overworld,
+            WorldGenerationProfile::SmallIslandV1,
+            WorldGenerationProfile::McloneOverworldV1,
+            WorldGenerationProfile::alpha_v1(false),
+            WorldGenerationProfile::BetaV1,
+        ] {
+            assert!(profile.validate_topology(finite).is_err(), "{profile:?}");
+            assert!(
+                profile
+                    .validate_topology(HorizontalTopology::UNBOUNDED)
+                    .is_ok(),
+                "{profile:?}"
+            );
+        }
     }
 
     #[test]

@@ -131,10 +131,15 @@ impl DimensionRuntime {
     fn new(
         key: DimensionKey,
         definition: crate::DimensionDefinition,
-        scheduler: ChunkScheduler,
+        mut scheduler: ChunkScheduler,
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
-        let loading_progress = ChunkLoadingProgress::new(runtime_chunk_target_status(&scheduler));
+        let topology = definition.topology;
+        scheduler
+            .set_topology(topology)
+            .expect("dimension topology must be validated before runtime construction");
+        let loading_progress =
+            ChunkLoadingProgress::with_topology(runtime_chunk_target_status(&scheduler), topology);
         Self {
             key,
             biome_source: ServerBiomeSource::new(definition.seed),
@@ -142,7 +147,7 @@ impl DimensionRuntime {
             scheduler,
             block_ticks: BlockTickList::new(),
             liquid_ticks: FluidTickList::new(),
-            chunk_tracking: PlayerChunkTracking::new(policy),
+            chunk_tracking: PlayerChunkTracking::with_topology(policy, topology),
             remote_players: RemotePlayerTracking::default(),
             entities: ServerEntityStore::default(),
             entity_tracking: EntityTracking::default(),
@@ -654,6 +659,26 @@ impl RealmServer {
     }
 
     pub fn register_dimension(&mut self, record: DimensionRecord) -> ChunkStoreResult<bool> {
+        record
+            .definition
+            .generation_profile
+            .validate_topology(record.definition.topology)
+            .map_err(ChunkStoreError::InvalidData)?;
+        let spawn_center = initial_spawn_center_for_profile(
+            record.definition.seed,
+            record.definition.generation_profile,
+        );
+        if record
+            .definition
+            .topology
+            .canonicalize_chunk(spawn_center)
+            .is_none()
+        {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "initial spawn chunk ({}, {}) is outside the dimension topology",
+                spawn_center.x, spawn_center.z
+            )));
+        }
         let already_registered = if let Some(existing) = self.dimensions.get(&record.key) {
             if existing != &record.definition {
                 return Err(ChunkStoreError::InvalidData(format!(
@@ -1021,9 +1046,27 @@ impl RealmServer {
     }
 
     pub fn schedule_fluid_tick(&mut self, pos: WorldBlockPos, fluid: FluidKind, delay: i32) {
+        let _ = self.try_schedule_fluid_tick(pos, fluid, delay);
+    }
+
+    pub fn try_schedule_fluid_tick(
+        &mut self,
+        pos: WorldBlockPos,
+        fluid: FluidKind,
+        delay: i32,
+    ) -> bool {
+        let Some(pos) = self
+            .active_dimension
+            .definition
+            .topology
+            .canonicalize_block(pos)
+        else {
+            return false;
+        };
         let simulation_tick = self.simulation_tick;
         self.liquid_ticks
             .schedule_tick(pos, fluid, delay, simulation_tick);
+        true
     }
 
     pub fn scheduled_block_tick_count(&self) -> usize {
@@ -1248,6 +1291,19 @@ impl RealmServer {
         if self.dimensions.get(&destination).is_none() {
             return Err(ChunkStoreError::InvalidData(format!(
                 "dimension {destination} is not registered"
+            )));
+        }
+        let destination_topology = self
+            .dimensions
+            .get(&destination)
+            .expect("registered destination definition must remain available")
+            .topology;
+        if destination_topology
+            .canonicalize_position(preferred_position)
+            .is_none()
+        {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "dimension transfer position is outside topology for {destination}"
             )));
         }
 
@@ -2342,6 +2398,17 @@ impl RealmServer {
         if let Some(record) = self.resume_record_for_target(target)? {
             view.center = chunk_pos_for_player_position(record.position);
         }
+        let topology = self.active_dimension.definition.topology;
+        view.center = topology.canonicalize_chunk(view.center).ok_or_else(|| {
+            ChunkStoreError::InvalidData(format!(
+                "chunk view center ({}, {}) is outside the active dimension topology",
+                view.center.x, view.center.z
+            ))
+        })?;
+        let accepted_probe = self.chunk_tracking.policy().clamp_view(&view);
+        topology
+            .validate_one_lift_radius(accepted_probe.chunk_tracking_radius)
+            .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
         self.loading_progress.set_view(&view);
         self.set_initial_spawn_center_for_target(target, view.center)?;
         let player_id = target.player_id();
@@ -2366,9 +2433,20 @@ impl RealmServer {
     fn set_observer_interest_active(
         &mut self,
         observer_id: ObserverId,
-        view: ChunkView,
+        mut view: ChunkView,
         simulation: ObserverSimulationInterest,
     ) -> ChunkStoreResult<ChunkView> {
+        let topology = self.active_dimension.definition.topology;
+        view.center = topology.canonicalize_chunk(view.center).ok_or_else(|| {
+            ChunkStoreError::InvalidData(format!(
+                "observer view center ({}, {}) is outside the active dimension topology",
+                view.center.x, view.center.z
+            ))
+        })?;
+        let accepted_probe = self.chunk_tracking.policy().clamp_view(&view);
+        topology
+            .validate_one_lift_radius(accepted_probe.chunk_tracking_radius)
+            .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
         let change = self
             .chunk_tracking
             .set_observer_requested_view(observer_id, view, simulation);
@@ -2413,6 +2491,17 @@ impl RealmServer {
         command: SequencedMovePlayerCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
+        let topology = self.active_dimension.definition.topology;
+        if command.movement.has_position() {
+            let current = self.player_for_target(target)?.position();
+            let proposed = command.movement.position_or(current);
+            if proposed.is_finite() && topology.canonicalize_position(proposed).is_none() {
+                let correction = self
+                    .player_mut_for_target(target)?
+                    .correction_update(simulation_tick);
+                return Ok(vec![ServerUpdate::PlayerPosition(correction)]);
+            }
+        }
         let (result, recognized_jump, pending_correction) = {
             let player = self.player_mut_for_target(target)?;
             let before_position = player.position();

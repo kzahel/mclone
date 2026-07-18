@@ -361,6 +361,11 @@ first isolated mountain/valley family. Tactical
 identity-topology baseline, finite-bound canary, and Flat Grass cylinder before
 the next river, hydrology, climate-breadth, or major structure tactical.
 
+The finite-bound canary is now landed. Flat Grass and Authored Only explicitly
+admit finite topology; Reference Overworld, Mclone Overworld, Small Island,
+Alpha, and Beta reject bounded or periodic topology during dimension
+registration. Periodic Flat Grass remains the next proof.
+
 Current `mclone-overworld-v1` support is:
 
 | Family | Plane | Finite | Cylinder | Torus | Cube atlas |

@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use mclone_core::{ChunkPos, ChunkSnapshot};
+use mclone_core::{ChunkPos, ChunkSnapshot, HorizontalTopology};
 use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate, encode_server_update};
 
 use crate::players::ServerPlayerId;
@@ -187,6 +187,7 @@ pub struct ObserverChunkTrackingDiagnostics {
 #[derive(Debug)]
 pub(crate) struct PlayerChunkTracking {
     policy: PlayerChunkTrackingPolicy,
+    topology: HorizontalTopology,
     players: BTreeMap<ServerPlayerId, PlayerChunkViewState>,
     observers: BTreeMap<ObserverId, ObserverChunkViewState>,
     aggregate_player_ticket_positions: BTreeSet<ChunkPos>,
@@ -197,9 +198,21 @@ pub(crate) struct PlayerChunkTracking {
 }
 
 impl PlayerChunkTracking {
+    #[cfg(test)]
     pub(crate) fn new(policy: PlayerChunkTrackingPolicy) -> Self {
+        Self::with_topology(policy, HorizontalTopology::UNBOUNDED)
+    }
+
+    pub(crate) fn with_topology(
+        policy: PlayerChunkTrackingPolicy,
+        topology: HorizontalTopology,
+    ) -> Self {
+        topology
+            .validate()
+            .expect("player chunk tracking requires validated topology");
         Self {
             policy,
+            topology,
             players: BTreeMap::new(),
             observers: BTreeMap::new(),
             aggregate_player_ticket_positions: BTreeSet::new(),
@@ -249,8 +262,9 @@ impl PlayerChunkTracking {
             .get_mut(&player_id)
             .expect("player state must exist after add_player");
         let old_visible = std::mem::take(&mut state.visible_chunks);
-        let target_visible = chunk_positions_for_view(&accepted);
-        let unload_visible = chunk_positions_for_center_radius(
+        let target_visible = chunk_positions_for_view_in(self.topology, &accepted);
+        let unload_visible = chunk_positions_for_center_radius_in(
+            self.topology,
             accepted.center,
             self.policy.unload_radius(&accepted),
         );
@@ -333,8 +347,9 @@ impl PlayerChunkTracking {
             .get_mut(&observer_id)
             .expect("observer state must exist after add_observer");
         let old_visible = std::mem::take(&mut state.view.visible_chunks);
-        let target_visible = chunk_positions_for_view(&accepted);
-        let unload_visible = chunk_positions_for_center_radius(
+        let target_visible = chunk_positions_for_view_in(self.topology, &accepted);
+        let unload_visible = chunk_positions_for_center_radius_in(
+            self.topology,
             accepted.center,
             self.policy.unload_radius(&accepted),
         );
@@ -704,18 +719,23 @@ impl PlayerChunkTracking {
     }
 }
 
-pub(crate) fn chunk_positions_for_view(view: &ChunkView) -> BTreeSet<ChunkPos> {
-    chunk_positions_for_center_radius(view.center, view.chunk_tracking_radius)
+pub(crate) fn chunk_positions_for_view_in(
+    topology: HorizontalTopology,
+    view: &ChunkView,
+) -> BTreeSet<ChunkPos> {
+    chunk_positions_for_center_radius_in(topology, view.center, view.chunk_tracking_radius)
 }
 
-fn chunk_positions_for_center_radius(center: ChunkPos, radius: u32) -> BTreeSet<ChunkPos> {
-    let radius = i32::try_from(radius).expect("chunk tracking radius exceeds i32");
-    let min_x = center.x - radius;
-    let max_x = center.x + radius;
-    let min_z = center.z - radius;
-    let max_z = center.z + radius;
-    (min_x..=max_x)
-        .flat_map(|x| (min_z..=max_z).map(move |z| ChunkPos::new(x, z)))
+fn chunk_positions_for_center_radius_in(
+    topology: HorizontalTopology,
+    center: ChunkPos,
+    radius: u32,
+) -> BTreeSet<ChunkPos> {
+    topology
+        .chunk_view(center, radius)
+        .expect("accepted chunk view must satisfy the one-lift topology contract")
+        .into_iter()
+        .map(|entry| entry.canonical)
         .collect()
 }
 
@@ -777,6 +797,36 @@ mod tests {
         assert_eq!(
             policy.clamp_view(&view(ChunkPos::new(0, 0), 100)),
             view(ChunkPos::new(0, 0), JAVA_MAX_VIEW_DISTANCE)
+        );
+    }
+
+    #[test]
+    fn finite_topology_clips_views_and_ticket_identity_at_authoritative_bounds() {
+        let topology = HorizontalTopology::new(
+            mclone_core::AxisTopology::finite(0, 2),
+            mclone_core::AxisTopology::finite(0, 2),
+        );
+        let mut tracking =
+            PlayerChunkTracking::with_topology(PlayerChunkTrackingPolicy::new(4, 4), topology);
+        let player = ServerPlayerId::from_raw_for_tests(0);
+
+        let changed = tracking.set_requested_view(player, view(ChunkPos::new(0, 0), 2));
+
+        assert_eq!(
+            changed.added_chunks,
+            vec![
+                ChunkPos::new(0, 0),
+                ChunkPos::new(0, 1),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(1, 1),
+            ]
+        );
+        assert_eq!(tracking.aggregate_player_ticket_positions().len(), 4);
+        assert!(
+            tracking
+                .aggregate_player_ticket_positions()
+                .iter()
+                .all(|pos| topology.canonicalize_chunk(*pos) == Some(*pos))
         );
     }
 

@@ -1,5 +1,5 @@
 use super::*;
-use crate::MemoryWorldStore;
+use crate::{ChunkTicketType, MemoryWorldStore, TopologyChunkState};
 use mclone_worldgen::block::GRASS_BLOCK;
 
 fn moon_record() -> DimensionRecord {
@@ -12,6 +12,172 @@ fn moon_record() -> DimensionRecord {
             WorldGenerationProfile::authored_only(),
         ),
     }
+}
+
+fn finite_flat_record() -> DimensionRecord {
+    let mut definition =
+        crate::DimensionDefinition::overworld(76_543, WorldGenerationProfile::FlatGrassV1);
+    definition.topology =
+        HorizontalTopology::new(AxisTopology::finite(0, 2), AxisTopology::finite(0, 2));
+    DimensionRecord {
+        key: DimensionKey::parse("mclone:finite_canary").unwrap(),
+        codec_version: crate::DIMENSION_RECORD_VERSION,
+        revision: 1,
+        definition,
+    }
+}
+
+#[test]
+fn finite_dimension_rejects_authority_outside_its_bounds() {
+    let record = finite_flat_record();
+    let finite = record.key.clone();
+    let topology = record.definition.topology;
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server.set_lighting_enabled(false);
+    assert!(server.register_dimension(record).unwrap());
+
+    let player = server.add_player_in_dimension(finite.clone()).unwrap();
+    assert_eq!(
+        server.scheduler().topology_chunk_state(ChunkPos::new(1, 1)),
+        TopologyChunkState::ValidUnloaded {
+            canonical: ChunkPos::new(1, 1),
+        }
+    );
+    server
+        .try_handle_command_for_player(
+            player,
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 2,
+                chunk_tracking_radius: 2,
+            }),
+        )
+        .unwrap();
+    assert_eq!(
+        server
+            .chunk_tracking
+            .diagnostics()
+            .total_player_visible_chunks,
+        4
+    );
+    let readiness = server.view_readiness_snapshot(player).unwrap();
+    assert_eq!(readiness.stats.target_chunk_count, 4);
+    assert_eq!(readiness.stats.playable_gate_chunk_count, 4);
+    assert!(
+        server
+            .chunk_tracking
+            .aggregate_resident_positions()
+            .iter()
+            .all(|pos| topology.canonicalize_chunk(*pos) == Some(*pos))
+    );
+
+    let outside_view = server
+        .try_handle_command_for_player(
+            player,
+            ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(-1, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }),
+        )
+        .unwrap_err();
+    assert!(outside_view.to_string().contains("outside"));
+
+    move_player(&mut server, player, Vec3d::new(1.5, 80.0, 1.5));
+    let correction = server
+        .try_handle_command_for_player(
+            player,
+            ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: Vec3d::new(-0.1, 80.0, 1.5),
+                on_ground: true,
+            }),
+        )
+        .unwrap();
+    assert!(matches!(
+        correction.as_slice(),
+        [ServerUpdate::PlayerPosition(_)]
+    ));
+    assert_eq!(
+        server.player_position(player),
+        Some(Vec3d::new(1.5, 80.0, 1.5))
+    );
+
+    assert!(
+        !server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::new(-1, 64, 0), DIRT)
+    );
+    assert!(
+        server
+            .scheduler_mut()
+            .add_region_ticket(ChunkTicketType::Forced, ChunkPos::new(-1, 0), 0)
+            .unwrap_err()
+            .to_string()
+            .contains("outside")
+    );
+    assert!(!server.try_schedule_fluid_tick(BlockPos::new(-1, 64, 0), FluidKind::Water, 0,));
+    assert_eq!(
+        server
+            .scheduler()
+            .topology_chunk_state(ChunkPos::new(-1, 0)),
+        TopologyChunkState::OutsideTopology
+    );
+    assert_eq!(
+        server.scheduler().topology_chunk_state(ChunkPos::new(1, 1)),
+        TopologyChunkState::Loaded {
+            canonical: ChunkPos::new(1, 1),
+        }
+    );
+    assert_eq!(
+        server.scheduler().topology_chunk_state(ChunkPos::new(0, 3)),
+        TopologyChunkState::OutsideTopology
+    );
+    assert!(
+        server
+            .scheduler_mut()
+            .set_chunk_forced(ChunkPos::new(-1, 0), true)
+            .unwrap_err()
+            .to_string()
+            .contains("outside")
+    );
+
+    let overworld_player = server.add_player();
+    move_player(&mut server, overworld_player, Vec3d::new(0.5, 80.0, 0.5));
+    assert!(
+        server
+            .transfer_player_dimension(overworld_player, finite, Vec3d::new(32.0, 80.0, 1.5),)
+            .unwrap_err()
+            .to_string()
+            .contains("outside topology")
+    );
+    assert_eq!(
+        server.player_dimension(overworld_player),
+        Some(&DimensionKey::overworld())
+    );
+}
+
+#[test]
+fn finite_dimension_rejects_unsupported_generator_profiles() {
+    let mut record = finite_flat_record();
+    record.definition.generation_profile = WorldGenerationProfile::Overworld;
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+
+    let error = server.register_dimension(record).unwrap_err();
+
+    assert!(error.to_string().contains("does not support"));
+}
+
+#[test]
+fn finite_dimension_rejects_an_outside_initial_spawn_before_persistence() {
+    let mut record = finite_flat_record();
+    record.definition.topology =
+        HorizontalTopology::new(AxisTopology::finite(5, 7), AxisTopology::finite(5, 7));
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+
+    let error = server.register_dimension(record).unwrap_err();
+
+    assert!(error.to_string().contains("initial spawn chunk"));
+    assert!(error.to_string().contains("outside"));
 }
 
 fn request_zero_radius_view(server: &mut RealmServer, player: ServerPlayerId) {

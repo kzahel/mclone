@@ -2,11 +2,13 @@
 
 Topic: `bounded-world-topology`
 
-Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-1 have
+Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-2 have
 landed the exact Euclidean baseline, validated shared axis operations, persisted
 dimension topology with legacy defaulting, protocol ordering, and the client
-dimension fact. Finite and periodic authority have not landed yet. Tactical 195
-continues with the finite-bound canary and first real Flat Grass X-periodic
+dimension fact. The finite Flat Grass canary now enforces authoritative bounds
+through views, tickets, readiness, spawn, movement, transfer, edits, explicit
+ticks, storage admission, and profile compatibility. Periodic authority has not
+landed yet; Tactical 195 continues with the first real Flat Grass X-periodic
 cylinder. The selected model is an exact
 locally Euclidean voxel world with dimension-owned finite, periodic, or later
 patch-glued horizontal topology. Canonical simulation and object identity stay
@@ -486,11 +488,13 @@ diagnostics. Later stages remain unallocated and must not broaden that tactical.
 
 ### 1. Finite hard-bound proof
 
-- Add chunk-aligned finite X/Z extents to an internal dimension.
-- Enforce bounds in generation planning, interest, spawn, teleport, movement,
+- **Landed 2026-07-18:** add chunk-aligned finite X/Z extents to an internal
+  Flat Grass dimension.
+- **Landed:** enforce bounds in generation admission, interest, spawn,
+  teleport, movement,
   placement, and persistence.
-- Use a flat or authored barrier/fog fixture to prove that visual explanation
-  and authoritative denial are separate.
+- **Landed:** keep visual barriers/fog absent from and independent of the
+  authoritative denial contract.
 
 ### 2. Periodic-cylinder authority
 

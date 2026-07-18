@@ -1,22 +1,25 @@
 use std::collections::BTreeMap;
 
-use mclone_core::{ChunkPos, ChunkStatus};
+use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology, LiftedChunkPos};
 use mclone_protocol::ChunkView;
 
 use crate::ChunkStatusStep;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkLoadingProgress {
+    topology: HorizontalTopology,
     view: Option<ChunkLoadingProgressView>,
     target_status: ChunkStatus,
     latest_statuses: BTreeMap<ChunkPos, ChunkStatus>,
     ready_statuses: BTreeMap<ChunkPos, ChunkStatus>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct ChunkLoadingProgressView {
     center: ChunkPos,
     target_radius: u32,
+    target_lifts: BTreeMap<ChunkPos, LiftedChunkPos>,
+    playable_lifts: BTreeMap<ChunkPos, LiftedChunkPos>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,7 +59,15 @@ impl Default for ChunkLoadingProgress {
 
 impl ChunkLoadingProgress {
     pub fn new(target_status: ChunkStatus) -> Self {
+        Self::with_topology(target_status, HorizontalTopology::UNBOUNDED)
+    }
+
+    pub fn with_topology(target_status: ChunkStatus, topology: HorizontalTopology) -> Self {
+        topology
+            .validate()
+            .expect("chunk loading progress requires validated topology");
         Self {
+            topology,
             view: None,
             target_status,
             latest_statuses: BTreeMap::new(),
@@ -69,9 +80,25 @@ impl ChunkLoadingProgress {
     }
 
     pub fn set_view(&mut self, view: &ChunkView) {
+        let target_lifts = self
+            .topology
+            .chunk_view(view.center, view.chunk_tracking_radius)
+            .expect("accepted loading view must satisfy the topology contract")
+            .into_iter()
+            .map(|entry| (entry.canonical, entry.lifted))
+            .collect();
+        let playable_lifts = self
+            .topology
+            .chunk_view(view.center, PLAYABLE_GATE_RADIUS)
+            .expect("playable loading gate must satisfy the topology contract")
+            .into_iter()
+            .map(|entry| (entry.canonical, entry.lifted))
+            .collect();
         self.view = Some(ChunkLoadingProgressView {
             center: view.center,
             target_radius: view.chunk_tracking_radius,
+            target_lifts,
+            playable_lifts,
         });
     }
 
@@ -108,27 +135,30 @@ impl ChunkLoadingProgress {
     }
 
     pub fn snapshot(&self) -> Option<ChunkLoadingProgressSnapshot> {
-        let view = self.view?;
+        let view = self.view.as_ref()?;
         let target_ready_chunks = self
             .ready_statuses
             .iter()
             .filter(|(pos, status)| {
-                chunk_within_radius(**pos, view.center, view.target_radius)
-                    && **status >= self.target_status
+                view.target_lifts.contains_key(pos) && **status >= self.target_status
             })
             .count();
-        let playable_gate_ready_chunks = playable_gate_ready_chunk_count(
-            |pos| self.ready_statuses.get(&pos).copied(),
-            view.center,
-            self.target_status,
-        );
-        let playable_gate_chunk_count = square_chunk_count(PLAYABLE_GATE_RADIUS);
+        let playable_gate_ready_chunks = view
+            .playable_lifts
+            .keys()
+            .filter(|pos| {
+                self.ready_statuses
+                    .get(pos)
+                    .is_some_and(|status| *status >= self.target_status)
+            })
+            .count();
+        let playable_gate_chunk_count = view.playable_lifts.len();
         let playable_chunk_ready = playable_gate_ready_chunks == playable_gate_chunk_count;
         let stats = ChunkLoadingProgressStats {
             center: view.center,
             target_radius: view.target_radius,
             target_status: self.target_status,
-            target_chunk_count: square_chunk_count(view.target_radius),
+            target_chunk_count: view.target_lifts.len(),
             target_ready_chunks,
             playable_chunk: view.center,
             playable_gate_radius: PLAYABLE_GATE_RADIUS,
@@ -144,15 +174,17 @@ impl ChunkLoadingProgress {
                 let ready_status = self.ready_statuses.get(pos).copied();
                 let target_ready =
                     ready_status.is_some_and(|ready_status| ready_status >= self.target_status);
-                chunk_within_radius(*pos, view.center, view.target_radius).then_some(
-                    ChunkLoadingProgressCell {
-                        relative_x: pos.x - view.center.x,
-                        relative_z: pos.z - view.center.z,
+                view.target_lifts
+                    .get(pos)
+                    .map(|lifted| ChunkLoadingProgressCell {
+                        relative_x: i32::try_from(lifted.x - i64::from(view.center.x))
+                            .expect("accepted loading view relative X must fit i32"),
+                        relative_z: i32::try_from(lifted.z - i64::from(view.center.z))
+                            .expect("accepted loading view relative Z must fit i32"),
                         status: Some(*status),
                         target_ready,
                         playable: *pos == stats.playable_chunk,
-                    },
-                )
+                    })
             })
             .collect::<Vec<_>>();
 
@@ -168,34 +200,6 @@ impl ChunkLoadingProgress {
 
         Some(ChunkLoadingProgressSnapshot { stats, cells })
     }
-}
-
-fn chunk_within_radius(pos: ChunkPos, center: ChunkPos, radius: u32) -> bool {
-    pos.x.abs_diff(center.x).max(pos.z.abs_diff(center.z)) <= radius
-}
-
-fn square_chunk_count(radius: u32) -> usize {
-    let side = radius as usize * 2 + 1;
-    side * side
-}
-
-pub(crate) fn playable_gate_ready_chunk_count(
-    mut status_at: impl FnMut(ChunkPos) -> Option<ChunkStatus>,
-    center: ChunkPos,
-    target_status: ChunkStatus,
-) -> usize {
-    let radius =
-        i32::try_from(PLAYABLE_GATE_RADIUS).expect("playable gate radius must fit into i32");
-    let mut ready_chunks = 0;
-    for relative_z in -radius..=radius {
-        for relative_x in -radius..=radius {
-            let pos = ChunkPos::new(center.x + relative_x, center.z + relative_z);
-            if status_at(pos).is_some_and(|status| status >= target_status) {
-                ready_chunks += 1;
-            }
-        }
-    }
-    ready_chunks
 }
 
 pub(crate) const PLAYABLE_GATE_RADIUS: u32 = 1;
@@ -439,5 +443,39 @@ mod tests {
                 playable: true,
             }]
         );
+    }
+
+    #[test]
+    fn finite_topology_counts_only_authoritative_boundary_chunks() {
+        let topology = HorizontalTopology {
+            x: mclone_core::AxisTopology::Finite {
+                minimum_chunk: 0,
+                maximum_chunk_exclusive: 2,
+            },
+            z: mclone_core::AxisTopology::Finite {
+                minimum_chunk: 0,
+                maximum_chunk_exclusive: 2,
+            },
+        };
+        let mut progress = ChunkLoadingProgress::with_topology(ChunkStatus::Features, topology);
+        progress.set_view(&view(ChunkPos::new(0, 0), 2));
+
+        for z in 0..2 {
+            for x in 0..2 {
+                progress.record_status_change(
+                    ChunkPos::new(x, z),
+                    ChunkStatus::Features,
+                    ChunkStatusStep::Ready,
+                );
+            }
+        }
+
+        let snapshot = progress.snapshot().unwrap();
+        assert_eq!(snapshot.stats.target_chunk_count, 4);
+        assert_eq!(snapshot.stats.target_ready_chunks, 4);
+        assert_eq!(snapshot.stats.playable_gate_chunk_count, 4);
+        assert_eq!(snapshot.stats.playable_gate_ready_chunks, 4);
+        assert!(snapshot.stats.playable_chunk_ready);
+        assert_eq!(snapshot.cells.len(), 4);
     }
 }

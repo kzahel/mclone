@@ -1,9 +1,9 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: in progress 2026-07-18. Slices 0-1 are complete: the Euclidean
+Status: in progress 2026-07-18. Slices 0-2 are complete: the Euclidean
 baseline, caller inventory, shared topology operations, persisted descriptor,
-protocol ordering, and canonical client dimension fact have landed. Slice 2 is
-the finite-bound authority canary.
+protocol ordering, canonical client dimension fact, and finite-bound authority
+canary have landed. Slice 3 is the periodic authority and scheduling proof.
 
 Topic: `bounded-world-topology`
 
@@ -366,6 +366,31 @@ to `cfa82c7e4590686302105b6e84cebaf11b41125bf45d8507e73a49e4a173255b`
 both before and after the identity routing. Repeated post-change captures are
 also byte-identical.
 
+### Slice 2 finite-bound authority canary (2026-07-18)
+
+A two-by-two chunk Flat Grass dimension now proves that finite topology is
+authority rather than a generator hint. Player and observer views clip at the
+bound and share one canonical ticket set; scheduler interest, regional and
+forced tickets, holder lookup, block/light queries, block edits, and explicit
+fluid-tick admission all route through the dimension topology. Movement,
+dimension transfer, and out-of-bound view centers reject before mutating player
+or chunk state. An initial spawn outside a finite definition rejects before the
+dimension record is persisted.
+
+Loading progress and readiness gates enumerate the same clipped topology view,
+so a boundary player waits for four real chunks rather than twenty-five
+imaginary neighbors. `TopologyChunkState` distinguishes outside topology from a
+valid unloaded canonical chunk and a loaded canonical chunk. Flat Grass and
+Authored Only are the only bounded profiles admitted; existing procedural and
+reference profiles fail at dimension registration instead of acquiring an
+accidental hard edge. Visual walls, fog, and markers remain separate and have
+not been added by this authority slice.
+
+Seven focused finite tests and all 489 `mclone-server` library tests pass. The
+canary covers clipped view/ticket/readiness accounting, initial-spawn admission,
+movement correction, transfer, placement, explicit tick, forced/region ticket,
+diagnostic-state, and unsupported profile rejection.
+
 ## Execution Checklist
 
 ### Slice 0: contract audit and clean baseline
@@ -401,11 +426,11 @@ remain observably unchanged.
 
 ### Slice 2: finite-bound canary
 
-- [ ] Add a small chunk-aligned finite Flat Grass or authored dimension.
-- [ ] Enforce bound rejection in view enumeration, generation admission, spawn,
+- [x] Add a small chunk-aligned finite Flat Grass or authored dimension.
+- [x] Enforce bound rejection in view enumeration, generation admission, spawn,
   teleport, movement, placement, tickets, and persistence.
-- [ ] Distinguish outside-topology from valid-but-unloaded cells in diagnostics.
-- [ ] Keep the visual wall/fog/marker separate from authoritative denial.
+- [x] Distinguish outside-topology from valid-but-unloaded cells in diagnostics.
+- [x] Keep the visual wall/fog/marker separate from authoritative denial.
 
 Gate: the topology service proves rejection and migration semantics before its
 first identity-forming periodic seam.
