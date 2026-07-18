@@ -32,6 +32,90 @@ const GRADIENTS: [[i32; 3]; 16] = [
     [0, -1, -1],
 ];
 
+/// Stable domain separation for original mclone procedural fields.
+///
+/// This is deliberately independent from Java's random-draw-compatible noise
+/// constructors below. A domain identifies one original field so adding or
+/// reordering another field does not perturb its samples.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct SeedDomain(u64);
+
+impl SeedDomain {
+    pub const fn new(value: u64) -> Self {
+        Self(value)
+    }
+
+    pub fn derive(self, seed: i64) -> i64 {
+        splitmix64((seed as u64) ^ self.0) as i64
+    }
+}
+
+/// Smooth two-dimensional lattice value noise for original mclone content.
+///
+/// Samples are functions only of the signed seed, stable domain, lattice
+/// scale, and absolute block coordinates. Euclidean division keeps negative
+/// coordinates continuous across chunk and lattice boundaries.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ValueNoise2d {
+    seed: i64,
+    scale: i32,
+    domain: SeedDomain,
+}
+
+impl ValueNoise2d {
+    pub fn new(seed: i64, domain: SeedDomain, scale: i32) -> Self {
+        assert!(scale > 0, "value-noise scale must be positive");
+        Self {
+            seed,
+            scale,
+            domain,
+        }
+    }
+
+    pub fn sample(self, world_x: i32, world_z: i32) -> f64 {
+        let lattice_x = world_x.div_euclid(self.scale);
+        let lattice_z = world_z.div_euclid(self.scale);
+        let fraction_x = f64::from(world_x.rem_euclid(self.scale)) / f64::from(self.scale);
+        let fraction_z = f64::from(world_z.rem_euclid(self.scale)) / f64::from(self.scale);
+        let blend_x = value_noise_smoothstep(fraction_x);
+        let blend_z = value_noise_smoothstep(fraction_z);
+        let top = value_noise_lerp(
+            self.lattice_sample(lattice_x, lattice_z),
+            self.lattice_sample(lattice_x + 1, lattice_z),
+            blend_x,
+        );
+        let bottom = value_noise_lerp(
+            self.lattice_sample(lattice_x, lattice_z + 1),
+            self.lattice_sample(lattice_x + 1, lattice_z + 1),
+            blend_x,
+        );
+        value_noise_lerp(top, bottom, blend_z)
+    }
+
+    fn lattice_sample(self, x: i32, z: i32) -> f64 {
+        let mut value = (self.seed as u64) ^ self.domain.0;
+        value ^= (x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+        value ^= (z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+        let unit = (splitmix64(value) >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64));
+        unit * 2.0 - 1.0
+    }
+}
+
+fn splitmix64(mut value: u64) -> u64 {
+    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+fn value_noise_smoothstep(value: f64) -> f64 {
+    value * value * (3.0 - 2.0 * value)
+}
+
+fn value_noise_lerp(from: f64, to: f64, amount: f64) -> f64 {
+    from + (to - from) * amount
+}
+
 #[derive(Clone, Debug)]
 pub struct ImprovedNoise {
     p: [u8; 256],
@@ -843,6 +927,27 @@ mod tests {
     use super::*;
     use crate::prng::SimpleRandomSource;
     use serde::Deserialize;
+
+    #[test]
+    fn value_noise_is_pinned_across_negative_and_positive_coordinates() {
+        let domain = SeedDomain::new(0x6973_6c61_6e64_2d31);
+        let noise = ValueNoise2d::new(12_345, domain, 64);
+        let samples = [(-65, -33), (-64, -32), (-1, -1), (0, 0), (63, 31), (64, 32)]
+            .map(|(x, z)| noise.sample(x, z).to_bits());
+
+        assert_eq!(
+            samples,
+            [
+                0x3fd8_3d64_611f_58ed,
+                0x3fd9_352e_d84c_eadc,
+                0x3fe6_7353_d50b_2335,
+                0x3fe6_7833_e4cb_2b20,
+                0x3fc3_0a13_6990_3c28,
+                0x3fc2_a2bb_1ba8_0e80,
+            ]
+        );
+        assert_eq!(domain.derive(12_345), -2_746_967_541_679_357_248);
+    }
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase")]

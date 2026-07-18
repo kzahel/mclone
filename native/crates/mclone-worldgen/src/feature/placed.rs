@@ -251,6 +251,28 @@ fn apply_overworld_biome_features_with_biomes_timed<W: FeatureWorld, B: FeatureB
     world: &mut W,
     count_added_blocks: bool,
 ) -> TimedDecorationReport {
+    let features = tables::overworld_features_for_biome_cached(biome);
+    apply_feature_table_with_biomes_timed(seed, biome, biomes, features, world, count_added_blocks)
+}
+
+pub(crate) fn apply_feature_table_to_region_timed(
+    seed: i64,
+    biome: BiomeDefinition,
+    features: &[PlacedFeature],
+    region: &mut FeatureRegion,
+) -> TimedDecorationReport {
+    let biomes = ConstantFeatureBiomeResolver::new(biome);
+    apply_feature_table_with_biomes_timed(seed, biome, &biomes, features, region, false)
+}
+
+fn apply_feature_table_with_biomes_timed<W: FeatureWorld, B: FeatureBiomeResolver>(
+    seed: i64,
+    biome: BiomeDefinition,
+    biomes: &B,
+    features: &[PlacedFeature],
+    world: &mut W,
+    count_added_blocks: bool,
+) -> TimedDecorationReport {
     let before = if count_added_blocks {
         world.non_air_block_count()
     } else {
@@ -259,7 +281,6 @@ fn apply_overworld_biome_features_with_biomes_timed<W: FeatureWorld, B: FeatureB
     let min_block_x = chunk_min_block_coord(world.center_chunk_x());
     let min_block_z = chunk_min_block_coord(world.center_chunk_z());
     let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
-    let features = tables::overworld_features_for_biome_cached(biome);
     let mut random = WorldgenRandom::default();
     let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
     let mut placed_features = 0;

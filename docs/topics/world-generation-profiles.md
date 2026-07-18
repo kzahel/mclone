@@ -3,8 +3,11 @@
 Topic: `world-generation-profiles`
 
 Status: **Tacticals 187 and 191 are complete. `flat-grass-v1` and
-`small-island-v1` are live, persisted, target-only shared-Rust generators
-beside the unchanged Overworld; authored-only misses still produce void.
+`small-island-v1` are live, persisted shared-Rust generators beside the
+unchanged Overworld; authored-only misses still produce void. Small Island now
+exercises the reusable value-noise primitive, typed scheduler/worker request
+contract, dependency cache, mutable feature region, and a real cross-chunk
+decoration stage.
 Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
 multi-dimension, and stored-reopen paths carry the same profile contract.
 Generator-owned pure plans now declare exact outputs, backend work, and typed
@@ -31,7 +34,8 @@ The first alternate generators are intentionally smaller:
 
 - flat grass proves a seed-independent, target-only procedural generator;
 - seeded small island proves original, nontrivial, position-dependent terrain,
-  shoreline continuity, biome output, and guaranteed spawn;
+  shoreline continuity, biome output, guaranteed spawn, and neighbor-aware
+  decoration;
 - neither is the final mclone overworld.
 
 ## Current Truth
@@ -42,7 +46,8 @@ The stored server-owned `WorldGenerationProfile` has four values:
 - `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
   decoration, ticks, or generator neighbors;
 - `SmallIslandV1`: a bounded original seeded radial/noise field with a safe
-  central grass patch, sand shoreline, ocean, and no generator neighbors;
+  central grass patch, sand shoreline, ocean, and a dependency-bearing
+  oak/grass/flower feature stage;
 - `AuthoredOnly`: persistence-backed content whose true misses become void.
 
 The profile already crosses world catalogs, realm/dimension metadata,
@@ -56,31 +61,53 @@ before using the shared profile-aware spawn policy. Native SQLite and browser
 IndexedDB reopen preserve it; the browser Worker applies stored metadata
 profiles before validating or scheduling the world.
 
-Scheduler and worker requests now carry an immutable profile-plus-seed
-descriptor through native messages, WASM codecs, responses, and diagnostics.
-The closed shared-Rust dispatcher selects the unchanged overworld cache, flat
-grass, or seeded island, and resident state resets when either descriptor fact
+Scheduler and worker requests carry an immutable profile-plus-seed descriptor
+through native messages, WASM codecs, responses, and diagnostics. The closed
+shared-Rust executor selects the unchanged Overworld cache, flat grass, or the
+Small Island cache, and resident state resets when either descriptor fact
 changes.
 
 `WorldGenerationProfile::plan_features` is the single closed planning entry.
 It returns a deterministic `ChunkGenerationPlan` containing exact requested
 outputs, generator backend-work chunks, and typed chunk/status prerequisites.
-Overworld declares its existing 3x3 feature-center and 5x5 mutable dependency
-footprints; Flat Grass and Small Island declare target-only work. The scheduler
-consumes every prerequisite generically, then applies its own view priority,
-deduplication, job admission, and publication policy. Planning occurs once per
-admitted batch and adds no worker message, serialization, trait-object dispatch,
-or general graph traversal.
+Overworld and Small Island declare a 3x3 feature-center and 5x5 mutable Surface
+dependency footprint for one target; Flat Grass declares target-only work. The
+scheduler consumes every prerequisite generically, then applies its own view
+priority, deduplication, job admission, and publication policy. Planning occurs
+once for scheduler admission and is recomputed once by the worker as request
+validation; it adds no worker round trip, trait-object dispatch, or general
+graph traversal and never runs per poll or publication.
 
-The overworld implementation itself remains concrete:
+The scheduler/worker seam now has two explicit request layers:
 
-- Overworld batch timing/cache types remain concrete inside optional
-  `OverworldGenerationDiagnostics`; Flat and Island do not publish fake
-  zero-valued Overworld counters;
-- resident worker state contains `OverworldFeatureDependencyCache` for the
-  Overworld dispatch case;
+- `GenerationPlanRequest` carries the immutable descriptor and exact requested
+  outputs and deterministically returns the generator-owned plan;
+- `GenerationExecutionRequest` carries that same plan request plus
+  `GenerationInput` values, each pairing its exact
+  `ChunkStatusRequirement` with a typed `ChunkBlocks` artifact.
+
+The scheduler uses the first request for readiness and ordering, then sends the
+second request over native messages or the WASM frame codec. The worker
+recomputes the declared plan and rejects undeclared or duplicate typed inputs
+before execution. Thus a bare chunk buffer can no longer silently lose the
+status it is intended to satisfy while crossing the worker boundary. Missing
+declared inputs remain legal cache misses and are generated deterministically.
+
+Generator implementations remain concrete behind that contract:
+
+- dependency-bearing profiles publish one generic cache report; detailed
+  `OverworldFeatureBatchTiming` remains optional and Overworld-only;
+- resident worker state contains separate Overworld and Small Island caches;
 - surface, carver, feature-biome, and feature-table internals remain specific
   to `OverworldBiomeSource` and the current Overworld case.
+
+Small Island's terrain fields use public `SeedDomain` and `ValueNoise2d`
+building blocks. The sampler is pinned across negative and positive absolute
+coordinates, uses Euclidean lattice coordinates, and separates fields by
+stable domains so adding one field need not perturb another. Decoration uses a
+separate derived seed domain and a small profile-owned feature table while
+reusing the existing `PlacedFeature`, `ConfiguredFeature`, and `FeatureRegion`
+execution machinery.
 
 The generic `NoiseBiomeSource` used by terrain sampling is only a partial seam.
 Flat grass and seeded island intentionally bypass that machinery. Authored
@@ -197,8 +224,12 @@ fingerprint.
 - guaranteed dry, reasonably level central spawn patch
 - stone/dirt/grass interior, sand shoreline, ocean floor and water
 - existing plains/beach/ocean biome IDs
-- no decoration, caves, carvers, structures, or cross-chunk writes
-- target-only generation with exact seam and batch-order determinism
+- oak trees, grass patches, dandelions, and poppies through the shared placed
+  feature machinery
+- 3x3 feature-center work and 5x5 Surface prerequisites for one target, with
+  cache reuse and cross-chunk writes
+- no caves, carvers, or structures
+- exact seam, request-order, and partition determinism
 - at least two pinned seeds with materially different valid islands
 
 The exact island constants and formulas are recorded in Tactical 187's Slice 3
@@ -218,9 +249,10 @@ stored DimensionDefinition
   -> shared lighting, publication, persistence, and runtime mutation
 ```
 
-The current overworld cache becomes one dispatch case rather than the worker
-protocol itself. Flat and island prove the zero-neighbor case. Future
-decoration or structure profiles may request broader dependencies without
+The current Overworld cache is one dispatch case rather than the worker
+protocol itself. Flat proves the zero-neighbor case; Small Island proves a
+second dependency-bearing cache and feature-table caller. Future structure
+profiles may request broader dependencies or new typed artifacts without
 changing holder, light, publication, or client contracts.
 
 Tactical
@@ -240,6 +272,7 @@ adding profile branches.
 - exact legacy world/profile decode;
 - unchanged overworld oracle fixtures and random order;
 - deterministic output independent of request order/batching;
+- worker rejection of undeclared or duplicate typed inputs;
 - explicit profile/seed reset of worker-resident state;
 - native and Web Worker equivalence;
 - SQLite and IndexedDB save/reopen equivalence;
@@ -253,11 +286,15 @@ adding profile branches.
 Execute
 [`Tactical 188`](../tactical/188-mclone-overworld-v1-biome-decoration-fork.md)
 when beginning the original overworld. It adds the versioned profile and a
-second real biome/decoration ruleset caller before extracting shared seams.
+second broad biome/decoration ruleset while the Small Island caller keeps the
+shared feature execution seams honest. Extract a more general feature recipe or
+registry only when that work exposes a concrete second need not already covered
+by the placed/configured feature tables.
 
 True native structure infrastructure and original mclone structures remain a
-separate follow-up. The generator plan must accommodate their future
-dependencies and metadata, but Tactical 187 does not implement them.
+separate follow-up. Before adding it, extend the typed artifact vocabulary for
+whatever structure metadata actually crosses planning/execution; do not encode
+that metadata as an untyped chunk-buffer side channel.
 
 ## Related
 

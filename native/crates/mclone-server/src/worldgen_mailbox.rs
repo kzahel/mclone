@@ -20,18 +20,19 @@ use std::{
 };
 
 use mclone_core::ChunkPos;
-use mclone_worldgen::levelgen::{
-    GeneratedChunk, MutableChunkBlockBuffer, OverworldFeatureDependencyCache,
-};
+use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
-use crate::job_codec::{OverworldGenerationDiagnostics, generate_chunks_with_dependencies};
+use crate::job_codec::{GenerationDiagnostics, WorldGenerationExecutor};
 #[cfg(target_arch = "wasm32")]
 use crate::job_codec::{decode_worldgen_response, encode_worldgen_delta_request};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
-use crate::{ChunkJobId, WorkerFrameMetrics, WorldGenerationDescriptor, WorldgenMailboxKind};
+use crate::{
+    ChunkJobId, GenerationExecutionRequest, WorkerFrameMetrics, WorldGenerationDescriptor,
+    WorldgenMailboxKind,
+};
 
 #[derive(Debug)]
 pub(crate) struct WorldgenCompletedJob {
@@ -39,7 +40,7 @@ pub(crate) struct WorldgenCompletedJob {
     pub(crate) descriptor: WorldGenerationDescriptor,
     pub(crate) generated_chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     pub(crate) retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
-    pub(crate) overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
+    pub(crate) diagnostics: Option<GenerationDiagnostics>,
 }
 
 #[derive(Debug)]
@@ -81,13 +82,10 @@ impl WorldgenMailbox {
     pub(crate) fn enqueue_features(
         &mut self,
         job_id: ChunkJobId,
-        descriptor: WorldGenerationDescriptor,
-        targets: &[ChunkPos],
-        dependencies: Vec<MutableChunkBlockBuffer>,
+        request: GenerationExecutionRequest,
     ) {
         self.pending_count = self.pending_count.saturating_add(1);
-        self.backend
-            .enqueue_features(job_id, descriptor, targets, dependencies);
+        self.backend.enqueue_features(job_id, request);
     }
 
     pub(crate) fn drain_completed(&mut self) -> Vec<WorldgenCompletedJob> {
@@ -178,13 +176,8 @@ impl WorldgenMailboxBackend {
             .map_or_else(WorkerFrameMetrics::default, WasmJobWorker::frame_metrics)
     }
 
-    fn enqueue_features(
-        &mut self,
-        job_id: ChunkJobId,
-        descriptor: WorldGenerationDescriptor,
-        targets: &[ChunkPos],
-        dependencies: Vec<MutableChunkBlockBuffer>,
-    ) {
+    fn enqueue_features(&mut self, job_id: ChunkJobId, request: GenerationExecutionRequest) {
+        let descriptor = request.descriptor();
         if self.worker.is_some() {
             // 069 Stage 1: ship a delta against the worker's resident dependency
             // mirror, not the whole seeded neighbourhood. The first job (or any job
@@ -201,19 +194,16 @@ impl WorldgenMailboxBackend {
                 self.worker_mirror_shadow.clear();
             }
             let generation = self.worker_mirror_generation;
-            let upserts: Vec<MutableChunkBlockBuffer> = dependencies
+            let upserts = request
+                .seeded_inputs
                 .into_iter()
-                .filter(|dependency| {
-                    reset
-                        || !self
-                            .worker_mirror_shadow
-                            .contains(&ChunkPos::new(dependency.chunk_x, dependency.chunk_z))
+                .filter(|input| {
+                    reset || !self.worker_mirror_shadow.contains(&input.requirement.pos)
                 })
-                .collect();
-            let frame = encode_worldgen_delta_request(
-                job_id, descriptor, generation, reset, targets, &upserts,
-            )
-            .expect("failed to encode wasm worldgen worker delta request");
+                .collect::<Vec<_>>();
+            let delta_request = GenerationExecutionRequest::new(request.plan, upserts);
+            let frame = encode_worldgen_delta_request(job_id, generation, reset, &delta_request)
+                .expect("failed to encode wasm worldgen worker delta request");
             self.worker
                 .as_mut()
                 .expect("wasm worldgen worker present")
@@ -224,29 +214,26 @@ impl WorldgenMailboxBackend {
             // ships a minimal delta. `drain_completed` then corrects the shadow to the
             // worker's authoritative retained set.
             self.worker_mirror_shadow.extend(
-                upserts
+                delta_request
+                    .seeded_inputs
                     .iter()
-                    .map(|dependency| ChunkPos::new(dependency.chunk_x, dependency.chunk_z)),
+                    .map(|input| input.requirement.pos),
             );
             self.worker_mirror_initialized = true;
             self.worker_descriptor = Some(descriptor);
             return;
         }
 
-        let mut dependency_cache = OverworldFeatureDependencyCache::new();
-        let result = generate_chunks_with_dependencies(
-            &mut dependency_cache,
-            descriptor,
-            targets,
-            dependencies,
-        )
-        .expect("scheduler sent unsupported profile to inline worldgen worker");
+        let mut executor = WorldGenerationExecutor::default();
+        let result = executor
+            .execute(request)
+            .expect("scheduler sent invalid profile request to inline worldgen worker");
         self.completed.push_back(WorldgenCompletedJob {
             job_id,
             descriptor,
             generated_chunks: result.chunks,
             retained_dependencies: result.retained_dependencies,
-            overworld_diagnostics: result.overworld_diagnostics,
+            diagnostics: result.diagnostics,
         });
     }
 
@@ -277,7 +264,7 @@ impl WorldgenMailboxBackend {
                 descriptor: decoded.descriptor,
                 generated_chunks: decoded.generated_chunks,
                 retained_dependencies: decoded.retained_dependencies,
-                overworld_diagnostics: decoded.overworld_diagnostics,
+                diagnostics: decoded.diagnostics,
             });
         }
         self.completed.drain(..).collect()
@@ -323,30 +310,22 @@ impl WorldgenMailboxBackend {
             .spawn(move || {
                 while let Ok(request) = receiver.recv() {
                     match request {
-                        WorldgenRequest::GenerateFeatures {
-                            job_id,
-                            descriptor,
-                            targets,
-                            dependencies,
-                        } => {
+                        WorldgenRequest::GenerateFeatures { job_id, request } => {
                             if let Ok(mut metrics) = worker_metrics.lock() {
                                 metrics.record_request(0);
                             }
                             let request_start = Instant::now();
-                            let mut dependency_cache = OverworldFeatureDependencyCache::new();
-                            let result = generate_chunks_with_dependencies(
-                                &mut dependency_cache,
-                                descriptor,
-                                &targets,
-                                dependencies,
-                            )
-                            .expect("scheduler sent unsupported profile to native worldgen worker");
+                            let descriptor = request.descriptor();
+                            let mut executor = WorldGenerationExecutor::default();
+                            let result = executor.execute(request).expect(
+                                "scheduler sent invalid profile request to native worldgen worker",
+                            );
                             let completed = WorldgenCompletedJob {
                                 job_id,
                                 descriptor,
                                 generated_chunks: result.chunks,
                                 retained_dependencies: result.retained_dependencies,
-                                overworld_diagnostics: result.overworld_diagnostics,
+                                diagnostics: result.diagnostics,
                             };
                             if let Ok(mut metrics) = worker_metrics.lock() {
                                 metrics.record_inbound(0);
@@ -382,20 +361,9 @@ impl WorldgenMailboxBackend {
             .unwrap_or_default()
     }
 
-    fn enqueue_features(
-        &mut self,
-        job_id: ChunkJobId,
-        descriptor: WorldGenerationDescriptor,
-        targets: &[ChunkPos],
-        dependencies: Vec<MutableChunkBlockBuffer>,
-    ) {
+    fn enqueue_features(&mut self, job_id: ChunkJobId, request: GenerationExecutionRequest) {
         self.sender
-            .send(WorldgenRequest::GenerateFeatures {
-                job_id,
-                descriptor,
-                targets: targets.to_vec(),
-                dependencies,
-            })
+            .send(WorldgenRequest::GenerateFeatures { job_id, request })
             .expect("native worldgen worker stopped before receiving job");
     }
 
@@ -436,9 +404,7 @@ impl Drop for WorldgenMailboxBackend {
 enum WorldgenRequest {
     GenerateFeatures {
         job_id: ChunkJobId,
-        descriptor: WorldGenerationDescriptor,
-        targets: Vec<ChunkPos>,
-        dependencies: Vec<MutableChunkBlockBuffer>,
+        request: GenerationExecutionRequest,
     },
     Shutdown,
 }

@@ -54,10 +54,13 @@ pub(crate) use context::{
 };
 pub(crate) use direction::offset_pos;
 pub(crate) use heightmap::{heightmap_height, project_to_surface};
-pub(crate) use placed::apply_overworld_biome_decoration_to_region_timed;
+pub(crate) use placed::{
+    apply_feature_table_to_region_timed, apply_overworld_biome_decoration_to_region_timed,
+};
 pub(crate) use selectors::{
     place_random_boolean_selector, place_random_selector, place_simple_random_selector,
 };
+pub(crate) use tables::small_island_feature_table;
 
 #[cfg(test)]
 pub(crate) use placed::test_support;

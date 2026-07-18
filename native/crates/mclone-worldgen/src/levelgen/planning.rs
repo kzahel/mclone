@@ -50,11 +50,50 @@ impl ChunkGenerationPlan {
     /// feature-center expansion, and the 5x5 Surface dependency expansion for
     /// a single target.
     pub fn overworld_features(targets: impl IntoIterator<Item = ChunkPos>) -> Self {
+        Self::feature_region(
+            targets,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            FEATURES_BLOCK_DEPENDENCY_RADIUS,
+            ChunkStatus::Surface,
+        )
+    }
+
+    /// Current Small Island FEATURES footprint. It uses the shared feature
+    /// region's one-chunk write and block-dependency radii over island Surface
+    /// inputs.
+    pub fn small_island_features(targets: impl IntoIterator<Item = ChunkPos>) -> Self {
+        Self::feature_region(
+            targets,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            FEATURES_BLOCK_DEPENDENCY_RADIUS,
+            ChunkStatus::Surface,
+        )
+    }
+
+    /// Neighbor-aware feature execution over a mutable chunk region.
+    ///
+    /// Backend centers within `write_radius` may affect requested outputs. Each
+    /// center may read or write inputs through `dependency_radius`, and every
+    /// such input must reach `prerequisite_status` before execution.
+    pub fn feature_region(
+        targets: impl IntoIterator<Item = ChunkPos>,
+        write_radius: i32,
+        dependency_radius: i32,
+        prerequisite_status: ChunkStatus,
+    ) -> Self {
+        assert!(
+            write_radius >= 0,
+            "feature write radius must be non-negative"
+        );
+        assert!(
+            dependency_radius >= 0,
+            "feature dependency radius must be non-negative"
+        );
         let output_chunks = targets.into_iter().collect::<BTreeSet<_>>();
-        let backend_work_chunks = expand_chunks(&output_chunks, FEATURES_WRITE_RADIUS_CUTOFF);
-        let prerequisites = expand_chunks(&backend_work_chunks, FEATURES_BLOCK_DEPENDENCY_RADIUS)
+        let backend_work_chunks = expand_chunks(&output_chunks, write_radius);
+        let prerequisites = expand_chunks(&backend_work_chunks, dependency_radius)
             .into_iter()
-            .map(|pos| ChunkStatusRequirement::new(pos, ChunkStatus::Surface))
+            .map(|pos| ChunkStatusRequirement::new(pos, prerequisite_status))
             .collect::<BTreeSet<_>>();
 
         Self {
@@ -231,5 +270,34 @@ mod tests {
         assert_eq!(plan.output_chunks(), &expected);
         assert_eq!(plan.backend_work_chunks(), &expected);
         assert!(plan.prerequisites().is_empty());
+    }
+
+    #[test]
+    fn feature_region_supports_non_overworld_status_and_radius_contracts() {
+        let target = ChunkPos::new(-3, 7);
+        let plan = ChunkGenerationPlan::feature_region([target], 2, 1, ChunkStatus::Terrain);
+
+        assert_eq!(plan.output_chunks(), &BTreeSet::from([target]));
+        assert_eq!(plan.backend_work_chunks(), &square(target, 2));
+        assert_eq!(
+            plan.prerequisites(),
+            &square(target, 3)
+                .into_iter()
+                .map(|pos| ChunkStatusRequirement::new(pos, ChunkStatus::Terrain))
+                .collect()
+        );
+    }
+
+    #[test]
+    fn small_island_uses_the_shared_neighbor_feature_contract() {
+        let target = ChunkPos::new(2, -5);
+        let plan = ChunkGenerationPlan::small_island_features([target]);
+
+        assert_eq!(plan.output_chunks(), &BTreeSet::from([target]));
+        assert_eq!(plan.backend_work_chunks(), &square(target, 1));
+        assert_eq!(
+            plan.prerequisites(),
+            &surface_requirements(square(target, 2))
+        );
     }
 }

@@ -136,6 +136,9 @@ pub use world_generation_profile::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, AuthoredMissingChunk, WorldGenerationDescriptor,
     WorldGenerationProfile,
 };
+pub(crate) use world_generation_profile::{
+    GenerationExecutionRequest, GenerationInput, GenerationInputArtifact, GenerationPlanRequest,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use persistence::FilesystemChunkSnapshotStore;

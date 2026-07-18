@@ -42,7 +42,7 @@ use crate::fluid::{
     target_fluid_can_be_replaced_with,
 };
 use crate::holder::ChunkHolder;
-use crate::job_codec::OverworldGenerationDiagnostics;
+use crate::job_codec::GenerationDiagnostics;
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{
@@ -69,10 +69,10 @@ use crate::worldgen_mailbox::{PendingWorldgenPublication, WorldgenMailbox};
 use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState,
     ChunkResidency, ChunkStatusStep, ChunkTicketKey, ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ,
-    FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, LightStatusMailboxKind,
-    LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics,
-    WorldBlockPos, WorldGenerationDescriptor, WorldGenerationProfile, WorldgenMailboxKind,
-    full_chunk_status_for_ticket_level,
+    FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, GenerationExecutionRequest, GenerationInput,
+    GenerationPlanRequest, LightStatusMailboxKind, LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE,
+    UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos, WorldGenerationDescriptor,
+    WorldGenerationProfile, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -88,6 +88,7 @@ pub struct ChunkStatusJob {
     pub state: ChunkJobState,
     pub target_chunks: Vec<ChunkPos>,
     pub feature_centers: Vec<ChunkPos>,
+    pub dependency_requirements: Vec<ChunkStatusRequirement>,
     pub dependency_chunks: Vec<ChunkPos>,
     pub seeded_dependency_chunks: usize,
     pub dependency_cache_hits: usize,
@@ -2914,7 +2915,7 @@ impl ChunkScheduler {
             return Vec::new();
         }
 
-        let (job_id, seeded_dependencies) = self.create_feature_job(&job_targets, priority_centers);
+        let (job_id, request) = self.create_feature_job(&job_targets, priority_centers);
         let mut events = Vec::with_capacity(job_targets.len());
         for pos in &job_targets {
             self.stored_chunk_misses.remove(pos);
@@ -2930,12 +2931,7 @@ impl ChunkScheduler {
         }
 
         self.mark_job_state(job_id, ChunkJobState::Running);
-        self.worldgen_mailbox.enqueue_features(
-            job_id,
-            self.world_generation_descriptor(),
-            &job_targets,
-            seeded_dependencies,
-        );
+        self.worldgen_mailbox.enqueue_features(job_id, request);
         events
     }
 
@@ -3080,7 +3076,7 @@ impl ChunkScheduler {
             .saturating_add(completed.len());
         if self.publication_budget.enabled() {
             for completed_job in &completed {
-                self.mark_job_complete(completed_job.job_id, completed_job.overworld_diagnostics);
+                self.mark_job_complete(completed_job.job_id, completed_job.diagnostics);
                 diagnostics.feature_jobs_pipeline_completed = diagnostics
                     .feature_jobs_pipeline_completed
                     .saturating_add(1);
@@ -3263,10 +3259,23 @@ impl ChunkScheduler {
             .remove(&completed.job_id)
             .unwrap_or_default();
         for dependency in completed.retained_dependencies.into_values() {
-            self.mark_dependency_ready(dependency);
+            let dependency_pos = ChunkPos::new(dependency.chunk_x, dependency.chunk_z);
+            let status = job
+                .dependency_requirements
+                .iter()
+                .filter(|requirement| requirement.pos == dependency_pos)
+                .map(|requirement| requirement.status)
+                .max()
+                .unwrap_or_else(|| {
+                    panic!(
+                        "worldgen retained undeclared dependency ({}, {})",
+                        dependency_pos.x, dependency_pos.z
+                    )
+                });
+            self.mark_dependency_ready(dependency, status);
         }
         if !self.publication_budget.enabled() {
-            self.mark_job_complete(completed.job_id, completed.overworld_diagnostics);
+            self.mark_job_complete(completed.job_id, completed.diagnostics);
         }
         diagnostics.feature_jobs_completed = diagnostics.feature_jobs_completed.saturating_add(1);
         if !pending_light_statuses.is_empty() {
@@ -3440,16 +3449,22 @@ impl ChunkScheduler {
         &mut self,
         targets: &[ChunkPos],
         priority_centers: &[ChunkPos],
-    ) -> (ChunkJobId, Vec<MutableChunkBlockBuffer>) {
+    ) -> (ChunkJobId, GenerationExecutionRequest) {
         let id = ChunkJobId(self.next_job_id);
         self.next_job_id += 1;
-        let plan = self
-            .world_generation_profile
-            .plan_features(targets.iter().copied());
+        let plan_request =
+            GenerationPlanRequest::new(self.world_generation_descriptor(), targets.to_vec());
+        let plan = plan_request.plan();
         self.schedule_generation_prerequisites(plan.prerequisites());
-        let (target_chunks, feature_centers, dependency_chunks) =
+        let (target_chunks, feature_centers, dependency_requirements) =
             ordered_generation_plan(plan, priority_centers);
-        let seeded_dependencies = self.seeded_dependency_buffers(&dependency_chunks);
+        let mut seen_dependency_chunks = BTreeSet::new();
+        let dependency_chunks = dependency_requirements
+            .iter()
+            .map(|requirement| requirement.pos)
+            .filter(|pos| seen_dependency_chunks.insert(*pos))
+            .collect::<Vec<_>>();
+        let seeded_inputs = self.seeded_generation_inputs(&dependency_requirements);
         self.jobs.insert(
             id,
             ChunkStatusJob {
@@ -3459,14 +3474,18 @@ impl ChunkScheduler {
                 state: ChunkJobState::Queued,
                 target_chunks,
                 feature_centers,
+                dependency_requirements,
                 dependency_chunks,
-                seeded_dependency_chunks: seeded_dependencies.len(),
+                seeded_dependency_chunks: seeded_inputs.len(),
                 dependency_cache_hits: 0,
                 dependency_cache_misses: 0,
                 retained_dependency_chunks: 0,
             },
         );
-        (id, seeded_dependencies)
+        (
+            id,
+            GenerationExecutionRequest::new(plan_request, seeded_inputs),
+        )
     }
 
     fn mark_job_state(&mut self, id: ChunkJobId, state: ChunkJobState) {
@@ -3476,20 +3495,18 @@ impl ChunkScheduler {
             .state = state;
     }
 
-    fn mark_job_complete(
-        &mut self,
-        id: ChunkJobId,
-        overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
-    ) {
+    fn mark_job_complete(&mut self, id: ChunkJobId, diagnostics: Option<GenerationDiagnostics>) {
         let job = self
             .jobs
             .get_mut(&id)
             .expect("job must exist before state transition");
-        if let Some(diagnostics) = overworld_diagnostics {
+        if let Some(diagnostics) = diagnostics {
             job.dependency_cache_hits = diagnostics.cache_report.cache_hits;
             job.dependency_cache_misses = diagnostics.cache_report.generated_dependency_chunks;
             job.retained_dependency_chunks = diagnostics.cache_report.retained_dependency_chunks;
-            self.job_timings.insert(id, diagnostics.timing);
+            if let Some(timing) = diagnostics.overworld_timing {
+                self.job_timings.insert(id, timing);
+            }
         }
         job.state = ChunkJobState::Complete;
     }
@@ -4048,30 +4065,38 @@ impl ChunkScheduler {
         }
     }
 
-    fn mark_dependency_ready(&mut self, buffer: MutableChunkBlockBuffer) {
+    fn mark_dependency_ready(&mut self, buffer: MutableChunkBlockBuffer, status: ChunkStatus) {
         let pos = ChunkPos::new(buffer.chunk_x, buffer.chunk_z);
         let holder = self
             .holders
             .entry(pos)
             .or_insert_with(|| ChunkHolder::new(pos));
-        holder.set_target_status(ChunkStatus::Surface);
+        holder.set_target_status(status);
         holder.set_dependency_buffer(buffer);
-        for status in status_path_to(ChunkStatus::Surface) {
-            holder.mark_ready(status, None);
+        for ready_status in status_path_to(status) {
+            holder.mark_ready(ready_status, None);
         }
     }
 
-    fn seeded_dependency_buffers(
+    fn seeded_generation_inputs(
         &self,
-        dependency_chunks: &[ChunkPos],
-    ) -> Vec<MutableChunkBlockBuffer> {
-        dependency_chunks
+        requirements: &[ChunkStatusRequirement],
+    ) -> Vec<GenerationInput> {
+        requirements
             .iter()
-            .filter_map(|pos| {
-                self.holders
-                    .get(pos)
-                    .and_then(ChunkHolder::dependency_buffer)
-                    .cloned()
+            .filter_map(|requirement| {
+                let holder = self.holders.get(&requirement.pos)?;
+                let ready = holder
+                    .status_slot(requirement.status)
+                    .is_some_and(|slot| slot.step == ChunkStatusStep::Ready);
+                if !ready {
+                    return None;
+                }
+                let buffer = holder.dependency_buffer()?.clone();
+                Some(
+                    GenerationInput::chunk_blocks(*requirement, buffer)
+                        .expect("holder dependency position must match its requirement"),
+                )
             })
             .collect()
     }
@@ -4235,17 +4260,24 @@ fn block_change_affects_light(old_block: RawBlockId, new_block: RawBlockId) -> b
 fn ordered_generation_plan(
     plan: ChunkGenerationPlan,
     priority_centers: &[ChunkPos],
-) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkPos>) {
+) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkStatusRequirement>) {
     let (target_chunks, backend_work_chunks, prerequisites) = plan.into_parts();
     let target_chunks = sorted_chunk_positions_by_priority(target_chunks, priority_centers);
     let backend_work_chunks =
         sorted_chunk_positions_by_priority(backend_work_chunks, priority_centers);
-    let mut dependency_chunks = sorted_chunk_positions_by_priority(
-        prerequisites.into_iter().map(|requirement| requirement.pos),
-        priority_centers,
-    );
-    dependency_chunks.dedup();
-    (target_chunks, backend_work_chunks, dependency_chunks)
+    let mut dependency_requirements = prerequisites.into_iter().collect::<Vec<_>>();
+    if priority_centers.is_empty() {
+        dependency_requirements
+            .sort_by_key(|requirement| (requirement.pos.z, requirement.pos.x, requirement.status));
+    } else {
+        dependency_requirements.sort_by_key(|requirement| {
+            (
+                chunk_priority_key(requirement.pos, priority_centers),
+                *requirement,
+            )
+        });
+    }
+    (target_chunks, backend_work_chunks, dependency_requirements)
 }
 
 fn sorted_chunk_positions_by_priority(
@@ -4429,14 +4461,24 @@ mod tests {
             .into_iter()
             .collect::<Vec<_>>();
 
-        let plan = WorldGenerationProfile::Overworld.plan_features(targets.iter().copied());
+        let plan = GenerationPlanRequest::new(
+            WorldGenerationDescriptor::overworld(12_345),
+            targets.clone(),
+        )
+        .plan();
         let expected = plan.clone();
-        let (target_chunks, feature_centers, dependency_chunks) =
+        let (target_chunks, feature_centers, dependency_requirements) =
             ordered_generation_plan(plan, &[ChunkPos::new(5, -3)]);
 
         assert_eq!(target_chunks.first(), Some(&ChunkPos::new(5, -3)));
         assert_eq!(feature_centers.first(), Some(&ChunkPos::new(5, -3)));
-        assert_eq!(dependency_chunks.first(), Some(&ChunkPos::new(5, -3)));
+        assert_eq!(
+            dependency_requirements.first(),
+            Some(&ChunkStatusRequirement::new(
+                ChunkPos::new(5, -3),
+                ChunkStatus::Surface,
+            ))
+        );
         assert_eq!(
             target_chunks.iter().copied().collect::<BTreeSet<_>>(),
             *expected.output_chunks()
@@ -4446,12 +4488,11 @@ mod tests {
             *expected.backend_work_chunks()
         );
         assert_eq!(
-            dependency_chunks.iter().copied().collect::<BTreeSet<_>>(),
-            expected
-                .prerequisites()
+            dependency_requirements
                 .iter()
-                .map(|requirement| requirement.pos)
-                .collect::<BTreeSet<_>>()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            expected.prerequisites().clone()
         );
     }
 
@@ -4487,8 +4528,14 @@ mod tests {
             ],
         );
         let prerequisites = plan.prerequisites().iter().copied().collect::<Vec<_>>();
-        let (_, _, dependency_chunks) = ordered_generation_plan(plan.clone(), &[center]);
-        assert_eq!(dependency_chunks, vec![near, far],);
+        let (_, _, dependency_requirements) = ordered_generation_plan(plan.clone(), &[center]);
+        assert_eq!(
+            dependency_requirements,
+            vec![
+                ChunkStatusRequirement::new(near, ChunkStatus::Surface),
+                ChunkStatusRequirement::new(far, ChunkStatus::Terrain),
+            ],
+        );
         assert_eq!(
             prerequisites.into_iter().collect::<BTreeSet<_>>(),
             BTreeSet::from([
@@ -4843,7 +4890,7 @@ mod tests {
     }
 
     #[test]
-    fn small_island_profile_uses_target_only_generation_and_safe_origin_patch() {
+    fn small_island_profile_uses_typed_dependencies_and_safe_origin_patch() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler
             .set_world_generation_profile(WorldGenerationProfile::SmallIslandV1)
@@ -4895,9 +4942,22 @@ mod tests {
             job.generation_descriptor,
             WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, 12_345)
         );
-        assert!(job.dependency_chunks.is_empty());
+        let expected_plan =
+            GenerationPlanRequest::new(job.generation_descriptor, job.target_chunks.clone()).plan();
+        assert_eq!(
+            job.dependency_requirements
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            expected_plan.prerequisites().clone()
+        );
+        assert!(job.dependency_chunks.len() > job.target_chunks.len());
+        assert!(
+            job.dependency_requirements
+                .iter()
+                .all(|requirement| requirement.status == ChunkStatus::Surface)
+        );
         assert_eq!(job.seeded_dependency_chunks, 0);
-        assert_eq!(job.retained_dependency_chunks, 0);
         assert!(scheduler.job_timing(job.id).is_none());
     }
 
@@ -4938,9 +4998,9 @@ mod tests {
         let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
         scheduler.mark_job_complete(
             first_job_id,
-            Some(OverworldGenerationDiagnostics {
+            Some(GenerationDiagnostics {
                 cache_report: Default::default(),
-                timing: Default::default(),
+                overworld_timing: Some(Default::default()),
             }),
         );
 

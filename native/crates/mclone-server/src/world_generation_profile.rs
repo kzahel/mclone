@@ -1,5 +1,7 @@
 use mclone_core::ChunkPos;
-use mclone_worldgen::levelgen::ChunkGenerationPlan;
+use mclone_worldgen::levelgen::{
+    ChunkGenerationPlan, ChunkStatusRequirement, MutableChunkBlockBuffer,
+};
 use serde::{Deserialize, Serialize};
 
 pub const AUTHORED_WORLD_MIN_Y: i32 = 0;
@@ -58,13 +60,11 @@ impl WorldGenerationProfile {
     /// Closed built-in dispatch for the pure FEATURES-stage generation plan.
     /// Scheduler priority and readiness policy are intentionally applied only
     /// after this generator-owned declaration returns.
-    pub(crate) fn plan_features(
-        self,
-        targets: impl IntoIterator<Item = ChunkPos>,
-    ) -> ChunkGenerationPlan {
+    fn plan_features(self, targets: impl IntoIterator<Item = ChunkPos>) -> ChunkGenerationPlan {
         match self {
             Self::Overworld => ChunkGenerationPlan::overworld_features(targets),
-            Self::FlatGrassV1 | Self::SmallIslandV1 => ChunkGenerationPlan::target_only(targets),
+            Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
+            Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
             Self::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
             }
@@ -88,6 +88,101 @@ impl WorldGenerationProfile {
             3 => Some(Self::SmallIslandV1),
             _ => None,
         }
+    }
+}
+
+/// Pure request from scheduler admission into generator-owned footprint
+/// planning. The descriptor is included even when today's footprint does not
+/// depend on seed so future profile planning cannot silently consult scheduler
+/// state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GenerationPlanRequest {
+    pub(crate) descriptor: WorldGenerationDescriptor,
+    pub(crate) requested_outputs: Vec<ChunkPos>,
+}
+
+impl GenerationPlanRequest {
+    pub(crate) fn new(
+        descriptor: WorldGenerationDescriptor,
+        requested_outputs: impl Into<Vec<ChunkPos>>,
+    ) -> Self {
+        Self {
+            descriptor,
+            requested_outputs: requested_outputs.into(),
+        }
+    }
+
+    pub(crate) fn plan(&self) -> ChunkGenerationPlan {
+        self.descriptor
+            .profile
+            .plan_features(self.requested_outputs.iter().copied())
+    }
+}
+
+/// Currently supported typed artifact for one declared generation input.
+/// Future metadata-only status inputs can extend this enum without converting
+/// the scheduler/worker boundary back to untyped chunk buffers.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum GenerationInputArtifact {
+    ChunkBlocks(MutableChunkBlockBuffer),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GenerationInput {
+    pub(crate) requirement: ChunkStatusRequirement,
+    pub(crate) artifact: GenerationInputArtifact,
+}
+
+impl GenerationInput {
+    pub(crate) fn chunk_blocks(
+        requirement: ChunkStatusRequirement,
+        chunk: MutableChunkBlockBuffer,
+    ) -> Result<Self, String> {
+        let actual = ChunkPos::new(chunk.chunk_x, chunk.chunk_z);
+        if actual != requirement.pos {
+            return Err(format!(
+                "generation input for ({}, {}) carried chunk blocks for ({}, {})",
+                requirement.pos.x, requirement.pos.z, actual.x, actual.z
+            ));
+        }
+        Ok(Self {
+            requirement,
+            artifact: GenerationInputArtifact::ChunkBlocks(chunk),
+        })
+    }
+
+    pub(crate) fn into_chunk_blocks(self) -> MutableChunkBlockBuffer {
+        match self.artifact {
+            GenerationInputArtifact::ChunkBlocks(chunk) => chunk,
+        }
+    }
+}
+
+/// Typed worker execution request. The same plan request drives scheduler
+/// prerequisite admission and worker-side validation/recomputation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct GenerationExecutionRequest {
+    pub(crate) plan: GenerationPlanRequest,
+    pub(crate) seeded_inputs: Vec<GenerationInput>,
+}
+
+impl GenerationExecutionRequest {
+    pub(crate) fn new(
+        plan: GenerationPlanRequest,
+        seeded_inputs: impl Into<Vec<GenerationInput>>,
+    ) -> Self {
+        Self {
+            plan,
+            seeded_inputs: seeded_inputs.into(),
+        }
+    }
+
+    pub(crate) const fn descriptor(&self) -> WorldGenerationDescriptor {
+        self.plan.descriptor
+    }
+
+    pub(crate) fn requested_outputs(&self) -> &[ChunkPos] {
+        &self.plan.requested_outputs
     }
 }
 

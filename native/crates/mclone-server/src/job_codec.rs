@@ -2,14 +2,14 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_core::{BlockPos, ChunkPos, ChunkSnapshot, PackedLightSection};
+use mclone_core::{BlockPos, ChunkPos, ChunkSnapshot, ChunkStatus, PackedLightSection};
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
     GeneratedChunk, MutableChunkBlockBuffer, OverworldDependencyGenerationTiming,
     OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
-    OverworldFeatureDependencyCacheReport, ScheduledTick, SurfaceFillTiming,
-    generate_flat_grass_chunk, generate_small_island_chunk,
+    OverworldFeatureDependencyCacheReport, ScheduledTick, SmallIslandFeatureDependencyCache,
+    SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming, generate_flat_grass_chunk,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -18,7 +18,10 @@ use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::persistence::ScheduledTickRecord;
-use crate::{ChunkJobId, WorldGenerationDescriptor, WorldGenerationProfile};
+use crate::{
+    ChunkJobId, GenerationExecutionRequest, GenerationInput, GenerationInputArtifact,
+    GenerationPlanRequest, WorldGenerationDescriptor, WorldGenerationProfile,
+};
 
 const WORLDGEN_REQUEST_MAGIC: u32 = 0x5747_4A52;
 const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
@@ -33,40 +36,62 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 4;
+const JOB_FRAME_VERSION: u32 = 5;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct GenerationCacheReport {
+    pub(crate) requested_dependency_chunks: usize,
+    pub(crate) cache_hits: usize,
+    pub(crate) generated_dependency_chunks: usize,
+    pub(crate) retained_dependency_chunks: usize,
+}
+
+impl From<OverworldFeatureDependencyCacheReport> for GenerationCacheReport {
+    fn from(report: OverworldFeatureDependencyCacheReport) -> Self {
+        Self {
+            requested_dependency_chunks: report.requested_dependency_chunks,
+            cache_hits: report.cache_hits,
+            generated_dependency_chunks: report.generated_dependency_chunks,
+            retained_dependency_chunks: report.retained_dependency_chunks,
+        }
+    }
+}
+
+impl From<SmallIslandFeatureDependencyCacheReport> for GenerationCacheReport {
+    fn from(report: SmallIslandFeatureDependencyCacheReport) -> Self {
+        Self {
+            requested_dependency_chunks: report.requested_dependency_chunks,
+            cache_hits: report.cache_hits,
+            generated_dependency_chunks: report.generated_dependency_chunks,
+            retained_dependency_chunks: report.retained_dependency_chunks,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct OverworldGenerationDiagnostics {
-    pub(crate) cache_report: OverworldFeatureDependencyCacheReport,
-    pub(crate) timing: OverworldFeatureBatchTiming,
+pub(crate) struct GenerationDiagnostics {
+    pub(crate) cache_report: GenerationCacheReport,
+    /// Only the Overworld generator currently exposes detailed phase timing.
+    /// Cache diagnostics remain profile-neutral.
+    pub(crate) overworld_timing: Option<OverworldFeatureBatchTiming>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct WorldGenerationBatchResult {
     pub(crate) chunks: BTreeMap<ChunkPos, GeneratedChunk>,
     pub(crate) retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
-    /// Present only for the Overworld implementation. Target-only profiles do
-    /// not manufacture zero-valued Overworld cache or timing diagnostics.
-    pub(crate) overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
+    /// Present for dependency-bearing profiles. Target-only profiles do not
+    /// manufacture zero-valued cache diagnostics.
+    pub(crate) diagnostics: Option<GenerationDiagnostics>,
 }
 
 pub(crate) fn encode_worldgen_request(
     job_id: ChunkJobId,
-    descriptor: WorldGenerationDescriptor,
-    targets: &[ChunkPos],
-    dependencies: Vec<MutableChunkBlockBuffer>,
+    request: &GenerationExecutionRequest,
 ) -> Result<Vec<u8>, String> {
     let mut writer = FrameWriter::new(WORLDGEN_REQUEST_MAGIC);
     writer.write_u64(job_id.0);
-    writer.write_world_generation_descriptor(descriptor);
-    writer.write_len("worldgen targets", targets.len())?;
-    for target in targets {
-        writer.write_chunk_pos(*target);
-    }
-    writer.write_len("worldgen dependencies", dependencies.len())?;
-    for dependency in &dependencies {
-        writer.write_mutable_chunk(dependency)?;
-    }
+    writer.write_generation_execution_request(request)?;
     Ok(writer.into_bytes())
 }
 
@@ -86,10 +111,16 @@ pub(crate) fn decode_worldgen_response(bytes: &[u8]) -> Result<WorldgenJobFrame,
     })?;
     let retained_dependency_positions =
         reader.read_vec("retained dependency positions", FrameReader::read_chunk_pos)?;
-    let overworld_diagnostics = if reader.read_bool()? {
-        Some(OverworldGenerationDiagnostics {
-            cache_report: reader.read_feature_cache_report()?,
-            timing: reader.read_feature_batch_timing()?,
+    let diagnostics = if reader.read_bool()? {
+        let cache_report = reader.read_generation_cache_report()?;
+        let overworld_timing = if reader.read_bool()? {
+            Some(reader.read_feature_batch_timing()?)
+        } else {
+            None
+        };
+        Some(GenerationDiagnostics {
+            cache_report,
+            overworld_timing,
         })
     } else {
         None
@@ -101,25 +132,20 @@ pub(crate) fn decode_worldgen_response(bytes: &[u8]) -> Result<WorldgenJobFrame,
         generated_chunks,
         retained_dependencies,
         retained_dependency_positions,
-        overworld_diagnostics,
+        diagnostics,
     })
 }
 
 pub fn compute_worldgen_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
     let mut reader = FrameReader::new(bytes, WORLDGEN_REQUEST_MAGIC)?;
     let job_id = ChunkJobId(reader.read_u64()?);
-    let descriptor = reader.read_world_generation_descriptor()?;
-    let targets = reader.read_vec("worldgen targets", FrameReader::read_chunk_pos)?;
-    let dependencies = reader.read_vec("worldgen dependencies", FrameReader::read_mutable_chunk)?;
+    let request = reader.read_generation_execution_request()?;
     reader.finish()?;
 
-    let mut dependency_cache = OverworldFeatureDependencyCache::new();
-    let result = generate_chunks_with_dependencies(
-        &mut dependency_cache,
-        descriptor,
-        &targets,
-        dependencies,
-    )?;
+    let descriptor = request.descriptor();
+    let targets = request.requested_outputs().to_vec();
+    let mut executor = WorldGenerationExecutor::default();
+    let result = executor.execute(request)?;
 
     // Stateless path: the cache started empty, so every retained column is new this
     // job and the response subset is the whole retained set (matches the legacy
@@ -127,72 +153,128 @@ pub fn compute_worldgen_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
     encode_worldgen_response(job_id, descriptor, result, &BTreeSet::new(), &targets)
 }
 
-pub(crate) fn generate_chunks_with_dependencies(
-    overworld_cache: &mut OverworldFeatureDependencyCache,
-    descriptor: WorldGenerationDescriptor,
-    targets: &[ChunkPos],
-    dependencies: Vec<MutableChunkBlockBuffer>,
-) -> Result<WorldGenerationBatchResult, String> {
-    match descriptor.profile {
-        WorldGenerationProfile::Overworld => {
-            let result = overworld_cache.generate_features_chunks_with_dependencies(
-                descriptor.seed,
-                targets.iter().copied(),
-                dependencies,
-            );
-            Ok(WorldGenerationBatchResult {
-                chunks: result.chunks,
-                retained_dependencies: result.retained_dependencies,
-                overworld_diagnostics: Some(OverworldGenerationDiagnostics {
-                    cache_report: result.cache_report,
-                    timing: result.timing,
-                }),
-            })
+#[derive(Debug, Default)]
+pub(crate) struct WorldGenerationExecutor {
+    overworld_cache: OverworldFeatureDependencyCache,
+    small_island_cache: SmallIslandFeatureDependencyCache,
+}
+
+impl WorldGenerationExecutor {
+    pub(crate) fn clear(&mut self) {
+        self.overworld_cache.clear();
+        self.small_island_cache.clear();
+    }
+
+    pub(crate) fn resident_positions(&self, profile: WorldGenerationProfile) -> BTreeSet<ChunkPos> {
+        match profile {
+            WorldGenerationProfile::Overworld => self.overworld_cache.resident_positions(),
+            WorldGenerationProfile::SmallIslandV1 => self.small_island_cache.resident_positions(),
+            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
+                BTreeSet::new()
+            }
         }
-        WorldGenerationProfile::FlatGrassV1 => {
-            if !dependencies.is_empty() {
+    }
+
+    pub(crate) fn retained_chunk_count(&self, profile: WorldGenerationProfile) -> usize {
+        match profile {
+            WorldGenerationProfile::Overworld => self.overworld_cache.retained_chunk_count(),
+            WorldGenerationProfile::SmallIslandV1 => self.small_island_cache.retained_chunk_count(),
+            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => 0,
+        }
+    }
+
+    pub(crate) fn execute(
+        &mut self,
+        request: GenerationExecutionRequest,
+    ) -> Result<WorldGenerationBatchResult, String> {
+        let declared_plan = request.plan.plan();
+        let descriptor = request.descriptor();
+        let targets = request.plan.requested_outputs;
+        let mut seen_requirements = BTreeSet::new();
+        for input in &request.seeded_inputs {
+            if !declared_plan.prerequisites().contains(&input.requirement) {
                 return Err(format!(
-                    "flat-grass-v1 is target-only but received {} dependency chunks",
-                    dependencies.len()
+                    "{} input ({}, {}) at {:?} was not declared by its generation plan",
+                    descriptor.profile.label(),
+                    input.requirement.pos.x,
+                    input.requirement.pos.z,
+                    input.requirement.status
                 ));
             }
-            let chunks = targets
-                .iter()
-                .copied()
-                .map(|pos| (pos, generate_flat_grass_chunk(pos.x, pos.z)))
-                .collect();
-            Ok(WorldGenerationBatchResult {
-                chunks,
-                retained_dependencies: BTreeMap::new(),
-                overworld_diagnostics: None,
-            })
-        }
-        WorldGenerationProfile::SmallIslandV1 => {
-            if !dependencies.is_empty() {
+            if !seen_requirements.insert(input.requirement) {
                 return Err(format!(
-                    "small-island-v1 is target-only but received {} dependency chunks",
-                    dependencies.len()
+                    "{} received duplicate input ({}, {}) at {:?}",
+                    descriptor.profile.label(),
+                    input.requirement.pos.x,
+                    input.requirement.pos.z,
+                    input.requirement.status
                 ));
             }
-            let chunks = targets
-                .iter()
-                .copied()
-                .map(|pos| {
-                    (
-                        pos,
-                        generate_small_island_chunk(descriptor.seed, pos.x, pos.z),
-                    )
+        }
+        let dependencies = request
+            .seeded_inputs
+            .into_iter()
+            .map(GenerationInput::into_chunk_blocks)
+            .collect::<Vec<_>>();
+
+        match descriptor.profile {
+            WorldGenerationProfile::Overworld => {
+                let result = self
+                    .overworld_cache
+                    .generate_features_chunks_with_dependencies(
+                        descriptor.seed,
+                        targets.iter().copied(),
+                        dependencies,
+                    );
+                Ok(WorldGenerationBatchResult {
+                    chunks: result.chunks,
+                    retained_dependencies: result.retained_dependencies,
+                    diagnostics: Some(GenerationDiagnostics {
+                        cache_report: result.cache_report.into(),
+                        overworld_timing: Some(result.timing),
+                    }),
                 })
-                .collect();
-            Ok(WorldGenerationBatchResult {
-                chunks,
-                retained_dependencies: BTreeMap::new(),
-                overworld_diagnostics: None,
-            })
+            }
+            WorldGenerationProfile::FlatGrassV1 => {
+                if !dependencies.is_empty() {
+                    return Err(format!(
+                        "flat-grass-v1 is target-only but received {} dependency chunks",
+                        dependencies.len()
+                    ));
+                }
+                let chunks = targets
+                    .iter()
+                    .copied()
+                    .map(|pos| (pos, generate_flat_grass_chunk(pos.x, pos.z)))
+                    .collect();
+                Ok(WorldGenerationBatchResult {
+                    chunks,
+                    retained_dependencies: BTreeMap::new(),
+                    diagnostics: None,
+                })
+            }
+            WorldGenerationProfile::SmallIslandV1 => {
+                let result = self
+                    .small_island_cache
+                    .generate_features_chunks_with_dependencies(
+                        descriptor.seed,
+                        targets.iter().copied(),
+                        dependencies,
+                    );
+                Ok(WorldGenerationBatchResult {
+                    chunks: result.chunks,
+                    retained_dependencies: result.retained_dependencies,
+                    diagnostics: Some(GenerationDiagnostics {
+                        cache_report: result.cache_report.into(),
+                        overworld_timing: None,
+                    }),
+                })
+            }
+            WorldGenerationProfile::AuthoredOnly { .. } => Err(
+                "authored-only missing chunks must bypass the procedural worldgen worker"
+                    .to_owned(),
+            ),
         }
-        WorldGenerationProfile::AuthoredOnly { .. } => Err(
-            "authored-only missing chunks must bypass the procedural worldgen worker".to_owned(),
-        ),
     }
 }
 
@@ -209,25 +291,15 @@ pub(crate) fn generate_chunks_with_dependencies(
 /// regenerated byte-identically — the delta only changes transport, never output.
 pub(crate) fn encode_worldgen_delta_request(
     job_id: ChunkJobId,
-    descriptor: WorldGenerationDescriptor,
     generation: u64,
     reset: bool,
-    targets: &[ChunkPos],
-    upserts: &[MutableChunkBlockBuffer],
+    request: &GenerationExecutionRequest,
 ) -> Result<Vec<u8>, String> {
     let mut writer = FrameWriter::new(WORLDGEN_DELTA_REQUEST_MAGIC);
     writer.write_u64(job_id.0);
-    writer.write_world_generation_descriptor(descriptor);
     writer.write_u64(generation);
     writer.write_bool(reset);
-    writer.write_len("worldgen delta targets", targets.len())?;
-    for target in targets {
-        writer.write_chunk_pos(*target);
-    }
-    writer.write_len("worldgen delta upserts", upserts.len())?;
-    for upsert in upserts {
-        writer.write_mutable_chunk(upsert)?;
-    }
+    writer.write_generation_execution_request(request)?;
     Ok(writer.into_bytes())
 }
 
@@ -296,18 +368,21 @@ fn encode_worldgen_response(
     for pos in result.retained_dependencies.keys() {
         writer.write_chunk_pos(*pos);
     }
-    writer.write_bool(result.overworld_diagnostics.is_some());
-    if let Some(diagnostics) = result.overworld_diagnostics {
-        writer.write_feature_cache_report(diagnostics.cache_report);
-        writer.write_feature_batch_timing(diagnostics.timing)?;
+    writer.write_bool(result.diagnostics.is_some());
+    if let Some(diagnostics) = result.diagnostics {
+        writer.write_generation_cache_report(diagnostics.cache_report);
+        writer.write_bool(diagnostics.overworld_timing.is_some());
+        if let Some(timing) = diagnostics.overworld_timing {
+            writer.write_feature_batch_timing(timing)?;
+        }
     }
     Ok(writer.into_bytes())
 }
 
 /// 069 Stage 1: the web worldgen worker's resident session. Mirrors the 067
 /// Stage 4 `WebRenderCompilerSession` resident-mirror discipline: one
-/// `OverworldFeatureDependencyCache` held across jobs (instead of
-/// `OverworldFeatureDependencyCache::new()` per job, as the stateless
+/// profile-neutral dependency executor held across jobs (instead of a fresh
+/// cache per job, as the stateless
 /// [`compute_worldgen_job_frame`] free function and the native `mpsc` worker
 /// still do) plus a `mirror_generation` epoch for the desync tripwire. Each job
 /// applies its request delta to the resident cache, then generates from it, so
@@ -315,7 +390,7 @@ fn encode_worldgen_response(
 /// re-serialization in and the regeneration of those columns.
 #[derive(Debug, Default)]
 pub struct WorldgenJobSession {
-    cache: OverworldFeatureDependencyCache,
+    executor: WorldGenerationExecutor,
     descriptor: Option<WorldGenerationDescriptor>,
     mirror_generation: Option<u64>,
     last_delta_upsert_count: usize,
@@ -339,15 +414,16 @@ impl WorldgenJobSession {
     pub fn compute_delta_job_frame(&mut self, bytes: &[u8]) -> Result<Vec<u8>, String> {
         let mut reader = FrameReader::new(bytes, WORLDGEN_DELTA_REQUEST_MAGIC)?;
         let job_id = ChunkJobId(reader.read_u64()?);
-        let descriptor = reader.read_world_generation_descriptor()?;
         let generation = reader.read_u64()?;
         let reset = reader.read_bool()?;
-        let targets = reader.read_vec("worldgen delta targets", FrameReader::read_chunk_pos)?;
-        let upserts = reader.read_vec("worldgen delta upserts", FrameReader::read_mutable_chunk)?;
+        let request = reader.read_generation_execution_request()?;
         reader.finish()?;
+        let descriptor = request.descriptor();
+        let targets = request.requested_outputs().to_vec();
+        let upsert_count = request.seeded_inputs.len();
 
         if reset {
-            self.cache.clear();
+            self.executor.clear();
             self.descriptor = Some(descriptor);
             self.mirror_generation = Some(generation);
         } else if self.mirror_generation != Some(generation) {
@@ -363,16 +439,15 @@ impl WorldgenJobSession {
             ));
         }
 
-        self.last_delta_upsert_count = upserts.len();
+        self.last_delta_upsert_count = upsert_count;
         self.last_delta_reset = reset;
 
         // Snapshot what the mirror held before this job; the response ships only the
         // columns that become resident this job (plus the light ring) — see
         // `worldgen_response_subset_positions`.
-        let resident_before = self.cache.resident_positions();
+        let resident_before = self.executor.resident_positions(descriptor.profile);
 
-        let result =
-            generate_chunks_with_dependencies(&mut self.cache, descriptor, &targets, upserts)?;
+        let result = self.executor.execute(request)?;
 
         encode_worldgen_response(job_id, descriptor, result, &resident_before, &targets)
     }
@@ -380,7 +455,9 @@ impl WorldgenJobSession {
     /// Number of dependency columns currently resident in the worker mirror
     /// (bounded to the last job's plan by the cache's own retain step).
     pub fn mirror_chunk_count(&self) -> usize {
-        self.cache.retained_chunk_count()
+        self.descriptor.map_or(0, |descriptor| {
+            self.executor.retained_chunk_count(descriptor.profile)
+        })
     }
 
     /// The resident mirror's adopted generation, or `None` before the first
@@ -463,7 +540,7 @@ pub(crate) struct WorldgenJobFrame {
     /// correct its mirror shadow to the worker's authoritative retained set even
     /// though the buffers above are only a subset.
     pub(crate) retained_dependency_positions: Vec<ChunkPos>,
-    pub(crate) overworld_diagnostics: Option<OverworldGenerationDiagnostics>,
+    pub(crate) diagnostics: Option<GenerationDiagnostics>,
 }
 
 struct FrameWriter {
@@ -534,6 +611,42 @@ impl FrameWriter {
     fn write_world_generation_descriptor(&mut self, descriptor: WorldGenerationDescriptor) {
         self.write_u8(descriptor.profile.codec_tag());
         self.write_i64(descriptor.seed);
+    }
+
+    fn write_chunk_status(&mut self, status: ChunkStatus) {
+        self.write_u8(match status {
+            ChunkStatus::Terrain => 0,
+            ChunkStatus::Surface => 1,
+            ChunkStatus::Features => 2,
+            ChunkStatus::Light => 3,
+            ChunkStatus::Full => 4,
+        });
+    }
+
+    fn write_generation_execution_request(
+        &mut self,
+        request: &GenerationExecutionRequest,
+    ) -> Result<(), String> {
+        self.write_world_generation_descriptor(request.descriptor());
+        self.write_len(
+            "worldgen requested outputs",
+            request.requested_outputs().len(),
+        )?;
+        for output in request.requested_outputs() {
+            self.write_chunk_pos(*output);
+        }
+        self.write_len("worldgen seeded inputs", request.seeded_inputs.len())?;
+        for input in &request.seeded_inputs {
+            self.write_chunk_pos(input.requirement.pos);
+            self.write_chunk_status(input.requirement.status);
+            match &input.artifact {
+                GenerationInputArtifact::ChunkBlocks(chunk) => {
+                    self.write_u8(0);
+                    self.write_mutable_chunk(chunk)?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn write_tick(&mut self, tick: &ScheduledTick) -> Result<(), String> {
@@ -681,7 +794,7 @@ impl FrameWriter {
         Ok(())
     }
 
-    fn write_feature_cache_report(&mut self, report: OverworldFeatureDependencyCacheReport) {
+    fn write_generation_cache_report(&mut self, report: GenerationCacheReport) {
         self.write_u64(report.requested_dependency_chunks as u64);
         self.write_u64(report.cache_hits as u64);
         self.write_u64(report.generated_dependency_chunks as u64);
@@ -919,6 +1032,38 @@ impl<'a> FrameReader<'a> {
         Ok(WorldGenerationDescriptor::new(profile, seed))
     }
 
+    fn read_chunk_status(&mut self) -> Result<ChunkStatus, String> {
+        match self.read_u8()? {
+            0 => Ok(ChunkStatus::Terrain),
+            1 => Ok(ChunkStatus::Surface),
+            2 => Ok(ChunkStatus::Features),
+            3 => Ok(ChunkStatus::Light),
+            4 => Ok(ChunkStatus::Full),
+            tag => Err(format!("unknown chunk status tag {tag}")),
+        }
+    }
+
+    fn read_generation_execution_request(&mut self) -> Result<GenerationExecutionRequest, String> {
+        let descriptor = self.read_world_generation_descriptor()?;
+        let requested_outputs =
+            self.read_vec("worldgen requested outputs", FrameReader::read_chunk_pos)?;
+        let seeded_inputs = self.read_vec("worldgen seeded inputs", |reader| {
+            let pos = reader.read_chunk_pos()?;
+            let status = reader.read_chunk_status()?;
+            let requirement = mclone_worldgen::levelgen::ChunkStatusRequirement { pos, status };
+            let artifact_tag = reader.read_u8()?;
+            let chunk = match artifact_tag {
+                0 => reader.read_mutable_chunk()?,
+                tag => return Err(format!("unknown generation input artifact tag {tag}")),
+            };
+            GenerationInput::chunk_blocks(requirement, chunk)
+        })?;
+        Ok(GenerationExecutionRequest::new(
+            GenerationPlanRequest::new(descriptor, requested_outputs),
+            seeded_inputs,
+        ))
+    }
+
     fn read_tick(&mut self) -> Result<ScheduledTick, String> {
         let x = self.read_i32()?;
         let y = self.read_i32()?;
@@ -1070,10 +1215,8 @@ impl<'a> FrameReader<'a> {
         })
     }
 
-    fn read_feature_cache_report(
-        &mut self,
-    ) -> Result<OverworldFeatureDependencyCacheReport, String> {
-        Ok(OverworldFeatureDependencyCacheReport {
+    fn read_generation_cache_report(&mut self) -> Result<GenerationCacheReport, String> {
+        Ok(GenerationCacheReport {
             requested_dependency_chunks: self.read_u64()? as usize,
             cache_hits: self.read_u64()? as usize,
             generated_dependency_chunks: self.read_u64()? as usize,
@@ -1195,13 +1338,46 @@ mod tests {
     use mclone_core::{AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
     use mclone_worldgen::levelgen::OverworldFeatureBatchResult;
 
+    fn execution_request(
+        descriptor: WorldGenerationDescriptor,
+        targets: &[ChunkPos],
+        seeded_inputs: Vec<GenerationInput>,
+    ) -> GenerationExecutionRequest {
+        GenerationExecutionRequest::new(
+            GenerationPlanRequest::new(descriptor, targets.to_vec()),
+            seeded_inputs,
+        )
+    }
+
+    fn full_worldgen_frame(
+        job_id: ChunkJobId,
+        descriptor: WorldGenerationDescriptor,
+        targets: &[ChunkPos],
+    ) -> Result<Vec<u8>, String> {
+        encode_worldgen_request(job_id, &execution_request(descriptor, targets, Vec::new()))
+    }
+
+    fn delta_worldgen_frame(
+        job_id: ChunkJobId,
+        descriptor: WorldGenerationDescriptor,
+        generation: u64,
+        reset: bool,
+        targets: &[ChunkPos],
+    ) -> Result<Vec<u8>, String> {
+        encode_worldgen_delta_request(
+            job_id,
+            generation,
+            reset,
+            &execution_request(descriptor, targets, Vec::new()),
+        )
+    }
+
     #[test]
     fn worldgen_job_frame_crosses_command_update_boundary() {
-        let request = encode_worldgen_request(
+        let request = full_worldgen_frame(
             ChunkJobId(7),
             WorldGenerationDescriptor::overworld(12_345),
             &[ChunkPos::new(0, 0)],
-            Vec::new(),
         )
         .unwrap();
         let response = compute_worldgen_job_frame(&request).unwrap();
@@ -1213,9 +1389,7 @@ mod tests {
             WorldGenerationDescriptor::overworld(12_345)
         );
         assert!(decoded.generated_chunks.contains_key(&ChunkPos::new(0, 0)));
-        let diagnostics = decoded
-            .overworld_diagnostics
-            .expect("overworld response diagnostics");
+        let diagnostics = decoded.diagnostics.expect("overworld response diagnostics");
         assert_eq!(
             diagnostics.cache_report.retained_dependency_chunks,
             diagnostics.cache_report.requested_dependency_chunks
@@ -1224,24 +1398,49 @@ mod tests {
     }
 
     #[test]
-    fn target_only_worldgen_frames_omit_overworld_diagnostics() {
-        for profile in [
-            WorldGenerationProfile::FlatGrassV1,
-            WorldGenerationProfile::SmallIslandV1,
-        ] {
-            let request = encode_worldgen_request(
-                ChunkJobId(8),
-                WorldGenerationDescriptor::new(profile, 12_345),
-                &[ChunkPos::new(0, 0)],
-                Vec::new(),
-            )
-            .unwrap();
-            let response = compute_worldgen_job_frame(&request).unwrap();
-            let decoded = decode_worldgen_response(&response).unwrap();
+    fn diagnostics_follow_the_profile_contract() {
+        let target = [ChunkPos::new(0, 0)];
+        let flat = full_worldgen_frame(
+            ChunkJobId(8),
+            WorldGenerationDescriptor::new(WorldGenerationProfile::FlatGrassV1, 12_345),
+            &target,
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        assert!(flat.diagnostics.is_none());
 
-            assert_eq!(decoded.descriptor.profile, profile);
-            assert!(decoded.overworld_diagnostics.is_none());
-        }
+        let island = full_worldgen_frame(
+            ChunkJobId(9),
+            WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, 12_345),
+            &target,
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        let diagnostics = island.diagnostics.expect("island cache diagnostics");
+        assert_eq!(diagnostics.cache_report.requested_dependency_chunks, 25);
+        assert!(diagnostics.overworld_timing.is_none());
+    }
+
+    #[test]
+    fn worldgen_frame_preserves_and_validates_typed_input_requirements() {
+        let descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, 12_345);
+        let target = ChunkPos::new(0, 0);
+        let requirement =
+            mclone_worldgen::levelgen::ChunkStatusRequirement::new(target, ChunkStatus::Terrain);
+        let input = GenerationInput::chunk_blocks(
+            requirement,
+            MutableChunkBlockBuffer::new(target.x, target.z, 0, 256),
+        )
+        .unwrap();
+        let request = execution_request(descriptor, &[target], vec![input]);
+        let frame = encode_worldgen_request(ChunkJobId(10), &request).unwrap();
+
+        let error = compute_worldgen_job_frame(&frame).unwrap_err();
+        assert!(error.contains("Terrain"), "unexpected error: {error}");
+        assert!(error.contains("not declared"), "unexpected error: {error}");
     }
 
     fn stateless_reference(seed: i64, targets: &[ChunkPos]) -> OverworldFeatureBatchResult {
@@ -1260,9 +1459,7 @@ mod tests {
         let reference = stateless_reference(seed, &targets);
 
         let mut session = WorldgenJobSession::new();
-        let request =
-            encode_worldgen_delta_request(ChunkJobId(1), descriptor, 1, true, &targets, &[])
-                .unwrap();
+        let request = delta_worldgen_frame(ChunkJobId(1), descriptor, 1, true, &targets).unwrap();
         let decoded =
             decode_worldgen_response(&session.compute_delta_job_frame(&request).unwrap()).unwrap();
 
@@ -1311,19 +1508,11 @@ mod tests {
 
         let mut session = WorldgenJobSession::new();
         let req1 =
-            encode_worldgen_delta_request(ChunkJobId(1), descriptor, 7, true, &first_targets, &[])
-                .unwrap();
+            delta_worldgen_frame(ChunkJobId(1), descriptor, 7, true, &first_targets).unwrap();
         session.compute_delta_job_frame(&req1).unwrap();
 
-        let req2 = encode_worldgen_delta_request(
-            ChunkJobId(2),
-            descriptor,
-            7,
-            false,
-            &second_targets,
-            &[],
-        )
-        .unwrap();
+        let req2 =
+            delta_worldgen_frame(ChunkJobId(2), descriptor, 7, false, &second_targets).unwrap();
         let decoded2 =
             decode_worldgen_response(&session.compute_delta_job_frame(&req2).unwrap()).unwrap();
 
@@ -1333,7 +1522,7 @@ mod tests {
         assert_eq!(decoded2.generated_chunks, reference2.chunks);
         assert!(
             decoded2
-                .overworld_diagnostics
+                .diagnostics
                 .expect("overworld response diagnostics")
                 .cache_report
                 .cache_hits
@@ -1395,21 +1584,16 @@ mod tests {
         let targets = [ChunkPos::new(0, 0)];
 
         let mut session = WorldgenJobSession::new();
-        let req_reset =
-            encode_worldgen_delta_request(ChunkJobId(1), descriptor, 1, true, &targets, &[])
-                .unwrap();
+        let req_reset = delta_worldgen_frame(ChunkJobId(1), descriptor, 1, true, &targets).unwrap();
         session.compute_delta_job_frame(&req_reset).unwrap();
 
-        let req_bad =
-            encode_worldgen_delta_request(ChunkJobId(2), descriptor, 2, false, &targets, &[])
-                .unwrap();
+        let req_bad = delta_worldgen_frame(ChunkJobId(2), descriptor, 2, false, &targets).unwrap();
         let err = session.compute_delta_job_frame(&req_bad).unwrap_err();
         assert!(err.contains("desync"), "unexpected error: {err}");
 
         let mut fresh = WorldgenJobSession::new();
         let req_premature =
-            encode_worldgen_delta_request(ChunkJobId(3), descriptor, 1, false, &targets, &[])
-                .unwrap();
+            delta_worldgen_frame(ChunkJobId(3), descriptor, 1, false, &targets).unwrap();
         assert!(fresh.compute_delta_job_frame(&req_premature).is_err());
     }
 
@@ -1417,24 +1601,22 @@ mod tests {
     fn worldgen_delta_session_requires_reset_for_descriptor_change() {
         let targets = [ChunkPos::new(0, 0)];
         let mut session = WorldgenJobSession::new();
-        let first = encode_worldgen_delta_request(
+        let first = delta_worldgen_frame(
             ChunkJobId(1),
             WorldGenerationDescriptor::overworld(12_345),
             1,
             true,
             &targets,
-            &[],
         )
         .unwrap();
         session.compute_delta_job_frame(&first).unwrap();
 
-        let changed_without_reset = encode_worldgen_delta_request(
+        let changed_without_reset = delta_worldgen_frame(
             ChunkJobId(2),
             WorldGenerationDescriptor::overworld(54_321),
             1,
             false,
             &targets,
-            &[],
         )
         .unwrap();
         let error = session
@@ -1442,13 +1624,12 @@ mod tests {
             .unwrap_err();
         assert!(error.contains("descriptor changed"), "{error}");
 
-        let changed_with_reset = encode_worldgen_delta_request(
+        let changed_with_reset = delta_worldgen_frame(
             ChunkJobId(3),
             WorldGenerationDescriptor::overworld(54_321),
             2,
             true,
             &targets,
-            &[],
         )
         .unwrap();
         session
@@ -1467,16 +1648,15 @@ mod tests {
             -9_223_372_036_854_775,
         );
         let targets = [ChunkPos::new(7, -9), ChunkPos::new(-2, 3)];
-        let forward = encode_worldgen_request(ChunkJobId(1), descriptor, &targets, Vec::new())
+        let forward = full_worldgen_frame(ChunkJobId(1), descriptor, &targets)
             .and_then(|frame| compute_worldgen_job_frame(&frame))
             .and_then(|frame| decode_worldgen_response(&frame))
             .unwrap();
         let reversed_targets = [targets[1], targets[0]];
-        let reversed =
-            encode_worldgen_request(ChunkJobId(2), descriptor, &reversed_targets, Vec::new())
-                .and_then(|frame| compute_worldgen_job_frame(&frame))
-                .and_then(|frame| decode_worldgen_response(&frame))
-                .unwrap();
+        let reversed = full_worldgen_frame(ChunkJobId(2), descriptor, &reversed_targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
 
         assert_eq!(forward.descriptor, descriptor);
         assert_eq!(forward.generated_chunks, reversed.generated_chunks);
@@ -1493,7 +1673,7 @@ mod tests {
     }
 
     #[test]
-    fn small_island_frames_are_target_only_partition_and_order_independent() {
+    fn small_island_frames_are_dependency_bearing_partition_and_order_independent() {
         let descriptor =
             WorldGenerationDescriptor::new(WorldGenerationProfile::SmallIslandV1, -98_765);
         let targets = [
@@ -1501,45 +1681,40 @@ mod tests {
             ChunkPos::new(-3, 4),
             ChunkPos::new(0, 0),
         ];
-        let batch = encode_worldgen_request(ChunkJobId(1), descriptor, &targets, Vec::new())
+        let batch = full_worldgen_frame(ChunkJobId(1), descriptor, &targets)
             .and_then(|frame| compute_worldgen_job_frame(&frame))
             .and_then(|frame| decode_worldgen_response(&frame))
             .unwrap();
         let reversed_targets = [targets[2], targets[1], targets[0]];
-        let reversed =
-            encode_worldgen_request(ChunkJobId(2), descriptor, &reversed_targets, Vec::new())
-                .and_then(|frame| compute_worldgen_job_frame(&frame))
-                .and_then(|frame| decode_worldgen_response(&frame))
-                .unwrap();
+        let reversed = full_worldgen_frame(ChunkJobId(2), descriptor, &reversed_targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
         let partitioned = targets
             .iter()
             .copied()
             .enumerate()
             .flat_map(|(index, target)| {
-                encode_worldgen_request(
-                    ChunkJobId(index as u64 + 3),
-                    descriptor,
-                    &[target],
-                    Vec::new(),
-                )
-                .and_then(|frame| compute_worldgen_job_frame(&frame))
-                .and_then(|frame| decode_worldgen_response(&frame))
-                .unwrap()
-                .generated_chunks
+                full_worldgen_frame(ChunkJobId(index as u64 + 3), descriptor, &[target])
+                    .and_then(|frame| compute_worldgen_job_frame(&frame))
+                    .and_then(|frame| decode_worldgen_response(&frame))
+                    .unwrap()
+                    .generated_chunks
             })
             .collect::<BTreeMap<_, _>>();
 
         assert_eq!(batch.descriptor, descriptor);
         assert_eq!(batch.generated_chunks, reversed.generated_chunks);
         assert_eq!(batch.generated_chunks, partitioned);
-        assert!(batch.retained_dependencies.is_empty());
-        assert!(batch.retained_dependency_positions.is_empty());
+        assert!(!batch.retained_dependencies.is_empty());
+        assert!(!batch.retained_dependency_positions.is_empty());
+        assert!(batch.diagnostics.is_some());
 
         let other_seed = WorldGenerationDescriptor::new(
             WorldGenerationProfile::SmallIslandV1,
             descriptor.seed + 1,
         );
-        let changed = encode_worldgen_request(ChunkJobId(9), other_seed, &targets, Vec::new())
+        let changed = full_worldgen_frame(ChunkJobId(9), other_seed, &targets)
             .and_then(|frame| compute_worldgen_job_frame(&frame))
             .and_then(|frame| decode_worldgen_response(&frame))
             .unwrap();

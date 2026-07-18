@@ -133,6 +133,20 @@ pub(super) fn overworld_features_for_biome_cached(
     }
 }
 
+pub(crate) fn small_island_feature_table() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            vec![
+                tree_feature(BasicTreeConfiguration::oak(), 1, 0.25, 1),
+                grass_patch(GRASS, 3),
+                flower_patch(DANDELION, 1),
+                flower_patch(POPPY, 1),
+            ]
+        })
+        .as_slice()
+}
+
 fn build_overworld_feature_table(
     biome_key: &str,
     mut biome_features: Vec<PlacedFeature>,

@@ -1,8 +1,16 @@
-use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord, expected_chunk_biome_count};
+use std::collections::{BTreeMap, BTreeSet};
 
+use mclone_core::{CHUNK_WIDTH, ChunkPos, chunk_min_block_coord, expected_chunk_biome_count};
+
+use crate::biome::get_layered_biome_by_id;
 use crate::block::{BEDROCK, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
+use crate::feature::{
+    FeatureRegion, apply_feature_table_to_region_timed, small_island_feature_table,
+};
+use crate::noise::{SeedDomain, ValueNoise2d};
 
-use super::{GeneratedChunk, MutableChunkBlockBuffer};
+use super::feature_batch::sorted_chunk_positions_z_major;
+use super::{ChunkGenerationPlan, GeneratedChunk, MutableChunkBlockBuffer};
 
 pub const FLAT_GRASS_MIN_Y: i32 = 0;
 pub const FLAT_GRASS_HEIGHT: i32 = 256;
@@ -27,9 +35,39 @@ const SMALL_ISLAND_SHORE_NOISE_AMPLITUDE: f64 = 20.0;
 const SMALL_ISLAND_DETAIL_NOISE_AMPLITUDE: f64 = 7.0;
 const SMALL_ISLAND_RELIEF_AMPLITUDE: f64 = 5.0;
 const SMALL_ISLAND_SPAWN_BLEND_DISTANCE: f64 = 20.0;
-const SMALL_ISLAND_SHORE_DOMAIN: u64 = 0x6d63_6c6f_6e65_6973;
-const SMALL_ISLAND_DETAIL_DOMAIN: u64 = 0x736d_616c_6c2d_7631;
-const SMALL_ISLAND_RELIEF_DOMAIN: u64 = 0x7265_6c69_6566_7631;
+const SMALL_ISLAND_SHORE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6c6f_6e65_6973);
+const SMALL_ISLAND_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x736d_616c_6c2d_7631);
+const SMALL_ISLAND_RELIEF_DOMAIN: SeedDomain = SeedDomain::new(0x7265_6c69_6566_7631);
+const SMALL_ISLAND_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6465_636f_722d_7631);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SmallIslandNoise {
+    shore: ValueNoise2d,
+    detail: ValueNoise2d,
+    relief: ValueNoise2d,
+}
+
+impl SmallIslandNoise {
+    fn new(seed: i64) -> Self {
+        Self {
+            shore: ValueNoise2d::new(
+                seed,
+                SMALL_ISLAND_SHORE_DOMAIN,
+                SMALL_ISLAND_SHORE_NOISE_SCALE,
+            ),
+            detail: ValueNoise2d::new(
+                seed,
+                SMALL_ISLAND_DETAIL_DOMAIN,
+                SMALL_ISLAND_DETAIL_NOISE_SCALE,
+            ),
+            relief: ValueNoise2d::new(
+                seed,
+                SMALL_ISLAND_RELIEF_DOMAIN,
+                SMALL_ISLAND_RELIEF_NOISE_SCALE,
+            ),
+        }
+    }
+}
 
 /// Generate the immutable `flat-grass-v1` column stack.
 ///
@@ -54,18 +92,35 @@ pub fn generate_flat_grass_chunk(chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
     )
 }
 
-/// Generate one target-only chunk from the immutable `small-island-v1` field.
-pub fn generate_small_island_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
+/// Generate one undecorated Surface-stage chunk from the small-island field.
+pub fn generate_small_island_surface_chunk(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> GeneratedChunk {
+    let buffer = generate_small_island_surface_buffer(seed, chunk_x, chunk_z);
+    GeneratedChunk::from_mutable_buffer_with_biomes(
+        buffer,
+        small_island_chunk_biomes(seed, chunk_x, chunk_z),
+    )
+}
+
+fn generate_small_island_surface_buffer(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> MutableChunkBlockBuffer {
     let mut buffer =
         MutableChunkBlockBuffer::new(chunk_x, chunk_z, FLAT_GRASS_MIN_Y, FLAT_GRASS_HEIGHT);
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
+    let noise = SmallIslandNoise::new(seed);
 
     for local_z in 0..CHUNK_WIDTH {
         for local_x in 0..CHUNK_WIDTH {
             let world_x = min_x + local_x;
             let world_z = min_z + local_z;
-            let surface_y = small_island_surface_height(seed, world_x, world_z);
+            let surface_y = small_island_surface_height_with_noise(noise, world_x, world_z);
             buffer.set_block_at_y(local_x, 0, local_z, BEDROCK);
 
             if surface_y >= SMALL_ISLAND_SEA_LEVEL - 4 && surface_y <= SMALL_ISLAND_SEA_LEVEL + 3 {
@@ -95,14 +150,204 @@ pub fn generate_small_island_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> Gen
         }
     }
 
-    GeneratedChunk::from_mutable_buffer_with_biomes(
-        buffer,
-        small_island_chunk_biomes(seed, chunk_x, chunk_z),
-    )
+    buffer.prime_worldgen_heightmaps();
+    buffer
+}
+
+/// Generate one fully decorated small-island chunk through the same
+/// dependency-bearing batch path used by scheduler workers.
+pub fn generate_small_island_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
+    let pos = ChunkPos::new(chunk_x, chunk_z);
+    SmallIslandFeatureDependencyCache::new()
+        .generate_features_chunks(seed, [pos])
+        .chunks
+        .remove(&pos)
+        .unwrap_or_else(|| panic!("small-island feature batch omitted ({chunk_x}, {chunk_z})"))
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SmallIslandFeatureDependencyCacheReport {
+    pub requested_dependency_chunks: usize,
+    pub cache_hits: usize,
+    pub generated_dependency_chunks: usize,
+    pub retained_dependency_chunks: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SmallIslandFeatureBatchResult {
+    pub chunks: BTreeMap<ChunkPos, GeneratedChunk>,
+    pub retained_dependencies: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+    pub cache_report: SmallIslandFeatureDependencyCacheReport,
+}
+
+#[derive(Debug, Default)]
+pub struct SmallIslandFeatureDependencyCache {
+    seed: Option<i64>,
+    chunks: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+}
+
+impl SmallIslandFeatureDependencyCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn retained_chunk_count(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub fn resident_positions(&self) -> BTreeSet<ChunkPos> {
+        self.chunks.keys().copied().collect()
+    }
+
+    pub fn clear(&mut self) {
+        self.seed = None;
+        self.chunks.clear();
+    }
+
+    pub fn generate_features_chunks(
+        &mut self,
+        seed: i64,
+        targets: impl IntoIterator<Item = ChunkPos>,
+    ) -> SmallIslandFeatureBatchResult {
+        self.generate_features_chunks_with_dependencies(seed, targets, std::iter::empty())
+    }
+
+    pub fn generate_features_chunks_with_dependencies(
+        &mut self,
+        seed: i64,
+        targets: impl IntoIterator<Item = ChunkPos>,
+        dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> SmallIslandFeatureBatchResult {
+        if self.seed != Some(seed) {
+            self.seed = Some(seed);
+            self.chunks.clear();
+        }
+        for dependency in dependencies {
+            self.chunks.insert(
+                ChunkPos::new(dependency.chunk_x, dependency.chunk_z),
+                dependency,
+            );
+        }
+
+        let plan = ChunkGenerationPlan::small_island_features(targets);
+        let mut cache_report = SmallIslandFeatureDependencyCacheReport {
+            requested_dependency_chunks: plan.prerequisites().len(),
+            ..SmallIslandFeatureDependencyCacheReport::default()
+        };
+        let required_positions = plan
+            .prerequisites()
+            .iter()
+            .map(|requirement| requirement.pos)
+            .collect::<BTreeSet<_>>();
+        let mut region_chunks = Vec::with_capacity(required_positions.len());
+        for pos in sorted_chunk_positions_z_major(required_positions.iter().copied()) {
+            if let Some(chunk) = self.chunks.get(&pos) {
+                cache_report.cache_hits += 1;
+                region_chunks.push(chunk.clone());
+            } else {
+                let chunk = generate_small_island_surface_buffer(seed, pos.x, pos.z);
+                self.chunks.insert(pos, chunk.clone());
+                region_chunks.push(chunk);
+                cache_report.generated_dependency_chunks += 1;
+            }
+        }
+
+        self.chunks
+            .retain(|pos, _| required_positions.contains(pos));
+        cache_report.retained_dependency_chunks = self.chunks.len();
+        let retained_dependencies = self.chunks.clone();
+
+        if plan.output_chunks().is_empty() {
+            return SmallIslandFeatureBatchResult {
+                chunks: BTreeMap::new(),
+                retained_dependencies,
+                cache_report,
+            };
+        }
+
+        let first_target = *plan
+            .output_chunks()
+            .iter()
+            .next()
+            .expect("non-empty small-island targets");
+        let mut region = FeatureRegion::new(first_target.x, first_target.z, region_chunks);
+        let decoration_seed = SMALL_ISLAND_DECORATION_DOMAIN.derive(seed);
+        let plains = get_layered_biome_by_id(PLAINS_BIOME_ID);
+        for center in sorted_chunk_positions_z_major(plan.backend_work_chunks().iter().copied()) {
+            region.set_center(center.x, center.z);
+            apply_feature_table_to_region_timed(
+                decoration_seed,
+                plains,
+                small_island_feature_table(),
+                &mut region,
+            );
+        }
+
+        let (targets, _, _) = plan.into_parts();
+        let mut chunks = BTreeMap::new();
+        for target in targets {
+            let mut chunk = region.remove_chunk(target.x, target.z).unwrap_or_else(|| {
+                panic!(
+                    "small-island feature region omitted target ({}, {})",
+                    target.x, target.z
+                )
+            });
+            restore_small_island_spawn_patch(&mut chunk);
+            chunks.insert(
+                target,
+                GeneratedChunk::from_mutable_buffer_with_biomes(
+                    chunk,
+                    small_island_chunk_biomes(seed, target.x, target.z),
+                ),
+            );
+        }
+
+        SmallIslandFeatureBatchResult {
+            chunks,
+            retained_dependencies,
+            cache_report,
+        }
+    }
+}
+
+fn restore_small_island_spawn_patch(chunk: &mut MutableChunkBlockBuffer) {
+    let min_x = chunk_min_block_coord(chunk.chunk_x);
+    let min_z = chunk_min_block_coord(chunk.chunk_z);
+    for local_z in 0..CHUNK_WIDTH {
+        for local_x in 0..CHUNK_WIDTH {
+            let world_x = min_x + local_x;
+            let world_z = min_z + local_z;
+            if !(SMALL_ISLAND_SPAWN_PATCH_MIN..SMALL_ISLAND_SPAWN_PATCH_MAX_EXCLUSIVE)
+                .contains(&world_x)
+                || !(SMALL_ISLAND_SPAWN_PATCH_MIN..SMALL_ISLAND_SPAWN_PATCH_MAX_EXCLUSIVE)
+                    .contains(&world_z)
+            {
+                continue;
+            }
+            chunk.set_block_at_y(local_x, 0, local_z, BEDROCK);
+            for y in 1..SMALL_ISLAND_SPAWN_SURFACE_Y - 2 {
+                chunk.set_block_at_y(local_x, y, local_z, STONE);
+            }
+            chunk.set_block_at_y(local_x, SMALL_ISLAND_SPAWN_SURFACE_Y - 2, local_z, DIRT);
+            chunk.set_block_at_y(local_x, SMALL_ISLAND_SPAWN_SURFACE_Y - 1, local_z, DIRT);
+            chunk.set_block_at_y(local_x, SMALL_ISLAND_SPAWN_SURFACE_Y, local_z, GRASS_BLOCK);
+            for y in SMALL_ISLAND_SPAWN_SURFACE_Y + 1..FLAT_GRASS_HEIGHT {
+                chunk.set_block_at_y(local_x, y, local_z, crate::block::AIR);
+            }
+        }
+    }
 }
 
 /// Single-valued absolute-coordinate surface field for `small-island-v1`.
 pub fn small_island_surface_height(seed: i64, world_x: i32, world_z: i32) -> i32 {
+    small_island_surface_height_with_noise(SmallIslandNoise::new(seed), world_x, world_z)
+}
+
+fn small_island_surface_height_with_noise(
+    noise: SmallIslandNoise,
+    world_x: i32,
+    world_z: i32,
+) -> i32 {
     let x = f64::from(world_x);
     let z = f64::from(world_z);
     let distance = (x * x + z * z).sqrt();
@@ -110,33 +355,14 @@ pub fn small_island_surface_height(seed: i64, world_x: i32, world_z: i32) -> i32
         return SMALL_ISLAND_OCEAN_FLOOR_Y;
     }
 
-    let shore_noise = value_noise_2d(
-        seed,
-        world_x,
-        world_z,
-        SMALL_ISLAND_SHORE_NOISE_SCALE,
-        SMALL_ISLAND_SHORE_DOMAIN,
-    );
-    let detail_noise = value_noise_2d(
-        seed,
-        world_x,
-        world_z,
-        SMALL_ISLAND_DETAIL_NOISE_SCALE,
-        SMALL_ISLAND_DETAIL_DOMAIN,
-    );
+    let shore_noise = noise.shore.sample(world_x, world_z);
+    let detail_noise = noise.detail.sample(world_x, world_z);
     let distorted_distance = distance
         - shore_noise * SMALL_ISLAND_SHORE_NOISE_AMPLITUDE
         - detail_noise * SMALL_ISLAND_DETAIL_NOISE_AMPLITUDE;
     let strength = (1.0 - distorted_distance / SMALL_ISLAND_ENVELOPE_RADIUS).clamp(0.0, 1.0);
     let envelope = smoothstep(strength);
-    let relief = value_noise_2d(
-        seed,
-        world_x,
-        world_z,
-        SMALL_ISLAND_RELIEF_NOISE_SCALE,
-        SMALL_ISLAND_RELIEF_DOMAIN,
-    ) * SMALL_ISLAND_RELIEF_AMPLITUDE
-        * envelope;
+    let relief = noise.relief.sample(world_x, world_z) * SMALL_ISLAND_RELIEF_AMPLITUDE * envelope;
     let base_height =
         (f64::from(SMALL_ISLAND_OCEAN_FLOOR_Y) + SMALL_ISLAND_HEIGHT_SPAN * envelope + relief)
             .round()
@@ -190,42 +416,6 @@ fn small_island_chunk_biomes(seed: i64, chunk_x: i32, chunk_z: i32) -> Vec<i32> 
     biomes
 }
 
-fn value_noise_2d(seed: i64, world_x: i32, world_z: i32, scale: i32, domain: u64) -> f64 {
-    let lattice_x = world_x.div_euclid(scale);
-    let lattice_z = world_z.div_euclid(scale);
-    let fraction_x = f64::from(world_x.rem_euclid(scale)) / f64::from(scale);
-    let fraction_z = f64::from(world_z.rem_euclid(scale)) / f64::from(scale);
-    let blend_x = smoothstep(fraction_x);
-    let blend_z = smoothstep(fraction_z);
-    let top = lerp(
-        lattice_noise(seed, lattice_x, lattice_z, domain),
-        lattice_noise(seed, lattice_x + 1, lattice_z, domain),
-        blend_x,
-    );
-    let bottom = lerp(
-        lattice_noise(seed, lattice_x, lattice_z + 1, domain),
-        lattice_noise(seed, lattice_x + 1, lattice_z + 1, domain),
-        blend_x,
-    );
-    lerp(top, bottom, blend_z)
-}
-
-fn lattice_noise(seed: i64, x: i32, z: i32, domain: u64) -> f64 {
-    let mut value = (seed as u64) ^ domain;
-    value ^= (x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    value ^= (z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = splitmix64(value);
-    let unit = (value >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64));
-    unit * 2.0 - 1.0
-}
-
-fn splitmix64(mut value: u64) -> u64 {
-    value = value.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
-}
-
 fn smoothstep(value: f64) -> f64 {
     value * value * (3.0 - 2.0 * value)
 }
@@ -236,7 +426,10 @@ fn lerp(from: f64, to: f64, amount: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::block::{AIR, BEDROCK, DIRT, GRASS_BLOCK, RawBlockId, SAND, STONE, WATER};
+    use crate::block::{
+        AIR, BEDROCK, DANDELION, DIRT, GRASS, GRASS_BLOCK, OAK_LOG, POPPY, RawBlockId, SAND, STONE,
+        WATER,
+    };
 
     use super::*;
 
@@ -413,6 +606,59 @@ mod tests {
             small_island_fingerprint(-98_765),
             12_105_951_125_863_982_310
         );
+    }
+
+    #[test]
+    fn small_island_feature_cache_reuses_overlapping_surface_inputs() {
+        let mut cache = SmallIslandFeatureDependencyCache::new();
+        let first = cache.generate_features_chunks(12_345, [ChunkPos::new(0, 0)]);
+        assert_eq!(first.cache_report.requested_dependency_chunks, 25);
+        assert_eq!(first.cache_report.cache_hits, 0);
+        assert_eq!(first.cache_report.generated_dependency_chunks, 25);
+
+        let second = cache.generate_features_chunks(12_345, [ChunkPos::new(1, 0)]);
+        assert_eq!(second.cache_report.requested_dependency_chunks, 25);
+        assert_eq!(second.cache_report.cache_hits, 20);
+        assert_eq!(second.cache_report.generated_dependency_chunks, 5);
+        assert_eq!(second.cache_report.retained_dependency_chunks, 25);
+    }
+
+    #[test]
+    fn small_island_neighbor_features_are_partition_independent() {
+        let targets = [ChunkPos::new(0, 0), ChunkPos::new(1, 0)];
+        let combined = SmallIslandFeatureDependencyCache::new()
+            .generate_features_chunks(12_345, targets)
+            .chunks;
+        let partitioned = targets
+            .into_iter()
+            .map(|target| {
+                let chunk = generate_small_island_chunk(12_345, target.x, target.z);
+                (target, chunk)
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(combined, partitioned);
+    }
+
+    #[test]
+    fn small_island_feature_stage_places_real_decorations() {
+        let targets = (-4..=4)
+            .flat_map(|z| (-4..=4).map(move |x| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        let chunks = SmallIslandFeatureDependencyCache::new()
+            .generate_features_chunks(12_345, targets)
+            .chunks;
+        let decoration_count = chunks
+            .values()
+            .map(|chunk| {
+                [OAK_LOG, GRASS, DANDELION, POPPY]
+                    .into_iter()
+                    .map(|block| chunk.block_count(block))
+                    .sum::<usize>()
+            })
+            .sum::<usize>();
+
+        assert!(decoration_count > 0);
     }
 
     fn small_island_fingerprint(seed: i64) -> u64 {
