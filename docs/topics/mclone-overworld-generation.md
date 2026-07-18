@@ -9,7 +9,10 @@ internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
 Minecraft Java 1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete;
 [`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md) owns the
-next mountain/valley content family.
+next mountain/valley content family. The shared Flat Grass cylinder proof is
+complete; [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned
+after the first accepted Tactical 192 field set and before rivers, climate
+breadth, or structures.
 
 ## Scope
 
@@ -364,7 +367,13 @@ with its pre-slice product and reuse inventory. Add only the ridge and
 ruggedness/erosion signals used by the first mountain/valley rule, review their
 production maps and first landscapes before abstraction, and then reserve a
 dedicated reuse/refactor checkpoint. Do not fold rivers, climate breadth,
-caves, or structures into that tactical.
+caves, or structures into that tactical. After its first field set is accepted,
+execute [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
+re-audit every live field scale, select the explicit periodic sampler and
+circumference, then route terrain and decoration through canonical outputs plus
+coherent seam work lifts. Do not add rivers or climate breadth before that
+contract is demonstrated through the production browser Worker and persistence
+paths.
 
 ## Related
 
@@ -376,3 +385,4 @@ caves, or structures into that tactical.
 - [`../tactical/187-generator-profile-flat-grass-and-seeded-island.md`](../tactical/187-generator-profile-flat-grass-and-seeded-island.md)
 - [`../tactical/191-guarded-generation-planning-refactor.md`](../tactical/191-guarded-generation-planning-refactor.md)
 - [`../tactical/192-mclone-overworld-mountains-and-valleys.md`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
+- [`../tactical/196-periodic-mclone-terrain-fields.md`](../tactical/196-periodic-mclone-terrain-fields.md)

@@ -1,14 +1,11 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: in progress 2026-07-18. Slices 0-5 are complete: the Euclidean
-baseline, caller inventory, shared topology operations, persisted descriptor,
-protocol ordering, canonical client dimension fact, and finite-bound authority
-canary have landed. The periodic authority and scheduling proof now maintains
-one canonical X ring. Observer-local terrain lifts, seam-aware meshing and
-dirtying, and the first inspected seam pixels have landed. Movement,
-interaction, fluid, light, multiplayer, continuity reset, and stable actor
-crossings now agree on the same seam. Slice 6 is persistence, network,
-platform, performance, and terrain-handoff closeout.
+Status: complete 2026-07-18. Slices 0-6 landed the Euclidean baseline,
+finite-bound canary, one canonical 32-chunk Flat Grass X ring, observer-local
+render lifts, seamless gameplay neighbors, SQLite and IndexedDB reopen,
+in-memory/TCP/WebSocket agreement, shared platform validation, performance
+evidence, and the periodic Mclone terrain handoff. Cylinder v0 is supported;
+its explicit exclusions remain recorded below.
 
 Topic: `bounded-world-topology`
 
@@ -184,9 +181,9 @@ must be explicit:
 
 | Profile/family | Euclidean plane | Finite | Cylinder X | Torus | Patch atlas |
 |---|---|---|---|---|---|
-| Flat Grass | supported | first proof | first proof | pending | unsupported |
-| Authored Only | supported | fixture-only proof | fixture-only proof | pending | design only |
-| Mclone Overworld | supported | pending | later periodic sampler | pending | design only |
+| Flat Grass | supported | supported | supported | pending | unsupported |
+| Authored Only | supported | fixture support | fixture support | pending | design only |
+| Mclone Overworld | supported | pending | Tactical 196 planned | pending | design only |
 | Small Island | supported bounded content | pending | unsupported initially | unsupported | unsupported |
 | Reference Overworld | supported/reference-locked | unsupported | unsupported | unsupported | unsupported |
 | Alpha/Beta | supported internal profiles | unsupported | unsupported | unsupported | unsupported |
@@ -457,9 +454,9 @@ with zero GUI commands and no visible seam or crack.
 
 Focused tests cover canonical client snapshot lookup, wrapped dirty-neighbor
 deduplication, seam compile aliases, lifted traversal, and zero-cost uniform
-size preservation. The browser build consumes the extended compile request but
-does not yet enable cylinder meshing; browser cylinder startup and platform
-closeout remain Slice 6 work.
+size preservation. The production browser compiler now carries the same
+topology delta, borrows canonical seam neighbors, and draws the same
+observer-nearest image through its Web Worker path.
 
 ### Slice 5 movement, interaction, fluids, and actors (2026-07-18)
 
@@ -501,6 +498,56 @@ All 1,211 library tests in `mclone-protocol`, `mclone-client`,
 `mclone-server` pass. Focused canaries additionally cover both actor crossing
 directions, opposing-player interaction, runtime emissive removal, fluid flow,
 correction preservation, and lifecycle continuity reset.
+
+### Slice 6 persistence, network, and platform closeout (2026-07-18)
+
+SQLite now persists the dimension descriptor, canonical seam-side edits, the
+player after a complete lap, and the stable scripted cow; the focused close/
+reopen test recovers each fact under the same canonical owner. The production
+browser IndexedDB host persists the dimension record before realm construction
+and serializes ticks, commands, loads, saves, and flushes through its dedicated
+server Worker. Its cylinder probe generated and saved 121 chunks, two entity
+chunks, and one dimension record, placed dirt at canonical `(0,4,1)`, observed
+the same state at lifted `(512,4,1)`, reopened, and recovered state id 5 at both
+addresses. Repeated full create/save/reload runs passed, including the final
+edit-alias probe. The inspected post-reopen
+`/tmp/mclone-native-web-indexeddb-reload-probe-canvas.png` shows the edit and
+continuous terrain through the cyan seam.
+
+The dedicated server accepts the same topology selection as local hosts. Local
+in-memory, TCP, and WebSocket traces install the descriptor before dependent
+facts, and a TCP client requesting the seam neighbor receives the one canonical
+chunk. Render scheduling now measures target readiness and admission in the
+observer lift. An along-seam capture exposed the former raw-coordinate
+priority defect, where canonical chunk 31 could be dropped as far from chunk
+zero; fixing that shared scheduler produced continuous terrain on both sides in
+the inspected `/tmp/mclone-cylinder-along-seam-fixed.png` and browser captures.
+Crossing still performs no bulk shift, remesh, or upload replacement.
+
+The final workspace run passed 2,368 tests. Desktop offscreen, production web
+build/smoke and IndexedDB reopen, synthetic stereo XR, OpenXR compile, Android
+APK, Android AVD with the real `--world-topology cylinder-x` startup argument,
+and Quest APK packaging all passed. The inspected desktop, browser, stereo,
+and Android frames were healthy. No physical Quest headset was attached, so
+only that device execution lane remains unavailable; it is not represented as
+a pass.
+
+A paired 240-frame persisted Flat Grass run loaded 121 chunks, cached 1,296
+sections, compiled 1,248 sections, and uploaded 78 chunks in both modes. Plane
+versus cylinder average frame time was 2.311 versus 2.275 ms; total remesh was
+6.734 versus 7.694 ms, upload 8.466 versus 8.390 ms, and render 70.341 versus
+76.113 ms. Full-view readiness was 713.002 versus 699.831 ms and render
+quiescence 1,032.067 versus 1,080.308 ms. The comparable 12-chunk SQLite
+prewarm occupied 81,920 bytes in both modes. One-run resident memory was
+159,858,688 versus 172,081,152 bytes; that noisy process-wide sample is a
+watch item, not evidence of a retained canonical duplicate because all chunk,
+section, compile, and upload counts matched.
+
+[`Tactical 196`](196-periodic-mclone-terrain-fields.md) records the next
+terrain caller: explicit periodic production sampling, canonical outputs plus
+coherent work lifts, seam-safe feature/dependency planning, worker/cache
+identity, and native/browser/persistence evidence before rivers or climate
+breadth.
 
 ## Execution Checklist
 
@@ -597,16 +644,16 @@ claimed gameplay consumer agrees on the same neighbor.
 
 ### Slice 6: persistence, platform closeout, and terrain handoff
 
-- [ ] Complete a lap, edit both sides of the seam, save, close, reopen, and
+- [x] Complete a lap, edit both sides of the seam, save, close, reopen, and
   revisit the same canonical facts through SQLite and IndexedDB.
-- [ ] Prove normalized in-memory, TCP, and WebSocket behavior agreement.
-- [ ] Re-run native workspace tests, offscreen captures, browser build/smoke,
+- [x] Prove normalized in-memory, TCP, and WebSocket behavior agreement.
+- [x] Re-run native workspace tests, offscreen captures, browser build/smoke,
   Android packaging/AVD canary, and available XR compile/device lanes.
-- [ ] Measure direct Euclidean and one-lift cylinder frame, scheduling, mesh,
+- [x] Measure direct Euclidean and one-lift cylinder frame, scheduling, mesh,
   upload, storage, and memory costs.
-- [ ] Update the topology-support matrix and every deferred/unsupported
+- [x] Update the topology-support matrix and every deferred/unsupported
   subsystem with an exact reason.
-- [ ] Write the next periodic Mclone terrain tactical only after the canonical
+- [x] Write the next periodic Mclone terrain tactical only after the canonical
   plus work-lift generation contract is demonstrated.
 
 Gate: Cylinder v0 is a persisted, networked, inspectable gameplay dimension;

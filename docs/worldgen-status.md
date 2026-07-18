@@ -18,6 +18,11 @@ its first bounded foundation is complete in
 [`tactical/188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md),
 and mountains/valleys continue in
 [`tactical/192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md).
+The finite/periodic runtime proof is complete in
+[`tactical/195-periodic-cylinder-topology-proof.md`](tactical/195-periodic-cylinder-topology-proof.md);
+genuinely periodic Mclone fields and features are planned in
+[`tactical/196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md)
+after the first accepted Tactical 192 field set.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -51,7 +56,9 @@ Landed native coverage:
   void.
 - Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
   payloads, origin spawn policy, native/dedicated publication, and save/reopen
-  coverage.
+  coverage. It now supports authoritative finite dimensions and a persisted,
+  networked 32-chunk periodic-X cylinder; other procedural profiles still
+  reject non-Euclidean topology explicitly.
 - Bounded `small-island-v1` world-coordinate terrain with seeded shoreline and
   relief, a guaranteed central spawn patch, plains/beach/ocean biomes,
   native/dedicated publication, seam/partition locks, and save/reopen coverage.
@@ -116,6 +123,9 @@ Still not full vanilla parity:
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette and no mountains, rivers, caves,
   or structures
+- Mclone Overworld terrain and features remain planar until Tactical 196 makes
+  their production samplers, dependency plans, and feature writes periodic;
+  canonical chunk wrapping alone is intentionally rejected
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes

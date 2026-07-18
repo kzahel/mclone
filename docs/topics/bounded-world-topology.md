@@ -2,33 +2,44 @@
 
 Topic: `bounded-world-topology`
 
-Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-5 have
-landed the exact Euclidean baseline, validated shared axis operations, persisted
-dimension topology with legacy defaulting, protocol ordering, and the client
-dimension fact. The finite Flat Grass canary now enforces authoritative bounds
-through views, tickets, readiness, spawn, movement, transfer, edits, explicit
-ticks, storage admission, and profile compatibility. The first 32-chunk
-X-periodic Flat Grass cylinder now canonicalizes views, tickets, holders,
-scheduler priority, generation work, block/tick/entity ownership, and worker
-identity while preserving a coherent generation work lift. The client and
-renderer retain one canonical snapshot, mesh, and upload while choosing the
-observer-nearest terrain image; seam compile aliases, dirtying, readiness,
-culling, mono/multiview shaders, and opt-in debug presentation now agree on the
-wrapped neighbor. Inspected normal pixels have no visible seam, while a shared
-HUD and cyan seam grid expose it for testing. Canonical player movement now
-preserves continuous local lifts; collision, raycast, reach, edits, runtime
-lighting, fluids, remote players, and a stable two-way scripted actor agree on
-the seam. Lifecycle teleports reset continuity explicitly, while ordinary
-corrections select the nearest lift. Inspected before/after actor frames show a
-small continuous crossing with one canonical identity. Tactical 195 now
-continues with persistence, network, platform, performance, and terrain
-handoff closeout. The selected model is an exact
-locally Euclidean voxel world with dimension-owned finite, periodic, or later
-patch-glued horizontal topology. Canonical simulation and object identity stay
-independent from observer-local lifts and optional presentation-only visual
-bending. A flat torus follows the cylinder; a six-face cube atlas with eight
-inaccessible vertex regions comes before any true spherical regional-atlas
-integration.**
+Status: **Cylinder v0 complete 2026-07-18. Tactical 195 landed the exact
+Euclidean baseline, finite-bound authority canary, and a persisted/networked
+32-chunk X-periodic Flat Grass dimension across shared server, client,
+renderer, desktop, browser, Android, and available XR lanes. Authority stores
+one canonical ring; observation chooses a nearby lift of the same chunks,
+actors, meshes, and uploads. Movement, collision, targeting, lighting, fluids,
+multiplayer, save/reopen, TCP/WebSocket transport, mono/stereo/multiview
+rendering, and opt-in diagnostics agree on the seam. Crossing performs no bulk
+geometry shift or remesh. The next allocated work is Tactical 196's genuine
+periodic Mclone production sampler. Far LOD, natural spawning, multiple visible
+lifts, torus topology, nonlinear horizon bending, and patch atlases remain
+explicit follow-ups. The selected long-term model remains an exact locally
+Euclidean voxel world with dimension-owned finite, periodic, or later
+patch-glued horizontal topology. A flat torus follows the cylinder; a six-face
+cube atlas with inaccessible vertex regions comes before any true spherical
+regional-atlas integration.**
+
+## Cylinder v0 Support
+
+| Family | Plane | Finite | Cylinder X | Later topology |
+|---|---|---|---|---|
+| Descriptor, protocol, persistence | supported | supported | supported | torus/atlas pending |
+| Authority, views, tickets, gameplay | supported | supported | supported | pending |
+| Client replica, mesh, light, fluids | supported | supported | supported | pending |
+| Flat Grass generation | supported | supported | supported | torus pending |
+| Authored Only generation | supported | fixture support | fixture support | design only |
+| Mclone Overworld generation | supported | unsupported | Tactical 196 | design only |
+| Reference/Alpha/Beta/Small Island | supported | unsupported | unsupported | unsupported |
+| Far LOD | supported | unclaimed | explicit rejection | pending |
+| Natural spawning | supported | unclaimed | explicit rejection | pending |
+| Particles | supported baseline | unclaimed | unclaimed | pending |
+
+The cylinder production path is validated through SQLite and IndexedDB,
+in-memory/TCP/WebSocket sessions, desktop, the production browser Worker,
+Android APK/AVD, synthetic stereo, OpenXR compile, and Quest APK packaging. A
+physical Quest was not attached for the closeout, so device execution remains
+unclaimed rather than inferred from the proxy lanes. The one-lift invariant
+still rejects views wide enough to show two images of a canonical chunk.
 
 This topic owns the continuing product and engine direction for finite worlds,
 looping worlds, exact grid-edge identifications, inaccessible topology regions,
@@ -485,10 +496,12 @@ addresses in different dimensions remain isolated by `DimensionKey`.
 
 ## Proposed Implementation Ladder
 
-[`Tactical 195`](../tactical/195-periodic-cylinder-topology-proof.md) owns
-Stages 0-2 as independently reviewable slices: identity topology and persistence,
-a finite-bound canary, then a real Flat Grass cylinder with interactive seam
-diagnostics. Later stages remain unallocated and must not broaden that tactical.
+[`Tactical 195`](../tactical/195-periodic-cylinder-topology-proof.md) completed
+Stages 0-2 as independently reviewable slices: identity topology and
+persistence, a finite-bound canary, then a real Flat Grass cylinder with
+interactive seam diagnostics. Tactical
+[`196`](../tactical/196-periodic-mclone-terrain-fields.md) owns the first
+procedural periodic terrain caller. Later stages remain unallocated.
 
 ### 0. Contract and Euclidean baseline
 
@@ -511,12 +524,14 @@ diagnostics. Later stages remain unallocated and must not broaden that tactical.
 
 ### 2. Periodic-cylinder authority
 
-- Add one chunk-aligned periodic axis with an extent comfortably larger than
+- **Landed 2026-07-18:** add one chunk-aligned periodic axis comfortably larger than
   twice the tracking radius.
-- Canonicalize storage, generation, tickets, chunks, blocks, player/entity
+- **Landed:** canonicalize storage, generation, tickets, chunks, blocks, player/entity
   poses, collision, interaction, interpolation, meshing, lighting, and fluids.
-- Place a distinctive structure across the seam and complete a player lap.
-- Prove two players and an entity can interact across the identified edge.
+- **Landed:** mark the observer-local seam, complete a player lap, and retain
+  edits and actor identity after save/reopen.
+- **Landed:** prove two players and one stable entity can interact across the
+  identified edge through local and remote transports.
 
 ### 3. Flat torus and finite scheduling
 
@@ -592,19 +607,10 @@ validation policy.
 
 ## Open Questions
 
-- What exact persisted descriptor version and migration policy should be
-  allocated before the first internal bounded world is retained?
-- Should the initial canonical continuous pose store a normalized coordinate
-  plus continuity anchor, or retain a bounded local lift only inside each
-  connection/runtime?
-- Which subsystems need a canonical-address wrapper immediately, and which can
-  safely retain plain `BlockPos` inside a dimension-scoped topology service?
 - What is the minimum authoritative boundary shape needed for finite worlds:
   cell rejection alone, explicit border collision, or both?
 - Which generation profiles first support finite and periodic topology, and how
   are invalid combinations represented in the world catalog?
-- What period-to-view constraint is enforced before multiple visible lifts are
-  implemented?
 - Does the first cylindrical presentation bend individual vertices, rigid
   columns, or render sections, and how much interaction-ray disagreement is
   acceptable?
@@ -614,10 +620,13 @@ validation policy.
   tracking, generation dependency, and fog radii?
 - Do Far LOD and sky rendering wrap, terminate, or use topology-specific
   presentation in each initial profile?
+- When multiple visible lifts are admitted, which render/interaction instance
+  wins at exact half-period ties without duplicating authoritative identity?
 
 ## Related
 
 - [`../tactical/195-periodic-cylinder-topology-proof.md`](../tactical/195-periodic-cylinder-topology-proof.md)
+- [`../tactical/196-periodic-mclone-terrain-fields.md`](../tactical/196-periodic-mclone-terrain-fields.md)
 - [`faithful-world-embeddings.md`](faithful-world-embeddings.md)
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
