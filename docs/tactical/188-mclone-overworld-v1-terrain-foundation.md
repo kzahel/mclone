@@ -282,6 +282,23 @@ Execution record 2026-07-18:
 
 ### Slice 3: first terrain language
 
+Pre-slice inventory 2026-07-18:
+
+| Candidate | Decision for this slice | Ownership/evidence |
+|---|---|---|
+| biome choice | add a concrete Mclone rule over the production terrain sample | Mclone owns ocean/beach/open-lowland/wooded-upland thresholds and uses existing biome IDs |
+| surface material writing | keep recipes concrete over `MutableChunkBlockBuffer` | Mclone owns grass/soil, sand beach, gravel floor, and stone-exposure rules; do not generalize the similar Small Island writer yet |
+| feature placement | reuse `FeatureRegion`, configured/placed features, and the ordered executor | shared mechanisms already have cross-chunk and PRNG/order locks |
+| feature footprint | reuse `ChunkGenerationPlan::feature_region` through a named Mclone plan | exact 3x3 backend and 5x5 Surface-input facts; scheduler only consumes the declaration |
+| feature recipes and random seed | add Mclone-owned lowland/upland tables and a new domain | do not invoke vanilla biome tables or Small Island's complete table/domain |
+| dependency cache | add the smallest concrete Mclone cache beside the existing callers | compare all three caches in Slice 4 before extracting lifecycle policy |
+| reference Overworld | do not modify its biome, surface, or decoration composition | full oracle, random-order, worker, and scheduler locks remain mandatory |
+
+Land biome/surface output as one target-only commit and inspect pixels before
+adding feature dependencies. Land decoration, worker/cache routing, and exact
+plan changes as a separate commit. This keeps intentional material tuning
+separate from the later execution-boundary change.
+
 - [ ] Distinguish open lowlands and wooded uplands with the smallest useful
   profile-owned biome rule and existing biome IDs.
 - [ ] Add mclone-owned grass/soil, beach, ocean-floor, and exposed-stone
