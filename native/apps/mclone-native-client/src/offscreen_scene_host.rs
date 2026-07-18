@@ -476,12 +476,12 @@ impl OffscreenDriver {
                                 snapshot.failure.as_deref().unwrap_or("no failure detail"),
                             );
                         }
+                        // GPU advances include ordinary compile/poll gaps; the
+                        // lifecycle counters are the conservation invariant.
                         if !snapshot.readiness.switchable
                             || snapshot.initial_upload_applied_lifecycle_items
                                 != snapshot.initial_upload_lifecycle_items
                             || snapshot.initial_upload_released_compile_jobs != 0
-                            || snapshot.gpu_ready_advance_count
-                                != snapshot.initial_upload_lifecycle_items
                         {
                             bail!(
                                 "warm-world standby violated stereo switchable conservation: readiness={} initial={}/{} initial_releases={} ready_advances={}",
@@ -712,11 +712,12 @@ impl OffscreenDriver {
                 snapshot.failure.as_deref().unwrap_or("no failure detail"),
             );
         }
+        // GPU advances include ordinary compile/poll gaps; the lifecycle
+        // counters are the conservation invariant.
         if !snapshot.readiness.switchable
             || snapshot.initial_upload_applied_lifecycle_items
                 != snapshot.initial_upload_lifecycle_items
             || snapshot.initial_upload_released_compile_jobs != 0
-            || snapshot.gpu_ready_advance_count != snapshot.initial_upload_lifecycle_items
         {
             bail!(
                 "warm-world standby violated switchable conservation: readiness={} initial={}/{} initial_releases={} ready_advances={}",

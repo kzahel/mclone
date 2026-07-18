@@ -263,7 +263,10 @@ fn open_dedicated_server(
     world: &DedicatedWorldSelection,
 ) -> Result<RealmServer> {
     let mut server = match world {
-        DedicatedWorldSelection::Transient => Ok(RealmServer::new(seed)),
+        DedicatedWorldSelection::Transient => Ok(RealmServer::with_world_store(
+            seed,
+            Box::<mclone_server::NullWorldStore>::default(),
+        )),
         DedicatedWorldSelection::Persistent { dir } => {
             RealmServer::try_with_threaded_sqlite_world_dir(seed, dir)
                 .with_context(|| format!("failed to open dedicated world at {}", dir.display()))
@@ -1052,6 +1055,29 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("--transient cannot be combined"));
+    }
+
+    #[test]
+    fn transient_server_discards_player_saves_without_failing() {
+        let mut server = open_dedicated_server(
+            12_345,
+            WorldGenerationProfile::McloneOverworldV1,
+            &DedicatedWorldSelection::Transient,
+        )
+        .unwrap();
+        server
+            .scheduler_mut()
+            .save_player_record_blocking(mclone_server::PlayerRecord::new(
+                mclone_server::PlayerRecordKey::Uuid(
+                    "5a5a5a5a-5a5a-4a5a-9a5a-5a5a5a5a5a5a".to_owned(),
+                ),
+                1,
+                "Transient",
+                Vec3d::new(0.5, 80.0, 0.5),
+            ))
+            .unwrap();
+        server.scheduler_mut().flush_persistence().unwrap();
+        server.shutdown_persistence().unwrap();
     }
 
     #[test]

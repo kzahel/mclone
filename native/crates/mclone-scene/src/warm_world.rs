@@ -40,7 +40,7 @@ const PROVISIONAL_GATE_EXIT_OFFSET_BLOCKS: f64 = 1.25;
 const PROVISIONAL_GATE_HALF_WIDTH_BLOCKS: i32 = 1;
 const PROVISIONAL_GATE_APPROACH_DEPTH_BLOCKS: i32 = 2;
 const PROVISIONAL_GATE_HEIGHT_BLOCKS: i32 = 4;
-const PROVISIONAL_GATE_SURFACE_SEARCH_BLOCKS: i32 = 12;
+const PROVISIONAL_GATE_SURFACE_SEARCH_BLOCKS: i32 = 48;
 const WORLD_GATE_WIDTH_BLOCKS: f64 = 3.0;
 const WORLD_GATE_HEIGHT_BLOCKS: f64 = 4.0;
 const WORLD_GATE_ENTER_MARGIN_BLOCKS: f64 = 0.35;
@@ -2057,6 +2057,18 @@ mod tests {
         .expect("ring search finds a clear alternate");
 
         assert_ne!(endpoint.feet_position, Vec3d::new(0.5, 64.0, 6.5));
+    }
+
+    #[test]
+    fn provisional_endpoint_searches_below_a_high_provisional_pose() {
+        let pose = WorldEntryPose {
+            feet_position: Vec3d::new(0.5, 86.0, 0.5),
+            yaw_radians: 0.0,
+        };
+        let endpoint = resolve_world_gate_endpoint_with(pose, |_| true, |point| point.y < 64.0)
+            .expect("reviewed lowland range accepts a gate below the provisional camera");
+
+        assert_eq!(endpoint.feet_position, Vec3d::new(0.5, 64.0, 6.5));
     }
 
     #[test]

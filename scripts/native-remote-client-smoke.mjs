@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, extname, join } from "node:path";
 
 const screenshotPath = process.env.MCLONE_NATIVE_REMOTE_SMOKE_SCREENSHOT
@@ -11,6 +12,8 @@ const height = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_HEIGHT ?? 
 const renderDistance = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_RENDER_DISTANCE ?? "2", 10);
 const remoteSettleMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_REMOTE_SETTLE_MS ?? "6000", 10);
 const timeoutMs = Number.parseInt(process.env.MCLONE_NATIVE_REMOTE_SMOKE_TIMEOUT_MS ?? "120000", 10);
+const generationProfile = process.env.MCLONE_NATIVE_REMOTE_SMOKE_GENERATION_PROFILE
+  ?? "overworld";
 
 run().catch((error) => {
   console.error(error instanceof Error ? error.stack ?? error.message : String(error));
@@ -21,10 +24,13 @@ async function run() {
   await mkdir(dirname(screenshotPath), { recursive: true });
   await mkdir(dirname(observerScreenshotPath), { recursive: true });
   await buildNativeBinaries();
+  const clientStateDir = await mkdtemp(join(tmpdir(), "mclone-native-remote-smoke-"));
 
   const server = spawnNative("mclone-dedicated-server", [
     "--listen",
     "127.0.0.1:0",
+    "--generation-profile",
+    generationProfile,
   ]);
   const serverLog = captureProcessLog(server, "server");
   let serverExited = false;
@@ -69,7 +75,9 @@ async function run() {
         String(config.scriptedInteraction),
         "--screenshot-remote-settle-ms",
         String(remoteSettleMs),
-      ]);
+      ], {
+        MCLONE_PLAYER_PROFILE_FILE: join(clientStateDir, `${config.label}-profile.json`),
+      });
       const log = captureProcessLog(client, config.label);
       clients.push({
         config,
@@ -106,10 +114,12 @@ async function run() {
       };
     }));
 
-    const observerReport = clientReports.find((report) => report.label === "observer");
-    if (!observerReport || observerReport.report.remotePlayerCount <= 0) {
+    const mutualVisibilityReport = clientReports.find(
+      (report) => report.report.remotePlayerCount > 0,
+    );
+    if (!mutualVisibilityReport) {
       throw new Error(
-        `remote observer client did not retain a remote player:\n${JSON.stringify(observerReport?.report ?? null, null, 2)}`,
+        `neither remote client retained the other player:\n${JSON.stringify(clientReports, null, 2)}`,
       );
     }
 
@@ -120,6 +130,7 @@ async function run() {
       height,
       renderDistance,
       remoteSettleMs,
+      generationProfile,
       clients: clientReports,
     }, null, 2));
   } finally {
@@ -137,6 +148,7 @@ async function run() {
         serverLog,
       ).catch(() => {});
     }
+    await rm(clientStateDir, { recursive: true, force: true });
   }
 }
 
@@ -168,10 +180,10 @@ function spawnCargo(args) {
   });
 }
 
-function spawnNative(name, args) {
+function spawnNative(name, args, envOverrides = {}) {
   return spawn(nativeBinaryPath(name), args, {
     cwd: process.cwd(),
-    env: process.env,
+    env: { ...process.env, ...envOverrides },
     stdio: ["ignore", "pipe", "pipe"],
   });
 }

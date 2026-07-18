@@ -208,32 +208,39 @@ fn dimensions_generate_with_independent_stored_profiles_and_seeds() {
     };
     let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
     server
-        .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+        .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
         .unwrap();
     server.set_lighting_enabled(false);
     assert!(server.register_dimension(island_record).unwrap());
 
-    let flat_player = server.add_player();
+    let mclone_player = server.add_player();
     let island_player = server.add_player_in_dimension(island.clone()).unwrap();
-    request_zero_radius_view(&mut server, flat_player);
+    request_zero_radius_view(&mut server, mclone_player);
     request_zero_radius_view(&mut server, island_player);
     wait_for_origin_in_both_dimensions(&mut server, &island);
 
-    let flat = server
+    let generated_mclone = mclone_worldgen::levelgen::generate_mclone_overworld_chunk(12_345, 0, 0);
+    let sample_x = 8;
+    let sample_z = 8;
+    let sample_y = (generated_mclone.min_y..generated_mclone.min_y + generated_mclone.height)
+        .rev()
+        .find(|y| {
+            generated_mclone.block_at_y(sample_x, *y, sample_z).0 != mclone_worldgen::block::AIR
+        })
+        .expect("Mclone origin column should contain terrain");
+    let generated_overworld = server
         .dimension_runtime(&DimensionKey::overworld())
         .unwrap();
     assert_eq!(
-        flat.definition().generation_profile,
-        WorldGenerationProfile::FlatGrassV1
+        generated_overworld.definition().generation_profile,
+        WorldGenerationProfile::McloneOverworldV1
     );
-    assert_eq!(flat.definition().seed, 12_345);
+    assert_eq!(generated_overworld.definition().seed, 12_345);
     assert_eq!(
-        flat.scheduler().block_at_world(BlockPos::new(0, 3, 0)),
-        Some(GRASS_BLOCK)
-    );
-    assert_eq!(
-        flat.scheduler().block_at_world(BlockPos::new(0, 4, 0)),
-        Some(AIR)
+        generated_overworld
+            .scheduler()
+            .block_at_world(BlockPos::new(sample_x, sample_y, sample_z)),
+        Some(generated_mclone.block_at_y(sample_x, sample_y, sample_z).0)
     );
 
     let generated_island = server.dimension_runtime(&island).unwrap();

@@ -1985,6 +1985,7 @@ impl Cli {
                         "--warm-world-swap-smoke requires --warm-world-standby-seed with a distinct local seed"
                     );
                 }
+                scene.debug_auxiliary_player_script = true;
                 Ok(Self::WarmWorldSwapSmoke {
                     options: WarmWorldSwapSmokeOptions {
                         directory,

@@ -90,6 +90,7 @@ fn cli_parses_warm_world_swap_smoke_options() {
         Some(mclone_server::SimulationCadenceConfig::new(5, 5, 5))
     );
     assert_eq!(options.cost_sample_ms, 1000);
+    assert!(options.scene.debug_auxiliary_player_script);
 }
 
 #[test]
