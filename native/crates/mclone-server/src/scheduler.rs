@@ -4962,7 +4962,7 @@ mod tests {
     }
 
     #[test]
-    fn mclone_overworld_profile_uses_target_only_continuous_terrain() {
+    fn mclone_overworld_profile_uses_typed_feature_dependencies() {
         let seed = -98_765;
         let center = crate::spawn::initial_spawn_center_for_profile(
             seed,
@@ -5021,10 +5021,22 @@ mod tests {
             job.generation_descriptor,
             WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, seed)
         );
-        assert!(job.dependency_requirements.is_empty());
-        assert!(job.dependency_chunks.is_empty());
+        let expected_plan =
+            GenerationPlanRequest::new(job.generation_descriptor, job.target_chunks.clone()).plan();
+        assert_eq!(
+            job.dependency_requirements
+                .iter()
+                .copied()
+                .collect::<BTreeSet<_>>(),
+            expected_plan.prerequisites().clone()
+        );
+        assert!(job.dependency_chunks.len() > job.target_chunks.len());
+        assert!(
+            job.dependency_requirements
+                .iter()
+                .all(|requirement| requirement.status == ChunkStatus::Surface)
+        );
         assert_eq!(job.seeded_dependency_chunks, 0);
-        assert_eq!(job.retained_dependency_chunks, 0);
         assert!(scheduler.job_timing(job.id).is_none());
     }
 

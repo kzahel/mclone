@@ -60,7 +60,7 @@ pub(crate) use placed::{
 pub(crate) use selectors::{
     place_random_boolean_selector, place_random_selector, place_simple_random_selector,
 };
-pub(crate) use tables::small_island_feature_table;
+pub(crate) use tables::{flower_patch, grass_patch, small_island_feature_table, tree_feature};
 
 #[cfg(test)]
 pub(crate) use placed::test_support;

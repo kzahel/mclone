@@ -7,7 +7,25 @@ use crate::levelgen::chunk::sample_column_biome_payload;
 use crate::levelgen::profile::{FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y};
 use crate::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
-pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
+pub fn generate_mclone_overworld_surface_chunk(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> GeneratedChunk {
+    let buffer = generate_mclone_overworld_surface_buffer(seed, chunk_x, chunk_z);
+    let min_x = chunk_min_block_coord(chunk_x);
+    let min_z = chunk_min_block_coord(chunk_z);
+    GeneratedChunk::from_mutable_buffer_with_biomes(
+        buffer,
+        mclone_overworld_chunk_biomes(seed, min_x, min_z),
+    )
+}
+
+pub(super) fn generate_mclone_overworld_surface_buffer(
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> MutableChunkBlockBuffer {
     let mut buffer =
         MutableChunkBlockBuffer::new(chunk_x, chunk_z, FLAT_GRASS_MIN_Y, FLAT_GRASS_HEIGHT);
     let min_x = chunk_min_block_coord(chunk_x);
@@ -22,17 +40,11 @@ pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) ->
     }
     buffer.prime_worldgen_heightmaps();
 
-    GeneratedChunk::from_mutable_buffer_with_biomes(
-        buffer,
-        mclone_overworld_chunk_biomes(sampler, min_x, min_z),
-    )
+    buffer
 }
 
-fn mclone_overworld_chunk_biomes(
-    sampler: McloneOverworldSampler,
-    min_x: i32,
-    min_z: i32,
-) -> Vec<i32> {
+pub(super) fn mclone_overworld_chunk_biomes(seed: i64, min_x: i32, min_z: i32) -> Vec<i32> {
+    let sampler = McloneOverworldSampler::new(seed);
     sample_column_biome_payload(min_x, min_z, FLAT_GRASS_HEIGHT, |world_x, world_z| {
         biome_id_for_sample(sampler.sample(world_x, world_z))
     })
@@ -55,7 +67,7 @@ mod tests {
     #[test]
     fn chunk_columns_follow_the_production_sampler_and_material_rules() {
         for (seed, chunk_x, chunk_z) in [(12_345, 0, 0), (-98_765, -17, 11)] {
-            let chunk = generate_mclone_overworld_chunk(seed, chunk_x, chunk_z);
+            let chunk = generate_mclone_overworld_surface_chunk(seed, chunk_x, chunk_z);
             let sampler = McloneOverworldSampler::new(seed);
             let min_x = chunk_min_block_coord(chunk_x);
             let min_z = chunk_min_block_coord(chunk_z);
@@ -92,8 +104,8 @@ mod tests {
     fn adjacent_chunks_sample_one_continuous_absolute_field() {
         let seed = 8_675_309;
         for (left_x, z) in [(-2, -3), (-1, 0), (0, 2), (47, -61)] {
-            let left = generate_mclone_overworld_chunk(seed, left_x, z);
-            let right = generate_mclone_overworld_chunk(seed, left_x + 1, z);
+            let left = generate_mclone_overworld_surface_chunk(seed, left_x, z);
+            let right = generate_mclone_overworld_surface_chunk(seed, left_x + 1, z);
             for local_z in 0..CHUNK_WIDTH {
                 let world_z = chunk_min_block_coord(z) + local_z;
                 for (chunk, local_x, world_x) in [
@@ -223,7 +235,7 @@ mod tests {
         let fingerprints = [12_345, -98_765, 8_675_309].map(|seed| {
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for (chunk_x, chunk_z) in [(0, 0), (-17, 11), (31, -1)] {
-                let chunk = generate_mclone_overworld_chunk(seed, chunk_x, chunk_z);
+                let chunk = generate_mclone_overworld_surface_chunk(seed, chunk_x, chunk_z);
                 for byte in chunk
                     .blocks()
                     .iter()

@@ -1214,7 +1214,7 @@ fn add_jungle_extra_vegetation(features: &mut Vec<PlacedFeature>) {
     features.push(vines_feature());
 }
 
-fn tree_feature(
+pub(crate) fn tree_feature(
     config: BasicTreeConfiguration,
     count: i32,
     extra_chance: f32,
@@ -2004,7 +2004,7 @@ fn spring_lava_feature() -> PlacedFeature {
     )
 }
 
-fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
+pub(crate) fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
     random_patch_feature(
         RandomPatchConfiguration {
             state: block_id,
@@ -2025,7 +2025,7 @@ fn grass_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
     )
 }
 
-fn flower_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
+pub(crate) fn flower_patch(block_id: RawBlockId, count: i32) -> PlacedFeature {
     random_patch_feature(RandomPatchConfiguration::new(block_id), count)
 }
 

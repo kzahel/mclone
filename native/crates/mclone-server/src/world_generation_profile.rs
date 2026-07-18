@@ -73,7 +73,7 @@ impl WorldGenerationProfile {
             Self::Overworld => ChunkGenerationPlan::overworld_features(targets),
             Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
-            Self::McloneOverworldV1 => ChunkGenerationPlan::target_only(targets),
+            Self::McloneOverworldV1 => ChunkGenerationPlan::mclone_overworld_features(targets),
             Self::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
             }

@@ -70,6 +70,18 @@ impl ChunkGenerationPlan {
         )
     }
 
+    /// Current Mclone Overworld FEATURES footprint. Profile-owned decoration
+    /// uses the shared one-chunk write and block-dependency radii over its
+    /// Surface inputs.
+    pub fn mclone_overworld_features(targets: impl IntoIterator<Item = ChunkPos>) -> Self {
+        Self::feature_region(
+            targets,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            FEATURES_BLOCK_DEPENDENCY_RADIUS,
+            ChunkStatus::Surface,
+        )
+    }
+
     /// Neighbor-aware feature execution over a mutable chunk region.
     ///
     /// Backend centers within `write_radius` may affect requested outputs. Each
@@ -292,6 +304,19 @@ mod tests {
     fn small_island_uses_the_shared_neighbor_feature_contract() {
         let target = ChunkPos::new(2, -5);
         let plan = ChunkGenerationPlan::small_island_features([target]);
+
+        assert_eq!(plan.output_chunks(), &BTreeSet::from([target]));
+        assert_eq!(plan.backend_work_chunks(), &square(target, 1));
+        assert_eq!(
+            plan.prerequisites(),
+            &surface_requirements(square(target, 2))
+        );
+    }
+
+    #[test]
+    fn mclone_overworld_uses_the_shared_neighbor_feature_contract() {
+        let target = ChunkPos::new(-4, 9);
+        let plan = ChunkGenerationPlan::mclone_overworld_features([target]);
 
         assert_eq!(plan.output_chunks(), &BTreeSet::from([target]));
         assert_eq!(plan.backend_work_chunks(), &square(target, 1));
