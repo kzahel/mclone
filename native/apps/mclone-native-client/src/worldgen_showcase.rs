@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::process::Command;
 
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
@@ -237,6 +238,7 @@ pub(crate) fn run_worldgen_showcase(
     save_rgba_png(&card_path, card_width, card_height, &card_pixels)?;
 
     let receipt_path = options.directory.join(format!("{output_prefix}-card.json"));
+    let (commit, dirty) = git_state();
     let profile_coverage = if options.scene.world_generation_profile
         == mclone_server::WorldGenerationProfile::SmallIslandV1
     {
@@ -250,8 +252,10 @@ pub(crate) fn run_worldgen_showcase(
         serde_json::json!({ "kind": "unbounded" })
     };
     let receipt = serde_json::json!({
-        "schema": 3,
+        "schema": 4,
         "profile": profile,
+        "commit": commit,
+        "dirty": dirty,
         "seed": options.scene.seed,
         "centerChunk": [options.scene.chunk_x, options.scene.chunk_z],
         "renderDistance": options.scene.render_distance,
@@ -319,7 +323,7 @@ fn showcase_views(center_x: f32, surface_y: f32, center_z: f32) -> [WorldgenShow
         },
         WorldgenShowcaseView {
             slug: "coast",
-            label: "COASTLINE",
+            label: "LOW LANDSCAPE",
             eye: Vec3::new(center_x, surface_y + 8.0, center_z - 200.0),
             target: Vec3::new(center_x, surface_y - 6.0, center_z),
             fov_y_degrees: 48.0,
@@ -332,6 +336,23 @@ fn showcase_views(center_x: f32, surface_y: f32, center_z: f32) -> [WorldgenShow
             fov_y_degrees: 38.0,
         },
     ]
+}
+
+fn git_state() -> (Option<String>, Option<bool>) {
+    let commit = Command::new("git")
+        .args(["rev-parse", "--short=12", "HEAD"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .map(|value| value.trim().to_owned());
+    let dirty = Command::new("git")
+        .args(["status", "--porcelain", "--untracked-files=no"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| !output.stdout.is_empty());
+    (commit, dirty)
 }
 
 fn showcase_chunk_camera(view: &WorldgenShowcaseView, render_distance: u32) -> Result<ChunkCamera> {

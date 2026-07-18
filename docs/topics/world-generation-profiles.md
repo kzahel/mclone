@@ -266,7 +266,7 @@ next Tactical 188 gate.
 ### Reusable visual review card
 
 `pnpm native:worldgen:card --seed 12345` renders three fixed views from one
-fully warmed transient world: near-vertical top-down, low coastline, and an
+fully warmed transient world: near-vertical top-down, a low landscape, and an
 elevated opposing landscape. The chunk interest remains fixed on the requested
 `--chunk-x`/`--chunk-z` center while detached diagnostic cameras render from
 above or outside that region. It writes the labeled comparison card, the three
@@ -292,10 +292,10 @@ render target to be compiled and uploaded. Feature-dependency work outside that
 capture target may still exist; the receipt reports it separately instead of
 mistaking it for incomplete visible terrain. The receipt also records the fixed
 interest center, coverage radius, warmup cost, camera poses/lenses, and per-view
-drawn-section counts. Its profile-aware coverage metadata distinguishes the
-bounded Small Island support/water margin from unbounded profiles. These cards
-are visual review evidence under the safety ledger, not pixel-locked
-compatibility fixtures.
+drawn-section counts, commit, and dirty state. Its profile-aware coverage
+metadata distinguishes the bounded Small Island support/water margin from
+unbounded profiles. These cards are visual review evidence under the safety
+ledger, not pixel-locked compatibility fixtures.
 
 ## Architecture Direction
 
