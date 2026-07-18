@@ -2,10 +2,11 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tacticals 187, 188, 191, and 193 are complete. `flat-grass-v1`,
-`small-island-v1`, `alpha-v1`, and the first `mclone-overworld-v1` terrain
-language are live, persisted shared-Rust generators beside the unchanged Overworld;
-authored-only misses still produce void. Small Island now
+Status: **Tacticals 187, 188, 191, and 193 are complete, and Tactical 194 is
+active. `flat-grass-v1`, `small-island-v1`, `alpha-v1`, `beta-v1`, and the
+first `mclone-overworld-v1` terrain language are live, persisted shared-Rust
+generators beside the unchanged Overworld; authored-only misses still produce
+void. Small Island now
 exercises the reusable value-noise primitive, typed scheduler/worker request
 contract, dependency cache, mutable feature region, and a real cross-chunk
 decoration stage.
@@ -42,11 +43,14 @@ The first alternate generators are intentionally smaller:
   decoration;
 - mclone overworld now proves unbounded continuous terrain, a deliberately
   small biome/surface language, and dependency-bearing vegetation through the
-  same host contracts as the other profiles.
+  same host contracts as the other profiles;
+- Alpha and Beta prove that historical generation families can remain
+  standalone siblings while sharing neutral chunks, planning, feature-region,
+  persistence, and host contracts.
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has five values:
+The stored server-owned `WorldGenerationProfile` has seven values:
 
 - `Overworld`: current procedural vanilla-1.17-shaped generation;
 - `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
@@ -58,35 +62,42 @@ The stored server-owned `WorldGenerationProfile` has five values:
   wooded rolling upland terrain from inspectable profile-owned fields, with
   gravel/sand/grass/stone surface recipes and a profile-owned oak, grass, and
   occasional-flower decoration language;
+- `AlphaV1 { winter }`: standalone Alpha v1.1.2_01-shaped density terrain,
+  surface, caves, and compact deterministic population, with temperate and
+  whole-world winter selections;
+- `BetaV1`: standalone Beta 1.7.3 climate/biome terrain, exact staged surface
+  and caves, and a deterministic Beta-flavored population subset;
 - `AuthoredOnly`: persistence-backed content whose true misses become void.
 
 The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-Product world creation cycles the four procedural profiles through shared
-catalog policy and generator-agnostic UI text. Scene replacement, warm-world
-startup, managed previews, and all host adapters copy the selected descriptor
-before using the shared profile-aware spawn policy. Native SQLite and browser
-IndexedDB reopen preserve it; the browser Worker applies stored metadata
-profiles before validating or scheduling the world.
+Product world creation cycles seven procedural selections—the four modern
+profiles, Alpha temperate, Alpha winter, and Beta—through shared catalog policy
+and generator-agnostic UI text. Scene replacement, warm-world startup, managed
+previews, and all host adapters copy the selected descriptor before using the
+shared profile-aware spawn policy. Native SQLite and browser IndexedDB reopen
+preserve it; the browser Worker applies stored metadata profiles before
+validating or scheduling the world.
 
 Scheduler and worker requests carry an immutable profile-plus-seed descriptor
 through native messages, WASM codecs, responses, and diagnostics. The closed
 shared-Rust executor selects the unchanged Overworld cache, flat grass, the
-Small Island cache, or the concrete Mclone Overworld terrain caller, and
-resident state resets when either descriptor fact changes.
+Small Island, Mclone Overworld, Alpha, or Beta cache, and resident state resets
+when either descriptor fact changes.
 
 `WorldGenerationProfile::plan_features` is the single closed planning entry.
 It returns a deterministic `ChunkGenerationPlan` containing exact requested
 outputs, generator backend-work chunks, and typed chunk/status prerequisites.
-Overworld, Small Island, and Mclone Overworld declare a 3x3 feature-center and
-5x5 mutable Surface dependency footprint for one target; Flat Grass declares
-target-only work. The scheduler consumes every prerequisite generically, then
-applies its own view priority, deduplication, job admission, and publication
-policy. Planning occurs once for scheduler admission and is recomputed once by
-the worker as request validation; it adds no worker round trip, trait-object
-dispatch, or general graph traversal and never runs per poll or publication.
+Overworld, Small Island, Mclone Overworld, Alpha, and Beta declare a 3x3
+feature-center and 5x5 mutable Surface dependency footprint for one target;
+Flat Grass declares target-only work. The scheduler consumes every prerequisite
+generically, then applies its own view priority, deduplication, job admission,
+and publication policy. Planning occurs once for scheduler admission and is
+recomputed once by the worker as request validation; it adds no worker round
+trip, trait-object dispatch, or general graph traversal and never runs per poll
+or publication.
 
 The scheduler/worker seam now has two explicit request layers:
 
@@ -107,8 +118,8 @@ Generator implementations remain concrete behind that contract:
 
 - dependency-bearing profiles publish one generic cache report; detailed
   `OverworldFeatureBatchTiming` remains optional and Overworld-only;
-- resident worker state contains separate Overworld, Small Island, and Mclone
-  caches;
+- resident worker state contains separate Overworld, Small Island, Mclone,
+  Alpha, and Beta caches;
 - surface, carver, feature-biome, and feature-table internals remain specific
   to `OverworldBiomeSource` and the current Overworld case.
 
@@ -162,7 +173,7 @@ Dispositions mean:
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
 | `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, biome/surface/decoration rules, spawn, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
 | `alpha-v1` | `internal-mutable` | Profile shape, winter option, feature subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Alpha flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Alpha v1.1.2_01 stage receipts constrain the close-parity core but do not make the whole profile a historical compatibility promise | Re-run the Alpha oracle hashes, mapping/order tests, scheduler/worker/persistence tests, temperate and winter captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
-| `beta-v1` | `planned-unallocated` | Identity, binary tag, parity boundary, implementation, fixtures, and output may change before first runtime use | It is an authorized internal implementation with no live profile or preservation consumer yet | Before allocating it, record its final tag and `internal-mutable` update gates; then run staged Beta receipts, scheduler/worker/persistence tests, captures, workspace tests, and web build |
+| `beta-v1` | `internal-mutable` | Identity, binary tag 7, parity boundary, population subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Beta flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Beta 1.7.3 staged receipts constrain the close-parity climate/terrain/surface/cave core but do not make the whole profile a historical compatibility promise | Re-run the Beta oracle hashes, mapping/order tests, scheduler/worker/persistence tests, captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
 
 For a proposed change, resolve every affected row before editing. The most
 restrictive disposition wins when a shared primitive affects multiple rows. If

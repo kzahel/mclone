@@ -213,6 +213,10 @@ pub fn generate_beta_climate_region(
     BetaClimateSource::new(seed).region(x, z, size_x, size_z)
 }
 
+pub fn beta_biome_id(seed: i64, x: i32, z: i32) -> i32 {
+    BetaClimateSource::new(seed).region(x, z, 1, 1).biomes[0].native_biome_id()
+}
+
 pub fn generate_beta_stage_chunk(
     seed: i64,
     chunk_x: i32,

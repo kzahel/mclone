@@ -3,7 +3,9 @@ use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource, get_layered_
 use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
-use mclone_worldgen::levelgen::{mclone_overworld_biome_id, mclone_overworld_spawn_chunk};
+use mclone_worldgen::levelgen::{
+    beta_biome_id, mclone_overworld_biome_id, mclone_overworld_spawn_chunk,
+};
 use mclone_worldgen::surface::overworld_surface_top_material;
 
 use crate::WorldGenerationProfile;
@@ -26,6 +28,7 @@ pub fn initial_spawn_center_for_profile(seed: i64, profile: WorldGenerationProfi
         WorldGenerationProfile::FlatGrassV1
         | WorldGenerationProfile::SmallIslandV1
         | WorldGenerationProfile::AlphaV1 { .. }
+        | WorldGenerationProfile::BetaV1
         | WorldGenerationProfile::AuthoredOnly { .. } => ChunkPos::new(0, 0),
     }
 }
@@ -47,6 +50,7 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
             | WorldGenerationProfile::SmallIslandV1
             | WorldGenerationProfile::McloneOverworldV1
             | WorldGenerationProfile::AlphaV1 { .. }
+            | WorldGenerationProfile::BetaV1
             | WorldGenerationProfile::AuthoredOnly { .. }
     ) {
         SpawnColumnOrder::CenterFirst
@@ -64,6 +68,7 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
             WorldGenerationProfile::McloneOverworldV1 => {
                 get_layered_biome_by_id(mclone_overworld_biome_id(seed, x, z))
             }
+            WorldGenerationProfile::BetaV1 => get_layered_biome_by_id(beta_biome_id(seed, x, z)),
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
                 biome_source.get_block_position_biome_definition(seed, x, z)
             }
@@ -288,8 +293,8 @@ mod tests {
 
     use mclone_worldgen::biome::get_layered_biome_by_id;
     use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, STONE, WATER};
-    use mclone_worldgen::levelgen::generate_alpha_chunk;
     use mclone_worldgen::levelgen::generate_mclone_overworld_chunk;
+    use mclone_worldgen::levelgen::{generate_alpha_chunk, generate_beta_chunk};
 
     use super::*;
 
@@ -420,6 +425,41 @@ mod tests {
                 center
             );
         }
+    }
+
+    #[test]
+    fn beta_profile_selects_a_safe_loaded_origin_spawn() {
+        let seed = 12_345;
+        let profile = WorldGenerationProfile::BetaV1;
+        let center = initial_spawn_center_for_profile(seed, profile);
+        let chunk = generate_beta_chunk(seed, center.x, center.z);
+        let spawn = find_safe_surface_spawn_for_loaded_profile(
+            seed,
+            profile,
+            center,
+            |pos| {
+                (pos.chunk_pos() == center).then(|| {
+                    chunk
+                        .block_at_y(
+                            pos.x - center.min_block_x(),
+                            pos.y,
+                            pos.z - center.min_block_z(),
+                        )
+                        .0
+                })
+            },
+            |pos| pos == center,
+        )
+        .expect("Beta origin should expose a safe loaded spawn");
+        assert_eq!(
+            BlockPos::new(
+                spawn.x.floor() as i32,
+                spawn.y.floor() as i32,
+                spawn.z.floor() as i32,
+            )
+            .chunk_pos(),
+            center
+        );
     }
 
     #[test]

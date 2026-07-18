@@ -23,6 +23,8 @@ pub enum WorldGenerationProfile {
         #[serde(default)]
         winter: bool,
     },
+    #[serde(rename = "beta-v1")]
+    BetaV1,
     AuthoredOnly {
         #[serde(rename = "missingChunk")]
         missing_chunk: AuthoredMissingChunk,
@@ -55,6 +57,7 @@ impl WorldGenerationProfile {
             Self::McloneOverworldV1 => "mclone-overworld-v1",
             Self::AlphaV1 { winter: false } => "alpha-v1",
             Self::AlphaV1 { winter: true } => "alpha-v1-winter",
+            Self::BetaV1 => "beta-v1",
             Self::AuthoredOnly { .. } => "authored-only",
         }
     }
@@ -69,9 +72,10 @@ impl WorldGenerationProfile {
             }
             "alpha-v1" | "alpha_v1" | "alphaV1" => Ok(Self::alpha_v1(false)),
             "alpha-v1-winter" | "alpha_v1_winter" | "alphaV1Winter" => Ok(Self::alpha_v1(true)),
+            "beta-v1" | "beta_v1" | "betaV1" => Ok(Self::BetaV1),
             "authored-only" | "authored_only" | "authoredOnly" => Ok(Self::authored_only()),
             value => Err(format!(
-                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, alpha-v1, or authored-only, got `{value}`"
+                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, alpha-v1, beta-v1, or authored-only, got `{value}`"
             )),
         }
     }
@@ -82,7 +86,8 @@ impl WorldGenerationProfile {
             | Self::FlatGrassV1
             | Self::SmallIslandV1
             | Self::McloneOverworldV1
-            | Self::AlphaV1 { .. } => None,
+            | Self::AlphaV1 { .. }
+            | Self::BetaV1 => None,
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
         }
     }
@@ -97,6 +102,7 @@ impl WorldGenerationProfile {
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
             Self::McloneOverworldV1 => ChunkGenerationPlan::mclone_overworld_features(targets),
             Self::AlphaV1 { .. } => ChunkGenerationPlan::alpha_features(targets),
+            Self::BetaV1 => ChunkGenerationPlan::beta_features(targets),
             Self::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
             }
@@ -112,6 +118,7 @@ impl WorldGenerationProfile {
             Self::McloneOverworldV1 => 4,
             Self::AlphaV1 { winter: false } => 5,
             Self::AlphaV1 { winter: true } => 6,
+            Self::BetaV1 => 7,
         }
     }
 
@@ -124,6 +131,7 @@ impl WorldGenerationProfile {
             4 => Some(Self::McloneOverworldV1),
             5 => Some(Self::alpha_v1(false)),
             6 => Some(Self::alpha_v1(true)),
+            7 => Some(Self::BetaV1),
             _ => None,
         }
     }
@@ -276,6 +284,7 @@ mod tests {
             WorldGenerationProfile::alpha_v1(true).label(),
             "alpha-v1-winter"
         );
+        assert_eq!(WorldGenerationProfile::BetaV1.label(), "beta-v1");
         assert_eq!(
             WorldGenerationProfile::authored_only().label(),
             "authored-only"
@@ -309,6 +318,10 @@ mod tests {
             WorldGenerationProfile::alpha_v1(true)
         );
         assert_eq!(
+            WorldGenerationProfile::parse_label("beta-v1").unwrap(),
+            WorldGenerationProfile::BetaV1
+        );
+        assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::Overworld).unwrap(),
             r#""overworld""#
         );
@@ -337,6 +350,10 @@ mod tests {
             r#"{"alpha-v1":{"winter":true}}"#
         );
         assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::BetaV1).unwrap(),
+            r#""beta-v1""#
+        );
+        assert_eq!(
             serde_json::from_str::<WorldGenerationProfile>("\"overworld\"").unwrap(),
             WorldGenerationProfile::Overworld
         );
@@ -360,11 +377,23 @@ mod tests {
             WorldGenerationProfile::from_codec_tag(6),
             Some(WorldGenerationProfile::alpha_v1(true))
         );
+        assert_eq!(
+            WorldGenerationProfile::from_codec_tag(7),
+            Some(WorldGenerationProfile::BetaV1)
+        );
     }
 
     #[test]
     fn alpha_profile_declares_population_dependencies() {
         let plan = WorldGenerationProfile::alpha_v1(false).plan_features([ChunkPos::new(0, 0)]);
+        assert_eq!(plan.output_chunks().len(), 1);
+        assert_eq!(plan.backend_work_chunks().len(), 9);
+        assert_eq!(plan.prerequisites().len(), 25);
+    }
+
+    #[test]
+    fn beta_profile_declares_population_dependencies() {
+        let plan = WorldGenerationProfile::BetaV1.plan_features([ChunkPos::new(0, 0)]);
         assert_eq!(plan.output_chunks().len(), 1);
         assert_eq!(plan.backend_work_chunks().len(), 9);
         assert_eq!(plan.prerequisites().len(), 25);

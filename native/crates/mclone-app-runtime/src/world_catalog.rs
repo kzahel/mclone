@@ -23,13 +23,14 @@ pub const LOCAL_WORLD_ID_MAX_LEN: usize = 64;
 pub const LOCAL_WORLD_DISPLAY_NAME_MAX_CHARS: usize = 64;
 pub const NATIVE_WORLD_METADATA_FILE: &str = "world.json";
 pub const NATIVE_WORLD_BACKEND_LABEL: &str = "native-sqlite";
-pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 6] = [
+pub const LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES: [WorldGenerationProfile; 7] = [
     WorldGenerationProfile::Overworld,
     WorldGenerationProfile::FlatGrassV1,
     WorldGenerationProfile::SmallIslandV1,
     WorldGenerationProfile::McloneOverworldV1,
     WorldGenerationProfile::AlphaV1 { winter: false },
     WorldGenerationProfile::AlphaV1 { winter: true },
+    WorldGenerationProfile::BetaV1,
 ];
 
 const DEFAULT_LOCAL_WORLD_ID: &str = "world";
@@ -44,6 +45,7 @@ pub const fn local_world_generation_profile_display_name(
         WorldGenerationProfile::McloneOverworldV1 => "Mclone Overworld",
         WorldGenerationProfile::AlphaV1 { winter: false } => "Alpha (Temperate)",
         WorldGenerationProfile::AlphaV1 { winter: true } => "Alpha (Winter)",
+        WorldGenerationProfile::BetaV1 => "Beta 1.7.3",
         WorldGenerationProfile::AuthoredOnly { .. } => "Authored World",
     }
 }
@@ -57,8 +59,10 @@ pub const fn next_local_world_generation_profile(
         WorldGenerationProfile::SmallIslandV1 => WorldGenerationProfile::McloneOverworldV1,
         WorldGenerationProfile::McloneOverworldV1 => WorldGenerationProfile::alpha_v1(false),
         WorldGenerationProfile::AlphaV1 { winter: false } => WorldGenerationProfile::alpha_v1(true),
-        WorldGenerationProfile::AlphaV1 { winter: true }
-        | WorldGenerationProfile::AuthoredOnly { .. } => WorldGenerationProfile::Overworld,
+        WorldGenerationProfile::AlphaV1 { winter: true } => WorldGenerationProfile::BetaV1,
+        WorldGenerationProfile::BetaV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
+            WorldGenerationProfile::Overworld
+        }
     }
 }
 
@@ -1165,6 +1169,7 @@ mod tests {
                 WorldGenerationProfile::McloneOverworldV1,
                 WorldGenerationProfile::alpha_v1(false),
                 WorldGenerationProfile::alpha_v1(true),
+                WorldGenerationProfile::BetaV1,
             ]
         );
         assert_eq!(
@@ -1192,6 +1197,10 @@ mod tests {
             "Alpha (Winter)"
         );
         assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::BetaV1),
+            "Beta 1.7.3"
+        );
+        assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::Overworld),
             WorldGenerationProfile::FlatGrassV1
         );
@@ -1213,6 +1222,10 @@ mod tests {
         );
         assert_eq!(
             next_local_world_generation_profile(WorldGenerationProfile::alpha_v1(true)),
+            WorldGenerationProfile::BetaV1
+        );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::BetaV1),
             WorldGenerationProfile::Overworld
         );
     }
@@ -1225,6 +1238,7 @@ mod tests {
             WorldGenerationProfile::McloneOverworldV1,
             WorldGenerationProfile::alpha_v1(false),
             WorldGenerationProfile::alpha_v1(true),
+            WorldGenerationProfile::BetaV1,
         ] {
             let options = LocalWorldCreateOptions::new("Alternate", 9)
                 .unwrap()

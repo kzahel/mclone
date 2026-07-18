@@ -5085,6 +5085,7 @@ mod tests {
         for (profile, tag) in [
             (WorldGenerationProfile::alpha_v1(false), 5),
             (WorldGenerationProfile::alpha_v1(true), 6),
+            (WorldGenerationProfile::BetaV1, 7),
         ] {
             let mut encoded = Vec::new();
             write_world_generation_profile(&mut encoded, profile).unwrap();
@@ -5095,10 +5096,10 @@ mod tests {
             );
         }
         assert!(
-            read_world_generation_profile(&mut [7].as_slice())
+            read_world_generation_profile(&mut [8].as_slice())
                 .unwrap_err()
                 .to_string()
-                .contains("unknown world generation profile tag 7")
+                .contains("unknown world generation profile tag 8")
         );
     }
 
