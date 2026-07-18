@@ -2,14 +2,15 @@
 
 Topic: `bounded-world-topology`
 
-Status: **design direction accepted 2026-07-18; no runtime implementation or
-bounded tactical is allocated yet. The selected model is an exact locally
-Euclidean voxel world with dimension-owned finite, periodic, or later
+Status: **design direction accepted 2026-07-18; no runtime implementation has
+landed. Tactical 195 now owns the exact Euclidean baseline, finite-bound canary,
+and first real Flat Grass X-periodic cylinder. The selected model is an exact
+locally Euclidean voxel world with dimension-owned finite, periodic, or later
 patch-glued horizontal topology. Canonical simulation and object identity stay
 independent from observer-local lifts and optional presentation-only visual
-bending. The implementation ladder begins with finite axis bounds, a periodic
-cylinder, and a flat torus; a six-face cube atlas with eight inaccessible
-vertex regions comes before any true spherical regional-atlas integration.**
+bending. A flat torus follows the cylinder; a six-face cube atlas with eight
+inaccessible vertex regions comes before any true spherical regional-atlas
+integration.**
 
 This topic owns the continuing product and engine direction for finite worlds,
 looping worlds, exact grid-edge identifications, inaccessible topology regions,
@@ -466,9 +467,10 @@ addresses in different dimensions remain isolated by `DimensionKey`.
 
 ## Proposed Implementation Ladder
 
-No tactical number is allocated yet. A future tactical should split the work
-into independently reviewable slices rather than attempt every consumer at
-once.
+[`Tactical 195`](../tactical/195-periodic-cylinder-topology-proof.md) owns
+Stages 0-2 as independently reviewable slices: identity topology and persistence,
+a finite-bound canary, then a real Flat Grass cylinder with interactive seam
+diagnostics. Later stages remain unallocated and must not broaden that tactical.
 
 ### 0. Contract and Euclidean baseline
 
@@ -595,6 +597,8 @@ validation policy.
 
 ## Related
 
+- [`../tactical/195-periodic-cylinder-topology-proof.md`](../tactical/195-periodic-cylinder-topology-proof.md)
+- [`faithful-world-embeddings.md`](faithful-world-embeddings.md)
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`embedded-worlds.md`](embedded-worlds.md)

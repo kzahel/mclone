@@ -63,7 +63,14 @@ series implements the same concern, normally reuse the document slug in its
   exact locally Euclidean finite and looping dimensions, including bounded
   planes and cylinders, flat tori, observer-local lifts, topology-aware
   generation, presentation-only visual bending, a fog-capped cube atlas, and
-  deliberate deferral of true spherical regional rasterization.
+  deliberate deferral of true spherical regional rasterization. Tactical
+  [`195`](../tactical/195-periodic-cylinder-topology-proof.md) owns the exact
+  baseline, finite-bound canary, and first real Flat Grass cylinder.
+- [`faithful-world-embeddings.md`](faithful-world-embeddings.md): complementary
+  design exploration for dimensions whose exact slab, hinge, square-tube, or
+  cuboid embedding is visible to the player, including patch-local authority,
+  face-relative gravity, bounded cuboid shells, deterministic face-priority
+  ownership, and a later bounded connection to worlds inside blocks.
 - [`world-generation-profiles.md`](world-generation-profiles.md): accepted
   generator-profile direction and authoritative compatibility safety ledger;
   current reference-locked Overworld versus internal-mutable flat-grass,

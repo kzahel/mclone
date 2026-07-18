@@ -49,3 +49,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   comparing its old-Beta Overworld pipeline with Alpha
 - `beta-world-generation` — standalone selectable Beta 1.7.3 Overworld with
   staged core parity and deterministic flavor-close population; Tactical 194
+- `bounded-world-topology` — finite and periodic canonical dimension identity,
+  observer-local lifts, seam-safe simulation/rendering, and later exact patch
+  atlases; Tactical 195 begins with a Flat Grass X-periodic cylinder
