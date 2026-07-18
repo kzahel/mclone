@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
+use mclone_core::{AxisTopology, HorizontalTopology};
 use mclone_frame_budget::RenderCompileCapacityReport;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::RenderColorProfile;
@@ -18,6 +19,7 @@ use crate::{
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_GENERATION_PROFILE: &str = "--generation-profile";
+pub const ARG_WORLD_TOPOLOGY: &str = "--world-topology";
 pub const ARG_ALPHA_WINTER: &str = "--alpha-winter";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
 pub const ARG_CHUNK_Z: &str = "--chunk-z";
@@ -50,6 +52,7 @@ pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_SEED,
     ARG_GENERATION_PROFILE,
+    ARG_WORLD_TOPOLOGY,
     ARG_ALPHA_WINTER,
     ARG_CHUNK_X,
     ARG_CHUNK_Z,
@@ -79,6 +82,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
 
 pub const QUERY_SEED: &str = "seed";
 pub const QUERY_GENERATION_PROFILE: &str = "generationProfile";
+pub const QUERY_WORLD_TOPOLOGY: &str = "worldTopology";
 pub const QUERY_ALPHA_WINTER: &str = "alphaWinter";
 pub const QUERY_CHUNK_X: &str = "chunkX";
 pub const QUERY_CHUNK_Z: &str = "chunkZ";
@@ -104,6 +108,7 @@ pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
 pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SEED,
     QUERY_GENERATION_PROFILE,
+    QUERY_WORLD_TOPOLOGY,
     QUERY_ALPHA_WINTER,
     QUERY_CHUNK_X,
     QUERY_CHUNK_Z,
@@ -148,6 +153,7 @@ impl RenderDistanceLimits {
 pub struct StartupSceneOptions {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub world_topology: HorizontalTopology,
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub render_distance: u32,
@@ -174,6 +180,7 @@ impl Default for StartupSceneOptions {
         Self {
             seed: DEFAULT_STARTUP_SEED,
             world_generation_profile: WorldGenerationProfile::default(),
+            world_topology: HorizontalTopology::UNBOUNDED,
             chunk_x: DEFAULT_STARTUP_CHUNK_X,
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
             render_distance: DEFAULT_STARTUP_RENDER_DISTANCE,
@@ -372,6 +379,12 @@ impl StartupArgState {
                 .map_err(anyhow::Error::msg)?;
                 self.apply_alpha_winter_override();
             }
+            ARG_WORLD_TOPOLOGY => {
+                self.scene.world_topology = parse_world_topology_arg(
+                    ARG_WORLD_TOPOLOGY,
+                    &parse_string_arg(ARG_WORLD_TOPOLOGY, args.next())?,
+                )?;
+            }
             ARG_ALPHA_WINTER => {
                 self.alpha_winter_override = Some(parse_bool_arg(ARG_ALPHA_WINTER, args.next())?);
                 self.apply_alpha_winter_override();
@@ -513,6 +526,12 @@ impl StartupArgState {
                 .map_err(anyhow::Error::msg)?;
                 self.apply_alpha_winter_override();
             }
+            QUERY_WORLD_TOPOLOGY => {
+                self.scene.world_topology = parse_world_topology_arg(
+                    QUERY_WORLD_TOPOLOGY,
+                    &parse_string_arg(QUERY_WORLD_TOPOLOGY, value)?,
+                )?;
+            }
             QUERY_ALPHA_WINTER => {
                 self.alpha_winter_override =
                     Some(parse_query_presence_bool(QUERY_ALPHA_WINTER, value)?);
@@ -636,6 +655,28 @@ impl Default for StartupArgState {
 
 pub fn parse_string_arg(flag: &str, value: Option<String>) -> Result<String> {
     value.with_context(|| format!("{flag} requires a value"))
+}
+
+pub fn parse_world_topology_arg(flag: &str, value: &str) -> Result<HorizontalTopology> {
+    let value = value.trim();
+    if matches!(value, "plane" | "unbounded" | "euclidean") {
+        return Ok(HorizontalTopology::UNBOUNDED);
+    }
+    let period = if value == "cylinder-x" {
+        32
+    } else if let Some(period) = value.strip_prefix("cylinder-x:") {
+        period
+            .parse::<u32>()
+            .with_context(|| format!("invalid X-cylinder period `{period}` for {flag}"))?
+    } else {
+        bail!("{flag} must be plane, cylinder-x, or cylinder-x:<period-chunks>, got `{value}`");
+    };
+    let topology =
+        HorizontalTopology::new(AxisTopology::periodic(0, period), AxisTopology::Unbounded);
+    topology
+        .validate()
+        .map_err(|error| anyhow::anyhow!("invalid {flag}: {error}"))?;
+    Ok(topology)
 }
 
 pub fn parse_u32_arg(flag: &str, value: Option<String>) -> Result<u32> {
@@ -843,6 +884,7 @@ mod tests {
             StartupSceneOptions {
                 seed: 12_345,
                 world_generation_profile: WorldGenerationProfile::Overworld,
+                world_topology: HorizontalTopology::UNBOUNDED,
                 chunk_x: 0,
                 chunk_z: 0,
                 render_distance: 5,
@@ -901,6 +943,8 @@ mod tests {
             "-77",
             ARG_GENERATION_PROFILE,
             "authored-only",
+            ARG_WORLD_TOPOLOGY,
+            "cylinder-x:32",
             ARG_RENDER_DISTANCE,
             "6",
             ARG_REMOTE_ADDR,
@@ -919,6 +963,7 @@ mod tests {
         for (key, value) in [
             (QUERY_SEED, "-77"),
             (QUERY_GENERATION_PROFILE, "authored-only"),
+            (QUERY_WORLD_TOPOLOGY, "cylinder-x:32"),
             (QUERY_RENDER_DISTANCE, "6"),
             (QUERY_REMOTE_WS_URL, "example.test:25565"),
             (QUERY_DAY_TIME, "6000"),
@@ -948,6 +993,8 @@ mod tests {
             "-77",
             ARG_GENERATION_PROFILE,
             "authored-only",
+            ARG_WORLD_TOPOLOGY,
+            "cylinder-x:32",
             ARG_CHUNK_X,
             "4",
             ARG_CHUNK_Z,
@@ -987,6 +1034,10 @@ mod tests {
             StartupSceneOptions {
                 seed: -77,
                 world_generation_profile: WorldGenerationProfile::authored_only(),
+                world_topology: HorizontalTopology::new(
+                    AxisTopology::periodic(0, 32),
+                    AxisTopology::Unbounded,
+                ),
                 chunk_x: 4,
                 chunk_z: -3,
                 render_distance: 5,
@@ -1302,6 +1353,7 @@ mod tests {
             (QUERY_RENDER_COMPILE_WORKERS, "3"),
             (QUERY_RENDER_COMPILE_MAX_PENDING_JOBS, "5"),
             (QUERY_RENDER_COMPILE_CAPACITY, "derived"),
+            (QUERY_WORLD_TOPOLOGY, "cylinder-x"),
             (QUERY_REMOTE_WS_URL, "ws://127.0.0.1:25565"),
             (QUERY_DAY_TIME, "6000"),
             (QUERY_FREEZE_TIME, ""),
@@ -1334,6 +1386,10 @@ mod tests {
             StartupSceneOptions {
                 seed: -77,
                 world_generation_profile: WorldGenerationProfile::authored_only(),
+                world_topology: HorizontalTopology::new(
+                    AxisTopology::periodic(0, 32),
+                    AxisTopology::Unbounded,
+                ),
                 chunk_x: 4,
                 chunk_z: -3,
                 render_distance: 6,

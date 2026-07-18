@@ -110,7 +110,7 @@ impl PlayerChunkTrackingPolicy {
         }
     }
 
-    fn unload_radius(self, accepted: &ChunkView) -> u32 {
+    pub(crate) fn unload_radius(self, accepted: &ChunkView) -> u32 {
         if accepted.chunk_tracking_radius < JAVA_MIN_VIEW_DISTANCE {
             return accepted.chunk_tracking_radius;
         }

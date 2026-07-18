@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, HorizontalTopology};
 
 use crate::{
     CHUNK_LEVEL_FULL, ChunkTicket, ChunkTicketKey, ChunkTicketType, MAX_CHUNK_DISTANCE,
@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Debug)]
 pub(crate) struct ChunkDistanceManager {
+    topology: HorizontalTopology,
     tickets: BTreeMap<ChunkPos, BTreeSet<ChunkTicket>>,
     aggregate_resident_positions: BTreeSet<ChunkPos>,
     aggregate_simulation_ticket_positions: BTreeSet<ChunkPos>,
@@ -27,12 +28,18 @@ pub(crate) struct ChunkDistanceManager {
 impl ChunkDistanceManager {
     pub(crate) fn new() -> Self {
         Self {
+            topology: HorizontalTopology::UNBOUNDED,
             tickets: BTreeMap::new(),
             aggregate_resident_positions: BTreeSet::new(),
             aggregate_simulation_ticket_positions: BTreeSet::new(),
             aggregate_interest_priority_centers: Vec::new(),
             ticket_tick: 0,
         }
+    }
+
+    pub(crate) fn set_topology(&mut self, topology: HorizontalTopology) {
+        debug_assert!(self.tickets.is_empty());
+        self.topology = topology;
     }
 
     pub(crate) fn ticket_tick(&self) -> u64 {
@@ -195,7 +202,9 @@ impl ChunkDistanceManager {
                         continue;
                     }
 
-                    let pos = ChunkPos::new(source_pos.x + dx, source_pos.z + dz);
+                    let Some(pos) = self.topology.neighbor_chunk(*source_pos, dx, dz) else {
+                        continue;
+                    };
                     levels
                         .entry(pos)
                         .and_modify(|current| *current = (*current).min(level))

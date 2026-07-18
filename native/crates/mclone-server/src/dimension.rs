@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use mclone_protocol::DimensionKey;
 
 use crate::WorldGenerationProfile;
-use crate::persistence::{DimensionDefinition, DimensionRecord};
+use crate::persistence::DimensionDefinition;
 
 /// Realm-owned registry of durable dimension definitions.
 ///
@@ -17,9 +17,12 @@ pub struct DimensionRegistry {
 
 impl DimensionRegistry {
     pub fn single_overworld(seed: i64, generation_profile: WorldGenerationProfile) -> Self {
-        let record = DimensionRecord::overworld(seed, generation_profile);
+        Self::single_overworld_definition(DimensionDefinition::overworld(seed, generation_profile))
+    }
+
+    pub(crate) fn single_overworld_definition(definition: DimensionDefinition) -> Self {
         Self {
-            definitions: BTreeMap::from([(record.key, record.definition)]),
+            definitions: BTreeMap::from([(DimensionKey::overworld(), definition)]),
         }
     }
 

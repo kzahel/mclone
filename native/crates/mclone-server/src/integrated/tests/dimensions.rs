@@ -27,6 +27,107 @@ fn finite_flat_record() -> DimensionRecord {
     }
 }
 
+fn cylinder_flat_record() -> DimensionRecord {
+    let mut definition =
+        crate::DimensionDefinition::overworld(98_765, WorldGenerationProfile::FlatGrassV1);
+    definition.topology =
+        HorizontalTopology::new(AxisTopology::periodic(0, 32), AxisTopology::Unbounded);
+    DimensionRecord {
+        key: DimensionKey::parse("mclone:cylinder_canary").unwrap(),
+        codec_version: crate::DIMENSION_RECORD_VERSION,
+        revision: 1,
+        definition,
+    }
+}
+
+#[test]
+fn periodic_dimension_deduplicates_laps_and_opposing_seam_views() {
+    let record = cylinder_flat_record();
+    let cylinder = record.key.clone();
+    let topology = record.definition.topology;
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server.set_lighting_enabled(false);
+    assert!(server.register_dimension(record).unwrap());
+
+    let player = server.add_player_in_dimension(cylinder.clone()).unwrap();
+    for center_x in 0..=32 {
+        server
+            .try_handle_command_for_player(
+                player,
+                ClientCommand::SetChunkView(ChunkView {
+                    center: ChunkPos::new(center_x, 0),
+                    render_distance: 2,
+                    chunk_tracking_radius: 2,
+                }),
+            )
+            .unwrap();
+        let positions = server.chunk_tracking.aggregate_resident_positions();
+        assert_eq!(positions.len(), 25);
+        assert!(
+            positions
+                .iter()
+                .all(|pos| topology.canonicalize_chunk(*pos) == Some(*pos))
+        );
+    }
+    let diagnostics = server.chunk_tracking_diagnostics();
+    assert_eq!(
+        diagnostics.players[0]
+            .accepted_view
+            .as_ref()
+            .unwrap()
+            .center,
+        ChunkPos::new(0, 0)
+    );
+    assert_eq!(
+        server.scheduler().world_generation_descriptor().topology,
+        topology
+    );
+    assert_eq!(
+        server
+            .scheduler()
+            .topology_chunk_state(ChunkPos::new(-1, 0)),
+        TopologyChunkState::Loaded {
+            canonical: ChunkPos::new(31, 0),
+        }
+    );
+    let seam_ticket_count = server.scheduler().ticket_count_at(ChunkPos::new(31, 0));
+    server
+        .scheduler_mut()
+        .set_chunk_forced(ChunkPos::new(-1, 0), true)
+        .unwrap();
+    assert_eq!(
+        server.scheduler().ticket_count_at(ChunkPos::new(-1, 0)),
+        seam_ticket_count + 1
+    );
+
+    let observer = server
+        .add_observer(
+            cylinder,
+            ChunkView {
+                center: ChunkPos::new(31, 0),
+                render_distance: 2,
+                chunk_tracking_radius: 2,
+            },
+            ObserverSimulationInterest::ResidencyOnly,
+        )
+        .unwrap();
+    let diagnostics = server.chunk_tracking_diagnostics();
+    assert_eq!(diagnostics.aggregate_player_ticket_chunks, 25);
+    assert_eq!(diagnostics.aggregate_resident_chunks, 30);
+    assert_eq!(diagnostics.total_player_visible_chunks, 25);
+    assert_eq!(diagnostics.total_observer_visible_chunks, 25);
+    assert_eq!(
+        diagnostics.observers[0]
+            .accepted_view
+            .as_ref()
+            .unwrap()
+            .center,
+        ChunkPos::new(31, 0)
+    );
+
+    server.remove_observer(observer).unwrap();
+}
+
 #[test]
 fn finite_dimension_rejects_authority_outside_its_bounds() {
     let record = finite_flat_record();

@@ -9,7 +9,7 @@
 use std::error::Error;
 use std::fmt;
 
-use mclone_core::BlockPos;
+use mclone_core::{BlockPos, HorizontalTopology};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_protocol::{
     ChunkView, DimensionKey, decode_client_command, encode_client_command, encode_server_update,
@@ -645,6 +645,7 @@ mod native {
     pub struct NativeIntegratedServerRunnerConfig {
         pub seed: i64,
         pub world_generation_profile: WorldGenerationProfile,
+        pub world_topology: HorizontalTopology,
         pub world_behavior_profile: WorldBehaviorProfile,
         pub lighting_enabled: bool,
         pub light_status_batch_size: usize,
@@ -667,6 +668,7 @@ mod native {
             Self {
                 seed,
                 world_generation_profile: WorldGenerationProfile::default(),
+                world_topology: HorizontalTopology::UNBOUNDED,
                 world_behavior_profile: WorldBehaviorProfile::default(),
                 lighting_enabled: true,
                 light_status_batch_size: crate::DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -692,6 +694,11 @@ mod native {
 
         pub fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
             self.world_generation_profile = profile;
+            self
+        }
+
+        pub fn with_world_topology(mut self, topology: HorizontalTopology) -> Self {
+            self.world_topology = topology;
             self
         }
 
@@ -1174,16 +1181,26 @@ mod native {
             let _ = ready_tx.send(Err("invalid native server cadence config".to_owned()));
             return Ok(());
         };
+        if let Err(error) = config
+            .world_generation_profile
+            .validate_topology(config.world_topology)
+        {
+            let _ = ready_tx.send(Err(error));
+            return Ok(());
+        }
+        let mut definition =
+            crate::DimensionDefinition::overworld(config.seed, config.world_generation_profile);
+        definition.topology = config.world_topology;
         let mut server = match &config.world_storage {
             NativeIntegratedServerWorldStorage::Transient => {
-                LocalRealmSession::with_player_chunk_tracking_policy(
-                    config.seed,
+                LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+                    definition.clone(),
                     config.player_chunk_tracking_policy,
                 )
             }
             NativeIntegratedServerWorldStorage::Persistent { dir } => {
-                match LocalRealmSession::try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
-                    config.seed,
+                match LocalRealmSession::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                    definition,
                     dir,
                     config.player_chunk_tracking_policy,
                 ) {
@@ -1842,6 +1859,39 @@ mod native {
             let config = NativeIntegratedServerRunnerConfig::new(0).with_light_status_batch_size(0);
 
             assert_eq!(config.light_status_batch_size, 1);
+        }
+
+        #[test]
+        fn native_runner_starts_periodic_flat_grass_as_the_primary_dimension() {
+            let topology = HorizontalTopology::cylinder_x(0, 32);
+            let config = test_runner_config(12_345)
+                .with_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+                .with_world_topology(topology);
+            let mut runner = NativeIntegratedServerRunner::new(config).unwrap();
+
+            let updates = drain_until(&mut runner, |updates| {
+                updates.iter().any(|update| {
+                    matches!(update, ServerUpdate::WorldInfo { topology: actual, .. } if *actual == topology)
+                })
+            });
+
+            assert!(updates.iter().any(|update| {
+                matches!(update, ServerUpdate::WorldInfo { topology: actual, .. } if *actual == topology)
+            }));
+            runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn native_runner_rejects_an_unsupported_primary_topology_profile() {
+            let result = NativeIntegratedServerRunner::new(
+                test_runner_config(12_345)
+                    .with_world_topology(HorizontalTopology::cylinder_x(0, 32)),
+            );
+
+            assert!(matches!(
+                result,
+                Err(ServerRunnerError::ThreadStart(message)) if message.contains("does not support")
+            ));
         }
 
         #[test]

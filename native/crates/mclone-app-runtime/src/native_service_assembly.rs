@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
+use mclone_core::HorizontalTopology;
 use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot, LodTileKey};
 use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
@@ -100,6 +101,7 @@ pub fn native_managed_scenario_content_operations(
 pub struct LocalIntegratedSceneOptions {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub world_topology: HorizontalTopology,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub center: ChunkPos,
     pub render_distance: u32,
@@ -173,6 +175,7 @@ impl LocalIntegratedSceneOptions {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::Overworld,
+            world_topology: HorizontalTopology::UNBOUNDED,
             world_behavior_profile: WorldBehaviorProfile::Mutable,
             center,
             render_distance,
@@ -202,6 +205,11 @@ impl LocalIntegratedSceneOptions {
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub const fn with_world_topology(mut self, topology: HorizontalTopology) -> Self {
+        self.world_topology = topology;
         self
     }
 
@@ -3392,6 +3400,7 @@ fn native_runner_config(
 ) -> NativeIntegratedServerRunnerConfig {
     let mut config = NativeIntegratedServerRunnerConfig::new(options.seed)
         .with_world_generation_profile(options.world_generation_profile)
+        .with_world_topology(options.world_topology)
         .with_world_behavior_profile(options.world_behavior_profile)
         .with_lighting_enabled(options.lighting_enabled)
         .with_light_status_batch_size(options.light_status_batch_size)

@@ -6442,7 +6442,8 @@ pub fn local_integrated_scene_options(
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
     let mut options =
         LocalIntegratedSceneOptions::new(scene.seed, scene.center(), scene.render_distance)
-            .with_world_generation_profile(scene.world_generation_profile);
+            .with_world_generation_profile(scene.world_generation_profile)
+            .with_world_topology(scene.world_topology);
     // Procedural profiles own their preferred initial center. An authored
     // world instead keeps its persistence-backed entry hint so the ordinary
     // safe-surface correction can resolve the exact pose from stored chunks.

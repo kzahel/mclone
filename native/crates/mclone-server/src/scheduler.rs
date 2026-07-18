@@ -900,6 +900,7 @@ impl ChunkScheduler {
             ));
         }
         self.topology = topology;
+        self.distance_manager.set_topology(topology);
         Ok(())
     }
 
@@ -928,7 +929,11 @@ impl ChunkScheduler {
     }
 
     pub const fn world_generation_descriptor(&self) -> WorldGenerationDescriptor {
-        WorldGenerationDescriptor::new(self.world_generation_profile, self.seed)
+        WorldGenerationDescriptor::with_topology(
+            self.world_generation_profile,
+            self.seed,
+            self.topology,
+        )
     }
 
     pub fn set_world_generation_profile(
@@ -2247,6 +2252,9 @@ impl ChunkScheduler {
         block_id: RawBlockId,
         report: &mut FluidMutationReport,
     ) {
+        let Some(pos) = self.topology.canonicalize_block(pos) else {
+            return;
+        };
         let before = self.block_at_world(pos);
         let set_block_start = simulation_timing_start();
         let changed_by_set = self.set_block_at_world(pos, block_id);
@@ -2276,6 +2284,9 @@ impl ChunkScheduler {
         }
 
         for candidate in candidates {
+            let Some(candidate) = self.topology.canonicalize_block(candidate) else {
+                continue;
+            };
             let set_block_start = simulation_timing_start();
             let changed = self.resolve_lava_source_contact_at(candidate);
             report.set_block_us += simulation_timing_elapsed_us(set_block_start);
@@ -2872,7 +2883,11 @@ impl ChunkScheduler {
         }
 
         events.extend(self.enqueue_runtime_chunks(
-            sorted_chunk_positions_by_priority(runtime_targets, &priority_centers),
+            sorted_chunk_positions_by_priority_in(
+                self.topology,
+                runtime_targets,
+                &priority_centers,
+            ),
             self.runtime_chunk_target_status(),
             &priority_centers,
         )?);
@@ -2987,7 +3002,8 @@ impl ChunkScheduler {
                     })
             })
             .collect::<BTreeSet<_>>();
-        let candidates = sorted_chunk_positions_by_priority(candidates, &priority_centers);
+        let candidates =
+            sorted_chunk_positions_by_priority_in(self.topology, candidates, &priority_centers);
         self.enqueue_feature_job_for_missing_targets(candidates, &priority_centers)
     }
 
@@ -3399,7 +3415,8 @@ impl ChunkScheduler {
             .distance_manager
             .player_interest_priority_centers()
             .to_vec();
-        let statuses = light_statuses_sorted_by_priority(statuses, &priority_centers);
+        let statuses =
+            light_statuses_sorted_by_priority_in(self.topology, statuses, &priority_centers);
         self.light_mailbox
             .enqueue_batch(PendingLightStatusBatch::new(statuses));
     }
@@ -3527,7 +3544,9 @@ impl ChunkScheduler {
         }
         self.pending_light_publications
             .make_contiguous()
-            .sort_by_key(|completed| chunk_priority_key(completed.pos, &priority_centers));
+            .sort_by_key(|completed| {
+                chunk_priority_key_in(self.topology, completed.pos, &priority_centers)
+            });
     }
 
     fn observe_publication_spend(
@@ -3562,7 +3581,7 @@ impl ChunkScheduler {
         let plan = plan_request.plan();
         self.schedule_generation_prerequisites(plan.prerequisites());
         let (target_chunks, feature_centers, dependency_requirements) =
-            ordered_generation_plan(plan, priority_centers);
+            ordered_generation_plan_in(self.topology, plan, priority_centers);
         let mut seen_dependency_chunks = BTreeSet::new();
         let dependency_chunks = dependency_requirements
             .iter()
@@ -4362,14 +4381,24 @@ fn block_change_affects_light(old_block: RawBlockId, new_block: RawBlockId) -> b
         || block_light_emission(old_block) != block_light_emission(new_block)
 }
 
+#[cfg(test)]
 fn ordered_generation_plan(
     plan: ChunkGenerationPlan,
     priority_centers: &[ChunkPos],
 ) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkStatusRequirement>) {
+    ordered_generation_plan_in(HorizontalTopology::UNBOUNDED, plan, priority_centers)
+}
+
+fn ordered_generation_plan_in(
+    topology: HorizontalTopology,
+    plan: ChunkGenerationPlan,
+    priority_centers: &[ChunkPos],
+) -> (Vec<ChunkPos>, Vec<ChunkPos>, Vec<ChunkStatusRequirement>) {
     let (target_chunks, backend_work_chunks, prerequisites) = plan.into_parts();
-    let target_chunks = sorted_chunk_positions_by_priority(target_chunks, priority_centers);
+    let target_chunks =
+        sorted_chunk_positions_by_priority_in(topology, target_chunks, priority_centers);
     let backend_work_chunks =
-        sorted_chunk_positions_by_priority(backend_work_chunks, priority_centers);
+        sorted_chunk_positions_by_priority_in(topology, backend_work_chunks, priority_centers);
     let mut dependency_requirements = prerequisites.into_iter().collect::<Vec<_>>();
     if priority_centers.is_empty() {
         dependency_requirements
@@ -4377,7 +4406,7 @@ fn ordered_generation_plan(
     } else {
         dependency_requirements.sort_by_key(|requirement| {
             (
-                chunk_priority_key(requirement.pos, priority_centers),
+                chunk_priority_key_in(topology, requirement.pos, priority_centers),
                 *requirement,
             )
         });
@@ -4385,7 +4414,20 @@ fn ordered_generation_plan(
     (target_chunks, backend_work_chunks, dependency_requirements)
 }
 
+#[cfg(test)]
 fn sorted_chunk_positions_by_priority(
+    positions: impl IntoIterator<Item = ChunkPos>,
+    priority_centers: &[ChunkPos],
+) -> Vec<ChunkPos> {
+    sorted_chunk_positions_by_priority_in(
+        HorizontalTopology::UNBOUNDED,
+        positions,
+        priority_centers,
+    )
+}
+
+fn sorted_chunk_positions_by_priority_in(
+    topology: HorizontalTopology,
     positions: impl IntoIterator<Item = ChunkPos>,
     priority_centers: &[ChunkPos],
 ) -> Vec<ChunkPos> {
@@ -4394,26 +4436,41 @@ fn sorted_chunk_positions_by_priority(
     }
 
     let mut positions = positions.into_iter().collect::<Vec<_>>();
-    positions.sort_by_key(|pos| chunk_priority_key(*pos, priority_centers));
+    positions.sort_by_key(|pos| chunk_priority_key_in(topology, *pos, priority_centers));
     positions
 }
 
+#[cfg(test)]
 fn light_statuses_sorted_by_priority(
+    statuses: Vec<PendingLightStatus>,
+    priority_centers: &[ChunkPos],
+) -> Vec<PendingLightStatus> {
+    light_statuses_sorted_by_priority_in(HorizontalTopology::UNBOUNDED, statuses, priority_centers)
+}
+
+fn light_statuses_sorted_by_priority_in(
+    topology: HorizontalTopology,
     mut statuses: Vec<PendingLightStatus>,
     priority_centers: &[ChunkPos],
 ) -> Vec<PendingLightStatus> {
     if !priority_centers.is_empty() {
-        statuses.sort_by_key(|status| chunk_priority_key(status.pos, priority_centers));
+        statuses
+            .sort_by_key(|status| chunk_priority_key_in(topology, status.pos, priority_centers));
     }
     statuses
 }
 
-fn chunk_priority_key(pos: ChunkPos, priority_centers: &[ChunkPos]) -> (i64, i64, i32, i32) {
+fn chunk_priority_key_in(
+    topology: HorizontalTopology,
+    pos: ChunkPos,
+    priority_centers: &[ChunkPos],
+) -> (i64, i64, i32, i32) {
     let (chebyshev_distance, manhattan_distance) = priority_centers
         .iter()
         .map(|center| {
-            let dx = (i64::from(pos.x) - i64::from(center.x)).abs();
-            let dz = (i64::from(pos.z) - i64::from(center.z)).abs();
+            let [dx, dz] = topology.shortest_chunk_displacement(*center, pos);
+            let dx = dx.abs();
+            let dz = dz.abs();
             (dx.max(dz), dx + dz)
         })
         .min()
@@ -4524,6 +4581,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(scheduler.metrics().direct_ticket_chunks, 4);
+        assert_eq!(scheduler.distance_manager.active_levels().len(), 4);
         assert!(
             scheduler
                 .distance_manager
@@ -4536,6 +4594,42 @@ mod tests {
             None
         );
         assert!(!scheduler.set_block_at_world(BlockPos::new(-1, 64, 0), DIRT));
+    }
+
+    #[test]
+    fn periodic_ticket_propagation_never_creates_noncanonical_holders() {
+        let topology = HorizontalTopology::new(
+            mclone_core::AxisTopology::periodic(0, 32),
+            mclone_core::AxisTopology::Unbounded,
+        );
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+            .unwrap();
+        scheduler.set_topology(topology).unwrap();
+
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 2,
+                chunk_tracking_radius: 2,
+            })
+            .unwrap();
+
+        assert_eq!(scheduler.metrics().direct_ticket_chunks, 25);
+        assert!(
+            scheduler
+                .distance_manager
+                .active_levels()
+                .keys()
+                .all(|pos| topology.canonicalize_chunk(*pos) == Some(*pos))
+        );
+        assert!(
+            scheduler
+                .holders
+                .keys()
+                .all(|pos| topology.canonicalize_chunk(*pos) == Some(*pos))
+        );
     }
 
     #[test]
@@ -4600,6 +4694,31 @@ mod tests {
                     .position(|pos| *pos == ChunkPos::new(2, 2))
                     .unwrap()
         );
+    }
+
+    #[test]
+    fn periodic_priority_treats_both_sides_of_the_seam_as_adjacent() {
+        let topology = HorizontalTopology::new(
+            mclone_core::AxisTopology::periodic(0, 32),
+            mclone_core::AxisTopology::Unbounded,
+        );
+        let sorted = sorted_chunk_positions_by_priority_in(
+            topology,
+            [
+                ChunkPos::new(16, 0),
+                ChunkPos::new(31, 0),
+                ChunkPos::new(1, 0),
+                ChunkPos::new(0, 0),
+            ],
+            &[ChunkPos::new(0, 0)],
+        );
+
+        assert_eq!(sorted[0], ChunkPos::new(0, 0));
+        assert_eq!(
+            sorted[1..3].iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([ChunkPos::new(1, 0), ChunkPos::new(31, 0)])
+        );
+        assert_eq!(sorted[3], ChunkPos::new(16, 0));
     }
 
     #[test]

@@ -40,6 +40,9 @@ fn scene_render_distance(scene: &SceneOptions) -> Result<u32> {
 pub(crate) fn local_integrated_scene_options(
     scene: &SceneOptions,
 ) -> Result<LocalIntegratedSceneOptions> {
+    if !scene.world_topology.is_unbounded() && scene.far_lod.enabled {
+        anyhow::bail!("Far LOD is unavailable for bounded or periodic world topology");
+    }
     let profile = load_or_create_native_local_player_profile(scene.world_root.as_deref())?;
     let storage = IntegratedWorldSessionStorage::from_world_dir(scene.world_dir.as_deref())
         .with_adaptive_chunk_publication_budget(scene.adaptive_chunk_publication_budget);
@@ -48,6 +51,8 @@ pub(crate) fn local_integrated_scene_options(
         ChunkPos::new(scene.chunk_x, scene.chunk_z),
         scene_render_distance(scene)?,
     )
+    .with_world_generation_profile(scene.world_generation_profile)
+    .with_world_topology(scene.world_topology)
     .with_day_time(scene.day_time_override)
     .with_freeze_time(scene.freeze_time)
     .with_cadence(scene.simulation_cadence)

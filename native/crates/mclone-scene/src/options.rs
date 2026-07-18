@@ -112,6 +112,9 @@ impl McloneSceneHostOptions {
     }
 
     pub fn validated(self) -> Result<Self> {
+        if !self.world_topology.is_unbounded() && self.far_lod.enabled {
+            bail!("Far LOD is unavailable for bounded or periodic world topology");
+        }
         if self.render_distance == 0 || self.render_distance > MAX_XR_RENDER_DISTANCE {
             bail!(
                 "XR render distance must be between 1 and {MAX_XR_RENDER_DISTANCE}, got {}",

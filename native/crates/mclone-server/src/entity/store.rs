@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_blocks::collision_aabb_for_feet_position;
-use mclone_core::{Aabb, BlockPos, BlockStateId, ChunkPos, Vec3d};
+use mclone_core::{Aabb, BlockPos, BlockStateId, ChunkPos, HorizontalTopology, Vec3d};
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
@@ -37,6 +37,7 @@ pub(crate) struct ItemPickupTarget {
 
 #[derive(Debug, Default)]
 pub(crate) struct ServerEntityStore {
+    topology: HorizontalTopology,
     entities: BTreeMap<EntityId, ServerEntityState>,
     mobs: BTreeMap<EntityId, MobRuntimeState>,
     items: BTreeMap<EntityId, ItemEntityRuntimeState>,
@@ -58,6 +59,16 @@ pub(crate) struct DebugPhysicsCubeEntitySpawn {
 }
 
 impl ServerEntityStore {
+    pub(crate) fn with_topology(topology: HorizontalTopology) -> Self {
+        topology
+            .validate()
+            .expect("entity store requires validated topology");
+        Self {
+            topology,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn ensure_debug_passive_showcase_near_spawn(
         &mut self,
         spawn_position: Vec3d,
@@ -136,6 +147,10 @@ impl ServerEntityStore {
         rotation: EntityRotation,
         age_ticks: u64,
     ) -> ServerEntityState {
+        let position = self
+            .topology
+            .canonicalize_position(position)
+            .expect("debug physics entity must lie inside the dimension topology");
         if let Some(id) = self.debug_physics_cube_id {
             let state = debug_physics_cube_state(
                 id,
@@ -160,6 +175,10 @@ impl ServerEntityStore {
         rotation: EntityRotation,
         age_ticks: u64,
     ) -> ServerEntityState {
+        let position = self
+            .topology
+            .canonicalize_position(position)
+            .expect("debug physics entity must lie inside the dimension topology");
         let id = self.allocate_entity_id();
         self.debug_physics_cube_id = Some(id);
         let state = debug_physics_cube_state(
@@ -439,6 +458,14 @@ impl ServerEntityStore {
                 if is_item && entity.alive && item_merge_due(entity.age_ticks, item_block_changed) {
                     merge_due_ids.push(id);
                 }
+                if entity.alive {
+                    if let Some(position) = self.topology.canonicalize_position(entity.position) {
+                        entity.position = position;
+                    } else {
+                        entity.alive = false;
+                        removed_ids.push(id);
+                    }
+                }
                 updated.push(*entity);
             }
         }
@@ -637,6 +664,10 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
     ) -> ServerEntityState {
+        let position = self
+            .topology
+            .canonicalize_position(position)
+            .expect("spawned passive entity must lie inside the dimension topology");
         let metadata = EntityMetadata::for_kind(kind).expect("passive mob metadata must exist");
         debug_assert!(metadata.is_passive_mob());
         let state = ServerEntityState::from_metadata(
@@ -664,6 +695,10 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
     ) -> ServerEntityState {
+        let position = self
+            .topology
+            .canonicalize_position(position)
+            .expect("spawned item entity must lie inside the dimension topology");
         let id = self.allocate_entity_id();
         let metadata = EntityMetadata::for_kind(EntityKind::Item).expect("item metadata");
         let mut state = ServerEntityState::from_metadata(
@@ -695,6 +730,15 @@ impl ServerEntityStore {
                 saved.persistent_id
             )));
         }
+        let canonical_position = self
+            .topology
+            .canonicalize_position(saved.position)
+            .ok_or_else(|| {
+                ChunkStoreError::InvalidData(format!(
+                    "entity {:?} lies outside the dimension topology",
+                    saved.persistent_id
+                ))
+            })?;
         if self
             .persistent_ids
             .values()
@@ -709,21 +753,32 @@ impl ServerEntityStore {
         let id = self.allocate_entity_id();
         let state = match (saved.kind.as_str(), &saved.payload) {
             ("minecraft:cow", EntitySavePayload::Cow) => {
-                self.insert_saved_passive_mob(id, saved, EntityKind::Cow, None)?
+                self.insert_saved_passive_mob(id, saved, canonical_position, EntityKind::Cow, None)?
             }
-            ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => {
-                self.insert_saved_passive_mob(id, saved, EntityKind::Chicken, Some(*egg_time))?
-            }
-            ("mclone:mannequin", EntitySavePayload::Mannequin) => {
-                self.insert_saved_passive_mob(id, saved, EntityKind::Mannequin, None)?
-            }
+            ("minecraft:chicken", EntitySavePayload::Chicken { egg_time }) => self
+                .insert_saved_passive_mob(
+                    id,
+                    saved,
+                    canonical_position,
+                    EntityKind::Chicken,
+                    Some(*egg_time),
+                )?,
+            ("mclone:mannequin", EntitySavePayload::Mannequin) => self.insert_saved_passive_mob(
+                id,
+                saved,
+                canonical_position,
+                EntityKind::Mannequin,
+                None,
+            )?,
             (
                 "minecraft:item",
                 EntitySavePayload::Item {
                     stack,
                     pickup_delay,
                 },
-            ) => self.insert_saved_item_entity(id, saved, stack, *pickup_delay)?,
+            ) => {
+                self.insert_saved_item_entity(id, saved, canonical_position, stack, *pickup_delay)?
+            }
             (kind, payload) => {
                 return Err(ChunkStoreError::InvalidData(format!(
                     "entity {:?} had incompatible kind {kind:?} and payload {payload:?}",
@@ -742,6 +797,7 @@ impl ServerEntityStore {
         &mut self,
         id: EntityId,
         saved: &EntitySaveRecord,
+        position: Vec3d,
         kind: EntityKind,
         chicken_egg_time: Option<i32>,
     ) -> ChunkStoreResult<ServerEntityState> {
@@ -751,7 +807,7 @@ impl ServerEntityStore {
         let mut state = ServerEntityState::from_metadata(
             id,
             metadata,
-            saved.position,
+            position,
             saved.y_rot_degrees,
             saved.x_rot_degrees,
             saved.rotation,
@@ -775,6 +831,7 @@ impl ServerEntityStore {
         &mut self,
         id: EntityId,
         saved: &EntitySaveRecord,
+        position: Vec3d,
         stack: &ItemStackSaveRecord,
         pickup_delay: i32,
     ) -> ChunkStoreResult<ServerEntityState> {
@@ -783,7 +840,7 @@ impl ServerEntityStore {
         let mut state = ServerEntityState::from_metadata(
             id,
             metadata,
-            saved.position,
+            position,
             saved.y_rot_degrees,
             saved.x_rot_degrees,
             saved.rotation,
@@ -1005,6 +1062,30 @@ fn fallback_persistent_id(id: EntityId) -> EntityPersistentId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn periodic_store_canonicalizes_entity_pose_and_chunk_ownership() {
+        let topology = HorizontalTopology::new(
+            mclone_core::AxisTopology::periodic(0, 32),
+            mclone_core::AxisTopology::Unbounded,
+        );
+        let mut store = ServerEntityStore::with_topology(topology);
+
+        let id =
+            store.insert_passive_mob_for_test(EntityKind::Cow, Vec3d::new(512.5, 64.0, 8.5), 0.0);
+
+        assert_eq!(
+            store.state(id).unwrap().position,
+            Vec3d::new(0.5, 64.0, 8.5)
+        );
+        assert_eq!(
+            store
+                .persistent_entity_chunk_positions()
+                .into_values()
+                .collect::<Vec<_>>(),
+            vec![ChunkPos::new(0, 0)]
+        );
+    }
     use crate::entity::metadata::{EntityDimensions, EntityMetadata, PASSIVE_MOB_KINDS};
     use crate::entity::mob::BlockPathType;
 

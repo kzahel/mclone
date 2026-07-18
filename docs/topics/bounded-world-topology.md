@@ -2,14 +2,17 @@
 
 Topic: `bounded-world-topology`
 
-Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-2 have
+Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-3 have
 landed the exact Euclidean baseline, validated shared axis operations, persisted
 dimension topology with legacy defaulting, protocol ordering, and the client
 dimension fact. The finite Flat Grass canary now enforces authoritative bounds
 through views, tickets, readiness, spawn, movement, transfer, edits, explicit
-ticks, storage admission, and profile compatibility. Periodic authority has not
-landed yet; Tactical 195 continues with the first real Flat Grass X-periodic
-cylinder. The selected model is an exact
+ticks, storage admission, and profile compatibility. The first 32-chunk
+X-periodic Flat Grass cylinder now canonicalizes views, tickets, holders,
+scheduler priority, generation work, block/tick/entity ownership, and worker
+identity while preserving a coherent generation work lift. Tactical 195 now
+continues with observer-local client lifts, seam meshing, and first pixels. The
+selected model is an exact
 locally Euclidean voxel world with dimension-owned finite, periodic, or later
 patch-glued horizontal topology. Canonical simulation and object identity stay
 independent from observer-local lifts and optional presentation-only visual

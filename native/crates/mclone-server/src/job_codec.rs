@@ -2,7 +2,10 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use mclone_core::{BlockPos, ChunkPos, ChunkSnapshot, ChunkStatus, PackedLightSection};
+use mclone_core::{
+    AxisTopology, BlockPos, ChunkPos, ChunkSnapshot, ChunkStatus, HorizontalTopology,
+    PackedLightSection,
+};
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
@@ -39,7 +42,7 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 5;
+const JOB_FRAME_VERSION: u32 = 6;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct GenerationCacheReport {
@@ -711,6 +714,30 @@ impl FrameWriter {
     fn write_world_generation_descriptor(&mut self, descriptor: WorldGenerationDescriptor) {
         self.write_u8(descriptor.profile.codec_tag());
         self.write_i64(descriptor.seed);
+        self.write_axis_topology(descriptor.topology.x);
+        self.write_axis_topology(descriptor.topology.z);
+    }
+
+    fn write_axis_topology(&mut self, topology: AxisTopology) {
+        match topology {
+            AxisTopology::Unbounded => self.write_u8(0),
+            AxisTopology::Finite {
+                minimum_chunk,
+                maximum_chunk_exclusive,
+            } => {
+                self.write_u8(1);
+                self.write_i32(minimum_chunk);
+                self.write_i32(maximum_chunk_exclusive);
+            }
+            AxisTopology::Periodic {
+                minimum_chunk,
+                period_chunks,
+            } => {
+                self.write_u8(2);
+                self.write_i32(minimum_chunk);
+                self.write_u32(period_chunks);
+            }
+        }
     }
 
     fn write_chunk_status(&mut self, status: ChunkStatus) {
@@ -1129,7 +1156,24 @@ impl<'a> FrameReader<'a> {
         let profile = WorldGenerationProfile::from_codec_tag(tag)
             .ok_or_else(|| format!("unknown world generation profile tag {tag}"))?;
         let seed = self.read_i64()?;
-        Ok(WorldGenerationDescriptor::new(profile, seed))
+        let topology =
+            HorizontalTopology::new(self.read_axis_topology()?, self.read_axis_topology()?);
+        topology
+            .validate()
+            .map_err(|error| format!("invalid world generation topology: {error}"))?;
+        profile.validate_topology(topology)?;
+        Ok(WorldGenerationDescriptor::with_topology(
+            profile, seed, topology,
+        ))
+    }
+
+    fn read_axis_topology(&mut self) -> Result<AxisTopology, String> {
+        match self.read_u8()? {
+            0 => Ok(AxisTopology::Unbounded),
+            1 => Ok(AxisTopology::finite(self.read_i32()?, self.read_i32()?)),
+            2 => Ok(AxisTopology::periodic(self.read_i32()?, self.read_u32()?)),
+            tag => Err(format!("unknown world generation axis topology tag {tag}")),
+        }
     }
 
     fn read_chunk_status(&mut self) -> Result<ChunkStatus, String> {
@@ -1775,6 +1819,43 @@ mod tests {
             session.descriptor(),
             Some(WorldGenerationDescriptor::overworld(54_321))
         );
+    }
+
+    #[test]
+    fn worldgen_descriptor_roundtrips_periodic_identity_and_resets_mirrors() {
+        let cylinder =
+            HorizontalTopology::new(AxisTopology::periodic(0, 32), AxisTopology::Unbounded);
+        let plane = WorldGenerationDescriptor::new(WorldGenerationProfile::FlatGrassV1, 12_345);
+        let periodic = WorldGenerationDescriptor::with_topology(
+            WorldGenerationProfile::FlatGrassV1,
+            12_345,
+            cylinder,
+        );
+        let targets = [ChunkPos::new(-1, 0), ChunkPos::new(0, 0)];
+
+        let response = full_worldgen_frame(ChunkJobId(1), periodic, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        assert_eq!(response.descriptor, periodic);
+        assert_eq!(
+            response
+                .generated_chunks
+                .keys()
+                .copied()
+                .collect::<Vec<_>>(),
+            vec![ChunkPos::new(0, 0), ChunkPos::new(31, 0)]
+        );
+
+        let mut session = WorldgenJobSession::new();
+        let first = delta_worldgen_frame(ChunkJobId(2), plane, 1, true, &targets).unwrap();
+        session.compute_delta_job_frame(&first).unwrap();
+        let changed_without_reset =
+            delta_worldgen_frame(ChunkJobId(3), periodic, 1, false, &targets).unwrap();
+        let error = session
+            .compute_delta_job_frame(&changed_without_reset)
+            .unwrap_err();
+        assert!(error.contains("descriptor changed"), "{error}");
     }
 
     #[test]

@@ -1,9 +1,10 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: in progress 2026-07-18. Slices 0-2 are complete: the Euclidean
+Status: in progress 2026-07-18. Slices 0-3 are complete: the Euclidean
 baseline, caller inventory, shared topology operations, persisted descriptor,
 protocol ordering, canonical client dimension fact, and finite-bound authority
-canary have landed. Slice 3 is the periodic authority and scheduling proof.
+canary have landed. The periodic authority and scheduling proof now maintains
+one canonical X ring. Slice 4 is the client-lift and first-pixels proof.
 
 Topic: `bounded-world-topology`
 
@@ -391,6 +392,35 @@ canary covers clipped view/ticket/readiness accounting, initial-spawn admission,
 movement correction, transfer, placement, explicit tick, forced/region ticket,
 diagnostic-state, and unsupported profile rejection.
 
+### Slice 3 periodic authority and scheduling (2026-07-18)
+
+The primary local-world launch path now accepts
+`--generation-profile flat-grass-v1 --world-topology cylinder-x` for the
+provisional 32-chunk X-periodic cylinder. An optional
+`cylinder-x:PERIOD_CHUNKS` form supports focused internal tests. Unsupported
+profile/topology pairs reject before the runner constructs a world, and Far
+LOD plus natural spawning remain explicitly unavailable for the cylinder.
+
+Server views, player and observer tickets, distance propagation, loading
+readiness, holder lookup, scheduler priority, forced tickets, block and fluid
+ticks, simulation writes, and entity ownership all canonicalize through the
+dimension topology. Ordinary view admission enforces the one-lift inequality.
+A repeated 0-through-32 lap retains 25 unique visible chunks at radius two;
+opposing observers at canonical chunks zero and 31 share a 30-chunk resident
+union rather than duplicating seam identities.
+
+The generation worker descriptor now includes topology beside profile and seed,
+and its codec version rejects invalid or unsupported combinations. Generation
+plans distinguish a canonical output from a target-relative `work_lift`; a
+synthetic dependency halo centered at chunk 31 reaches lifted chunk 32 while
+persisting canonical chunk zero exactly once. Scheduler priority likewise
+treats canonical chunks 31 and one as one step from zero.
+
+Seven focused periodic authority tests, all 497 `mclone-server` library tests,
+and all 292 `mclone-app-runtime` library tests pass. Every native workspace test
+target compiles. Client draw placement is intentionally still canonical at this
+checkpoint; Slice 4 owns the observer lift and the first seam pixels.
+
 ## Execution Checklist
 
 ### Slice 0: contract audit and clean baseline
@@ -437,13 +467,13 @@ first identity-forming periodic seam.
 
 ### Slice 3: periodic authority and scheduling
 
-- [ ] Enable periodic X for the internal Flat Grass cylinder.
-- [ ] Canonicalize views, tickets, holders, priority distance, generation
+- [x] Enable periodic X for the internal Flat Grass cylinder.
+- [x] Canonicalize views, tickets, holders, priority distance, generation
   outputs, worker requests, block/tick/entity ownership, and persistence keys.
-- [ ] Cap or reject views that violate the one-lift period constraint.
-- [ ] Canonicalize and deduplicate the synthetic cross-seam dependency/feature
+- [x] Cap or reject views that violate the one-lift period constraint.
+- [x] Canonicalize and deduplicate the synthetic cross-seam dependency/feature
   write while retaining a coherent work lift.
-- [ ] Prove one finite canonical X chunk set under repeated laps and opposing
+- [x] Prove one finite canonical X chunk set under repeated laps and opposing
   observers.
 
 Gate: authority, scheduling, generation, and storage have no duplicate seam

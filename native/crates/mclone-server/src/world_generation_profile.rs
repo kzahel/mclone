@@ -1,4 +1,4 @@
-use mclone_core::{ChunkPos, HorizontalTopology};
+use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology, LiftedChunkPos};
 use mclone_worldgen::levelgen::{
     ChunkGenerationPlan, ChunkStatusRequirement, MutableChunkBlockBuffer,
 };
@@ -167,17 +167,102 @@ impl GenerationPlanRequest {
         descriptor: WorldGenerationDescriptor,
         requested_outputs: impl Into<Vec<ChunkPos>>,
     ) -> Self {
+        let requested_outputs = requested_outputs
+            .into()
+            .into_iter()
+            .map(|pos| {
+                descriptor
+                    .topology
+                    .canonicalize_chunk(pos)
+                    .expect("generation output must lie inside the dimension topology")
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
         Self {
             descriptor,
-            requested_outputs: requested_outputs.into(),
+            requested_outputs,
         }
     }
 
     pub(crate) fn plan(&self) -> ChunkGenerationPlan {
-        self.descriptor
+        let raw = self
+            .descriptor
             .profile
-            .plan_features(self.requested_outputs.iter().copied())
+            .plan_features(self.requested_outputs.iter().copied());
+        topology_generation_plan(self.descriptor.topology, raw).canonical
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct GenerationChunkRef {
+    pub(crate) canonical: ChunkPos,
+    pub(crate) work_lift: LiftedChunkPos,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct TopologyGenerationPlan {
+    canonical: ChunkGenerationPlan,
+    output_chunks: Vec<GenerationChunkRef>,
+    backend_work_chunks: Vec<GenerationChunkRef>,
+    prerequisites: Vec<(GenerationChunkRef, ChunkStatus)>,
+}
+
+fn topology_generation_plan(
+    topology: HorizontalTopology,
+    raw: ChunkGenerationPlan,
+) -> TopologyGenerationPlan {
+    let (outputs, backend_work, prerequisites) = raw.into_parts();
+    let output_chunks = topology_generation_refs(topology, outputs);
+    let backend_work_chunks = topology_generation_refs(topology, backend_work);
+    let prerequisites = prerequisites
+        .into_iter()
+        .filter_map(|requirement| {
+            topology_generation_ref(topology, requirement.pos)
+                .map(|(canonical, chunk)| (canonical, (chunk, requirement.status)))
+        })
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_values()
+        .collect::<Vec<_>>();
+    let canonical = ChunkGenerationPlan::from_parts(
+        output_chunks.iter().map(|chunk| chunk.canonical),
+        backend_work_chunks.iter().map(|chunk| chunk.canonical),
+        prerequisites
+            .iter()
+            .map(|(chunk, status)| ChunkStatusRequirement::new(chunk.canonical, *status)),
+    );
+    TopologyGenerationPlan {
+        canonical,
+        output_chunks,
+        backend_work_chunks,
+        prerequisites,
+    }
+}
+
+fn topology_generation_refs(
+    topology: HorizontalTopology,
+    positions: impl IntoIterator<Item = ChunkPos>,
+) -> Vec<GenerationChunkRef> {
+    positions
+        .into_iter()
+        .filter_map(|pos| topology_generation_ref(topology, pos))
+        .collect::<std::collections::BTreeMap<_, _>>()
+        .into_values()
+        .collect()
+}
+
+fn topology_generation_ref(
+    topology: HorizontalTopology,
+    work_lift: ChunkPos,
+) -> Option<(ChunkPos, GenerationChunkRef)> {
+    let canonical = topology.canonicalize_chunk(work_lift)?;
+    Some((
+        canonical,
+        GenerationChunkRef {
+            canonical,
+            work_lift: LiftedChunkPos::new(i64::from(work_lift.x), i64::from(work_lift.z)),
+        },
+    ))
 }
 
 /// Currently supported typed artifact for one declared generation input.
@@ -250,17 +335,30 @@ impl GenerationExecutionRequest {
 /// Complete immutable identity for one procedural generation session.
 ///
 /// The profile is the persisted behavior/version identity. The seed remains a
-/// separate stored world fact, but workers treat the pair as one descriptor so
-/// resident generator state can never leak across either change.
+/// separate stored world fact, but workers treat profile, seed, and topology as
+/// one descriptor so resident generator state can never leak across a change.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct WorldGenerationDescriptor {
     pub profile: WorldGenerationProfile,
     pub seed: i64,
+    pub topology: HorizontalTopology,
 }
 
 impl WorldGenerationDescriptor {
     pub const fn new(profile: WorldGenerationProfile, seed: i64) -> Self {
-        Self { profile, seed }
+        Self::with_topology(profile, seed, HorizontalTopology::UNBOUNDED)
+    }
+
+    pub const fn with_topology(
+        profile: WorldGenerationProfile,
+        seed: i64,
+        topology: HorizontalTopology,
+    ) -> Self {
+        Self {
+            profile,
+            seed,
+            topology,
+        }
     }
 
     pub const fn overworld(seed: i64) -> Self {
@@ -404,6 +502,10 @@ mod tests {
             mclone_core::AxisTopology::finite(0, 2),
             mclone_core::AxisTopology::finite(0, 2),
         );
+        let cylinder = HorizontalTopology::new(
+            mclone_core::AxisTopology::periodic(0, 32),
+            mclone_core::AxisTopology::Unbounded,
+        );
 
         assert!(
             WorldGenerationProfile::FlatGrassV1
@@ -415,6 +517,11 @@ mod tests {
                 .validate_topology(finite)
                 .is_ok()
         );
+        assert!(
+            WorldGenerationProfile::FlatGrassV1
+                .validate_topology(cylinder)
+                .is_ok()
+        );
         for profile in [
             WorldGenerationProfile::Overworld,
             WorldGenerationProfile::SmallIslandV1,
@@ -423,6 +530,7 @@ mod tests {
             WorldGenerationProfile::BetaV1,
         ] {
             assert!(profile.validate_topology(finite).is_err(), "{profile:?}");
+            assert!(profile.validate_topology(cylinder).is_err(), "{profile:?}");
             assert!(
                 profile
                     .validate_topology(HorizontalTopology::UNBOUNDED)
@@ -430,6 +538,45 @@ mod tests {
                 "{profile:?}"
             );
         }
+    }
+
+    #[test]
+    fn periodic_planning_keeps_work_lifts_while_deduplicating_canonical_chunks() {
+        let topology = HorizontalTopology::new(
+            mclone_core::AxisTopology::periodic(0, 32),
+            mclone_core::AxisTopology::Unbounded,
+        );
+        let raw =
+            ChunkGenerationPlan::feature_region([ChunkPos::new(31, 0)], 1, 1, ChunkStatus::Surface);
+
+        let plan = topology_generation_plan(topology, raw);
+
+        assert!(plan.backend_work_chunks.contains(&GenerationChunkRef {
+            canonical: ChunkPos::new(0, 0),
+            work_lift: LiftedChunkPos::new(32, 0),
+        }));
+        assert!(plan.prerequisites.contains(&(
+            GenerationChunkRef {
+                canonical: ChunkPos::new(0, 0),
+                work_lift: LiftedChunkPos::new(32, 0),
+            },
+            ChunkStatus::Surface,
+        )));
+        assert_eq!(
+            plan.canonical.backend_work_chunks().len(),
+            plan.backend_work_chunks.len()
+        );
+        assert_eq!(
+            plan.canonical.prerequisites().len(),
+            plan.prerequisites.len()
+        );
+        assert_eq!(
+            plan.output_chunks,
+            vec![GenerationChunkRef {
+                canonical: ChunkPos::new(31, 0),
+                work_lift: LiftedChunkPos::new(31, 0),
+            }]
+        );
     }
 
     #[test]

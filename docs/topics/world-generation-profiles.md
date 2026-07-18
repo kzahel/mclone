@@ -14,7 +14,10 @@ Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
 multi-dimension, and stored-reopen paths carry the same profile contract.
 Generator-owned pure plans now declare exact outputs, backend work, and typed
 prerequisites while the scheduler retains readiness, priority, admission,
-publication, lighting, and persistence. The alternate profiles remain
+publication, lighting, and persistence. Flat Grass now also supports finite
+bounds and the first X-periodic cylinder; its generation plans retain coherent
+target-relative work lifts while deduplicating canonical seam identities. The
+alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
 regression guards rather than release compatibility promises. Tactical 188
 completed two terrain reviews, one relief tune, one flower-density tune, two

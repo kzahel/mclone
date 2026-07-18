@@ -136,6 +136,9 @@ impl DimensionRuntime {
     ) -> Self {
         let topology = definition.topology;
         scheduler
+            .set_world_generation_profile(definition.generation_profile)
+            .expect("dimension generation profile must be validated before runtime construction");
+        scheduler
             .set_topology(topology)
             .expect("dimension topology must be validated before runtime construction");
         let loading_progress =
@@ -149,7 +152,7 @@ impl DimensionRuntime {
             liquid_ticks: FluidTickList::new(),
             chunk_tracking: PlayerChunkTracking::with_topology(policy, topology),
             remote_players: RemotePlayerTracking::default(),
-            entities: ServerEntityStore::default(),
+            entities: ServerEntityStore::with_topology(topology),
             entity_tracking: EntityTracking::default(),
             dirty_entity_chunks: BTreeSet::new(),
             #[cfg(feature = "physics-engine")]
@@ -433,18 +436,21 @@ impl RealmServer {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
-        seed: i64,
+    pub(crate) fn try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+        definition: crate::DimensionDefinition,
         world_dir: impl AsRef<Path>,
         policy: PlayerChunkTrackingPolicy,
     ) -> ChunkStoreResult<Self> {
         let store = crate::persistence::SqliteWorldStore::open_world_dir(world_dir)?;
-        Ok(Self::with_scheduler_and_player_chunk_tracking_policy(
-            RealmId::LEGACY_SINGLE_REALM,
-            seed,
-            ChunkScheduler::try_with_threaded_world_store(seed, Box::new(store))?,
-            policy,
-        ))
+        let seed = definition.seed;
+        Ok(
+            Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+                RealmId::LEGACY_SINGLE_REALM,
+                definition,
+                ChunkScheduler::try_with_threaded_world_store(seed, Box::new(store))?,
+                policy,
+            ),
+        )
     }
 
     pub(crate) fn with_player_chunk_tracking_policy(
@@ -537,17 +543,33 @@ impl RealmServer {
         scheduler: ChunkScheduler,
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
-        let overworld_key = DimensionKey::overworld();
         let overworld_definition =
             crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::default());
-        let active_dimension =
-            DimensionRuntime::new(overworld_key, overworld_definition, scheduler, policy);
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            realm_id,
+            overworld_definition,
+            scheduler,
+            policy,
+        )
+    }
+
+    fn with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+        realm_id: RealmId,
+        overworld_definition: crate::DimensionDefinition,
+        scheduler: ChunkScheduler,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> Self {
+        let seed = overworld_definition.seed;
+        let overworld_key = DimensionKey::overworld();
+        let active_dimension = DimensionRuntime::new(
+            overworld_key,
+            overworld_definition.clone(),
+            scheduler,
+            policy,
+        );
         Self {
             realm_id,
-            dimensions: DimensionRegistry::single_overworld(
-                seed,
-                WorldGenerationProfile::default(),
-            ),
+            dimensions: DimensionRegistry::single_overworld_definition(overworld_definition),
             seed,
             active_dimension,
             inactive_dimensions: BTreeMap::new(),
@@ -569,6 +591,19 @@ impl RealmServer {
             pending_player_respawns: BTreeMap::new(),
             debug_auxiliary_player_script: None,
         }
+    }
+
+    pub(crate) fn with_player_chunk_tracking_policy_and_dimension_definition(
+        definition: crate::DimensionDefinition,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
+            ChunkScheduler::new(seed),
+            policy,
+        )
     }
 
     pub const fn seed(&self) -> i64 {
@@ -923,8 +958,12 @@ impl RealmServer {
                 }
             }
         }
-        let overworld_record =
-            DimensionRecord::overworld(metadata.seed, metadata.world_generation_profile);
+        let overworld_record = DimensionRecord {
+            key: DimensionKey::overworld(),
+            codec_version: crate::DIMENSION_RECORD_VERSION,
+            revision: 1,
+            definition: self.active_dimension.definition.clone(),
+        };
         match self
             .scheduler
             .load_dimension_blocking(DimensionKey::overworld())?
@@ -2159,7 +2198,7 @@ impl RealmServer {
         let mut live = VolatileCreatureSpawnDiagnostics::default();
         let mut spawned_entities = Vec::new();
 
-        if self.volatile_natural_spawning_enabled && !evaluation.plan.is_blocked() {
+        if self.natural_spawning_runtime_enabled() && !evaluation.plan.is_blocked() {
             let creature_plan = evaluation
                 .plan
                 .categories
@@ -2230,7 +2269,7 @@ impl RealmServer {
         context.placement_predicates_ready = true;
         context.brightness_checks_ready = self.scheduler.lighting_enabled();
         context.collision_checks_ready = true;
-        context.gamerules_ready = self.volatile_natural_spawning_enabled;
+        context.gamerules_ready = self.natural_spawning_runtime_enabled();
         let plan = plan_natural_spawns(self.natural_spawn_config(), context);
         let creature_state = SpawnState::new(spawnable_chunk_count, category_counts)
             .category_state(MobCategory::Creature);
@@ -2250,11 +2289,16 @@ impl RealmServer {
     }
 
     fn natural_spawn_config(&self) -> NaturalSpawnConfig {
-        if self.volatile_natural_spawning_enabled {
+        if self.natural_spawning_runtime_enabled() {
             NaturalSpawnConfig::enabled_volatile_passive_creatures()
         } else {
             NaturalSpawnConfig::default()
         }
+    }
+
+    fn natural_spawning_runtime_enabled(&self) -> bool {
+        self.volatile_natural_spawning_enabled
+            && self.active_dimension.definition.topology.is_unbounded()
     }
 
     fn natural_spawning_diagnostics_from_evaluation(
@@ -2263,8 +2307,8 @@ impl RealmServer {
         live: VolatileCreatureSpawnDiagnostics,
     ) -> NaturalSpawningDiagnostics {
         NaturalSpawningDiagnostics {
-            live_attempts_enabled: self.volatile_natural_spawning_enabled,
-            live_spawns_are_volatile: self.volatile_natural_spawning_enabled,
+            live_attempts_enabled: self.natural_spawning_runtime_enabled(),
+            live_spawns_are_volatile: self.natural_spawning_runtime_enabled(),
             ready_for_live_attempts: !evaluation.plan.is_blocked(),
             blocker_count: evaluation.plan.blocked_by.len(),
             player_distance_spawnable_chunks: evaluation.chunk_inputs.player_distance_chunk_count(),
@@ -2409,6 +2453,9 @@ impl RealmServer {
         topology
             .validate_one_lift_radius(accepted_probe.chunk_tracking_radius)
             .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+        topology
+            .validate_one_lift_radius(self.chunk_tracking.policy().unload_radius(&accepted_probe))
+            .map_err(|error| ChunkStoreError::InvalidData(format!("unload view: {error}")))?;
         self.loading_progress.set_view(&view);
         self.set_initial_spawn_center_for_target(target, view.center)?;
         let player_id = target.player_id();
@@ -2447,6 +2494,9 @@ impl RealmServer {
         topology
             .validate_one_lift_radius(accepted_probe.chunk_tracking_radius)
             .map_err(|error| ChunkStoreError::InvalidData(error.to_string()))?;
+        topology
+            .validate_one_lift_radius(self.chunk_tracking.policy().unload_radius(&accepted_probe))
+            .map_err(|error| ChunkStoreError::InvalidData(format!("unload view: {error}")))?;
         let change = self
             .chunk_tracking
             .set_observer_requested_view(observer_id, view, simulation);
@@ -3083,6 +3133,14 @@ impl RealmServer {
     }
 
     fn set_block_from_simulation(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
+        let Some(pos) = self
+            .active_dimension
+            .definition
+            .topology
+            .canonicalize_block(pos)
+        else {
+            return false;
+        };
         let before = self.scheduler.block_at_world(pos);
         let changed = self.scheduler.set_block_at_world(pos, block_id);
         if changed {
@@ -3098,14 +3156,22 @@ impl RealmServer {
                 self.schedule_fluid_tick(request.pos, request.fluid, request.delay);
             }
             for request in block_tick_requests_after_block_change(pos, block_id) {
+                let Some(request_pos) = self
+                    .active_dimension
+                    .definition
+                    .topology
+                    .canonicalize_block(request.pos)
+                else {
+                    continue;
+                };
                 let target = self
                     .scheduler
-                    .block_at_world(request.pos)
+                    .block_at_world(request_pos)
                     .map(block_name)
                     .unwrap_or("minecraft:air");
                 let simulation_tick = self.simulation_tick;
                 self.block_ticks
-                    .schedule_tick(request.pos, target, request.delay, simulation_tick);
+                    .schedule_tick(request_pos, target, request.delay, simulation_tick);
             }
         }
         changed
@@ -4161,23 +4227,29 @@ impl LocalRealmSession {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
-        seed: i64,
+    pub(crate) fn try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+        definition: crate::DimensionDefinition,
         world_dir: impl AsRef<Path>,
         policy: PlayerChunkTrackingPolicy,
     ) -> ChunkStoreResult<Self> {
         Ok(Self::from_server(
-            RealmServer::try_with_threaded_sqlite_world_dir_and_player_chunk_tracking_policy(
-                seed, world_dir, policy,
+            RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition,
+                world_dir,
+                policy,
             )?,
         ))
     }
 
-    pub(crate) fn with_player_chunk_tracking_policy(
-        seed: i64,
+    pub(crate) fn with_player_chunk_tracking_policy_and_dimension_definition(
+        definition: crate::DimensionDefinition,
         policy: PlayerChunkTrackingPolicy,
     ) -> Self {
-        Self::from_server(RealmServer::with_player_chunk_tracking_policy(seed, policy))
+        Self::from_server(
+            RealmServer::with_player_chunk_tracking_policy_and_dimension_definition(
+                definition, policy,
+            ),
+        )
     }
 
     #[cfg(target_arch = "wasm32")]
