@@ -64,6 +64,17 @@ ridges, temperature, and moisture are useful vocabulary, but the profile does
 not port the Minecraft 1.18 density-function/spline stack or the disabled
 1.17.1 Caves & Cliffs paths.
 
+The community
+[`JJThunder To The Max` reference study](jjthunder-to-the-max-reference.md)
+reinforces the structured-field direction without changing that boundary. Its
+strong candidates are specialized landform recipes behind macro selectors, a
+direct finite-difference gradient attenuation experiment, preserved raw versus
+processed relief, one river field shared by terrain and biome classification,
+and relative overburden for later caves. Its 2,096-block height, registry
+replacement model, and literal JSON spline tables are not implementation
+targets. The study does not change the current tactical order: mountains and
+valleys remain next, with rivers and caves deferred to their own slices.
+
 ## Pipeline And Ownership
 
 ```text
@@ -358,6 +369,7 @@ caves, or structures into that tactical.
 ## Related
 
 - [`world-generation-profiles.md`](world-generation-profiles.md)
+- [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
 - [`../worldgen-status.md`](../worldgen-status.md)
 - [`../reference-minecraft.md`](../reference-minecraft.md)
 - [`../structures.md`](../structures.md)

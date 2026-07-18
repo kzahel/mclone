@@ -47,6 +47,12 @@ series implements the same concern, normally reuse the document slug in its
   implementation contract for the internal `alpha-v1` profile—Alpha
   v1.1.2_01-shaped terrain, explicit winter state, semantic oracle mapping,
   deterministic cross-chunk decoration, persistence, and visual acceptance.
+- [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md):
+  extracted current community-datapack study covering its 2,096-block physical
+  height, routed landform families, finite-difference pseudo-erosion,
+  terrain-participating rivers, relative-depth cave hierarchy, and
+  mountain-conditioned Underlands, with bounded lessons for the original
+  mclone Overworld.
 - [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
   transports, session lifecycle, server tick/publication cadence — current
   state, structural gaps (lockstep request/response wire, tick-per-command
