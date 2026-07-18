@@ -92,7 +92,7 @@ impl WorldGenerationProfile {
         }
     }
 
-    pub(crate) fn validate_topology(self, topology: HorizontalTopology) -> Result<(), String> {
+    pub fn validate_topology(self, topology: HorizontalTopology) -> Result<(), String> {
         topology
             .validate()
             .map_err(|error| format!("invalid dimension topology: {error}"))?;

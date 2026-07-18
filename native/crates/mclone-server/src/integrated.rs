@@ -406,6 +406,19 @@ impl RealmServer {
         Self::with_world_store_in_realm(RealmId::LEGACY_SINGLE_REALM, seed, store)
     }
 
+    pub fn with_world_store_and_dimension_definition(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
+            ChunkScheduler::with_world_store(seed, store),
+            PlayerChunkTrackingPolicy::default(),
+        )
+    }
+
     pub fn with_world_store_in_realm(
         realm_id: RealmId,
         seed: i64,
@@ -427,6 +440,31 @@ impl RealmServer {
         )
     }
 
+    pub fn local_integrated_with_dimension_definition(
+        definition: crate::DimensionDefinition,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
+            ChunkScheduler::new(seed),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
+    pub fn local_integrated_with_world_store_and_dimension_definition(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
+            ChunkScheduler::with_world_store(seed, store),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
     pub fn local_integrated_with_external_load_world_store(
         seed: i64,
         store: Box<dyn WorldStore>,
@@ -434,6 +472,19 @@ impl RealmServer {
         Self::with_scheduler_and_player_chunk_tracking_policy(
             RealmId::LEGACY_SINGLE_REALM,
             seed,
+            ChunkScheduler::with_external_load_world_store(seed, store),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
+    pub fn local_integrated_with_external_load_world_store_and_dimension_definition(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
             ChunkScheduler::with_external_load_world_store(seed, store),
             PlayerChunkTrackingPolicy::java_max(),
         )
@@ -457,6 +508,23 @@ impl RealmServer {
     ) -> ChunkStoreResult<Self> {
         let store = crate::persistence::SqliteWorldStore::open_world_dir(world_dir)?;
         Self::try_with_threaded_world_store(seed, Box::new(store))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn try_with_threaded_sqlite_world_dir_dimension_definition(
+        definition: crate::DimensionDefinition,
+        world_dir: impl AsRef<Path>,
+    ) -> ChunkStoreResult<Self> {
+        let store = crate::persistence::SqliteWorldStore::open_world_dir(world_dir)?;
+        let seed = definition.seed;
+        Ok(
+            Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+                RealmId::LEGACY_SINGLE_REALM,
+                definition,
+                ChunkScheduler::try_with_threaded_world_store(seed, Box::new(store))?,
+                PlayerChunkTrackingPolicy::default(),
+            ),
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -519,6 +587,24 @@ impl RealmServer {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_dimension_definition_and_wasm_job_workers(
+        definition: crate::DimensionDefinition,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
+            ChunkScheduler::with_wasm_job_workers(
+                seed,
+                Box::<NullChunkSnapshotStore>::default(),
+                config,
+            ),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn local_integrated_with_world_store_and_wasm_job_workers(
         seed: i64,
         store: Box<dyn WorldStore>,
@@ -533,6 +619,21 @@ impl RealmServer {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_world_store_dimension_definition_and_wasm_job_workers(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
+            ChunkScheduler::with_world_store_and_wasm_job_workers(seed, store, config),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn local_integrated_with_external_load_world_store_and_wasm_job_workers(
         seed: i64,
         store: Box<dyn WorldStore>,
@@ -541,6 +642,23 @@ impl RealmServer {
         Self::with_scheduler_and_player_chunk_tracking_policy(
             RealmId::LEGACY_SINGLE_REALM,
             seed,
+            ChunkScheduler::with_external_load_world_store_and_wasm_job_workers(
+                seed, store, config,
+            ),
+            PlayerChunkTrackingPolicy::java_max(),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_external_load_world_store_dimension_definition_and_wasm_job_workers(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        let seed = definition.seed;
+        Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+            RealmId::LEGACY_SINGLE_REALM,
+            definition,
             ChunkScheduler::with_external_load_world_store_and_wasm_job_workers(
                 seed, store, config,
             ),
@@ -4241,11 +4359,41 @@ impl LocalRealmSession {
         Self::from_server(RealmServer::local_integrated_with_world_store(seed, store))
     }
 
+    pub fn local_integrated_with_dimension_definition(
+        definition: crate::DimensionDefinition,
+    ) -> Self {
+        Self::from_server(RealmServer::local_integrated_with_dimension_definition(
+            definition,
+        ))
+    }
+
+    pub fn local_integrated_with_world_store_and_dimension_definition(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_world_store_and_dimension_definition(
+                definition, store,
+            ),
+        )
+    }
+
     pub fn local_integrated_with_external_load_world_store(
         seed: i64,
         store: Box<dyn WorldStore>,
     ) -> Self {
         Self::from_server(RealmServer::local_integrated_with_external_load_world_store(seed, store))
+    }
+
+    pub fn local_integrated_with_external_load_world_store_and_dimension_definition(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_external_load_world_store_and_dimension_definition(
+                definition, store,
+            ),
+        )
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -4310,6 +4458,18 @@ impl LocalRealmSession {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_dimension_definition_and_wasm_job_workers(
+        definition: crate::DimensionDefinition,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_dimension_definition_and_wasm_job_workers(
+                definition, config,
+            ),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn local_integrated_with_world_store_and_wasm_job_workers(
         seed: i64,
         store: Box<dyn WorldStore>,
@@ -4323,6 +4483,19 @@ impl LocalRealmSession {
     }
 
     #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_world_store_dimension_definition_and_wasm_job_workers(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_world_store_dimension_definition_and_wasm_job_workers(
+                definition, store, config,
+            ),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
     pub fn local_integrated_with_external_load_world_store_and_wasm_job_workers(
         seed: i64,
         store: Box<dyn WorldStore>,
@@ -4331,6 +4504,19 @@ impl LocalRealmSession {
         Self::from_server(
             RealmServer::local_integrated_with_external_load_world_store_and_wasm_job_workers(
                 seed, store, config,
+            ),
+        )
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn local_integrated_with_external_load_world_store_dimension_definition_and_wasm_job_workers(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore>,
+        config: WasmServerJobWorkerConfig,
+    ) -> Self {
+        Self::from_server(
+            RealmServer::local_integrated_with_external_load_world_store_dimension_definition_and_wasm_job_workers(
+                definition, store, config,
             ),
         )
     }

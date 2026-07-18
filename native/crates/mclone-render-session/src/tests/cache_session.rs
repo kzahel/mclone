@@ -193,7 +193,8 @@ fn mark_all_sections_dirty_flags_every_resident_section() {
 #[test]
 fn near_camera_readiness_columns_track_exception_membership() {
     let camera = Vec3::new(8.0, 64.0, 8.0);
-    let near_columns = render_section_near_camera_readiness_columns(camera);
+    let near_columns =
+        render_section_near_camera_readiness_columns(HorizontalTopology::UNBOUNDED, camera);
 
     assert!(near_columns.contains(&ChunkPos::new(0, 0)));
     assert!(near_columns.contains(&ChunkPos::new(1, 0)));
@@ -203,6 +204,34 @@ fn near_camera_readiness_columns_track_exception_membership() {
     assert_eq!(
         render_section_neighbor_readiness(&ClientRuntime::local_integrated(), key, camera),
         RenderSectionNeighborReadiness::ReadyNearCamera
+    );
+}
+
+#[test]
+fn periodic_render_work_orders_the_wrapped_neighbor_locally() {
+    let topology = HorizontalTopology::cylinder_x(0, 32);
+    let camera = Vec3::new(0.5, 64.0, 0.5);
+    let sorted = sort_chunk_positions_by_distance(
+        [
+            ChunkPos::new(16, 0),
+            ChunkPos::new(31, 0),
+            ChunkPos::new(1, 0),
+        ],
+        topology,
+        camera,
+    );
+
+    assert_eq!(
+        sorted,
+        [
+            ChunkPos::new(31, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(16, 0)
+        ]
+    );
+    assert!(
+        render_section_near_camera_readiness_columns(topology, camera)
+            .contains(&ChunkPos::new(31, 0))
     );
 }
 

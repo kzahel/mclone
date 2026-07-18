@@ -1572,6 +1572,7 @@ impl SingleViewRuntime {
         C: RenderSectionCompileDispatcher,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
+        let topology = self.client().topology();
         self.engine
             .sync_render_sections_with_budget_and_completed_result_acceptance(
                 compiler,
@@ -1579,12 +1580,14 @@ impl SingleViewRuntime {
                 |dirty_work| {
                     sort_chunk_positions_by_distance(
                         dirty_work.loaded_dirty_chunks.iter().copied(),
+                        topology,
                         camera_position,
                     )
                 },
                 |dirty_work| {
                     sort_dirty_section_chunks_by_distance(
                         &dirty_work.loaded_dirty_sections_by_chunk,
+                        topology,
                         camera_position,
                     )
                 },
@@ -1761,16 +1764,19 @@ impl SingleViewRuntime {
         }
 
         let prepare_start = Instant::now();
+        let topology = self.client().topology();
         let sync_update = self.engine.prepare_sync_update(
             |dirty_work| {
                 sort_chunk_positions_by_distance(
                     dirty_work.loaded_dirty_chunks.iter().copied(),
+                    topology,
                     camera_position,
                 )
             },
             |dirty_work| {
                 sort_dirty_section_chunks_by_distance(
                     &dirty_work.loaded_dirty_sections_by_chunk,
+                    topology,
                     camera_position,
                 )
             },
@@ -1879,16 +1885,19 @@ impl SingleViewRuntime {
         }
 
         let prepare_start = Instant::now();
+        let topology = self.client().topology();
         let sync_update = self.engine.prepare_sync_update(
             |dirty_work| {
                 sort_chunk_positions_by_distance(
                     dirty_work.loaded_dirty_chunks.iter().copied(),
+                    topology,
                     camera_position,
                 )
             },
             |dirty_work| {
                 sort_dirty_section_chunks_by_distance(
                     &dirty_work.loaded_dirty_sections_by_chunk,
+                    topology,
                     camera_position,
                 )
             },
@@ -2373,7 +2382,10 @@ impl SingleViewRuntime {
             render_distance: self.render_distance,
             render_section_cache_generation: self.render_session().section_cache_generation(),
             loaded_chunks: self.client().loaded_chunk_positions().collect(),
-            near_camera_columns: render_section_near_camera_readiness_columns(camera_position),
+            near_camera_columns: render_section_near_camera_readiness_columns(
+                self.client().topology(),
+                camera_position,
+            ),
             draw_section_generation,
         }
     }
@@ -2397,10 +2409,18 @@ impl SingleViewRuntime {
     }
 
     fn render_chunk_within_render_distance(&self, pos: ChunkPos) -> bool {
-        let distance = i32::try_from(self.render_distance).unwrap_or(i32::MAX);
-        (pos.x - self.interest_center.x)
+        let distance = i64::from(self.render_distance);
+        let topology = self.client().topology();
+        topology
+            .x
+            .shortest_chunk_displacement(self.interest_center.x, pos.x)
             .abs()
-            .max((pos.z - self.interest_center.z).abs())
+            .max(
+                topology
+                    .z
+                    .shortest_chunk_displacement(self.interest_center.z, pos.z)
+                    .abs(),
+            )
             <= distance
     }
 
@@ -3062,6 +3082,21 @@ mod tests {
 
         assert!(runtime.render_section_within_render_distance(RenderSectionKey::new(2, 0, 0)));
         assert!(!runtime.render_section_within_render_distance(RenderSectionKey::new(3, 0, 0)));
+    }
+
+    #[test]
+    fn cylinder_render_filter_includes_the_wrapped_side_of_the_view() {
+        let mut client = ClientRuntime::local_integrated();
+        client.apply_update(ServerUpdate::WorldInfo {
+            dimension: mclone_protocol::DimensionKey::overworld(),
+            biome_zoom_seed: 0,
+            topology: mclone_core::HorizontalTopology::cylinder_x(0, 32),
+        });
+        let runtime = SingleViewRuntime::new(client, ChunkPos::new(0, 0), 3, 4);
+
+        assert!(runtime.render_section_within_render_distance(RenderSectionKey::new(31, 0, 0)));
+        assert!(runtime.render_section_within_render_distance(RenderSectionKey::new(29, 0, 0)));
+        assert!(!runtime.render_section_within_render_distance(RenderSectionKey::new(28, 0, 0)));
     }
 
     #[test]

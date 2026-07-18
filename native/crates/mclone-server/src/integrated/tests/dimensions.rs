@@ -345,6 +345,128 @@ fn periodic_seam_break_and_place_share_one_canonical_block() {
     );
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn periodic_lap_blocks_player_and_actor_survive_sqlite_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "mclone-cylinder-restart-{}-{}",
+        std::process::id(),
+        current_unix_millis()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let seed = 98_765;
+    let mut definition =
+        crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::FlatGrassV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 32);
+    let identity =
+        ClientIdentity::new(PlayerProfileId::new([0xC7; 16]), "Cylinder Player").unwrap();
+    let seam_west = BlockPos::new(511, 80, 8);
+    let seam_east = BlockPos::new(0, 80, 9);
+    let cow_position;
+
+    {
+        let mut server = LocalRealmSession::
+            try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        server.initialize_world_metadata_blocking().unwrap();
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        load_chunk_view(&mut server, ChunkPos::new(31, 0));
+        load_chunk_view(&mut server, ChunkPos::new(0, 0));
+
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(BlockPos::new(-1, 80, 8), STONE)
+        );
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(BlockPos::new(512, 80, 9), DIRT)
+        );
+        send_player_move(&mut server, Vec3d::new(1_024.25, 81.0, 8.5));
+        assert_eq!(
+            server.player_position(server.player_id()),
+            Some(Vec3d::new(0.25, 81.0, 8.5))
+        );
+
+        server
+            .entities
+            .ensure_debug_passive_showcase_near_spawn(Vec3d::new(510.0, 81.0, 8.0), true);
+        server.try_simulation_tick_report().unwrap();
+        cow_position = server
+            .entities
+            .states()
+            .into_iter()
+            .find(|entity| entity.kind == EntityKind::Cow)
+            .expect("cylinder cow before restart")
+            .position;
+        assert!(cow_position.x >= 510.0 || cow_position.x <= 2.0);
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut store = crate::SqliteWorldStore::open_world_dir(&root).unwrap();
+        let stored = store
+            .load_dimension(&DimensionKey::overworld())
+            .unwrap()
+            .expect("stored Overworld definition");
+        assert_eq!(stored.definition.topology, definition.topology);
+    }
+
+    {
+        let mut reopened = LocalRealmSession::
+            try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        reopened.initialize_world_metadata_blocking().unwrap();
+        reopened
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        reopened.set_debug_passive_showcase_enabled(false);
+        load_chunk_view(&mut reopened, ChunkPos::new(31, 0));
+        load_chunk_view(&mut reopened, ChunkPos::new(0, 0));
+
+        assert_eq!(reopened.definition().topology, definition.topology);
+        assert_eq!(reopened.scheduler().block_at_world(seam_west), Some(STONE));
+        assert_eq!(
+            reopened
+                .scheduler()
+                .block_at_world(BlockPos::new(-1, 80, 8)),
+            Some(STONE)
+        );
+        assert_eq!(reopened.scheduler().block_at_world(seam_east), Some(DIRT));
+        assert_eq!(
+            reopened
+                .scheduler()
+                .block_at_world(BlockPos::new(512, 80, 9)),
+            Some(DIRT)
+        );
+        assert_eq!(
+            reopened.player_position(reopened.player_id()),
+            Some(Vec3d::new(0.25, 81.0, 8.5))
+        );
+        let restored_cow = reopened
+            .entities
+            .states()
+            .into_iter()
+            .find(|entity| entity.kind == EntityKind::Cow)
+            .expect("restored cylinder cow");
+        assert_eq!(restored_cow.position, cow_position);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn periodic_fluid_tick_spreads_into_the_canonical_seam_neighbor() {
     let mut definition =

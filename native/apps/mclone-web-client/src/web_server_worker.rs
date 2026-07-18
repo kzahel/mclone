@@ -10,7 +10,8 @@ use mclone_app_runtime::client_connection::{
     ClientConnectionDrainResult, ClientConnectionQueueMetrics, QueuedServerUpdate,
 };
 use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
-use mclone_core::{ChunkPos, ChunkStatus};
+use mclone_app_runtime::startup_args::parse_world_topology_arg;
+use mclone_core::{AxisTopology, ChunkPos, ChunkStatus, HorizontalTopology};
 use mclone_protocol::{
     ChunkView, ClientCommand, ClientIdentity, DimensionChunkPos, DimensionKey, PlayerProfileId,
     ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
@@ -25,9 +26,9 @@ use mclone_server::{
     WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
     WorldGenerationProfile, WorldMetadata, WorldMetadataLoad, WorldStore, WorldStoreCompletion,
     WorldStoreRequest, WorldgenJobSession, WorldgenMailboxKind, compute_light_status_job_frame,
-    decode_chunk_record, decode_entity_chunk_record, decode_player_record, decode_world_metadata,
-    encode_chunk_record, encode_dimension_record, encode_entity_chunk_record, encode_player_record,
-    encode_world_metadata,
+    decode_chunk_record, decode_dimension_record, decode_entity_chunk_record, decode_player_record,
+    decode_world_metadata, encode_chunk_record, encode_dimension_record,
+    encode_entity_chunk_record, encode_player_record, encode_world_metadata,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -55,10 +56,40 @@ const MAX_RUNNER_SHARED_POOL_SLOTS: usize = 2;
 const MIN_RUNNER_SHARED_REQUEST_BYTES: u32 = 4 * 1024;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 
+fn web_world_topology_label(topology: HorizontalTopology) -> Result<String, String> {
+    match (topology.x, topology.z) {
+        (AxisTopology::Unbounded, AxisTopology::Unbounded) => Ok("plane".to_owned()),
+        (
+            AxisTopology::Periodic {
+                minimum_chunk: 0,
+                period_chunks,
+            },
+            AxisTopology::Unbounded,
+        ) => Ok(format!("cylinder-x:{period_chunks}")),
+        _ => Err(format!(
+            "browser startup does not yet expose topology {topology:?}"
+        )),
+    }
+}
+
+fn web_dimension_definition(
+    seed: i64,
+    generation_profile: &str,
+    world_topology: &str,
+) -> Result<mclone_server::DimensionDefinition, String> {
+    let generation_profile = WorldGenerationProfile::parse_label(generation_profile)?;
+    let topology = parse_world_topology_arg("worldTopology", world_topology)
+        .map_err(|error| error.to_string())?;
+    let mut definition = mclone_server::DimensionDefinition::overworld(seed, generation_profile);
+    definition.topology = topology;
+    Ok(definition)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WebIntegratedServerRunnerConfig {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub world_topology: HorizontalTopology,
     pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
     pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
@@ -95,6 +126,7 @@ impl WebIntegratedServerRunnerConfig {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            world_topology: HorizontalTopology::UNBOUNDED,
             world_behavior_profile: mclone_server::WorldBehaviorProfile::default(),
             freeze_scheduled_fluid_ticks: false,
             debug_passive_showcase: true,
@@ -131,6 +163,11 @@ impl WebIntegratedServerRunnerConfig {
 
     pub const fn with_world_generation_profile(mut self, profile: WorldGenerationProfile) -> Self {
         self.world_generation_profile = profile;
+        self
+    }
+
+    pub const fn with_world_topology(mut self, topology: HorizontalTopology) -> Self {
+        self.world_topology = topology;
         self
     }
 
@@ -492,6 +529,11 @@ impl WebIntegratedServerRunner {
             &message,
             "generationProfile",
             config.world_generation_profile.label(),
+        )?;
+        set_string(
+            &message,
+            "worldTopology",
+            &web_world_topology_label(config.world_topology)?,
         )?;
         set_string(
             &message,
@@ -1777,10 +1819,15 @@ impl WebIndexedDbWorldStoreState {
     fn from_js_records(
         chunk_records: JsValue,
         entity_chunk_records: JsValue,
+        dimension_records: JsValue,
         world_metadata_record: JsValue,
         legacy_records_present: bool,
     ) -> Result<Rc<RefCell<Self>>, String> {
-        let mut state = Self::from_js_metadata(world_metadata_record, legacy_records_present)?;
+        let mut state = Self::from_js_metadata(
+            dimension_records,
+            world_metadata_record,
+            legacy_records_present,
+        )?;
         for (address, record) in decode_chunk_records_from_js(&chunk_records)? {
             state.chunks.insert(address, record);
         }
@@ -1792,15 +1839,32 @@ impl WebIndexedDbWorldStoreState {
     }
 
     fn from_js_metadata(
+        dimension_records: JsValue,
         world_metadata_record: JsValue,
         legacy_records_present: bool,
     ) -> Result<Self, String> {
-        Ok(Self {
+        let mut state = Self {
             world_metadata: decode_world_metadata_from_js(&world_metadata_record)?,
             legacy_records_present,
             ..Self::default()
-        })
+        };
+        for (key, record) in decode_dimension_records_from_js(&dimension_records)? {
+            state.dimensions.insert(key, record);
+        }
+        Ok(state)
     }
+}
+
+fn web_dimension_definition_for_state(
+    seed: i64,
+    generation_profile: &str,
+    world_topology: &str,
+    state: &Rc<RefCell<WebIndexedDbWorldStoreState>>,
+) -> Result<mclone_server::DimensionDefinition, String> {
+    if let Some(record) = state.borrow().dimensions.get(&DimensionKey::overworld()) {
+        return Ok(record.definition.clone());
+    }
+    web_dimension_definition(seed, generation_profile, world_topology)
 }
 
 fn apply_stored_world_metadata_profiles(
@@ -1941,6 +2005,18 @@ impl McloneWebIntegratedServerWorker {
         Self::from_server(seed, server, None)
     }
 
+    #[wasm_bindgen(js_name = withDefinition)]
+    pub fn with_definition(
+        seed: i64,
+        generation_profile: String,
+        world_topology: String,
+    ) -> Result<Self, JsValue> {
+        let definition = web_dimension_definition(seed, &generation_profile, &world_topology)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let server = LocalRealmSession::local_integrated_with_dimension_definition(definition);
+        Ok(Self::from_server(seed, server, None))
+    }
+
     #[wasm_bindgen(js_name = withJobWorkers)]
     pub fn with_job_workers(
         seed: i64,
@@ -1955,23 +2031,52 @@ impl McloneWebIntegratedServerWorker {
         Self::from_server(seed, server, None)
     }
 
+    #[wasm_bindgen(js_name = withDefinitionAndJobWorkers)]
+    pub fn with_definition_and_job_workers(
+        seed: i64,
+        generation_profile: String,
+        world_topology: String,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Result<Self, JsValue> {
+        let definition = web_dimension_definition(seed, &generation_profile, &world_topology)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let server =
+            LocalRealmSession::local_integrated_with_dimension_definition_and_wasm_job_workers(
+                definition,
+                WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
+            );
+        Ok(Self::from_server(seed, server, None))
+    }
+
     #[wasm_bindgen(js_name = withIndexedDbRecords)]
     pub fn with_indexed_db_records(
         seed: i64,
         chunk_records: JsValue,
         entity_chunk_records: JsValue,
+        dimension_records: JsValue,
         world_metadata_record: JsValue,
         legacy_records_present: bool,
+        generation_profile: String,
+        world_topology: String,
     ) -> Result<Self, JsValue> {
         let state = WebIndexedDbWorldStoreState::from_js_records(
             chunk_records,
             entity_chunk_records,
+            dimension_records,
             world_metadata_record,
             legacy_records_present,
         )
         .map_err(|error| JsValue::from_str(&error))?;
+        let definition =
+            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
+                .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server = LocalRealmSession::local_integrated_with_world_store(seed, store);
+        let mut server =
+            LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+                definition, store,
+            );
         apply_stored_world_metadata_profiles(&mut server, &state)
             .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
@@ -1980,19 +2085,28 @@ impl McloneWebIntegratedServerWorker {
     #[wasm_bindgen(js_name = withIndexedDbExternalLoads)]
     pub fn with_indexed_db_external_loads(
         seed: i64,
+        dimension_records: JsValue,
         world_metadata_record: JsValue,
         legacy_records_present: bool,
+        generation_profile: String,
+        world_topology: String,
     ) -> Result<Self, JsValue> {
         let state = Rc::new(RefCell::new(
             WebIndexedDbWorldStoreState::from_js_metadata(
+                dimension_records,
                 world_metadata_record,
                 legacy_records_present,
             )
             .map_err(|error| JsValue::from_str(&error))?,
         ));
+        let definition =
+            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
+                .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server =
-            LocalRealmSession::local_integrated_with_external_load_world_store(seed, store);
+        let mut server = LocalRealmSession::
+            local_integrated_with_external_load_world_store_and_dimension_definition(
+                definition, store,
+            );
         apply_stored_world_metadata_profiles(&mut server, &state)
             .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
@@ -2006,22 +2120,34 @@ impl McloneWebIntegratedServerWorker {
         bindgen_wasm_url: String,
         chunk_records: JsValue,
         entity_chunk_records: JsValue,
+        dimension_records: JsValue,
         world_metadata_record: JsValue,
         legacy_records_present: bool,
+        generation_profile: String,
+        world_topology: String,
     ) -> Result<Self, JsValue> {
         let state = WebIndexedDbWorldStoreState::from_js_records(
             chunk_records,
             entity_chunk_records,
+            dimension_records,
             world_metadata_record,
             legacy_records_present,
         )
         .map_err(|error| JsValue::from_str(&error))?;
+        let definition =
+            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
+                .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server = LocalRealmSession::local_integrated_with_world_store_and_wasm_job_workers(
-            seed,
-            store,
-            WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
-        );
+        let mut server = LocalRealmSession::
+            local_integrated_with_world_store_dimension_definition_and_wasm_job_workers(
+                definition,
+                store,
+                WasmServerJobWorkerConfig::new(
+                    job_worker_url,
+                    bindgen_js_url,
+                    bindgen_wasm_url,
+                ),
+            );
         apply_stored_world_metadata_profiles(&mut server, &state)
             .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self::from_server(seed, server, Some(state)))
@@ -2033,22 +2159,33 @@ impl McloneWebIntegratedServerWorker {
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
+        dimension_records: JsValue,
         world_metadata_record: JsValue,
         legacy_records_present: bool,
+        generation_profile: String,
+        world_topology: String,
     ) -> Result<Self, JsValue> {
         let state = Rc::new(RefCell::new(
             WebIndexedDbWorldStoreState::from_js_metadata(
+                dimension_records,
                 world_metadata_record,
                 legacy_records_present,
             )
             .map_err(|error| JsValue::from_str(&error))?,
         ));
+        let definition =
+            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
+                .map_err(|error| JsValue::from_str(&error))?;
         let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server =
-            LocalRealmSession::local_integrated_with_external_load_world_store_and_wasm_job_workers(
-                seed,
+        let mut server = LocalRealmSession::
+            local_integrated_with_external_load_world_store_dimension_definition_and_wasm_job_workers(
+                definition,
                 store,
-                WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
+                WasmServerJobWorkerConfig::new(
+                    job_worker_url,
+                    bindgen_js_url,
+                    bindgen_wasm_url,
+                ),
             );
         apply_stored_world_metadata_profiles(&mut server, &state)
             .map_err(|error| JsValue::from_str(&error))?;
@@ -2454,6 +2591,34 @@ fn decode_chunk_records_from_js(
                 format!("indexedDB chunk record {index} had invalid dimension: {error}")
             })?;
             Ok((DimensionChunkPos::new(dimension, record.pos()), record))
+        })
+        .collect()
+}
+
+fn decode_dimension_records_from_js(
+    value: &JsValue,
+) -> Result<Vec<(DimensionKey, DimensionRecord)>, String> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(Vec::new());
+    }
+    Array::from(value)
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let bytes = js_record_bytes(&entry)
+                .map_err(|error| format!("indexedDB dimension record {index}: {error}"))?;
+            let record = decode_dimension_record(&bytes)
+                .map_err(|error| format!("decode indexedDB dimension record {index}: {error}"))?;
+            let key = indexed_db_dimension_key(&entry).map_err(|error| {
+                format!("indexedDB dimension record {index} had invalid key: {error}")
+            })?;
+            if record.key != key {
+                return Err(format!(
+                    "indexedDB dimension record {index} key {key} did not match payload key {}",
+                    record.key
+                ));
+            }
+            Ok((key, record))
         })
         .collect()
 }

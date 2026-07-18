@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
+use mclone_core::{AxisTopology, HorizontalTopology};
 use mclone_protocol::{DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION};
 use mclone_server::{
     RealmServer, SimulationCadence, SimulationCadenceConfig, WorldGenerationProfile,
@@ -41,6 +42,7 @@ struct Cli {
     listen_ws: Option<String>,
     seed: i64,
     world_generation_profile: WorldGenerationProfile,
+    world_topology: HorizontalTopology,
     serve_once: bool,
     multi_client_smoke: bool,
     world: DedicatedWorldSelection,
@@ -53,6 +55,7 @@ impl Default for Cli {
             listen_ws: None,
             seed: DEFAULT_SEED,
             world_generation_profile: WorldGenerationProfile::default(),
+            world_topology: HorizontalTopology::UNBOUNDED,
             serve_once: false,
             multi_client_smoke: false,
             world: DedicatedWorldSelection::Transient,
@@ -105,6 +108,12 @@ impl Cli {
                     )?;
                     cli.world_generation_profile =
                         WorldGenerationProfile::parse_label(&value).map_err(anyhow::Error::msg)?;
+                }
+                "--world-topology" => {
+                    let value = args.next().context(
+                        "--world-topology requires plane, cylinder-x, or cylinder-x:<period-chunks>",
+                    )?;
+                    cli.world_topology = parse_world_topology_arg("--world-topology", &value)?;
                 }
                 "--serve-once" => {
                     cli.serve_once = true;
@@ -189,14 +198,49 @@ fn parse_i64_arg(flag: &str, value: Option<String>) -> Result<i64> {
         .with_context(|| format!("{flag} requires a signed 64-bit integer, got `{value}`"))
 }
 
+fn parse_world_topology_arg(flag: &str, value: &str) -> Result<HorizontalTopology> {
+    if matches!(value, "plane" | "unbounded" | "euclidean") {
+        return Ok(HorizontalTopology::UNBOUNDED);
+    }
+    let period = if value == "cylinder-x" {
+        32
+    } else if let Some(period) = value.strip_prefix("cylinder-x:") {
+        period
+            .parse::<u32>()
+            .with_context(|| format!("invalid X-cylinder period `{period}` for {flag}"))?
+    } else {
+        bail!("{flag} must be plane, cylinder-x, or cylinder-x:<period-chunks>, got `{value}`");
+    };
+    let topology =
+        HorizontalTopology::new(AxisTopology::periodic(0, period), AxisTopology::Unbounded);
+    topology
+        .validate()
+        .map_err(|error| anyhow::anyhow!("invalid {flag}: {error}"))?;
+    Ok(topology)
+}
+
+fn world_topology_label(topology: HorizontalTopology) -> String {
+    match (topology.x, topology.z) {
+        (AxisTopology::Unbounded, AxisTopology::Unbounded) => "plane".to_owned(),
+        (
+            AxisTopology::Periodic {
+                minimum_chunk: 0,
+                period_chunks,
+            },
+            AxisTopology::Unbounded,
+        ) => format!("cylinder-x:{period_chunks}"),
+        _ => format!("{topology:?}"),
+    }
+}
+
 fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:32] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
-         The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
+         The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-topology selects plane or a periodic X cylinder. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
@@ -217,6 +261,9 @@ fn run_server(cli: Cli) -> Result<()> {
         if cli.world_generation_profile != WorldGenerationProfile::Overworld {
             bail!("--multi-client-smoke requires --generation-profile overworld");
         }
+        if !cli.world_topology.is_unbounded() {
+            bail!("--multi-client-smoke requires --world-topology plane");
+        }
         return dedicated_smoke::run_multi_client_smoke(cli.seed);
     }
 
@@ -226,11 +273,12 @@ fn run_server(cli: Cli) -> Result<()> {
         .local_addr()
         .context("failed to read listen addr")?;
     println!(
-        "mclone dedicated server listening on {local_addr} seed={} protocol {} world={} generation={}",
+        "mclone dedicated server listening on {local_addr} seed={} protocol {} world={} generation={} topology={}",
         cli.seed,
         PROTOCOL_VERSION,
         cli.world.description(),
         cli.world_generation_profile.label(),
+        world_topology_label(cli.world_topology),
     );
 
     let mode = if cli.serve_once {
@@ -244,14 +292,16 @@ fn run_server(cli: Cli) -> Result<()> {
             listen_ws,
             cli.seed,
             cli.world_generation_profile,
+            cli.world_topology,
             cli.world,
             mode,
         );
     }
-    run_server_loop_with_profile(
+    run_server_loop_with_profile_and_topology(
         listener,
         cli.seed,
         cli.world_generation_profile,
+        cli.world_topology,
         cli.world,
         mode,
     )
@@ -260,19 +310,26 @@ fn run_server(cli: Cli) -> Result<()> {
 fn open_dedicated_server(
     seed: i64,
     profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
     world: &DedicatedWorldSelection,
 ) -> Result<RealmServer> {
+    profile
+        .validate_topology(topology)
+        .map_err(anyhow::Error::msg)?;
+    let mut definition = mclone_server::DimensionDefinition::overworld(seed, profile);
+    definition.topology = topology;
     let mut server = match world {
-        DedicatedWorldSelection::Transient => Ok(RealmServer::with_world_store(
-            seed,
-            Box::<mclone_server::NullWorldStore>::default(),
-        )),
+        DedicatedWorldSelection::Transient => {
+            Ok(RealmServer::with_world_store_and_dimension_definition(
+                definition.clone(),
+                Box::<mclone_server::NullWorldStore>::default(),
+            ))
+        }
         DedicatedWorldSelection::Persistent { dir } => {
-            RealmServer::try_with_threaded_sqlite_world_dir(seed, dir)
+            RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition(definition, dir)
                 .with_context(|| format!("failed to open dedicated world at {}", dir.display()))
         }
     }?;
-    server.set_world_generation_profile(profile)?;
     if matches!(world, DedicatedWorldSelection::Persistent { .. }) {
         server
             .initialize_world_metadata_blocking()
@@ -286,6 +343,7 @@ fn run_server_with_websocket(
     listen_ws: &str,
     seed: i64,
     profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
 ) -> Result<()> {
@@ -295,7 +353,15 @@ fn run_server_with_websocket(
         .local_addr()
         .context("failed to read websocket listen addr")?;
     println!("mclone dedicated websocket listening on ws://{ws_addr}");
-    run_server_loop_with_listeners(listener, Some(ws_listener), seed, profile, world, mode)
+    run_server_loop_with_listeners(
+        listener,
+        Some(ws_listener),
+        seed,
+        profile,
+        topology,
+        world,
+        mode,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -329,7 +395,25 @@ fn run_server_loop_with_profile(
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
 ) -> Result<()> {
-    run_server_loop_with_listeners(listener, None, seed, profile, world, mode)
+    run_server_loop_with_profile_and_topology(
+        listener,
+        seed,
+        profile,
+        HorizontalTopology::UNBOUNDED,
+        world,
+        mode,
+    )
+}
+
+fn run_server_loop_with_profile_and_topology(
+    listener: TcpListener,
+    seed: i64,
+    profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
+    world: DedicatedWorldSelection,
+    mode: ServerRunMode,
+) -> Result<()> {
+    run_server_loop_with_listeners(listener, None, seed, profile, topology, world, mode)
 }
 
 fn run_server_loop_with_listeners(
@@ -337,11 +421,12 @@ fn run_server_loop_with_listeners(
     websocket_listener: Option<TcpListener>,
     seed: i64,
     profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
 ) -> Result<()> {
     let network = DedicatedNetwork::start_with_websocket(listener, websocket_listener)?;
-    let mut server = open_dedicated_server(seed, profile, &world)?;
+    let mut server = open_dedicated_server(seed, profile, topology, &world)?;
     let loop_result = run_server_loop_inner(network, &mut server, mode);
     let shutdown_result = server
         .shutdown_persistence()
@@ -952,6 +1037,7 @@ mod tests {
                 listen_ws: None,
                 seed: -7,
                 world_generation_profile: WorldGenerationProfile::authored_only(),
+                world_topology: HorizontalTopology::UNBOUNDED,
                 serve_once: true,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Transient,
@@ -974,6 +1060,19 @@ mod tests {
     }
 
     #[test]
+    fn cli_parses_cylinder_world_topology() {
+        let cli = Cli::parse([
+            "--generation-profile".to_owned(),
+            "flat-grass-v1".to_owned(),
+            "--world-topology".to_owned(),
+            "cylinder-x:48".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(cli.world_topology, HorizontalTopology::cylinder_x(0, 48));
+    }
+
+    #[test]
     fn cli_parses_websocket_listener() {
         assert_eq!(
             Cli::parse([
@@ -990,6 +1089,7 @@ mod tests {
                 listen_ws: Some("127.0.0.1:0".to_owned()),
                 seed: 17,
                 world_generation_profile: WorldGenerationProfile::Overworld,
+                world_topology: HorizontalTopology::UNBOUNDED,
                 serve_once: false,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Transient,
@@ -1011,6 +1111,7 @@ mod tests {
                 listen_ws: None,
                 seed: 99,
                 world_generation_profile: WorldGenerationProfile::Overworld,
+                world_topology: HorizontalTopology::UNBOUNDED,
                 serve_once: false,
                 multi_client_smoke: true,
                 world: DedicatedWorldSelection::Transient,
@@ -1033,6 +1134,7 @@ mod tests {
                 listen_ws: None,
                 seed: 77,
                 world_generation_profile: WorldGenerationProfile::Overworld,
+                world_topology: HorizontalTopology::UNBOUNDED,
                 serve_once: false,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Persistent {
@@ -1076,6 +1178,7 @@ mod tests {
         let mut server = open_dedicated_server(
             12_345,
             WorldGenerationProfile::McloneOverworldV1,
+            HorizontalTopology::UNBOUNDED,
             &DedicatedWorldSelection::Transient,
         )
         .unwrap();
@@ -1735,6 +1838,51 @@ mod tests {
         assert!(snapshot.biomes.contains(&1));
         let spawn = player_position_update_opt(&updates).unwrap().position;
         assert_eq!(spawn, Vec3d::new(0.5, 81.0, 0.5));
+
+        drop(session);
+        server.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn dedicated_tcp_cylinder_publishes_topology_and_canonical_chunk() {
+        let _guard = DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            run_server_loop_with_profile_and_topology(
+                listener,
+                12_345,
+                WorldGenerationProfile::FlatGrassV1,
+                topology,
+                DedicatedWorldSelection::Transient,
+                ServerRunMode::ServeOnce,
+            )
+        });
+
+        let mut session = NativeClientIoSession::connect(addr).unwrap();
+        session
+            .send_command_only(ClientCommand::SetChunkView(ChunkView {
+                center: ChunkPos::new(32, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            }))
+            .unwrap();
+        let updates = wait_for_remote_updates(&mut session, |updates| {
+            chunk_snapshot_opt(updates, ChunkPos::new(0, 0)).is_some()
+                && updates.iter().any(|update| {
+                    matches!(
+                        update,
+                        ServerUpdate::WorldInfo { topology: received, .. }
+                            if *received == topology
+                    )
+                })
+        });
+        assert!(
+            updates
+                .iter()
+                .all(|update| !matches!(update, ServerUpdate::ChunkSnapshot(snapshot) if snapshot.pos.x == 32))
+        );
 
         drop(session);
         server.join().unwrap().unwrap();

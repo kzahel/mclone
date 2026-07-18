@@ -47,6 +47,15 @@ if (
     `--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, or beta-v1; got ${generationProfile}`,
   );
 }
+const worldTopologyArgIndex = process.argv.indexOf("--world-topology");
+const worldTopology = worldTopologyArgIndex >= 0
+  ? String(process.argv[worldTopologyArgIndex + 1] ?? "")
+  : "";
+if (worldTopology && !/^(plane|cylinder-x(?::[1-9][0-9]*)?)$/.test(worldTopology)) {
+  throw new Error(
+    `--world-topology requires plane, cylinder-x, or cylinder-x:<period-chunks>; got ${worldTopology}`,
+  );
+}
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
@@ -499,8 +508,11 @@ async function run() {
       const baseAppUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
         : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || farLodQuery || lobbyScenarioQuery}`;
-      const appUrl = generationProfile
-        ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}generationProfile=${encodeURIComponent(generationProfile)}`
+      const startupParameters = new URLSearchParams();
+      if (generationProfile) startupParameters.set("generationProfile", generationProfile);
+      if (worldTopology) startupParameters.set("worldTopology", worldTopology);
+      const appUrl = startupParameters.size > 0
+        ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}${startupParameters}`
         : baseAppUrl;
       await page.goto(appUrl, { waitUntil: "load" });
       await page.waitForFunction(
@@ -1110,6 +1122,7 @@ async function run() {
           baseUrl,
           indexedDbReloadWorldId,
           generationProfile,
+          worldTopology,
         );
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         let pageScreenshotCaptured = false;
@@ -3676,6 +3689,7 @@ async function runBlockEditProbe(page, canvas) {
  * @param {string} baseUrl
  * @param {string} worldId
  * @param {string | null} generationProfile
+ * @param {string | null} worldTopology
  */
 async function runIndexedDbReloadProbe(
   page,
@@ -3683,6 +3697,7 @@ async function runIndexedDbReloadProbe(
   baseUrl,
   worldId,
   generationProfile = null,
+  worldTopology = null,
 ) {
   if (generationProfile) {
     await waitForWebAppStreamingSettled(page, 60_000);
@@ -3705,7 +3720,13 @@ async function runIndexedDbReloadProbe(
     // Carry the descriptor alongside the direct smoke URL just as the product
     // catalog carries it in the open request. The worker also adopts stored
     // metadata before initialization, so persistence remains authoritative.
-    const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}&generationProfile=${encodeURIComponent(generationProfile)}`;
+    const reloadParameters = new URLSearchParams({
+      worldStorage: "indexeddb",
+      worldId,
+      generationProfile,
+    });
+    if (worldTopology) reloadParameters.set("worldTopology", worldTopology);
+    const reloadUrl = `${baseUrl}/app.html?${reloadParameters}`;
     await page.goto(reloadUrl, { waitUntil: "load" });
     await waitForWebAppReady(page);
     await installIndexedDbCountHelper(page);
@@ -3719,11 +3740,13 @@ async function runIndexedDbReloadProbe(
       ok: beforeReloadProfile.ok === true
         && afterReloadProfile.ok === true
         && afterReloadRecordCounts.chunks > 0
+        && afterReloadRecordCounts.dimensions === 1
         && afterReloadRecordCounts.worldMetadata === 1
         && afterReloadDayTime >= beforeReloadDayTime,
       worldId,
       reloadUrl,
       generationProfile,
+      worldTopology,
       beforeReloadProfile,
       afterReloadProfile,
       beforeReloadDayTime,
@@ -4928,14 +4951,23 @@ async function waitForWebAppReady(page) {
     undefined,
     { timeout: 20_000 },
   );
-  await page.waitForFunction(
-    () => {
-      const app = globalThis.__mcloneWebApp;
-      return app?.ready === true || app?.state?.failed === true;
-    },
-    undefined,
-    { timeout: 60_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const app = globalThis.__mcloneWebApp;
+        return app?.ready === true || app?.state?.failed === true;
+      },
+      undefined,
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(
+      () => /** @type {any} */ (globalThis).__mcloneWebApp?.state ?? null,
+    );
+    throw new Error(
+      `native web app did not settle before timeout: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`,
+    );
+  }
   const state = await page.evaluate(() => /** @type {any} */ (globalThis).__mcloneWebApp.state);
   if (!state?.ready || !state?.ok) {
     throw new Error(`native web app failed to boot after reload:\n${JSON.stringify(state, null, 2)}`);
@@ -5118,7 +5150,7 @@ async function waitForBrowserIndexedDbRecordsAtLeast(page, worldId, minRecords) 
 async function installIndexedDbCountHelper(page) {
   await page.evaluate(() => {
     const global = /** @type {any} */ (globalThis);
-    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, worldMetadata: number, worldMetadataBytes: number[] | null, total: number }>} */
+    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, dimensions: number, worldMetadata: number, worldMetadataBytes: number[] | null, total: number }>} */
     const countIndexedDbRecords = async (worldId) => {
       const db = await /** @type {Promise<IDBDatabase>} */ (new Promise((resolve, reject) => {
         const request = indexedDB.open("mclone-web-worlds");
@@ -5140,9 +5172,10 @@ async function installIndexedDbCountHelper(page) {
           request.onsuccess = () => resolve(Number(request.result) || 0);
           request.onerror = () => reject(request.error ?? new Error(`failed to count ${storeName}`));
         });
-        const [chunks, entityChunks, worldMetadataRecord] = await Promise.all([
+        const [chunks, entityChunks, dimensions, worldMetadataRecord] = await Promise.all([
           countStore("dimensionChunks"),
           countStore("dimensionEntityChunks"),
+          countStore("dimensions"),
           new Promise((resolve, reject) => {
             if (!db.objectStoreNames.contains("worldMetadata")) {
               resolve(null);
@@ -5163,9 +5196,12 @@ async function installIndexedDbCountHelper(page) {
         return {
           chunks: Number(chunks) || 0,
           entityChunks: Number(entityChunks) || 0,
+          dimensions: Number(dimensions) || 0,
           worldMetadata: metadataBytes ? 1 : 0,
           worldMetadataBytes: metadataBytes,
-          total: (Number(chunks) || 0) + (Number(entityChunks) || 0),
+          total: (Number(chunks) || 0)
+            + (Number(entityChunks) || 0)
+            + (Number(dimensions) || 0),
         };
       } finally {
         db.close();

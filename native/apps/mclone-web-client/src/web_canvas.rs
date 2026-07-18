@@ -61,7 +61,9 @@ use mclone_client::ClientRuntime;
 use mclone_core::{
     AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus, chunk_section_index,
 };
-use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, LodTileKey};
+use mclone_core::{
+    AxisTopology, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, LodTileKey,
+};
 use mclone_mesh::{
     RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     TexturedRenderSectionMesh, TexturedRenderSectionMetadata, load_textured_terrain_assets,
@@ -76,6 +78,7 @@ use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompileQueueHealth, RenderSectionCompileRequest,
     RenderSectionCompileResult, RenderSectionCompiler, build_client_textured_sections,
     build_render_sections_from_snapshots_with_biome_zoom_seed,
+    build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology,
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
     summarize_textured_render_section_build_report,
 };
@@ -104,10 +107,11 @@ const WEB_DEFERRED_DROP_DRAIN_ITEM_BUDGET: usize = 256;
 // 067 Stage 4: the render-compile input arena now carries a *delta* against the
 // worker's resident snapshot mirror, not the whole loaded world. Distinct magic from the
 // retired whole-world format so a stale producer/consumer is rejected loudly. Layout:
-// magic, u32 generation, u32 flags (bit 0 = reset/full-resync), u32 upsert_count followed
+// magic, u32 generation, u32 flags (bit 0 = reset/full-resync), two fixed-width encoded
+// topology axes, u32 upsert_count followed
 // by that many length-prefixed `ServerUpdate::ChunkSnapshot` frames, then u32 evict_count
 // followed by that many `[i32 x][i32 z]` chunk positions to drop from the mirror.
-const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD1\0";
+const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD2\0";
 const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
 const WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED: u32 = 2;
 const WEB_FAR_LOD_TILE_MESH_MAGIC: &[u8; 8] = b"MCWLOD1\0";
@@ -296,6 +300,7 @@ pub struct WebRenderCompilerSession {
     // not match is a desync (e.g. a worker that silently lost its mirror) and is rejected.
     mirror_generation: u32,
     biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
     last_delta_upsert_count: usize,
     last_delta_eviction_count: usize,
 }
@@ -315,6 +320,7 @@ impl WebRenderCompilerSession {
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
             biome_zoom_seed: None,
+            topology: HorizontalTopology::UNBOUNDED,
             last_delta_upsert_count: 0,
             last_delta_eviction_count: 0,
         })
@@ -351,6 +357,7 @@ impl WebRenderCompilerSession {
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
             biome_zoom_seed: None,
+            topology: HorizontalTopology::UNBOUNDED,
             last_delta_upsert_count: 0,
             last_delta_eviction_count: 0,
         })
@@ -388,6 +395,7 @@ impl WebRenderCompilerSession {
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
             biome_zoom_seed: None,
+            topology: HorizontalTopology::UNBOUNDED,
             last_delta_upsert_count: 0,
             last_delta_eviction_count: 0,
         }
@@ -499,6 +507,7 @@ impl WebRenderCompilerSession {
             &snapshots,
             &target_sections,
             self.biome_zoom_seed,
+            self.topology,
         )
         .map_err(JsValue::from)?;
         let packed = encode_textured_render_section_build_report(&report);
@@ -545,6 +554,7 @@ impl WebRenderCompilerSession {
         self.last_delta_upsert_count = delta.upserts.len();
         self.last_delta_eviction_count = delta.evictions.len();
         self.biome_zoom_seed = delta.biome_zoom_seed;
+        self.topology = delta.topology;
         for pos in &delta.evictions {
             self.snapshot_mirror.remove(pos);
         }
@@ -829,12 +839,14 @@ fn compile_snapshot_chunk_sections_with_catalog<S: std::borrow::Borrow<ChunkSnap
     snapshots: &[S],
     target_sections: &BTreeSet<RenderSectionKey>,
     biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
 ) -> Result<mclone_mesh::TexturedRenderSectionBuildReport, String> {
-    build_render_sections_from_snapshots_with_biome_zoom_seed(
+    build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology(
         snapshots,
         catalog,
         target_sections,
         biome_zoom_seed,
+        topology,
     )
     .map_err(|error| format!("failed to compile snapshot render sections: {error:#}"))
 }
@@ -847,6 +859,7 @@ struct WebRenderCompileDelta {
     generation: u32,
     reset: bool,
     biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
     upserts: Vec<ChunkSnapshot>,
     evictions: Vec<ChunkPos>,
 }
@@ -855,6 +868,7 @@ fn encode_web_render_compile_delta(
     generation: u32,
     reset: bool,
     biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
     upserts: &[ChunkSnapshot],
     evictions: &[ChunkPos],
 ) -> Result<Vec<u8>, String> {
@@ -870,6 +884,8 @@ fn encode_web_render_compile_delta(
         flags |= WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED;
     }
     bytes.extend_from_slice(&flags.to_le_bytes());
+    encode_web_axis_topology(&mut bytes, topology.x);
+    encode_web_axis_topology(&mut bytes, topology.z);
     if let Some(seed) = biome_zoom_seed {
         bytes.extend_from_slice(&seed.to_le_bytes());
     }
@@ -903,6 +919,13 @@ fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta
     let generation = reader.read_u32("delta generation")?;
     let flags = reader.read_u32("delta flags")?;
     let reset = flags & WEB_RENDER_COMPILE_DELTA_FLAG_RESET != 0;
+    let topology = HorizontalTopology::new(
+        decode_web_axis_topology(&mut reader, "x")?,
+        decode_web_axis_topology(&mut reader, "z")?,
+    );
+    topology
+        .validate()
+        .map_err(|error| format!("invalid web render compile topology: {error}"))?;
     let biome_zoom_seed = if flags & WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED != 0 {
         Some(reader.read_i64("delta biome zoom seed")?)
     } else {
@@ -936,9 +959,47 @@ fn decode_web_render_compile_delta(bytes: &[u8]) -> Result<WebRenderCompileDelta
         generation,
         reset,
         biome_zoom_seed,
+        topology,
         upserts,
         evictions,
     })
+}
+
+fn encode_web_axis_topology(bytes: &mut Vec<u8>, axis: AxisTopology) {
+    let (tag, first, second) = match axis {
+        AxisTopology::Unbounded => (0_u32, 0_i32, 0_u32),
+        AxisTopology::Finite {
+            minimum_chunk,
+            maximum_chunk_exclusive,
+        } => (1, minimum_chunk, maximum_chunk_exclusive as u32),
+        AxisTopology::Periodic {
+            minimum_chunk,
+            period_chunks,
+        } => (2, minimum_chunk, period_chunks),
+    };
+    bytes.extend_from_slice(&tag.to_le_bytes());
+    bytes.extend_from_slice(&first.to_le_bytes());
+    bytes.extend_from_slice(&second.to_le_bytes());
+}
+
+fn decode_web_axis_topology(
+    reader: &mut WebRenderCompileInputReader<'_>,
+    label: &str,
+) -> Result<AxisTopology, String> {
+    let tag = reader.read_u32("topology axis tag")?;
+    let first = reader.read_i32("topology axis first value")?;
+    let second = reader.read_u32("topology axis second value")?;
+    match tag {
+        0 if first == 0 && second == 0 => Ok(AxisTopology::Unbounded),
+        1 => Ok(AxisTopology::finite(first, second as i32)),
+        2 => Ok(AxisTopology::periodic(first, second)),
+        0 => Err(format!(
+            "web render compile {label} unbounded axis carried nonzero values"
+        )),
+        _ => Err(format!(
+            "web render compile {label} axis had unknown tag {tag}"
+        )),
+    }
 }
 
 fn write_web_compile_input_u32(
@@ -1843,7 +1904,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             section_revisions,
             snapshots: upserts,
             biome_zoom_seed,
-            topology: _,
+            topology,
         } = request;
 
         if staged_delta.reset {
@@ -1860,6 +1921,7 @@ impl RenderSectionCompiler for WebRenderSectionCompiler {
             staged_delta.generation,
             staged_delta.reset,
             biome_zoom_seed,
+            topology,
             &upserts,
             &staged_delta.evictions,
         )
@@ -3876,23 +3938,34 @@ mod tests {
         let evictions = vec![ChunkPos::new(-3, 4), ChunkPos::new(5, -6)];
 
         // Full-resync delta (reset = true) carrying upserts and evictions together.
+        let topology = HorizontalTopology::cylinder_x(-2, 32);
         let bytes =
-            encode_web_render_compile_delta(7, true, Some(1124), &upserts, &evictions).unwrap();
+            encode_web_render_compile_delta(7, true, Some(1124), topology, &upserts, &evictions)
+                .unwrap();
         assert!(bytes.len() > WEB_RENDER_COMPILE_DELTA_MAGIC.len());
         let decoded = decode_web_render_compile_delta(&bytes).unwrap();
         assert_eq!(decoded.generation, 7);
         assert!(decoded.reset);
         assert_eq!(decoded.biome_zoom_seed, Some(1124));
+        assert_eq!(decoded.topology, topology);
         assert_eq!(decoded.upserts, upserts);
         assert_eq!(decoded.evictions, evictions);
 
         // Incremental delta (reset = false) preserves the generation and the empty-set cases.
-        let incremental =
-            encode_web_render_compile_delta(8, false, None, &upserts[..1], &[]).unwrap();
+        let incremental = encode_web_render_compile_delta(
+            8,
+            false,
+            None,
+            HorizontalTopology::UNBOUNDED,
+            &upserts[..1],
+            &[],
+        )
+        .unwrap();
         let decoded = decode_web_render_compile_delta(&incremental).unwrap();
         assert_eq!(decoded.generation, 8);
         assert!(!decoded.reset);
         assert_eq!(decoded.biome_zoom_seed, None);
+        assert_eq!(decoded.topology, HorizontalTopology::UNBOUNDED);
         assert_eq!(decoded.upserts, upserts[..1]);
         assert!(decoded.evictions.is_empty());
 

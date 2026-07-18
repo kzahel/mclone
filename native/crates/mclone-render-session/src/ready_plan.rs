@@ -52,7 +52,10 @@ pub fn render_section_neighbor_readiness(
 /// Readiness only cares whether a render-section column is inside the fixed
 /// near-camera exception radius, so callers can compare this small set instead
 /// of invalidating traversal-ready state for every sub-block camera movement.
-pub fn render_section_near_camera_readiness_columns(camera_position: Vec3) -> BTreeSet<ChunkPos> {
+pub fn render_section_near_camera_readiness_columns(
+    topology: HorizontalTopology,
+    camera_position: Vec3,
+) -> BTreeSet<ChunkPos> {
     if !camera_position.x.is_finite() || !camera_position.z.is_finite() {
         return BTreeSet::new();
     }
@@ -76,7 +79,11 @@ pub fn render_section_near_camera_readiness_columns(camera_position: Vec3) -> BT
             let dx = center_x - camera_position.x;
             let dz = center_z - camera_position.z;
             if dx * dx + dz * dz <= RENDER_NEIGHBOR_READY_DISTANCE_SQ {
-                columns.insert(ChunkPos::new(chunk_x, chunk_z));
+                if let Some(canonical) =
+                    topology.canonicalize_chunk(ChunkPos::new(chunk_x, chunk_z))
+                {
+                    columns.insert(canonical);
+                }
             }
         }
     }
@@ -96,8 +103,15 @@ pub fn render_section_center(key: RenderSectionKey) -> Vec3 {
     )
 }
 
-fn render_section_distance_sq(key: RenderSectionKey, camera_position: Vec3) -> f32 {
-    render_section_center(key).distance_squared(camera_position)
+fn render_section_distance_sq_in(
+    topology: HorizontalTopology,
+    key: RenderSectionKey,
+    camera_position: Vec3,
+) -> f32 {
+    let horizontal_distance =
+        render_section_horizontal_distance_sq_in(topology, key, camera_position);
+    let dy = render_section_center(key).y - camera_position.y;
+    horizontal_distance + dy * dy
 }
 
 fn render_section_horizontal_distance_sq_in(
@@ -123,11 +137,23 @@ fn render_section_horizontal_distance_sq_in(
     dx * dx + dz * dz
 }
 
-fn render_chunk_distance_sq(pos: ChunkPos, camera_position: Vec3) -> f32 {
+fn render_chunk_distance_sq_in(
+    topology: HorizontalTopology,
+    pos: ChunkPos,
+    camera_position: Vec3,
+) -> f32 {
+    let lifted = topology.nearest_chunk_lift(
+        pos,
+        Vec3d::new(
+            f64::from(camera_position.x),
+            f64::from(camera_position.y),
+            f64::from(camera_position.z),
+        ),
+    );
     let center = Vec3::new(
-        chunk_middle_block_coord(pos.x) as f32,
+        chunk_middle_block_coord(lifted.x as i32) as f32,
         camera_position.y,
-        chunk_middle_block_coord(pos.z) as f32,
+        chunk_middle_block_coord(lifted.z as i32) as f32,
     );
     center.distance_squared(camera_position)
 }
@@ -148,28 +174,14 @@ fn has_horizontal_neighbor_snapshots(client: &ClientRuntime, pos: ChunkPos) -> b
 /// platforms compile the nearest pending chunk first.
 pub fn sort_chunk_positions_by_distance(
     positions: impl IntoIterator<Item = ChunkPos>,
+    topology: HorizontalTopology,
     camera_position: Vec3,
 ) -> Vec<ChunkPos> {
     let mut positions = positions.into_iter().collect::<Vec<_>>();
     positions.sort_by(|left, right| {
-        render_chunk_distance_sq(*left, camera_position)
-            .total_cmp(&render_chunk_distance_sq(*right, camera_position))
-            .then_with(|| left.x.cmp(&right.x))
-            .then_with(|| left.z.cmp(&right.z))
-    });
-    positions
-}
-
-/// Distance-sort dirty-section chunks by their nearest dirty section, nearest-first.
-pub fn sort_dirty_section_chunks_by_distance(
-    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
-    camera_position: Vec3,
-) -> Vec<ChunkPos> {
-    let mut positions = sections_by_chunk.keys().copied().collect::<Vec<_>>();
-    positions.sort_by(|left, right| {
-        dirty_section_chunk_distance_sq(sections_by_chunk, *left, camera_position)
-            .total_cmp(&dirty_section_chunk_distance_sq(
-                sections_by_chunk,
+        render_chunk_distance_sq_in(topology, *left, camera_position)
+            .total_cmp(&render_chunk_distance_sq_in(
+                topology,
                 *right,
                 camera_position,
             ))
@@ -179,8 +191,30 @@ pub fn sort_dirty_section_chunks_by_distance(
     positions
 }
 
-fn dirty_section_chunk_distance_sq(
+/// Distance-sort dirty-section chunks by their nearest dirty section, nearest-first.
+pub fn sort_dirty_section_chunks_by_distance(
     sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    topology: HorizontalTopology,
+    camera_position: Vec3,
+) -> Vec<ChunkPos> {
+    let mut positions = sections_by_chunk.keys().copied().collect::<Vec<_>>();
+    positions.sort_by(|left, right| {
+        dirty_section_chunk_distance_sq_in(sections_by_chunk, topology, *left, camera_position)
+            .total_cmp(&dirty_section_chunk_distance_sq_in(
+                sections_by_chunk,
+                topology,
+                *right,
+                camera_position,
+            ))
+            .then_with(|| left.x.cmp(&right.x))
+            .then_with(|| left.z.cmp(&right.z))
+    });
+    positions
+}
+
+fn dirty_section_chunk_distance_sq_in(
+    sections_by_chunk: &BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    topology: HorizontalTopology,
     pos: ChunkPos,
     camera_position: Vec3,
 ) -> f32 {
@@ -188,10 +222,10 @@ fn dirty_section_chunk_distance_sq(
         .get(&pos)
         .and_then(|keys| {
             keys.iter()
-                .map(|key| render_section_distance_sq(*key, camera_position))
+                .map(|key| render_section_distance_sq_in(topology, *key, camera_position))
                 .min_by(f32::total_cmp)
         })
-        .unwrap_or_else(|| render_chunk_distance_sq(pos, camera_position))
+        .unwrap_or_else(|| render_chunk_distance_sq_in(topology, pos, camera_position))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

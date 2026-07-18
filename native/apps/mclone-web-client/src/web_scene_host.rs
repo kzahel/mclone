@@ -1269,6 +1269,7 @@ impl WebSceneHost {
         }
         let pending = self.take_pending_session_start()?;
         let world_generation_profile = pending.scene.world_generation_profile;
+        let world_topology = pending.scene.world_topology;
         self.start_worker_runtime(
             pending,
             WebIntegratedServerRunnerConfig::new(
@@ -1278,7 +1279,8 @@ impl WebSceneHost {
                 bindgen_js_url,
                 bindgen_wasm_url,
             )
-            .with_world_generation_profile(world_generation_profile),
+            .with_world_generation_profile(world_generation_profile)
+            .with_world_topology(world_topology),
         )
         .await
     }
@@ -1314,6 +1316,7 @@ impl WebSceneHost {
         }
         let pending = self.take_pending_session_start()?;
         let world_generation_profile = pending.scene.world_generation_profile;
+        let world_topology = pending.scene.world_topology;
         self.start_worker_runtime(
             pending,
             WebIntegratedServerRunnerConfig::new(
@@ -1324,7 +1327,8 @@ impl WebSceneHost {
                 bindgen_wasm_url,
             )
             .with_indexed_db_world(world_id, false)
-            .with_world_generation_profile(world_generation_profile),
+            .with_world_generation_profile(world_generation_profile)
+            .with_world_topology(world_topology),
         )
         .await
     }
@@ -1490,6 +1494,7 @@ impl WebSceneHost {
         )
         .with_indexed_db_world(world_id, false)
         .with_world_generation_profile(pending.scene.world_generation_profile)
+        .with_world_topology(pending.scene.world_topology)
         .with_world_behavior_profile(pending.scene.world_behavior_profile)
         .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
         .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
@@ -1818,6 +1823,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         bindgen_wasm_url,
     )
     .with_world_generation_profile(scene_startup.world_generation_profile)
+    .with_world_topology(scene_startup.world_topology)
     .with_debug_passive_showcase(scene_startup.debug_passive_showcase)
     .with_debug_auxiliary_player_script(scene_startup.debug_auxiliary_player_script)
     .with_light_status_batch_size(scene_startup.light_status_batch_size);
@@ -2087,6 +2093,7 @@ impl WebSceneHost {
         let center = pending.scene.center();
         let render_distance = pending.scene.render_distance;
         config.world_generation_profile = pending.scene.world_generation_profile;
+        config.world_topology = pending.scene.world_topology;
         config.world_behavior_profile = pending.scene.world_behavior_profile;
         config.freeze_scheduled_fluid_ticks = pending.scene.freeze_scheduled_fluid_ticks;
         config.debug_passive_showcase = pending.scene.debug_passive_showcase;

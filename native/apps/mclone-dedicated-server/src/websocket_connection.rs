@@ -360,9 +360,19 @@ mod tests {
     }
 
     #[test]
-    fn local_tcp_and_websocket_adapters_preserve_one_logical_trace() {
-        let mut local = LocalRealmSession::new(12_345);
+    fn cylinder_local_tcp_and_websocket_adapters_preserve_one_logical_trace() {
+        let mut definition = mclone_server::DimensionDefinition::overworld(
+            12_345,
+            mclone_server::WorldGenerationProfile::FlatGrassV1,
+        );
+        definition.topology = mclone_core::HorizontalTopology::cylinder_x(0, 32);
+        let mut local = LocalRealmSession::local_integrated_with_dimension_definition(definition);
         let join_trace = local.try_drain_updates().unwrap();
+        assert!(join_trace.iter().any(|update| matches!(
+            update,
+            ServerUpdate::WorldInfo { topology, .. }
+                if *topology == mclone_core::HorizontalTopology::cylinder_x(0, 32)
+        )));
 
         let native_listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let native_addr = native_listener.local_addr().unwrap();
