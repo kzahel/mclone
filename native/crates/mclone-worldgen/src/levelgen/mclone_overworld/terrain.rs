@@ -1,12 +1,10 @@
 use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
-use crate::block::{BEDROCK, DIRT, GRASS_BLOCK, SAND, STONE, WATER};
-
-use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldSampler};
+use super::biomes::biome_id_for_sample;
+use super::fields::McloneOverworldSampler;
+use super::surface::write_surface_column;
 use crate::levelgen::chunk::sample_column_biome_payload;
-use crate::levelgen::profile::{
-    BEACH_BIOME_ID, FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
-};
+use crate::levelgen::profile::{FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y};
 use crate::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
 pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
@@ -19,7 +17,7 @@ pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) ->
     for local_z in 0..CHUNK_WIDTH {
         for local_x in 0..CHUNK_WIDTH {
             let sample = sampler.sample(min_x + local_x, min_z + local_z);
-            write_column(&mut buffer, local_x, local_z, sample.surface_y);
+            write_surface_column(&mut buffer, local_x, local_z, sample);
         }
     }
     buffer.prime_worldgen_heightmaps();
@@ -30,62 +28,29 @@ pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) ->
     )
 }
 
-pub fn mclone_overworld_biome_id(seed: i64, world_x: i32, world_z: i32) -> i32 {
-    biome_id_for_surface(
-        McloneOverworldSampler::new(seed)
-            .sample(world_x, world_z)
-            .surface_y,
-    )
-}
-
-fn write_column(buffer: &mut MutableChunkBlockBuffer, local_x: i32, local_z: i32, surface_y: i32) {
-    buffer.set_block_at_y(local_x, 0, local_z, BEDROCK);
-    if surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-        let sand_min_y = (surface_y - 3).max(1);
-        for y in 1..sand_min_y {
-            buffer.set_block_at_y(local_x, y, local_z, STONE);
-        }
-        for y in sand_min_y..=surface_y {
-            buffer.set_block_at_y(local_x, y, local_z, SAND);
-        }
-    } else {
-        for y in 1..surface_y - 2 {
-            buffer.set_block_at_y(local_x, y, local_z, STONE);
-        }
-        buffer.set_block_at_y(local_x, surface_y - 2, local_z, DIRT);
-        buffer.set_block_at_y(local_x, surface_y - 1, local_z, DIRT);
-        buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
-    }
-    for y in surface_y + 1..=MCLONE_OVERWORLD_SEA_LEVEL {
-        buffer.set_block_at_y(local_x, y, local_z, WATER);
-    }
-}
-
-fn biome_id_for_surface(surface_y: i32) -> i32 {
-    if surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
-        OCEAN_BIOME_ID
-    } else if surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-        BEACH_BIOME_ID
-    } else {
-        PLAINS_BIOME_ID
-    }
-}
-
 fn mclone_overworld_chunk_biomes(
     sampler: McloneOverworldSampler,
     min_x: i32,
     min_z: i32,
 ) -> Vec<i32> {
     sample_column_biome_payload(min_x, min_z, FLAT_GRASS_HEIGHT, |world_x, world_z| {
-        biome_id_for_surface(sampler.sample(world_x, world_z).surface_y)
+        biome_id_for_sample(sampler.sample(world_x, world_z))
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::block::AIR;
+    use crate::block::{AIR, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER};
 
     use super::*;
+    use crate::levelgen::mclone_overworld::biomes::{
+        MCLONE_OVERWORLD_FOREST_BIOME_ID, biome_id_for_sample,
+    };
+    use crate::levelgen::mclone_overworld::fields::MCLONE_OVERWORLD_SEA_LEVEL;
+    use crate::levelgen::mclone_overworld::surface::{
+        McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe,
+    };
+    use crate::levelgen::profile::{BEACH_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID};
 
     #[test]
     fn chunk_columns_follow_the_production_sampler_and_material_rules() {
@@ -97,10 +62,11 @@ mod tests {
             for local_z in 0..CHUNK_WIDTH {
                 for local_x in 0..CHUNK_WIDTH {
                     let sample = sampler.sample(min_x + local_x, min_z + local_z);
-                    let expected_top = if sample.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-                        SAND
-                    } else {
-                        GRASS_BLOCK
+                    let expected_top = match mclone_overworld_surface_recipe(sample) {
+                        McloneOverworldSurfaceRecipe::OceanFloor => GRAVEL,
+                        McloneOverworldSurfaceRecipe::Beach => SAND,
+                        McloneOverworldSurfaceRecipe::GrassSoil => GRASS_BLOCK,
+                        McloneOverworldSurfaceRecipe::ExposedStone => STONE,
                     };
                     assert_eq!(
                         chunk.block_at_y(local_x, sample.surface_y, local_z).0,
@@ -189,6 +155,94 @@ mod tests {
                 4_555_534_153_015_019_042,
                 18_040_415_189_221_613_033,
                 3_809_513_469_643_986_681,
+            ]
+        );
+    }
+
+    #[test]
+    fn selected_regions_exercise_and_pin_biome_and_surface_language() {
+        let receipts = [12_345, -98_765, 8_675_309].map(|seed| {
+            let sampler = McloneOverworldSampler::new(seed);
+            let mut biome_counts = [0_u32; 4];
+            let mut surface_counts = [0_u32; 4];
+            let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+            for z in (-2_048..2_048).step_by(16) {
+                for x in (-2_048..2_048).step_by(16) {
+                    let sample = sampler.sample(x, z);
+                    let biome_id = biome_id_for_sample(sample);
+                    let biome_index = match biome_id {
+                        OCEAN_BIOME_ID => 0,
+                        BEACH_BIOME_ID => 1,
+                        PLAINS_BIOME_ID => 2,
+                        MCLONE_OVERWORLD_FOREST_BIOME_ID => 3,
+                        _ => panic!("unexpected Mclone biome ID {biome_id}"),
+                    };
+                    let surface_index = match mclone_overworld_surface_recipe(sample) {
+                        McloneOverworldSurfaceRecipe::OceanFloor => 0,
+                        McloneOverworldSurfaceRecipe::Beach => 1,
+                        McloneOverworldSurfaceRecipe::GrassSoil => 2,
+                        McloneOverworldSurfaceRecipe::ExposedStone => 3,
+                    };
+                    biome_counts[biome_index] += 1;
+                    surface_counts[surface_index] += 1;
+                    for byte in [biome_index as u8, surface_index as u8] {
+                        hash ^= u64::from(byte);
+                        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
+                }
+            }
+            assert!(biome_counts.into_iter().all(|count| count > 0));
+            assert!(surface_counts.into_iter().all(|count| count > 0));
+            (biome_counts, surface_counts, hash)
+        });
+
+        assert_eq!(
+            receipts,
+            [
+                (
+                    [21_961, 8_677, 18_012, 16_886],
+                    [13_072, 17_566, 34_698, 200],
+                    1_553_751_596_871_636_624,
+                ),
+                (
+                    [17_223, 7_179, 9_432, 31_702],
+                    [8_521, 15_881, 40_253, 881],
+                    9_869_182_724_332_914_468,
+                ),
+                (
+                    [33_641, 11_970, 9_716, 10_209],
+                    [21_336, 24_275, 19_814, 111],
+                    8_785_814_785_668_338_928,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn selected_chunks_pin_surface_blocks_and_biome_payloads() {
+        let fingerprints = [12_345, -98_765, 8_675_309].map(|seed| {
+            let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+            for (chunk_x, chunk_z) in [(0, 0), (-17, 11), (31, -1)] {
+                let chunk = generate_mclone_overworld_chunk(seed, chunk_x, chunk_z);
+                for byte in chunk
+                    .blocks()
+                    .iter()
+                    .copied()
+                    .chain(chunk.biomes().iter().flat_map(|id| id.to_le_bytes()))
+                {
+                    hash ^= u64::from(byte);
+                    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+                }
+            }
+            hash
+        });
+
+        assert_eq!(
+            fingerprints,
+            [
+                9_298_043_774_959_183_043,
+                11_087_554_102_491_393_574,
+                9_064_488_643_018_196_967,
             ]
         );
     }

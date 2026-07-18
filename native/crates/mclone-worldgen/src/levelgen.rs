@@ -17,9 +17,12 @@ pub use feature_batch::{
 };
 pub use generator::NoiseBasedChunkGenerator;
 pub use mclone_overworld::{
-    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldSampleRegion,
-    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldTerrainSample,
-    generate_mclone_overworld_chunk, mclone_overworld_biome_id, mclone_overworld_spawn_chunk,
+    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_RELIEF, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y,
+    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y, McloneOverworldSampleRegion,
+    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSurfaceRecipe,
+    McloneOverworldTerrainSample, generate_mclone_overworld_chunk, mclone_overworld_biome_id,
+    mclone_overworld_spawn_chunk, mclone_overworld_surface_recipe,
 };
 pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{
