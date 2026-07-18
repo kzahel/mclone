@@ -1,6 +1,6 @@
 use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
-use super::biomes::biome_id_for_sample;
+use super::biomes::mclone_overworld_biome_id_for_sample;
 use super::fields::McloneOverworldSampler;
 use super::surface::write_surface_column;
 use crate::levelgen::chunk::sample_column_biome_payload;
@@ -46,7 +46,7 @@ pub(super) fn generate_mclone_overworld_surface_buffer(
 pub(super) fn mclone_overworld_chunk_biomes(seed: i64, min_x: i32, min_z: i32) -> Vec<i32> {
     let sampler = McloneOverworldSampler::new(seed);
     sample_column_biome_payload(min_x, min_z, FLAT_GRASS_HEIGHT, |world_x, world_z| {
-        biome_id_for_sample(sampler.sample(world_x, world_z))
+        mclone_overworld_biome_id_for_sample(sampler.sample(world_x, world_z))
     })
 }
 
@@ -56,7 +56,7 @@ mod tests {
 
     use super::*;
     use crate::levelgen::mclone_overworld::biomes::{
-        MCLONE_OVERWORLD_FOREST_BIOME_ID, biome_id_for_sample,
+        MCLONE_OVERWORLD_FOREST_BIOME_ID, mclone_overworld_biome_id_for_sample,
     };
     use crate::levelgen::mclone_overworld::fields::MCLONE_OVERWORLD_SEA_LEVEL;
     use crate::levelgen::mclone_overworld::surface::{
@@ -181,7 +181,7 @@ mod tests {
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
                     let sample = sampler.sample(x, z);
-                    let biome_id = biome_id_for_sample(sample);
+                    let biome_id = mclone_overworld_biome_id_for_sample(sample);
                     let biome_index = match biome_id {
                         OCEAN_BIOME_ID => 0,
                         BEACH_BIOME_ID => 1,

@@ -6,9 +6,12 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use image::RgbaImage;
 use mclone_worldgen::levelgen::{
-    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL,
-    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldTerrainSample,
-    mclone_overworld_spawn_chunk,
+    BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
+    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSurfaceRecipe,
+    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
+    mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -83,11 +86,20 @@ fn run() -> Result<()> {
     let relief_path = config.output_dir.join(format!("{prefix}-relief.png"));
     let surface_path = config.output_dir.join(format!("{prefix}-surface-y.png"));
     let fields_path = config.output_dir.join(format!("{prefix}-fields.png"));
+    let biome_path = config.output_dir.join(format!("{prefix}-biomes.png"));
+    let surface_recipe_path = config
+        .output_dir
+        .join(format!("{prefix}-surface-recipes.png"));
+    let language_path = config
+        .output_dir
+        .join(format!("{prefix}-terrain-language.png"));
     let receipt_path = config.output_dir.join(format!("{prefix}-fields.json"));
 
     let continentalness = render_map(&region.samples, continentalness_color);
     let relief = render_map(&region.samples, relief_color);
     let surface = render_map(&region.samples, surface_color);
+    let biomes = render_map(&region.samples, biome_color);
+    let surface_recipes = render_map(&region.samples, surface_recipe_color);
     save_rgba(
         &continentalness_path,
         request.width,
@@ -107,12 +119,27 @@ fn run() -> Result<()> {
         request.depth,
         &combined,
     )?;
+    save_rgba(&biome_path, request.width, request.depth, &biomes)?;
+    save_rgba(
+        &surface_recipe_path,
+        request.width,
+        request.depth,
+        &surface_recipes,
+    )?;
+    let terrain_language = combine_maps(request.width, request.depth, [&biomes, &surface_recipes]);
+    save_rgba(
+        &language_path,
+        request.width * 2 + MAP_GAP_PIXELS,
+        request.depth,
+        &terrain_language,
+    )?;
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 1,
+        "schema": 2,
         "profile": "mclone-overworld-v1",
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
+        "decorationRevision": MCLONE_OVERWORLD_DECORATION_REVISION,
         "commit": commit,
         "dirty": dirty,
         "seed": config.seed,
@@ -153,18 +180,35 @@ fn run() -> Result<()> {
             "shore": facts.shore_columns,
             "dryLand": facts.dry_land_columns,
         },
+        "biomeCounts": {
+            "ocean": facts.ocean_biome_columns,
+            "beach": facts.beach_biome_columns,
+            "openLowland": facts.open_lowland_biome_columns,
+            "woodedUpland": facts.wooded_upland_biome_columns,
+        },
+        "surfaceRecipeCounts": {
+            "oceanFloor": facts.ocean_floor_columns,
+            "beach": facts.beach_surface_columns,
+            "grassSoil": facts.grass_soil_columns,
+            "exposedStone": facts.exposed_stone_columns,
+        },
         "slopeEdges": {
             "total": facts.slope_edges,
             "atLeastOneBlock": facts.slope_at_least_one,
             "atLeastThreeBlocks": facts.slope_at_least_three,
         },
         "sampleFingerprint": facts.fingerprint,
+        "terrainLanguageFingerprint": facts.terrain_language_fingerprint,
         "maps": {
             "order": ["continentalness", "relief", "surfaceY"],
             "combined": fields_path,
             "continentalness": continentalness_path,
             "relief": relief_path,
             "surfaceY": surface_path,
+            "terrainLanguageOrder": ["biomes", "surfaceRecipes"],
+            "terrainLanguage": language_path,
+            "biomes": biome_path,
+            "surfaceRecipes": surface_recipe_path,
         },
     });
     fs::write(&receipt_path, serde_json::to_vec_pretty(&receipt)?)
@@ -270,10 +314,19 @@ struct RegionFacts {
     water_columns: usize,
     shore_columns: usize,
     dry_land_columns: usize,
+    ocean_biome_columns: usize,
+    beach_biome_columns: usize,
+    open_lowland_biome_columns: usize,
+    wooded_upland_biome_columns: usize,
+    ocean_floor_columns: usize,
+    beach_surface_columns: usize,
+    grass_soil_columns: usize,
+    exposed_stone_columns: usize,
     slope_edges: usize,
     slope_at_least_one: usize,
     slope_at_least_three: usize,
     fingerprint: u64,
+    terrain_language_fingerprint: u64,
 }
 
 impl RegionFacts {
@@ -286,7 +339,16 @@ impl RegionFacts {
         let mut water_columns = 0;
         let mut shore_columns = 0;
         let mut dry_land_columns = 0;
+        let mut ocean_biome_columns = 0;
+        let mut beach_biome_columns = 0;
+        let mut open_lowland_biome_columns = 0;
+        let mut wooded_upland_biome_columns = 0;
+        let mut ocean_floor_columns = 0;
+        let mut beach_surface_columns = 0;
+        let mut grass_soil_columns = 0;
+        let mut exposed_stone_columns = 0;
         let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
+        let mut terrain_language_fingerprint = 0xcbf2_9ce4_8422_2325_u64;
         for sample in samples {
             min_continentalness = min_continentalness.min(sample.continentalness);
             max_continentalness = max_continentalness.max(sample.continentalness);
@@ -299,6 +361,30 @@ impl RegionFacts {
                 shore_columns += 1;
             } else {
                 dry_land_columns += 1;
+            }
+            let biome_id = mclone_overworld_biome_id_for_sample(*sample);
+            match biome_id {
+                OCEAN_BIOME_ID => ocean_biome_columns += 1,
+                BEACH_BIOME_ID => beach_biome_columns += 1,
+                PLAINS_BIOME_ID => open_lowland_biome_columns += 1,
+                MCLONE_OVERWORLD_FOREST_BIOME_ID => wooded_upland_biome_columns += 1,
+                _ => {}
+            }
+            let surface_recipe = mclone_overworld_surface_recipe(*sample);
+            match surface_recipe {
+                McloneOverworldSurfaceRecipe::OceanFloor => ocean_floor_columns += 1,
+                McloneOverworldSurfaceRecipe::Beach => beach_surface_columns += 1,
+                McloneOverworldSurfaceRecipe::GrassSoil => grass_soil_columns += 1,
+                McloneOverworldSurfaceRecipe::ExposedStone => exposed_stone_columns += 1,
+            }
+            for byte in biome_id
+                .to_le_bytes()
+                .into_iter()
+                .chain([surface_recipe_tag(surface_recipe)])
+            {
+                terrain_language_fingerprint ^= u64::from(byte);
+                terrain_language_fingerprint =
+                    terrain_language_fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
             }
             for byte in sample
                 .continentalness
@@ -356,10 +442,19 @@ impl RegionFacts {
             water_columns,
             shore_columns,
             dry_land_columns,
+            ocean_biome_columns,
+            beach_biome_columns,
+            open_lowland_biome_columns,
+            wooded_upland_biome_columns,
+            ocean_floor_columns,
+            beach_surface_columns,
+            grass_soil_columns,
+            exposed_stone_columns,
             slope_edges,
             slope_at_least_one,
             slope_at_least_three,
             fingerprint,
+            terrain_language_fingerprint,
         }
     }
 }
@@ -437,6 +532,34 @@ fn surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     }
 }
 
+fn biome_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    match mclone_overworld_biome_id_for_sample(sample) {
+        OCEAN_BIOME_ID => [25, 76, 145, 255],
+        BEACH_BIOME_ID => [222, 207, 143, 255],
+        PLAINS_BIOME_ID => [112, 176, 76, 255],
+        MCLONE_OVERWORLD_FOREST_BIOME_ID => [42, 105, 55, 255],
+        _ => [211, 64, 198, 255],
+    }
+}
+
+fn surface_recipe_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    match mclone_overworld_surface_recipe(sample) {
+        McloneOverworldSurfaceRecipe::OceanFloor => [104, 111, 119, 255],
+        McloneOverworldSurfaceRecipe::Beach => [222, 207, 143, 255],
+        McloneOverworldSurfaceRecipe::GrassSoil => [91, 151, 67, 255],
+        McloneOverworldSurfaceRecipe::ExposedStone => [137, 137, 137, 255],
+    }
+}
+
+fn surface_recipe_tag(recipe: McloneOverworldSurfaceRecipe) -> u8 {
+    match recipe {
+        McloneOverworldSurfaceRecipe::OceanFloor => 0,
+        McloneOverworldSurfaceRecipe::Beach => 1,
+        McloneOverworldSurfaceRecipe::GrassSoil => 2,
+        McloneOverworldSurfaceRecipe::ExposedStone => 3,
+    }
+}
+
 fn lerp_color(from: [u8; 4], to: [u8; 4], amount: f64) -> [u8; 4] {
     let amount = amount.clamp(0.0, 1.0);
     std::array::from_fn(|index| {
@@ -446,8 +569,9 @@ fn lerp_color(from: [u8; 4], to: [u8; 4], amount: f64) -> [u8; 4] {
     })
 }
 
-fn combine_maps(width: u32, height: u32, maps: [&[u8]; 3]) -> Vec<u8> {
-    let combined_width = width * 3 + MAP_GAP_PIXELS * 2;
+fn combine_maps<const N: usize>(width: u32, height: u32, maps: [&[u8]; N]) -> Vec<u8> {
+    let map_count = u32::try_from(N).expect("review map count exceeds u32");
+    let combined_width = width * map_count + MAP_GAP_PIXELS * map_count.saturating_sub(1);
     let mut combined = vec![18_u8; (combined_width * height * 4) as usize];
     for pixel in combined.chunks_exact_mut(4) {
         pixel[3] = 255;

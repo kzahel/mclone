@@ -25,7 +25,8 @@ pub use mclone_overworld::{
     McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
     McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, generate_mclone_overworld_chunk,
     generate_mclone_overworld_surface_chunk, mclone_overworld_biome_id,
-    mclone_overworld_spawn_chunk, mclone_overworld_surface_recipe,
+    mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
+    mclone_overworld_surface_recipe,
 };
 pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{

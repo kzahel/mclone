@@ -7,7 +7,7 @@ mod terrain;
 
 pub use biomes::{
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y,
-    mclone_overworld_biome_id,
+    mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
 };
 pub use decoration::MCLONE_OVERWORLD_DECORATION_REVISION;
 pub use feature_batch::{
