@@ -15,6 +15,12 @@ and
 The bounded biome and decoration fork is planned in
 [`tactical/188-mclone-overworld-v1-biome-decoration-fork.md`](tactical/188-mclone-overworld-v1-biome-decoration-fork.md).
 
+Compatibility safety is recorded in the
+[`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
+The project is currently internal and unshipped: Flat Grass, Small Island, and
+authored-only fixtures are mutable proving surfaces, while `overworld` remains
+locked because Java 1.17.1 parity is its external correctness target.
+
 The implementation lives primarily in `native/crates/mclone-worldgen`, with
 scheduler/publication integration in `native/crates/mclone-server` and shared
 chunk data in `native/crates/mclone-core`.

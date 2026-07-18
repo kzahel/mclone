@@ -186,6 +186,20 @@ Seed parity against 1.17.1 vanilla overworld is the correctness bar. Detailed ta
 
 Do not port `Aquifer`, `Cavifier`, `NoodleCavifier`, `OreVeinifier`, the disabled deepslate path, or other disabled Caves & Cliffs Part 1 worldgen paths for MVP. If asked to port any of these, push back and confirm the target has changed before writing code.
 
+### Worldgen compatibility safety
+
+Before deciding that generator output must be preserved, read the compatibility
+safety ledger in
+[`docs/topics/world-generation-profiles.md`](docs/topics/world-generation-profiles.md#compatibility-safety-ledger).
+A `v1` name, persisted tag, or checked-in fingerprint is not by itself a
+release compatibility promise. The current project is internal and unshipped:
+`flat-grass-v1`, `small-island-v1`, and authored-only behavior may be changed
+intentionally in place when their fixtures, docs, and disposable internal
+worlds are updated. The `overworld` profile remains reference-locked because
+Minecraft Java 1.17.1 parity is its correctness target, not because it has
+shipped users. Update the ledger before relying on a new release freeze or a
+specific world that must survive generator changes.
+
 ## Commit Message Guidance
 
 Aim for a <=65 char subject, and strictly enforce a 72-column line wrap

@@ -9,8 +9,10 @@ Shared catalog/UI selection and desktop, browser, Android, XR, dedicated,
 multi-dimension, and stored-reopen paths carry the same profile contract.
 Generator-owned pure plans now declare exact outputs, backend work, and typed
 prerequisites while the scheduler retains readiness, priority, admission,
-publication, lighting, and persistence. Tactical 188 owns the later
-`mclone-overworld-v1` biome/decoration fork.**
+publication, lighting, and persistence. The alternate profiles remain
+internal and unshipped, so their current names, tags, and fixtures are
+regression guards rather than release compatibility promises. Tactical 188
+owns the later `mclone-overworld-v1` biome/decoration fork.**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -89,15 +91,76 @@ desert well, monster room, and fossil history belonged to the retired
 TypeScript engine; current structure docs must distinguish that history from
 native status.
 
+## Compatibility Safety Ledger
+
+This is the authoritative metadata for deciding whether an intentional
+world-generation change is safe. Review it before preserving an algorithm,
+adding a new versioned profile, changing a fixture, or migrating a stored
+world.
+
+- **Reviewed:** 2026-07-18
+- **Project release state:** `internal-unshipped`
+- **Known external world/save consumers:** none
+- **Default fixture meaning:** refactor and determinism regression guard, not a
+  release compatibility promise
+- **Default internal-world policy:** disposable or explicitly migrated when an
+  intentional generator change lands
+
+Dispositions mean:
+
+- `reference-locked`: output is constrained by an external correctness target;
+  intentional change is limited to parity corrections, proven
+  behavior-preserving refactors, or an explicit target change;
+- `internal-mutable`: intentional output and identity changes are allowed in
+  place because no shipped consumer depends on them;
+- `planned-unallocated`: the identity is not live and may be redesigned before
+  implementation.
+
+| Surface | Disposition | Safe intentional changes | Why | Required update when changed |
+|---|---|---|---|---|
+| `overworld` | `reference-locked` | Parity fixes, output-identical refactors, or an explicit change away from the Java 1.17.1 target | Its constraint is the Minecraft reference/oracle target, not shipped save compatibility | Re-run oracle, random-order, scheduler, worker, and pixel gates; update fixtures only when correcting the reference expectation |
+| `flat-grass-v1` | `internal-mutable` | Layers, biome, seed use, label, tag, planning shape, and implementation may change in place | It is an internal proof generator with no shipped worlds or external consumers | Update focused fixtures/tests/docs and discard or migrate affected internal worlds |
+| `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
+| `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
+| provisional `mclone-overworld-v1` | `planned-unallocated` | Identity, tag, seed domains, fixtures, and algorithm are freely designable | No live profile or retained world uses it | Update Tactical 188 and this ledger when the profile becomes live |
+
+For a proposed change, resolve every affected row before editing. The most
+restrictive disposition wins when a shared primitive affects multiple rows. If
+the affected surface has no row, add one with its concrete preservation
+consumer—or state that none exists—rather than inferring safety from its name
+or tests. Classify fixtures as regression guards or compatibility evidence,
+then list the exact migrations and validation that an intentional change must
+carry.
+
+An immutable profile-plus-seed descriptor during a worker/scheduler session is
+a runtime consistency rule, not a promise that a later build must preserve the
+same algorithm.
+
+A surface becomes release-frozen only when at least one concrete preservation
+consumer is recorded here, for example:
+
+- a distributed build whose users are expected to reopen generated worlds;
+- a named family/test/server world that the user asks to retain across builds;
+- an external fixture, tool, or protocol consumer that depends on the exact
+  identity or output; or
+- an explicit release/compatibility declaration.
+
+When one of those triggers occurs, update this ledger first with the consumer,
+freeze boundary, migration policy, and earliest compatible version. Do not
+infer a freeze merely from a `v1` suffix, persisted discriminant, or committed
+fingerprint.
+
 ## Binding Decisions
 
 1. Preserve the existing stored `overworld` identity and serialized
-   discriminant. A source rename may happen later, but old saves and external
-   labels retain their meanings.
-2. New generator algorithm versions are immutable profile identities, starting
-   with `flat-grass-v1` and `small-island-v1`.
-3. A later original overworld receives its own versioned identity, provisionally
-   `mclone-overworld-v1`; it never silently replaces `overworld`.
+   discriminant while it names the Java 1.17.1 reference path. This is a
+   reference-baseline decision, not evidence of shipped save consumers.
+2. `flat-grass-v1` and `small-island-v1` are current internal identities, not
+   release freezes. They may change in place under the safety ledger while no
+   preservation consumer exists.
+3. A later original overworld provisionally uses `mclone-overworld-v1` so it
+   remains distinct from the reference `overworld`; its exact compatibility
+   promise begins only when the safety ledger records a freeze.
 4. Persistence hits win for every profile. Profiles govern only what a true
    missing chunk produces.
 5. Generator dependency footprints are separate from lighting and publication
@@ -108,8 +171,9 @@ native status.
    codec/registry framework are deferred until a real requirement exists.
 8. Flat and island initially emit existing biome IDs. Original biome registry
    work waits for the actual mclone fork.
-9. Generator identity and behavior version are stored per dimension so unseen
-   chunks in an old world never change meaning after an upgrade.
+9. Generator identity is stored per dimension and remains fixed during a live
+   scheduling session. Cross-build preservation is required only for worlds
+   recorded as compatibility consumers in the safety ledger.
 10. Remote clients consume authoritative chunks and do not need the server's
     generator implementation.
 
@@ -137,10 +201,11 @@ native status.
 - target-only generation with exact seam and batch-order determinism
 - at least two pinned seeds with materially different valid islands
 
-The exact island constants and formulas are frozen in Tactical 187's Slice 3
+The exact island constants and formulas are recorded in Tactical 187's Slice 3
 execution record. Two pinned seeds, X/Z seam checks, partition invariance,
-save/reopen, dedicated spawn, and inspected overview/shoreline captures now
-establish the v1 compatibility shape.
+save/reopen, dedicated spawn, and inspected overview/shoreline captures form a
+strong accidental-regression baseline. They may be intentionally updated under
+the safety ledger.
 
 ## Architecture Direction
 

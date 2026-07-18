@@ -25,20 +25,27 @@ This tactical begins only when there is at least one concrete original biome
 or decoration combination to implement. It does not create an empty generic
 framework in anticipation of unspecified content.
 
-## Locked Compatibility Boundary
+## Current Internal Compatibility Boundary
 
 - `overworld` remains binary tag `0`, stored label `overworld`, and the exact
   Java 1.17.1 oracle/parity target.
-- `authored-only`, `flat-grass-v1`, and `small-island-v1` retain tags `1`, `2`,
-  and `3` and their current immutable behavior.
+- `authored-only`, `flat-grass-v1`, and `small-island-v1` currently use tags
+  `1`, `2`, and `3`, but those internal/unshipped identities and algorithms may
+  change in place under the compatibility safety ledger;
 - the provisional new identity is stored label `mclone-overworld-v1` and the
   next appended binary tag `4`;
-- an algorithm-incompatible revision is a new stored profile such as
-  `mclone-overworld-v2`, never a silent mutation of v1;
+- a new stored profile such as `mclone-overworld-v2` becomes mandatory only
+  after the safety ledger records a release freeze or a concrete world that
+  must survive the change;
 - persistence hits always win. The stored per-dimension profile governs only a
   true missing chunk and remains fixed before scheduling;
 - vanilla oracle fixtures never become acceptance tests for the original
   profile, and original fixture changes never update vanilla expected output.
+
+See
+[`world-generation-profiles.md`](../topics/world-generation-profiles.md#compatibility-safety-ledger)
+for the current reasoned disposition and freeze triggers. A `v1` suffix or
+fixture alone is not a compatibility promise.
 
 ## Evidence From Tactical 187
 
@@ -82,14 +89,17 @@ reserved for compatibility but this tactical does not require structure
 runtime implementation.
 
 Changing the mixer, domain spelling, coordinate packing, or key derivation is
-an algorithm change and therefore requires a new profile version once v1
-fixtures are frozen.
+an algorithm change. It requires updated internal fixtures while the profile
+is internal-mutable, and a new profile version after the safety ledger records
+a compatibility freeze.
 
 ## Compatibility Fixture Vocabulary
 
-Original-profile fixtures are compact mclone compatibility evidence, not Java
-oracle output. Every fixture records the profile label, signed seed, dimension
-key, algorithm revision, and requested chunk/region before one or more of:
+Original-profile fixtures are compact mclone determinism and regression
+evidence, not Java oracle output. They become release compatibility evidence
+only after the safety ledger records a freeze. Every fixture records the
+profile label, signed seed, dimension key, algorithm revision, and requested
+chunk/region before one or more of:
 
 - a quart-coordinate biome sample grid with biome keys/IDs and a stable hash;
 - a column-height/material fingerprint before decoration;

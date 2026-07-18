@@ -4,6 +4,14 @@ Status: complete 2026-07-17. Product direction accepted 2026-07-16; all six
 slices and cross-platform gates are complete. Tactical 188 owns the actual
 vanilla/mclone biome and decoration fork.
 
+Compatibility note 2026-07-18: this execution record used conservative terms
+such as “immutable” while establishing profile and regression locks. The
+authoritative current disposition is the compatibility safety ledger in
+[`../topics/world-generation-profiles.md`](../topics/world-generation-profiles.md#compatibility-safety-ledger):
+the project is internal and unshipped, so Flat Grass, Small Island, and their
+fixtures may be intentionally updated in place. Overworld remains locked to
+the Java 1.17.1 reference target.
+
 Topic: `world-generation-profiles`
 
 Workstream: shared native Rust world generation and server scheduling, desktop
@@ -195,14 +203,16 @@ Add stable profiles provisionally labeled:
 | Persisted label | Meaning | Seed use | Behavior promise |
 |---|---|---|---|
 | `overworld` | current vanilla-1.17-shaped path | full | existing compatibility/oracle path |
-| `flat-grass-v1` | fixed bedrock/dirt/grass layers | identity only | immutable v1 layers/biome |
-| `small-island-v1` | original seeded island in ocean | full | immutable v1 field/material rules |
+| `flat-grass-v1` | fixed bedrock/dirt/grass layers | identity only | current internal baseline; mutable under the safety ledger |
+| `small-island-v1` | original seeded island in ocean | full | current internal baseline; mutable under the safety ledger |
 | `authored-only` | stored chunks or deterministic void | identity only | existing authored miss policy |
 
-Version is part of profile identity for the new generators. Do not add a
-mutable global "current generator version" whose meaning changes beneath an
-old save. A later algorithm is `small-island-v2` or a new descriptor, while
-old `small-island-v1` worlds continue to generate unseen chunks with v1.
+Version is represented in the current profile identity rather than by a
+mutable global "current generator version." While the project remains
+internal-unshipped, the safety ledger permits intentional in-place changes and
+disposable or explicit migration of internal worlds. A new profile such as
+`small-island-v2` becomes necessary only after a concrete preservation
+consumer is recorded.
 
 Native binary persistence discriminants, serde JSON, browser catalog strings,
 CLI parsing, dedicated startup, and test fixtures must all retain exact legacy
@@ -548,7 +558,7 @@ Gate: one seed visibly produces a coherent grass/sand island in ocean, a
 second produces a materially different but valid island, both guarantee safe
 spawn, and all deterministic/seam/profile gates pass.
 
-Frozen `small-island-v1` field:
+Recorded `small-island-v1` regression baseline:
 
 - build range is `0..256`, sea level is Y `63`, and the exact open-ocean floor
   is Y `48`;

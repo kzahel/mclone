@@ -45,9 +45,10 @@ series implements the same concern, normally reuse the document slug in its
   across transfer and restart. Tactical
   [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) is complete.
 - [`world-generation-profiles.md`](world-generation-profiles.md): accepted
-  direction for stable, versioned procedural generator profiles; current
-  overworld/authored-only truth, the flat-grass and seeded-island proofs, and
-  the later frozen-vanilla versus original-mclone biome/decoration fork.
+  generator-profile direction and authoritative compatibility safety ledger;
+  current reference-locked Overworld versus internal-mutable flat-grass,
+  seeded-island, and authored-only proofs, plus the later original-mclone
+  biome/decoration fork.
   Tactical
   [`187`](../tactical/187-generator-profile-flat-grass-and-seeded-island.md)
   owns the bounded refactor and first two generators.
