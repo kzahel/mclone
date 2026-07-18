@@ -101,7 +101,7 @@ impl Cli {
                 }
                 "--generation-profile" => {
                     let value = args.next().context(
-                        "--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, or authored-only",
+                        "--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, alpha-v1, alpha-v1-winter, beta-v1, or authored-only",
                     )?;
                     cli.world_generation_profile =
                         WorldGenerationProfile::parse_label(&value).map_err(anyhow::Error::msg)?;
@@ -193,7 +193,7 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
          The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
@@ -957,6 +957,20 @@ mod tests {
                 world: DedicatedWorldSelection::Transient,
             }
         );
+    }
+
+    #[test]
+    fn cli_parses_beta_world_generation_profile() {
+        let cli = Cli::parse([
+            "--generation-profile".to_owned(),
+            "beta-v1".to_owned(),
+            "--seed".to_owned(),
+            "12345".to_owned(),
+        ])
+        .unwrap();
+
+        assert_eq!(cli.world_generation_profile, WorldGenerationProfile::BetaV1);
+        assert_eq!(cli.seed, 12_345);
     }
 
     #[test]

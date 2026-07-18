@@ -1044,6 +1044,29 @@ mod tests {
     }
 
     #[test]
+    fn beta_profile_parses_from_native_and_browser_startup_inputs() {
+        assert_eq!(
+            parse(&[ARG_GENERATION_PROFILE, "beta-v1"])
+                .scene
+                .world_generation_profile,
+            WorldGenerationProfile::BetaV1
+        );
+
+        let mut query = StartupArgState::default();
+        query
+            .parse_query_param(
+                QUERY_GENERATION_PROFILE,
+                Some("beta-v1".to_owned()),
+                RenderDistanceLimits::new(1, 16),
+            )
+            .unwrap();
+        assert_eq!(
+            query.finish().scene.world_generation_profile,
+            WorldGenerationProfile::BetaV1
+        );
+    }
+
+    #[test]
     fn parses_render_tokens_and_lighting_fullbright_default() {
         let options = parse(&[
             ARG_LIGHTING,
