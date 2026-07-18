@@ -32,6 +32,14 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`alpha-era-reference.md`](alpha-era-reference.md): preserved early-worldgen
+  study ladder, reproducible Alpha v1.1.2_01 decompilation and terrain oracle,
+  detailed generator anatomy, and the Alpha v1.2.6 biome-era comparison that
+  bounds a future reference-locked Alpha profile.
+- [`alpha-world-generation.md`](alpha-world-generation.md): active
+  implementation contract for the internal `alpha-v1` profile—Alpha
+  v1.1.2_01-shaped terrain, explicit winter state, semantic oracle mapping,
+  deterministic cross-chunk decoration, persistence, and visual acceptance.
 - [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
   transports, session lifecycle, server tick/publication cadence — current
   state, structural gaps (lockstep request/response wire, tick-per-command

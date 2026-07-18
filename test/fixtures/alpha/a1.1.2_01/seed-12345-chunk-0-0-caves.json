@@ -1,0 +1,26 @@
+{
+  "version": "a1.1.2_01",
+  "stage": "caves",
+  "seed": 12345,
+  "chunk_x": 0,
+  "chunk_z": 0,
+  "snow": false,
+  "sha256": "947b3a034360da67c83baef0fc486fd05f8373d57080abc2fe952662db55e833",
+  "height_min": 93,
+  "height_max": 100,
+  "height_mean": 95.496094,
+  "blocks": {
+    "air_0": 8652,
+    "stone_1": 22247,
+    "grass_2": 256,
+    "dirt_3": 947,
+    "bedrock_7": 617,
+    "flowing_water_8": 0,
+    "water_9": 0,
+    "flowing_lava_10": 49,
+    "lava_11": 0,
+    "sand_12": 0,
+    "gravel_13": 0,
+    "ice_79": 0
+  }
+}

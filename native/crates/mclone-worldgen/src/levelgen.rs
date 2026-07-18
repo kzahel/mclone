@@ -1,3 +1,4 @@
+mod alpha;
 mod chunk;
 mod feature_batch;
 mod generator;
@@ -49,3 +50,9 @@ pub use timing::{
 
 #[cfg(test)]
 mod tests;
+pub use alpha::{
+    ALPHA_ACTIVE_HEIGHT, ALPHA_BUILD_HEIGHT, ALPHA_SEA_LEVEL, AlphaFeatureBatchResult,
+    AlphaFeatureDependencyCache, AlphaFeatureDependencyCacheReport, AlphaGenerationStage,
+    alpha_semantic_block_id, alpha_semantic_bytes, generate_alpha_chunk,
+    generate_alpha_stage_chunk,
+};

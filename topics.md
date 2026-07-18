@@ -43,3 +43,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `mclone-overworld-generation` — original continuous Overworld terrain,
   structured macro fields, biome/surface/decoration ownership, and explicit
   reuse/refactor review stages beginning with Tactical 188
+- `alpha-world-generation` — Alpha v1.1.2_01 reference archaeology and the
+  deterministic, selectable `alpha-v1` shared generator; Tactical 193

@@ -227,6 +227,8 @@
     "texture-lab:web": "pnpm --dir ./tools/texture-lab web:dev",
     "texture-lab:web:build": "pnpm --dir ./tools/texture-lab web:build",
     "typecheck": "pnpm native:web:typecheck",
+    "reference:alpha": "bash ./scripts/decompile-alpha-mc.sh",
+    "oracle:alpha:terrain": "bash ./oracle/alpha/run-terrain-probe.sh",
     "oracle:gen": "bash ./oracle/run.sh",
     "oracle:client": "node ./oracle/vanilla-client-launch.mjs",
     "oracle:visual-compare": "node ./oracle/visual-compare.mjs"

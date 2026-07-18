@@ -6,9 +6,9 @@ use mclone_core::{BlockPos, ChunkPos, ChunkSnapshot, ChunkStatus, PackedLightSec
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, McloneOverworldFeatureDependencyCache,
-    McloneOverworldFeatureDependencyCacheReport, MutableChunkBlockBuffer,
-    OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
+    AlphaFeatureDependencyCache, AlphaFeatureDependencyCacheReport, GeneratedChunk,
+    McloneOverworldFeatureDependencyCache, McloneOverworldFeatureDependencyCacheReport,
+    MutableChunkBlockBuffer, OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, ScheduledTick,
     SmallIslandFeatureDependencyCache, SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming,
     generate_flat_grass_chunk,
@@ -61,6 +61,17 @@ impl From<OverworldFeatureDependencyCacheReport> for GenerationCacheReport {
 
 impl From<SmallIslandFeatureDependencyCacheReport> for GenerationCacheReport {
     fn from(report: SmallIslandFeatureDependencyCacheReport) -> Self {
+        Self {
+            requested_dependency_chunks: report.requested_dependency_chunks,
+            cache_hits: report.cache_hits,
+            generated_dependency_chunks: report.generated_dependency_chunks,
+            retained_dependency_chunks: report.retained_dependency_chunks,
+        }
+    }
+}
+
+impl From<AlphaFeatureDependencyCacheReport> for GenerationCacheReport {
+    fn from(report: AlphaFeatureDependencyCacheReport) -> Self {
         Self {
             requested_dependency_chunks: report.requested_dependency_chunks,
             cache_hits: report.cache_hits,
@@ -171,6 +182,7 @@ pub(crate) struct WorldGenerationExecutor {
     overworld_cache: OverworldFeatureDependencyCache,
     small_island_cache: SmallIslandFeatureDependencyCache,
     mclone_overworld_cache: McloneOverworldFeatureDependencyCache,
+    alpha_cache: AlphaFeatureDependencyCache,
 }
 
 impl WorldGenerationExecutor {
@@ -178,6 +190,7 @@ impl WorldGenerationExecutor {
         self.overworld_cache.clear();
         self.small_island_cache.clear();
         self.mclone_overworld_cache.clear();
+        self.alpha_cache.clear();
     }
 
     pub(crate) fn resident_positions(&self, profile: WorldGenerationProfile) -> BTreeSet<ChunkPos> {
@@ -187,6 +200,7 @@ impl WorldGenerationExecutor {
             WorldGenerationProfile::McloneOverworldV1 => {
                 self.mclone_overworld_cache.resident_positions()
             }
+            WorldGenerationProfile::AlphaV1 { .. } => self.alpha_cache.resident_positions(),
             WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
                 BTreeSet::new()
             }
@@ -200,6 +214,7 @@ impl WorldGenerationExecutor {
             WorldGenerationProfile::McloneOverworldV1 => {
                 self.mclone_overworld_cache.retained_chunk_count()
             }
+            WorldGenerationProfile::AlphaV1 { .. } => self.alpha_cache.retained_chunk_count(),
             WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => 0,
         }
     }
@@ -299,6 +314,22 @@ impl WorldGenerationExecutor {
                         targets.iter().copied(),
                         dependencies,
                     );
+                Ok(WorldGenerationBatchResult {
+                    chunks: result.chunks,
+                    retained_dependencies: result.retained_dependencies,
+                    diagnostics: Some(GenerationDiagnostics {
+                        cache_report: result.cache_report.into(),
+                        overworld_timing: None,
+                    }),
+                })
+            }
+            WorldGenerationProfile::AlphaV1 { winter } => {
+                let result = self.alpha_cache.generate_features_chunks_with_dependencies(
+                    descriptor.seed,
+                    winter,
+                    targets.iter().copied(),
+                    dependencies,
+                );
                 Ok(WorldGenerationBatchResult {
                     chunks: result.chunks,
                     retained_dependencies: result.retained_dependencies,
@@ -1471,6 +1502,18 @@ mod tests {
         let diagnostics = island.diagnostics.expect("island cache diagnostics");
         assert_eq!(diagnostics.cache_report.requested_dependency_chunks, 25);
         assert!(diagnostics.overworld_timing.is_none());
+
+        let alpha = full_worldgen_frame(
+            ChunkJobId(11),
+            WorldGenerationDescriptor::new(WorldGenerationProfile::alpha_v1(false), 12_345),
+            &target,
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        let diagnostics = alpha.diagnostics.expect("alpha cache diagnostics");
+        assert_eq!(diagnostics.cache_report.requested_dependency_chunks, 25);
+        assert!(diagnostics.overworld_timing.is_none());
     }
 
     #[test]
@@ -1819,6 +1862,36 @@ mod tests {
             .and_then(|frame| decode_worldgen_response(&frame))
             .unwrap();
         assert_ne!(batch.generated_chunks, changed.generated_chunks);
+    }
+
+    #[test]
+    fn alpha_frames_preserve_winter_and_batch_order() {
+        let targets = [ChunkPos::new(0, 0), ChunkPos::new(1, 0)];
+        let temperate_descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::alpha_v1(false), 12_345);
+        let forward = full_worldgen_frame(ChunkJobId(20), temperate_descriptor, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        let reversed = full_worldgen_frame(
+            ChunkJobId(21),
+            temperate_descriptor,
+            &[targets[1], targets[0]],
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        assert_eq!(forward.generated_chunks, reversed.generated_chunks);
+        assert!(!forward.retained_dependencies.is_empty());
+
+        let winter_descriptor =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::alpha_v1(true), 12_345);
+        let winter = full_worldgen_frame(ChunkJobId(22), winter_descriptor, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        assert_eq!(winter.descriptor, winter_descriptor);
+        assert_ne!(forward.generated_chunks, winter.generated_chunks);
     }
 
     #[test]

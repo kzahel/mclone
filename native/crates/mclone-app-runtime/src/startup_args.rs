@@ -18,6 +18,7 @@ use crate::{
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_GENERATION_PROFILE: &str = "--generation-profile";
+pub const ARG_ALPHA_WINTER: &str = "--alpha-winter";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
 pub const ARG_CHUNK_Z: &str = "--chunk-z";
 pub const ARG_RENDER_DISTANCE: &str = "--render-distance";
@@ -49,6 +50,7 @@ pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_SEED,
     ARG_GENERATION_PROFILE,
+    ARG_ALPHA_WINTER,
     ARG_CHUNK_X,
     ARG_CHUNK_Z,
     ARG_RENDER_DISTANCE,
@@ -77,6 +79,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
 
 pub const QUERY_SEED: &str = "seed";
 pub const QUERY_GENERATION_PROFILE: &str = "generationProfile";
+pub const QUERY_ALPHA_WINTER: &str = "alphaWinter";
 pub const QUERY_CHUNK_X: &str = "chunkX";
 pub const QUERY_CHUNK_Z: &str = "chunkZ";
 pub const QUERY_RENDER_DISTANCE: &str = "renderDistance";
@@ -101,6 +104,7 @@ pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
 pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SEED,
     QUERY_GENERATION_PROFILE,
+    QUERY_ALPHA_WINTER,
     QUERY_CHUNK_X,
     QUERY_CHUNK_Z,
     QUERY_RENDER_DISTANCE,
@@ -306,6 +310,7 @@ pub struct StartupArgState {
     fullbright_explicit: bool,
     render_compile_worker_count_explicit: bool,
     render_compile_max_pending_jobs_explicit: bool,
+    alpha_winter_override: Option<bool>,
 }
 
 impl StartupArgState {
@@ -318,6 +323,7 @@ impl StartupArgState {
             fullbright_explicit: false,
             render_compile_worker_count_explicit: false,
             render_compile_max_pending_jobs_explicit: false,
+            alpha_winter_override: None,
         }
     }
 
@@ -364,6 +370,11 @@ impl StartupArgState {
                     &parse_string_arg(ARG_GENERATION_PROFILE, args.next())?,
                 )
                 .map_err(anyhow::Error::msg)?;
+                self.apply_alpha_winter_override();
+            }
+            ARG_ALPHA_WINTER => {
+                self.alpha_winter_override = Some(parse_bool_arg(ARG_ALPHA_WINTER, args.next())?);
+                self.apply_alpha_winter_override();
             }
             ARG_CHUNK_X => {
                 self.scene.chunk_x = parse_i32_arg(ARG_CHUNK_X, args.next())?;
@@ -500,6 +511,12 @@ impl StartupArgState {
                     &parse_string_arg(QUERY_GENERATION_PROFILE, value)?,
                 )
                 .map_err(anyhow::Error::msg)?;
+                self.apply_alpha_winter_override();
+            }
+            QUERY_ALPHA_WINTER => {
+                self.alpha_winter_override =
+                    Some(parse_query_presence_bool(QUERY_ALPHA_WINTER, value)?);
+                self.apply_alpha_winter_override();
             }
             QUERY_CHUNK_X => {
                 self.scene.chunk_x = parse_i32_arg(QUERY_CHUNK_X, value)?;
@@ -586,6 +603,7 @@ impl StartupArgState {
     }
 
     pub fn finish(mut self) -> StartupOptions {
+        self.apply_alpha_winter_override();
         if !self.scene.lighting_enabled && !self.fullbright_explicit {
             self.render_options.force_fullbright = true;
         }
@@ -594,6 +612,15 @@ impl StartupArgState {
             storage: self.storage,
             render_options: self.render_options,
             camera: self.camera,
+        }
+    }
+
+    fn apply_alpha_winter_override(&mut self) {
+        if let (Some(winter), WorldGenerationProfile::AlphaV1 { .. }) = (
+            self.alpha_winter_override,
+            self.scene.world_generation_profile,
+        ) {
+            self.scene.world_generation_profile = WorldGenerationProfile::alpha_v1(winter);
         }
     }
 }
@@ -984,6 +1011,35 @@ mod tests {
                 eye: Some([1.5, 62.25, -3.0]),
                 target: Some([8.0, 64.0, 8.0]),
             }
+        );
+    }
+
+    #[test]
+    fn alpha_winter_is_an_order_independent_explicit_override() {
+        for args in [
+            [ARG_GENERATION_PROFILE, "alpha-v1", ARG_ALPHA_WINTER, "true"],
+            [ARG_ALPHA_WINTER, "true", ARG_GENERATION_PROFILE, "alpha-v1"],
+        ] {
+            assert_eq!(
+                parse(&args).scene.world_generation_profile,
+                WorldGenerationProfile::alpha_v1(true)
+            );
+        }
+
+        let mut query = StartupArgState::default();
+        query
+            .parse_query_param(QUERY_ALPHA_WINTER, None, RenderDistanceLimits::new(1, 16))
+            .unwrap();
+        query
+            .parse_query_param(
+                QUERY_GENERATION_PROFILE,
+                Some("alpha-v1".to_owned()),
+                RenderDistanceLimits::new(1, 16),
+            )
+            .unwrap();
+        assert_eq!(
+            query.finish().scene.world_generation_profile,
+            WorldGenerationProfile::alpha_v1(true)
         );
     }
 

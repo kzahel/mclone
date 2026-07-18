@@ -1,0 +1,26 @@
+{
+  "version": "a1.1.2_01",
+  "stage": "terrain",
+  "seed": 12345,
+  "chunk_x": 0,
+  "chunk_z": 0,
+  "snow": false,
+  "sha256": "7442e144fdf4819e3b960d1ece8e0a43ce427e785fc7117354fc1204e5464105",
+  "height_min": 93,
+  "height_max": 100,
+  "height_mean": 95.496094,
+  "blocks": {
+    "air_0": 8321,
+    "stone_1": 24447,
+    "grass_2": 0,
+    "dirt_3": 0,
+    "bedrock_7": 0,
+    "flowing_water_8": 0,
+    "water_9": 0,
+    "flowing_lava_10": 0,
+    "lava_11": 0,
+    "sand_12": 0,
+    "gravel_13": 0,
+    "ice_79": 0
+  }
+}

@@ -5081,11 +5081,24 @@ mod tests {
             read_world_generation_profile(&mut mclone_overworld.as_slice()).unwrap(),
             WorldGenerationProfile::McloneOverworldV1
         );
+
+        for (profile, tag) in [
+            (WorldGenerationProfile::alpha_v1(false), 5),
+            (WorldGenerationProfile::alpha_v1(true), 6),
+        ] {
+            let mut encoded = Vec::new();
+            write_world_generation_profile(&mut encoded, profile).unwrap();
+            assert_eq!(encoded, [tag]);
+            assert_eq!(
+                read_world_generation_profile(&mut encoded.as_slice()).unwrap(),
+                profile
+            );
+        }
         assert!(
-            read_world_generation_profile(&mut [5].as_slice())
+            read_world_generation_profile(&mut [7].as_slice())
                 .unwrap_err()
                 .to_string()
-                .contains("unknown world generation profile tag 5")
+                .contains("unknown world generation profile tag 7")
         );
     }
 

@@ -18,6 +18,11 @@ pub enum WorldGenerationProfile {
     SmallIslandV1,
     #[serde(rename = "mclone-overworld-v1")]
     McloneOverworldV1,
+    #[serde(rename = "alpha-v1")]
+    AlphaV1 {
+        #[serde(default)]
+        winter: bool,
+    },
     AuthoredOnly {
         #[serde(rename = "missingChunk")]
         missing_chunk: AuthoredMissingChunk,
@@ -31,12 +36,25 @@ impl WorldGenerationProfile {
         }
     }
 
+    pub const fn alpha_v1(winter: bool) -> Self {
+        Self::AlphaV1 { winter }
+    }
+
+    pub const fn alpha_winter(self) -> Option<bool> {
+        match self {
+            Self::AlphaV1 { winter } => Some(winter),
+            _ => None,
+        }
+    }
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Overworld => "overworld",
             Self::FlatGrassV1 => "flat-grass-v1",
             Self::SmallIslandV1 => "small-island-v1",
             Self::McloneOverworldV1 => "mclone-overworld-v1",
+            Self::AlphaV1 { winter: false } => "alpha-v1",
+            Self::AlphaV1 { winter: true } => "alpha-v1-winter",
             Self::AuthoredOnly { .. } => "authored-only",
         }
     }
@@ -49,18 +67,22 @@ impl WorldGenerationProfile {
             "mclone-overworld-v1" | "mclone_overworld_v1" | "mcloneOverworldV1" => {
                 Ok(Self::McloneOverworldV1)
             }
+            "alpha-v1" | "alpha_v1" | "alphaV1" => Ok(Self::alpha_v1(false)),
+            "alpha-v1-winter" | "alpha_v1_winter" | "alphaV1Winter" => Ok(Self::alpha_v1(true)),
             "authored-only" | "authored_only" | "authoredOnly" => Ok(Self::authored_only()),
             value => Err(format!(
-                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, or authored-only, got `{value}`"
+                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, alpha-v1, or authored-only, got `{value}`"
             )),
         }
     }
 
     pub const fn authored_missing_chunk(self) -> Option<AuthoredMissingChunk> {
         match self {
-            Self::Overworld | Self::FlatGrassV1 | Self::SmallIslandV1 | Self::McloneOverworldV1 => {
-                None
-            }
+            Self::Overworld
+            | Self::FlatGrassV1
+            | Self::SmallIslandV1
+            | Self::McloneOverworldV1
+            | Self::AlphaV1 { .. } => None,
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
         }
     }
@@ -74,6 +96,7 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
             Self::McloneOverworldV1 => ChunkGenerationPlan::mclone_overworld_features(targets),
+            Self::AlphaV1 { .. } => ChunkGenerationPlan::alpha_features(targets),
             Self::AuthoredOnly { .. } => {
                 unreachable!("authored-only misses bypass procedural job creation")
             }
@@ -87,6 +110,8 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => 2,
             Self::SmallIslandV1 => 3,
             Self::McloneOverworldV1 => 4,
+            Self::AlphaV1 { winter: false } => 5,
+            Self::AlphaV1 { winter: true } => 6,
         }
     }
 
@@ -97,6 +122,8 @@ impl WorldGenerationProfile {
             2 => Some(Self::FlatGrassV1),
             3 => Some(Self::SmallIslandV1),
             4 => Some(Self::McloneOverworldV1),
+            5 => Some(Self::alpha_v1(false)),
+            6 => Some(Self::alpha_v1(true)),
             _ => None,
         }
     }
@@ -244,6 +271,11 @@ mod tests {
             WorldGenerationProfile::McloneOverworldV1.label(),
             "mclone-overworld-v1"
         );
+        assert_eq!(WorldGenerationProfile::alpha_v1(false).label(), "alpha-v1");
+        assert_eq!(
+            WorldGenerationProfile::alpha_v1(true).label(),
+            "alpha-v1-winter"
+        );
         assert_eq!(
             WorldGenerationProfile::authored_only().label(),
             "authored-only"
@@ -269,6 +301,14 @@ mod tests {
             WorldGenerationProfile::McloneOverworldV1
         );
         assert_eq!(
+            WorldGenerationProfile::parse_label("alpha-v1").unwrap(),
+            WorldGenerationProfile::alpha_v1(false)
+        );
+        assert_eq!(
+            WorldGenerationProfile::parse_label("alpha-v1-winter").unwrap(),
+            WorldGenerationProfile::alpha_v1(true)
+        );
+        assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::Overworld).unwrap(),
             r#""overworld""#
         );
@@ -289,6 +329,14 @@ mod tests {
             r#""mclone-overworld-v1""#
         );
         assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::alpha_v1(false)).unwrap(),
+            r#"{"alpha-v1":{"winter":false}}"#
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::alpha_v1(true)).unwrap(),
+            r#"{"alpha-v1":{"winter":true}}"#
+        );
+        assert_eq!(
             serde_json::from_str::<WorldGenerationProfile>("\"overworld\"").unwrap(),
             WorldGenerationProfile::Overworld
         );
@@ -299,5 +347,26 @@ mod tests {
             .unwrap(),
             WorldGenerationProfile::authored_only()
         );
+        assert_eq!(
+            serde_json::from_str::<WorldGenerationProfile>(r#"{"alpha-v1":{"winter":true}}"#,)
+                .unwrap(),
+            WorldGenerationProfile::alpha_v1(true)
+        );
+        assert_eq!(
+            WorldGenerationProfile::from_codec_tag(5),
+            Some(WorldGenerationProfile::alpha_v1(false))
+        );
+        assert_eq!(
+            WorldGenerationProfile::from_codec_tag(6),
+            Some(WorldGenerationProfile::alpha_v1(true))
+        );
+    }
+
+    #[test]
+    fn alpha_profile_declares_population_dependencies() {
+        let plan = WorldGenerationProfile::alpha_v1(false).plan_features([ChunkPos::new(0, 0)]);
+        assert_eq!(plan.output_chunks().len(), 1);
+        assert_eq!(plan.backend_work_chunks().len(), 9);
+        assert_eq!(plan.prerequisites().len(), 25);
     }
 }

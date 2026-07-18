@@ -82,6 +82,18 @@ impl ChunkGenerationPlan {
         )
     }
 
+    /// Alpha population writes from a center chunk into its east/south
+    /// neighbours, so canonical output replays the surrounding 3x3 centers
+    /// over a 5x5 Surface dependency region.
+    pub fn alpha_features(targets: impl IntoIterator<Item = ChunkPos>) -> Self {
+        Self::feature_region(
+            targets,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            FEATURES_BLOCK_DEPENDENCY_RADIUS,
+            ChunkStatus::Surface,
+        )
+    }
+
     /// Neighbor-aware feature execution over a mutable chunk region.
     ///
     /// Backend centers within `write_radius` may affect requested outputs. Each

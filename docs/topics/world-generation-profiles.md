@@ -2,9 +2,9 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tacticals 187, 188, and 191 are complete. `flat-grass-v1`,
-`small-island-v1`, and the first `mclone-overworld-v1` terrain language are
-live, persisted shared-Rust generators beside the unchanged Overworld;
+Status: **Tacticals 187, 188, 191, and 193 are complete. `flat-grass-v1`,
+`small-island-v1`, `alpha-v1`, and the first `mclone-overworld-v1` terrain
+language are live, persisted shared-Rust generators beside the unchanged Overworld;
 authored-only misses still produce void. Small Island now
 exercises the reusable value-noise primitive, typed scheduler/worker request
 contract, dependency cache, mutable feature region, and a real cross-chunk
@@ -161,6 +161,7 @@ Dispositions mean:
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
 | `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, biome/surface/decoration rules, spawn, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
+| `alpha-v1` | `internal-mutable` | Profile shape, winter option, feature subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Alpha flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Alpha v1.1.2_01 stage receipts constrain the close-parity core but do not make the whole profile a historical compatibility promise | Re-run the Alpha oracle hashes, mapping/order tests, scheduler/worker/persistence tests, temperate and winter captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
 
 For a proposed change, resolve every affected row before editing. The most
 restrictive disposition wins when a shared primitive affects multiple rows. If

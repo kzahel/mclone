@@ -143,6 +143,35 @@ Pipeline stages:
 6. Optionally download Parchment and rewrite mapped method parameters.
 7. For client builds, extract filtered textures, models, blockstates, and structures into `extracted/`.
 
+## Legacy Alpha Side Reference
+
+Minecraft Alpha predates Mojang's official mappings, so it has a separate,
+gitignored reference pipeline based on the CC0
+[Ornithe Feather mappings](https://github.com/OrnitheMC/feather). The pinned
+study specimen is Alpha v1.1.2_01, the final pre-Halloween-Update Alpha build;
+it is a historical side reference and does not change the 1.17.1 vanilla
+Overworld target above.
+
+```bash
+# Build reference/minecraft-a1.1.2_01/src and the mapped merged jar.
+pnpm reference:alpha
+
+# Exercise the real mapped generator through terrain, surfaces, and caves.
+pnpm oracle:alpha:terrain -- --seed 12345 --chunk-x 0 --chunk-z 0
+
+# Decompile a later Alpha explicitly for comparison.
+./scripts/decompile-alpha-mc.sh a1.2.6 --out /tmp/minecraft-a1.2.6
+```
+
+The decompiler verifies the official Mojang client SHA-1, pins the Feather
+revision, and records its provenance under the generated reference directory.
+The full historical selection report, generator trace, probe fingerprint, and
+future porting boundary live in
+[`topics/alpha-era-reference.md`](topics/alpha-era-reference.md).
+The deliberately close-but-not-perfect native profile contract and current
+implementation status live separately in
+[`topics/alpha-world-generation.md`](topics/alpha-world-generation.md).
+
 ## Mappings
 
 Mojang mappings cover class, method, and field names. They do not include method parameter names, javadocs, or true local variable names.

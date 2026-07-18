@@ -25,6 +25,7 @@ pub fn initial_spawn_center_for_profile(seed: i64, profile: WorldGenerationProfi
         WorldGenerationProfile::McloneOverworldV1 => mclone_overworld_spawn_chunk(seed),
         WorldGenerationProfile::FlatGrassV1
         | WorldGenerationProfile::SmallIslandV1
+        | WorldGenerationProfile::AlphaV1 { .. }
         | WorldGenerationProfile::AuthoredOnly { .. } => ChunkPos::new(0, 0),
     }
 }
@@ -45,6 +46,7 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
         WorldGenerationProfile::FlatGrassV1
             | WorldGenerationProfile::SmallIslandV1
             | WorldGenerationProfile::McloneOverworldV1
+            | WorldGenerationProfile::AlphaV1 { .. }
             | WorldGenerationProfile::AuthoredOnly { .. }
     ) {
         SpawnColumnOrder::CenterFirst
@@ -56,9 +58,9 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
         center,
         block_at,
         |x, z| match profile {
-            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::SmallIslandV1 => {
-                get_layered_biome_by_id(1)
-            }
+            WorldGenerationProfile::FlatGrassV1
+            | WorldGenerationProfile::SmallIslandV1
+            | WorldGenerationProfile::AlphaV1 { .. } => get_layered_biome_by_id(1),
             WorldGenerationProfile::McloneOverworldV1 => {
                 get_layered_biome_by_id(mclone_overworld_biome_id(seed, x, z))
             }
@@ -286,6 +288,7 @@ mod tests {
 
     use mclone_worldgen::biome::get_layered_biome_by_id;
     use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, STONE, WATER};
+    use mclone_worldgen::levelgen::generate_alpha_chunk;
     use mclone_worldgen::levelgen::generate_mclone_overworld_chunk;
 
     use super::*;
@@ -375,6 +378,46 @@ mod tests {
                     )
                     .0,
                 GRASS_BLOCK
+            );
+        }
+    }
+
+    #[test]
+    fn alpha_profiles_select_a_safe_loaded_origin_spawn() {
+        let seed = 12_345;
+        let center = ChunkPos::new(0, 0);
+        for profile in [
+            WorldGenerationProfile::alpha_v1(false),
+            WorldGenerationProfile::alpha_v1(true),
+        ] {
+            let chunk =
+                generate_alpha_chunk(seed, center.x, center.z, profile.alpha_winter().unwrap());
+            let spawn = find_safe_surface_spawn_for_loaded_profile(
+                seed,
+                profile,
+                center,
+                |pos| {
+                    (pos.chunk_pos() == center).then(|| {
+                        chunk
+                            .block_at_y(
+                                pos.x - center.min_block_x(),
+                                pos.y,
+                                pos.z - center.min_block_z(),
+                            )
+                            .0
+                    })
+                },
+                |pos| pos == center,
+            )
+            .unwrap_or_else(|| panic!("{profile:?} had no safe spawn in {center:?}"));
+            assert_eq!(
+                BlockPos::new(
+                    spawn.x.floor() as i32,
+                    spawn.y.floor() as i32,
+                    spawn.z.floor() as i32,
+                )
+                .chunk_pos(),
+                center
             );
         }
     }
