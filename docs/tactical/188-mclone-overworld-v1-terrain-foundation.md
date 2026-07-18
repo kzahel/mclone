@@ -1,8 +1,9 @@
 # Tactical 188: Mclone Overworld V1 Terrain Foundation
 
-Status: Slices 0 and 1 and Review 1 complete 2026-07-18; Slice 2 is next. The
-live internal profile now provides reviewed undecorated continuous terrain
-through the generic target-only plan. Durable direction lives in
+Status: Slices 0 through 3 and Reviews 1 and 2 complete 2026-07-18; Slice 4 is
+next. The live internal profile now provides reviewed continuous terrain,
+biomes, surfaces, and vegetation through typed dependency planning. Durable
+direction lives in
 [`mclone-overworld-generation`](../topics/mclone-overworld-generation.md).
 
 Topic: `mclone-overworld-generation`
@@ -299,31 +300,101 @@ adding feature dependencies. Land decoration, worker/cache routing, and exact
 plan changes as a separate commit. This keeps intentional material tuning
 separate from the later execution-boundary change.
 
-- [ ] Distinguish open lowlands and wooded uplands with the smallest useful
+- [x] Distinguish open lowlands and wooded uplands with the smallest useful
   profile-owned biome rule and existing biome IDs.
-- [ ] Add mclone-owned grass/soil, beach, ocean-floor, and exposed-stone
+- [x] Add mclone-owned grass/soil, beach, ocean-floor, and exposed-stone
   surface recipes through shared writing mechanisms.
-- [ ] Add an independent decoration domain and a small table of existing
+- [x] Add an independent decoration domain and a small table of existing
   configured features such as trees, grass, and flowers.
-- [ ] Declare exact feature work and prerequisites through
+- [x] Declare exact feature work and prerequisites through
   `ChunkGenerationPlan` without scheduler branches.
-- [ ] Prove cross-chunk placement, cache reuse, request-order independence,
+- [x] Prove cross-chunk placement, cache reuse, request-order independence,
   and safe-spawn preservation.
-- [ ] Pin field, surface, ordered-feature, and final-chunk fingerprints.
+- [x] Pin field, surface, ordered-feature, and final-chunk fingerprints.
 
 Gate: terrain, biome choice, surface, and decoration have separate ownership
 and form a recognizable first original world.
 
+Execution record 2026-07-18:
+
+- added Mclone-owned ocean, beach, open-lowland, and wooded-upland biome
+  classification over the production terrain sample. Surface selection is a
+  separate Mclone rule with gravel ocean floor, sand beach, grass over dirt,
+  and sparse high-relief exposed stone recipes;
+- reused the existing configured/placed feature vocabulary, `FeatureRegion`,
+  ordered executor, and typed planning contract. Mclone owns only its
+  independent decoration seed domain and its lowland/upland tables for oak
+  trees, grass, dandelions, and poppies;
+- changed the profile plan from target-only output to an exact 3-by-3 feature
+  work band and 5-by-5 Surface prerequisite band. The server scheduler and
+  worker codecs consume those facts generically; no terrain rule or profile
+  branch entered scheduling policy;
+- added a concrete Mclone dependency cache with exact overlap evidence: a
+  one-chunk move reuses 20 of 25 Surface inputs and generates five. Combined,
+  reversed, native, encoded-worker, and partitioned target requests produce
+  identical decorated chunks, and the existing shared region tests retain
+  the cross-chunk write boundary;
+- pinned the three broad field fingerprints, three surface/biome chunk
+  fingerprints, a 9-by-9 ordered decoration distribution, and final payload.
+  After Review 2 tuning, seed `12345` places 57 oak logs, 3,326 grass, 383
+  dandelions, and 223 poppies across that region, with final fingerprint
+  `6043725934403648447`;
+- retained the generator-owned spawn query and proved the server still chooses
+  a loaded dry spawn after features. Full validation passed 242 worldgen tests
+  with one known gauntlet ignored and 473 server tests. The production browser
+  Worker app-loop also completed the dependency-bearing plan and rendered the
+  generated result;
+- the clean release probe at commit `0dfc5148`, seed `12345`, radius one, and
+  three iterations measured 2,787.828 target-only Surface chunks/s, 700.838
+  cold decorated target chunks/s, and 12,682.010 warm decorated target
+  chunks/s. Cold batches generated every declared input; warm batches hit all
+  147 requested inputs.
+
 ### Review 2: complete foundation
 
-- [ ] Re-run all field maps and landscape cards.
-- [ ] Review biome proportions, feature density, coast readability, exposed
+- [x] Re-run all field maps and landscape cards.
+- [x] Review biome proportions, feature density, coast readability, exposed
   stone, repetition, and performance.
-- [ ] Compare Small Island beside mclone output to find shared mechanisms
+- [x] Compare Small Island beside mclone output to find shared mechanisms
   without requiring similar results.
-- [ ] Bound defects for later mountain/valley or river work.
+- [x] Bound defects for later mountain/valley or river work.
 
 Gate: obtain human acceptance before the final refactor and host rollout.
+
+Execution record 2026-07-18:
+
+- extended `pnpm native:worldgen:fields` with production-backed biome and
+  surface-recipe panels. Schema-2 receipts record the field and decoration
+  revisions, per-rule distributions, and a deterministic terrain-language
+  fingerprint without reconstructing the rules in the tool;
+- inspected final clean broad maps for seeds `12345`, `-98765`, and `8675309`.
+  Their ocean/beach/open-lowland/wooded-upland counts are respectively
+  `66533/21063/31618/29011`, `50565/14161/21161/62338`, and
+  `63682/28238/29898/26407` out of 148,225 samples. The resulting language
+  fingerprints are `9809547655668137720`, `16182128992402164837`, and
+  `15593051643100665937`;
+- exposed stone is deliberately a local accent: 426, 2,129, and 310 sampled
+  columns across the three seeds. Beaches remain broad and readable, and the
+  biome maps show coherent upland forest bands rather than per-chunk noise;
+- the first decorated card pass rejected flowers in every eligible chunk as
+  uniformly noisy. Revision 2 retained the shared placed-feature executor but
+  added Mclone-owned chance decorators. Final cards show localized flower
+  patches, open grass, wooded uplands, readable coasts, and sparse stone;
+- inspected the approved five-region matrix plus actual spawns `(18,-21)` for
+  seed `-98765` and `(30,-1)` for seed `8675309`. Every clean commit
+  `0dfc5148` RD16 receipt reports 1,225/1,225 visible and target-ready chunks,
+  zero target stream/render work pending, 1,356-1,396 warmup frames, and
+  7.979-8.503 seconds;
+- comparison with Small Island confirms the right similarity boundary: both
+  reuse column-biome traversal, typed feature planning, feature-region
+  execution, and placed-feature vocabulary, while island radial shape,
+  Mclone macro fields, surface recipes, seed domains, and feature tables stay
+  intentionally different;
+- accepted defects for later content slices are the limited four-biome
+  vocabulary, height-threshold forest borders, one tree family, no climate
+  fields, no mountains/valleys/rivers/wetlands, no caves, and no structures.
+  Several intentionally selected matrix centers remain open ocean; that is
+  useful coverage, not a spawn or generation failure.
 
 ### Slice 4: second reuse and boundary checkpoint
 

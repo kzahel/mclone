@@ -14,7 +14,7 @@ and
 [`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
 The original terrain direction lives in
 [`topics/mclone-overworld-generation.md`](topics/mclone-overworld-generation.md),
-and its first bounded foundation is in progress in
+and its first bounded foundation is through its second review in
 [`tactical/188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md).
 
 Compatibility safety is recorded in the
@@ -52,16 +52,20 @@ Landed native coverage:
 - Bounded `small-island-v1` world-coordinate terrain with seeded shoreline and
   relief, a guaranteed central spawn patch, plains/beach/ocean biomes,
   native/dedicated publication, seam/partition locks, and save/reopen coverage.
-- Continuous `mclone-overworld-v1` ocean, coast, grass lowland, and rolling
-  upland terrain from pure production point/region samples, with a
-  deterministic dry-upland spawn, target-only worker execution, and field,
-  seam, order, partition, codec, native, and browser regression evidence.
+- Continuous `mclone-overworld-v1` ocean, coast, open grass lowland, and
+  wooded rolling upland terrain from pure production point/region samples,
+  with separate gravel/sand/grass/stone surface recipes, a deterministic dry
+  spawn, dependency-bearing vegetation execution, and field, seam, order,
+  partition, cache, codec, native, and browser regression evidence.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
-  fine relief octave to break up concentric local contour bands.
+  fine relief octave to break up concentric local contour bands. The second
+  review added biome/surface maps and tuned always-on flowers into occasional
+  patches.
 - Profile-qualified worker results: dependency-cache and generation-timing
-  diagnostics are explicitly optional and exist only for the Overworld path;
-  target-only flat and island jobs do not synthesize Overworld reports.
+  diagnostics are explicitly optional. Overworld reports cache and timing;
+  Small Island and Mclone report their concrete caches without synthesizing
+  Overworld timing; target-only Flat Grass has neither.
 
 Important native entry points:
 

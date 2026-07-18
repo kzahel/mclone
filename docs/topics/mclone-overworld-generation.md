@@ -2,12 +2,12 @@
 
 Topic: `mclone-overworld-generation`
 
-Status: the first continuous-terrain caller, terrain review, and concrete
-reuse checkpoint completed 2026-07-18 as the separate internal-mutable
-`mclone-overworld-v1` profile while `overworld` remains the Minecraft Java
-1.17.1 reference path. Tactical
+Status: the first continuous-terrain caller, two visual/distribution reviews,
+and the first biome, surface, and decoration language completed 2026-07-18 as
+the separate internal-mutable `mclone-overworld-v1` profile while `overworld`
+remains the Minecraft Java 1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is entering
-its first biome, surface, and decoration language slice.
+its second dedicated reuse and boundary checkpoint.
 
 ## Scope
 
@@ -171,6 +171,16 @@ another real caller proves a smaller mechanism boundary. Reference Overworld
 keeps its distinct three-dimensional biome source and Java-owned
 surface/ordering path.
 
+The first terrain-language slice now classifies ocean, beach, open lowland,
+and wooded upland, then selects separate gravel-floor, sand-beach, grass-soil,
+and sparse exposed-stone recipes. Decoration uses an independent Mclone seed
+domain and profile-owned oak/grass/flower tables through the existing placed
+features, `FeatureRegion`, and ordered executor. Its plan declares a 3-by-3
+feature work band and 5-by-5 Surface prerequisite band. A concrete Mclone
+cache currently makes that contract executable; comparing its lifecycle with
+Small Island and reference Overworld is intentionally deferred to the second
+checkpoint rather than hidden behind a premature generic cache.
+
 ## Module Direction
 
 Start the new rules together without first reorganizing every existing
@@ -190,7 +200,7 @@ native/crates/mclone-worldgen/src/
       biomes.rs
       surface.rs
       decoration.rs
-      spawn.rs
+      feature_batch.rs
 ```
 
 `noise.rs`, `feature/`, `chunk.rs`, and `planning.rs` remain shared mechanism
@@ -319,11 +329,12 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Continue Slice 3 of
+Continue Slice 4 of
 [`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-add the smallest profile-owned biome, surface, and decoration language through
-the existing planning and feature-execution contracts, then pause for another
-visual and distribution review.
+compare the three procedural profiles' surface writing, feature recipes,
+region setup, dependency caches, and spawn queries. Extract only boundaries
+with real shared ownership, preserve profile rules and reference ordering, and
+land any output-identical refactor separately from later terrain content.
 
 ## Related
 

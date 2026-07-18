@@ -3,9 +3,9 @@
 Topic: `world-generation-profiles`
 
 Status: **Tacticals 187 and 191 are complete. `flat-grass-v1`,
-`small-island-v1`, and the first `mclone-overworld-v1` terrain caller are live,
-persisted shared-Rust generators beside the unchanged Overworld; authored-only
-misses still produce void. Small Island now
+`small-island-v1`, and the first `mclone-overworld-v1` terrain language are
+live, persisted shared-Rust generators beside the unchanged Overworld;
+authored-only misses still produce void. Small Island now
 exercises the reusable value-noise primitive, typed scheduler/worker request
 contract, dependency cache, mutable feature region, and a real cross-chunk
 decoration stage.
@@ -16,8 +16,9 @@ prerequisites while the scheduler retains readiness, priority, admission,
 publication, lighting, and persistence. The alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
 regression guards rather than release compatibility promises. Tactical 188
-accepted its first terrain review after one internal relief tune and is at the
-first reuse/refactor checkpoint; the creative terrain direction lives in
+completed two terrain reviews after one relief tune and one flower-density
+tune and is at the second reuse/refactor checkpoint; the creative terrain
+direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md).**
 
 This topic owns the current truth and durable decisions for selectable,
@@ -252,19 +253,25 @@ the safety ledger.
 - pure absolute-coordinate point samples and bounded row-major region samples
   through the production sampler;
 - continuous ocean, sand coast, grass lowland, and rolling upland terrain;
-- existing ocean, beach, and plains biome IDs with canonical heightmaps and
-  empty ticks;
+- existing ocean, beach, plains, and forest biome IDs with canonical
+  heightmaps and empty ticks;
+- profile-owned gravel, sand, grass/soil, and exposed-stone surface recipes;
 - deterministic dry-upland spawn search;
-- target-only planning with no terrain knowledge in scheduler or TypeScript;
+- independent decoration domain and Mclone-owned oak, grass, and occasional
+  flower tables through shared placed-feature and region execution;
+- exact typed 3-by-3 feature work and 5-by-5 Surface prerequisites, with no
+  terrain knowledge in scheduler or TypeScript;
 - exact field, seam, negative-coordinate, request-order, partition, worker
   codec, and different-seed regression locks;
-- no decoration, carvers, caves, mountains, rivers, or structures yet.
+- no carvers, caves, mountains, rivers, climate fields, or structures yet.
 
 These locks guard accidental drift while the profile is internal-mutable. The
 first multi-seed/region field-map and landscape-card review accepted the macro
 terrain after adding one fine relief octave to break up concentric local
-contours. The next Tactical 188 gate compares real callers before extracting
-any more shared mechanism.
+contours. The second added biome/surface maps, accepted the first recognizable
+terrain language, and changed flowers from every land chunk to occasional
+patches. The next Tactical 188 gate compares all three procedural callers
+before extracting any more shared mechanism.
 
 ### Reusable visual review card
 
@@ -339,22 +346,23 @@ adding profile branches.
 - native and Web Worker equivalence;
 - SQLite and IndexedDB save/reopen equivalence;
 - safe spawn for every profile;
-- inspected flat and island desktop captures;
+- inspected flat, island, and Mclone desktop captures;
 - profile identity visible in useful diagnostics;
 - no app-local or TypeScript terrain implementation.
 
 ## Next Work
 
-Continue Slice 3 in
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md): add
-the first profile-owned biome, surface, and decoration language through the
-existing generic planning and feature-execution contracts. The preceding
+Continue Slice 4 in
+[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
+compare surface writing, feature recipes, region setup, dependency cache
+ownership, and spawn queries across the three procedural callers. The first
 checkpoint shared only the output-identical columnar biome payload traversal;
 profile rule composition remains concrete. The accepted terrain, reuse,
 module, review, and long-term content direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
-tactical adds real continuous terrain and pauses for explicit reuse/refactor
-reviews before broadening biome and decoration rules.
+tactical now has real continuous terrain and its first terrain language; it
+pauses for an explicit reuse/refactor review before host closeout or another
+content family.
 
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. Before adding it, extend the typed artifact vocabulary for
