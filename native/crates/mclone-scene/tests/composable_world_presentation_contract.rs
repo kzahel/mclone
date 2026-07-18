@@ -303,9 +303,16 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
     assert!(activate.contains("demote_player_to_observer()"));
 
     let server = read("../mclone-server/src/integrated.rs");
-    let constructor = braced_item(
+    let legacy_constructor = braced_item(
         &server,
         "fn with_scheduler_and_player_chunk_tracking_policy(",
+    );
+    assert!(legacy_constructor.contains(
+        "Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy("
+    ));
+    let constructor = braced_item(
+        &server,
+        "fn with_scheduler_dimension_definition_and_player_chunk_tracking_policy(",
     );
     assert!(constructor.contains("players: ServerPlayerList::default()"));
     assert!(!constructor.contains(".add_player("));

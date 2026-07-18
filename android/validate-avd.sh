@@ -58,6 +58,8 @@ Options:
   --chunk-x X         Add --chunk-x X to startup argv.
   --chunk-z Z         Add --chunk-z Z to startup argv.
   --render-distance N Add --render-distance N to startup argv.
+  --world-topology TOPOLOGY
+                      Add --world-topology TOPOLOGY to startup argv.
   --movement-speed-multiplier N
                       Add --movement-speed-multiplier N to startup argv.
   --day-time T        Add --day-time T to startup argv.
@@ -173,7 +175,7 @@ while [[ $# -gt 0 ]]; do
             MCLONE_ANDROID_REMOTE_ADDR="$2"
             shift 2
             ;;
-        --seed|--chunk-x|--chunk-z|--render-distance|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile|--generation-profile|--screenshot-eye|--screenshot-target|--pacing-perf-label|--pacing-perf-warmup-seconds|--pacing-perf-churn-interval-seconds|--pacing-perf-churn-offset-chunks)
+        --seed|--chunk-x|--chunk-z|--render-distance|--world-topology|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile|--generation-profile|--screenshot-eye|--screenshot-target|--pacing-perf-label|--pacing-perf-warmup-seconds|--pacing-perf-churn-interval-seconds|--pacing-perf-churn-offset-chunks)
             mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_STARTUP_ARGV+=("$1" "$2")
             shift 2

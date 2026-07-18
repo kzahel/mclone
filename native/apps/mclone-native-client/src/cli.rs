@@ -108,6 +108,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--screenshot-hud",
     "--screenshot-player-box",
     "--screenshot-remote-settle-ms",
+    "--screenshot-settle-ms",
     "--screenshot-scripted-interaction",
     "--screenshot-ui",
     "--settle-distances",
