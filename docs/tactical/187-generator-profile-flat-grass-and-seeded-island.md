@@ -1,8 +1,8 @@
 # Tactical 187: Generator Profiles, Flat Grass, and Seeded Island
 
 Status: complete 2026-07-17. Product direction accepted 2026-07-16; all six
-slices and cross-platform gates are complete. Tactical 188 owns the actual
-vanilla/mclone biome and decoration fork.
+slices and cross-platform gates are complete. Tactical 188 owns the first
+original mclone Overworld terrain foundation.
 
 Compatibility note 2026-07-18: this execution record used conservative terms
 such as “immutable” while establishing profile and regression locks. The
@@ -668,8 +668,8 @@ Status: complete 2026-07-17; only evidence-backed extraction was performed.
 - Keep current `overworld` oracle tests explicitly scoped to that profile.
 - Define the first original-profile compatibility fixture vocabulary and seed
   domain without implementing custom biome content in this tactical.
-- Write the follow-up tactical for the vanilla/mclone biome and decoration
-  fork using the evidence from two real alternate generators.
+- Write the follow-up tactical for the original continuous terrain foundation
+  using the evidence from two real alternate generators.
 
 Gate: adding a future mclone profile has a named owner and bounded seams, while
 the current flat/island implementations remain simple and the overworld path
@@ -699,7 +699,7 @@ Execution record:
   excludes native fixture binaries from the cross-target check;
 - defined the original-profile identity, seed-domain, fixture vocabulary, and
   evidence-driven extraction order in
-  [`188-mclone-overworld-v1-biome-decoration-fork.md`](188-mclone-overworld-v1-biome-decoration-fork.md).
+  [`188-mclone-overworld-v1-terrain-foundation.md`](188-mclone-overworld-v1-terrain-foundation.md).
 
 ## Validation Matrix
 

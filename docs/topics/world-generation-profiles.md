@@ -15,7 +15,9 @@ prerequisites while the scheduler retains readiness, priority, admission,
 publication, lighting, and persistence. The alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
 regression guards rather than release compatibility promises. Tactical 188
-owns the later `mclone-overworld-v1` biome/decoration fork.**
+owns the first `mclone-overworld-v1` terrain foundation; the creative terrain
+direction lives in
+[`mclone-overworld-generation.md`](mclone-overworld-generation.md).**
 
 This topic owns the current truth and durable decisions for selectable,
 versioned world-generation profiles. Detailed refactoring and implementation
@@ -316,12 +318,12 @@ adding profile branches.
 ## Next Work
 
 Execute
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-biome-decoration-fork.md)
-when beginning the original overworld. It adds the versioned profile and a
-second broad biome/decoration ruleset while the Small Island caller keeps the
-shared feature execution seams honest. Extract a more general feature recipe or
-registry only when that work exposes a concrete second need not already covered
-by the placed/configured feature tables.
+[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md)
+when beginning the original overworld. The accepted terrain, reuse, module,
+review, and long-term content direction lives in
+[`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
+tactical adds real continuous terrain and pauses for explicit reuse/refactor
+reviews before broadening biome and decoration rules.
 
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. Before adding it, extend the typed artifact vocabulary for
@@ -333,10 +335,11 @@ that metadata as an untyped chunk-buffer side channel.
 - [`../worldgen-status.md`](../worldgen-status.md)
 - [`../reference-minecraft.md`](../reference-minecraft.md)
 - [`../structures.md`](../structures.md)
+- [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`embedded-worlds.md`](embedded-worlds.md)
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md)
 - [`../tactical/103-decorated-biome-fixture-matrix.md`](../tactical/103-decorated-biome-fixture-matrix.md)
 - [`../tactical/135-overworld-biome-palette-matrix.md`](../tactical/135-overworld-biome-palette-matrix.md)
 - [`../tactical/146-overworld-macro-terrain-geometry-parity.md`](../tactical/146-overworld-macro-terrain-geometry-parity.md)
-- [`../tactical/188-mclone-overworld-v1-biome-decoration-fork.md`](../tactical/188-mclone-overworld-v1-biome-decoration-fork.md)
+- [`../tactical/188-mclone-overworld-v1-terrain-foundation.md`](../tactical/188-mclone-overworld-v1-terrain-foundation.md)
 - [`../tactical/191-guarded-generation-planning-refactor.md`](../tactical/191-guarded-generation-planning-refactor.md)

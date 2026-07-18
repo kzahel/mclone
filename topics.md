@@ -40,3 +40,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `world-generation-profiles` — stable versioned generator identity, shared
   dispatch, flat-grass and seeded-island proofs, and the later frozen-vanilla
   versus original-mclone worldgen fork; Tactical 187
+- `mclone-overworld-generation` — original continuous Overworld terrain,
+  structured macro fields, biome/surface/decoration ownership, and explicit
+  reuse/refactor review stages beginning with Tactical 188

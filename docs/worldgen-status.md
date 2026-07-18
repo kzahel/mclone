@@ -12,8 +12,10 @@ mclone generation profiles. See
 [`topics/world-generation-profiles.md`](topics/world-generation-profiles.md)
 and
 [`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
-The bounded biome and decoration fork is planned in
-[`tactical/188-mclone-overworld-v1-biome-decoration-fork.md`](tactical/188-mclone-overworld-v1-biome-decoration-fork.md).
+The original terrain direction lives in
+[`topics/mclone-overworld-generation.md`](topics/mclone-overworld-generation.md),
+and its first bounded foundation is planned in
+[`tactical/188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md).
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -91,9 +93,10 @@ Still not full vanilla parity:
   former buried-treasure implementation and the former desert-well,
   monster-room, and fossil feature work belonged to the retired TypeScript
   engine
-- the first original island generator is intentionally bounded and undecorated;
-  a full original mclone overworld, original biome registry/content, and native
-  structures remain future work
+- the first original island generator is intentionally bounded and has a
+  deliberately narrow biome/decoration palette; a continuous original mclone
+  overworld, broader original biome content, and native structures remain
+  future work
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes
@@ -122,4 +125,4 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`015-decoration-framework-foundation.md`](tactical/015-decoration-framework-foundation.md) through the later worldgen tacticals for feature/decorator progress.
 - [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md) for the current full decorated chunk parity target.
 - [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
-- [`188-mclone-overworld-v1-biome-decoration-fork.md`](tactical/188-mclone-overworld-v1-biome-decoration-fork.md) for the planned frozen-overworld/original-mclone biome and decoration fork.
+- [`188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md) for the first original continuous-terrain profile and its explicit reuse/refactor reviews.

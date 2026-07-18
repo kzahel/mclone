@@ -47,11 +47,18 @@ series implements the same concern, normally reuse the document slug in its
 - [`world-generation-profiles.md`](world-generation-profiles.md): accepted
   generator-profile direction and authoritative compatibility safety ledger;
   current reference-locked Overworld versus internal-mutable flat-grass,
-  seeded-island, and authored-only proofs, plus the later original-mclone
-  biome/decoration fork.
+  seeded-island, and authored-only proofs, plus the separate original-mclone
+  profile identity.
   Tactical
   [`187`](../tactical/187-generator-profile-flat-grass-and-seeded-island.md)
   owns the bounded refactor and first two generators.
+- [`mclone-overworld-generation.md`](mclone-overworld-generation.md): accepted
+  terrain-first direction for the original continuous mclone Overworld,
+  including structured macro fields, module/reuse boundaries, explicit
+  review/refactor stages, and the long-term relief, river, cave, geology, and
+  landmark sequence. Tactical
+  [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) owns the
+  first bounded terrain foundation.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   vanilla-shaped client-authoritative interim, planned server validation
   checks, the preserved sequenced-input-replay path, and remote-actor
