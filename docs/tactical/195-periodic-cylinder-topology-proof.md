@@ -1,12 +1,14 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: in progress 2026-07-18. Slices 0-4 are complete: the Euclidean
+Status: in progress 2026-07-18. Slices 0-5 are complete: the Euclidean
 baseline, caller inventory, shared topology operations, persisted descriptor,
 protocol ordering, canonical client dimension fact, and finite-bound authority
 canary have landed. The periodic authority and scheduling proof now maintains
 one canonical X ring. Observer-local terrain lifts, seam-aware meshing and
-dirtying, and the first inspected seam pixels have landed. Slice 5 is the
-movement, interaction, fluid, and actor-crossing proof.
+dirtying, and the first inspected seam pixels have landed. Movement,
+interaction, fluid, light, multiplayer, continuity reset, and stable actor
+crossings now agree on the same seam. Slice 6 is persistence, network,
+platform, performance, and terrain-handoff closeout.
 
 Topic: `bounded-world-topology`
 
@@ -459,6 +461,47 @@ size preservation. The browser build consumes the extended compile request but
 does not yet enable cylinder meshing; browser cylinder startup and platform
 closeout remain Slice 6 work.
 
+### Slice 5 movement, interaction, fluids, and actors (2026-07-18)
+
+The authoritative player now remains canonical while the local controller
+retains its continuous observer lift. Movement commands canonicalize only at
+the wire boundary; camera interest, collision, raycast, outline, reach,
+break/place, and correction paths use the active topology. A lap through
+`511.75 -> 512.25` therefore sends canonical `0.25` without changing the local
+`512.25` camera pose. Protocol version 31 distinguishes ordinary corrections,
+which preserve the nearest lift, from join, teleport, respawn, and dimension
+replacement, which reset winding continuity explicitly.
+
+Initial and runtime lighting unfold canonical seam neighbors into target-local
+columns. Emissive edits invalidate the topology-aware 3x3 target set, and a
+torch at canonical X zero produces block light 13 in canonical block X 511.
+A controlled water source likewise flows from X zero into X 511. Server reach
+uses shortest topology displacement, so lifted hits map to one canonical block
+for collision, break, placement, and fluid scheduling.
+
+Remote players and entities retain canonical protocol identity while walk
+distance, interpolation, and render submission select the observer-nearest
+lift. The cylinder debug cow follows a deterministic two-way seam script under
+one persistent entity id; duplicate tick samples are removed before routing.
+Two players on opposing seam sides receive one canonical remote subject,
+interact across the seam, and independently draw that subject in their nearby
+lift. The debug pane now reports actor id, canonical X, selected lift, shortest
+X delta, and client-observed seam-crossing count.
+
+The inspected `/tmp/mclone-cylinder-actor-before.png` reports actor E1 at
+canonical/lift X `511.90`, crossing count zero. The immediately following
+`/tmp/mclone-cylinder-actor-after.png` reports canonical X `0.20`, selected
+lift X `512.20`, and crossing count one. Both frames draw two stable actors,
+five resident sections, three terrain sections, and 348 GUI commands; the cow
+moves only the expected fraction of a block on screen. There is no terrain
+shift, remesh, actor disappearance, duplicate, or long interpolation sweep.
+
+All 1,211 library tests in `mclone-protocol`, `mclone-client`,
+`mclone-render-session`, `mclone-app-runtime`, `mclone-scene`, and
+`mclone-server` pass. Focused canaries additionally cover both actor crossing
+directions, opposing-player interaction, runtime emissive removal, fluid flow,
+correction preservation, and lifecycle continuity reset.
+
 ## Execution Checklist
 
 ### Slice 0: contract audit and clean baseline
@@ -535,18 +578,18 @@ the ordinary direct render path remains unchanged.
 
 ### Slice 5: movement, interaction, fluids, and actors
 
-- [ ] Canonicalize local-player movement while preserving observer continuity
+- [x] Canonicalize local-player movement while preserving observer continuity
   and shortest-displacement validation.
-- [ ] Cross the seam through collision, raycast, break/place, outlines, and
+- [x] Cross the seam through collision, raycast, break/place, outlines, and
   authoritative correction without a teleport artifact.
-- [ ] Run the light/emissive and controlled fluid canaries across the seam.
-- [ ] Cross one stable scripted entity in both directions and retain correct
+- [x] Run the light/emissive and controlled fluid canaries across the seam.
+- [x] Cross one stable scripted entity in both directions and retain correct
   tracking, simulation, drawing, and interpolation.
-- [ ] Place two players on opposite canonical sides, interact across the seam,
+- [x] Place two players on opposite canonical sides, interact across the seam,
   and cross while each client selects its own nearby lifts.
-- [ ] Reset continuity correctly on join, teleport, respawn, death, and
+- [x] Reset continuity correctly on join, teleport, respawn, death, and
   dimension transfer.
-- [ ] Finish the interactive diagnostic receipts and assert no duplicate
+- [x] Finish the interactive diagnostic receipts and assert no duplicate
   canonical ids or ineligible interactive lifts.
 
 Gate: an interactive user can watch and test the seam directly, and every

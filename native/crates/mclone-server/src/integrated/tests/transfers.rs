@@ -96,13 +96,15 @@ fn wait_for_transfer_updates(
 }
 
 fn transfer_position_update(updates: &[ServerUpdate]) -> mclone_protocol::PlayerPositionUpdate {
-    updates
+    let update = updates
         .iter()
         .find_map(|update| match update {
             ServerUpdate::PlayerPosition(update) => Some(*update),
             _ => None,
         })
-        .expect("transfer must finish with a teleport update")
+        .expect("transfer must finish with a teleport update");
+    assert!(update.reset_continuity);
+    update
 }
 
 fn assert_dimension_change_precedes_destination_replica(

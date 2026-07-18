@@ -639,8 +639,22 @@ impl EngineCameraController {
         self.player.next_move_player_command()
     }
 
+    pub fn next_move_player_command_in(
+        &mut self,
+        topology: HorizontalTopology,
+    ) -> Option<ClientCommand> {
+        self.player.next_move_player_command_in(topology)
+    }
+
     pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
         self.player.pos_rot_move_player_command()
+    }
+
+    pub fn pos_rot_move_player_command_in(
+        &mut self,
+        topology: HorizontalTopology,
+    ) -> Option<ClientCommand> {
+        self.player.pos_rot_move_player_command_in(topology)
     }
 
     pub fn take_landing_events(&mut self) -> Vec<LandingEvent> {
@@ -653,8 +667,27 @@ impl EngineCameraController {
         command
     }
 
+    pub fn apply_player_position_update_in(
+        &mut self,
+        topology: HorizontalTopology,
+        update: PlayerPositionUpdate,
+    ) -> ClientCommand {
+        let command = self
+            .player
+            .apply_player_position_update_in(topology, update);
+        self.reset_room_scale_body_follow();
+        command
+    }
+
     pub fn next_pose_sync_command(&mut self) -> Option<EnginePoseSyncCommand> {
-        let command = self.next_move_player_command()?;
+        self.next_pose_sync_command_in(HorizontalTopology::UNBOUNDED)
+    }
+
+    pub fn next_pose_sync_command_in(
+        &mut self,
+        topology: HorizontalTopology,
+    ) -> Option<EnginePoseSyncCommand> {
+        let command = self.next_move_player_command_in(topology)?;
         Some(EnginePoseSyncCommand {
             kind: EnginePoseSyncCommandKind::Movement,
             command,
@@ -666,7 +699,15 @@ impl EngineCameraController {
         &mut self,
         update: PlayerPositionUpdate,
     ) -> EnginePoseCorrectionAcceptance {
-        let accept_command = self.apply_player_position_update(update);
+        self.accept_position_update_in(HorizontalTopology::UNBOUNDED, update)
+    }
+
+    pub fn accept_position_update_in(
+        &mut self,
+        topology: HorizontalTopology,
+        update: PlayerPositionUpdate,
+    ) -> EnginePoseCorrectionAcceptance {
+        let accept_command = self.apply_player_position_update_in(topology, update);
         let feet_position = self.player.pose().position;
         EnginePoseCorrectionAcceptance {
             update,
@@ -677,12 +718,20 @@ impl EngineCameraController {
     }
 
     pub fn corrected_pose_sync_command(&mut self) -> EnginePoseSyncCommand {
-        let command = self.pos_rot_move_player_command();
-        EnginePoseSyncCommand {
+        self.corrected_pose_sync_command_in(HorizontalTopology::UNBOUNDED)
+            .expect("finite local player pose must remain inside the active topology")
+    }
+
+    pub fn corrected_pose_sync_command_in(
+        &mut self,
+        topology: HorizontalTopology,
+    ) -> Option<EnginePoseSyncCommand> {
+        let command = self.pos_rot_move_player_command_in(topology)?;
+        Some(EnginePoseSyncCommand {
             kind: EnginePoseSyncCommandKind::CorrectionResync,
             command,
             camera: self.snapshot(),
-        }
+        })
     }
 
     pub const fn speed_blocks_per_second(&self) -> f64 {

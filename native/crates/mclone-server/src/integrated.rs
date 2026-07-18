@@ -73,6 +73,30 @@ use crate::spawn::{
     SpawnColumnOrder, find_safe_surface_spawn_with_column_order, initial_spawn_center_for_profile,
 };
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
+
+fn move_player_command_with_position(
+    command: MovePlayerCommand,
+    position: Vec3d,
+) -> MovePlayerCommand {
+    match command {
+        MovePlayerCommand::Pos { on_ground, .. } => MovePlayerCommand::Pos {
+            position,
+            on_ground,
+        },
+        MovePlayerCommand::PosRot {
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground,
+            ..
+        } => MovePlayerCommand::PosRot {
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground,
+        },
+        MovePlayerCommand::Rot { .. } | MovePlayerCommand::StatusOnly { .. } => command,
+    }
+}
 use crate::{
     ChunkLoadingProgress, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
     ChunkPublicationBudgetConfig, ChunkRecord, ChunkScheduler, ChunkSchedulerEvent,
@@ -2023,6 +2047,12 @@ impl RealmServer {
                     .map(|block| BlockStateId(u32::from(block)))
             },
         ));
+        if self.debug_passive_showcase_enabled
+            && let Some(scripted) = runtime.entities.advance_debug_periodic_showcase()
+        {
+            entity_updates.retain(|entity| entity.id != scripted.id);
+            entity_updates.push(scripted);
+        }
         let item_pickup_targets = self.item_pickup_targets();
         let players = &mut self.players;
         entity_updates.extend(self.active_dimension.entities.collect_item_entities(
@@ -2538,19 +2568,20 @@ impl RealmServer {
     fn handle_move_player_for_target(
         &mut self,
         target: CommandTarget,
-        command: SequencedMovePlayerCommand,
+        mut command: SequencedMovePlayerCommand,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
         let topology = self.active_dimension.definition.topology;
-        if command.movement.has_position() {
+        if command.movement.has_position() && !topology.is_unbounded() {
             let current = self.player_for_target(target)?.position();
             let proposed = command.movement.position_or(current);
-            if proposed.is_finite() && topology.canonicalize_position(proposed).is_none() {
+            let Some(canonical) = topology.canonicalize_position(proposed) else {
                 let correction = self
                     .player_mut_for_target(target)?
                     .correction_update(simulation_tick);
                 return Ok(vec![ServerUpdate::PlayerPosition(correction)]);
-            }
+            };
+            command.movement = move_player_command_with_position(command.movement, canonical);
         }
         let (result, recognized_jump, pending_correction) = {
             let player = self.player_mut_for_target(target)?;
@@ -2668,7 +2699,9 @@ impl RealmServer {
                 .map(|(_, player)| player.state.position())
                 .or(observer_anchor)
                 .unwrap_or(Vec3d::new(8.5, 66.0, 8.5));
-            let to_anchor = anchor.subtract(script.current_position);
+            let topology = self.active_dimension.definition.topology;
+            let to_anchor =
+                topology.shortest_position_displacement(script.current_position, anchor);
             let desired = if to_anchor.length_sqr() > 0.25 * 0.25 {
                 let distance = to_anchor.length_sqr().sqrt();
                 script
@@ -2959,7 +2992,10 @@ impl RealmServer {
             && self.world_behavior_profile.allows_player_break()
         {
             let player_position = self.player_for_target(target)?.position();
-            let context = ServerInteractionContext::debug_creative(player_position);
+            let context = ServerInteractionContext::debug_creative_in(
+                player_position,
+                self.active_dimension.definition.topology,
+            );
             if context.may_break_block(command.pos) {
                 self.set_block_debug(command.pos, AIR_BLOCK_STATE_ID);
             }
@@ -3017,7 +3053,10 @@ impl RealmServer {
             let player = self.player_for_target(target)?;
             (player.position(), player.y_rot_degrees())
         };
-        let context = ServerInteractionContext::debug_creative(player_position);
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
         if !context.may_use_item_on(command.hit) {
             return Ok(Vec::new());
         }
@@ -3105,7 +3144,10 @@ impl RealmServer {
             return Ok(None);
         };
         let player_position = self.player_for_target(target)?.position();
-        let context = ServerInteractionContext::debug_creative(player_position);
+        let context = ServerInteractionContext::debug_creative_in(
+            player_position,
+            self.active_dimension.definition.topology,
+        );
         if !context.may_use_item_on(command.hit) {
             return Ok(None);
         }

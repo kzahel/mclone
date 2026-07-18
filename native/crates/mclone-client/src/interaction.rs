@@ -332,6 +332,32 @@ mod tests {
     }
 
     #[test]
+    fn periodic_raycast_and_outline_use_the_observer_local_seam_lift() {
+        let mut client = client_with_blocks(&[(BlockPos::new(0, 2, 1), BlockStateId(7))]);
+        client.apply_update(mclone_protocol::ServerUpdate::WorldInfo {
+            dimension: mclone_protocol::DimensionKey::overworld(),
+            biome_zoom_seed: 12_345,
+            topology: mclone_core::HorizontalTopology::cylinder_x(0, 32),
+        });
+        let controller = ClientInteractionController::new();
+
+        let target = controller
+            .target_block(
+                &client,
+                Vec3d::new(511.5, 2.5, 1.5),
+                Vec3d::new(1.0, 0.0, 0.0),
+            )
+            .expect("wrapped block target");
+
+        assert_eq!(target.hit.block_pos, BlockPos::new(512, 2, 1));
+        assert_eq!(target.hit.direction, Direction::West);
+        assert_eq!(
+            target.outline_boxes,
+            vec![Aabb::new(512.0, 2.0, 1.0, 513.0, 3.0, 2.0)]
+        );
+    }
+
+    #[test]
     fn raycast_uses_java_outline_shape_height() {
         let client = client_with_blocks(&[(BlockPos::new(4, 2, 1), BlockStateId(8))]);
 

@@ -178,11 +178,22 @@ pub fn actor_instances_from_presentations(
     presentations: &[ActorPresentation],
     client: &ClientRuntime,
 ) -> Vec<ActorInstance> {
+    actor_instances_from_presentations_near_observer(presentations, client, Vec3d::ZERO)
+}
+
+pub fn actor_instances_from_presentations_near_observer(
+    presentations: &[ActorPresentation],
+    client: &ClientRuntime,
+    observer_lift: Vec3d,
+) -> Vec<ActorInstance> {
     presentations
         .iter()
         .map(|actor| {
             let packed_light =
                 client.packed_light_at_world_or_fullbright(actor_light_probe_block_pos(actor));
+            let feet_position = client
+                .topology()
+                .nearest_position_lift(actor.feet_position, observer_lift);
             let instance = match actor.kind {
                 ActorPresentationKind::RemotePlayer => actor
                     .appearance
@@ -190,14 +201,14 @@ pub fn actor_instances_from_presentations(
                     .map_or_else(
                         || {
                             ActorInstance::remote_player(
-                                glam_vec3_from_vec3d(actor.feet_position),
+                                glam_vec3_from_vec3d(feet_position),
                                 actor.y_rot_degrees,
                             )
                             .with_walk_animation_distance(actor.walk_animation_distance)
                         },
                         |figure| {
                             ActorInstance::remote_player_with_figure(
-                                glam_vec3_from_vec3d(actor.feet_position),
+                                glam_vec3_from_vec3d(feet_position),
                                 actor.y_rot_degrees,
                                 figure,
                             )
@@ -206,7 +217,7 @@ pub fn actor_instances_from_presentations(
                     )
                     .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
-                    glam_vec3_from_vec3d(actor.feet_position),
+                    glam_vec3_from_vec3d(feet_position),
                     actor.y_rot_degrees,
                     actor.width,
                     actor.height,
@@ -214,7 +225,7 @@ pub fn actor_instances_from_presentations(
                 .with_packed_light(packed_light),
                 ActorPresentationKind::Entity(EntityKind::Chicken) => {
                     ActorInstance::remote_player_with_figure(
-                        glam_vec3_from_vec3d(actor.feet_position),
+                        glam_vec3_from_vec3d(feet_position),
                         actor.y_rot_degrees,
                         mclone_assets::chicken_figure_id(),
                     )
@@ -225,7 +236,7 @@ pub fn actor_instances_from_presentations(
                 }
                 ActorPresentationKind::Entity(EntityKind::Mannequin) => {
                     ActorInstance::remote_player(
-                        glam_vec3_from_vec3d(actor.feet_position),
+                        glam_vec3_from_vec3d(feet_position),
                         actor.y_rot_degrees,
                     )
                     .with_dimensions(actor.width, actor.height)
@@ -233,7 +244,7 @@ pub fn actor_instances_from_presentations(
                     .with_packed_light(packed_light)
                 }
                 ActorPresentationKind::Entity(EntityKind::DebugCube) => ActorInstance::debug_cube(
-                    glam_vec3_from_vec3d(actor.feet_position),
+                    glam_vec3_from_vec3d(feet_position),
                     actor.y_rot_degrees,
                     actor.x_rot_degrees,
                     actor.rotation.map(glam_quat_from_entity_rotation),
@@ -244,7 +255,7 @@ pub fn actor_instances_from_presentations(
                 ActorPresentationKind::Entity(EntityKind::Item) => {
                     match actor.item_stack.map(|stack| stack.kind) {
                         Some(ItemKind::Egg) | None => ActorInstance::item_egg(
-                            glam_vec3_from_vec3d(actor.feet_position),
+                            glam_vec3_from_vec3d(feet_position),
                             actor.y_rot_degrees,
                             actor.width,
                             actor.height,

@@ -153,9 +153,9 @@ use mclone_render_session::{
     EngineHandPushInput, EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
     RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
     RenderSectionUploadPhaseReport, XrFov, XrRenderView, XrView, XrViewPose,
-    actor_instances_from_presentations, engine_debug_world_lines,
-    local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
-    render_view_from_world_pose,
+    actor_instances_from_presentations, actor_instances_from_presentations_near_observer,
+    engine_debug_world_lines, local_player_actor_instance_for_view,
+    render_pose_from_snapshot_with_view_mode, render_view_from_world_pose,
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
@@ -556,8 +556,10 @@ impl DrawableWorldSlot {
             self.last_actor_presentation_update = None;
             return Vec::new();
         };
-        self.actor_interpolation
-            .reconcile_authoritative(runtime.client().actor_presentations());
+        self.actor_interpolation.reconcile_authoritative_in(
+            runtime.client().topology(),
+            runtime.client().actor_presentations(),
+        );
         let dt_seconds = self
             .last_actor_presentation_update
             .replace(now)
@@ -3738,8 +3740,11 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .map_or_else(Vec::new, |runtime| {
-                let instances =
-                    actor_instances_from_presentations(&presentations, runtime.client());
+                let instances = actor_instances_from_presentations_near_observer(
+                    &presentations,
+                    runtime.client(),
+                    self.active_world.camera.snapshot().eye,
+                );
                 if self.mono_ui_context.is_some() {
                     instances
                         .into_iter()

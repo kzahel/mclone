@@ -5,7 +5,7 @@
 //! call out of the already large scheduler module.
 
 use mclone_core::{
-    ChunkPos, ChunkSnapshot, ChunkStatus, PackedLightSection, SECTION_HEIGHT,
+    ChunkPos, ChunkSnapshot, ChunkStatus, HorizontalTopology, PackedLightSection, SECTION_HEIGHT,
     block_to_section_coord,
 };
 use mclone_light::{
@@ -15,7 +15,7 @@ use mclone_light::{
 use mclone_worldgen::block::RawBlockId;
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
-use crate::lighting_seed::provisional_sky_light_includes_chunk;
+use crate::lighting_seed::provisional_light_neighbor_lift;
 use crate::persistence::{ChunkStoreError, ChunkStoreResult, ScheduledTickRecord};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -51,22 +51,22 @@ impl PendingLightStatus {
         chunk: &GeneratedChunk,
         scheduled_block_ticks: Vec<ScheduledTickRecord>,
         scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+        topology: HorizontalTopology,
         generated_chunks: impl IntoIterator<Item = (&'a ChunkPos, &'a GeneratedChunk)>,
         retained_dependencies: impl IntoIterator<Item = (&'a ChunkPos, &'a MutableChunkBlockBuffer)>,
     ) -> Self {
         let neighbor_blocks = retained_dependencies
             .into_iter()
             .filter_map(|(neighbor_pos, buffer)| {
-                (*neighbor_pos != pos && provisional_sky_light_includes_chunk(pos, *neighbor_pos))
-                    .then_some((*neighbor_pos, buffer.blocks.as_slice()))
+                provisional_light_neighbor_lift(topology, pos, *neighbor_pos)
+                    .map(|lifted| (lifted, buffer.blocks.as_slice()))
             })
             .chain(
                 generated_chunks
                     .into_iter()
                     .filter_map(|(neighbor_pos, chunk)| {
-                        (*neighbor_pos != pos
-                            && provisional_sky_light_includes_chunk(pos, *neighbor_pos))
-                        .then_some((*neighbor_pos, chunk.blocks()))
+                        provisional_light_neighbor_lift(topology, pos, *neighbor_pos)
+                            .map(|lifted| (lifted, chunk.blocks()))
                     }),
             )
             .map(|(neighbor_pos, blocks)| (neighbor_pos, blocks.to_vec()))

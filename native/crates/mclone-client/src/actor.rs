@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_assets::{ActorFigureId, default_player_figure_id, upright_bear_figure_id};
-use mclone_core::Vec3d;
+use mclone_core::{HorizontalTopology, Vec3d};
 use mclone_protocol::{
     EntityId, EntityKind, EntityRotation, EntitySnapshot, ItemStackSnapshot, PlayerAppearance,
     PlayerModelKind, RemotePlayerId, RemotePlayerUpdate,
@@ -140,12 +140,20 @@ impl ActorInterpolationState {
     }
 
     pub fn reconcile_authoritative(&mut self, actors: impl IntoIterator<Item = ActorPresentation>) {
+        self.reconcile_authoritative_in(HorizontalTopology::UNBOUNDED, actors);
+    }
+
+    pub fn reconcile_authoritative_in(
+        &mut self,
+        topology: HorizontalTopology,
+        actors: impl IntoIterator<Item = ActorPresentation>,
+    ) {
         let mut retained = BTreeSet::new();
         for actor in actors {
             retained.insert(actor.id);
             self.tracks
                 .entry(actor.id)
-                .and_modify(|track| track.set_target(actor))
+                .and_modify(|track| track.set_target_in(topology, actor))
                 .or_insert_with(|| ActorTrack::new(actor));
         }
         self.tracks.retain(|id, _| retained.contains(id));
@@ -186,8 +194,10 @@ impl ActorTrack {
         }
     }
 
-    fn set_target(&mut self, actor: ActorPresentation) {
+    fn set_target_in(&mut self, topology: HorizontalTopology, mut actor: ActorPresentation) {
         let previous_kind = self.rendered.kind;
+        actor.feet_position =
+            topology.nearest_position_lift(actor.feet_position, self.rendered.feet_position);
         self.target = actor;
         self.rendered.id = actor.id;
         self.rendered.kind = actor.kind;
@@ -566,6 +576,24 @@ mod tests {
             ActorPresentationId::RemotePlayer(RemotePlayerId(1))
         );
         assert!((presentations[0].feet_position.x - 5.0).abs() < 1.0e-9);
+    }
+
+    #[test]
+    fn actor_interpolation_treats_a_periodic_seam_crossing_as_half_a_block() {
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let mut state = ActorInterpolationState::from_authoritative([actor(1, 511.75, 0.0)]);
+
+        state.reconcile_authoritative_in(topology, [actor(1, 0.25, 0.0)]);
+        state.step(
+            1.0,
+            ActorInterpolationConfig {
+                half_life_seconds: 0.0,
+            },
+        );
+        let presentation = state.presentations()[0];
+
+        assert_eq!(presentation.feet_position.x, 512.25);
+        assert!((presentation.walk_animation_distance - 0.5).abs() < 1.0e-6);
     }
 
     #[test]

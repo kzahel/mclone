@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_blocks::collision_aabb_for_feet_position;
-use mclone_core::{Aabb, BlockPos, BlockStateId, ChunkPos, HorizontalTopology, Vec3d};
+use mclone_core::{
+    Aabb, AxisTopology, BlockPos, BlockStateId, ChunkPos, HorizontalTopology, Vec3d,
+};
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
@@ -47,6 +49,9 @@ pub(crate) struct ServerEntityStore {
     next_entity_id: u64,
     next_persistent_id: u64,
     debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
+    debug_periodic_showcase_phase: u64,
+    debug_periodic_showcase_crossings: u64,
+    debug_periodic_showcase_last_x: Option<f64>,
     #[cfg(feature = "physics-engine")]
     debug_physics_cube_id: Option<EntityId>,
 }
@@ -90,13 +95,78 @@ impl ServerEntityStore {
             }
 
             let id = self.allocate_entity_id();
-            let position = debug_passive_showcase_position(spawn_position, index);
+            let mut position = debug_passive_showcase_position(spawn_position, index);
+            if index == 0
+                && let AxisTopology::Periodic {
+                    minimum_chunk,
+                    period_chunks,
+                } = self.topology.x
+            {
+                let minimum_block = f64::from(minimum_chunk) * 16.0;
+                position.x = minimum_block + f64::from(period_chunks) * 16.0 - 2.0;
+            }
             let y_rot_degrees = debug_passive_showcase_y_rot(index);
             self.insert_passive_mob(id, kind, position, y_rot_degrees);
             self.debug_passive_showcase_ids.push((kind, id));
             ids.push(id);
         }
         ids
+    }
+
+    pub(crate) fn advance_debug_periodic_showcase(&mut self) -> Option<ServerEntityState> {
+        let AxisTopology::Periodic {
+            minimum_chunk,
+            period_chunks,
+        } = self.topology.x
+        else {
+            return None;
+        };
+        let id = self.debug_passive_showcase_ids.first()?.1;
+        let entity = self.entities.get_mut(&id)?;
+        if !entity.alive {
+            return None;
+        }
+
+        const HALF_CYCLE_TICKS: u64 = 80;
+        const HALF_SPAN_BLOCKS: f64 = 2.0;
+        let phase = self.debug_periodic_showcase_phase % (HALF_CYCLE_TICKS * 2);
+        let progress =
+            f64::from((phase % HALF_CYCLE_TICKS) as u32) / f64::from(HALF_CYCLE_TICKS as u32);
+        let offset = if phase < HALF_CYCLE_TICKS {
+            -HALF_SPAN_BLOCKS + progress * HALF_SPAN_BLOCKS * 2.0
+        } else {
+            HALF_SPAN_BLOCKS - progress * HALF_SPAN_BLOCKS * 2.0
+        };
+        let minimum_block = f64::from(minimum_chunk) * 16.0;
+        let period_blocks = f64::from(period_chunks) * 16.0;
+        let lifted_x = minimum_block + period_blocks + offset;
+        let canonical_position = self.topology.canonicalize_position(Vec3d::new(
+            lifted_x,
+            entity.position.y,
+            entity.position.z,
+        ))?;
+        if self
+            .debug_periodic_showcase_last_x
+            .is_some_and(|previous| (canonical_position.x - previous).abs() > period_blocks * 0.5)
+        {
+            self.debug_periodic_showcase_crossings =
+                self.debug_periodic_showcase_crossings.saturating_add(1);
+        }
+        self.debug_periodic_showcase_last_x = Some(canonical_position.x);
+        self.debug_periodic_showcase_phase = self.debug_periodic_showcase_phase.saturating_add(1);
+        entity.position = canonical_position;
+        entity.y_rot_degrees = if phase < HALF_CYCLE_TICKS {
+            -90.0
+        } else {
+            90.0
+        };
+        entity.on_ground = true;
+        Some(*entity)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn debug_periodic_showcase_crossings(&self) -> u64 {
+        self.debug_periodic_showcase_crossings
     }
 
     #[cfg(test)]
@@ -1140,6 +1210,32 @@ mod tests {
 
         assert!(ids.is_empty());
         assert_eq!(store.diagnostics().stored_entities, 0);
+    }
+
+    #[test]
+    fn periodic_showcase_keeps_one_identity_through_both_seam_directions() {
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let mut store = ServerEntityStore::with_topology(topology);
+        let id =
+            store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[0];
+        let mut chunks = Vec::new();
+
+        for _ in 0..161 {
+            let state = store
+                .advance_debug_periodic_showcase()
+                .expect("periodic showcase actor");
+            assert_eq!(state.id, id);
+            assert_eq!(
+                topology.canonicalize_position(state.position),
+                Some(state.position)
+            );
+            chunks.push(state.chunk_pos().x);
+        }
+
+        assert!(chunks.windows(2).any(|pair| pair == [31, 0]));
+        assert!(chunks.windows(2).any(|pair| pair == [0, 31]));
+        assert_eq!(store.debug_periodic_showcase_crossings(), 2);
+        assert_eq!(store.state(id).unwrap().id, id);
     }
 
     #[test]

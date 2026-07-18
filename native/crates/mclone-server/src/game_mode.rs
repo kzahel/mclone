@@ -1,4 +1,4 @@
-use mclone_core::{BlockHitResult, BlockPos, HitResultType, Vec3d};
+use mclone_core::{BlockHitResult, BlockPos, HitResultType, HorizontalTopology, Vec3d};
 
 pub(crate) const JAVA_OVERWORLD_MAX_BUILD_HEIGHT: i32 = 256;
 
@@ -9,18 +9,33 @@ const JAVA_USE_ITEM_ON_REACH_SQR: f64 = 64.0;
 pub(crate) struct ServerInteractionContext {
     player_feet_position: Vec3d,
     max_build_height: i32,
+    topology: HorizontalTopology,
 }
 
 impl ServerInteractionContext {
+    #[cfg(test)]
     pub(crate) const fn new(player_feet_position: Vec3d, max_build_height: i32) -> Self {
         Self {
             player_feet_position,
             max_build_height,
+            topology: HorizontalTopology::UNBOUNDED,
         }
     }
 
+    #[cfg(test)]
     pub(crate) const fn debug_creative(player_feet_position: Vec3d) -> Self {
         Self::new(player_feet_position, JAVA_OVERWORLD_MAX_BUILD_HEIGHT)
+    }
+
+    pub(crate) const fn debug_creative_in(
+        player_feet_position: Vec3d,
+        topology: HorizontalTopology,
+    ) -> Self {
+        Self {
+            player_feet_position,
+            max_build_height: JAVA_OVERWORLD_MAX_BUILD_HEIGHT,
+            topology,
+        }
     }
 
     pub(crate) fn may_break_block(self, pos: BlockPos) -> bool {
@@ -41,16 +56,24 @@ impl ServerInteractionContext {
     }
 
     fn block_break_distance_sqr(self, pos: BlockPos) -> f64 {
-        let dx = self.player_feet_position.x - (pos.x as f64 + 0.5);
+        let target = Vec3d::new(pos.x as f64 + 0.5, pos.y as f64 + 0.5, pos.z as f64 + 0.5);
+        let displacement = self
+            .topology
+            .shortest_position_displacement(self.player_feet_position, target);
+        let dx = displacement.x;
         let dy = self.player_feet_position.y - (pos.y as f64 + 0.5) + 1.5;
-        let dz = self.player_feet_position.z - (pos.z as f64 + 0.5);
+        let dz = displacement.z;
         dx * dx + dy * dy + dz * dz
     }
 
     fn distance_to_block_center_sqr(self, pos: BlockPos) -> f64 {
-        let dx = self.player_feet_position.x - (pos.x as f64 + 0.5);
+        let target = Vec3d::new(pos.x as f64 + 0.5, pos.y as f64 + 0.5, pos.z as f64 + 0.5);
+        let displacement = self
+            .topology
+            .shortest_position_displacement(self.player_feet_position, target);
+        let dx = displacement.x;
         let dy = self.player_feet_position.y - (pos.y as f64 + 0.5);
-        let dz = self.player_feet_position.z - (pos.z as f64 + 0.5);
+        let dz = displacement.z;
         dx * dx + dy * dy + dz * dz
     }
 }
@@ -96,5 +119,17 @@ mod tests {
 
         assert!(context.may_place_at(BlockPos::new(0, JAVA_OVERWORLD_MAX_BUILD_HEIGHT - 1, 0)));
         assert!(!context.may_place_at(BlockPos::new(0, JAVA_OVERWORLD_MAX_BUILD_HEIGHT, 0)));
+    }
+
+    #[test]
+    fn periodic_reach_validation_treats_the_seam_as_one_block() {
+        let context = ServerInteractionContext::debug_creative_in(
+            Vec3d::new(511.5, 80.0, 0.5),
+            HorizontalTopology::cylinder_x(0, 32),
+        );
+        let canonical = BlockPos::new(0, 80, 0);
+
+        assert!(context.may_break_block(canonical));
+        assert!(context.may_use_item_on(block_hit(canonical, Direction::Up)));
     }
 }

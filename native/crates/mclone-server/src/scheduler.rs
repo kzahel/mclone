@@ -49,7 +49,7 @@ use crate::light_status::{
     PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
 };
 use crate::light_world::RetainedInitialLightState;
-use crate::lighting_seed::provisional_sky_light_includes_chunk;
+use crate::lighting_seed::provisional_light_neighbor_lift;
 use crate::loading_progress::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
     PLAYABLE_GATE_RADIUS,
@@ -1957,17 +1957,29 @@ impl ChunkScheduler {
         }
 
         let chunk_pos = pos.chunk_pos();
-        let Some(status) = self.runtime_light_status_for_chunk(chunk_pos) else {
+        let topology = self.topology;
+        let affected_chunks = (-1..=1)
+            .flat_map(|dz| {
+                (-1..=1).filter_map(move |dx| {
+                    topology.canonicalize_chunk(ChunkPos::new(chunk_pos.x + dx, chunk_pos.z + dz))
+                })
+            })
+            .collect::<BTreeSet<_>>();
+        let statuses = affected_chunks
+            .into_iter()
+            .filter_map(|target| self.runtime_light_status_for_chunk(target))
+            .collect::<Vec<_>>();
+        if statuses.is_empty() {
             return false;
-        };
+        }
 
         let mut light_state = RetainedInitialLightState::new();
-        let mut completed = light_state.compute_batch(PendingLightStatusBatch::new(vec![status]));
-        let Some((_status, light_sections, _timing)) = completed.pop() else {
-            return false;
-        };
-
-        self.publish_runtime_light_sections(chunk_pos, light_sections)
+        light_state
+            .compute_batch(PendingLightStatusBatch::new(statuses))
+            .into_iter()
+            .fold(false, |published, (status, light_sections, _timing)| {
+                self.publish_runtime_light_sections(status.pos, light_sections) || published
+            })
     }
 
     fn runtime_light_status_for_chunk(&self, target_pos: ChunkPos) -> Option<PendingLightStatus> {
@@ -1985,11 +1997,8 @@ impl ChunkScheduler {
             .holders
             .iter()
             .filter_map(|(neighbor_pos, neighbor)| {
-                if *neighbor_pos == target_pos
-                    || !provisional_sky_light_includes_chunk(target_pos, *neighbor_pos)
-                {
-                    return None;
-                }
+                let lifted =
+                    provisional_light_neighbor_lift(self.topology, target_pos, *neighbor_pos)?;
                 let blocks = neighbor
                     .live_blocks
                     .as_ref()
@@ -1997,7 +2006,7 @@ impl ChunkScheduler {
                 if blocks.min_y != snapshot.min_y || blocks.height != snapshot.height {
                     return None;
                 }
-                Some((*neighbor_pos, blocks.blocks.clone()))
+                Some((lifted, blocks.blocks.clone()))
             })
             .collect();
 
@@ -3343,6 +3352,7 @@ impl ChunkScheduler {
                         chunk,
                         scheduled_block_ticks,
                         scheduled_fluid_ticks,
+                        self.topology,
                         generated.iter(),
                         retained_dependencies.iter(),
                     ));

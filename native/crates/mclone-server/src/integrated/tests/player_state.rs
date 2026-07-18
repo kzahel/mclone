@@ -835,6 +835,7 @@ fn explicit_respawn_restores_one_safe_life_without_resetting_realm_state() {
         }
     }
     let position_update = position_update.expect("timed out waiting for safe respawn position");
+    assert!(position_update.reset_continuity);
 
     let life_index = updates
         .iter()

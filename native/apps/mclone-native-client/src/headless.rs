@@ -11,6 +11,7 @@ use mclone_app_runtime::frame_render::{
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_service_assembly::NativeSceneServices;
 use mclone_client::ActorInterpolationState;
+use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, TexturedSectionRenderOptions, TexturedSectionUploadReport,
@@ -19,7 +20,7 @@ use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
 use mclone_render::screen_effect::UnderwaterOverlay;
-use mclone_render_session::actor_instances_from_presentations;
+use mclone_render_session::actor_instances_from_presentations_near_observer;
 use mclone_ui::{GameUiHost, GuiDrawList, GuiScale};
 
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
@@ -1166,15 +1167,21 @@ fn render_renderer_rebuild_smoke_frame(
     let sky_clear_color = state.runtime.sky_clear_color();
     let time_of_day = state.runtime.time_of_day();
     let sun_angle = state.runtime.sun_angle();
-    state
-        .actor_interpolation
-        .reconcile_authoritative(state.runtime.client().actor_presentations());
+    state.actor_interpolation.reconcile_authoritative_in(
+        state.runtime.client().topology(),
+        state.runtime.client().actor_presentations(),
+    );
     state
         .actor_interpolation
         .step(1.0 / 60.0, Default::default());
-    let actor_instances = actor_instances_from_presentations(
+    let actor_instances = actor_instances_from_presentations_near_observer(
         &state.actor_interpolation.presentations(),
         state.runtime.client(),
+        Vec3d::new(
+            f64::from(state.camera.eye[0]),
+            f64::from(state.camera.eye[1]),
+            f64::from(state.camera.eye[2]),
+        ),
     );
     let gui_scale = state.ui.scale();
     let gui_state = FullFrameGui::new(

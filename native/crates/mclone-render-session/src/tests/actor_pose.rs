@@ -170,6 +170,47 @@ fn actor_instance_identity_is_stable_across_presentation_reordering() {
 }
 
 #[test]
+fn actor_instance_selects_the_lift_nearest_its_observer() {
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(mclone_protocol::ServerUpdate::WorldInfo {
+        dimension: mclone_protocol::DimensionKey::overworld(),
+        biome_zoom_seed: 12_345,
+        topology: mclone_core::HorizontalTopology::cylinder_x(0, 32),
+    });
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(7)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Mannequin),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        feet_position: Vec3d::new(0.25, 64.0, 2.0),
+        y_rot_degrees: 0.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.6,
+        height: 1.8,
+        walk_animation_distance: 0.0,
+        chicken_wing_flap_radians: None,
+    };
+
+    let seam_actors = actor_instances_from_presentations_near_observer(
+        &[presentation],
+        &client,
+        Vec3d::new(511.75, 64.0, 2.0),
+    );
+    let origin_actors = actor_instances_from_presentations_near_observer(
+        &[presentation],
+        &client,
+        Vec3d::new(0.75, 64.0, 2.0),
+    );
+
+    assert_eq!(seam_actors[0].feet_position.x, 512.25);
+    assert_eq!(origin_actors[0].feet_position.x, 0.25);
+    assert_eq!(seam_actors[0].id, origin_actors[0].id);
+    assert_eq!(seam_actors[0].id, Some(ActorInstanceId::Entity(7)));
+}
+
+#[test]
 fn item_entity_actor_uses_egg_item_shape() {
     let client = ClientRuntime::local_integrated();
     let presentation = ActorPresentation {

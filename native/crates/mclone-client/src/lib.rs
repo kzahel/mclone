@@ -104,6 +104,7 @@ pub struct ClientRuntime {
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
     entities: BTreeMap<EntityId, EntitySnapshot>,
+    entity_seam_crossings: BTreeMap<EntityId, u64>,
     entity_chunks: BTreeMap<EntityId, ChunkPos>,
     entities_by_chunk: BTreeMap<ChunkPos, BTreeSet<EntityId>>,
 }
@@ -132,6 +133,7 @@ impl ClientRuntime {
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
             entities: BTreeMap::new(),
+            entity_seam_crossings: BTreeMap::new(),
             entity_chunks: BTreeMap::new(),
             entities_by_chunk: BTreeMap::new(),
         }
@@ -270,7 +272,8 @@ impl ClientRuntime {
             }
             ServerUpdate::RemotePlayerUpdate(update) => {
                 if let Some(previous) = self.remote_players.get(&update.id) {
-                    let distance = remote_player_horizontal_distance(previous, &update);
+                    let distance =
+                        remote_player_horizontal_distance(self.topology, previous, &update);
                     *self
                         .remote_player_walk_distances
                         .entry(update.id)
@@ -405,6 +408,7 @@ impl ClientRuntime {
         self.remote_players.clear();
         self.remote_player_walk_distances.clear();
         self.entities.clear();
+        self.entity_seam_crossings.clear();
         self.entity_chunks.clear();
         self.entities_by_chunk.clear();
     }
@@ -427,6 +431,13 @@ impl ClientRuntime {
 
     pub fn entity_count(&self) -> usize {
         self.entities.len()
+    }
+
+    pub fn entity_seam_crossing_count(&self, id: EntityId) -> u64 {
+        self.entity_seam_crossings
+            .get(&id)
+            .copied()
+            .unwrap_or_default()
     }
 
     pub fn entity_snapshots(&self) -> impl Iterator<Item = &EntitySnapshot> {
@@ -614,6 +625,15 @@ impl ClientRuntime {
             let Some(snapshot) = self.entities.get_mut(&update.id) else {
                 return;
             };
+            let raw_displacement = update.position.subtract(snapshot.position);
+            let shortest = self
+                .topology
+                .shortest_position_displacement(snapshot.position, update.position);
+            if (raw_displacement.x - shortest.x).abs() > 1.0e-9
+                || (raw_displacement.z - shortest.z).abs() > 1.0e-9
+            {
+                *self.entity_seam_crossings.entry(update.id).or_default() += 1;
+            }
             if let Some(stack) = update.item_stack {
                 snapshot.item_stack = Some(stack);
             }
@@ -634,6 +654,7 @@ impl ClientRuntime {
         };
         for id in ids {
             self.entities.remove(&id);
+            self.entity_seam_crossings.remove(&id);
             self.entity_chunks.remove(&id);
         }
     }
@@ -642,11 +663,13 @@ impl ClientRuntime {
         let id = snapshot.id;
         let chunk = entity_chunk_pos(&snapshot);
         self.entities.insert(id, snapshot);
+        self.entity_seam_crossings.entry(id).or_default();
         self.set_entity_chunk(id, chunk);
     }
 
     fn remove_entity(&mut self, id: EntityId) {
         self.entities.remove(&id);
+        self.entity_seam_crossings.remove(&id);
         self.remove_entity_chunk_index(id);
     }
 
@@ -708,14 +731,16 @@ fn packed_light_section_drop_item_count(section: &PackedLightSection) -> usize {
 }
 
 fn remote_player_horizontal_distance(
+    topology: HorizontalTopology,
     previous: &RemotePlayerUpdate,
     next: &RemotePlayerUpdate,
 ) -> f32 {
     if !previous.on_ground || !next.on_ground {
         return 0.0;
     }
-    let dx = next.position.x - previous.position.x;
-    let dz = next.position.z - previous.position.z;
+    let displacement = topology.shortest_position_displacement(previous.position, next.position);
+    let dx = displacement.x;
+    let dz = displacement.z;
     (dx.mul_add(dx, dz * dz).sqrt()) as f32
 }
 
@@ -735,7 +760,7 @@ mod tests {
     use super::*;
     use mclone_core::{
         AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus,
-        LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, chunk_section_index,
+        LIGHT_DATA_LAYER_BYTE_COUNT, PackedLightSection, Vec3d, chunk_section_index,
     };
     use mclone_protocol::{PlayerAppearance, PlayerModelKind};
 
@@ -1037,6 +1062,7 @@ mod tests {
             last_applied_move_sequence: 6,
             teleport_id: 7,
             dismount_vehicle: false,
+            reset_continuity: true,
         }));
         runtime.apply_update(ServerUpdate::RemotePlayerAdd(RemotePlayerUpdate {
             id: RemotePlayerId(42),
@@ -1210,6 +1236,7 @@ mod tests {
             last_applied_move_sequence: 6,
             teleport_id: 7,
             dismount_vehicle: false,
+            reset_continuity: false,
         };
 
         runtime.apply_update(ServerUpdate::PlayerPosition(update));
@@ -1285,6 +1312,70 @@ mod tests {
         runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
         let presentation = runtime.actor_presentations().remove(0);
         assert_eq!(presentation.walk_animation_distance, 0.0);
+    }
+
+    #[test]
+    fn periodic_remote_player_walk_distance_uses_the_shortest_seam_displacement() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        runtime.apply_update(ServerUpdate::WorldInfo {
+            dimension: DimensionKey::overworld(),
+            biome_zoom_seed: 12_345,
+            topology: HorizontalTopology::cylinder_x(0, 32),
+        });
+        let initial = RemotePlayerUpdate {
+            id: RemotePlayerId(7),
+            appearance: PlayerAppearance::default(),
+            position: Vec3d::new(511.75, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        };
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
+        runtime.apply_update(ServerUpdate::RemotePlayerUpdate(RemotePlayerUpdate {
+            position: Vec3d::new(0.25, 64.0, 2.0),
+            ..initial
+        }));
+
+        let presentation = runtime.actor_presentations().remove(0);
+
+        assert!((presentation.walk_animation_distance - 0.5).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn periodic_entity_replica_counts_canonical_seam_crossings() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        runtime.apply_update(ServerUpdate::WorldInfo {
+            dimension: DimensionKey::overworld(),
+            biome_zoom_seed: 12_345,
+            topology: HorizontalTopology::cylinder_x(0, 32),
+        });
+        let id = EntityId(7);
+        runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
+            id,
+            kind: mclone_protocol::EntityKind::Cow,
+            item_stack: None,
+            position: Vec3d::new(511.75, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            width: 0.9,
+            height: 1.4,
+            age_ticks: 0,
+        }));
+        runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
+            id,
+            item_stack: None,
+            position: Vec3d::new(0.25, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            rotation: None,
+            on_ground: true,
+            age_ticks: 1,
+        }));
+
+        assert_eq!(runtime.entity_seam_crossing_count(id), 1);
+        assert_eq!(runtime.entity(id).unwrap().position.x, 0.25);
     }
 
     #[test]

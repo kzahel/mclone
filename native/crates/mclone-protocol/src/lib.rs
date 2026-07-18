@@ -28,7 +28,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 30;
+pub const PROTOCOL_VERSION: u32 = 31;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -591,6 +591,7 @@ pub struct PlayerPositionUpdate {
     pub last_applied_move_sequence: u32,
     pub teleport_id: u32,
     pub dismount_vehicle: bool,
+    pub reset_continuity: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1580,6 +1581,7 @@ impl ByteWriter {
         self.write_u32(update.last_applied_move_sequence);
         self.write_u32(update.teleport_id);
         self.write_bool(update.dismount_vehicle);
+        self.write_bool(update.reset_continuity);
     }
 
     fn write_remote_player_id(&mut self, id: RemotePlayerId) {
@@ -2121,6 +2123,7 @@ impl<'a> ByteReader<'a> {
             last_applied_move_sequence: self.read_u32()?,
             teleport_id: self.read_u32()?,
             dismount_vehicle: self.read_bool()?,
+            reset_continuity: self.read_bool()?,
         })
     }
 
@@ -2510,6 +2513,7 @@ mod tests {
             last_applied_move_sequence: 41,
             teleport_id: 42,
             dismount_vehicle: true,
+            reset_continuity: true,
         });
 
         let bytes = encode_server_update(&update).unwrap();

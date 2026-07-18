@@ -1849,6 +1849,36 @@ impl McloneSceneHost {
                 .frame_state(&self.active_world.interaction);
             let snapshot = self.active_world.camera.snapshot();
             let render_options = self.effective_render_options(glam_vec3_from_vec3d(snapshot.eye));
+            let topology = runtime.client().topology();
+            let topology_actor = (!topology.is_unbounded())
+                .then(|| {
+                    runtime
+                        .client()
+                        .actor_presentations()
+                        .into_iter()
+                        .find_map(|presentation| {
+                            let mclone_client::ActorPresentationId::Entity(entity_id) =
+                                presentation.id
+                            else {
+                                return None;
+                            };
+                            let lifted = topology
+                                .nearest_position_lift(presentation.feet_position, snapshot.eye);
+                            let delta = topology.shortest_position_displacement(
+                                snapshot.eye,
+                                presentation.feet_position,
+                            );
+                            Some(format!(
+                                "ACT E{} C{:.2} L{:.2} D{:+.2} X{}",
+                                entity_id.0,
+                                presentation.feet_position.x,
+                                lifted.x,
+                                delta.x,
+                                runtime.client().entity_seam_crossing_count(entity_id),
+                            ))
+                        })
+                })
+                .flatten();
             let debug = DebugPaneStats {
                 position: glam_vec3_from_vec3d(snapshot.eye),
                 speed: camera.camera.speed_blocks_per_second as f32,
@@ -1868,7 +1898,8 @@ impl McloneSceneHost {
                 force_fullbright: render_options.force_fullbright,
                 color_profile: render_options.color_profile.label(),
                 render_scale: context.render_scale,
-                topology: runtime.client().topology(),
+                topology,
+                topology_actor,
             }
             .overlay();
             let mut debug_overlay = debug.to_debug_overlay();

@@ -129,6 +129,350 @@ fn periodic_dimension_deduplicates_laps_and_opposing_seam_views() {
 }
 
 #[test]
+fn periodic_player_crossing_retains_canonical_authority_position() {
+    let record = cylinder_flat_record();
+    let cylinder = record.key.clone();
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server.set_lighting_enabled(false);
+    assert!(server.register_dimension(record).unwrap());
+    let player = server.add_player_in_dimension(cylinder).unwrap();
+
+    for position in [511.75, 512.25, 1_024.5, -0.25] {
+        server
+            .try_handle_command_for_player(
+                player,
+                ClientCommand::move_player(MovePlayerCommand::Pos {
+                    position: Vec3d::new(position, 64.0, 2.0),
+                    on_ground: true,
+                }),
+            )
+            .unwrap();
+        let canonical = position.rem_euclid(512.0);
+        assert_eq!(
+            server.player_position(player),
+            Some(Vec3d::new(canonical, 64.0, 2.0))
+        );
+    }
+}
+
+#[test]
+fn periodic_crossing_publishes_one_canonical_remote_player_to_opposing_views() {
+    let mut definition =
+        crate::DimensionDefinition::overworld(98_765, WorldGenerationProfile::FlatGrassV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 32);
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        definition,
+        PlayerChunkTrackingPolicy::default(),
+    );
+    server.set_lighting_enabled(false);
+    let local = server.player_id();
+    load_chunk_view(&mut server, ChunkPos::new(31, 0));
+    send_player_move(&mut server, Vec3d::new(511.75, 80.0, 8.5));
+
+    let opposing = server.add_player();
+    let initial = set_dedicated_chunk_view_and_poll(&mut server, opposing, ChunkPos::new(0, 0), 1);
+    let add = remote_player_add(&initial, local)
+        .expect("opposing seam observer should receive the canonical player");
+    assert_eq!(add.position, Vec3d::new(511.75, 80.0, 8.5));
+
+    server
+        .try_handle_command_for_player(
+            opposing,
+            ClientCommand::move_player(MovePlayerCommand::Pos {
+                position: Vec3d::new(0.5, 80.0, 8.5),
+                on_ground: true,
+            }),
+        )
+        .unwrap();
+    let opposite_block = BlockPos::new(511, 80, 8);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(opposite_block, STONE)
+    );
+    server.scheduler_mut().drain_pending_block_delta_events();
+    server
+        .try_handle_command_for_player(
+            opposing,
+            ClientCommand::PlayerAction(PlayerActionCommand {
+                pos: opposite_block,
+                direction: Direction::Up,
+                kind: PlayerActionKind::DebugInstantBreak,
+            }),
+        )
+        .unwrap();
+    assert_eq!(server.scheduler().block_at_world(opposite_block), Some(AIR));
+
+    send_player_move(&mut server, Vec3d::new(512.25, 80.0, 8.5));
+    let updates = server
+        .try_drain_updates_for_player(opposing)
+        .expect("drain seam crossing for opposing observer");
+    let moved = remote_player_update(&updates, local)
+        .expect("opposing seam observer should receive the crossing");
+
+    assert_eq!(moved.position, Vec3d::new(0.25, 80.0, 8.5));
+    assert_eq!(server.player_position(local), Some(moved.position));
+}
+
+#[test]
+fn periodic_showcase_actor_tracks_one_identity_through_both_crossings() {
+    let mut definition =
+        crate::DimensionDefinition::overworld(98_765, WorldGenerationProfile::FlatGrassV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 32);
+    let topology = definition.topology;
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        definition,
+        PlayerChunkTrackingPolicy::default(),
+    );
+    server.set_lighting_enabled(false);
+    server.set_debug_passive_showcase_enabled(true);
+    let mut updates = server
+        .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 1,
+            chunk_tracking_radius: 1,
+        }))
+        .unwrap();
+    accept_player_position_updates(&mut server, &updates);
+    for _ in 0..60_000 {
+        let polled = server.try_poll().unwrap();
+        accept_player_position_updates(&mut server, &polled);
+        updates.extend(polled);
+        if server.pending_job_count() == 0 {
+            break;
+        }
+        if server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+        }
+    }
+    for _ in 0..2 {
+        updates.extend(server.try_simulation_tick_report().unwrap().updates);
+    }
+    server
+        .entities
+        .ensure_debug_passive_showcase_near_spawn(Vec3d::new(510.0, 4.0, 8.0), true);
+    let actor = server
+        .entities
+        .states()
+        .into_iter()
+        .find(|entity| entity.kind == EntityKind::Cow)
+        .expect("cylinder showcase actor should exist at the seam");
+    let mut positions = vec![actor.position];
+
+    for _ in 0..161 {
+        let report = server.try_simulation_tick_report().unwrap();
+        positions.extend(report.updates.iter().filter_map(|update| match update {
+            ServerUpdate::EntityUpdate(update) if update.id == actor.id => Some(update.position),
+            _ => None,
+        }));
+    }
+    let chunks = positions
+        .iter()
+        .map(|position| BlockPos::containing(*position).chunk_pos().x)
+        .collect::<Vec<_>>();
+
+    assert!(positions.iter().all(|position| {
+        topology
+            .canonicalize_position(*position)
+            .is_some_and(|canonical| canonical == *position)
+    }));
+    assert!(
+        positions
+            .iter()
+            .all(|position| position.x <= 2.0 || position.x >= 510.0)
+    );
+    assert!(chunks.windows(2).any(|pair| pair == [31, 0]));
+    assert!(chunks.windows(2).any(|pair| pair == [0, 31]));
+    assert!(server.entities.state(actor.id).is_some());
+}
+
+#[test]
+fn periodic_seam_break_and_place_share_one_canonical_block() {
+    let mut definition =
+        crate::DimensionDefinition::overworld(98_765, WorldGenerationProfile::FlatGrassV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 32);
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        definition,
+        PlayerChunkTrackingPolicy::default(),
+    );
+    load_chunk_view(&mut server, ChunkPos::new(0, 0));
+    send_player_move(&mut server, Vec3d::new(511.5, 80.0, 8.5));
+
+    let canonical_base = BlockPos::new(0, 79, 8);
+    let canonical_target = canonical_base.relative(Direction::Up);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(canonical_base, STONE)
+    );
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(canonical_target, STONE)
+    );
+    server.scheduler_mut().drain_pending_block_delta_events();
+
+    server
+        .try_handle_command(ClientCommand::PlayerAction(PlayerActionCommand {
+            pos: BlockPos::new(512, 80, 8),
+            direction: Direction::Up,
+            kind: PlayerActionKind::DebugInstantBreak,
+        }))
+        .unwrap();
+    assert_eq!(
+        server.scheduler().block_at_world(canonical_target),
+        Some(AIR)
+    );
+
+    assign_debug_hotbar_slot(&mut server, 0, generated_block_state_id(DIRT));
+    sync_carried_slot(&mut server, 0);
+    server
+        .try_handle_command(use_held_item_on(BlockHitResult::new(
+            Vec3d::new(512.5, 80.0, 8.5),
+            Direction::Up,
+            BlockPos::new(512, 79, 8),
+            false,
+        )))
+        .unwrap();
+
+    assert_eq!(
+        server.scheduler().block_at_world(canonical_target),
+        Some(DIRT)
+    );
+    assert_eq!(
+        server.scheduler().block_at_world(BlockPos::new(512, 80, 8)),
+        Some(DIRT)
+    );
+}
+
+#[test]
+fn periodic_fluid_tick_spreads_into_the_canonical_seam_neighbor() {
+    let mut definition =
+        crate::DimensionDefinition::overworld(98_765, WorldGenerationProfile::FlatGrassV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 32);
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        definition,
+        PlayerChunkTrackingPolicy::default(),
+    );
+    server.set_lighting_enabled(false);
+    let updates = server
+        .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 1,
+            chunk_tracking_radius: 1,
+        }))
+        .unwrap();
+    accept_player_position_updates(&mut server, &updates);
+    for _ in 0..60_000 {
+        let updates = server.try_poll().unwrap();
+        accept_player_position_updates(&mut server, &updates);
+        if server.pending_job_count() == 0 {
+            break;
+        }
+        if server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+        }
+    }
+
+    let source = BlockPos::new(0, 80, 8);
+    let seam_neighbor = BlockPos::new(511, 80, 8);
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(source.below(), STONE)
+    );
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(seam_neighbor.below(), STONE)
+    );
+    assert!(server.scheduler_mut().set_block_at_world(source, WATER));
+    for wall in [
+        BlockPos::new(1, 80, 8),
+        BlockPos::new(0, 80, 7),
+        BlockPos::new(0, 80, 9),
+    ] {
+        assert!(server.scheduler_mut().set_block_at_world(wall, STONE));
+    }
+    if server.scheduler().block_at_world(seam_neighbor) != Some(AIR) {
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(seam_neighbor, AIR)
+        );
+    }
+    server.liquid_ticks = FluidTickList::new();
+    server.schedule_fluid_tick(source, FluidKind::Water, 0);
+
+    let report = server.try_simulation_tick_report().unwrap();
+    assert_eq!(report.fluid_ticks_executed, 1, "{report:?}");
+
+    assert_eq!(
+        server
+            .scheduler()
+            .block_at_world(seam_neighbor)
+            .and_then(FluidKind::from_block_id),
+        Some(FluidKind::Water)
+    );
+}
+
+#[test]
+fn periodic_runtime_block_light_recomputes_the_opposite_seam_chunk() {
+    let mut definition =
+        crate::DimensionDefinition::overworld(98_765, WorldGenerationProfile::FlatGrassV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 32);
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        definition,
+        PlayerChunkTrackingPolicy::default(),
+    );
+    let updates = server
+        .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+            center: ChunkPos::new(0, 0),
+            render_distance: 1,
+            chunk_tracking_radius: 1,
+        }))
+        .unwrap();
+    accept_player_position_updates(&mut server, &updates);
+    for _ in 0..60_000 {
+        let updates = server.try_poll().unwrap();
+        accept_player_position_updates(&mut server, &updates);
+        if server.pending_job_count() == 0 {
+            break;
+        }
+        if server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+            server.wait_for_light_completion(Duration::from_secs(1));
+        }
+    }
+    assert_eq!(server.pending_job_count(), 0, "cylinder light view settled");
+
+    // Keep the canary in the terrain's non-empty surface section. The current
+    // light engine intentionally omits storage for wholly empty sections.
+    let source = BlockPos::new(0, 4, 8);
+    let seam_neighbor = BlockPos::new(511, 4, 8);
+    assert!(server.set_block_from_simulation(source, TORCH));
+
+    assert_eq!(
+        server.scheduler().raw_brightness_at_world(source, 15),
+        Some(14)
+    );
+    assert_eq!(
+        server
+            .scheduler()
+            .raw_brightness_at_world(seam_neighbor, 15),
+        Some(13)
+    );
+
+    assert!(server.set_block_from_simulation(source, AIR));
+    assert_eq!(
+        server
+            .scheduler()
+            .raw_brightness_at_world(seam_neighbor, 15),
+        Some(0)
+    );
+}
+
+#[test]
 fn finite_dimension_rejects_authority_outside_its_bounds() {
     let record = finite_flat_record();
     let finite = record.key.clone();

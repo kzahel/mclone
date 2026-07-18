@@ -129,6 +129,7 @@ impl ServerPlayerState {
             last_applied_move_sequence: self.last_applied_move_sequence,
             teleport_id: id,
             dismount_vehicle: false,
+            reset_continuity: false,
         }
     }
 
@@ -149,7 +150,10 @@ impl ServerPlayerState {
         self.on_ground = false;
         self.first_good_position = self.position;
         self.last_good_position = self.position;
-        self.correction_update(tick)
+        PlayerPositionUpdate {
+            reset_continuity: true,
+            ..self.correction_update(tick)
+        }
     }
 
     pub(crate) fn restored_position_update(
@@ -536,6 +540,7 @@ mod tests {
                 last_applied_move_sequence: 17,
                 teleport_id: 1,
                 dismount_vehicle: false,
+                reset_continuity: false,
             }
         );
         assert_eq!(
@@ -565,6 +570,15 @@ mod tests {
         assert!(player.accept_teleport(1));
         assert_eq!(player.awaiting_teleport(), None);
         assert_eq!(player.last_good_position(), Vec3d::new(1.0, 64.0, 2.0));
+    }
+
+    #[test]
+    fn initial_position_update_resets_client_continuity() {
+        let mut player = ServerPlayerState::default();
+
+        let update = player.initial_position_update(Vec3d::new(8.5, 64.0, 8.5), 0.0, 0.0, 7);
+
+        assert!(update.reset_continuity);
     }
 
     #[test]
@@ -599,6 +613,7 @@ mod tests {
                 last_applied_move_sequence: 0,
                 teleport_id: 2,
                 dismount_vehicle: false,
+                reset_continuity: false,
             }
         );
         assert_eq!(

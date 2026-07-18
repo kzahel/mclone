@@ -6,7 +6,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_app_runtime::frame_render::FullFrameRenderSummary;
-use mclone_client::{ActorPresentationId, ClientHost, ClientRuntime};
+use mclone_client::{ActorPresentationId, ClientRuntime};
 use mclone_core::{AIR_BLOCK_STATE_ID, BlockPos, BlockStateId, ChunkPos};
 use mclone_input::{FlatInputAction, FlatInputFrame, FlatInputIntent};
 use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
@@ -798,13 +798,7 @@ impl OffscreenFlatClientHost {
     }
 
     fn settle_remote_session(&mut self, remote_settle_ms: u64) -> Result<()> {
-        if remote_settle_ms == 0
-            || !self
-                .driver
-                .host()
-                .mono_client()
-                .is_some_and(|client| client.host() == ClientHost::RemoteDedicated)
-        {
+        if remote_settle_ms == 0 {
             return Ok(());
         }
         std::thread::sleep(Duration::from_millis(remote_settle_ms));

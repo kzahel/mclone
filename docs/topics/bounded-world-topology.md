@@ -2,7 +2,7 @@
 
 Topic: `bounded-world-topology`
 
-Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-4 have
+Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-5 have
 landed the exact Euclidean baseline, validated shared axis operations, persisted
 dimension topology with legacy defaulting, protocol ordering, and the client
 dimension fact. The finite Flat Grass canary now enforces authoritative bounds
@@ -15,8 +15,14 @@ renderer retain one canonical snapshot, mesh, and upload while choosing the
 observer-nearest terrain image; seam compile aliases, dirtying, readiness,
 culling, mono/multiview shaders, and opt-in debug presentation now agree on the
 wrapped neighbor. Inspected normal pixels have no visible seam, while a shared
-HUD and cyan seam grid expose it for testing. Tactical 195 now continues with
-movement, interaction, fluid, and actor crossings. The selected model is an exact
+HUD and cyan seam grid expose it for testing. Canonical player movement now
+preserves continuous local lifts; collision, raycast, reach, edits, runtime
+lighting, fluids, remote players, and a stable two-way scripted actor agree on
+the seam. Lifecycle teleports reset continuity explicitly, while ordinary
+corrections select the nearest lift. Inspected before/after actor frames show a
+small continuous crossing with one canonical identity. Tactical 195 now
+continues with persistence, network, platform, performance, and terrain
+handoff closeout. The selected model is an exact
 locally Euclidean voxel world with dimension-owned finite, periodic, or later
 patch-glued horizontal topology. Canonical simulation and object identity stay
 independent from observer-local lifts and optional presentation-only visual

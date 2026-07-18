@@ -903,6 +903,7 @@ fn engine_camera_controller_reports_correction_acceptance_and_resync() {
         last_applied_move_sequence: 17,
         teleport_id: 42,
         dismount_vehicle: false,
+        reset_continuity: false,
     };
 
     let accepted = camera.accept_position_update(update);

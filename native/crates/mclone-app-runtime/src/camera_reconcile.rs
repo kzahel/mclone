@@ -10,7 +10,7 @@
 //! camera options, and the XR `XrStartupViewPose` + tracking-origin policy.
 
 use anyhow::{Context, Result};
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, HorizontalTopology};
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
 use mclone_render_session::EngineCameraController;
 
@@ -22,6 +22,10 @@ use crate::{GameplayCommandTiming, GameplayCommandUpdatePolicy, elapsed_ms};
 /// the reconcile policy itself has no filesystem, thread, or platform API
 /// dependency.
 pub trait EngineCameraRuntime {
+    fn camera_topology(&self) -> HorizontalTopology {
+        HorizontalTopology::UNBOUNDED
+    }
+
     fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool>;
 
     fn send_camera_command_with_policy_timed(
@@ -44,6 +48,10 @@ impl<S> EngineCameraRuntime for crate::native_service_assembly::NativeSceneServi
 where
     S: crate::host_mode::RemoteDedicatedServerSession,
 {
+    fn camera_topology(&self) -> HorizontalTopology {
+        self.client().topology()
+    }
+
     fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
         self.send_gameplay_command(command)
     }
@@ -70,6 +78,10 @@ where
 }
 
 impl EngineCameraRuntime for crate::scene_session_runtime::SceneSessionRuntime {
+    fn camera_topology(&self) -> HorizontalTopology {
+        self.client().topology()
+    }
+
     fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
         self.send_gameplay_command(command)
     }
@@ -205,7 +217,8 @@ where
     let command_start = timing
         .is_some()
         .then(|| clock.expect("timed reconcile needs clock").now());
-    let changed = if let Some(report) = camera.next_pose_sync_command() {
+    let topology = runtime.camera_topology();
+    let changed = if let Some(report) = camera.next_pose_sync_command_in(topology) {
         let (changed, command_timing) = runtime
             .send_camera_command_with_policy_timed(report.command, context.pose_sync_policy)
             .with_context(|| format!("failed to sync {} player pose to server", context.lane))?;
@@ -250,8 +263,9 @@ where
     R: EngineCameraRuntime + ?Sized,
 {
     let mut changed = false;
+    let topology = runtime.camera_topology();
     for update in runtime.drain_camera_position_updates() {
-        let accepted = camera.accept_position_update(update);
+        let accepted = camera.accept_position_update_in(topology, update);
         runtime
             .send_camera_command(accepted.accept_command)
             .with_context(|| {
@@ -260,7 +274,9 @@ where
                     context.lane
                 )
             })?;
-        let resync = camera.corrected_pose_sync_command();
+        let resync = camera
+            .corrected_pose_sync_command_in(topology)
+            .context("corrected player pose left the active topology")?;
         runtime
             .send_camera_command(resync.command)
             .with_context(|| format!("failed to sync corrected {} player pose", context.lane))?;
@@ -308,7 +324,10 @@ where
         .is_some()
         .then(|| clock.expect("timed reconcile needs clock").now());
     let snapshot = camera.snapshot();
-    let center = snapshot.chunk_pos;
+    let center = runtime
+        .camera_topology()
+        .canonicalize_chunk(snapshot.chunk_pos)
+        .context("camera interest center left the active topology")?;
     let (changed, command_timing) =
         runtime.set_camera_interest_center_timed(center, GameplayCommandUpdatePolicy::SendOnly)?;
     if let (Some(start), Some(timing)) = (interest_start, timing) {

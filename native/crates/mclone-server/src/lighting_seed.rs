@@ -4,9 +4,9 @@
 //! `ChunkStatus::Light` bridge. The actual graph-backed propagation lives in
 //! Java-shaped light bridge modules.
 
-use mclone_core::ChunkPos;
 #[cfg(test)]
 use mclone_core::{CHUNK_WIDTH, PackedLightSection};
+use mclone_core::{ChunkPos, HorizontalTopology, Vec3d, chunk_middle_block_coord};
 #[cfg(test)]
 use mclone_worldgen::block::RawBlockId;
 
@@ -103,4 +103,47 @@ pub(crate) fn provisional_sky_light_includes_chunk(
     chunk_pos: ChunkPos,
 ) -> bool {
     (chunk_pos.x - target_pos.x).abs() <= 1 && (chunk_pos.z - target_pos.z).abs() <= 1
+}
+
+pub(crate) fn provisional_light_neighbor_lift(
+    topology: HorizontalTopology,
+    target: ChunkPos,
+    canonical_neighbor: ChunkPos,
+) -> Option<ChunkPos> {
+    if canonical_neighbor == target {
+        return None;
+    }
+    let lifted = topology.nearest_chunk_lift(
+        canonical_neighbor,
+        Vec3d::new(
+            f64::from(chunk_middle_block_coord(target.x)),
+            0.0,
+            f64::from(chunk_middle_block_coord(target.z)),
+        ),
+    );
+    let lifted = ChunkPos::new(i32::try_from(lifted.x).ok()?, i32::try_from(lifted.z).ok()?);
+    provisional_sky_light_includes_chunk(target, lifted).then_some(lifted)
+}
+
+#[cfg(test)]
+mod topology_tests {
+    use super::*;
+
+    #[test]
+    fn cylinder_light_neighbors_unfold_to_the_adjacent_seam_column() {
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+
+        assert_eq!(
+            provisional_light_neighbor_lift(topology, ChunkPos::new(0, 0), ChunkPos::new(31, 0),),
+            Some(ChunkPos::new(-1, 0))
+        );
+        assert_eq!(
+            provisional_light_neighbor_lift(topology, ChunkPos::new(31, 0), ChunkPos::new(0, 0),),
+            Some(ChunkPos::new(32, 0))
+        );
+        assert_eq!(
+            provisional_light_neighbor_lift(topology, ChunkPos::new(0, 0), ChunkPos::new(2, 0),),
+            None
+        );
+    }
 }

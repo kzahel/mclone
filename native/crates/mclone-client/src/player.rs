@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 use mclone_blocks::{BlockFluidKind, block_fluid_height, block_fluid_kind};
-use mclone_core::{Aabb, BlockPos, ChunkPos, Vec3d};
+use mclone_core::{Aabb, BlockPos, ChunkPos, HorizontalTopology, Vec3d};
 use mclone_protocol::{
     AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerPositionUpdate,
 };
@@ -1077,18 +1077,43 @@ impl LocalPlayerController {
     }
 
     pub fn next_move_player_command(&mut self) -> Option<ClientCommand> {
+        self.next_move_player_command_in(HorizontalTopology::UNBOUNDED)
+    }
+
+    pub fn next_move_player_command_in(
+        &mut self,
+        topology: HorizontalTopology,
+    ) -> Option<ClientCommand> {
         let movement = self.move_sync.next_command(self.pose, self.on_ground)?;
+        let movement = canonical_move_player_command(topology, movement)?;
         Some(self.move_sync.sequence_command(movement))
     }
 
     pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
+        self.pos_rot_move_player_command_in(HorizontalTopology::UNBOUNDED)
+            .expect("finite local player pose must remain inside the active topology")
+    }
+
+    pub fn pos_rot_move_player_command_in(
+        &mut self,
+        topology: HorizontalTopology,
+    ) -> Option<ClientCommand> {
         let movement = self.move_sync.pos_rot_command(self.pose, self.on_ground);
-        self.move_sync.sequence_command(movement)
+        let movement = canonical_move_player_command(topology, movement)?;
+        Some(self.move_sync.sequence_command(movement))
     }
 
     pub fn apply_player_position_update(&mut self, update: PlayerPositionUpdate) -> ClientCommand {
+        self.apply_player_position_update_in(HorizontalTopology::UNBOUNDED, update)
+    }
+
+    pub fn apply_player_position_update_in(
+        &mut self,
+        topology: HorizontalTopology,
+        update: PlayerPositionUpdate,
+    ) -> ClientCommand {
         let pose = self.pose;
-        let position = Vec3d::new(
+        let canonical_or_relative_position = Vec3d::new(
             if update.relative.x {
                 pose.position.x + update.position.x
             } else {
@@ -1114,6 +1139,13 @@ impl LocalPlayerController {
             pose.x_rot_degrees + f64::from(update.x_rot_degrees)
         } else {
             f64::from(update.x_rot_degrees)
+        };
+        let position = if update.reset_continuity {
+            topology
+                .canonicalize_position(canonical_or_relative_position)
+                .unwrap_or(canonical_or_relative_position)
+        } else {
+            topology.nearest_position_lift(canonical_or_relative_position, pose.position)
         };
         self.pose.set_position(position);
         self.pose.set_rot(y_rot_degrees, x_rot_degrees);
@@ -1533,6 +1565,33 @@ impl LocalPlayerController {
         result.vertical_collision = previous_vertical_collision;
         result.on_ground = previous_on_ground;
         result
+    }
+}
+
+fn canonical_move_player_command(
+    topology: HorizontalTopology,
+    command: MovePlayerCommand,
+) -> Option<MovePlayerCommand> {
+    match command {
+        MovePlayerCommand::Pos {
+            position,
+            on_ground,
+        } => Some(MovePlayerCommand::Pos {
+            position: topology.canonicalize_position(position)?,
+            on_ground,
+        }),
+        MovePlayerCommand::PosRot {
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground,
+        } => Some(MovePlayerCommand::PosRot {
+            position: topology.canonicalize_position(position)?,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground,
+        }),
+        MovePlayerCommand::Rot { .. } | MovePlayerCommand::StatusOnly { .. } => Some(command),
     }
 }
 
@@ -2623,6 +2682,67 @@ mod tests {
     }
 
     #[test]
+    fn periodic_controller_keeps_a_continuous_lift_and_sends_canonical_positions() {
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(511.75, 64.0, 2.0),
+            ..Default::default()
+        });
+        let _ = controller.next_move_player_command_in(topology);
+
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(512.25, 64.0, 2.0),
+            ..controller.pose()
+        });
+        let command = controller
+            .next_move_player_command_in(topology)
+            .expect("seam crossing command");
+
+        assert!(matches!(
+            command,
+            ClientCommand::MovePlayer(mclone_protocol::SequencedMovePlayerCommand {
+                movement: MovePlayerCommand::Pos {
+                    position: Vec3d { x, .. },
+                    ..
+                },
+                ..
+            }) if (x - 0.25).abs() < 1.0e-9
+        ));
+        assert_eq!(controller.pose().position.x, 512.25);
+
+        controller.apply_player_position_update_in(
+            topology,
+            PlayerPositionUpdate {
+                position: Vec3d::new(0.5, 64.0, 2.0),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                relative: PlayerPositionRelativeFlags::ABSOLUTE,
+                last_applied_move_sequence: 2,
+                teleport_id: 9,
+                dismount_vehicle: false,
+                reset_continuity: false,
+            },
+        );
+        assert_eq!(controller.pose().position.x, 512.5);
+
+        controller.apply_player_position_update_in(
+            topology,
+            PlayerPositionUpdate {
+                position: Vec3d::new(0.75, 64.0, 2.0),
+                y_rot_degrees: 0.0,
+                x_rot_degrees: 0.0,
+                relative: PlayerPositionRelativeFlags::ABSOLUTE,
+                last_applied_move_sequence: 2,
+                teleport_id: 10,
+                dismount_vehicle: false,
+                reset_continuity: true,
+            },
+        );
+        assert_eq!(controller.pose().position.x, 0.75);
+    }
+
+    #[test]
     fn controller_forces_position_sync_after_java_reminder_interval() {
         let mut controller = LocalPlayerController::new();
         controller.set_pose(LocalPlayerPose {
@@ -2691,6 +2811,7 @@ mod tests {
             last_applied_move_sequence: 3,
             teleport_id: 12,
             dismount_vehicle: false,
+            reset_continuity: false,
         });
 
         assert_eq!(
@@ -2728,6 +2849,7 @@ mod tests {
             last_applied_move_sequence: 4,
             teleport_id: 13,
             dismount_vehicle: false,
+            reset_continuity: false,
         });
 
         assert_eq!(controller.pose().position, Vec3d::new(5.0, 5.0, 9.0));
@@ -2816,6 +2938,27 @@ mod tests {
         assert!(!controller.vertical_collision());
         assert!(!controller.on_ground());
         assert_approx_eq(controller.pose().position.x, 0.7);
+    }
+
+    #[test]
+    fn colliding_movement_reads_the_canonical_block_across_a_periodic_seam() {
+        let mut client = client_with_blocks(&[(BlockPos::new(0, 0, 0), BlockStateId(7))]);
+        client.apply_update(ServerUpdate::WorldInfo {
+            dimension: mclone_protocol::DimensionKey::overworld(),
+            biome_zoom_seed: 12_345,
+            topology: HorizontalTopology::cylinder_x(0, 32),
+        });
+        let mut controller = LocalPlayerController::new();
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(511.5, 0.0, 0.5),
+            ..Default::default()
+        });
+
+        let result = controller.move_colliding(&client, Vec3d::new(2.0, 0.0, 0.0));
+
+        assert_approx_eq(result.traveled.x, 0.2);
+        assert!(result.horizontal_collision);
+        assert_approx_eq(controller.pose().position.x, 511.7);
     }
 
     #[test]

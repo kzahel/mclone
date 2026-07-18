@@ -22,6 +22,8 @@ use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::CompletedLightStatus;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
+use crate::lighting_seed::provisional_light_neighbor_lift;
+#[cfg(test)]
 use crate::lighting_seed::provisional_sky_light_includes_chunk;
 use crate::persistence::ScheduledTickRecord;
 use crate::{
@@ -421,15 +423,17 @@ fn worldgen_response_subset_positions(
     retained: &BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     resident_before: &BTreeSet<ChunkPos>,
     targets: &[ChunkPos],
+    topology: HorizontalTopology,
 ) -> Vec<ChunkPos> {
     retained
         .keys()
         .copied()
         .filter(|pos| {
             !resident_before.contains(pos)
-                || targets
-                    .iter()
-                    .any(|target| provisional_sky_light_includes_chunk(*target, *pos))
+                || targets.iter().any(|target| {
+                    topology.canonicalize_chunk(*target) == topology.canonicalize_chunk(*pos)
+                        || provisional_light_neighbor_lift(topology, *target, *pos).is_some()
+                })
         })
         .collect()
 }
@@ -441,8 +445,12 @@ fn encode_worldgen_response(
     resident_before: &BTreeSet<ChunkPos>,
     targets: &[ChunkPos],
 ) -> Result<Vec<u8>, String> {
-    let subset_positions =
-        worldgen_response_subset_positions(&result.retained_dependencies, resident_before, targets);
+    let subset_positions = worldgen_response_subset_positions(
+        &result.retained_dependencies,
+        resident_before,
+        targets,
+        descriptor.topology,
+    );
 
     let mut writer = FrameWriter::new(WORLDGEN_RESPONSE_MAGIC);
     writer.write_u64(job_id.0);

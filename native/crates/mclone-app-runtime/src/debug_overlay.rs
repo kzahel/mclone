@@ -26,6 +26,7 @@ pub struct DebugPaneStats {
     pub color_profile: &'static str,
     pub render_scale: f32,
     pub topology: HorizontalTopology,
+    pub topology_actor: Option<String>,
 }
 
 impl DebugPaneStats {
@@ -174,6 +175,11 @@ impl DebugPaneStats {
         ];
         if let Some(topology) = topology_debug_line(self.topology, self.position) {
             overlay.extra_lines.insert(1, topology);
+        }
+        if let Some(actor) = self.topology_actor.as_ref() {
+            overlay
+                .extra_lines
+                .insert(2.min(overlay.extra_lines.len()), actor.clone());
         }
         overlay
     }

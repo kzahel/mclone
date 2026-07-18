@@ -570,7 +570,7 @@ impl SkyLightWorld for SharedRetainedLightWorld {
 mod tests {
     use super::*;
     use mclone_core::{BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
-    use mclone_worldgen::block::{AIR, DIRT, STONE};
+    use mclone_worldgen::block::{AIR, DIRT, STONE, TORCH};
 
     fn test_snapshot(pos: ChunkPos, min_y: i32, height: i32) -> mclone_core::ChunkSnapshot {
         let section_count = height / SECTION_HEIGHT;
@@ -615,6 +615,71 @@ mod tests {
             STONE,
             "target status blocks should replace stale dependency blocks"
         );
+    }
+
+    #[test]
+    fn lifted_seam_neighbor_propagates_block_light_into_the_target_chunk() {
+        let target = ChunkPos::new(0, 0);
+        let lifted_neighbor = ChunkPos::new(-1, 0);
+        let len = (CHUNK_WIDTH * SECTION_HEIGHT * CHUNK_WIDTH) as usize;
+        let mut target_blocks = vec![AIR; len];
+        target_blocks[chunk_block_index(8, 0, 8)] = STONE;
+        let mut neighbor_blocks = vec![AIR; len];
+        neighbor_blocks[chunk_block_index(15, 1, 1)] = TORCH;
+        let status = PendingLightStatus::from_parts(
+            target,
+            test_snapshot(target, 0, SECTION_HEIGHT),
+            target_blocks,
+            vec![(lifted_neighbor, neighbor_blocks)],
+        );
+
+        let mut state = RetainedInitialLightState::new();
+        let sections = state
+            .compute_batch(PendingLightStatusBatch::new(vec![status]))
+            .pop()
+            .expect("completed target light status")
+            .1;
+        let packed = mclone_light::packed_light_at_local_block_or_fullbright(
+            &sections,
+            0,
+            SECTION_HEIGHT,
+            0,
+            1,
+            1,
+        );
+
+        assert_eq!(mclone_light::packed_block_light(packed), 13);
+    }
+
+    #[test]
+    fn lifted_positive_seam_neighbor_propagates_block_light_into_the_target_chunk() {
+        let target = ChunkPos::new(31, 0);
+        let lifted_neighbor = ChunkPos::new(32, 0);
+        let min_y = -64;
+        let height = 384;
+        let len = (CHUNK_WIDTH * height * CHUNK_WIDTH) as usize;
+        let mut target_blocks = vec![AIR; len];
+        target_blocks[chunk_block_index(8, 3 - min_y, 8)] = STONE;
+        let mut neighbor_blocks = vec![AIR; len];
+        neighbor_blocks[chunk_block_index(0, 4 - min_y, 1)] = TORCH;
+        let status = PendingLightStatus::from_parts(
+            target,
+            test_snapshot(target, min_y, height),
+            target_blocks,
+            vec![(lifted_neighbor, neighbor_blocks)],
+        );
+
+        let mut state = RetainedInitialLightState::new();
+        let sections = state
+            .compute_batch(PendingLightStatusBatch::new(vec![status]))
+            .pop()
+            .expect("completed target light status")
+            .1;
+        let packed = mclone_light::packed_light_at_local_block_or_fullbright(
+            &sections, min_y, height, 15, 4, 1,
+        );
+
+        assert_eq!(mclone_light::packed_block_light(packed), 13);
     }
 
     #[test]
