@@ -65,6 +65,11 @@ series implements the same concern, normally reuse the document slug in its
   previews, warm transfer as client presentation, and typed statistics proven
   across transfer and restart. Tactical
   [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) is complete.
+- [`world-height-and-volumetric-streaming.md`](world-height-and-volumetric-streaming.md):
+  current 256-block column/16-section shape, modern Java's 384-block Overworld
+  and custom-height envelope, accepted per-dimension finite-range contract,
+  practical cost tiers, near-term height cleanup, and the separate later path
+  toward section-addressed or cubic residency.
 - [`bounded-world-topology.md`](bounded-world-topology.md): accepted design for
   exact locally Euclidean finite and looping dimensions, including bounded
   planes and cylinders, flat tori, observer-local lifts, topology-aware

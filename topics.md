@@ -55,3 +55,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `bounded-world-topology` — finite and periodic canonical dimension identity,
   observer-local lifts, seam-safe simulation/rendering, and later exact patch
   atlases; Tactical 195 begins with a Flat Grass X-periodic cylinder
+- `world-height-and-volumetric-streaming` — authoritative finite per-dimension
+  height, taller-world cost controls, and the separate path toward partial
+  vertical or cubic residency
