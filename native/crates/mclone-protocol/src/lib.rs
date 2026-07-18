@@ -8,9 +8,9 @@ use std::error::Error;
 use std::fmt;
 
 use mclone_core::{
-    BlockHitResult, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision, ChunkSnapshot,
-    ChunkStatus, Direction, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
-    SECTION_HEIGHT, Vec3d,
+    AxisTopology, BlockHitResult, BlockPos, BlockStateId, CHUNK_WIDTH, ChunkPos, ChunkRevision,
+    ChunkSnapshot, ChunkStatus, Direction, HorizontalTopology, LIGHT_DATA_LAYER_BYTE_COUNT,
+    PackedChunkSection, PackedLightSection, SECTION_HEIGHT, Vec3d,
 };
 
 pub use player_lifecycle::{
@@ -28,7 +28,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 29;
+pub const PROTOCOL_VERSION: u32 = 30;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -445,6 +445,7 @@ pub enum ServerUpdate {
     WorldInfo {
         dimension: DimensionKey,
         biome_zoom_seed: i64,
+        topology: HorizontalTopology,
     },
     /// Vanilla-shaped respawn/dimension boundary. The client must replace its
     /// dimension-local replica before applying following world updates while
@@ -452,6 +453,7 @@ pub enum ServerUpdate {
     DimensionChange {
         dimension: DimensionKey,
         biome_zoom_seed: i64,
+        topology: HorizontalTopology,
         keep_player_state: bool,
     },
     ChunkSnapshot(ChunkSnapshot),
@@ -823,19 +825,25 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
         ServerUpdate::WorldInfo {
             dimension,
             biome_zoom_seed,
+            topology,
         } => {
+            validate_horizontal_topology(*topology)?;
             writer.write_u8(SERVER_UPDATE_WORLD_INFO);
             writer.write_string("dimension key", dimension.as_str())?;
             writer.write_i64(*biome_zoom_seed);
+            writer.write_horizontal_topology(*topology);
         }
         ServerUpdate::DimensionChange {
             dimension,
             biome_zoom_seed,
+            topology,
             keep_player_state,
         } => {
+            validate_horizontal_topology(*topology)?;
             writer.write_u8(SERVER_UPDATE_DIMENSION_CHANGE);
             writer.write_string("dimension key", dimension.as_str())?;
             writer.write_i64(*biome_zoom_seed);
+            writer.write_horizontal_topology(*topology);
             writer.write_bool(*keep_player_state);
         }
         ServerUpdate::ChunkSnapshot(snapshot) => {
@@ -965,6 +973,7 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             ServerUpdate::WorldInfo {
                 dimension,
                 biome_zoom_seed: reader.read_i64()?,
+                topology: reader.read_horizontal_topology()?,
             }
         }
         SERVER_UPDATE_DIMENSION_CHANGE => {
@@ -974,6 +983,7 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
             ServerUpdate::DimensionChange {
                 dimension,
                 biome_zoom_seed: reader.read_i64()?,
+                topology: reader.read_horizontal_topology()?,
                 keep_player_state: reader.read_bool()?,
             }
         }
@@ -1103,6 +1113,12 @@ fn validate_session_configuration(configuration: &SessionConfiguration) -> Proto
         ));
     }
     Ok(())
+}
+
+fn validate_horizontal_topology(topology: HorizontalTopology) -> ProtocolCodecResult<()> {
+    topology
+        .validate()
+        .map_err(|_| ProtocolCodecError::InvalidData("invalid dimension topology"))
 }
 
 fn validate_disconnect_reason(reason: &DisconnectReason) -> ProtocolCodecResult<()> {
@@ -1294,6 +1310,33 @@ impl ByteWriter {
     fn write_chunk_pos(&mut self, pos: ChunkPos) {
         self.write_i32(pos.x);
         self.write_i32(pos.z);
+    }
+
+    fn write_horizontal_topology(&mut self, topology: HorizontalTopology) {
+        self.write_axis_topology(topology.x);
+        self.write_axis_topology(topology.z);
+    }
+
+    fn write_axis_topology(&mut self, axis: AxisTopology) {
+        match axis {
+            AxisTopology::Unbounded => self.write_u8(0),
+            AxisTopology::Finite {
+                minimum_chunk,
+                maximum_chunk_exclusive,
+            } => {
+                self.write_u8(1);
+                self.write_i32(minimum_chunk);
+                self.write_i32(maximum_chunk_exclusive);
+            }
+            AxisTopology::Periodic {
+                minimum_chunk,
+                period_chunks,
+            } => {
+                self.write_u8(2);
+                self.write_i32(minimum_chunk);
+                self.write_u32(period_chunks);
+            }
+        }
     }
 
     fn write_block_pos(&mut self, pos: BlockPos) {
@@ -1721,6 +1764,24 @@ impl<'a> ByteReader<'a> {
         std::str::from_utf8(bytes)
             .map(str::to_owned)
             .map_err(|_| ProtocolCodecError::InvalidData("protocol string is not UTF-8"))
+    }
+
+    fn read_horizontal_topology(&mut self) -> ProtocolCodecResult<HorizontalTopology> {
+        let topology =
+            HorizontalTopology::new(self.read_axis_topology()?, self.read_axis_topology()?);
+        validate_horizontal_topology(topology)?;
+        Ok(topology)
+    }
+
+    fn read_axis_topology(&mut self) -> ProtocolCodecResult<AxisTopology> {
+        match self.read_u8()? {
+            0 => Ok(AxisTopology::Unbounded),
+            1 => Ok(AxisTopology::finite(self.read_i32()?, self.read_i32()?)),
+            2 => Ok(AxisTopology::periodic(self.read_i32()?, self.read_u32()?)),
+            _ => Err(ProtocolCodecError::InvalidData(
+                "unknown dimension axis topology tag",
+            )),
+        }
     }
 
     fn read_chunk_pos(&mut self) -> ProtocolCodecResult<ChunkPos> {
@@ -2830,6 +2891,7 @@ mod tests {
         let update = ServerUpdate::WorldInfo {
             dimension: DimensionKey::parse("mclone:moon").unwrap(),
             biome_zoom_seed: -1_234_567_890,
+            topology: HorizontalTopology::UNBOUNDED,
         };
 
         let bytes = encode_server_update(&update).unwrap();
@@ -2842,6 +2904,7 @@ mod tests {
         let update = ServerUpdate::DimensionChange {
             dimension: DimensionKey::parse("mclone:moon").unwrap(),
             biome_zoom_seed: -1_234_567_890,
+            topology: HorizontalTopology::cylinder_x(0, 32),
             keep_player_state: true,
         };
 

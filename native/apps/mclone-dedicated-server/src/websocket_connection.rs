@@ -328,6 +328,7 @@ mod tests {
             ServerUpdate::DimensionChange {
                 dimension: DimensionKey::parse("mclone:moon").unwrap(),
                 biome_zoom_seed: 54_321,
+                topology: mclone_core::HorizontalTopology::UNBOUNDED,
                 keep_player_state: true,
             },
             time_update(123),

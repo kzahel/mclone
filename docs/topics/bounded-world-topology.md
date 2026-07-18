@@ -2,9 +2,12 @@
 
 Topic: `bounded-world-topology`
 
-Status: **design direction accepted 2026-07-18; no runtime implementation has
-landed. Tactical 195 now owns the exact Euclidean baseline, finite-bound canary,
-and first real Flat Grass X-periodic cylinder. The selected model is an exact
+Status: **implementation in progress 2026-07-18. Tactical 195 Slices 0-1 have
+landed the exact Euclidean baseline, validated shared axis operations, persisted
+dimension topology with legacy defaulting, protocol ordering, and the client
+dimension fact. Finite and periodic authority have not landed yet. Tactical 195
+continues with the finite-bound canary and first real Flat Grass X-periodic
+cylinder. The selected model is an exact
 locally Euclidean voxel world with dimension-owned finite, periodic, or later
 patch-glued horizontal topology. Canonical simulation and object identity stay
 independent from observer-local lifts and optional presentation-only visual

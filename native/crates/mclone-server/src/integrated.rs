@@ -1313,12 +1313,14 @@ impl RealmServer {
         );
 
         let biome_zoom_seed = obfuscate_biome_zoom_seed(self.active_dimension.definition.seed);
+        let topology = self.active_dimension.definition.topology;
         let time_update = self.time_update();
         self.chunk_tracking.queue_update_for_player(
             player_id,
             ServerUpdate::DimensionChange {
                 dimension: destination,
                 biome_zoom_seed,
+                topology,
                 keep_player_state: true,
             },
         );
@@ -2734,6 +2736,7 @@ impl RealmServer {
                 ServerUpdate::DimensionChange {
                     dimension: destination.clone(),
                     biome_zoom_seed,
+                    topology: destination_definition.topology,
                     keep_player_state: true,
                 },
             );
@@ -3422,6 +3425,7 @@ impl RealmServer {
         ServerUpdate::WorldInfo {
             dimension: self.active_dimension.key.clone(),
             biome_zoom_seed: obfuscate_biome_zoom_seed(self.active_dimension.definition.seed),
+            topology: self.active_dimension.definition.topology,
         }
     }
 

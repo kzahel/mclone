@@ -4786,6 +4786,7 @@ mod tests {
             ServerUpdate::WorldInfo {
                 dimension: mclone_protocol::DimensionKey::overworld(),
                 biome_zoom_seed: 1124,
+                topology: mclone_core::HorizontalTopology::UNBOUNDED,
             },
             ServerUpdate::ChunkSnapshot(stone_test_snapshot(center)),
         ]))]);

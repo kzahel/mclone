@@ -1,8 +1,9 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: in progress 2026-07-18. Slice 0 is complete: the Euclidean contract,
-raw-coordinate caller inventory, shared ownership, fixture constants, and
-ordinary render baseline are locked. Runtime topology work begins in Slice 1.
+Status: in progress 2026-07-18. Slices 0-1 are complete: the Euclidean
+baseline, caller inventory, shared topology operations, persisted descriptor,
+protocol ordering, and canonical client dimension fact have landed. Slice 2 is
+the finite-bound authority canary.
 
 Topic: `bounded-world-topology`
 
@@ -339,10 +340,31 @@ facts use the existing shared screen-space HUD.
 
 The clean baseline passed 672 focused tests (`mclone-core`,
 `mclone-protocol`, `mclone-client`, and `mclone-server`). The inspected
-2560x1600 offscreen reference at `/tmp/mclone-desktop-offscreen.png` had SHA-256
-`46dfb7f3587e902bfd13ecb3e10bb558d690258cc1860f0acd0cb32a6c084cb3` and
-reported 64 sections, 11 drawn sections, two stable actors, and no GUI commands.
-This is the exact Euclidean pixel lock for the identity-routing slice.
+2560x1600 offscreen reference reported 64 sections, 11 drawn sections, two
+actors, and no GUI commands. Its actor animation makes the PNG timing-sensitive,
+so it is visual evidence rather than an exact pixel lock.
+
+### Slice 1 descriptor and identity (2026-07-18)
+
+`mclone-core` now provides validated unbounded, chunk-aligned finite, and
+chunk-aligned periodic axes plus explicit canonicalization, finite rejection,
+neighbor stepping, shortest displacement, one-lift view validation, view
+enumeration, and nearest-lift selection. Property tests cover negative and
+positive Euclidean remainder, idempotence, seam step/back, half-period ties,
+finite bounds, duplicate-view rejection, and continuous lifted poses.
+
+Dimension record v2 persists both horizontal axes. Version 1 records normalize
+to the current codec with exact unbounded topology. World and dimension-change
+updates carry validated topology after the biome seed and before dependent
+facts; the client retains it beside the current dimension while ordinary
+coordinates remain canonical replica keys. Protocol version 30 makes the wire
+change explicit.
+
+The four focused crates pass 682 tests, and every workspace test target
+compiles. A deterministic actor-free, frozen, fullbright 960x540 capture hashes
+to `cfa82c7e4590686302105b6e84cebaf11b41125bf45d8507e73a49e4a173255b`
+both before and after the identity routing. Repeated post-change captures are
+also byte-identical.
 
 ## Execution Checklist
 
@@ -363,15 +385,15 @@ fixture can be evaluated without topology code.
 
 ### Slice 1: descriptor and identity topology
 
-- [ ] Add the smallest validated finite/unbounded/periodic horizontal-axis
+- [x] Add the smallest validated finite/unbounded/periodic horizontal-axis
   descriptor in shared Rust.
-- [ ] Persist it beside generation and environment facts with exact legacy
+- [x] Persist it beside generation and environment facts with exact legacy
   unbounded-Euclidean migration.
-- [ ] Carry it through configuration, dimension transfer, native/browser
+- [x] Carry it through configuration, dimension transfer, native/browser
   storage, and in-memory/TCP/WebSocket paths before dependent play facts.
-- [ ] Implement topology operations and property tests under identity topology
+- [x] Implement topology operations and property tests under identity topology
   without changing any ordinary call result.
-- [ ] Route one narrow set of existing operations through identity topology and
+- [x] Route one narrow set of existing operations through identity topology and
   prove output/pixel/performance invariance.
 
 Gate: topology is a real dimension fact everywhere while all existing worlds

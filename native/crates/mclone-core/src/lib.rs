@@ -4,6 +4,7 @@ mod bit_storage;
 mod chunk;
 mod pos;
 pub mod time;
+mod topology;
 
 pub use bit_storage::{BitStorage, local_palette_bits_for, palette_bits_for};
 pub use chunk::{
@@ -18,6 +19,7 @@ pub use pos::{
     Aabb, BlockHitResult, BlockPos, Direction, HitResultType, Vec3d, block_pos_to_chunk_coord,
 };
 use sha2::{Digest, Sha256};
+pub use topology::{AxisTopology, ChunkLift, HorizontalTopology, LiftedChunkPos, TopologyError};
 
 pub const TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 

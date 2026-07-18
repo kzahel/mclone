@@ -19,7 +19,9 @@ use std::{
 #[cfg(not(target_arch = "wasm32"))]
 use rusqlite::{Connection, OptionalExtension, params};
 
-use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, Vec3d};
+use mclone_core::{
+    AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, Vec3d,
+};
 use mclone_protocol::{
     DEFAULT_PLAYER_MAX_HEALTH, DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot,
     MAX_PLAYER_STATISTIC_ENTRIES, MAX_STATISTIC_RESOURCE_KEY_BYTES, PlayerDamageCause,
@@ -48,7 +50,7 @@ pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 pub const PLAYER_RECORD_VERSION: u32 = 3;
-pub const DIMENSION_RECORD_VERSION: u32 = 1;
+pub const DIMENSION_RECORD_VERSION: u32 = 2;
 pub const WORLD_METADATA_VERSION: u32 = 2;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
@@ -405,6 +407,7 @@ impl PlayerRecord {
 pub struct DimensionDefinition {
     pub seed: i64,
     pub generation_profile: WorldGenerationProfile,
+    pub topology: HorizontalTopology,
     pub min_y: i32,
     pub height: i32,
     pub coordinate_scale: f64,
@@ -418,6 +421,7 @@ impl DimensionDefinition {
         Self {
             seed,
             generation_profile,
+            topology: HorizontalTopology::UNBOUNDED,
             min_y: 0,
             height: 256,
             coordinate_scale: 1.0,
@@ -4087,12 +4091,16 @@ fn write_dimension_record(
             "dimension height must be positive".to_owned(),
         ));
     }
+    definition.topology.validate().map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid dimension topology: {error}"))
+    })?;
     writer.write_all(DIMENSION_RECORD_MAGIC)?;
     write_u32(writer, DIMENSION_RECORD_VERSION)?;
     write_string(writer, record.key.as_str(), "dimension key")?;
     write_u64(writer, record.revision)?;
     write_i64(writer, definition.seed)?;
     write_world_generation_profile(writer, definition.generation_profile)?;
+    write_horizontal_topology(writer, definition.topology)?;
     write_i32(writer, definition.min_y)?;
     write_i32(writer, definition.height)?;
     write_f64(writer, definition.coordinate_scale)?;
@@ -4112,7 +4120,7 @@ fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRe
         ));
     }
     let codec_version = read_u32(reader)?;
-    if codec_version != DIMENSION_RECORD_VERSION {
+    if !(1..=DIMENSION_RECORD_VERSION).contains(&codec_version) {
         return Err(ChunkStoreError::InvalidData(format!(
             "unsupported dimension record codec version {codec_version}"
         )));
@@ -4124,9 +4132,17 @@ fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRe
         ))
     })?;
     let revision = read_u64(reader)?;
+    let seed = read_i64(reader)?;
+    let generation_profile = read_world_generation_profile(reader)?;
+    let topology = if codec_version >= 2 {
+        read_horizontal_topology(reader)?
+    } else {
+        HorizontalTopology::UNBOUNDED
+    };
     let definition = DimensionDefinition {
-        seed: read_i64(reader)?,
-        generation_profile: read_world_generation_profile(reader)?,
+        seed,
+        generation_profile,
+        topology,
         min_y: read_i32(reader)?,
         height: read_i32(reader)?,
         coordinate_scale: read_f64(reader)?,
@@ -4144,12 +4160,68 @@ fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRe
             "dimension height must be positive".to_owned(),
         ));
     }
+    definition.topology.validate().map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid dimension topology: {error}"))
+    })?;
     Ok(DimensionRecord {
         key,
-        codec_version,
+        codec_version: DIMENSION_RECORD_VERSION,
         revision,
         definition,
     })
+}
+
+fn write_horizontal_topology(
+    writer: &mut impl Write,
+    topology: HorizontalTopology,
+) -> ChunkStoreResult<()> {
+    topology.validate().map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid dimension topology: {error}"))
+    })?;
+    write_axis_topology(writer, topology.x)?;
+    write_axis_topology(writer, topology.z)
+}
+
+fn read_horizontal_topology(reader: &mut impl Read) -> ChunkStoreResult<HorizontalTopology> {
+    let topology =
+        HorizontalTopology::new(read_axis_topology(reader)?, read_axis_topology(reader)?);
+    topology.validate().map_err(|error| {
+        ChunkStoreError::InvalidData(format!("invalid dimension topology: {error}"))
+    })?;
+    Ok(topology)
+}
+
+fn write_axis_topology(writer: &mut impl Write, axis: AxisTopology) -> ChunkStoreResult<()> {
+    match axis {
+        AxisTopology::Unbounded => write_u8(writer, 0),
+        AxisTopology::Finite {
+            minimum_chunk,
+            maximum_chunk_exclusive,
+        } => {
+            write_u8(writer, 1)?;
+            write_i32(writer, minimum_chunk)?;
+            write_i32(writer, maximum_chunk_exclusive)
+        }
+        AxisTopology::Periodic {
+            minimum_chunk,
+            period_chunks,
+        } => {
+            write_u8(writer, 2)?;
+            write_i32(writer, minimum_chunk)?;
+            write_u32(writer, period_chunks)
+        }
+    }
+}
+
+fn read_axis_topology(reader: &mut impl Read) -> ChunkStoreResult<AxisTopology> {
+    match read_u8(reader)? {
+        0 => Ok(AxisTopology::Unbounded),
+        1 => Ok(AxisTopology::finite(read_i32(reader)?, read_i32(reader)?)),
+        2 => Ok(AxisTopology::periodic(read_i32(reader)?, read_u32(reader)?)),
+        tag => Err(ChunkStoreError::InvalidData(format!(
+            "unknown dimension axis topology tag {tag}"
+        ))),
+    }
 }
 
 fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata> {
@@ -5109,10 +5181,51 @@ mod tests {
         record.key = DimensionKey::parse("mclone:moon").unwrap();
         record.definition.coordinate_scale = 0.125;
         record.definition.has_sky_light = false;
+        record.definition.topology = HorizontalTopology::cylinder_x(0, 32);
 
         let bytes = encode_dimension_record(&record).unwrap();
 
         assert_eq!(decode_dimension_record(&bytes).unwrap(), record);
+    }
+
+    #[test]
+    fn binary_dimension_record_v1_defaults_to_unbounded_topology() {
+        let mut legacy = Vec::new();
+        legacy.extend_from_slice(DIMENSION_RECORD_MAGIC);
+        write_u32(&mut legacy, 1).unwrap();
+        write_string(
+            &mut legacy,
+            DimensionKey::overworld().as_str(),
+            "dimension key",
+        )
+        .unwrap();
+        write_u64(&mut legacy, 7).unwrap();
+        write_i64(&mut legacy, 44).unwrap();
+        write_world_generation_profile(&mut legacy, WorldGenerationProfile::FlatGrassV1).unwrap();
+        write_i32(&mut legacy, 0).unwrap();
+        write_i32(&mut legacy, 256).unwrap();
+        write_f64(&mut legacy, 1.0).unwrap();
+        write_bool(&mut legacy, true).unwrap();
+        write_bool(&mut legacy, false).unwrap();
+        write_bool(&mut legacy, false).unwrap();
+
+        let decoded = decode_dimension_record(&legacy).unwrap();
+
+        assert_eq!(decoded.codec_version, DIMENSION_RECORD_VERSION);
+        assert_eq!(decoded.definition.topology, HorizontalTopology::UNBOUNDED);
+    }
+
+    #[test]
+    fn binary_dimension_record_rejects_invalid_topology() {
+        let mut record = DimensionRecord::overworld(44, WorldGenerationProfile::FlatGrassV1);
+        record.definition.topology = HorizontalTopology::cylinder_x(0, 0);
+
+        assert!(
+            encode_dimension_record(&record)
+                .unwrap_err()
+                .to_string()
+                .contains("zero period")
+        );
     }
 
     #[test]

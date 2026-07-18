@@ -285,6 +285,7 @@ fn engine_render_session_retires_old_dimension_chunks_before_destination_updates
         ServerUpdate::DimensionChange {
             dimension: DimensionKey::parse("mclone:moon").expect("dimension key should be valid"),
             biome_zoom_seed: 41,
+            topology: mclone_core::HorizontalTopology::UNBOUNDED,
             keep_player_state: true,
         },
         ServerUpdate::ChunkSnapshot(empty_test_snapshot(destination_chunk, 0, SECTION_HEIGHT)),

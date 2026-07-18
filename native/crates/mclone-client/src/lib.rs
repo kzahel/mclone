@@ -20,8 +20,8 @@ mod block_shapes {
 }
 
 use mclone_core::{
-    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, PackedChunkSection, PackedLightSection,
-    SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
+    BlockPos, CHUNK_WIDTH, ChunkPos, ChunkSnapshot, HorizontalTopology, PackedChunkSection,
+    PackedLightSection, SECTION_HEIGHT, local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
@@ -89,6 +89,7 @@ pub struct ClientRuntime {
     disconnect_reason: Option<DisconnectReason>,
     current_dimension: DimensionKey,
     biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
     deferred_chunk_drops: VecDeque<ChunkSnapshot>,
@@ -116,6 +117,7 @@ impl ClientRuntime {
             disconnect_reason: None,
             current_dimension: DimensionKey::overworld(),
             biome_zoom_seed: None,
+            topology: HorizontalTopology::UNBOUNDED,
             chunk_view: None,
             chunks: BTreeMap::new(),
             deferred_chunk_drops: VecDeque::new(),
@@ -172,6 +174,10 @@ impl ClientRuntime {
         &self.current_dimension
     }
 
+    pub const fn topology(&self) -> HorizontalTopology {
+        self.topology
+    }
+
     pub fn set_chunk_view(&mut self, view: ChunkView) -> ClientCommand {
         self.chunk_view = Some(view.clone());
         ClientCommand::SetChunkView(view)
@@ -204,18 +210,22 @@ impl ClientRuntime {
             ServerUpdate::WorldInfo {
                 dimension,
                 biome_zoom_seed,
+                topology,
             } => {
                 self.current_dimension = dimension;
                 self.biome_zoom_seed = Some(biome_zoom_seed);
+                self.topology = topology;
             }
             ServerUpdate::DimensionChange {
                 dimension,
                 biome_zoom_seed,
+                topology,
                 keep_player_state,
             } => {
                 self.clear_server_replica();
                 self.current_dimension = dimension;
                 self.biome_zoom_seed = Some(biome_zoom_seed);
+                self.topology = topology;
                 if !keep_player_state {
                     self.total_experience = 0;
                     self.player_statistics = PlayerStatistics::default();
@@ -798,10 +808,12 @@ mod tests {
         runtime.apply_update(ServerUpdate::WorldInfo {
             dimension: moon.clone(),
             biome_zoom_seed: -99,
+            topology: HorizontalTopology::cylinder_x(0, 32),
         });
 
         assert_eq!(runtime.current_dimension(), &moon);
         assert_eq!(runtime.biome_zoom_seed(), Some(-99));
+        assert_eq!(runtime.topology(), HorizontalTopology::cylinder_x(0, 32));
     }
 
     #[test]
@@ -1028,6 +1040,7 @@ mod tests {
         runtime.apply_update(ServerUpdate::DimensionChange {
             dimension: moon.clone(),
             biome_zoom_seed: 987_654,
+            topology: HorizontalTopology::UNBOUNDED,
             keep_player_state: true,
         });
 
