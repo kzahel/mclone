@@ -230,6 +230,7 @@
     "reference:alpha": "bash ./scripts/decompile-alpha-mc.sh",
     "reference:beta": "bash ./scripts/decompile-beta-mc.sh",
     "oracle:alpha:terrain": "bash ./oracle/alpha/run-terrain-probe.sh",
+    "oracle:beta:terrain": "bash ./oracle/beta/run-terrain-probe.sh",
     "oracle:gen": "bash ./oracle/run.sh",
     "oracle:client": "node ./oracle/vanilla-client-launch.mjs",
     "oracle:visual-compare": "node ./oracle/visual-compare.mjs"
