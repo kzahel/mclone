@@ -3,17 +3,18 @@ use std::sync::OnceLock;
 use mclone_core::chunk_min_block_coord;
 
 use crate::biome::get_layered_biome_by_id;
-use crate::block::{DANDELION, GRASS, POPPY};
+use crate::block::{DANDELION, GRASS, POPPY, RawBlockId};
 use crate::feature::{
     BasicTreeConfiguration, FeatureRegion, FeatureWorld, PlacedFeature,
     apply_feature_table_to_region_timed, flower_patch, grass_patch, tree_feature,
 };
 use crate::levelgen::profile::PLAINS_BIOME_ID;
 use crate::noise::SeedDomain;
+use crate::placement::ConfiguredDecorator;
 
 use super::biomes::{MCLONE_OVERWORLD_FOREST_BIOME_ID, mclone_overworld_biome_id};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-1";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-2";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 
@@ -48,8 +49,8 @@ fn open_lowland_features() -> &'static [PlacedFeature] {
             vec![
                 tree_feature(BasicTreeConfiguration::oak(), 0, 0.20, 1),
                 grass_patch(GRASS, 4),
-                flower_patch(DANDELION, 1),
-                flower_patch(POPPY, 1),
+                occasional_flower_patch(DANDELION, 3),
+                occasional_flower_patch(POPPY, 5),
             ]
         })
         .as_slice()
@@ -62,11 +63,19 @@ fn wooded_upland_features() -> &'static [PlacedFeature] {
             vec![
                 tree_feature(BasicTreeConfiguration::oak(), 4, 0.35, 1),
                 grass_patch(GRASS, 2),
-                flower_patch(DANDELION, 1),
-                flower_patch(POPPY, 1),
+                occasional_flower_patch(DANDELION, 4),
+                occasional_flower_patch(POPPY, 6),
             ]
         })
         .as_slice()
+}
+
+fn occasional_flower_patch(block_id: RawBlockId, rarity: i32) -> PlacedFeature {
+    let mut patch = flower_patch(block_id, 1);
+    patch
+        .decorators
+        .insert(0, ConfiguredDecorator::chance(rarity));
+    patch
 }
 
 #[cfg(test)]

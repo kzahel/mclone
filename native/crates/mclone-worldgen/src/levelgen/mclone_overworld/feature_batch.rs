@@ -223,7 +223,7 @@ mod tests {
             }
         }
 
-        assert_eq!(decoration_counts, [57, 3_277, 934, 901]);
-        assert_eq!(hash, 2_613_968_940_188_657_488);
+        assert_eq!(decoration_counts, [57, 3_326, 383, 223]);
+        assert_eq!(hash, 6_043_725_934_403_648_447);
     }
 }
