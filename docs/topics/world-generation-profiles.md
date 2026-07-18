@@ -2,7 +2,7 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tacticals 187 and 191 are complete. `flat-grass-v1`,
+Status: **Tacticals 187, 188, and 191 are complete. `flat-grass-v1`,
 `small-island-v1`, and the first `mclone-overworld-v1` terrain language are
 live, persisted shared-Rust generators beside the unchanged Overworld;
 authored-only misses still produce void. Small Island now
@@ -16,9 +16,9 @@ prerequisites while the scheduler retains readiness, priority, admission,
 publication, lighting, and persistence. The alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
 regression guards rather than release compatibility promises. Tactical 188
-completed two terrain reviews, one relief tune, one flower-density tune, and
-two reuse/refactor checkpoints; host and persistence closeout is next. The
-creative terrain direction lives in
+completed two terrain reviews, one relief tune, one flower-density tune, two
+reuse/refactor checkpoints, and host plus persistence closeout. Tactical 192
+owns the next mountain/valley family. The creative terrain direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md).**
 
 This topic owns the current truth and durable decisions for selectable,
@@ -40,8 +40,9 @@ The first alternate generators are intentionally smaller:
 - seeded small island proves original, nontrivial, position-dependent terrain,
   shoreline continuity, biome output, guaranteed spawn, and neighbor-aware
   decoration;
-- mclone overworld now proves an unbounded target-only terrain caller while
-  deliberately deferring biome and decoration breadth.
+- mclone overworld now proves unbounded continuous terrain, a deliberately
+  small biome/surface language, and dependency-bearing vegetation through the
+  same host contracts as the other profiles.
 
 ## Current Truth
 
@@ -54,8 +55,9 @@ The stored server-owned `WorldGenerationProfile` has five values:
   central grass patch, sand shoreline, ocean, and a dependency-bearing
   oak/grass/flower feature stage;
 - `McloneOverworldV1`: continuous original ocean, coast, grass lowland, and
-  rolling upland terrain from inspectable profile-owned fields, currently with
-  a target-only plan and no decoration;
+  wooded rolling upland terrain from inspectable profile-owned fields, with
+  gravel/sand/grass/stone surface recipes and a profile-owned oak, grass, and
+  occasional-flower decoration language;
 - `AuthoredOnly`: persistence-backed content whose true misses become void.
 
 The profile already crosses world catalogs, realm/dimension metadata,
@@ -78,8 +80,8 @@ resident state resets when either descriptor fact changes.
 `WorldGenerationProfile::plan_features` is the single closed planning entry.
 It returns a deterministic `ChunkGenerationPlan` containing exact requested
 outputs, generator backend-work chunks, and typed chunk/status prerequisites.
-Overworld and Small Island declare a 3x3 feature-center and 5x5 mutable Surface
-dependency footprint for one target; Flat Grass and Mclone Overworld declare
+Overworld, Small Island, and Mclone Overworld declare a 3x3 feature-center and
+5x5 mutable Surface dependency footprint for one target; Flat Grass declares
 target-only work. The scheduler consumes every prerequisite generically, then
 applies its own view priority, deduplication, job admission, and publication
 policy. Planning occurs once for scheduler admission and is recomputed once by
@@ -105,7 +107,8 @@ Generator implementations remain concrete behind that contract:
 
 - dependency-bearing profiles publish one generic cache report; detailed
   `OverworldFeatureBatchTiming` remains optional and Overworld-only;
-- resident worker state contains separate Overworld and Small Island caches;
+- resident worker state contains separate Overworld, Small Island, and Mclone
+  caches;
 - surface, carver, feature-biome, and feature-table internals remain specific
   to `OverworldBiomeSource` and the current Overworld case.
 
@@ -157,7 +160,7 @@ Dispositions mean:
 | `flat-grass-v1` | `internal-mutable` | Layers, biome, seed use, label, tag, planning shape, and implementation may change in place | It is an internal proof generator with no shipped worlds or external consumers | Update focused fixtures/tests/docs and discard or migrate affected internal worlds |
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
-| `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, spawn, planning shape, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
+| `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, biome/surface/decoration rules, spawn, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
 
 For a proposed change, resolve every affected row before editing. The most
 restrictive disposition wins when a shared primitive affects multiple rows. If
@@ -352,19 +355,16 @@ adding profile branches.
 
 ## Next Work
 
-Continue Slice 5 in
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-prove current creation/catalog, SQLite/IndexedDB reopen, native/browser
-workers, dedicated/remote authority, dimension replacement, and warm-preview
-paths before closing the foundation. The two checkpoints shared only the
+Tactical 188 is complete. Creation/catalog display, SQLite and IndexedDB
+reopen, native and browser workers, dedicated/remote authority, independent
+dimensions, and mono/stereo warm replacement all carry the Mclone descriptor
+through existing shared contracts. The two checkpoints shared only the
 output-identical columnar biome payload traversal and the Small Island/Mclone
 Surface dependency-cache lifecycle; profile rule composition remains
-concrete. The accepted terrain, reuse, module, review, and long-term content
-direction lives in
-[`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
-tactical now has real continuous terrain and its first terrain language; it
-pauses for an explicit reuse/refactor review before host closeout or another
-content family.
+concrete. The accepted terrain and reuse direction lives in
+[`mclone-overworld-generation.md`](mclone-overworld-generation.md), and
+[`Tactical 192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
+owns the next bounded mountain/valley family.
 
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. Before adding it, extend the typed artifact vocabulary for
@@ -384,3 +384,4 @@ that metadata as an untyped chunk-buffer side channel.
 - [`../tactical/146-overworld-macro-terrain-geometry-parity.md`](../tactical/146-overworld-macro-terrain-geometry-parity.md)
 - [`../tactical/188-mclone-overworld-v1-terrain-foundation.md`](../tactical/188-mclone-overworld-v1-terrain-foundation.md)
 - [`../tactical/191-guarded-generation-planning-refactor.md`](../tactical/191-guarded-generation-planning-refactor.md)
+- [`../tactical/192-mclone-overworld-mountains-and-valleys.md`](../tactical/192-mclone-overworld-mountains-and-valleys.md)

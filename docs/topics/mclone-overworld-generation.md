@@ -3,12 +3,13 @@
 Topic: `mclone-overworld-generation`
 
 Status: the first continuous-terrain caller, two visual/distribution reviews,
-the first biome/surface/decoration language, and two reuse checkpoints
-completed 2026-07-18 as the separate internal-mutable
-`mclone-overworld-v1` profile while `overworld` remains the Minecraft Java
-1.17.1 reference path. Tactical
-[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is entering
-host and persistence closeout.
+the first biome/surface/decoration language, two reuse checkpoints, and full
+host/persistence closeout completed 2026-07-18 as the separate
+internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
+Minecraft Java 1.17.1 reference path. Tactical
+[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete;
+[`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md) owns the
+next mountain/valley content family.
 
 ## Scope
 
@@ -190,6 +191,15 @@ empty-request retention. A common wrapper with timing and lifecycle switches
 would hide those differences. Surface recipes and spawn searches likewise
 remain profile-owned; their similarities are vocabulary, not one rule.
 
+The foundation profile and seed descriptor now have direct closeout evidence
+through shared catalog creation/display, native descriptor sessions, the
+production browser Worker, SQLite and IndexedDB reopen, concurrent independent
+dimensions, transient dedicated authority, remote clients, and retained-world
+mono/stereo replacement. Persistence metadata is restored before a true miss
+is scheduled, and remote clients consume chunks without selecting or running
+the server generator. These are shared host contracts, not new terrain
+abstractions.
+
 ## Module Direction
 
 Start the new rules together without first reorganizing every existing
@@ -338,13 +348,12 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Continue Slice 5 of
-[`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-close the foundation across creation/catalog display, SQLite and IndexedDB
-reopen, native and browser worker execution, dedicated/remote authority,
-dimension replacement, and warm previews. Update the safety ledger evidence
-and select the next bounded terrain-content tactical only after those host
-contracts are current.
+Begin [`Tactical 192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
+with its pre-slice product and reuse inventory. Add only the ridge and
+ruggedness/erosion signals used by the first mountain/valley rule, review their
+production maps and first landscapes before abstraction, and then reserve a
+dedicated reuse/refactor checkpoint. Do not fold rivers, climate breadth,
+caves, or structures into that tactical.
 
 ## Related
 
@@ -354,3 +363,4 @@ contracts are current.
 - [`../structures.md`](../structures.md)
 - [`../tactical/187-generator-profile-flat-grass-and-seeded-island.md`](../tactical/187-generator-profile-flat-grass-and-seeded-island.md)
 - [`../tactical/191-guarded-generation-planning-refactor.md`](../tactical/191-guarded-generation-planning-refactor.md)
+- [`../tactical/192-mclone-overworld-mountains-and-valleys.md`](../tactical/192-mclone-overworld-mountains-and-valleys.md)

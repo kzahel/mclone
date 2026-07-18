@@ -14,8 +14,10 @@ and
 [`tactical/187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md).
 The original terrain direction lives in
 [`topics/mclone-overworld-generation.md`](topics/mclone-overworld-generation.md),
-and its first bounded foundation is through its second review in
-[`tactical/188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md).
+its first bounded foundation is complete in
+[`tactical/188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md),
+and mountains/valleys continue in
+[`tactical/192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md).
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -44,8 +46,9 @@ Landed native coverage:
 - Generated scheduled tick carry-through for fluids.
 - A stored, descriptor-driven `WorldGenerationProfile` boundary with
   `Overworld`, `FlatGrassV1`, `SmallIslandV1`, `McloneOverworldV1`, and
-  `AuthoredOnly`; flat grass and the first Mclone Overworld caller are
-  target-only, while authored-only maps true persistence misses to void.
+  `AuthoredOnly`; Flat Grass is target-only, Small Island and Mclone use typed
+  feature dependencies, and authored-only maps true persistence misses to
+  void.
 - Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
   payloads, origin spawn policy, native/dedicated publication, and save/reopen
   coverage.
@@ -111,7 +114,7 @@ Still not full vanilla parity:
   engine
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
-  terrain/material/biome palette and no decoration, mountains, rivers, caves,
+  terrain/material/biome/vegetation palette and no mountains, rivers, caves,
   or structures
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
@@ -142,3 +145,4 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md) for the current full decorated chunk parity target.
 - [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
 - [`188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md) for the first original continuous-terrain profile and its explicit reuse/refactor reviews.
+- [`192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md) for the next original relief family.

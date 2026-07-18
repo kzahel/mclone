@@ -1,9 +1,10 @@
 # Tactical 188: Mclone Overworld V1 Terrain Foundation
 
-Status: Slices 0 through 4 and Reviews 1 and 2 complete 2026-07-18; Slice 5 is
-next. The live internal profile now provides reviewed continuous terrain,
-biomes, surfaces, and vegetation through typed dependency planning and a
-two-caller shared Surface dependency cache. Durable direction lives in
+Status: complete 2026-07-18. The live internal profile now provides reviewed
+continuous terrain, biomes, surfaces, and vegetation through typed dependency
+planning and a two-caller shared Surface dependency cache, and its persisted
+identity is proven across local, Worker, dedicated, dimension, and retained
+world hosts. Durable direction lives in
 [`mclone-overworld-generation`](../topics/mclone-overworld-generation.md).
 
 Topic: `mclone-overworld-generation`
@@ -453,19 +454,76 @@ Execution record 2026-07-18:
 
 ### Slice 5: persistence, hosts, and closeout
 
-- [ ] Cover shared world creation/catalog selection and descriptor display.
-- [ ] Prove SQLite and IndexedDB reopen before generating unseen chunks.
-- [ ] Prove native threads, production Web Workers, integrated/dedicated
+- [x] Cover shared world creation/catalog selection and descriptor display.
+- [x] Prove SQLite and IndexedDB reopen before generating unseen chunks.
+- [x] Prove native threads, production Web Workers, integrated/dedicated
   startup, remote authoritative consumption, dimension replacement, and warm
   previews.
-- [ ] Validate desktop pixels first, then required browser, Android, and XR
+- [x] Validate desktop pixels first, then required browser, Android, and XR
   lanes affected by selection/startup changes.
-- [ ] Record review receipts, distribution facts, commands, and performance.
-- [ ] Update the safety ledger and living topic with the new internal state,
+- [x] Record review receipts, distribution facts, commands, and performance.
+- [x] Update the safety ledger and living topic with the new internal state,
   accepted defects, shared extractions, and selected next tactical.
 
 Gate: every host carries the same stored identity and authoritative output,
 and the next content slice is explicitly chosen.
+
+Execution record 2026-07-18:
+
+- shared catalog tests retain `Mclone Overworld` in the four-profile creation
+  cycle, serialize it through create options and catalog summaries, and carry
+  that selected identity into the shared session start. No app owns terrain
+  rules or interprets the profile beyond selection and display;
+- a threaded SQLite integration test now creates an Mclone world, persists a
+  block edit, reopens and validates metadata before loading that stored chunk,
+  then requests a deliberately distant true miss. The edit returns with
+  `LoadedFromStore` residency and the miss exactly matches fresh Mclone output
+  with `Generated` residency;
+- the production IndexedDB reload probe retained 121 chunks plus world
+  metadata, reported `mclone-overworld-v1` before and after reload, restored
+  the same grounded camera, and used the production server, worldgen, light,
+  and render Web Workers. The permanent generator smoke now includes this
+  Mclone reload lane;
+- native descriptor sessions, encoded Worker frames, and partition/order
+  locks remain covered by the server suite. The independent-dimension proof
+  now runs Mclone seed `12345` beside Small Island seed `-98765` and compares
+  both authoritative outputs against their concrete generators;
+- the selectable two-client dedicated smoke ran a transient Mclone server and
+  rendered authoritative chunks, entities, actors, and the other player in
+  both clients. The clients did not select Mclone locally. This exposed and
+  fixed two generic smoke/host defects: both processes had shared one profile
+  identity, and transient dedicated player saves used a chunk-only adapter
+  that rejected the queued record after one client disconnected;
+- the retained-world proof switched Mclone seed `12345` to `-98765` and back
+  through two gate crossings. Its schema-3 receipt recorded four captures,
+  98.316% A/B differing pixels, and a switchable standby with exact 16/16
+  initial upload lifecycle conservation. Synthetic stereo repeated A-to-B-to-A
+  with 50 sections and 11 drawn sections in the final frame;
+- Mclone lowlands also exposed two generic warm-smoke assumptions. The harness
+  now enables its required shared auxiliary-player script, and provisional
+  gate placement can search 48 vertical blocks below a high diagnostic camera
+  while preserving the same solid-support and clear-body requirements. GPU
+  advance count remains a timing fact rather than being mistaken for upload
+  lifecycle conservation;
+- inspected native dedicated, mono gate, and synthetic-stereo pixels and the
+  browser IndexedDB canvas. Android selection/startup adapters did not change
+  in this closeout, so the prior shared-profile Android/Quest-proxy evidence
+  remains applicable; the only shared XR-visible behavior change was gate
+  placement, covered by direct, mono, and synthetic-stereo validation;
+- final code gates passed: worldgen 244 with one known ignored gauntlet,
+  server 474, app runtime 290 plus integrations, dedicated server 38, scene
+  122 plus contracts, native client 170 plus three review-tool tests, WASM
+  compilation, TypeScript checking, and workspace formatting. The production
+  Mclone IndexedDB Worker probe and two-client dedicated smoke passed;
+- Slice 5 changed no generator algorithm. The final clean generation-cost
+  receipt therefore remains commit `55f4e13d`: 2,939.709 Surface chunks/s,
+  707.597 cold decorated target chunks/s, and 12,877.588 warm target chunks/s
+  for seed `12345`, radius one, three release iterations;
+- the safety disposition remains `internal-mutable`: there is still no shipped
+  build, named retained save, or external output consumer. Mountains and
+  valleys are selected as the next content family in
+  [`Tactical 192`](192-mclone-overworld-mountains-and-valleys.md); rivers,
+  caves, and structures remain outside this foundation.
 
 ## Evidence And Validation
 
