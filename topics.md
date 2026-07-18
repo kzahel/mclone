@@ -47,3 +47,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   deterministic, selectable `alpha-v1` shared generator; Tactical 193
 - `beta-1.7.3-reference` — pinned Beta 1.7.3 decompilation and source study
   comparing its old-Beta Overworld pipeline with Alpha
+- `beta-world-generation` — standalone selectable Beta 1.7.3 Overworld with
+  staged core parity and deterministic flavor-close population; Tactical 194

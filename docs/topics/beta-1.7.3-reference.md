@@ -4,9 +4,10 @@ Topic: `beta-1.7.3-reference`
 
 Status: **Minecraft Java Beta 1.7.3 is the selected Beta specimen. Its mapped
 client/server merge is reproducibly decompiled and its world-generation source
-has been traced and measured against Alpha v1.1.2_01. This is research only:
-there is no native Beta profile, parity oracle, compatibility identity, or
-implementation tactical.**
+has been traced and measured against Alpha v1.1.2_01. The source study is
+complete; the separately scoped native implementation is now active under
+[`beta-world-generation.md`](beta-world-generation.md) and Tactical
+[`194`](../tactical/194-beta-v1-world-generation.md).**
 
 ## Scope And Selection
 
@@ -20,11 +21,11 @@ questions at once:
 - how large a close, playable old-Beta Overworld port might be relative to the
   implemented `alpha-v1` profile.
 
-This report is intentionally not an implementation proposal. It does not
-allocate a `beta-v1` identity, select exact versus flavor-close population,
-decide whether the Nether belongs to a future profile, or authorize native
-Rust changes. Those choices should be made only after reviewing this source
-map and, if desired, building a staged Java oracle.
+This report preserves the source facts rather than serving as the mutable
+implementation plan. The later product decision selected an Overworld-only
+`beta-v1`, exact staged climate/terrain/surface/cave targets, and
+deterministic flavor-close population. The implementation topic owns those
+decisions and their evidence.
 
 The earlier Alpha ladder and historical selection rationale live in
 [`alpha-era-reference.md`](alpha-era-reference.md). The deliberately
@@ -426,21 +427,15 @@ Not yet built, by design:
 - Beta screenshots; or
 - Nether/Skylands scope and product decisions.
 
-## Recommended Next Discussion
+## Resolved Implementation Boundary
 
-Before writing Rust, choose these boundaries explicitly:
+The subsequent implementation decision selected:
 
-1. Is the target only the Beta 1.7.3 Overworld, or also the Nether?
-2. Should terrain, climate, surfaces, and caves be exact at pinned oracle
-   stages while population remains deterministic/flavor-close, as with Alpha?
-3. Should the profile reproduce Beta's biome palette exactly, including
-   unreachable declarations only as reference data, or expose only effective
-   generated biomes?
-4. Is spawn still a deterministic mclone adaptation rather than Beta's
-   unseeded sand-search walk?
-5. Should shared legacy noise/cave primitives be extracted from `alpha.rs`, or
-   should Beta remain a sibling direct port until both parity suites are stable?
-
-If those answers favor a close Overworld-only profile, the next bounded action
-should be a Java oracle and implementation tactical—not generator code in the
-same research commit.
+1. Beta 1.7.3 Overworld only, excluding Nether and Skylands;
+2. exact staged climate, terrain, surface, and cave targets with deterministic
+   flavor-close population;
+3. the ten effective generated biomes, not unreachable Ice Desert;
+4. deterministic mclone safe spawn rather than the historical sand-search
+   walk; and
+5. a sibling direct port until both Alpha and Beta parity suites prove any
+   smaller shared legacy extraction safe.

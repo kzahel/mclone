@@ -32,10 +32,13 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`beta-world-generation.md`](beta-world-generation.md): active `beta-v1`
+  implementation contract for a standalone Beta 1.7.3 Overworld with staged
+  core parity, deterministic flavor-close population, product selection, and
+  visual acceptance.
 - [`beta-1.7.3-reference.md`](beta-1.7.3-reference.md): reproducible Beta
   1.7.3 decompilation, traced old-Beta terrain/biome/cave/population
-  architecture, measured Alpha comparison, and the unresolved scope choices
-  that must precede any native implementation.
+  architecture, and measured Alpha comparison supporting the implementation.
 - [`alpha-era-reference.md`](alpha-era-reference.md): preserved early-worldgen
   study ladder, reproducible Alpha v1.1.2_01 decompilation and terrain oracle,
   detailed generator anatomy, and the Alpha v1.2.6 biome-era comparison that
