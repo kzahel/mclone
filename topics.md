@@ -45,3 +45,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   reuse/refactor review stages beginning with Tactical 188
 - `alpha-world-generation` — Alpha v1.1.2_01 reference archaeology and the
   deterministic, selectable `alpha-v1` shared generator; Tactical 193
+- `beta-1.7.3-reference` — pinned Beta 1.7.3 decompilation and source study
+  comparing its old-Beta Overworld pipeline with Alpha

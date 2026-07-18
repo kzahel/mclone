@@ -32,10 +32,14 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`beta-1.7.3-reference.md`](beta-1.7.3-reference.md): reproducible Beta
+  1.7.3 decompilation, traced old-Beta terrain/biome/cave/population
+  architecture, measured Alpha comparison, and the unresolved scope choices
+  that must precede any native implementation.
 - [`alpha-era-reference.md`](alpha-era-reference.md): preserved early-worldgen
   study ladder, reproducible Alpha v1.1.2_01 decompilation and terrain oracle,
   detailed generator anatomy, and the Alpha v1.2.6 biome-era comparison that
-  bounds a future reference-locked Alpha profile.
+  informed the implemented `alpha-v1` profile.
 - [`alpha-world-generation.md`](alpha-world-generation.md): active
   implementation contract for the internal `alpha-v1` profile—Alpha
   v1.1.2_01-shaped terrain, explicit winter state, semantic oracle mapping,

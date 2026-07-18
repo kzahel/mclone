@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Download and decompile a legacy Minecraft Alpha client with Ornithe Feather
-# mappings. Generated Mojang code and jars remain under the gitignored
-# reference/ tree.
+# Download and decompile a legacy Minecraft Alpha or Beta client with Ornithe
+# Feather mappings. Generated Mojang code and jars remain under the gitignored
+# reference/ tree. The Alpha-named entry point remains for compatibility; the
+# pinned Beta study uses scripts/decompile-beta-mc.sh.
 #
 # Usage:
 #   ./scripts/decompile-alpha-mc.sh [VERSION] [--out DIR] [--force]
@@ -19,7 +20,7 @@ set -euo pipefail
 MANIFEST_URL="https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 FEATHER_URL="https://github.com/OrnitheMC/feather.git"
 # Pin the mapping graph and tool configuration used for the first Alpha study.
-FEATHER_REF="${MCLONE_ALPHA_FEATHER_REF:-f9c6723b76d00cfffd48f10de317a4646919bbfc}"
+FEATHER_REF="${MCLONE_LEGACY_FEATHER_REF:-${MCLONE_ALPHA_FEATHER_REF:-f9c6723b76d00cfffd48f10de317a4646919bbfc}}"
 
 VERSION=""
 OUT_DIR=""
@@ -71,7 +72,7 @@ esac
 
 FEATHER_DIR="$OUT_DIR/tools/feather"
 
-log() { printf '[alpha-decompile] %s\n' "$*"; }
+log() { printf '[legacy-decompile] %s\n' "$*"; }
 
 find_python() {
     local candidate

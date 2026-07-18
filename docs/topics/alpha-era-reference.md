@@ -4,8 +4,9 @@ Topic: `alpha-era-reference`
 
 Status: **Alpha v1.1.2_01 is the selected primary specimen. Its client/server
 merged bytecode has been mapped and decompiled reproducibly, the terrain path
-has been traced, and a deterministic headless terrain probe is live. No Alpha
-generator profile has been added to the native engine.**
+has been traced, and a deterministic headless terrain probe is live. The
+separate `alpha-v1` native profile is implemented and validated; this document
+remains the historical source study.**
 
 ## Scope And Selection
 
@@ -379,11 +380,10 @@ It is small enough to review against one Java class, immediately shows whether
 the characteristic overhangs and floating terrain survived the port, and avoids
 mixing density errors with cave or feature-order errors.
 
-Known gaps in the present reference work:
+Known gaps in the historical reference work:
 
-- there is no native Alpha generator implementation yet;
-- the oracle does not yet fingerprint raw density, surface-only, or
-  post-population stages separately;
+- the oracle now fingerprints terrain, surface, and cave stages, but not raw
+  density or exact post-population output;
 - the population oracle still needs a controlled multi-chunk world fixture;
 - no representative screenshot atlas has been captured across several seeds;
   and

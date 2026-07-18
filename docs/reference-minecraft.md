@@ -143,7 +143,7 @@ Pipeline stages:
 6. Optionally download Parchment and rewrite mapped method parameters.
 7. For client builds, extract filtered textures, models, blockstates, and structures into `extracted/`.
 
-## Legacy Alpha Side Reference
+## Legacy Alpha And Beta Side References
 
 Minecraft Alpha predates Mojang's official mappings, so it has a separate,
 gitignored reference pipeline based on the CC0
@@ -171,6 +171,22 @@ future porting boundary live in
 The deliberately close-but-not-perfect native profile contract and current
 implementation status live separately in
 [`topics/alpha-world-generation.md`](topics/alpha-world-generation.md).
+
+The selected Beta comparison specimen is Beta 1.7.3, the mature old-Beta
+terrain family immediately before the Beta 1.8 Adventure Update generator
+change. It uses the same pinned Feather pipeline through a Beta-specific entry
+point:
+
+```bash
+# Build reference/minecraft-b1.7.3/src and the mapped merged jar.
+pnpm reference:beta
+```
+
+The generated tree remains gitignored. The research report traces Beta's
+climate-shaped Alpha density skeleton, biome surface/population policy, cave
+change, dimensions, features, chunk/storage evolution, and measured size. It
+also records the decisions required before any Rust implementation:
+[`topics/beta-1.7.3-reference.md`](topics/beta-1.7.3-reference.md).
 
 ## Mappings
 
