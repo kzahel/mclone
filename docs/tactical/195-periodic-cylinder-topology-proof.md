@@ -1,9 +1,8 @@
 # Tactical 195: Periodic Cylinder Topology Proof
 
-Status: planned after Tactical 192 closes its first mountain/valley family. It
-does not block that bounded terrain work, but the topology contract and flat
-cylinder proof must land before the next river, hydrology, climate, or major
-structure-breadth tactical. No runtime topology code has landed yet.
+Status: in progress 2026-07-18. Slice 0 is complete: the Euclidean contract,
+raw-coordinate caller inventory, shared ownership, fixture constants, and
+ordinary render baseline are locked. Runtime topology work begins in Slice 1.
 
 Topic: `bounded-world-topology`
 
@@ -310,18 +309,53 @@ Every inventoried caller must be classified as routed in this tactical,
 explicitly unavailable in the cylinder profile, or deferred behind a safe
 failure. A flat-looking screenshot alone is not completion evidence.
 
+## Execution Record
+
+### Slice 0 baseline (2026-07-18)
+
+The initial audit fixed the following ownership before behavior changed:
+
+- `mclone-core` owns the context-explicit descriptor and exact integer/float
+  topology operations; `BlockPos`, `ChunkPos`, and `Vec3d` remain unchanged;
+- `mclone-protocol` owns topology ordering on world/dimension configuration;
+- `mclone-server` owns canonical player/entity/block/chunk identity, view and
+  ticket enumeration, scheduler priority, generation admission, and storage;
+- `mclone-client` retains canonical replica facts and applies topology to
+  collision, raycast, movement continuity, and actor interpolation;
+- `mclone-render-session` and `mclone-scene` own canonical render identity and
+  observer-relative draw lifts; app crates receive no topology policy; and
+- the dedicated seam marker uses ordinary authored blocks plus the existing
+  shared HUD/outline paths, avoiding a new mono-only world renderer.
+
+The first fixture keeps the proposed `P = 32` chunks (512 blocks) and admits
+tracking radius at most 6, comfortably satisfying the one-lift invariant.
+Flat Grass is the only procedural cylinder profile. Authored Only may be used
+for the seam fixture. Natural spawning and Far LOD are disabled for Cylinder v0
+until their topology-aware neighborhood policies land; attempts to enable them
+must fail explicitly rather than see an edge. Particles have no authoritative
+resident state in the current fixture and remain unclaimed. The authored marker
+is visible in mono, stereo, and multiview because it is terrain; exact topology
+facts use the existing shared screen-space HUD.
+
+The clean baseline passed 672 focused tests (`mclone-core`,
+`mclone-protocol`, `mclone-client`, and `mclone-server`). The inspected
+2560x1600 offscreen reference at `/tmp/mclone-desktop-offscreen.png` had SHA-256
+`46dfb7f3587e902bfd13ecb3e10bb558d690258cc1860f0acd0cb32a6c084cb3` and
+reported 64 sections, 11 drawn sections, two stable actors, and no GUI commands.
+This is the exact Euclidean pixel lock for the identity-routing slice.
+
 ## Execution Checklist
 
 ### Slice 0: contract audit and clean baseline
 
-- [ ] Complete the raw-coordinate and neighbor-operation inventory above.
-- [ ] Lock exact Euclidean descriptor decode, server/client traces, scheduler
+- [x] Complete the raw-coordinate and neighbor-operation inventory above.
+- [x] Lock exact Euclidean descriptor decode, server/client traces, scheduler
   work, movement, interaction, persistence, and representative pixels.
-- [ ] Finalize the internal fixture period, view radius, marker, actor script,
+- [x] Finalize the internal fixture period, view radius, marker, actor script,
   fluid/light canaries, and debug receipt schema.
-- [ ] Record the Mclone topology-support matrix and the pre-river sequencing
+- [x] Record the Mclone topology-support matrix and the pre-river sequencing
   boundary in the living topic docs.
-- [ ] Decide which existing renderer/overlay path owns the world-space debug
+- [x] Decide which existing renderer/overlay path owns the world-space debug
   treatment through mono, stereo, and multiview.
 
 Gate: every consumer is classified, the ordinary path is locked, and the
