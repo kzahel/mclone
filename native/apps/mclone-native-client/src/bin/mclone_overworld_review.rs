@@ -8,6 +8,7 @@ use image::RgbaImage;
 use mclone_worldgen::levelgen::{
     MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL,
     McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldTerrainSample,
+    mclone_overworld_spawn_chunk,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -61,12 +62,16 @@ fn run() -> Result<()> {
         step: config.step_blocks,
     };
 
+    let sampler = McloneOverworldSampler::new(config.seed);
     let sample_start = Instant::now();
-    let region = McloneOverworldSampler::new(config.seed)
-        .sample_region(request)
-        .map_err(anyhow::Error::msg)?;
+    let region = sampler.sample_region(request).map_err(anyhow::Error::msg)?;
     let sample_elapsed_ms = sample_start.elapsed().as_secs_f64() * 1_000.0;
     let facts = RegionFacts::from_samples(&region.samples, request.width, request.depth);
+    let center_sample = sampler.sample(center_x, center_z);
+    let spawn_chunk = mclone_overworld_spawn_chunk(config.seed);
+    let spawn_x = spawn_chunk.min_block_x() + 8;
+    let spawn_z = spawn_chunk.min_block_z() + 8;
+    let spawn_sample = sampler.sample(spawn_x, spawn_z);
 
     let prefix = format!(
         "mclone-overworld-v1-seed-{}-chunk-{}-{}",
@@ -113,6 +118,12 @@ fn run() -> Result<()> {
         "seed": config.seed,
         "centerChunk": [config.chunk_x, config.chunk_z],
         "centerBlock": [center_x, center_z],
+        "centerSample": sample_json(center_sample),
+        "spawn": {
+            "chunk": [spawn_chunk.x, spawn_chunk.z],
+            "block": [spawn_x, spawn_z],
+            "sample": sample_json(spawn_sample),
+        },
         "boundsBlocks": {
             "min": [request.min_x, request.min_z],
             "max": [
@@ -171,6 +182,14 @@ fn run() -> Result<()> {
         receipt_path.display(),
     );
     Ok(())
+}
+
+fn sample_json(sample: McloneOverworldTerrainSample) -> serde_json::Value {
+    serde_json::json!({
+        "continentalness": sample.continentalness,
+        "relief": sample.relief,
+        "surfaceY": sample.surface_y,
+    })
 }
 
 #[derive(Clone, Debug)]
