@@ -1,9 +1,9 @@
 # Tactical 188: Mclone Overworld V1 Terrain Foundation
 
-Status: Slices 0 through 3 and Reviews 1 and 2 complete 2026-07-18; Slice 4 is
+Status: Slices 0 through 4 and Reviews 1 and 2 complete 2026-07-18; Slice 5 is
 next. The live internal profile now provides reviewed continuous terrain,
-biomes, surfaces, and vegetation through typed dependency planning. Durable
-direction lives in
+biomes, surfaces, and vegetation through typed dependency planning and a
+two-caller shared Surface dependency cache. Durable direction lives in
 [`mclone-overworld-generation`](../topics/mclone-overworld-generation.md).
 
 Topic: `mclone-overworld-generation`
@@ -398,16 +398,58 @@ Execution record 2026-07-18:
 
 ### Slice 4: second reuse and boundary checkpoint
 
-- [ ] Compare surface writers, feature recipes, region setup, cache ownership,
+- [x] Compare surface writers, feature recipes, region setup, cache ownership,
   and spawn queries across the three procedural profiles.
-- [ ] Extract only data/mechanism boundaries now shared by real callers.
-- [ ] Reject abstractions that hide different profile rules behind switches.
-- [ ] Confirm vanilla rule tables/PRNG assumptions did not enter mclone code
+- [x] Extract only data/mechanism boundaries now shared by real callers.
+- [x] Reject abstractions that hide different profile rules behind switches.
+- [x] Confirm vanilla rule tables/PRNG assumptions did not enter mclone code
   and terrain knowledge did not enter scheduler or platform code.
-- [ ] Re-run output locks and performance comparisons after refactors.
+- [x] Re-run output locks and performance comparisons after refactors.
 
 Gate: concrete profile modules remain clear, shared mechanisms stay small, and
 the next terrain family will not copy known common policy.
+
+Execution record 2026-07-18:
+
+- compared the live Small Island, Mclone, and reference Overworld callers.
+  Small Island and Mclone had the same seed reset, externally supplied input
+  insertion, sorted Surface-input assembly, overlap reuse, plan-bounded
+  retention, retained-input response, and empty-plan clearing lifecycle;
+- extracted that exact two-caller lifecycle into the internal
+  `SurfaceDependencyCache`. Each profile retains its public wrapper/report and
+  supplies its own pure plan and Surface generator. Direct mechanism tests pin
+  seed reset, 20-of-25 overlap reuse, five new inputs, seeded-input pruning,
+  retained count, ordering, and empty-plan clearing;
+- deliberately left reference Overworld on its existing cache. It reuses a
+  heavyweight generator and biome source, produces liquid-carved inputs,
+  records phase timing, has a three-dimensional biome payload, and preserves
+  residency for an empty request. Pulling it into the new helper would require
+  timing hooks and lifecycle switches that obscure rather than unify policy;
+- rejected a generic surface-recipe writer. Small Island's radial stone floor,
+  sand band, grass cap, and post-decoration spawn restoration are different
+  rules from Mclone's gravel floor, wider beach, grass/soil recipe, and relief
+  exposure. The common block-buffer setter is already the honest mechanism;
+- kept configured feature implementations, `FeatureRegion`, ordered traversal,
+  and typed plans shared, while retaining complete feature tables, decoration
+  seed domains, biome resolution, target extraction, and spawn rules in each
+  profile. Region construction is only a few neutral lines and did not warrant
+  a callback abstraction;
+- full validation after the output-identical extraction passed 244 worldgen
+  tests with one known gauntlet ignored, 473 server tests, and workspace
+  formatting. Existing reference oracle locks, both profile fingerprints,
+  cache/order/partition tests, scheduler plans, and worker codecs remained
+  unchanged;
+- clean commit `55f4e13d` cards for Small Island and Mclone each reported
+  1,225/1,225 visible and target-ready chunks with zero target stream/render
+  work pending. Both retained their reviewed pixels. The production browser
+  Worker app-loop also passed for Mclone after the extraction;
+- the clean release probe measured 2,939.709 Mclone Surface chunks/s, 707.597
+  cold decorated target chunks/s, and 12,877.588 warm target chunks/s versus
+  2,787.828, 700.838, and 12,682.010 before extraction. Treat the small
+  variation as evidence of no material regression, not an optimization claim;
+- no compatibility-safety disposition changed. Both consumers remain
+  internal-mutable, while the reference-locked path validated its output but
+  did not adopt the helper.
 
 ### Slice 5: persistence, hosts, and closeout
 

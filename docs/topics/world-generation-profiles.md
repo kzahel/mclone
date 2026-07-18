@@ -16,9 +16,9 @@ prerequisites while the scheduler retains readiness, priority, admission,
 publication, lighting, and persistence. The alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
 regression guards rather than release compatibility promises. Tactical 188
-completed two terrain reviews after one relief tune and one flower-density
-tune and is at the second reuse/refactor checkpoint; the creative terrain
-direction lives in
+completed two terrain reviews, one relief tune, one flower-density tune, and
+two reuse/refactor checkpoints; host and persistence closeout is next. The
+creative terrain direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md).**
 
 This topic owns the current truth and durable decisions for selectable,
@@ -352,13 +352,15 @@ adding profile branches.
 
 ## Next Work
 
-Continue Slice 4 in
+Continue Slice 5 in
 [`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-compare surface writing, feature recipes, region setup, dependency cache
-ownership, and spawn queries across the three procedural callers. The first
-checkpoint shared only the output-identical columnar biome payload traversal;
-profile rule composition remains concrete. The accepted terrain, reuse,
-module, review, and long-term content direction lives in
+prove current creation/catalog, SQLite/IndexedDB reopen, native/browser
+workers, dedicated/remote authority, dimension replacement, and warm-preview
+paths before closing the foundation. The two checkpoints shared only the
+output-identical columnar biome payload traversal and the Small Island/Mclone
+Surface dependency-cache lifecycle; profile rule composition remains
+concrete. The accepted terrain, reuse, module, review, and long-term content
+direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
 tactical now has real continuous terrain and its first terrain language; it
 pauses for an explicit reuse/refactor review before host closeout or another

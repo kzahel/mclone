@@ -66,6 +66,10 @@ Landed native coverage:
   diagnostics are explicitly optional. Overworld reports cache and timing;
   Small Island and Mclone report their concrete caches without synthesizing
   Overworld timing; target-only Flat Grass has neither.
+- Small Island and Mclone share the plan-bounded Surface dependency-cache
+  lifecycle while retaining profile-owned surface generation, biome payloads,
+  decoration domains/tables, target post-processing, and spawn guarantees.
+  Reference Overworld retains its distinct timed, carved-stage cache path.
 
 Important native entry points:
 

@@ -3,11 +3,12 @@
 Topic: `mclone-overworld-generation`
 
 Status: the first continuous-terrain caller, two visual/distribution reviews,
-and the first biome, surface, and decoration language completed 2026-07-18 as
-the separate internal-mutable `mclone-overworld-v1` profile while `overworld`
-remains the Minecraft Java 1.17.1 reference path. Tactical
+the first biome/surface/decoration language, and two reuse checkpoints
+completed 2026-07-18 as the separate internal-mutable
+`mclone-overworld-v1` profile while `overworld` remains the Minecraft Java
+1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is entering
-its second dedicated reuse and boundary checkpoint.
+host and persistence closeout.
 
 ## Scope
 
@@ -176,10 +177,18 @@ and wooded upland, then selects separate gravel-floor, sand-beach, grass-soil,
 and sparse exposed-stone recipes. Decoration uses an independent Mclone seed
 domain and profile-owned oak/grass/flower tables through the existing placed
 features, `FeatureRegion`, and ordered executor. Its plan declares a 3-by-3
-feature work band and 5-by-5 Surface prerequisite band. A concrete Mclone
-cache currently makes that contract executable; comparing its lifecycle with
-Small Island and reference Overworld is intentionally deferred to the second
-checkpoint rather than hidden behind a premature generic cache.
+feature work band and 5-by-5 Surface prerequisite band. The second checkpoint
+extracted the identical seed/reset/input/reuse/retention lifecycle shared by
+Mclone and Small Island into `SurfaceDependencyCache`. Their surface
+generators, feature tables, biome assembly, target post-processing, public
+reports, and spawn rules remain concrete.
+
+Reference Overworld deliberately retains its existing cache. It reuses a
+heavyweight generator and biome source, creates liquid-carved inputs, records
+phase timing, writes three-dimensional biome payloads, and has different
+empty-request retention. A common wrapper with timing and lifecycle switches
+would hide those differences. Surface recipes and spawn searches likewise
+remain profile-owned; their similarities are vocabulary, not one rule.
 
 ## Module Direction
 
@@ -329,12 +338,13 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Continue Slice 4 of
+Continue Slice 5 of
 [`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-compare the three procedural profiles' surface writing, feature recipes,
-region setup, dependency caches, and spawn queries. Extract only boundaries
-with real shared ownership, preserve profile rules and reference ordering, and
-land any output-identical refactor separately from later terrain content.
+close the foundation across creation/catalog display, SQLite and IndexedDB
+reopen, native and browser worker execution, dedicated/remote authority,
+dimension replacement, and warm previews. Update the safety ledger evidence
+and select the next bounded terrain-content tactical only after those host
+contracts are current.
 
 ## Related
 
