@@ -6,6 +6,9 @@ This document is the current map for native Java 1.17.1-style lighting work.
 The broad architecture reference remains [`../lighting.md`](../lighting.md);
 the first concrete native slice is
 [`../tactical/026-lighting-pipeline.md`](../tactical/026-lighting-pipeline.md).
+Presentation-side point lights and dynamic shadows are a separate concern in
+[`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort this
+stored-light parity contract.
 This topic records where the subsystem stands now, how the next slices should
 compose, and which Java/native boundaries to preserve.
 
