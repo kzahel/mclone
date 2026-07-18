@@ -30,6 +30,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   Initial dual-integrated-host ownership smoke added; no commit series yet
 - `performance` — high-priority known performance issues, measured pickup
   queue, baselines, and cross-platform performance follow-ups
+- `lush-grass-rendering` — dense biome-tinted procedural grass, patch
+  instancing, distance LOD, wind, entity interaction, and cross-view rendering
+  research/direction
 - `compiled-figure-rendering` — compiled figure artifact, static local-space
   GPU geometry, presentation-rate rigid-part animation, instancing, and
   generated figure LOD direction; Tactical 181 static-box proof

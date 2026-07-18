@@ -113,6 +113,10 @@ series implements the same concern, normally reuse the document slug in its
   and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+- [`lush-grass-rendering.md`](lush-grass-rendering.md): pinned Grassier Grass
+  artifact/reconstruction research, observed section/wind/interaction/color
+  architecture, attribution and license constraints, and the accepted
+  independent mclone patch-instancing, LOD, multiview, and validation direction.
 - [`compiled-figure-rendering.md`](compiled-figure-rendering.md): selected
   direction for compiling Asset Lab primitives, textures, rigs, clips, and
   generated LODs into shared static GPU figures with presentation-rate
