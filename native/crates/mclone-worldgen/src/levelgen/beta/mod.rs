@@ -1,6 +1,7 @@
 mod caves;
 mod climate;
 mod noise;
+mod population;
 
 use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
@@ -15,6 +16,10 @@ use climate::BetaClimateSource;
 use noise::BetaPerlinNoise;
 
 pub use climate::{BetaBiome, BetaClimateRegion, beta_biome_from_climate};
+pub use population::{
+    BetaFeatureBatchResult, BetaFeatureDependencyCache, BetaFeatureDependencyCacheReport,
+    generate_beta_chunk,
+};
 
 pub const BETA_BUILD_HEIGHT: i32 = 256;
 pub const BETA_ACTIVE_HEIGHT: i32 = 128;
@@ -32,6 +37,7 @@ pub enum BetaGenerationStage {
     Terrain,
     Surface,
     Caves,
+    Features,
 }
 
 #[derive(Clone, Debug)]
@@ -213,6 +219,9 @@ pub fn generate_beta_stage_chunk(
     chunk_z: i32,
     stage: BetaGenerationStage,
 ) -> GeneratedChunk {
+    if stage == BetaGenerationStage::Features {
+        return generate_beta_chunk(seed, chunk_x, chunk_z);
+    }
     let banks = BetaNoiseBanks::new(seed);
     let climate_source = BetaClimateSource::new(seed);
     let climate = climate_source.region(
@@ -226,10 +235,44 @@ pub fn generate_beta_stage_chunk(
     if !matches!(stage, BetaGenerationStage::Terrain) {
         build_beta_surfaces(&banks, &climate, &mut chunk);
     }
-    if stage == BetaGenerationStage::Caves {
+    if matches!(stage, BetaGenerationStage::Caves) {
         carve_beta_caves(seed, &mut chunk);
     }
     chunk.prime_worldgen_heightmaps();
+    GeneratedChunk::from_mutable_buffer_with_biomes(chunk, beta_biome_payload(&climate))
+}
+
+fn generate_beta_surface_buffer_with_core(
+    banks: &BetaNoiseBanks,
+    climate_source: &BetaClimateSource,
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> MutableChunkBlockBuffer {
+    let climate = climate_source.region(
+        chunk_min_block_coord(chunk_x),
+        chunk_min_block_coord(chunk_z),
+        16,
+        16,
+    );
+    let mut chunk = MutableChunkBlockBuffer::new(chunk_x, chunk_z, 0, BETA_BUILD_HEIGHT);
+    build_beta_terrain(banks, &climate, &mut chunk);
+    build_beta_surfaces(banks, &climate, &mut chunk);
+    carve_beta_caves(seed, &mut chunk);
+    chunk.prime_worldgen_heightmaps();
+    chunk
+}
+
+fn beta_generated_chunk(
+    chunk: MutableChunkBlockBuffer,
+    climate_source: &BetaClimateSource,
+) -> GeneratedChunk {
+    let climate = climate_source.region(
+        chunk_min_block_coord(chunk.chunk_x),
+        chunk_min_block_coord(chunk.chunk_z),
+        16,
+        16,
+    );
     GeneratedChunk::from_mutable_buffer_with_biomes(chunk, beta_biome_payload(&climate))
 }
 
@@ -439,6 +482,31 @@ pub const fn beta_semantic_block_id(native: u8) -> Option<u8> {
         GRAVEL => Some(13),
         SANDSTONE => Some(24),
         ICE => Some(79),
+        crate::block::GOLD_ORE => Some(14),
+        crate::block::IRON_ORE => Some(15),
+        crate::block::COAL_ORE => Some(16),
+        crate::block::OAK_LOG => Some(17),
+        crate::block::SPRUCE_LOG => Some(17),
+        crate::block::BIRCH_LOG => Some(17),
+        crate::block::OAK_LEAVES => Some(18),
+        crate::block::SPRUCE_LEAVES => Some(18),
+        crate::block::BIRCH_LEAVES => Some(18),
+        crate::block::DANDELION => Some(37),
+        crate::block::POPPY => Some(38),
+        crate::block::BROWN_MUSHROOM => Some(39),
+        crate::block::RED_MUSHROOM => Some(40),
+        crate::block::DIAMOND_ORE => Some(56),
+        crate::block::REDSTONE_ORE => Some(73),
+        crate::block::SNOW => Some(78),
+        crate::block::CACTUS => Some(81),
+        crate::block::CLAY => Some(82),
+        crate::block::SUGAR_CANE => Some(83),
+        crate::block::PUMPKIN => Some(86),
+        crate::block::LAPIS_ORE => Some(21),
+        crate::block::GRASS => Some(31),
+        crate::block::FERN => Some(31),
+        crate::block::DEAD_BUSH => Some(32),
+        crate::block::CAVE_AIR => Some(0),
         _ => None,
     }
 }
@@ -524,6 +592,39 @@ mod tests {
         assert_eq!(
             semantic_sha256(&negative),
             "8eb348ee2438cbd02aa6ce58701cefe9b91db92d920154df1bacc7a949844a2c"
+        );
+    }
+
+    #[test]
+    fn beta_population_adds_the_representative_ore_set() {
+        let chunk = generate_beta_chunk(12_345, 0, 0);
+        assert!(chunk.block_count(crate::block::COAL_ORE) > 0);
+        assert!(chunk.block_count(crate::block::IRON_ORE) > 0);
+        assert!(chunk.block_count(crate::block::GOLD_ORE) > 0);
+        assert!(chunk.block_count(crate::block::REDSTONE_ORE) > 0);
+        assert!(chunk.block_count(crate::block::DIAMOND_ORE) > 0);
+        assert!(chunk.block_count(crate::block::LAPIS_ORE) > 0);
+    }
+
+    #[test]
+    fn beta_feature_batches_are_partition_independent() {
+        let left = mclone_core::ChunkPos::new(0, 0);
+        let right = mclone_core::ChunkPos::new(1, 0);
+        let mut batched_cache = BetaFeatureDependencyCache::new();
+        let batched = batched_cache.generate_features_chunks(12_345, [right, left]);
+
+        let mut left_cache = BetaFeatureDependencyCache::new();
+        let isolated_left = left_cache.generate_features_chunks(12_345, [left]);
+        let mut right_cache = BetaFeatureDependencyCache::new();
+        let isolated_right = right_cache.generate_features_chunks(12_345, [right]);
+
+        assert_eq!(
+            batched.chunks[&left].blocks(),
+            isolated_left.chunks[&left].blocks()
+        );
+        assert_eq!(
+            batched.chunks[&right].blocks(),
+            isolated_right.chunks[&right].blocks()
         );
     }
 

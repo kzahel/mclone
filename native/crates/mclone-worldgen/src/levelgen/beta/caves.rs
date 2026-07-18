@@ -283,16 +283,16 @@ impl BetaCaveCarver {
     }
 }
 
-fn beta_floor(value: f64) -> i32 {
+pub(super) fn beta_floor(value: f64) -> i32 {
     value.floor() as i32
 }
 
-fn beta_sin(value: f32) -> f32 {
+pub(super) fn beta_sin(value: f32) -> f32 {
     let index = ((value * 10_430.378).trunc() as i32 & 65_535) as usize;
     beta_sin_table()[index]
 }
 
-fn beta_cos(value: f32) -> f32 {
+pub(super) fn beta_cos(value: f32) -> f32 {
     let index = ((value * 10_430.378 + 16_384.0).trunc() as i32 & 65_535) as usize;
     beta_sin_table()[index]
 }

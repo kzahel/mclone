@@ -59,6 +59,7 @@ pub use alpha::{
 };
 pub use beta::{
     BETA_ACTIVE_HEIGHT, BETA_BUILD_HEIGHT, BETA_SEA_LEVEL, BetaBiome, BetaClimateRegion,
+    BetaFeatureBatchResult, BetaFeatureDependencyCache, BetaFeatureDependencyCacheReport,
     BetaGenerationStage, beta_biome_from_climate, beta_semantic_block_id, beta_semantic_bytes,
-    generate_beta_climate_region, generate_beta_stage_chunk,
+    generate_beta_chunk, generate_beta_climate_region, generate_beta_stage_chunk,
 };

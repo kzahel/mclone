@@ -94,6 +94,18 @@ impl ChunkGenerationPlan {
         )
     }
 
+    /// Beta population retains the same cross-chunk +8 placement shape as
+    /// Alpha while adding more biome-dependent features. Canonical output
+    /// therefore uses the same 3x3 center replay over 5x5 Surface inputs.
+    pub fn beta_features(targets: impl IntoIterator<Item = ChunkPos>) -> Self {
+        Self::feature_region(
+            targets,
+            FEATURES_WRITE_RADIUS_CUTOFF,
+            FEATURES_BLOCK_DEPENDENCY_RADIUS,
+            ChunkStatus::Surface,
+        )
+    }
+
     /// Neighbor-aware feature execution over a mutable chunk region.
     ///
     /// Backend centers within `write_radius` may affect requested outputs. Each
