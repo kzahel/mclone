@@ -1,8 +1,8 @@
 # Tactical 188: Mclone Overworld V1 Terrain Foundation
 
-Status: Slices 0 and 1 complete 2026-07-18; Review 1 is next. The live
-internal profile now provides undecorated continuous terrain through the
-generic target-only plan. Durable direction lives in
+Status: Slices 0 and 1 and Review 1 complete 2026-07-18; Slice 2 is next. The
+live internal profile now provides reviewed undecorated continuous terrain
+through the generic target-only plan. Durable direction lives in
 [`mclone-overworld-generation`](../topics/mclone-overworld-generation.md).
 
 Topic: `mclone-overworld-generation`
@@ -186,13 +186,52 @@ Execution record 2026-07-18:
 
 ### Review 1: terrain before abstraction
 
-- [ ] Render the approved seed/center matrix before decoration breadth.
-- [ ] Map every live field and derived height using the production sampler.
-- [ ] Inspect terrain scale, repetition, lattice artifacts, shoreline noise,
+- [x] Render the approved seed/center matrix before decoration breadth.
+- [x] Map every live field and derived height using the production sampler.
+- [x] Inspect terrain scale, repetition, lattice artifacts, shoreline noise,
   and spawn quality.
-- [ ] Record whether to accept, tune, or add one necessary field.
+- [x] Record whether to accept, tune, or add one necessary field.
 
 Gate: obtain human review before refactoring or adding content families.
+
+Execution record 2026-07-18:
+
+- added `pnpm native:worldgen:fields`, which requests a bounded strided region
+  from the production sampler and writes continentalness, relief, and derived
+  surface-height PNGs plus a schema-versioned quantitative receipt. Review
+  requests use a 385-by-385 grid, 16-block spacing, and a 3,072-block radius;
+- generalized card receipts with commit/dirty and bounded/unbounded coverage
+  facts, renamed the low view to be profile-neutral, and included center chunk
+  in output names. This prevented the three regions for seed `12345` from
+  overwriting one another during the review itself;
+- inspected the approved five-card matrix and added two cards at the actual
+  production-selected spawn chunks, `(18,-21)` for seed `-98765` and `(30,-1)`
+  for seed `8675309`. Every final card at commit `7a7b9247` reported all
+  1,225 client-visible and target-ready chunks before capture. Warmup was
+  1,342-1,379 frames and 7.84-8.09 seconds;
+- the initial cards accepted the macro land/ocean scale and seed variation but
+  rejected overly clean concentric relief terraces. One intentional tune added
+  a low-weight 48-block octave to the existing `relief` field; no new exposed
+  field or scheduler/runtime contract was added. Follow-up cards show more
+  organic plains, slopes, and beach transitions without changing the broad
+  continental shapes;
+- clean field-revision-2 receipts span surface Y 45-89. Their P10/P50/P90
+  heights are `50/64/78`, `55/70/83`, and `54/64/79`; water/shore/dry counts
+  are `66533/21063/60629`, `50565/14161/83499`, and
+  `63682/28238/56305` for seeds `12345`, `-98765`, and `8675309`.
+  Broad-map sample fingerprints are `646172283875503124`,
+  `11601619166430677986`, and `8202241311963224599`;
+- accepted remaining first-slice defects: many intentionally selected matrix
+  centers are open ocean, exposed block contours remain visible without
+  decoration, the biome/material vocabulary is minimal, and there are no
+  mountains, valleys, rivers, or local landmarks. No repeating macro tile or
+  axis-aligned lattice seam was visible in the three broad field maps;
+- release target-only throughput after the tune is 2,767.279 chunks/s versus
+  the pre-tune 2,894.796 chunks/s probe, a 4.4% cost for one extra value-noise
+  component per terrain sample with no new allocations, payload, or cache.
+  Full worldgen
+  (232 passed, one ignored) and server (473 passed) suites and the production
+  browser Worker app-loop passed after the tune.
 
 ### Slice 2: first reuse and refactoring checkpoint
 

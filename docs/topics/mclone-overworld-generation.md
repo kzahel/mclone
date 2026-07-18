@@ -2,11 +2,11 @@
 
 Topic: `mclone-overworld-generation`
 
-Status: the first continuous-terrain caller landed 2026-07-18 as the separate
-internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
-Minecraft Java 1.17.1 reference path. Tactical
+Status: the first continuous-terrain caller and terrain review completed
+2026-07-18 as the separate internal-mutable `mclone-overworld-v1` profile while
+`overworld` remains the Minecraft Java 1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is at its
-first terrain and field-map review before any reuse extraction or decoration.
+first explicit reuse/refactor checkpoint before decoration.
 
 ## Scope
 
@@ -129,6 +129,14 @@ The live first request/response type contains only `continentalness: f64`,
 requests call the same production sampler used by chunk generation. The
 region form is deliberately an in-process worldgen inspection seam, not a
 second scheduler/Worker protocol.
+
+Field revision 2 composes continentalness at 2,048, 1,024, and 512-block
+scales and relief at 384, 128, and a low-weight 48-block scale. Review 1 added
+the fine relief octave after initial cards exposed concentric contour bands;
+it did not add a new public semantic field. `pnpm native:worldgen:fields`
+writes broad production-backed maps and quantitative receipts, while
+`pnpm native:worldgen:card --generation-profile mclone-overworld-v1 ...`
+writes fully warmed seed/region and spawn cards.
 
 ## Reuse Boundary
 

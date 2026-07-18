@@ -56,6 +56,9 @@ Landed native coverage:
   upland terrain from pure production point/region samples, with a
   deterministic dry-upland spawn, target-only worker execution, and field,
   seam, order, partition, codec, native, and browser regression evidence.
+- Production-backed broad field maps and fully warmed seed/region/spawn cards;
+  the first review accepted macro scale and coast variation after adding one
+  fine relief octave to break up concentric local contour bands.
 - Profile-qualified worker results: dependency-cache and generation-timing
   diagnostics are explicitly optional and exist only for the Overworld path;
   target-only flat and island jobs do not synthesize Overworld reports.

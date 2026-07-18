@@ -15,8 +15,9 @@ Generator-owned pure plans now declare exact outputs, backend work, and typed
 prerequisites while the scheduler retains readiness, priority, admission,
 publication, lighting, and persistence. The alternate profiles remain
 internal and unshipped, so their current names, tags, and fixtures are
-regression guards rather than release compatibility promises. Tactical 188 is
-at its first terrain review; the creative terrain direction lives in
+regression guards rather than release compatibility promises. Tactical 188
+accepted its first terrain review after one internal relief tune and is at the
+first reuse/refactor checkpoint; the creative terrain direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md).**
 
 This topic owns the current truth and durable decisions for selectable,
@@ -260,8 +261,10 @@ the safety ledger.
 - no decoration, carvers, caves, mountains, rivers, or structures yet.
 
 These locks guard accidental drift while the profile is internal-mutable. The
-first approved multi-seed/region field-map and landscape-card review is the
-next Tactical 188 gate.
+first multi-seed/region field-map and landscape-card review accepted the macro
+terrain after adding one fine relief octave to break up concentric local
+contours. The next Tactical 188 gate compares real callers before extracting
+any more shared mechanism.
 
 ### Reusable visual review card
 
@@ -342,12 +345,12 @@ adding profile branches.
 
 ## Next Work
 
-Continue Review 1 in
+Continue Slice 2 in
 [`Tactical 188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md):
-render the approved seed/region matrix from production fields, inspect scale
-and artifacts, and record the accept/tune decision before extracting shared
-mechanisms. The accepted terrain, reuse, module, review, and long-term content
-direction lives in
+compare the working Mclone terrain caller with Small Island and reference
+Overworld, extract only mechanisms with real consumers and evidence, and keep
+profile rule composition concrete. The accepted terrain, reuse, module,
+review, and long-term content direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md). The first
 tactical adds real continuous terrain and pauses for explicit reuse/refactor
 reviews before broadening biome and decoration rules.
