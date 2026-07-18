@@ -3,19 +3,21 @@ use mclone_core::ChunkPos;
 use crate::noise::{SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-1";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-2";
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
 const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
 const CONTINENT_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e33);
 const RELIEF_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c31);
 const RELIEF_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c32);
+const RELIEF_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c33);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
 const CONTINENT_DETAIL_SCALE: i32 = 512;
 const RELIEF_LARGE_SCALE: i32 = 384;
 const RELIEF_DETAIL_SCALE: i32 = 128;
+const RELIEF_FINE_SCALE: i32 = 48;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -60,6 +62,7 @@ pub struct McloneOverworldSampler {
     continent_detail: ValueNoise2d,
     relief_large: ValueNoise2d,
     relief_detail: ValueNoise2d,
+    relief_fine: ValueNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -78,6 +81,7 @@ impl McloneOverworldSampler {
             ),
             relief_large: ValueNoise2d::new(seed, RELIEF_LARGE_DOMAIN, RELIEF_LARGE_SCALE),
             relief_detail: ValueNoise2d::new(seed, RELIEF_DETAIL_DOMAIN, RELIEF_DETAIL_SCALE),
+            relief_fine: ValueNoise2d::new(seed, RELIEF_FINE_DOMAIN, RELIEF_FINE_SCALE),
         }
     }
 
@@ -86,8 +90,9 @@ impl McloneOverworldSampler {
             + self.continent_medium.sample(world_x, world_z) * 0.30
             + self.continent_detail.sample(world_x, world_z) * 0.15)
             .clamp(-1.0, 1.0);
-        let relief = (self.relief_large.sample(world_x, world_z) * 0.65
-            + self.relief_detail.sample(world_x, world_z) * 0.35)
+        let relief = (self.relief_large.sample(world_x, world_z) * 0.50
+            + self.relief_detail.sample(world_x, world_z) * 0.30
+            + self.relief_fine.sample(world_x, world_z) * 0.20)
             .clamp(-1.0, 1.0);
         McloneOverworldTerrainSample {
             continentalness,
