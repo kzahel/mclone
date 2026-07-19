@@ -34,7 +34,6 @@ import {
 import type {
   WebLocalWorldCreateOptions,
   WebLocalWorldSummary,
-  WebWorldGenerationProfile,
 } from "./mclone-web-world-catalog.js";
 import type { WebSceneHost } from "mclone-web-client-wasm";
 
@@ -1880,9 +1879,7 @@ class WebFrameDriver {
           displayName: String(report.catalogDisplayName ?? ""),
           seed,
           requestedId: report.catalogRequestedId ?? null,
-          generationProfile: String(
-            report.catalogGenerationProfile ?? "overworld",
-          ) as WebWorldGenerationProfile,
+          generationProfile: String(report.catalogGenerationProfile ?? "overworld"),
         };
         return createIndexedDbCatalogWorld(db, options);
       }

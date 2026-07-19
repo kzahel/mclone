@@ -200,6 +200,32 @@ The integrated-server Worker is now 919 lines and total authored TypeScript is
 change. Shared/transfer runner stress, IndexedDB reload, and the desktop lobby
 remain green, including protected behavior and observer/player transitions.
 
+The browser catalog now persists a strict version-1 `MCWC` descriptor inside
+the existing `{ id, descriptor }` IndexedDB key-path envelope. Rust owns every
+persisted catalog fact, compatibility derivation, canonical ordering, and the
+clear UI projection. TypeScript retains only CRUD/transaction mechanics, the
+stable `id`, an opaque byte value, and browser timestamps. New writes contain
+no clear generation-profile or persisted-world policy fields. Legacy clear
+records remain readable and are rewritten in place on open or play-recording;
+the database remains version 6 and no migration runs at startup.
+
+Topology and behavior are intentionally not duplicated into this catalog
+descriptor. They were never catalog-summary facts: the dimension record owns
+topology, realm metadata owns behavior, and the integrated-server startup frame
+carries the selected session facts. The periodic IndexedDB reopen proof still
+recovers its cylinder descriptor and canonical edit from those existing Rust
+owners. Managed scenario metadata remains in its separate store and its
+isolation proof reports zero ordinary catalog rows before and after.
+
+This cut reduced authored TypeScript to 5,778 lines. The catalog adapter's UI
+summary type is now an opaque Rust projection with only `id` exposed to
+TypeScript, its generation-profile union is gone, all catalog ownership debts
+are zero, and the seven-site copy ledger is unchanged. The descriptor itself
+round-trips full-width integers, but browser world creation deliberately keeps
+its pre-cutover JavaScript-number seed semantics in this ownership-only slice.
+An initial attempt to change that semantic selected a different large-seed
+fixture world and was removed before landing.
+
 Two complete pre-cutover control runs separated coordinator evidence from
 unrelated browser-fixture debt:
 
@@ -482,11 +508,9 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Execute Tactical 197 Slices 3-6 autonomously at the recorded high-value
-boundary. Slice 3 is complete; next compare the render and server-job shells
-and extract only proven common Worker mechanics, then implement versioned
-integrated-server startup and bounded policy ownership, Rust-authored catalog
-descriptors, and residual measurement. Keep isolated heaps, the external SAB
-copy ledger, one ordinary render Worker, browser-owned IndexedDB/timers/events,
-and native typed channels. Stop for a human decision before browser-native
-long-tail reduction or shared Wasm linear-memory work.
+Complete Tactical 197 Slice 6: remeasure residual copies, duplicate resident
+memory, latency, TypeScript ownership, and failure containment, then stop with
+the decision package. Keep isolated heaps, the external SAB copy ledger, one
+ordinary render Worker, browser-owned IndexedDB/timers/events, and native typed
+channels. A human decision is required before browser-native long-tail
+reduction or shared Wasm linear-memory work.

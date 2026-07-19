@@ -6,6 +6,7 @@ use std::rc::Rc;
 
 use crate::web_render_compiler_abi::*;
 use crate::web_render_worker::{WebRenderWorkerCoordinator, WebRenderWorkerWorldHandle};
+use crate::web_world_catalog_descriptor;
 
 use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime,
@@ -2723,7 +2724,7 @@ pub fn mclone_web_catalog_prepare_create_world(
     summary.world_generation_profile = options.world_generation_profile;
     summary.last_played_unix_millis = Some(now);
     summary.backend_label = Some(WEB_WORLD_BACKEND_LABEL.to_owned());
-    encode_web_local_world_summary(&summary).map_err(JsValue::from)
+    encode_web_catalog_mutation(&summary).map_err(JsValue::from)
 }
 
 #[wasm_bindgen(js_name = mclone_web_catalog_prepare_open_world)]
@@ -2738,7 +2739,7 @@ pub fn mclone_web_catalog_prepare_open_world(
     validate_local_world_compatible(&summary).map_err(|error| JsValue::from(error.message))?;
     summary.last_played_unix_millis =
         Some(parse_web_unix_millis(now_unix_millis, "nowUnixMillis").map_err(JsValue::from)?);
-    encode_web_local_world_summary(&summary).map_err(JsValue::from)
+    encode_web_catalog_mutation(&summary).map_err(JsValue::from)
 }
 
 #[wasm_bindgen(js_name = mclone_web_catalog_prepare_record_world_played)]
@@ -3307,19 +3308,41 @@ fn decode_required_web_local_world_summary(
 }
 
 fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, String> {
+    let descriptor = js_property(value, "descriptor")?;
+    if !descriptor.is_null() && !descriptor.is_undefined() {
+        if !descriptor.is_instance_of::<js_sys::Uint8Array>() {
+            return Err("world catalog descriptor must be a Uint8Array".to_owned());
+        }
+        let summary =
+            web_world_catalog_descriptor::decode(&js_sys::Uint8Array::new(&descriptor).to_vec())?;
+        let envelope_id =
+            LocalWorldId::new(js_string_property(value, "id")?).map_err(|error| error.message)?;
+        if summary.id != envelope_id {
+            return Err(format!(
+                "world catalog descriptor `{}` was stored under envelope id `{envelope_id}`",
+                summary.id
+            ));
+        }
+        return Ok(summary);
+    }
+
     let id = LocalWorldId::new(js_string_property(value, "id")?).map_err(|error| error.message)?;
     let mut summary = LocalWorldSummary::new(
         id,
         js_string_property(value, "displayName")?,
-        js_i64_property(value, "seed")?,
-        js_u64_property(value, "createdUnixMillis")?,
+        js_i64_text_or_number_property(value, "seedText", "seed")?,
+        js_u64_text_or_number_property(value, "createdUnixMillisText", "createdUnixMillis")?,
     )
     .map_err(|error| error.message)?;
     summary.world_generation_profile = js_optional_string_property(value, "generationProfile")?
         .map(|profile| WorldGenerationProfile::parse_label(&profile))
         .transpose()?
         .unwrap_or_default();
-    summary.last_played_unix_millis = js_optional_u64_property(value, "lastPlayedUnixMillis")?;
+    summary.last_played_unix_millis = js_optional_u64_text_or_number_property(
+        value,
+        "lastPlayedUnixMillisText",
+        "lastPlayedUnixMillis",
+    )?;
     summary.storage_schema_version =
         js_optional_u32_property(value, "storageSchemaVersion")?.unwrap_or(0);
     summary.target_minecraft_version =
@@ -3347,6 +3370,7 @@ fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue
     set_string(&object, "id", summary.id.as_str())?;
     set_string(&object, "displayName", &summary.display_name)?;
     set_number(&object, "seed", summary.seed as f64)?;
+    set_string(&object, "seedText", &summary.seed.to_string())?;
     set_string(
         &object,
         "generationProfile",
@@ -3357,10 +3381,23 @@ fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue
         "createdUnixMillis",
         summary.created_unix_millis as f64,
     )?;
+    set_string(
+        &object,
+        "createdUnixMillisText",
+        &summary.created_unix_millis.to_string(),
+    )?;
     set_optional_number(
         &object,
         "lastPlayedUnixMillis",
         summary.last_played_unix_millis.map(|millis| millis as f64),
+    )?;
+    set_optional_string(
+        &object,
+        "lastPlayedUnixMillisText",
+        summary
+            .last_played_unix_millis
+            .map(|millis| millis.to_string())
+            .as_deref(),
     )?;
     set_number(
         &object,
@@ -3376,6 +3413,36 @@ fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue
     set_optional_string(&object, "backendLabel", summary.backend_label.as_deref())?;
     set_bool(&object, "locked", summary.locked)?;
     set_bool(&object, "compatible", summary.compatible)?;
+    Ok(object.into())
+}
+
+fn encode_web_catalog_record(summary: &LocalWorldSummary) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    let descriptor = web_world_catalog_descriptor::encode(summary)?;
+    set_string(&object, "id", summary.id.as_str())?;
+    js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("descriptor"),
+        js_sys::Uint8Array::from(descriptor.as_slice()).as_ref(),
+    )
+    .map_err(|error| format!("failed to attach world catalog descriptor: {error:?}"))?;
+    Ok(object.into())
+}
+
+fn encode_web_catalog_mutation(summary: &LocalWorldSummary) -> Result<JsValue, String> {
+    let object = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("record"),
+        &encode_web_catalog_record(summary)?,
+    )
+    .map_err(|error| format!("failed to attach world catalog record: {error:?}"))?;
+    js_sys::Reflect::set(
+        &object,
+        &JsValue::from_str("summary"),
+        &encode_web_local_world_summary(summary)?,
+    )
+    .map_err(|error| format!("failed to attach world catalog UI summary: {error:?}"))?;
     Ok(object.into())
 }
 
@@ -3417,12 +3484,52 @@ fn js_i64_property(value: &JsValue, key: &str) -> Result<i64, String> {
     Ok(number as i64)
 }
 
+fn js_i64_text_or_number_property(
+    value: &JsValue,
+    text_key: &str,
+    number_key: &str,
+) -> Result<i64, String> {
+    if let Some(text) = js_optional_string_property(value, text_key)? {
+        return text
+            .parse::<i64>()
+            .map_err(|_| format!("JS property {text_key} must be an i64 integer string"));
+    }
+    js_i64_property(value, number_key)
+}
+
 fn js_u64_property(value: &JsValue, key: &str) -> Result<u64, String> {
     let number = js_f64_property(value, key)?;
     if number.fract() != 0.0 || number < 0.0 || number > u64::MAX as f64 {
         return Err(format!("JS property {key} must be a u64 integer"));
     }
     Ok(number as u64)
+}
+
+fn js_u64_text_or_number_property(
+    value: &JsValue,
+    text_key: &str,
+    number_key: &str,
+) -> Result<u64, String> {
+    if let Some(text) = js_optional_string_property(value, text_key)? {
+        return text
+            .parse::<u64>()
+            .map_err(|_| format!("JS property {text_key} must be a u64 integer string"));
+    }
+    js_u64_property(value, number_key)
+}
+
+fn js_optional_u64_text_or_number_property(
+    value: &JsValue,
+    text_key: &str,
+    number_key: &str,
+) -> Result<Option<u64>, String> {
+    if let Some(text) = js_optional_string_property(value, text_key)? {
+        return text
+            .parse::<u64>()
+            .map(Some)
+            .map_err(|_| format!("JS property {text_key} must be a u64 integer string or null"));
+    }
+    js_optional_u64_property(value, number_key)
 }
 
 fn js_optional_u64_property(value: &JsValue, key: &str) -> Result<Option<u64>, String> {

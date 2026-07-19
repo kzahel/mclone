@@ -28,13 +28,6 @@ type IndexedDbCatalogPolicy = Pick<
 let indexedDbCatalogPolicy: IndexedDbCatalogPolicy | null = null;
 let lastCatalogTimestamp = 0;
 
-export type WebWorldGenerationProfile =
-  | "overworld"
-  | "flat-grass-v1"
-  | "small-island-v1"
-  | "mclone-overworld-v1"
-  | "authored-only";
-
 function nextCatalogTimestamp(): number {
   lastCatalogTimestamp = Math.max(Date.now(), lastCatalogTimestamp + 1);
   return lastCatalogTimestamp;
@@ -51,26 +44,25 @@ function requireIndexedDbCatalogPolicy(): IndexedDbCatalogPolicy {
   return indexedDbCatalogPolicy;
 }
 
-export interface WebLocalWorldSummary {
+export interface WebLocalWorldSummary extends Record<string, unknown> {
   id: string;
-  displayName: string;
-  seed: number;
-  generationProfile: WebWorldGenerationProfile;
-  createdUnixMillis: number;
-  lastPlayedUnixMillis: number | null;
-  storageSchemaVersion: number;
-  targetMinecraftVersion: string;
-  mcloneVersion: string | null;
-  backendLabel: string | null;
-  locked: boolean;
-  compatible: boolean;
 }
 
 export interface WebLocalWorldCreateOptions {
   displayName: string;
   seed: number;
-  generationProfile?: WebWorldGenerationProfile;
+  generationProfile?: string;
   requestedId?: string | null;
+}
+
+interface IndexedDbCatalogRecord {
+  id: string;
+  descriptor: Uint8Array;
+}
+
+interface IndexedDbCatalogMutation {
+  record: IndexedDbCatalogRecord;
+  summary: WebLocalWorldSummary;
 }
 
 export type ManagedWorldValidationStatus =
@@ -165,17 +157,17 @@ export async function createIndexedDbCatalogWorld(
   options: WebLocalWorldCreateOptions,
 ): Promise<WebLocalWorldSummary> {
   const existingRecords = await readIndexedDbCatalogRecords(db);
-  const summary = requireIndexedDbCatalogPolicy()
+  const mutation = requireIndexedDbCatalogPolicy()
     .mclone_web_catalog_prepare_create_world(
       options,
       existingRecords,
       nextCatalogTimestamp(),
-    ) as WebLocalWorldSummary;
+    ) as IndexedDbCatalogMutation;
 
   const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
-  transaction.objectStore(WORLD_CATALOG_STORE).add(summary);
+  transaction.objectStore(WORLD_CATALOG_STORE).add(mutation.record);
   await transactionDone(transaction);
-  return summary;
+  return mutation.summary;
 }
 
 export async function openIndexedDbCatalogWorld(
@@ -185,14 +177,14 @@ export async function openIndexedDbCatalogWorld(
   const normalizedId = requireIndexedDbCatalogPolicy()
     .mclone_web_catalog_validate_world_id(id);
   const summary = await getIndexedDbCatalogWorld(db, normalizedId);
-  const opened = requireIndexedDbCatalogPolicy()
+  const mutation = requireIndexedDbCatalogPolicy()
     .mclone_web_catalog_prepare_open_world(
       normalizedId,
       summary,
       nextCatalogTimestamp(),
-    ) as WebLocalWorldSummary;
-  await putIndexedDbCatalogSummary(db, opened);
-  return opened;
+    ) as IndexedDbCatalogMutation;
+  await putIndexedDbCatalogRecord(db, mutation.record);
+  return mutation.summary;
 }
 
 export async function recordIndexedDbCatalogWorldPlayed(
@@ -207,14 +199,14 @@ export async function recordIndexedDbCatalogWorldPlayed(
   const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
   const store = transaction.objectStore(WORLD_CATALOG_STORE);
   const summary = await idbRequest<unknown>(store.get(normalizedId));
-  const recorded = policy.mclone_web_catalog_prepare_record_world_played(
+  const mutation = policy.mclone_web_catalog_prepare_record_world_played(
     normalizedId,
     summary ?? null,
     nextCatalogTimestamp(),
-  ) as WebLocalWorldSummary;
-  store.put(recorded);
+  ) as IndexedDbCatalogMutation;
+  store.put(mutation.record);
   await transactionDone(transaction);
-  return recorded;
+  return mutation.summary;
 }
 
 export async function deleteIndexedDbCatalogWorld(
@@ -741,12 +733,12 @@ async function readIndexedDbCatalogRecords(db: IDBDatabase): Promise<unknown[]> 
   return records;
 }
 
-async function putIndexedDbCatalogSummary(
+async function putIndexedDbCatalogRecord(
   db: IDBDatabase,
-  summary: WebLocalWorldSummary,
+  record: IndexedDbCatalogRecord,
 ): Promise<void> {
   const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
-  transaction.objectStore(WORLD_CATALOG_STORE).put(summary);
+  transaction.objectStore(WORLD_CATALOG_STORE).put(record);
   await transactionDone(transaction);
 }
 

@@ -138,7 +138,7 @@ const moduleRegistry = {
     responsibilities: [
       "IndexedDB schema/transaction mechanics",
       "managed-provision Worker construction",
-      "registered generation-profile projection debt",
+      "opaque Rust catalog record and UI projection transport",
     ],
   },
 };
@@ -281,7 +281,21 @@ const domainDebt = [
     id: "catalog-generation-profile-union",
     file: "mclone-web-world-catalog.ts",
     needle: "export type WebWorldGenerationProfile",
-    maximum: 1,
+    maximum: 0,
+    destination: "Rust-authored opaque persisted descriptor",
+  },
+  {
+    id: "catalog-clear-summary-write",
+    file: "mclone-web-world-catalog.ts",
+    needle: ".add(summary)",
+    maximum: 0,
+    destination: "Rust-authored opaque persisted descriptor",
+  },
+  {
+    id: "catalog-clear-summary-put",
+    file: "mclone-web-world-catalog.ts",
+    needle: ".put(summary)",
+    maximum: 0,
     destination: "Rust-authored opaque persisted descriptor",
   },
   {

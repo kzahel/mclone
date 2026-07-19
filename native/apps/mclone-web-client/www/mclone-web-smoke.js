@@ -2,6 +2,7 @@ import { fetchAssetPack } from "./mclone-render-compiler-shared.js";
 import { PolledWorkerTransport } from "./mclone-worker-transport.js";
 import {
   WORLD_CHUNK_STORE,
+  WORLD_CATALOG_STORE,
   WORLD_ENTITY_CHUNK_STORE,
   WORLD_ID_INDEX,
   createIndexedDbCatalogWorld,
@@ -599,9 +600,45 @@ async function createIndexedDbSmokeSession(
 
 async function runIndexedDbCatalogSmoke() {
   const worldId = `catalog-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const legacyWorldId = `${worldId}-legacy`;
   const db = await openWorldDb();
   try {
     const before = await listIndexedDbCatalogWorlds(db);
+    const legacyTransaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
+    legacyTransaction.objectStore(WORLD_CATALOG_STORE).add({
+      id: legacyWorldId,
+      displayName: "Legacy Clear Catalog World",
+      seed: 17,
+      generationProfile: "flat-grass-v1",
+      createdUnixMillis: Date.now() - 1,
+      lastPlayedUnixMillis: null,
+      storageSchemaVersion: 1,
+      targetMinecraftVersion: "1.17.1",
+      mcloneVersion: null,
+      backendLabel: "web-indexeddb",
+      locked: false,
+      compatible: true,
+    });
+    await transactionDone(legacyTransaction);
+    const legacyListed = (await listIndexedDbCatalogWorlds(db))
+      .some((world) => world.id === legacyWorldId);
+    const legacyOpened = await openIndexedDbCatalogWorld(db, legacyWorldId);
+    const legacyReadTransaction = db.transaction(WORLD_CATALOG_STORE, "readonly");
+    const legacyUpgradedRecord = await new Promise((resolve, reject) => {
+      const request = legacyReadTransaction
+        .objectStore(WORLD_CATALOG_STORE)
+        .get(legacyWorldId);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error("failed to read legacy catalog row"));
+    });
+    await transactionDone(legacyReadTransaction);
+    const legacyUpgraded = Boolean(
+      legacyUpgradedRecord
+      && legacyUpgradedRecord.descriptor instanceof Uint8Array
+      && !("displayName" in legacyUpgradedRecord),
+    );
+    await deleteIndexedDbCatalogWorld(db, legacyWorldId);
+
     const created = await createIndexedDbCatalogWorld(db, {
       displayName: "Smoke Catalog World",
       seed: 424242,
@@ -639,6 +676,9 @@ async function runIndexedDbCatalogSmoke() {
       ok: Boolean(
         created.id === worldId
         && created.displayName === "Smoke Catalog World"
+        && legacyListed
+        && legacyOpened.id === legacyWorldId
+        && legacyUpgraded
         && opened.id === worldId
         && Number(opened.lastPlayedUnixMillis) >= Number(created.lastPlayedUnixMillis)
         && Number(recorded.lastPlayedUnixMillis) > Number(opened.lastPlayedUnixMillis)
@@ -660,6 +700,9 @@ async function runIndexedDbCatalogSmoke() {
       opened,
       recorded,
       deleted,
+      legacyListed,
+      legacyOpened,
+      legacyUpgraded,
       recordsBeforeDelete,
       recordsAfterDelete,
       duplicateRejected,

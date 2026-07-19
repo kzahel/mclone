@@ -832,7 +832,7 @@ A-to-B-to-A activation. No browser fixture assertion was weakened.
 
 ## Slice 5 — Rust-Authored Catalog Descriptors
 
-Status: approved after the integrated-server descriptor boundary is proven.
+Status: complete 2026-07-19.
 
 Keep IndexedDB CRUD, request/transaction mechanics, browser settings storage,
 and DOM-facing file acquisition in TypeScript. Remove its duplicated
@@ -845,6 +845,56 @@ Acceptance requires create/list/open/reopen/delete coverage for plane and
 periodic worlds, existing generator-profile fixtures, managed-world isolation,
 and unchanged stored-record compatibility. Do not bundle an IndexedDB schema
 migration unless the opaque descriptor cannot fit the current record envelope.
+
+### Slice 5 execution and evidence
+
+Rust now owns a strict `MCWC` version-1 descriptor for every ordinary browser
+catalog row. The current IndexedDB version and `worlds` key path are unchanged;
+new records have only the stable clear `id` plus opaque descriptor bytes. The
+descriptor encodes the complete current `LocalWorldSummary`, recomputes
+compatibility on decode, rejects invalid magic/version/flags, malformed UTF-8,
+truncation, and trailing bytes, and preserves full-width integers internally.
+
+Create, open, and play-recording policy now return a Rust-authored mutation
+plan containing the opaque storage record and a separate UI projection. List
+returns only Rust-authored projections. The TypeScript adapter stores the
+record without reconstructing it and exposes only `id` in its summary type;
+the duplicated generation-profile union and all clear-summary production
+writes are source-locked at zero. Legacy clear-field records are accepted and
+rewritten to the descriptor envelope on open or play-recording, so no startup
+migration or database-version increment was needed.
+
+Topology and behavior do not belong to `LocalWorldSummary` today. Their
+existing Rust owners remain the dimension record, realm metadata, and opaque
+integrated-server startup frame. The periodic acceptance therefore combines
+ordinary catalog CRUD with the existing cylinder IndexedDB reopen rather than
+inventing a second topology field in the catalog. The managed scenario store
+also remains independent from the ordinary catalog.
+
+The web-client suite passed 28 unit tests, including exact descriptor
+round-trip and strict rejection cases. The Wasm check, generated-bindgen
+TypeScript check, Worker ownership self-test, ordinary browser smoke, and
+catalog UI create/list/open/delete probe passed. The ordinary smoke explicitly
+inserted a legacy clear record, listed it, opened it, verified its in-place
+opaque rewrite, and deleted it. The Flat Grass cylinder IndexedDB probe saved
+and reopened 121 chunks, two entity chunks, its dimension descriptor, and the
+same canonical/lifted dirt edit. The managed-storage probe repaired partial and
+incompatible content, refused corruption, reopened both roles, and retained
+zero ordinary catalog rows. Catalog and cylinder captures under `/tmp` were
+inspected and remained visually coherent.
+
+One catalog UI run transiently observed chunk records after deletion before a
+clean retry passed. The broader catalog-lobby lane reached successful catalog
+selection, warm startup, actor observation/motion, A-to-B-to-A activation, and
+recency updates, then failed an unchanged remote-player walk-distance direction
+assertion; two earlier exact-seed experiments selected a different destination
+and were discarded. No assertion or gameplay rule was weakened for this cut.
+
+Authored TypeScript is now 5,778 lines, eleven below Slice 4.2 and 1,639 below
+the original 7,417-line inventory. `mclone-web-world-catalog.ts` is 776 lines
+versus its 784-line baseline, `mclone-web-app.ts` is 2,484 lines versus 2,650,
+all registered catalog ownership debts are zero, and the seven explicit
+production copy sites are unchanged.
 
 ## Slice 6 — Remeasure And Stop Or Escalate
 
