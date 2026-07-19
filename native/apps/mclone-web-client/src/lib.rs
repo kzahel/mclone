@@ -25,6 +25,7 @@ use mclone_server::{IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunne
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
+mod render_worker_coordinator;
 pub mod web_scene_protocol;
 
 #[cfg(target_arch = "wasm32")]
