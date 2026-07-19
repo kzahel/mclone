@@ -391,25 +391,17 @@ impl WebRenderCompilerSession {
         north_sample_spacing_blocks: u32,
         south_sample_spacing_blocks: u32,
     ) -> Result<js_sys::Uint8Array, JsValue> {
-        self.compile_count += 1;
-        let seed = seed_text
-            .parse::<i64>()
-            .map_err(|error| JsValue::from_str(&format!("invalid far LOD seed: {error}")))?;
-        let mesh = compile_far_terrain_lod_worker_input(
-            FarTerrainLodWorkerInput {
-                key: LodTileKey::new(ChunkPos::new(chunk_x, chunk_z), level),
-                seed,
-                sample_spacing_blocks,
-                neighbor_sample_spacings: [
-                    west_sample_spacing_blocks,
-                    east_sample_spacing_blocks,
-                    north_sample_spacing_blocks,
-                    south_sample_spacing_blocks,
-                ],
-            },
-            self.mesh_assets.far_lod_materials.as_ref(),
-        );
-        let packed = encode_web_far_lod_tile_mesh(&mesh).map_err(JsValue::from)?;
+        let packed = self.compile_far_lod_tile_bytes(
+            seed_text,
+            chunk_x,
+            chunk_z,
+            level,
+            sample_spacing_blocks,
+            west_sample_spacing_blocks,
+            east_sample_spacing_blocks,
+            north_sample_spacing_blocks,
+            south_sample_spacing_blocks,
+        )?;
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
 
@@ -420,18 +412,8 @@ impl WebRenderCompilerSession {
         center_z: i32,
         radius_chunks: u32,
     ) -> Result<js_sys::Uint8Array, JsValue> {
-        self.compile_count += 1;
-        let report = compile_generated_chunk_sections_with_catalog(
-            &self.mesh_assets.catalog,
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
-            radius_chunks,
-            None,
-        )
-        .map_err(JsValue::from)?;
-        let packed = encode_textured_render_section_build_report(&report);
+        let packed =
+            self.compile_generated_chunk_sections_bytes(center_x, center_z, radius_chunks, None)?;
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
 
@@ -443,20 +425,14 @@ impl WebRenderCompilerSession {
         radius_chunks: u32,
         target_sections: js_sys::Int32Array,
     ) -> Result<js_sys::Uint8Array, JsValue> {
-        self.compile_count += 1;
         let target_sections = render_section_keys_from_int32_array(&target_sections)
             .map_err(|error| JsValue::from_str(&error))?;
-        let report = compile_generated_chunk_sections_with_catalog(
-            &self.mesh_assets.catalog,
-            ChunkPos {
-                x: center_x,
-                z: center_z,
-            },
+        let packed = self.compile_generated_chunk_sections_bytes(
+            center_x,
+            center_z,
             radius_chunks,
             Some(&target_sections),
-        )
-        .map_err(JsValue::from)?;
-        let packed = encode_textured_render_section_build_report(&report);
+        )?;
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
 
@@ -471,23 +447,8 @@ impl WebRenderCompilerSession {
         snapshot_input_bytes: js_sys::Uint8Array,
         target_sections: js_sys::Int32Array,
     ) -> Result<js_sys::Uint8Array, JsValue> {
-        self.compile_count += 1;
-        let delta = decode_web_render_compile_delta(&snapshot_input_bytes.to_vec())
-            .map_err(|error| JsValue::from_str(&error))?;
-        self.apply_render_compile_delta(delta)
-            .map_err(|error| JsValue::from_str(&error))?;
-        let target_sections = render_section_keys_from_int32_array(&target_sections)
-            .map_err(|error| JsValue::from_str(&error))?;
-        let snapshots = self.snapshot_mirror.values().collect::<Vec<_>>();
-        let report = compile_snapshot_chunk_sections_with_catalog(
-            &self.mesh_assets.catalog,
-            &snapshots,
-            &target_sections,
-            self.biome_zoom_seed,
-            self.topology,
-        )
-        .map_err(JsValue::from)?;
-        let packed = encode_textured_render_section_build_report(&report);
+        let packed = self
+            .compile_snapshot_sections_for_targets_bytes(&snapshot_input_bytes, &target_sections)?;
         Ok(js_sys::Uint8Array::from(packed.as_slice()))
     }
 
@@ -511,6 +472,84 @@ impl WebRenderCompilerSession {
 }
 
 impl WebRenderCompilerSession {
+    pub(crate) fn compile_far_lod_tile_bytes(
+        &mut self,
+        seed_text: String,
+        chunk_x: i32,
+        chunk_z: i32,
+        level: u8,
+        sample_spacing_blocks: u32,
+        west_sample_spacing_blocks: u32,
+        east_sample_spacing_blocks: u32,
+        north_sample_spacing_blocks: u32,
+        south_sample_spacing_blocks: u32,
+    ) -> Result<Vec<u8>, JsValue> {
+        self.compile_count += 1;
+        let seed = seed_text
+            .parse::<i64>()
+            .map_err(|error| JsValue::from_str(&format!("invalid far LOD seed: {error}")))?;
+        let mesh = compile_far_terrain_lod_worker_input(
+            FarTerrainLodWorkerInput {
+                key: LodTileKey::new(ChunkPos::new(chunk_x, chunk_z), level),
+                seed,
+                sample_spacing_blocks,
+                neighbor_sample_spacings: [
+                    west_sample_spacing_blocks,
+                    east_sample_spacing_blocks,
+                    north_sample_spacing_blocks,
+                    south_sample_spacing_blocks,
+                ],
+            },
+            self.mesh_assets.far_lod_materials.as_ref(),
+        );
+        encode_web_far_lod_tile_mesh(&mesh).map_err(JsValue::from)
+    }
+
+    pub(crate) fn compile_generated_chunk_sections_bytes(
+        &mut self,
+        center_x: i32,
+        center_z: i32,
+        radius_chunks: u32,
+        target_sections: Option<&BTreeSet<RenderSectionKey>>,
+    ) -> Result<Vec<u8>, JsValue> {
+        self.compile_count += 1;
+        let report = compile_generated_chunk_sections_with_catalog(
+            &self.mesh_assets.catalog,
+            ChunkPos {
+                x: center_x,
+                z: center_z,
+            },
+            radius_chunks,
+            target_sections,
+        )
+        .map_err(JsValue::from)?;
+        Ok(encode_textured_render_section_build_report(&report))
+    }
+
+    pub(crate) fn compile_snapshot_sections_for_targets_bytes(
+        &mut self,
+        snapshot_input_bytes: &js_sys::Uint8Array,
+        target_sections: &js_sys::Int32Array,
+    ) -> Result<Vec<u8>, JsValue> {
+        self.compile_count += 1;
+        let delta = decode_web_render_compile_delta(&snapshot_input_bytes.to_vec())
+            .map_err(|error| JsValue::from_str(&error))?;
+        self.apply_render_compile_delta(delta)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let target_sections = render_section_keys_from_int32_array(&target_sections)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let snapshots = self.snapshot_mirror.values().collect::<Vec<_>>();
+        let report = compile_snapshot_chunk_sections_with_catalog(
+            &self.mesh_assets.catalog,
+            &snapshots,
+            &target_sections,
+            self.biome_zoom_seed,
+            self.topology,
+        )
+        .map_err(JsValue::from)?;
+        Ok(encode_textured_render_section_build_report(&report))
+    }
+
     /// Apply a render-compile delta to the resident mirror. A `reset` delta clears the mirror
     /// and adopts the delta's generation (a full resync); otherwise the delta's generation must
     /// match the mirror's, else it is a desync (a worker that lost its mirror would see a
@@ -745,9 +784,13 @@ pub fn mclone_web_packed_compile_report_summary(
     packed_report: js_sys::Uint8Array,
 ) -> Result<JsValue, JsValue> {
     let packed = packed_report.to_vec();
-    let report = decode_textured_render_section_build_report(&packed)
-        .map_err(|error| JsValue::from_str(&format!("{error:#}")))?;
-    packed_compile_report_summary_to_js(packed.len(), &report).map_err(JsValue::from)
+    packed_compile_report_summary_from_bytes(&packed).map_err(JsValue::from)
+}
+
+pub(crate) fn packed_compile_report_summary_from_bytes(packed: &[u8]) -> Result<JsValue, String> {
+    let report = decode_textured_render_section_build_report(packed)
+        .map_err(|error| format!("{error:#}"))?;
+    packed_compile_report_summary_to_js(packed.len(), &report)
 }
 
 #[wasm_bindgen(start)]
@@ -1178,42 +1221,6 @@ fn render_section_compile_result_from_report(
     }
 }
 
-fn render_compiler_atomic_store(
-    control: &js_sys::Int32Array,
-    index: u32,
-    value: i32,
-) -> Result<(), String> {
-    js_sys::Atomics::store(control, index, value)
-        .map(|_| ())
-        .map_err(|error| format!("failed to store render-compile control word {index}: {error:?}"))
-}
-
-fn render_compiler_atomic_load(control: &js_sys::Int32Array, index: u32) -> Result<i32, String> {
-    js_sys::Atomics::load(control, index)
-        .map_err(|error| format!("failed to load render-compile control word {index}: {error:?}"))
-}
-
-fn render_compiler_shared_memory_supported() -> bool {
-    let global = js_sys::global();
-    js_global_is_function(&global, "SharedArrayBuffer")
-        && js_global_method_is_function(&global, "Atomics", "load")
-        && js_global_method_is_function(&global, "Atomics", "store")
-        && js_global_method_is_function(&global, "Atomics", "notify")
-}
-
-fn js_global_is_function(global: &JsValue, name: &str) -> bool {
-    js_sys::Reflect::get(global, &JsValue::from_str(name))
-        .ok()
-        .is_some_and(|value| value.is_function())
-}
-
-fn js_global_method_is_function(global: &JsValue, object_name: &str, method_name: &str) -> bool {
-    js_sys::Reflect::get(global, &JsValue::from_str(object_name))
-        .ok()
-        .and_then(|object| js_sys::Reflect::get(&object, &JsValue::from_str(method_name)).ok())
-        .is_some_and(|value| value.is_function())
-}
-
 /// Resident render-compiler shared ring (067 Stage 2), owned by main wasm.
 ///
 /// The control buffers carry the atomic status / byte-count / capacity words; the
@@ -1256,32 +1263,32 @@ impl WebRenderCompilerSharedArena {
             input_capacity,
             input_byte_length: 0,
         };
-        render_compiler_atomic_store(
+        atomic_store(
             &arena.result_control,
             RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
             RENDER_COMPILER_SHARED_RESULT_PENDING,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &arena.result_control,
             RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
             0,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &arena.result_control,
             RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
             arena.result_capacity as i32,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &arena.input_control,
             RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX,
             RENDER_COMPILER_SHARED_INPUT_READY,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &arena.input_control,
             RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX,
             0,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &arena.input_control,
             RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX,
             arena.input_capacity as i32,
@@ -1313,17 +1320,17 @@ impl WebRenderCompilerSharedArena {
             view.copy_from(input_bytes);
         }
         self.input_byte_length = byte_length;
-        render_compiler_atomic_store(
+        atomic_store(
             &self.input_control,
             RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX,
             byte_length as i32,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &self.input_control,
             RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX,
             self.input_capacity as i32,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &self.input_control,
             RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX,
             RENDER_COMPILER_SHARED_INPUT_READY,
@@ -1335,17 +1342,17 @@ impl WebRenderCompilerSharedArena {
     }
 
     fn arm_result(&self) -> Result<(), String> {
-        render_compiler_atomic_store(
+        atomic_store(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
             0,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
             self.result_capacity as i32,
         )?;
-        render_compiler_atomic_store(
+        atomic_store(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
             RENDER_COMPILER_SHARED_RESULT_PENDING,
@@ -1354,14 +1361,14 @@ impl WebRenderCompilerSharedArena {
     }
 
     fn poll_result_status(&self) -> Result<i32, String> {
-        render_compiler_atomic_load(
+        atomic_load(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX,
         )
     }
 
     fn result_byte_length(&self) -> Result<u32, String> {
-        let bytes = render_compiler_atomic_load(
+        let bytes = atomic_load(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX,
         )?;
@@ -1370,7 +1377,7 @@ impl WebRenderCompilerSharedArena {
     }
 
     fn result_capacity_word(&self) -> Result<u32, String> {
-        let capacity = render_compiler_atomic_load(
+        let capacity = atomic_load(
             &self.result_control,
             RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX,
         )?;
@@ -1497,7 +1504,7 @@ struct WebStagedSubmitDelta {
 
 impl WebRenderSectionCompiler {
     fn new() -> Self {
-        let shared = if render_compiler_shared_memory_supported() {
+        let shared = if shared_memory_supported() {
             WebRenderCompilerSharedArena::new().ok()
         } else {
             None
@@ -2973,7 +2980,7 @@ fn write_target_sections(
     Ok(())
 }
 
-fn render_section_keys_from_int32_array(
+pub(crate) fn render_section_keys_from_int32_array(
     target_sections: &js_sys::Int32Array,
 ) -> Result<BTreeSet<RenderSectionKey>, String> {
     let values = target_sections.to_vec();

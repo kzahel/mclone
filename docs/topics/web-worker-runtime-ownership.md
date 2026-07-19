@@ -127,7 +127,7 @@ world-qualified handle. The TypeScript boundary is a generic polled transport
 that constructs one ordinary Worker and forwards opaque messages, transfer
 handles, browser errors, and termination.
 
-The cutover removed the TypeScript broker class, priority queue, pending
+The Slice 2 cutover removed the TypeScript broker class, priority queue, pending
 promises, compiler-wake relay, release policy, and asset-worker swap policy.
 Authored TypeScript is now 6,484 lines: 933 below the Slice 0 baseline and 929
 below the pre-Slice-2 tree. The render-worker family fell from 1,349 to 536
@@ -135,6 +135,31 @@ lines and `mclone-web-app.ts` from 2,650 to 2,487; the new generic transport is
 47 lines. All main-side render ownership debt counters are zero. The eight-site
 copy ledger, private Wasm heaps, external SAB ABI, and worker-side render actor
 remain unchanged.
+
+Slice 3 subsequently moved the worker-side render authority into
+`WebRenderWorkerActor`. Worker Rust now owns the selected asset template,
+per-world compiler sessions and release, render-section versus Far LOD
+dispatch, target normalization, compile diagnostics, shared-input validation,
+and atomic shared-result publication. The Worker TypeScript is a 69-line Wasm
+loader and opaque frame forwarder; it no longer names asset selection, world
+priority, work kinds, compiler methods, or per-world sessions.
+
+The cut also removed one real production copy. Compiler internals now return
+their packed Rust bytes to the actor, diagnostics inspect those bytes in place,
+and worker Rust copies them directly into the external result SAB. The prior
+Rust-to-JavaScript temporary array followed by JavaScript-to-SAB copy is gone.
+The ownership inventory now reports 6,072 authored TypeScript lines, 124 render
+worker lines, zero worker-side render debts, and a seven-site copy ledger.
+Private Wasm heaps, one ordinary render Worker, the external SAB ABI, and
+failure containment remain unchanged.
+
+Post-cutover validation passed the complete Rust workspace and the ordinary,
+movement, and desktop-lobby browser lanes. The lobby held two resident compiler
+sessions across three qualified world identities while retaining one Worker,
+one Worker-Wasm initialization, one asset load, and zero result overflow or
+response transfers. Its embedded-preview capture remained coherent. The
+broader lifecycle lane again stopped only at its recorded hard-coded actor-ID
+fixture after 628 successful actor compiles; its assertion was not weakened.
 
 Two complete pre-cutover control runs separated coordinator evidence from
 unrelated browser-fixture debt:
@@ -402,6 +427,8 @@ Primary implementation surfaces:
 
 - `native/apps/mclone-web-client/src/web_canvas.rs`
 - `native/apps/mclone-web-client/src/web_render_worker.rs`
+- `native/apps/mclone-web-client/src/web_render_worker_actor.rs`
+- `native/apps/mclone-web-client/src/web_render_compiler_abi.rs`
 - `native/apps/mclone-web-client/src/web_scene_host.rs`
 - `native/apps/mclone-web-client/src/web_server_worker.rs`
 - `native/apps/mclone-web-client/src/web_remote_session.rs`
@@ -417,9 +444,10 @@ Primary implementation surfaces:
 ## Recommended Next Work
 
 Execute Tactical 197 Slices 3-6 autonomously at the recorded high-value
-boundary: worker-side render actor, only proven common Worker mechanics,
-versioned integrated-server startup and policy actor, Rust-authored catalog
-descriptors, then residual measurement. Keep isolated heaps, the external SAB
+boundary. Slice 3 is complete; next compare the render and server-job shells
+and extract only proven common Worker mechanics, then implement versioned
+integrated-server startup and bounded policy ownership, Rust-authored catalog
+descriptors, and residual measurement. Keep isolated heaps, the external SAB
 copy ledger, one ordinary render Worker, browser-owned IndexedDB/timers/events,
 and native typed channels. Stop for a human decision before browser-native
 long-tail reduction or shared Wasm linear-memory work.

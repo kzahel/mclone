@@ -46,6 +46,8 @@ mod web_render_compiler_abi;
 #[cfg(target_arch = "wasm32")]
 mod web_render_worker;
 #[cfg(target_arch = "wasm32")]
+mod web_render_worker_actor;
+#[cfg(target_arch = "wasm32")]
 mod web_server_worker;
 
 #[cfg(target_arch = "wasm32")]

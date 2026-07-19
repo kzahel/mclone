@@ -1,5 +1,5 @@
-// Worker-safe mechanical helpers shared by the app's asset fetch and the
-// render-compiler worker. Request identity, scheduling, lifecycle, recovery,
+// Main-thread browser helpers for asset fetch and shared-buffer capability
+// reporting. Request identity, scheduling, lifecycle, worker publication,
 // asset generations, and diagnostics are owned by Rust.
 
 export async function fetchAssetPack(assetPackUrl: URL): Promise<Uint8Array> {

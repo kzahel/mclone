@@ -16,8 +16,8 @@ const RUST_SRC: &str = include_str!("../src/web_render_compiler_abi.rs");
 const JS_ABI: &str = include_str!("../www/mclone-render-compiler-abi.js");
 
 /// The numeric SAB-ring constants that exist on both sides and must agree. The
-/// `RENDER_COMPILER_TRANSPORT_KIND` string is a JS-only diagnostic label with no Rust `const`,
-/// so it is asserted separately below rather than parsed as an integer.
+/// `RENDER_COMPILER_TRANSPORT_KIND` diagnostic string is asserted separately
+/// below rather than parsed as an integer.
 const ABI_NAMES: &[&str] = &[
     "RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS",
     "RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX",
@@ -88,10 +88,16 @@ fn js_and_rust_render_compiler_abi_agree() {
 
 #[test]
 fn js_abi_declares_the_shared_result_buffer_transport_kind() {
-    // The one non-numeric ABI value: the transport-kind diagnostic label the worker reports and
-    // the app/smoke metrics default to. Rust references the same string literal directly.
+    // The one non-numeric ABI value: the transport-kind diagnostic label the
+    // Rust worker reports and the app/smoke metrics default to.
     assert!(
         JS_ABI.contains(r#"export const RENDER_COMPILER_TRANSPORT_KIND = "shared-result-buffer";"#),
         "mclone-render-compiler-abi.js must export RENDER_COMPILER_TRANSPORT_KIND = \"shared-result-buffer\""
+    );
+    assert!(
+        RUST_SRC.contains(
+            r#"pub(crate) const RENDER_COMPILER_TRANSPORT_KIND: &str = "shared-result-buffer";"#
+        ),
+        "web_render_compiler_abi.rs must declare the matching transport kind"
     );
 }

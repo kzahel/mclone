@@ -1,8 +1,8 @@
 // 067 Stage 5: single source for the render-compile SharedArrayBuffer ring ABI on the
-// JavaScript side. The render-compile worker (the producer, mclone-render-compiler-worker.js)
-// and the app/smoke glue (the consumers, via mclone-render-compiler-shared.js) all import
-// these constants instead of hand-duplicating them — collapsing the three former hand-synced
-// JS copies into one.
+// JavaScript side. Main-thread app/smoke glue consumes these constants through
+// mclone-render-compiler-shared.js. The render-compile producer now lives in Rust and consumes
+// the matching Rust module directly, so JavaScript no longer interprets this control layout on
+// the worker side.
 //
 // The Rust main-wasm reader keeps its own copy of the numeric constants below in
 // native/apps/mclone-web-client/src/web_render_compiler_abi.rs (it cannot import this JS file

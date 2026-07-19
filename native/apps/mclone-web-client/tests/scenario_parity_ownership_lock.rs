@@ -53,6 +53,10 @@ const WEB_RENDER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_render_worker.rs"
 ));
+const WEB_RENDER_WORKER_ACTOR: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_render_worker_actor.rs"
+));
 const WEB_SERVER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_server_worker.rs"
@@ -232,8 +236,13 @@ fn browser_compiler_broker_and_shared_renderer_boundary_are_singular() {
     assert!(WEB_RENDER_WORKER.contains("RenderWorkerAssetSwapState"));
     assert!(WEB_RENDER_WORKER.contains("RenderWorkerPriority::Active"));
     assert!(WEB_RENDER_WORKER.contains("release-render-compiler-world"));
-    assert!(WEB_RENDER_COMPILER_WORKER.contains("compilerSessions = new Map"));
-    assert!(WEB_RENDER_COMPILER_WORKER.contains("compilerTemplate.forkWorldSession()"));
+    assert!(!WEB_RENDER_COMPILER_WORKER.contains("compilerSessions = new Map"));
+    assert!(!WEB_RENDER_COMPILER_WORKER.contains("forkWorldSession"));
+    assert!(!WEB_RENDER_COMPILER_WORKER.contains("workKind"));
+    assert!(WEB_RENDER_COMPILER_WORKER.contains("new module.WebRenderWorkerActor"));
+    assert!(WEB_RENDER_WORKER_ACTOR.contains("compiler_sessions: BTreeMap"));
+    assert!(WEB_RENDER_WORKER_ACTOR.contains("enum WorkKind"));
+    assert!(WEB_RENDER_WORKER_ACTOR.contains("view.copy_from(packed)"));
     assert!(WEB_CANVAS.contains("WebRenderWorkerWorldHandle"));
 
     let shared_constructor = TERRAIN_RENDERER

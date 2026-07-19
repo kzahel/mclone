@@ -629,7 +629,7 @@ human review.
 
 ## Slice 3 — Worker-Side Render Rust Actor
 
-Status: approved for autonomous implementation 2026-07-19.
+Status: complete 2026-07-19.
 
 Once main-side ownership is Rust, move worker-side domain dispatch into a
 resident Rust actor. The actor should own:
@@ -657,6 +657,56 @@ only common Wasm loading, opaque forwarding, SAB publication, browser failure,
 yield, and close mechanics that are actually identical. Do not introduce a
 general browser-thread runtime or force unlike asset/session protocols through
 one abstraction merely to reduce line count.
+
+### Slice 3 execution and evidence
+
+`WebRenderWorkerActor` now owns the selected asset template, per-world session
+map, release notifications, render-section/Far-LOD selection, target
+normalization, worker counters, typed reports, shared-input validation, result
+overflow/failure status, and atomic notification. The external SAB constants
+and atomic helpers are shared by main and worker Rust through
+`web_render_compiler_abi.rs` and remain locked to the one JavaScript ABI copy.
+
+The production TypeScript Worker fell from 481 to 69 lines. It imports and
+initializes the independent Wasm instance, constructs the actor from the first
+opaque frame, forwards later frames, posts actor reports, and retains a
+last-resort browser/FFI failure envelope. It does not inspect work kind, asset
+selection, world priority, compiler methods, or world-session lifecycle. All
+three registered worker-side render debts are now locked at zero.
+
+The actor also removed the temporary JavaScript output array from the live
+path. Compiler internals return packed `Vec<u8>` values, report summaries read
+those bytes directly, and worker Rust copies once into the result SAB. The
+explicit production copy ledger therefore fell from eight sites to seven;
+input and main-side result copies, independent Wasm heaps, and the external SAB
+transport are otherwise unchanged.
+
+Focused Rust/Wasm checks, the ABI and scenario ownership locks, generated
+bindgen TypeScript checking, and the Worker ownership self-test passed. The
+complete Rust workspace check and test suite passed. The desktop lobby scenario
+also passed with one render Worker, one Worker-Wasm initialization, one asset
+load, three qualified worlds, two resident compiler sessions, zero result
+overflows, and no transferred response bytes. Its embedded preview capture was
+inspected and remained coherent. The ordinary browser smoke settled 22 compiles
+with one Worker-Wasm initialization, one asset load, zero transferred response
+bytes, and zero result overflows. A
+fresh movement run settled 450 compiles and 225 rendered movement frames; its
+retained 16-sample worker round-trip range was 15.0-32.3 ms (20.1 ms average),
+with a 20.3 ms maximum frame gap and no overflow or transferred response.
+
+The dedicated Far LOD probe reached its Rust-authored `far-lod` worker proof,
+rendered and captured the enabled multi-level shell, and then failed at the
+already-recorded movement C5 coverage debt rather than at actor dispatch or
+mailbox publication. The ordinary and Far LOD browser captures under `/tmp`
+were inspected and remained visually coherent. The baseline coverage assertion
+was not weakened.
+
+The broader lobby lifecycle probe again reached the already-recorded fixture
+failure: it waited specifically for actor IDs `1` and `2` after the returned
+world contained later valid cow and chicken actors. Before that assertion, the
+new actor completed 628 compiles with two resident world sessions, no overflow,
+and no transferred response bytes. This is the same pre-cutover debt and the
+assertion remains unchanged.
 
 ## Slice 4 — Integrated-Server Responsibility Split
 

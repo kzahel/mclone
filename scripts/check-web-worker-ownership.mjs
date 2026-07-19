@@ -54,12 +54,12 @@ const moduleRegistry = {
   },
   "mclone-render-compiler-worker.ts": {
     family: "render-workers",
-    baselineLines: 481,
+    baselineLines: 69,
     workerEntry: true,
     workerConstruction: false,
     responsibilities: [
-      "external SAB result publication",
-      "registered worker-side render-actor debt",
+      "browser Wasm module loading",
+      "opaque worker-resident Rust render-actor forwarding",
     ],
   },
   "mclone-runner-shared-abi.d.ts": {
@@ -190,21 +190,21 @@ const domainDebt = [
     id: "render-worker-world-sessions",
     file: "mclone-render-compiler-worker.ts",
     needle: "compilerSessions = new Map",
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust render actor",
   },
   {
     id: "render-worker-world-fork",
     file: "mclone-render-compiler-worker.ts",
     needle: "compilerTemplate.forkWorldSession()",
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust render actor",
   },
   {
     id: "render-worker-kind-selection",
     file: "mclone-render-compiler-worker.ts",
     needle: 'message.workKind === "far-lod"',
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust render actor",
   },
   {
@@ -256,14 +256,9 @@ const copyFacts = [
     needle: "snapshot_input_bytes.to_vec()",
   },
   {
-    id: "render-worker-rust-to-js",
-    path: "native/apps/mclone-web-client/src/web_canvas.rs",
-    needle: "Uint8Array::from(packed.as_slice())",
-  },
-  {
-    id: "render-worker-js-to-sab",
-    path: "native/apps/mclone-web-client/www/mclone-render-compiler-worker.ts",
-    needle: ".set(packed);",
+    id: "render-worker-rust-to-sab",
+    path: "native/apps/mclone-web-client/src/web_render_worker_actor.rs",
+    needle: "view.copy_from(packed);",
   },
   {
     id: "render-sab-to-main-rust",
