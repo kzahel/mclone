@@ -1,11 +1,9 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: autonomous high-value continuation approved 2026-07-19 after Slice 2
-review. Drive worker-side render ownership, proven common Worker mechanics,
-opaque integrated-server startup, bounded authority/session policy, and
-Rust-authored catalog descriptors as atomic cuts. Then remeasure and stop for a
-human decision before the browser-native long tail. This campaign must not
-widen into a shared-Wasm-memory runtime.
+Status: complete 2026-07-19. The high-value Rust ownership cuts and residual
+measurement are complete. Production retains isolated Wasm heaps and external
+SAB transports. The campaign stops before the browser-native long tail and
+does not open a shared-Wasm-memory tactical.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -898,7 +896,7 @@ production copy sites are unchanged.
 
 ## Slice 6 — Remeasure And Stop Or Escalate
 
-Status: required closeout.
+Status: complete 2026-07-19; stop with isolated heaps.
 
 After the isolated-actor conversions, remeasure the actual residual copies and
 duplicate memory. The expected default is to stop with isolated heaps.
@@ -917,6 +915,134 @@ Shared Wasm linear memory is not Slice 7. If the
 revisit gates are satisfied, create a separate tactical with a current
 toolchain proof, allocator and memory-growth instrumentation, cooperative
 shutdown, forced-crash recovery, and explicit human approval.
+
+### Final ownership inventory
+
+The final authored TypeScript inventory is 5,778 lines across 15 modules,
+1,639 below the 7,417-line baseline:
+
+| Responsibility family | Lines |
+|---|---:|
+| web app and browser assembly | 2,484 |
+| server, job, remote, and provision Workers | 1,328 |
+| input and touch | 886 |
+| catalog and settings | 862 |
+| render Worker and compatibility export | 124 |
+| threading capability smoke | 47 |
+| generic Worker transport | 47 |
+
+The source checker reports six Worker entry modules, two TypeScript Worker
+construction sites, and zero across all 24 registered domain-ownership debts.
+Remaining TypeScript owns browser mechanics: rAF and DOM assembly, input,
+IndexedDB CRUD and transactions, WebSocket construction, Worker construction,
+timers and event-loop yields, SAB typed views and atomics, provisioning,
+settings, and smoke/report exposure. It no longer chooses server-job kinds,
+render work, compiler sessions, active/standby policy, authority operations,
+generation/topology/behavior startup facts, or catalog compatibility.
+
+### Residual copy and timing evidence
+
+The production source ledger contains seven copies:
+
+1. main render Rust copies encoded input into the external input SAB;
+2. worker render Rust copies that SAB into its private Wasm heap;
+3. worker render Rust copies its packed result into the external result SAB;
+4. main render Rust copies that SAB into its private Wasm heap;
+5. parent server-job Rust copies an encoded request into its request SAB;
+6. server-job JavaScript copies the opaque response into its response SAB; and
+7. parent server-job Rust copies that SAB into its private Wasm heap.
+
+The focused movement lane moved three chunks across 226 frames and retained 16
+compile samples. Input reached 574,641 bytes and packed output 1,085,108 bytes.
+Worker round trip ranged from 15.2 to 25.1 ms and averaged 18.9 ms;
+main-side decode/finish/apply reported 0 ms at browser timer resolution. The
+maximum compile-correlated frame gap was 20.4 ms. Across 455 compiles, the
+result SAB carried 149,586,608 bytes with zero overflows, zero transferred
+responses, one Worker/Wasm initialization, and one 5,833,954-byte asset load.
+
+Shared-transport thread stress provided the complementary server-job byte
+ledger:
+
+| Lane | Requests / encoded bytes | Responses / encoded bytes | Aggregate round trip / worst |
+|---|---:|---:|---:|
+| runner | 6 / 102 B | 21 / 281,126 B | 2,334 ms / 662 ms |
+| worldgen | 6 / 456 B | 6 / 12,104,132 B | 282 ms / 119 ms |
+| light | 6 / 18,457,932 B | 6 / 1,172,610 B | 290 ms / 109 ms |
+
+These measurements expose bytes and end-to-end round trip, not separate
+memcpy, codec, queue, and worker-compute time. They therefore do not prove that
+copies dominate any lane. Tactical 068 remains the available decomposition:
+lighting was approximately 98% Worker computation and cold world generation
+approximately 88% generation. Tactical 069 already removed the measured warm
+worldgen serialization problem through resident state and deltas.
+
+### User-felt latency and resident resources
+
+The desktop lobby reached playable state in 442.0 ms and its warm embedded
+preview in 28.28 s. Across 3,442 sampled frame gaps, p95 was 9.925 ms and the
+maximum was 41.055 ms. The two-times CPU-throttled mobile lane reached playable
+state in 502.8 ms and preview in 28.46 s; its 3,462 gaps had a 10.065 ms p95 and
+100.985 ms maximum, below its 750 ms acceptance limit.
+
+Both lanes used one render Worker, one compiler Wasm initialization, one asset
+load, two resident compiler sessions, three qualified world identities, and
+two active integrated-server Workers. Desktop external SAB capacity totalled
+29,554,809 bytes; mobile totalled 29,066,242 bytes. The compatible worlds had
+two terrain and actor resource owners, zero duplicated atlas base bytes,
+52,436 known retained actor bytes, and about 1.35 MB allocated actor state.
+Desktop JS heap use was 21,027,010 bytes and mobile was 14,830,777 bytes.
+
+The 10,987,057-byte Wasm module is measured, but browser sharing of its compiled
+code is not. Production does not export main or Worker Wasm heap high-water or
+Worker CPU. The desktop main-renderer task-time upper bound was 20.5%; mobile
+was 43.0%. Exact duplicate private-heap state and copy-only CPU cost therefore
+remain intentionally reported as unavailable rather than inferred.
+
+### Failure containment and terminal decision
+
+The full Rust workspace tests cover render coordinator failure fan-out, stale
+generation and completion rejection, active restart, asset rollback, and
+idempotent termination. Browser thread/chunk stress covered shared and
+transfer runner modes and clean shutdown with zero pending jobs or
+publications. The lifecycle lane successfully completed deliberate provision
+cancellation and an injected integrated-server Worker-construction failure:
+the existing active world remained authoritative, the failed destination was
+not retained, and its Worker was contained. The lane subsequently stopped at
+the recorded fixture that demands entity IDs `1`/`2` even after valid later
+actors exist; that unrelated assertion remains unchanged. Five consecutive
+fresh remote interaction smokes also completed with zero pending work.
+
+The shared-Wasm-memory revisit gate is not met. In particular:
+
+- serialization/copy is not shown to be at least 20% of a user-felt path;
+- the CPU-throttled mobile proof shows no copy-attributed regression;
+- Worker CPU, private-heap high-water, allocator growth, and atomic contention
+  are not instrumented; and
+- cooperative shared-heap crash recovery and the required human architecture
+  review do not exist.
+
+Payload reduction, resident state, and current SAB/atomics capability are
+proven, but those are necessary rather than sufficient conditions. Do not open
+a shared-memory tactical from this result. Further browser-native long-tail
+reduction or a shared Wasm heap requires a new explicit human decision based on
+new evidence.
+
+### Final validation receipt
+
+The closeout passed:
+
+- full workspace format, check, test, and all three Wasm target checks;
+- generated-bindgen TypeScript, Worker ownership, and scene-host adoption
+  gates;
+- thread capability, app, chunk, movement, desktop lobby, and throttled-mobile
+  lobby browser smokes;
+- five consecutive fresh remote WebSocket interaction smokes; and
+- the earlier Slice 5 catalog, cylinder IndexedDB reopen, and managed-storage
+  proofs.
+
+App, movement, desktop-lobby, and mobile-lobby captures under `/tmp` were
+inspected and remained visually coherent. The lifecycle lane is explicitly
+red only at the pre-existing hard-coded actor-ID fixture described above.
 
 ## Validation Matrix
 

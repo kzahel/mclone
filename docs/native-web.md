@@ -39,17 +39,20 @@ records the completed parity refactor and feature-off/scenario-on performance
 evidence. Far LOD is supported through the production shared resident
 compiler/cache/render path.
 
-The lower-level Worker adapters still contain substantial hand-authored
-TypeScript coordination. The accepted next ownership direction keeps each
-Worker's private Wasm heap and current external `SharedArrayBuffer` mailboxes,
-but moves domain dispatch and lifecycle policy into worker-resident Rust actors
-behind domain-blind TypeScript brokers. This is tracked in
+The high-value lower-level Worker ownership campaign is complete. Each Worker
+keeps its private Wasm heap and current external `SharedArrayBuffer` mailboxes,
+while Rust actors now own server-job dispatch, render coordination and worker
+sessions, integrated-server startup and authority policy, and catalog
+descriptors. The remaining TypeScript owns browser mechanics such as Worker,
+IndexedDB, WebSocket, timer, event-loop, DOM/input, and typed SAB access. This
+boundary and its measured stopping decision are recorded in
 [`topics/web-worker-runtime-ownership.md`](topics/web-worker-runtime-ownership.md)
 and Tactical
 [`197-domain-blind-web-worker-broker.md`](tactical/197-domain-blind-web-worker-broker.md).
-It is not a commitment to one shared Wasm linear memory.
+A new human decision is required before further browser-native long-tail
+reduction or one shared Wasm linear memory.
 
-That path now uses 4/8/16 rings with two-chunk hysteresis and
+Far LOD uses 4/8/16 rings with two-chunk hysteresis and
 replacement-before-suppress transitions. Browser audio and teleport preview
 remain explicit absent service capabilities.
 

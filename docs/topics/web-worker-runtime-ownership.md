@@ -2,15 +2,14 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: autonomous high-value continuation approved 2026-07-19 after the
-server-job actor and main-side render coordinator cutovers. Production keeps
-isolated Wasm heaps and the existing external `SharedArrayBuffer` transports.
-Tactical [`197`](../tactical/197-domain-blind-web-worker-broker.md) now owns the
-worker-side render actor, proven common Worker mechanics, opaque
-integrated-server startup, bounded authority/session policy, and Rust-authored
-catalog descriptors. It then remeasures and stops before the browser-native
-long tail. A shared Wasm linear-memory runtime remains a separate,
-measurement-gated investigation rather than an implied destination.
+Status: high-value isolated-actor campaign complete 2026-07-19. Production
+keeps isolated Wasm heaps and the existing external `SharedArrayBuffer`
+transports. Tactical
+[`197`](../tactical/197-domain-blind-web-worker-broker.md) moved the render
+coordinator and worker actor, integrated-server startup and authority policy,
+server-job dispatch, and catalog descriptors into Rust. Its closeout found no
+evidence that justifies shared Wasm linear memory or further browser-native
+long-tail reduction without a new human decision.
 
 ## Scope
 
@@ -81,14 +80,14 @@ TypeScript coordination. The authored `.ts` inventory on 2026-07-19 is:
 
 | Family | Lines | Main contents |
 |---|---:|---|
-| `mclone-web-app.ts` | 2,487 | rAF/platform assembly, browser async operations, and smoke/report coordination |
-| server, job, remote, and provision Workers | 1,611 | integrated-server lifecycle, IndexedDB servicing, opaque job-actor forwarding, WebSocket, provisioning |
-| render compiler Worker, shim, and declarations | 536 | worker-side dispatch, SAB doorbells, ABI declarations, and generic transport export |
+| `mclone-web-app.ts` | 2,484 | rAF/platform assembly, browser async operations, and smoke/report coordination |
+| server, job, remote, and provision Workers | 1,328 | IndexedDB servicing, opaque actor forwarding, WebSocket, provisioning, timers, and SAB mechanics |
+| render compiler Worker, shim, and declarations | 124 | Wasm loading, opaque actor forwarding, and the render doorbell |
 | input and touch | 886 | browser input mechanics |
-| world catalog and settings | 870 | IndexedDB mechanics, stored-record projection, browser settings |
+| world catalog and settings | 862 | IndexedDB CRUD, opaque descriptor storage, browser settings |
 | threading smoke Worker | 47 | shared-memory capability proof |
 | generic Worker transport | 47 | opaque `post`/`poll`/`terminate` browser mechanics |
-| **total** | **6,484** | authored TypeScript, excluding JavaScript smoke harnesses |
+| **total** | **5,778** | authored TypeScript, excluding JavaScript smoke harnesses |
 
 Line count is a warning signal, not a correctness metric. Input, touch,
 IndexedDB transactions, and browser presentation can legitimately remain
@@ -184,8 +183,9 @@ authored TypeScript inventory from 6,072 to 5,909 lines. The ordinary browser
 lane passed shared and transfer runner stress, IndexedDB mutation/reload passed,
 and the desktop lobby passed protected interaction, warm standby, embedded
 preview, and activation checks. The next high-value owner is the live
-integrated-server authority/session actor; the external SAB and IndexedDB
-platform contracts remain deliberately unchanged.
+integrated-server authority/session actor, which the following cut completed;
+the external SAB and IndexedDB platform contracts remained deliberately
+unchanged.
 
 The live authority/session cut is now complete as well. A resident
 `WebIntegratedServerActor` owns operation admission, message-to-session
@@ -225,6 +225,49 @@ round-trips full-width integers, but browser world creation deliberately keeps
 its pre-cutover JavaScript-number seed semantics in this ownership-only slice.
 An initial attempt to change that semantic selected a different large-seed
 fixture world and was removed before landing.
+
+Slice 6 closed the campaign at that boundary. The final inventory contains 15
+authored TypeScript modules, six Worker entries, and two TypeScript Worker
+construction sites. All 24 registered domain-ownership debts are zero. The
+remaining 5,778 lines are concentrated in rAF/DOM assembly, input, IndexedDB,
+WebSocket, timers/yields, typed SAB views and atomics, provisioning, settings,
+and smoke/report exposure. Further reduction would primarily move
+browser-native mechanics into Rust rather than remove a competing engine
+owner.
+
+The source copy ledger has seven explicit production sites: main Rust to the
+render input SAB, that SAB into worker Rust, worker Rust to the render result
+SAB, that SAB into main Rust, parent Rust to the server-job request SAB,
+server-job JavaScript to its response SAB, and that SAB into parent Rust. The
+movement probe retained 16 compiles with at most 574,641 input bytes and
+1,085,108 result bytes. Their worker round trip averaged 18.9 ms and ranged
+from 15.2 to 25.1 ms; main decode/finish/apply was below the browser timer's
+resolution, the maximum observed frame gap was 20.4 ms, and no response
+overflow or transfer fallback occurred. The telemetry does not separate codec,
+copy, and compute time inside the Worker, so it cannot establish copy
+dominance. Tactical 068's most recent decomposition remains the stronger
+evidence: lighting was about 98% compute and cold world generation about 88%
+generation after transport attribution.
+
+The desktop lobby passed with a 9.925 ms p95 and 41.055 ms maximum frame gap;
+the two-times CPU-throttled mobile lobby passed with 10.065 ms p95 and 100.985
+ms maximum. Both used one render Worker, two resident compiler sessions, three
+qualified world identities, and two active integrated-server Workers. Measured
+external SAB capacity was 29.55 MB desktop and 29.07 MB mobile. Compatible
+terrain resources had two owners with zero duplicated atlas base bytes. Known
+actor retention was 52,436 bytes and actor-state allocation about 1.35 MB.
+Exact main and Worker Wasm heap high-water and Worker CPU are not exported, so
+the closeout does not pretend to have a complete duplicate-memory or copy-time
+decomposition.
+
+Failure containment remains an advantage of the chosen boundary. Rust tests
+cover coordinator failure, stale generation/completion rejection, asset
+rollback, restart, and idempotent termination. Browser runner stress reached
+clean shutdown in shared and transfer modes. The lifecycle probe completed a
+cancelled provision and an injected integrated-server Worker-construction
+failure without changing the active world or leaking the failed standby, then
+stopped at its separately recorded hard-coded actor-ID fixture. Five fresh
+remote WebSocket interaction runs also completed with zero pending work.
 
 Two complete pre-cutover control runs separated coordinator evidence from
 unrelated browser-fixture debt:
@@ -439,6 +482,16 @@ following are true:
 9. A human architecture review accepts the remaining lifetime and deployment
    risk.
 
+The 2026-07-19 closeout does not satisfy this gate. Payload reduction and
+resident state are proven, and the capability smoke proves the browser can use
+SAB, atomics, and shared-memory-capable Wasm. However, copy/serialization has
+not been shown to consume 20% of a user-felt path on either desktop or
+throttled mobile. Exact Worker CPU, private-heap high-water, allocator growth,
+and atomic contention are also not instrumented. Cooperative recovery for a
+hypothetical shared heap has not been designed or proven, and the required
+human architecture review has not occurred. No shared-memory tactical is
+therefore opened.
+
 ## Validation And Evidence
 
 Worker-convergence slices must preserve:
@@ -486,7 +539,7 @@ ownership checks and unchanged behavior/performance evidence are load-bearing.
 - [`../tactical/170-web-scene-host-adoption.md`](../tactical/170-web-scene-host-adoption.md):
   browser host/service cutover evidence.
 - [`../tactical/197-domain-blind-web-worker-broker.md`](../tactical/197-domain-blind-web-worker-broker.md):
-  active implementation plan.
+  completed implementation and closeout record.
 
 Primary implementation surfaces:
 
@@ -508,9 +561,10 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Complete Tactical 197 Slice 6: remeasure residual copies, duplicate resident
-memory, latency, TypeScript ownership, and failure containment, then stop with
-the decision package. Keep isolated heaps, the external SAB copy ledger, one
-ordinary render Worker, browser-owned IndexedDB/timers/events, and native typed
-channels. A human decision is required before browser-native long-tail
-reduction or shared Wasm linear-memory work.
+Keep isolated heaps, the seven-site external SAB copy ledger, one ordinary
+render Worker, browser-owned IndexedDB/timers/events, and native typed
+channels. Treat the remaining TypeScript as an intentionally isolated browser
+adapter, not an unfinished line-count target. Reopen this topic only when new
+profiling identifies a concrete user-felt copy bottleneck or a domain-policy
+owner appears in TypeScript. A new explicit human decision is required before
+browser-native long-tail reduction or shared Wasm linear-memory work.
