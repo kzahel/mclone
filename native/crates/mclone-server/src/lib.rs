@@ -76,7 +76,9 @@ pub use integrated::{
     RealmInterestDiagnostics, RealmServer,
 };
 pub use job_codec::{
-    WorldgenJobSession, compute_light_status_job_frame, compute_worldgen_job_frame,
+    ServerJobActor, ServerJobActorDiagnostics, ServerJobActorKind, WorldgenJobSession,
+    compute_light_status_job_frame, compute_worldgen_job_frame, decode_server_job_actor_init_frame,
+    encode_server_job_actor_init_frame,
 };
 pub use loading_progress::{
     ChunkLoadingProgress, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,

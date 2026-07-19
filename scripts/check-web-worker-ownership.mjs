@@ -78,7 +78,7 @@ const moduleRegistry = {
     responsibilities: [
       "external SAB job mailbox",
       "message-transfer fallback",
-      "registered worldgen/light dispatch debt",
+      "domain-blind Rust actor forwarding",
     ],
   },
   "mclone-thread-smoke-worker.ts": {
@@ -138,28 +138,28 @@ const domainDebt = [
     id: "server-job-worldgen-switch",
     file: "mclone-server-job-worker.ts",
     needle: 'case "worldgen":',
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust server-job actor",
   },
   {
     id: "server-job-light-switch",
     file: "mclone-server-job-worker.ts",
     needle: 'case "light-status":',
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust server-job actor",
   },
   {
     id: "server-job-worldgen-session",
     file: "mclone-server-job-worker.ts",
     needle: "new module.WebWorldgenJobSession()",
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust server-job actor",
   },
   {
     id: "server-job-light-entrypoint",
     file: "mclone-server-job-worker.ts",
     needle: "mclone_web_compute_light_status_job_frame(",
-    maximum: 1,
+    maximum: 0,
     destination: "worker-resident Rust server-job actor",
   },
   {

@@ -1,10 +1,9 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: active 2026-07-19. Slice 0 has landed its executable baseline. Slice 1
-is in progress. Slice 2 has a concrete ownership target but begins only after
-the small server-job actor proves the broker contract. Later integrated-server
-consolidation remains provisional and must not widen this tactical into a
-shared-Wasm-memory runtime.
+Status: awaiting boundary review 2026-07-19. Slices 0 and 1 have landed. Slice
+2 has a concrete ownership target but begins only after review of the small
+server-job actor/broker contract. Later integrated-server consolidation remains
+provisional and must not widen this tactical into a shared-Wasm-memory runtime.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -241,7 +240,7 @@ must not claim the remote scenario green without new evidence.
 
 ## Slice 1 — Server-Job Rust Actor Proof
 
-Status: in progress 2026-07-19.
+Status: complete 2026-07-19; awaiting boundary review before Slice 2.
 
 Use `mclone-server-job-worker.ts` as the first bounded proof. It is small, has
 two domain variants, already uses isolated Wasm instances, and carries both SAB
@@ -321,6 +320,38 @@ pnpm native:timedemo:smoke
 
 Inspect the chunk/app browser capture under `/tmp` because the worker output
 feeds rendered terrain, even though the intended change is ownership-only.
+
+### Slice 1 evidence
+
+Main Rust now selects `ServerJobActorKind`, encodes a strict versioned nine-byte
+initialization frame, and gives it to each isolated job Worker. Worker Rust
+decodes that frame into `ServerJobActor`, owns the resident
+`WorldgenJobSession` or light-status dispatch, counts completed/failed frames,
+exports opaque diagnostics, and has explicit shutdown state. Tests cover bad
+magic/version/kind, warm worldgen session reuse, byte-identical light output,
+typed failure after shutdown, and clean actor reconstruction.
+
+`mclone-server-job-worker.ts` now has one `WebServerJobActor` and one
+`computeFrame` call. It has no worldgen/light selector, domain constructor,
+light entrypoint, or domain-derived result kind. The ownership inventory records
+all four server-job debt counts at zero. Authored TypeScript fell from the
+7,417-line baseline to 7,410 lines; the eight-copy ledger, external SAB ABI,
+isolated Wasm heaps, transfer fallback, and native channel mailboxes are
+unchanged.
+
+The shared server suite passed 512 tests; the web client tests, wasm target
+check, generated-bindgen TypeScript check, thread/chunk/app/movement browser
+probes, native movement/timedemo probes, and lobby A-to-B-to-A scenario passed.
+The representative movement probe retained four worldgen frames and 2,886,884
+request bytes, 37,230,612 response bytes, all pooled responses, and zero pending
+jobs. Its maximum browser frame gap was 10.325 ms. Chunk, app, movement, and
+lobby-return captures were inspected under `/tmp`.
+
+The remote probe again made the authoritative block mutation successfully but
+timed out waiting for an additional mesh build, matching the Slice 0 baseline
+failure. All other remote interaction checks and the compiler settled state
+were green. This remains tracked as pre-existing validation debt, not as Slice
+1 evidence of a green remote path.
 
 ### Slice 1 review
 

@@ -8,7 +8,10 @@ use wasm_bindgen::closure::Closure;
 use wasm_bindgen::prelude::*;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
-use crate::{WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind};
+use crate::{
+    ServerJobActorKind, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    encode_server_job_actor_init_frame,
+};
 
 const SHARED_CONTROL_SLOTS: u32 = 4;
 const SHARED_CONTROL_BYTES: u32 = SHARED_CONTROL_SLOTS * 4;
@@ -25,7 +28,8 @@ const LIGHT_STATUS_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
 
 pub(crate) struct WasmJobWorker {
     worker: Worker,
-    job_kind: &'static str,
+    actor_kind: ServerJobActorKind,
+    actor_init_frame: Vec<u8>,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
     transport_kind: WorkerFrameTransportKind,
@@ -70,7 +74,7 @@ impl SharedJobSlot {
 impl WasmJobWorker {
     pub(crate) fn new(
         name: &'static str,
-        job_kind: &'static str,
+        actor_kind: ServerJobActorKind,
         config: &WasmServerJobWorkerConfig,
     ) -> Result<Self, String> {
         let options = WorkerOptions::new();
@@ -175,7 +179,8 @@ impl WasmJobWorker {
 
         Ok(Self {
             worker,
-            job_kind,
+            actor_kind,
+            actor_init_frame: encode_server_job_actor_init_frame(actor_kind),
             bindgen_js_url: config.bindgen_js_url.clone(),
             bindgen_wasm_url: config.bindgen_wasm_url.clone(),
             transport_kind,
@@ -218,7 +223,7 @@ impl WasmJobWorker {
         let transfer = Array::new();
         transfer.push(&bytes.buffer());
         let message = Object::new();
-        set_string(&message, "kind", self.job_kind)?;
+        self.attach_actor_init_frame(&message)?;
         set_number(&message, "requestId", f64::from(request_id))?;
         set_string(&message, "bindgenJsUrl", &self.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &self.bindgen_wasm_url)?;
@@ -273,7 +278,7 @@ impl WasmJobWorker {
         request_view.copy_from(frame);
 
         let message = Object::new();
-        set_string(&message, "kind", self.job_kind)?;
+        self.attach_actor_init_frame(&message)?;
         set_string(
             &message,
             "transportKind",
@@ -353,7 +358,7 @@ impl WasmJobWorker {
                 .record_shared_buffer_pool_miss();
             let slot = SharedJobSlot::new(
                 shared_capacity_for_len(request_bytes, MIN_SHARED_REQUEST_BYTES),
-                initial_shared_response_capacity(self.job_kind),
+                initial_shared_response_capacity(self.actor_kind),
             );
             self.frame_metrics
                 .borrow_mut()
@@ -363,12 +368,23 @@ impl WasmJobWorker {
         ensure_slot_request_capacity(&mut slot, request_bytes, &self.frame_metrics);
         slot
     }
+
+    fn attach_actor_init_frame(&self, message: &Object) -> Result<(), String> {
+        let frame = Uint8Array::from(self.actor_init_frame.as_slice());
+        Reflect::set(
+            message,
+            &JsValue::from_str("actorInitFrame"),
+            frame.as_ref(),
+        )
+        .map(|_| ())
+        .map_err(|error| format!("failed to attach server-job actor init frame: {error:?}"))
+    }
 }
 
 impl std::fmt::Debug for WasmJobWorker {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("WasmJobWorker")
-            .field("job_kind", &self.job_kind)
+            .field("actor_kind", &self.actor_kind)
             .field("transport_kind", &self.transport_kind)
             .field("pending_count", &self.pending_count())
             .field("frame_metrics", &self.frame_metrics())
@@ -460,11 +476,10 @@ fn shared_response_frame(value: &JsValue) -> Result<SharedResponseFrame, String>
     })
 }
 
-fn initial_shared_response_capacity(job_kind: &str) -> u32 {
-    match job_kind {
-        "worldgen" => WORLDGEN_SHARED_RESPONSE_BYTES,
-        "light-status" => LIGHT_STATUS_SHARED_RESPONSE_BYTES,
-        _ => DEFAULT_SHARED_RESPONSE_BYTES,
+fn initial_shared_response_capacity(actor_kind: ServerJobActorKind) -> u32 {
+    match actor_kind {
+        ServerJobActorKind::Worldgen => WORLDGEN_SHARED_RESPONSE_BYTES,
+        ServerJobActorKind::LightStatus => LIGHT_STATUS_SHARED_RESPONSE_BYTES,
     }
 }
 

@@ -20,7 +20,9 @@ use mclone_core::{ChunkPos, ChunkSnapshot, PackedLightSection};
 #[cfg(target_arch = "wasm32")]
 use crate::WasmServerJobWorkerConfig;
 #[cfg(target_arch = "wasm32")]
-use crate::job_codec::{decode_light_status_response, encode_light_status_request};
+use crate::job_codec::{
+    ServerJobActorKind, decode_light_status_response, encode_light_status_request,
+};
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_status::PendingLightStatusBatch;
 use crate::light_world::RetainedInitialLightState;
@@ -164,8 +166,12 @@ struct LightStatusMailboxBackend {
 impl LightStatusMailboxBackend {
     fn new(config: Option<WasmServerJobWorkerConfig>) -> Self {
         let worker = config.map(|config| {
-            WasmJobWorker::new("mclone-light-status", "light-status", &config)
-                .expect("failed to spawn wasm light-status worker")
+            WasmJobWorker::new(
+                "mclone-light-status",
+                ServerJobActorKind::LightStatus,
+                &config,
+            )
+            .expect("failed to spawn wasm light-status worker")
         });
         Self {
             worker,

@@ -2,11 +2,12 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: active 2026-07-19. The production browser keeps isolated Wasm heaps and
-the existing external `SharedArrayBuffer` transports while worker coordination
-is moved toward Rust-owned actors behind domain-blind TypeScript browser
-brokers. The executable whole-worker ownership and copy baseline has landed;
-the server-job Rust actor proof is next. Tactical
+Status: first actor proof complete 2026-07-19. The production browser keeps
+isolated Wasm heaps and the existing external `SharedArrayBuffer` transports
+while worker coordination moves toward Rust-owned actors behind domain-blind
+TypeScript browser brokers. The whole-worker baseline and server-job Rust actor
+proof have landed; the actor/broker boundary now awaits review before render
+ownership work. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the first
 implementation slices. A shared Wasm linear-memory runtime remains a separate,
 measurement-gated investigation rather than an implied destination of the
@@ -82,12 +83,12 @@ TypeScript coordination. The authored `.ts` inventory on 2026-07-19 is:
 | Family | Lines | Main contents |
 |---|---:|---|
 | `mclone-web-app.ts` | 2,650 | rAF/platform assembly plus compiler wake, asset swap, async operation, smoke/report coordination |
-| server, job, remote, and provision Workers | 1,618 | integrated-server lifecycle, IndexedDB servicing, job dispatch, WebSocket, provisioning |
+| server, job, remote, and provision Workers | 1,611 | integrated-server lifecycle, IndexedDB servicing, opaque job-actor forwarding, WebSocket, provisioning |
 | render compiler broker, Worker, and declarations | 1,349 | queueing, priority, request schemas, SAB doorbells, worker sessions, diagnostics |
 | input and touch | 886 | browser input mechanics |
 | world catalog and settings | 867 | IndexedDB mechanics, stored-record projection, browser settings |
 | threading smoke Worker | 47 | shared-memory capability proof |
-| **total** | **7,417** | authored TypeScript, excluding JavaScript smoke harnesses |
+| **total** | **7,410** | authored TypeScript, excluding JavaScript smoke harnesses |
 
 Line count is a warning signal, not a correctness metric. Input, touch,
 IndexedDB transactions, and browser presentation can legitimately remain
@@ -95,6 +96,11 @@ large. The concern is the domain vocabulary and state machines that grow
 inside the browser adapter: generation-profile unions, topology projection,
 render work kinds, active/standby priority, per-world compiler sessions,
 request retries, asset epochs, and hand-authored result bags.
+
+Slice 0 locked the pre-cutover 7,417-line baseline. Slice 1 removed all four
+registered server-job dispatch debts and seven net TypeScript lines by replacing
+the worldgen/light selector with one opaque Rust actor call. The line delta is
+incidental; the zero domain-selector counts are the acceptance evidence.
 
 The existing scene-host purity gate covers known competing scene-policy
 owners in `mclone-web-app.ts`, and focused Rust tests forbid particular
@@ -337,10 +343,11 @@ Primary implementation surfaces:
 - `native/apps/mclone-web-client/www/mclone-integrated-server-worker.ts`
 - `native/apps/mclone-web-client/www/mclone-server-job-worker.ts`
 - `scripts/check-web-scene-host-adoption.mjs`
+- `scripts/check-web-worker-ownership.mjs`
 
 ## Recommended Next Work
 
-Complete Tactical 197 Slice 1 to make the worldgen/light job Worker the first
-domain-blind isolated Rust actor. Preserve the Slice 0 external-SAB copy ledger
-and isolated heaps. Only after that proof and boundary review should the larger
-render-compiler broker move from TypeScript into browser-specific Rust.
+Review Tactical 197 Slice 1's actor/broker boundary. If accepted, begin Slice 2
+by moving the main-side render compiler broker into browser-specific Rust while
+preserving the external-SAB copy ledger and isolated heaps. Do not begin shared
+Wasm linear-memory work as part of that continuation.

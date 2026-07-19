@@ -12,10 +12,23 @@ const WEB_SERVER_WORKER: &str = include_str!(concat!(
 
 #[test]
 fn browser_job_worker_delegates_worldgen_frames_to_shared_rust() {
-    assert!(JOB_WORKER.contains("new module.WebWorldgenJobSession()"));
-    assert!(JOB_WORKER.contains("worldgenSession.computeWorldgenJobFrame(frame)"));
-    assert!(WEB_SERVER_WORKER.contains("session: WorldgenJobSession"));
-    assert!(WEB_SERVER_WORKER.contains(".compute_delta_job_frame(&frame.to_vec())"));
+    assert!(JOB_WORKER.contains("new module.WebServerJobActor(message.actorInitFrame)"));
+    assert!(JOB_WORKER.contains("serverJobActor.computeFrame(frame)"));
+    assert!(WEB_SERVER_WORKER.contains("actor: ServerJobActor"));
+    assert!(WEB_SERVER_WORKER.contains(".compute_frame(&frame.to_vec())"));
+
+    for forbidden in [
+        "new module.WebWorldgenJobSession()",
+        "computeWorldgenJobFrame(frame)",
+        "mclone_web_compute_light_status_job_frame(frame)",
+        "case \"worldgen\"",
+        "case \"light-status\"",
+    ] {
+        assert!(
+            !JOB_WORKER.contains(forbidden),
+            "TypeScript job broker must remain domain-blind: {forbidden}"
+        );
+    }
 
     for forbidden in [
         "NoiseBasedChunkGenerator",

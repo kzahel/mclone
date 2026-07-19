@@ -26,7 +26,9 @@ use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 use crate::WasmServerJobWorkerConfig;
 use crate::job_codec::{GenerationDiagnostics, WorldGenerationExecutor};
 #[cfg(target_arch = "wasm32")]
-use crate::job_codec::{decode_worldgen_response, encode_worldgen_delta_request};
+use crate::job_codec::{
+    ServerJobActorKind, decode_worldgen_response, encode_worldgen_delta_request,
+};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
 use crate::{
@@ -149,7 +151,7 @@ struct WorldgenMailboxBackend {
 impl WorldgenMailboxBackend {
     fn new(config: Option<WasmServerJobWorkerConfig>) -> Self {
         let worker = config.map(|config| {
-            WasmJobWorker::new("mclone-worldgen", "worldgen", &config)
+            WasmJobWorker::new("mclone-worldgen", ServerJobActorKind::Worldgen, &config)
                 .expect("failed to spawn wasm worldgen worker")
         });
         Self {

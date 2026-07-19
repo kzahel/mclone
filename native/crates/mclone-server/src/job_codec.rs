@@ -45,6 +45,67 @@ const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
 const JOB_FRAME_VERSION: u32 = 6;
+const SERVER_JOB_ACTOR_INIT_MAGIC: u32 = 0x534A_4149;
+const SERVER_JOB_ACTOR_INIT_VERSION: u32 = 1;
+const SERVER_JOB_ACTOR_INIT_FRAME_BYTES: usize = 9;
+const SERVER_JOB_ACTOR_DIAGNOSTICS_MAGIC: u32 = 0x534A_4144;
+const SERVER_JOB_ACTOR_DIAGNOSTICS_VERSION: u32 = 1;
+
+/// Rust-owned identity for one isolated browser server-job actor. This is kept
+/// out of the TypeScript Worker broker: main Rust encodes it into an opaque init
+/// frame and worker Rust decodes it before accepting job frames.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ServerJobActorKind {
+    Worldgen,
+    LightStatus,
+}
+
+impl ServerJobActorKind {
+    const fn tag(self) -> u8 {
+        match self {
+            Self::Worldgen => 1,
+            Self::LightStatus => 2,
+        }
+    }
+
+    fn from_tag(tag: u8) -> Result<Self, String> {
+        match tag {
+            1 => Ok(Self::Worldgen),
+            2 => Ok(Self::LightStatus),
+            _ => Err(format!("unknown server-job actor kind tag {tag}")),
+        }
+    }
+}
+
+pub fn encode_server_job_actor_init_frame(kind: ServerJobActorKind) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(SERVER_JOB_ACTOR_INIT_FRAME_BYTES);
+    frame.extend_from_slice(&SERVER_JOB_ACTOR_INIT_MAGIC.to_le_bytes());
+    frame.extend_from_slice(&SERVER_JOB_ACTOR_INIT_VERSION.to_le_bytes());
+    frame.push(kind.tag());
+    frame
+}
+
+pub fn decode_server_job_actor_init_frame(bytes: &[u8]) -> Result<ServerJobActorKind, String> {
+    if bytes.len() != SERVER_JOB_ACTOR_INIT_FRAME_BYTES {
+        return Err(format!(
+            "server-job actor init frame has {} bytes, expected {SERVER_JOB_ACTOR_INIT_FRAME_BYTES}",
+            bytes.len()
+        ));
+    }
+    let magic = u32::from_le_bytes(bytes[0..4].try_into().expect("checked actor init length"));
+    if magic != SERVER_JOB_ACTOR_INIT_MAGIC {
+        return Err(format!(
+            "server-job actor init magic {magic:#010x} does not match {SERVER_JOB_ACTOR_INIT_MAGIC:#010x}"
+        ));
+    }
+    let version = u32::from_le_bytes(bytes[4..8].try_into().expect("checked actor init length"));
+    if version != SERVER_JOB_ACTOR_INIT_VERSION {
+        return Err(format!(
+            "server-job actor init version {version} is unsupported; expected {SERVER_JOB_ACTOR_INIT_VERSION}"
+        ));
+    }
+    ServerJobActorKind::from_tag(bytes[8])
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct GenerationCacheReport {
@@ -632,6 +693,121 @@ pub fn compute_light_status_job_frame(bytes: &[u8]) -> Result<Vec<u8>, String> {
         writer.write_completed_light_status(status)?;
     }
     Ok(writer.into_bytes())
+}
+
+#[derive(Debug)]
+enum ServerJobActorState {
+    Worldgen(WorldgenJobSession),
+    LightStatus,
+}
+
+/// One worker-resident server-job actor behind the domain-blind browser broker.
+///
+/// The actor owns lane selection, the resident worldgen mirror, dispatch,
+/// failure accounting, and shutdown state. Browser TypeScript only forwards the
+/// opaque init/request/result bytes between isolated Wasm heaps.
+#[derive(Debug)]
+pub struct ServerJobActor {
+    kind: ServerJobActorKind,
+    state: Option<ServerJobActorState>,
+    completed_frame_count: u64,
+    failed_frame_count: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ServerJobActorDiagnostics {
+    pub kind: ServerJobActorKind,
+    pub shutdown: bool,
+    pub completed_frame_count: u64,
+    pub failed_frame_count: u64,
+    pub resident_worldgen_mirror_chunk_count: usize,
+    pub last_worldgen_delta_upsert_count: usize,
+}
+
+impl ServerJobActor {
+    pub fn new(kind: ServerJobActorKind) -> Self {
+        let state = match kind {
+            ServerJobActorKind::Worldgen => {
+                ServerJobActorState::Worldgen(WorldgenJobSession::new())
+            }
+            ServerJobActorKind::LightStatus => ServerJobActorState::LightStatus,
+        };
+        Self {
+            kind,
+            state: Some(state),
+            completed_frame_count: 0,
+            failed_frame_count: 0,
+        }
+    }
+
+    pub fn from_init_frame(frame: &[u8]) -> Result<Self, String> {
+        decode_server_job_actor_init_frame(frame).map(Self::new)
+    }
+
+    pub fn compute_frame(&mut self, frame: &[u8]) -> Result<Vec<u8>, String> {
+        let result = match self.state.as_mut() {
+            Some(ServerJobActorState::Worldgen(session)) => session.compute_delta_job_frame(frame),
+            Some(ServerJobActorState::LightStatus) => compute_light_status_job_frame(frame),
+            None => Err("server-job actor is shut down".to_owned()),
+        };
+        match result {
+            Ok(response) => {
+                self.completed_frame_count = self.completed_frame_count.saturating_add(1);
+                Ok(response)
+            }
+            Err(error) => {
+                self.failed_frame_count = self.failed_frame_count.saturating_add(1);
+                Err(error)
+            }
+        }
+    }
+
+    pub fn diagnostics(&self) -> ServerJobActorDiagnostics {
+        let (resident_worldgen_mirror_chunk_count, last_worldgen_delta_upsert_count) =
+            match self.state.as_ref() {
+                Some(ServerJobActorState::Worldgen(session)) => (
+                    session.mirror_chunk_count(),
+                    session.last_delta_upsert_count(),
+                ),
+                Some(ServerJobActorState::LightStatus) | None => (0, 0),
+            };
+        ServerJobActorDiagnostics {
+            kind: self.kind,
+            shutdown: self.state.is_none(),
+            completed_frame_count: self.completed_frame_count,
+            failed_frame_count: self.failed_frame_count,
+            resident_worldgen_mirror_chunk_count,
+            last_worldgen_delta_upsert_count,
+        }
+    }
+
+    /// Encode actor-owned diagnostics without exposing their domain fields to
+    /// the TypeScript broker.
+    pub fn diagnostics_frame(&self) -> Vec<u8> {
+        let diagnostics = self.diagnostics();
+        let mut frame = Vec::with_capacity(42);
+        frame.extend_from_slice(&SERVER_JOB_ACTOR_DIAGNOSTICS_MAGIC.to_le_bytes());
+        frame.extend_from_slice(&SERVER_JOB_ACTOR_DIAGNOSTICS_VERSION.to_le_bytes());
+        frame.push(diagnostics.kind.tag());
+        frame.push(u8::from(diagnostics.shutdown));
+        frame.extend_from_slice(&diagnostics.completed_frame_count.to_le_bytes());
+        frame.extend_from_slice(&diagnostics.failed_frame_count.to_le_bytes());
+        frame.extend_from_slice(
+            &u64::try_from(diagnostics.resident_worldgen_mirror_chunk_count)
+                .unwrap_or(u64::MAX)
+                .to_le_bytes(),
+        );
+        frame.extend_from_slice(
+            &u64::try_from(diagnostics.last_worldgen_delta_upsert_count)
+                .unwrap_or(u64::MAX)
+                .to_le_bytes(),
+        );
+        frame
+    }
+
+    pub fn shutdown(&mut self) {
+        self.state = None;
+    }
 }
 
 pub(crate) struct WorldgenJobFrame {
@@ -2068,6 +2244,78 @@ mod tests {
     }
 
     #[test]
+    fn server_job_actor_init_frame_is_typed_and_strict() {
+        for kind in [
+            ServerJobActorKind::Worldgen,
+            ServerJobActorKind::LightStatus,
+        ] {
+            let frame = encode_server_job_actor_init_frame(kind);
+            assert_eq!(frame.len(), SERVER_JOB_ACTOR_INIT_FRAME_BYTES);
+            assert_eq!(decode_server_job_actor_init_frame(&frame), Ok(kind));
+            assert_eq!(
+                ServerJobActor::from_init_frame(&frame)
+                    .unwrap()
+                    .diagnostics()
+                    .kind,
+                kind
+            );
+        }
+
+        assert!(decode_server_job_actor_init_frame(&[]).is_err());
+        let mut bad_magic = encode_server_job_actor_init_frame(ServerJobActorKind::Worldgen);
+        bad_magic[0] ^= 0xff;
+        assert!(decode_server_job_actor_init_frame(&bad_magic).is_err());
+        let mut bad_version = encode_server_job_actor_init_frame(ServerJobActorKind::Worldgen);
+        bad_version[4] = 2;
+        assert!(decode_server_job_actor_init_frame(&bad_version).is_err());
+        let mut bad_kind = encode_server_job_actor_init_frame(ServerJobActorKind::Worldgen);
+        bad_kind[8] = 255;
+        assert!(decode_server_job_actor_init_frame(&bad_kind).is_err());
+    }
+
+    #[test]
+    fn server_job_actor_keeps_worldgen_session_resident_and_reconstructs() {
+        let descriptor = WorldGenerationDescriptor::overworld(12_345);
+        let init = encode_server_job_actor_init_frame(ServerJobActorKind::Worldgen);
+        let mut actor = ServerJobActor::from_init_frame(&init).unwrap();
+        let first =
+            delta_worldgen_frame(ChunkJobId(1), descriptor, 7, true, &[ChunkPos::new(0, 0)])
+                .unwrap();
+        actor.compute_frame(&first).unwrap();
+        let second =
+            delta_worldgen_frame(ChunkJobId(2), descriptor, 7, false, &[ChunkPos::new(1, 0)])
+                .unwrap();
+        let response = actor.compute_frame(&second).unwrap();
+        assert_eq!(
+            decode_worldgen_response(&response).unwrap().job_id,
+            ChunkJobId(2)
+        );
+
+        let diagnostics = actor.diagnostics();
+        assert_eq!(diagnostics.kind, ServerJobActorKind::Worldgen);
+        assert_eq!(diagnostics.completed_frame_count, 2);
+        assert_eq!(diagnostics.failed_frame_count, 0);
+        assert!(diagnostics.resident_worldgen_mirror_chunk_count > 0);
+        assert_eq!(diagnostics.last_worldgen_delta_upsert_count, 0);
+        assert_eq!(actor.diagnostics_frame().len(), 42);
+
+        actor.shutdown();
+        assert!(
+            actor
+                .compute_frame(&second)
+                .unwrap_err()
+                .contains("shut down")
+        );
+        assert!(actor.diagnostics().shutdown);
+        assert_eq!(actor.diagnostics().failed_frame_count, 1);
+
+        let mut reconstructed = ServerJobActor::from_init_frame(&init).unwrap();
+        reconstructed.compute_frame(&first).unwrap();
+        assert_eq!(reconstructed.diagnostics().completed_frame_count, 1);
+        assert!(!reconstructed.diagnostics().shutdown);
+    }
+
+    #[test]
     fn light_status_job_frame_roundtrips_completed_status() {
         let snapshot = ChunkSnapshot::from_block_state_ids(
             ChunkPos::new(0, 0),
@@ -2085,7 +2333,12 @@ mod tests {
         );
         let request =
             encode_light_status_request(PendingLightStatusBatch::new(vec![pending])).unwrap();
-        let response = compute_light_status_job_frame(&request).unwrap();
+        let expected_response = compute_light_status_job_frame(&request).unwrap();
+        let init = encode_server_job_actor_init_frame(ServerJobActorKind::LightStatus);
+        let mut actor = ServerJobActor::from_init_frame(&init).unwrap();
+        let response = actor.compute_frame(&request).unwrap();
+        assert_eq!(response, expected_response);
+        assert_eq!(actor.diagnostics().completed_frame_count, 1);
         let completed = decode_light_status_response(&response).unwrap();
 
         assert_eq!(completed.len(), 1);

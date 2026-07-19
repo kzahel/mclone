@@ -9,7 +9,7 @@ import {
   RUNNER_SHARED_STATUS_COMPLETE,
   RUNNER_SHARED_STATUS_FAILED,
 } from "./mclone-runner-shared-abi.js";
-import type { WebWorldgenJobSession } from "mclone-web-client-wasm";
+import type { WebServerJobActor } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (its generated `.d.ts`, emitted by `wasm-bindgen
 // --typescript`). Loaded at runtime via a dynamic `import()` of a versioned URL, so this type
@@ -17,10 +17,11 @@ import type { WebWorldgenJobSession } from "mclone-web-client-wasm";
 // carries no runtime weight.
 type WasmModule = typeof import("mclone-web-client-wasm");
 
-// Inbound postMessage payload for the stateless worldgen/light-status job worker. Hand-rolled
-// and `kind`-tagged; shared-memory jobs carry the SAB ring control/request/response buffers.
+// Domain-blind browser envelope for one isolated Rust server-job actor. Main Rust authors the
+// opaque init and request frames; shared-memory jobs carry the SAB control/request/response
+// buffers used to move those bytes between independent Wasm heaps.
 interface ServerJobWorkerMessage {
-  kind?: string;
+  actorInitFrame?: Uint8Array;
   requestId?: number;
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
@@ -32,13 +33,7 @@ interface ServerJobWorkerMessage {
 }
 
 let wasmModulePromise: Promise<WasmModule> | null = null;
-// 069 Stage 1: the worldgen worker holds a resident session across jobs (exactly
-// as the render-compiler worker holds `compilerSession`), so its
-// OverworldFeatureDependencyCache persists and each job applies only the request
-// delta to it. This worker instance only ever receives "worldgen" jobs (the
-// light-status worker is a separate instance), so the session is never created in
-// the light worker. Light-status stays stateless (its free function).
-let worldgenSession: WebWorldgenJobSession | null = null;
+let serverJobActor: WebServerJobActor | null = null;
 const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 
 workerSelf.onmessage = async (event: MessageEvent) => {
@@ -63,11 +58,11 @@ workerSelf.onmessage = async (event: MessageEvent) => {
 
 function handleTransferredJob(module: WasmModule, message: ServerJobWorkerMessage): void {
   const frame = message.frame instanceof Uint8Array ? message.frame : new Uint8Array();
-  const response = computeJobFrame(module, message.kind, frame);
+  const response = computeActorFrame(module, message, frame);
   workerSelf.postMessage(
     {
       ok: true,
-      kind: `${String(message.kind)}-result`,
+      kind: "server-job-result",
       requestId: Number(message.requestId) || 0,
       frame: response,
     },
@@ -85,7 +80,7 @@ function handleSharedMemoryJob(module: WasmModule, message: ServerJobWorkerMessa
     );
   }
   const request = new Uint8Array(requestBuffer, 0, requestBytes);
-  const response = computeJobFrame(module, message.kind, request);
+  const response = computeActorFrame(module, message, request);
   const pooledResponseBuffer = sharedBuffer(message.responseBuffer, "responseBuffer");
   const pooledResponse = response.byteLength <= pooledResponseBuffer.byteLength;
   const responseBuffer = pooledResponse
@@ -97,7 +92,7 @@ function handleSharedMemoryJob(module: WasmModule, message: ServerJobWorkerMessa
   Atomics.notify(control, RUNNER_SHARED_STATUS_INDEX, 1);
   workerSelf.postMessage({
     ok: true,
-    kind: `${String(message.kind)}-result`,
+    kind: "server-job-result",
     requestId: Number(message.requestId) || 0,
     transportKind: "shared-memory",
     controlBuffer: message.controlBuffer,
@@ -108,20 +103,18 @@ function handleSharedMemoryJob(module: WasmModule, message: ServerJobWorkerMessa
   });
 }
 
-function computeJobFrame(
+function computeActorFrame(
   module: WasmModule,
-  kind: string | undefined,
+  message: ServerJobWorkerMessage,
   frame: Uint8Array,
 ): Uint8Array {
-  switch (kind) {
-    case "worldgen":
-      worldgenSession ??= new module.WebWorldgenJobSession();
-      return worldgenSession.computeWorldgenJobFrame(frame);
-    case "light-status":
-      return module.mclone_web_compute_light_status_job_frame(frame);
-    default:
-      throw new Error(`unexpected server job worker message kind ${String(kind)}`);
+  if (serverJobActor === null) {
+    if (!(message.actorInitFrame instanceof Uint8Array)) {
+      throw new Error("server-job actor init frame was not a Uint8Array");
+    }
+    serverJobActor = new module.WebServerJobActor(message.actorInitFrame);
   }
+  return serverJobActor.computeFrame(frame);
 }
 
 function loadWasmModule(
