@@ -161,6 +161,14 @@ response transfers. Its embedded-preview capture remained coherent. The
 broader lifecycle lane again stopped only at its recorded hard-coded actor-ID
 fixture after 628 successful actor compiles; its assertion was not weakened.
 
+The subsequent render/server-job shell comparison did not justify a common
+broker. Only the one-shot Wasm import and error stringification are identical.
+The render result mailbox is now Rust-owned, while the server-job shell still
+owns a distinct transfer-or-SAB response protocol and its failure wakeup.
+Factoring only the tiny loader would add indirection without reducing domain
+ownership or copies, so the shells remain specialized until another Rust actor
+makes a larger contract genuinely identical.
+
 Two complete pre-cutover control runs separated coordinator evidence from
 unrelated browser-fixture debt:
 

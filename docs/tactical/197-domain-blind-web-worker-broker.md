@@ -708,6 +708,25 @@ new actor completed 628 compiles with two resident world sessions, no overflow,
 and no transferred response bytes. This is the same pre-cutover debt and the
 assertion remains unchanged.
 
+### Post-Slice-3 common-mechanics decision
+
+The required render/server-job comparison found no useful shared broker yet.
+Their identical code is limited to a one-shot dynamic Wasm import and error
+stringification. The 69-line render shell forwards structured-clone frames to
+Rust, whose actor validates inputs and publishes the result SAB. The 157-line
+server-job shell still has a materially different dual transport: it selects
+message transfer versus SAB, validates request buffers, publishes response
+buffers, rings atomics, and contains failure wakeups around an opaque Rust job
+actor.
+
+Extracting the small import helper would add a generic type and another module
+without removing domain knowledge or copy sites. Sharing SAB publication now
+would move proven Rust render ownership back into JavaScript or obscure the
+job-specific overflow contract. The approved “common mechanics only after
+proof” step is therefore complete with a negative result: keep both shells
+small and specialized, and revisit only after another Rust actor removes the
+server-job transport policy.
+
 ## Slice 4 — Integrated-Server Responsibility Split
 
 Status: approved as bounded autonomous sub-slices after Slice 3.
