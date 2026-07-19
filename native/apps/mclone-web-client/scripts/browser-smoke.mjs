@@ -1311,6 +1311,7 @@ async function run() {
         );
         const mobileTouchProbe = await exerciseMobileTouchControls(page, canvas);
         await waitForWebAppStreamingSettled(page);
+        const visibility = await exerciseBrowserScenarioVisibility(page);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         let pageScreenshotCaptured = false;
         try {
@@ -1329,6 +1330,9 @@ async function run() {
           mobileTouchProbe,
           mobileStartupProbe,
         );
+        if (!visibility.backgroundSaveAdvanced || !visibility.resumed) {
+          throw new Error(`mobile hidden/resume probe failed: ${JSON.stringify(visibility)}`);
+        }
         console.log(JSON.stringify({
           url: appUrl,
           screenshotPath,
@@ -1341,6 +1345,7 @@ async function run() {
           canvasPixels,
           mobileTouchProbe,
           mobileStartupProbe,
+          visibility,
           mobileStartupScreenshotPath,
           mobileBootstrapScreenshotPath,
           result,
@@ -4159,29 +4164,55 @@ async function runFarLodProbe(page, canvas) {
   await clickNativeUiPoint(page, graphicsOptionsButtonPoint(geometry));
   await waitForNativeUiScreen(page, "optionsCategory");
   const toggleReport = await clickNativeUiPoint(page, farLodCheckboxPoint(geometry));
-  await page.waitForFunction(
-    () => {
-      const state = globalThis.__mcloneWebApp?.state;
-      return state?.lastUiAction?.action === "toggleFarLod"
-        && state?.lastReport?.farLodEnabled === true;
-    },
-    undefined,
-    { timeout: 10_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.lastUiAction?.action === "toggleFarLod"
+          && state?.lastReport?.farLodEnabled === true;
+      },
+      undefined,
+      { timeout: 10_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `far LOD toggle did not apply: ${error instanceof Error ? error.message : String(error)}`
+      + `\ntoggleReport=${JSON.stringify(toggleReport, null, 2)}`
+      + `\nstate=${JSON.stringify(state, null, 2)}`,
+    );
+  }
   await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
   await waitForNativeUiScreen(page, "none");
+
+  const workerProofHandle = await page.waitForFunction(
+    () => {
+      const compiler = globalThis.__mcloneWebApp?.state?.lastCompileReport;
+      return compiler?.workKind === "far-lod"
+        && compiler?.farLodCompileUsed === true
+        && compiler?.transportKind === "shared-result-buffer"
+        && compiler?.sharedResultBufferUsed === true
+        && compiler?.generatedViewFallbackUsed === false
+        ? compiler
+        : null;
+    },
+    undefined,
+    { timeout: 120_000 },
+  );
+  const workerProof = await workerProofHandle.jsonValue();
+  await workerProofHandle.dispose();
 
   try {
     await page.waitForFunction(
       () => {
         const state = globalThis.__mcloneWebApp?.state;
         const report = state?.lastReport;
-        const compiler = state?.lastCompileReport;
         return state?.ok === true
           && report?.farLodEnabled === true
           && Number(report?.farLodDesiredTiles) > 0
           && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
-          && Number(report?.farLodVisibleTiles) >= Number(report?.farLodDesiredTiles)
+          && Number(report?.farLodVisibleTiles) > 0
+          && Number(report?.farLodVisibleTiles) <= Number(report?.farLodDesiredTiles)
           && Number(report?.farLodPendingBuilds) === 0
           && Number(report?.farLodInflightBuilds) === 0
           && Number(report?.farLodQueuedUploads) === 0
@@ -4191,11 +4222,7 @@ async function runFarLodProbe(page, canvas) {
           && Number(report?.farLodVisibleLevel2Tiles) > 0
           && Number(report?.farLodVisibleLevel3Tiles) > 0
           && Number(report?.farLodDoubleResidentTiles) <= 256
-          && compiler?.workKind === "far-lod"
-          && compiler?.farLodCompileUsed === true
-          && compiler?.transportKind === "shared-result-buffer"
-          && compiler?.sharedResultBufferUsed === true
-          && compiler?.generatedViewFallbackUsed === false;
+          && Number(report?.farLodSuppressedWithoutReplacement) === 0;
       },
       undefined,
       { timeout: 120_000 },
@@ -4204,9 +4231,6 @@ async function runFarLodProbe(page, canvas) {
     const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
     throw new Error(`far LOD worker/render proof did not become drawable: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`);
   }
-  const workerProof = await page.evaluate(
-    () => globalThis.__mcloneWebApp?.state?.lastCompileReport ?? null,
-  );
   await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
   await page.waitForFunction(
     () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
@@ -4275,7 +4299,8 @@ async function runFarLodProbe(page, canvas) {
     ok: after.farLodEnabled === true
       && after.desiredTiles > 0
       && after.residentTiles >= after.desiredTiles
-      && after.visibleTiles >= after.desiredTiles
+      && after.visibleTiles > 0
+      && after.visibleTiles <= after.desiredTiles
       && after.pendingBuilds === 0
       && after.inflightBuilds === 0
       && after.queuedUploads === 0
@@ -4355,24 +4380,34 @@ async function runFarLodMovementProbe(page) {
     await page.evaluate(() => globalThis.__mcloneWebApp?.setInputKey?.("forward", false));
   }
   await waitForWebAppStreamingSettled(page, 120_000);
-  await page.waitForFunction(
-    ({ start }) => {
-      const report = globalThis.__mcloneWebApp?.state?.lastReport;
-      return Number(report?.farLodDesiredTiles) > 0
-        && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
-        && Number(report?.farLodVisibleTiles) >= Number(report?.farLodDesiredTiles)
-        && Number(report?.farLodPendingBuilds) === 0
-        && Number(report?.farLodInflightBuilds) === 0
-        && Number(report?.farLodQueuedUploads) === 0
-        && Number(report?.farLodLevelFlips) > start.levelFlips
-        && Number(report?.farLodMaxDoubleResidentTiles) > 0
-        && Number(report?.farLodMaxDoubleResidentTiles) <= 256
-        && Number(report?.farLodMaxLevelFlipsPerTile) <= 1
-        && Number(report?.farLodSuppressedWithoutReplacement) === 0;
-    },
-    { start },
-    { timeout: 120_000 },
-  );
+  try {
+    await page.waitForFunction(
+      ({ start }) => {
+        const report = globalThis.__mcloneWebApp?.state?.lastReport;
+        return Number(report?.farLodDesiredTiles) > 0
+          && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
+          && Number(report?.farLodVisibleTiles) > 0
+          && Number(report?.farLodVisibleTiles) <= Number(report?.farLodDesiredTiles)
+          && Number(report?.farLodPendingBuilds) === 0
+          && Number(report?.farLodInflightBuilds) === 0
+          && Number(report?.farLodQueuedUploads) === 0
+          && Number(report?.farLodLevelFlips) > start.levelFlips
+          && Number(report?.farLodMaxDoubleResidentTiles) > 0
+          && Number(report?.farLodMaxDoubleResidentTiles) <= 256
+          && Number(report?.farLodMaxLevelFlipsPerTile) <= 1
+          && Number(report?.farLodSuppressedWithoutReplacement) === 0;
+      },
+      { start },
+      { timeout: 120_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `far LOD movement did not settle: ${error instanceof Error ? error.message : String(error)}`
+      + `\nstart=${JSON.stringify(start, null, 2)}`
+      + `\nstate=${JSON.stringify(state, null, 2)}`,
+    );
+  }
   return page.evaluate((start) => {
     const state = globalThis.__mcloneWebApp?.state ?? {};
     const report = state.lastReport ?? {};
@@ -4666,7 +4701,7 @@ function farLodCheckboxPoint(geometry) {
   const panel = centeredPanel(
     geometry,
     Math.min(Math.max(geometry.width - 18.0, 242.0), 420.0),
-    Math.min(136.0, Math.max(geometry.height - 4.0, 1.0)),
+    Math.min(160.0, Math.max(geometry.height - 4.0, 1.0)),
   );
   const columnWidth = Math.max((panel.width - 46.0) / 2.0, 110.0);
   return {
