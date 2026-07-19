@@ -2,12 +2,12 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: first actor proof and validation baseline cleanup complete 2026-07-19.
-The production browser keeps isolated Wasm heaps and the existing external
-`SharedArrayBuffer` transports while worker coordination moves toward
-Rust-owned actors behind domain-blind TypeScript browser brokers. The
-whole-worker baseline and server-job Rust actor proof have landed; the
-actor/broker boundary now awaits review before render ownership work. Tactical
+Status: first actor proof and validation baseline cleanup complete; the
+main-side render coordinator cutover was approved 2026-07-19. The production
+browser keeps isolated Wasm heaps and the existing external `SharedArrayBuffer`
+transports while worker coordination moves toward Rust-owned actors behind
+domain-blind TypeScript browser transports. The whole-worker baseline and
+server-job Rust actor proof have landed. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the first
 implementation slices. A shared Wasm linear-memory runtime remains a separate,
 measurement-gated investigation rather than an implied destination of the
@@ -249,6 +249,23 @@ The generic broker does not need to be one universal Worker script on day one.
 It is acceptable to prove a narrow broker for server jobs and another for
 render compilation, provided both are domain-blind and converge on a small
 common browser-mechanics module only when the common shape is real.
+
+For the main-side render lane, the accepted browser-mechanics boundary is a
+generic polled transport rather than asynchronous domain callbacks into Rust:
+
+```text
+Rust coordinator -> post opaque message / handles -> TypeScript Worker shell
+Rust frame poll  <- queued opaque event / error  <- TypeScript Worker shell
+```
+
+The transport may own `new Worker`, `postMessage`, event capture, transfer
+lists, SAB handles, and `terminate`. Rust owns worker generations, readiness,
+request/world association, active/standby priority, timeouts, stale-result
+policy, quiescent world release, asset-epoch replacement, and recovery. This
+keeps the web mechanism explicit while making its coordinating semantics
+testable Rust state instead of a second TypeScript runtime. It also better
+matches native's nonblocking send/`try_recv` shape without forcing native to
+serialize through the browser ABI.
 
 ## Shared Wasm Linear Memory: Separate Option
 

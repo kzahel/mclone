@@ -1,10 +1,10 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: awaiting boundary review 2026-07-19. Slices 0 and 1 and the validation
-baseline cleanup have landed. Slice 2 has a concrete ownership target but
-begins only after review of the small server-job actor/broker contract. Later
-integrated-server consolidation remains provisional and must not widen this
-tactical into a shared-Wasm-memory runtime.
+Status: Slice 2 approved and in progress 2026-07-19. Slices 0 and 1 and the
+validation baseline cleanup have landed. The main-side render cutover uses a
+Rust coordinator behind a generic polled TypeScript Worker transport and stops
+for review before Slice 3. Later integrated-server consolidation remains
+provisional and must not widen this tactical into a shared-Wasm-memory runtime.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -424,31 +424,50 @@ server-job domain-debt counters remain zero and the copy ledger is unchanged.
 The baseline is green, but the existing human review gate still stops the
 workstream before Slice 2.
 
-## Slice 2 — Rust-Owned Main-Side Render Broker
+## Slice 2 — Rust-Owned Single Render-Worker Coordinator
 
-Status: concrete target; start after Slice 1 boundary review.
+Status: approved 2026-07-19; implementation in progress.
 
-Move the main-side `RenderSectionWorkerCompiler` lifecycle and queue from
-`mclone-render-compiler-shared.ts` into browser-specific Rust while leaving the
-worker-side compiler session and current SAB wire shape unchanged.
+Move the main-side `RenderSectionWorkerCompiler` policy and queue from
+`mclone-render-compiler-shared.ts` into Rust while leaving the worker-side
+compiler session and current SAB wire shape unchanged. “Single render-worker
+coordinator” means one main-thread coordinator arbitrates the existing ordinary
+render Worker across active and standby worlds. It does not mean the browser
+`SharedWorker` API, shared Wasm linear memory, or one Worker per world.
 
-Extend or wrap the existing Rust `WebRenderSectionCompiler`, which already
-owns the resident input/result arenas, mirror tracking, request IDs, revisions,
-and completion polling, so it also owns:
+The browser boundary is a generic, polled TypeScript transport:
 
-- browser `Worker` creation and error callbacks;
-- worker readiness and asset initialization;
-- the active/standby admission queue;
-- request-to-world association and world release ordering;
-- timeouts, failures, and restart state;
-- compiler wake posting; and
-- compile timing/diagnostic merge.
+```text
+post(opaque message, optional transfer handles)
+poll() -> opaque message | browser error | empty
+terminate()
+```
 
-This removes the current `js_sys::Function` compiler wake callback and
-domain-rich doorbell relay from `WebSceneRuntimeService`. Rust may still build
-a JavaScript `Object` to call `Worker.postMessage`; the important change is
-that authored TypeScript no longer interprets or reconstructs the domain
-request.
+The transport may construct an ordinary browser `Worker`, retain opaque event
+data until Rust polls it, forward transfer lists and SAB handles, and terminate
+the Worker. It must not interpret render work, worlds, priorities, epochs,
+retries, releases, or compiler sessions. Rust polls at a known frame/runtime
+boundary rather than accepting asynchronous JavaScript callbacks into an
+arbitrary mutable Rust owner.
+
+Add a Rust coordinator around the existing `WebRenderSectionCompiler`, which
+already owns resident input/result arenas, mirror tracking, local request IDs,
+revisions, and completion polling. The coordinator owns:
+
+- worker generation and readiness;
+- active/standby admission and the single-in-flight queue;
+- broker request identity and request-to-world association;
+- stale completion and failure rejection;
+- quiescent world release ordering;
+- asset-epoch candidate/activation/rollback state;
+- timeout and reconstruction policy; and
+- compile timing and diagnostic semantics.
+
+Keep the transport mechanism distinct from coordinator policy. Native may use
+typed moved-value/channel transports while web uses opaque frames and explicit
+SAB handles. Share a deterministic Rust coordinator/state machine wherever the
+semantics genuinely match; do not make native adopt the browser ABI for
+cosmetic symmetry.
 
 `mclone-web-app.ts` should stop owning:
 
@@ -464,10 +483,32 @@ It may continue to fetch browser assets and pass bytes/URLs into Rust service
 construction. This slice does not yet require the worker entry module itself
 to be domain-blind.
 
+### Slice 2 implementation sequence
+
+1. Lock this contract and the source ownership rules.
+2. Add and directly prove the generic polled Worker transport without changing
+   production render ownership.
+3. Add the deterministic Rust coordinator and fake-transport traces for
+   active/standby order, stale completion, worker failure, world release, and
+   asset replacement.
+4. Cut production over atomically and delete the TypeScript queue, pending
+   maps, promises, timeouts, world-release policy, asset-compiler swap policy,
+   and compiler-wake relay in the same ownership commit.
+5. Run the complete applicable browser/native matrix, compare performance and
+   transport metrics, inspect captures, update evidence, and stop before Slice
+   3.
+
+Preparatory contracts and direct proofs may land separately. Production must
+not retain joint Rust/TypeScript request ownership or a long-lived old/new
+toggle after cutover.
+
 ### Slice 2 acceptance
 
 - One Rust owner performs render worker admission and request association.
-- No JavaScript callback crosses into `WebRenderCompilerWakeSink`.
+- One generic TypeScript transport owns only Worker construction, opaque
+  post/poll, browser errors, transfer handles, and termination.
+- No JavaScript callback crosses into `WebRenderCompilerWakeSink`; the Rust
+  owner polls transport events at an explicit runtime boundary.
 - Local, IndexedDB, remote, and two-world lobby modes use the same broker.
 - Active-world compilation remains preferred over standby work without a
   TypeScript policy queue.
@@ -482,6 +523,22 @@ to be domain-blind.
 
 This is the first materially risky slice. It should cut over atomically after a
 direct proof and delete the TypeScript owner in the same commit.
+
+### Slice 2 autonomous stop conditions
+
+Stop for a new decision rather than broadening this slice if implementation
+requires shared Wasm linear memory, a general browser threading runtime, a new
+SAB ABI or copy strategy, changed mesh algorithms, changed native scheduling
+for browser symmetry, more than one production render Worker, a long-lived
+dual implementation, or domain fields in the generic TypeScript transport.
+
+Also stop on evidence if stale completions cannot be rejected unambiguously,
+worker failure leaves requests/worlds pending, asset rollback cannot be made
+atomic, active work loses priority, pixels change unexpectedly, or frame gap,
+memory, Worker count, copies, overflow, and retained-session metrics regress
+materially. Otherwise drive the complete main-side cutover autonomously,
+commit coherent stages, and stop after Slice 2 for human review before any
+worker-side Slice 3 work.
 
 ## Slice 3 — Worker-Side Render Rust Actor
 
