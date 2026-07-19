@@ -261,7 +261,7 @@ frames, queue limits, and main-side client semantics remain unchanged.
 
 ## Slice 2: Rust-Owned Ordinary Catalog Continuation
 
-Status: pending.
+Status: complete 2026-07-19.
 
 Replace the operation switch and argument reconstruction in
 `mclone-web-app.ts` with one opaque catalog execution. Keep IndexedDB opening,
@@ -286,6 +286,71 @@ Required focused tests:
 Browser acceptance covers catalog create/list/open/record/delete, legacy
 rewrite, ordinary IndexedDB mutation/reopen, periodic-world reopen, catalog
 lobby selection/activation, and unchanged managed-store isolation.
+
+### Slice 2 evidence
+
+`WebCatalogExecution` now owns the typed request, active-world validation,
+descriptor decoding, compatibility checks, catalog timestamps, operation
+sequencing, and final `WorldCatalogResponse`. `WebSceneHost` retains that
+typed request behind the request token and hands JavaScript one owned
+execution object. The per-frame report exposes only `catalogRequest` and its
+opaque request id; it no longer projects operation names, arguments, defaults,
+or active-world identity.
+
+The continuation emits storage-level steps with stable store/index ids,
+transaction mode, optional-store policy, and generic actions. TypeScript maps
+those identifiers to the unchanged IndexedDB version-6 schema and owns the
+transaction, request, cursor, promise, and close mechanics. It calls Rust
+synchronously from read-success callbacks and enqueues returned writes before
+the callback returns. There is no Rust borrow or JavaScript view across an
+`await`.
+
+The exact preserved traces are:
+
+- list: one readonly `getAll`;
+- create: readonly `getAll`, then a separate read/write `add`;
+- open: readonly `get`, then a separate read/write `put`;
+- record played: `get` plus its Rust-authored `put` in one read/write
+  transaction;
+- delete: readonly `get`, seven parallel optional range-delete transactions,
+  then catalog-row delete; and
+- delete-all/factory-reset: ordered per-world read, parallel record clears,
+  and row delete, with factory reset retaining its final multi-store clear.
+
+Nine Rust tests cover those traces, duplicate create, active-world refusal,
+stale and duplicate completion, browser-rounded create seeds, and full-width
+stored descriptor facts. Two source locks forbid operation vocabulary and
+policy callbacks from returning to production TypeScript and lock the
+record-played same-callback write. The Wasm check, generated-bindgen TypeScript
+gate, scene-host adoption check, and ownership inventory pass with all five new
+catalog debts at zero. Authored TypeScript is now 5,686 lines across 15
+modules, with the unchanged six Worker entries, two construction sites, and
+seven-copy ledger.
+
+The direct browser catalog smoke passed create/list/open/record/delete, legacy
+clear-record rewrite, duplicate and missing-open failures, an actual
+IndexedDB-add constraint abort followed by a successful list, concurrent
+record-played/delete non-resurrection, and chunk/entity cleanup. The catalog UI
+smoke passed two profiles, open, recency, inactive delete, and final one-row
+selection; its inspected capture remained coherent. A paired control at
+`7b2ef0ed` observed a 75.065 ms maximum frame gap versus 82.430 ms in the
+cutover run. That single compilation-heavy maximum does not establish a
+sustained frame cost; Slice 3 repeats the lane before closeout.
+
+Ordinary IndexedDB mutation/reopen passed. The periodic proof also passed with
+`flat-grass-v1` and `cylinder-x:32`: 121 chunks, two entity chunks, and one
+dimension record reopened, while state 5 was recovered at canonical X 0 and
+lifted X 512. The inspected frame showed continuous Flat Grass terrain and the
+persisted edit. Managed storage provisioning, reuse, corruption refusal and
+repair remained green with zero ordinary catalog rows before and after.
+
+The catalog-lobby run passes its catalog-owned checks: recency is unchanged
+during warmup, only the selected row advances on activation, and the selected
+seed reaches the destination. The aggregate lane stops later because remote
+player `walkDistance` decreases even though source position advances. The same
+failure reproduced in a detached pre-cutover
+`7b2ef0ed` control; the non-catalog lobby is green. The unrelated assertion is
+not weakened and is carried as baseline fixture debt.
 
 ## Slice 3: Closeout And Stop
 

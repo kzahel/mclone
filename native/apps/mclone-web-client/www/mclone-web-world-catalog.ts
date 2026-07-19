@@ -11,16 +11,12 @@ export const WORLD_METADATA_STORE = "worldMetadata";
 export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
 export const WORLD_ID_INDEX = "worldId";
 
+import type { WebCatalogExecution } from "mclone-web-client-wasm";
+
 type WasmModule = typeof import("mclone-web-client-wasm");
 
 type IndexedDbCatalogPolicy = Pick<
   WasmModule,
-  | "mclone_web_catalog_validate_world_id"
-  | "mclone_web_catalog_prepare_world_list"
-  | "mclone_web_catalog_prepare_create_world"
-  | "mclone_web_catalog_prepare_open_world"
-  | "mclone_web_catalog_prepare_record_world_played"
-  | "mclone_web_catalog_prepare_delete_world"
   | "mclone_web_managed_scenario_prepare_world"
   | "mclone_web_managed_scenario_validate_world"
 >;
@@ -44,25 +40,26 @@ function requireIndexedDbCatalogPolicy(): IndexedDbCatalogPolicy {
   return indexedDbCatalogPolicy;
 }
 
-export interface WebLocalWorldSummary extends Record<string, unknown> {
-  id: string;
+interface CatalogStorageStep {
+  stepId: number;
+  transactions: CatalogStorageTransaction[];
 }
 
-export interface WebLocalWorldCreateOptions {
-  displayName: string;
-  seed: number;
-  generationProfile?: string;
-  requestedId?: string | null;
+interface CatalogStorageTransaction {
+  stores: string[];
+  mode: IDBTransactionMode;
+  optionalStores: boolean;
+  actions: CatalogStorageAction[];
 }
 
-interface IndexedDbCatalogRecord {
-  id: string;
-  descriptor: Uint8Array;
-}
-
-interface IndexedDbCatalogMutation {
-  record: IndexedDbCatalogRecord;
-  summary: WebLocalWorldSummary;
+interface CatalogStorageAction extends Record<string, unknown> {
+  actionId: number;
+  kind: string;
+  store: string;
+  needsTimestamp?: boolean;
+  key?: string;
+  index?: string;
+  value?: unknown;
 }
 
 export type ManagedWorldValidationStatus =
@@ -140,133 +137,178 @@ export function openWorldDb(): Promise<IDBDatabase> {
   });
 }
 
-export async function listIndexedDbCatalogWorlds(
+export async function executeIndexedDbCatalogExecution(
   db: IDBDatabase,
-): Promise<WebLocalWorldSummary[]> {
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readonly");
-  const records = await idbRequest<unknown[]>(
-    transaction.objectStore(WORLD_CATALOG_STORE).getAll(),
-  );
-  await transactionDone(transaction);
-  return requireIndexedDbCatalogPolicy()
-    .mclone_web_catalog_prepare_world_list(records) as WebLocalWorldSummary[];
-}
-
-export async function createIndexedDbCatalogWorld(
-  db: IDBDatabase,
-  options: WebLocalWorldCreateOptions,
-): Promise<WebLocalWorldSummary> {
-  const existingRecords = await readIndexedDbCatalogRecords(db);
-  const mutation = requireIndexedDbCatalogPolicy()
-    .mclone_web_catalog_prepare_create_world(
-      options,
-      existingRecords,
-      nextCatalogTimestamp(),
-    ) as IndexedDbCatalogMutation;
-
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
-  transaction.objectStore(WORLD_CATALOG_STORE).add(mutation.record);
-  await transactionDone(transaction);
-  return mutation.summary;
-}
-
-export async function openIndexedDbCatalogWorld(
-  db: IDBDatabase,
-  id: string,
-): Promise<WebLocalWorldSummary> {
-  const normalizedId = requireIndexedDbCatalogPolicy()
-    .mclone_web_catalog_validate_world_id(id);
-  const summary = await getIndexedDbCatalogWorld(db, normalizedId);
-  const mutation = requireIndexedDbCatalogPolicy()
-    .mclone_web_catalog_prepare_open_world(
-      normalizedId,
-      summary,
-      nextCatalogTimestamp(),
-    ) as IndexedDbCatalogMutation;
-  await putIndexedDbCatalogRecord(db, mutation.record);
-  return mutation.summary;
-}
-
-export async function recordIndexedDbCatalogWorldPlayed(
-  db: IDBDatabase,
-  id: string,
-): Promise<WebLocalWorldSummary> {
-  const policy = requireIndexedDbCatalogPolicy();
-  const normalizedId = policy.mclone_web_catalog_validate_world_id(id);
-  // Keep the existence check and recency update in one read/write transaction.
-  // Otherwise a late activation record can read before a concurrent delete,
-  // then put its stale summary after the delete and resurrect the catalog row.
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
-  const store = transaction.objectStore(WORLD_CATALOG_STORE);
-  const summary = await idbRequest<unknown>(store.get(normalizedId));
-  const mutation = policy.mclone_web_catalog_prepare_record_world_played(
-    normalizedId,
-    summary ?? null,
-    nextCatalogTimestamp(),
-  ) as IndexedDbCatalogMutation;
-  store.put(mutation.record);
-  await transactionDone(transaction);
-  return mutation.summary;
-}
-
-export async function deleteIndexedDbCatalogWorld(
-  db: IDBDatabase,
-  id: string,
-  activeWorldId: string | null = null,
-): Promise<WebLocalWorldSummary> {
-  const policy = requireIndexedDbCatalogPolicy();
-  const normalizedId = policy.mclone_web_catalog_validate_world_id(id);
-  const summary = await getIndexedDbCatalogWorld(db, normalizedId);
-  const deleted = policy.mclone_web_catalog_prepare_delete_world(
-    normalizedId,
-    activeWorldId ?? "",
-    summary,
-  ) as WebLocalWorldSummary;
-
-  await clearIndexedDbWorldRecords(db, normalizedId);
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
-  transaction.objectStore(WORLD_CATALOG_STORE).delete(normalizedId);
-  await transactionDone(transaction);
-  return deleted;
-}
-
-export async function deleteAllIndexedDbCatalogWorlds(
-  db: IDBDatabase,
-  activeWorldId: string | null = null,
-): Promise<{ deletedCount: number }> {
-  if (activeWorldId && activeWorldId.trim().length > 0) {
-    throw new Error("Quit to title before deleting all local worlds");
-  }
-  const worlds = await listIndexedDbCatalogWorlds(db);
-  for (const world of worlds) {
-    await deleteIndexedDbCatalogWorld(db, world.id, null);
-  }
-  return { deletedCount: worlds.length };
-}
-
-export async function factoryResetIndexedDbLocalData(
-  db: IDBDatabase,
-  activeWorldId: string | null = null,
-): Promise<{ deletedCount: number }> {
-  const result = await deleteAllIndexedDbCatalogWorlds(db, activeWorldId);
-  const stores = [
-    MANAGED_WORLD_METADATA_STORE,
-    WORLD_CHUNK_STORE,
-    WORLD_ENTITY_CHUNK_STORE,
-    LEGACY_WORLD_CHUNK_STORE,
-    LEGACY_WORLD_ENTITY_CHUNK_STORE,
-    WORLD_DIMENSION_STORE,
-    WORLD_PLAYER_STORE,
-    WORLD_METADATA_STORE,
-  ].filter((storeName) => db.objectStoreNames.contains(storeName));
-  if (stores.length > 0) {
-    const transaction = db.transaction(stores, "readwrite");
-    for (const storeName of stores) {
-      transaction.objectStore(storeName).clear();
+  execution: WebCatalogExecution,
+): Promise<void> {
+  while (!execution.isComplete()) {
+    const step = execution.nextStorageStep() as CatalogStorageStep | undefined;
+    if (!step) {
+      if (execution.isComplete()) break;
+      throw new Error("Rust catalog continuation returned no storage step");
     }
-    await transactionDone(transaction);
+    await Promise.all(step.transactions.map((transaction) => (
+      executeCatalogStorageTransaction(db, execution, step.stepId, transaction)
+    )));
+    execution.completeStorageStep(step.stepId);
   }
-  return result;
+}
+
+function executeCatalogStorageTransaction(
+  db: IDBDatabase,
+  execution: WebCatalogExecution,
+  stepId: number,
+  plan: CatalogStorageTransaction,
+): Promise<void> {
+  const availableStores = plan.stores
+    .map((store) => ({ stable: store, browser: catalogBrowserStoreName(store) }))
+    .filter(({ browser }) => db.objectStoreNames.contains(browser));
+  if (!plan.optionalStores && availableStores.length !== plan.stores.length) {
+    const missing = plan.stores.filter((store) => (
+      !db.objectStoreNames.contains(catalogBrowserStoreName(store))
+    ));
+    return Promise.reject(new Error(`IndexedDB catalog stores are missing: ${missing.join(", ")}`));
+  }
+  if (availableStores.length === 0) return Promise.resolve();
+  const available = new Set(availableStores.map(({ stable }) => stable));
+  const browserStores = [...new Set(availableStores.map(({ browser }) => browser))];
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(browserStores, plan.mode);
+    let settled = false;
+    const fail = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      try {
+        transaction.abort();
+      } catch {
+        // A request can fail after the transaction has already aborted.
+      }
+      reject(error);
+    };
+    transaction.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    transaction.onerror = () => fail(
+      transaction.error ?? new Error("IndexedDB catalog transaction failed"),
+    );
+    transaction.onabort = () => fail(
+      transaction.error ?? new Error("IndexedDB catalog transaction aborted"),
+    );
+    try {
+      for (const action of plan.actions) {
+        if (available.has(action.store)) {
+          enqueueCatalogStorageAction(transaction, execution, stepId, action, fail);
+        }
+      }
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
+
+function enqueueCatalogStorageAction(
+  transaction: IDBTransaction,
+  execution: WebCatalogExecution,
+  stepId: number,
+  action: CatalogStorageAction,
+  fail: (error: unknown) => void,
+): void {
+  const store = transaction.objectStore(catalogBrowserStoreName(action.store));
+  switch (action.kind) {
+    case "get-all":
+      enqueueCatalogRead(store.getAll(), transaction, execution, stepId, action, fail);
+      return;
+    case "get":
+      enqueueCatalogRead(store.get(String(action.key ?? "")), transaction, execution, stepId, action, fail);
+      return;
+    case "add":
+      observeCatalogWrite(store.add(action.value), fail);
+      return;
+    case "put":
+      observeCatalogWrite(store.put(action.value), fail);
+      return;
+    case "delete-key":
+      observeCatalogWrite(store.delete(String(action.key ?? "")), fail);
+      return;
+    case "delete-index-range": {
+      const index = catalogBrowserIndexName(String(action.index ?? ""));
+      const request = store.index(index).openKeyCursor(IDBKeyRange.only(String(action.key ?? "")));
+      request.onsuccess = () => {
+        try {
+          const cursor = request.result;
+          if (!cursor) return;
+          observeCatalogWrite(store.delete(cursor.primaryKey), fail);
+          cursor.continue();
+        } catch (error) {
+          fail(error);
+        }
+      };
+      request.onerror = () => fail(request.error ?? new Error("IndexedDB catalog cursor failed"));
+      return;
+    }
+    case "clear":
+      observeCatalogWrite(store.clear(), fail);
+      return;
+    default:
+      throw new Error(`unsupported Rust catalog storage action ${JSON.stringify(action.kind)}`);
+  }
+}
+
+function enqueueCatalogRead<T>(
+  request: IDBRequest<T>,
+  transaction: IDBTransaction,
+  execution: WebCatalogExecution,
+  stepId: number,
+  action: CatalogStorageAction,
+  fail: (error: unknown) => void,
+): void {
+  request.onsuccess = () => {
+    try {
+      const now = action.needsTimestamp === true ? nextCatalogTimestamp() : 0;
+      const followups = execution.acceptStorageRead(
+        stepId,
+        action.actionId,
+        request.result ?? null,
+        now,
+      ) as CatalogStorageAction[];
+      // Enqueue read-dependent writes synchronously inside this success
+      // callback. In particular, record-played get/put must remain in one
+      // read/write transaction so a concurrent delete cannot resurrect a row.
+      for (const followup of followups) {
+        enqueueCatalogStorageAction(transaction, execution, stepId, followup, fail);
+      }
+    } catch (error) {
+      fail(error);
+    }
+  };
+  request.onerror = () => fail(request.error ?? new Error("IndexedDB catalog read failed"));
+}
+
+function observeCatalogWrite<T>(request: IDBRequest<T>, fail: (error: unknown) => void): void {
+  request.onerror = () => fail(request.error ?? new Error("IndexedDB catalog write failed"));
+}
+
+function catalogBrowserStoreName(stableName: string): string {
+  switch (stableName) {
+    case "catalog": return WORLD_CATALOG_STORE;
+    case "dimension-chunks": return WORLD_CHUNK_STORE;
+    case "dimension-entity-chunks": return WORLD_ENTITY_CHUNK_STORE;
+    case "legacy-chunks": return LEGACY_WORLD_CHUNK_STORE;
+    case "legacy-entity-chunks": return LEGACY_WORLD_ENTITY_CHUNK_STORE;
+    case "dimensions": return WORLD_DIMENSION_STORE;
+    case "players": return WORLD_PLAYER_STORE;
+    case "world-metadata": return WORLD_METADATA_STORE;
+    case "managed-world-metadata": return MANAGED_WORLD_METADATA_STORE;
+    default: throw new Error(`unsupported Rust catalog store ${JSON.stringify(stableName)}`);
+  }
+}
+
+function catalogBrowserIndexName(stableName: string): string {
+  if (stableName === "world-id") return WORLD_ID_INDEX;
+  throw new Error(`unsupported Rust catalog index ${JSON.stringify(stableName)}`);
 }
 
 export async function clearIndexedDbWorldRecords(
@@ -710,36 +752,6 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw signal.reason ?? new DOMException("Managed provisioning aborted", "AbortError");
   }
-}
-
-async function getIndexedDbCatalogWorld(
-  db: IDBDatabase,
-  id: string,
-): Promise<unknown | null> {
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readonly");
-  const record = await idbRequest<unknown>(
-    transaction.objectStore(WORLD_CATALOG_STORE).get(id),
-  );
-  await transactionDone(transaction);
-  return record ?? null;
-}
-
-async function readIndexedDbCatalogRecords(db: IDBDatabase): Promise<unknown[]> {
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readonly");
-  const records = await idbRequest<unknown[]>(
-    transaction.objectStore(WORLD_CATALOG_STORE).getAll(),
-  );
-  await transactionDone(transaction);
-  return records;
-}
-
-async function putIndexedDbCatalogRecord(
-  db: IDBDatabase,
-  record: IndexedDbCatalogRecord,
-): Promise<void> {
-  const transaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
-  transaction.objectStore(WORLD_CATALOG_STORE).put(record);
-  await transactionDone(transaction);
 }
 
 async function clearIndexedDbStoreForWorld(

@@ -34,6 +34,10 @@ mod web_world_catalog_descriptor;
 
 #[cfg(target_arch = "wasm32")]
 mod web_canvas;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_catalog_execution;
+#[cfg(target_arch = "wasm32")]
+pub use web_catalog_execution::WebCatalogExecution;
 #[cfg(target_arch = "wasm32")]
 mod web_scene_host;
 #[cfg(target_arch = "wasm32")]

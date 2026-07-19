@@ -5,11 +5,7 @@ import {
   WORLD_CATALOG_STORE,
   WORLD_ENTITY_CHUNK_STORE,
   WORLD_ID_INDEX,
-  createIndexedDbCatalogWorld,
-  deleteIndexedDbCatalogWorld,
-  listIndexedDbCatalogWorlds,
-  openIndexedDbCatalogWorld,
-  recordIndexedDbCatalogWorldPlayed,
+  executeIndexedDbCatalogExecution,
   openWorldDb,
   setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
@@ -435,7 +431,7 @@ async function renderCanvas() {
         assetPack,
         canvas,
       );
-      const indexedDbCatalog = await runIndexedDbCatalogSmoke();
+      const indexedDbCatalog = await runIndexedDbCatalogSmoke(module);
       const sharedTopologyStress = await runSharedTopologyStress(module);
       const remoteWebSocket = await runRemoteWebSocketSmoke(module);
       return {
@@ -598,12 +594,15 @@ async function createIndexedDbSmokeSession(
   );
 }
 
-async function runIndexedDbCatalogSmoke() {
+/** @param {WasmModule} module */
+async function runIndexedDbCatalogSmoke(module) {
   const worldId = `catalog-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   const legacyWorldId = `${worldId}-legacy`;
+  const constraintWorldId = `${worldId}-constraint`;
+  const nonResurrectionWorldId = `${worldId}-non-resurrection`;
   const db = await openWorldDb();
   try {
-    const before = await listIndexedDbCatalogWorlds(db);
+    const before = await executeCatalogSmoke(module, db, "listWorlds");
     const legacyTransaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
     legacyTransaction.objectStore(WORLD_CATALOG_STORE).add({
       id: legacyWorldId,
@@ -620,9 +619,14 @@ async function runIndexedDbCatalogSmoke() {
       compatible: true,
     });
     await transactionDone(legacyTransaction);
-    const legacyListed = (await listIndexedDbCatalogWorlds(db))
-      .some((world) => world.id === legacyWorldId);
-    const legacyOpened = await openIndexedDbCatalogWorld(db, legacyWorldId);
+    const legacyListed = (await executeCatalogSmoke(module, db, "listWorlds"))
+      .some((/** @type {any} */ world) => world.id === legacyWorldId);
+    const legacyOpened = await executeCatalogSmoke(
+      module,
+      db,
+      "openWorld",
+      { id: legacyWorldId },
+    );
     const legacyReadTransaction = db.transaction(WORLD_CATALOG_STORE, "readonly");
     const legacyUpgradedRecord = await new Promise((resolve, reject) => {
       const request = legacyReadTransaction
@@ -637,15 +641,15 @@ async function runIndexedDbCatalogSmoke() {
       && legacyUpgradedRecord.descriptor instanceof Uint8Array
       && !("displayName" in legacyUpgradedRecord),
     );
-    await deleteIndexedDbCatalogWorld(db, legacyWorldId);
+    await executeCatalogSmoke(module, db, "deleteWorld", { id: legacyWorldId });
 
-    const created = await createIndexedDbCatalogWorld(db, {
+    const created = await executeCatalogSmoke(module, db, "createWorld", {
       displayName: "Smoke Catalog World",
       seed: 424242,
       requestedId: worldId,
     });
     const duplicateRejected = await rejectsWithMessage(
-      () => createIndexedDbCatalogWorld(db, {
+      () => executeCatalogSmoke(module, db, "createWorld", {
         displayName: "Duplicate Smoke Catalog World",
         seed: 424242,
         requestedId: worldId,
@@ -653,21 +657,86 @@ async function runIndexedDbCatalogSmoke() {
       "already exists",
     );
     const activeDeleteRejected = await rejectsWithMessage(
-      () => deleteIndexedDbCatalogWorld(db, worldId, worldId),
+      () => executeCatalogSmoke(module, db, "deleteWorld", { id: worldId }, worldId),
       "cannot delete active local world",
+    );
+
+    // Pause one create after its read, insert the same id through an
+    // independent execution, then resume it. The stale add must abort its
+    // transaction, and the next ordinary operation must still succeed.
+    const staleCreate = module.mclone_web_catalog_smoke_execution(
+      "createWorld",
+      {
+        displayName: "Stale Constraint Probe",
+        seed: 424242,
+        requestedId: constraintWorldId,
+      },
+      "",
+    );
+    let constraintAbortError = "";
+    let continuedAfterAbort = false;
+    try {
+      await advanceCatalogSmokeCreateRead(db, staleCreate);
+      await executeCatalogSmoke(module, db, "createWorld", {
+        displayName: "Constraint Winner",
+        seed: 424242,
+        requestedId: constraintWorldId,
+      });
+      try {
+        await executeIndexedDbCatalogExecution(db, staleCreate);
+      } catch (error) {
+        constraintAbortError = stringifyError(error);
+      }
+      continuedAfterAbort = (await executeCatalogSmoke(module, db, "listWorlds"))
+        .some((/** @type {any} */ world) => world.id === constraintWorldId);
+      await executeCatalogSmoke(module, db, "deleteWorld", { id: constraintWorldId });
+    } finally {
+      staleCreate.free();
+    }
+    const constraintAbortRejected = /constraint|key already exists/i.test(
+      constraintAbortError,
+    );
+
+    await executeCatalogSmoke(module, db, "createWorld", {
+      displayName: "Non-resurrection Probe",
+      seed: 424242,
+      requestedId: nonResurrectionWorldId,
+    });
+    await Promise.all([
+      executeCatalogSmoke(
+        module,
+        db,
+        "recordWorldPlayed",
+        { id: nonResurrectionWorldId },
+      ),
+      executeCatalogSmoke(
+        module,
+        db,
+        "deleteWorld",
+        { id: nonResurrectionWorldId },
+      ),
+    ]);
+    const afterNonResurrectionRace = await executeCatalogSmoke(module, db, "listWorlds");
+    const nonResurrection = afterNonResurrectionRace.every(
+      (/** @type {any} */ world) => world.id !== nonResurrectionWorldId,
     );
 
     await putIndexedDbSmokeRecord(db, WORLD_CHUNK_STORE, worldId, 0, 0);
     await putIndexedDbSmokeRecord(db, WORLD_ENTITY_CHUNK_STORE, worldId, 0, 0);
     const recordsBeforeDelete = await countIndexedDbWorldRecords(worldId);
 
-    const afterCreate = await listIndexedDbCatalogWorlds(db);
-    const opened = await openIndexedDbCatalogWorld(db, worldId);
-    const recorded = await recordIndexedDbCatalogWorldPlayed(db, worldId);
-    const deleted = await deleteIndexedDbCatalogWorld(db, worldId);
-    const afterDelete = await listIndexedDbCatalogWorlds(db);
+    const afterCreate = await executeCatalogSmoke(module, db, "listWorlds");
+    const opened = await executeCatalogSmoke(module, db, "openWorld", { id: worldId });
+    const recorded = await executeCatalogSmoke(
+      module,
+      db,
+      "recordWorldPlayed",
+      { id: worldId },
+    );
+    const deleted = await executeCatalogSmoke(module, db, "deleteWorld", { id: worldId });
+    const afterDelete = await executeCatalogSmoke(module, db, "listWorlds");
     const openDeletedRejected = await rejectsWithMessage(
-      () => openIndexedDbCatalogWorld(db, worldId),
+      () => executeCatalogSmoke(module, db, "openWorld", { id: worldId }),
       "was not found",
     );
     const recordsAfterDelete = await countIndexedDbWorldRecords(worldId);
@@ -685,12 +754,15 @@ async function runIndexedDbCatalogSmoke() {
         && deleted.id === worldId
         && duplicateRejected
         && activeDeleteRejected
+        && constraintAbortRejected
+        && continuedAfterAbort
+        && nonResurrection
         && openDeletedRejected
         && recordsBeforeDelete.chunks === 1
         && recordsBeforeDelete.entityChunks === 1
         && recordsAfterDelete.total === 0
-        && afterCreate.some((world) => world.id === worldId)
-        && afterDelete.every((world) => world.id !== worldId)
+        && afterCreate.some((/** @type {any} */ world) => world.id === worldId)
+        && afterDelete.every((/** @type {any} */ world) => world.id !== worldId)
       ),
       worldId,
       beforeCount: before.length,
@@ -707,10 +779,71 @@ async function runIndexedDbCatalogSmoke() {
       recordsAfterDelete,
       duplicateRejected,
       activeDeleteRejected,
+      constraintAbortRejected,
+      constraintAbortError,
+      continuedAfterAbort,
+      nonResurrection,
       openDeletedRejected,
     };
   } finally {
     db.close();
+  }
+}
+
+/**
+ * Advance a smoke-only create continuation through its initial getAll so its
+ * later add can be raced deterministically against another committed create.
+ *
+ * @param {IDBDatabase} db
+ * @param {import("mclone-web-client-wasm").WebCatalogExecution} execution
+ */
+async function advanceCatalogSmokeCreateRead(db, execution) {
+  const step = execution.nextStorageStep();
+  const transactionPlan = step?.transactions?.[0];
+  const action = transactionPlan?.actions?.[0];
+  if (
+    transactionPlan?.mode !== "readonly"
+    || action?.kind !== "get-all"
+    || action?.store !== "catalog"
+  ) {
+    throw new Error(`unexpected catalog create read plan ${JSON.stringify(step)}`);
+  }
+  const transaction = db.transaction(WORLD_CATALOG_STORE, "readonly");
+  const request = transaction.objectStore(WORLD_CATALOG_STORE).getAll();
+  const rows = await new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error ?? new Error("catalog create read failed"));
+  });
+  await transactionDone(transaction);
+  execution.acceptStorageRead(step.stepId, action.actionId, rows, Date.now());
+  execution.completeStorageStep(step.stepId);
+}
+
+/**
+ * @param {WasmModule} module
+ * @param {IDBDatabase} db
+ * @param {string} operation
+ * @param {Record<string, unknown>} [options]
+ * @param {string} [activeWorldId]
+ * @returns {Promise<any>}
+ */
+async function executeCatalogSmoke(
+  module,
+  db,
+  operation,
+  options = {},
+  activeWorldId = "",
+) {
+  const execution = module.mclone_web_catalog_smoke_execution(
+    operation,
+    options,
+    activeWorldId,
+  );
+  try {
+    await executeIndexedDbCatalogExecution(db, execution);
+    return execution.responseForSmoke();
+  } finally {
+    execution.free();
   }
 }
 

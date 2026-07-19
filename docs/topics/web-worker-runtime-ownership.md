@@ -2,7 +2,7 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: bounded continuation approved 2026-07-19. Tactical
+Status: bounded continuation in closeout 2026-07-19. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
 high-value isolated-actor campaign without justifying shared Wasm memory.
 Human review then authorized Tactical
@@ -10,7 +10,8 @@ Human review then authorized Tactical
 remote WebSocket protocol state and ordinary catalog operation meaning into
 Rust while preserving browser-owned WebSocket and IndexedDB mechanics. It
 stops before managed provisioning or integrated-server persistence. Its
-remote-actor cut is complete; the ordinary catalog continuation is next.
+remote actor and ordinary catalog continuation are complete; validation and
+closeout remain.
 
 ## Scope
 
@@ -266,6 +267,44 @@ passed with maximum frame gaps from 18.620 to 19.260 ms and zero final command,
 update, job, or compile backlog. Authored TypeScript is now 5,738 lines across
 the unchanged 15 modules, six Worker entries, and two construction sites; the
 seven-site copy ledger is unchanged.
+
+Tactical 198 Slice 2 then replaced the ordinary catalog report vocabulary,
+application switch, loose argument reconstruction, and operation-specific
+IndexedDB helpers with `WebCatalogExecution`. The owned Rust continuation
+retains the typed `WorldCatalogRequest`, active-world policy, descriptor
+decoding and compatibility rules, timestamp meaning, operation sequencing,
+and final typed response. It emits only stable storage identifiers,
+transaction modes, and generic get/add/put/delete/range-delete/clear actions.
+
+TypeScript still opens version-6 IndexedDB, maps stable identifiers to browser
+store and index names, creates requests and cursors, awaits transaction
+completion, and closes the database. Read-dependent Rust follow-ups are called
+synchronously inside the IndexedDB success callback. This preserves the
+single read/write transaction for record-played get/put, while create and open
+retain their separate read and write transactions and per-world deletion keeps
+its seven parallel record-clear transactions before catalog deletion. No Rust
+borrow or JavaScript view crosses an `await`.
+
+Nine Rust trace tests and two source locks cover every operation shape,
+full-width stored descriptors, the intentionally preserved browser-number
+creation seed semantics, active-world refusal, and stale or duplicate
+completion. The direct browser smoke passed legacy rewrite, missing-open and
+duplicate rejection, a real IndexedDB add constraint abort followed by a
+successful operation, concurrent record-played/delete non-resurrection, and
+record cleanup. Catalog UI, ordinary and periodic cylinder reopen, and managed
+store isolation passed; the cylinder recovered state 5 through canonical X 0
+and lifted X 512 after reload. The unchanged database version, Worker count,
+private heaps, and seven-site copy ledger are preserved. Authored TypeScript is
+now 5,686 lines across the unchanged 15 modules, six Worker entries, and two
+construction sites; all 34 registered ownership debts are zero.
+
+The catalog-lobby lane's catalog predicates also pass: warmup leaves both
+recency values unchanged, activation updates only the selected world, and the
+selected seed reaches the destination. Its aggregate remains red on a separate
+remote-player walk-distance monotonicity assertion. A detached run of the
+pre-catalog `7b2ef0ed` commit reproduced the same walk-distance decrease while
+the player still moved, so the assertion remains intact and is recorded as
+baseline fixture debt rather than a catalog regression.
 
 The desktop lobby passed with a 9.925 ms p95 and 41.055 ms maximum frame gap;
 the two-times CPU-throttled mobile lobby passed with 10.065 ms p95 and 100.985
@@ -579,8 +618,7 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Continue Tactical 198 with the ordinary catalog cut: replace the catalog
-report/switch with a Rust-owned continuation over thin IndexedDB CRUD. Preserve
-asynchronous yielding and the exact existing transaction boundaries. Remeasure
-and stop before managed provisioning, integrated-server persistence, or shared
-Wasm memory.
+Close Tactical 198 by rerunning the full workspace and browser matrix,
+remeasuring the final ownership and performance ledgers, and recording the
+bounded stop. Do not continue into managed provisioning, integrated-server
+persistence, or shared Wasm memory without a new human decision.

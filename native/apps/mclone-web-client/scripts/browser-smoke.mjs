@@ -5013,11 +5013,19 @@ async function installIndexedDbCatalogHelper(page) {
       import("./mclone-web-world-catalog.js")
     );
     global.__mcloneBrowserSmokeCatalogWorlds = async () => {
-      const catalog = await catalogModule();
+      const [catalog, wasm] = await Promise.all([
+        catalogModule(),
+        // @ts-ignore browser-page-relative import resolved by the served app root.
+        import("./pkg/mclone_web_client.js"),
+      ]);
+      await wasm.default(new URL("./pkg/mclone_web_client_bg.wasm", location.href));
       const db = await catalog.openWorldDb();
+      const execution = wasm.mclone_web_catalog_smoke_execution("listWorlds", {}, "");
       try {
-        return await catalog.listIndexedDbCatalogWorlds(db);
+        await catalog.executeIndexedDbCatalogExecution(db, execution);
+        return execution.responseForSmoke();
       } finally {
+        execution.free();
         db.close();
       }
     };
@@ -5770,6 +5778,14 @@ async function runManagedScenarioStorageProbe(page) {
         ].sort(),
       };
     };
+    const ordinaryCatalogRows = async () => {
+      const transaction = db.transaction(catalog.WORLD_CATALOG_STORE, "readonly");
+      const rows = await request(
+        transaction.objectStore(catalog.WORLD_CATALOG_STORE).getAll(),
+      );
+      await done(transaction);
+      return rows;
+    };
 
     /** @type {Record<string, any>} */
     const discovered = {};
@@ -5777,7 +5793,7 @@ async function runManagedScenarioStorageProbe(page) {
       discovered[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
       await clearManagedWorld(discovered[role].worldId);
     }
-    const catalogBefore = await catalog.listIndexedDbCatalogWorlds(db);
+    const catalogBefore = await ordinaryCatalogRows();
     /** @type {Record<string, any>} */
     const before = {};
     for (const role of roles) {
@@ -5865,7 +5881,7 @@ async function runManagedScenarioStorageProbe(page) {
     await provision("primary-cleanup", "primary");
 
     const identities = await managedIdentities();
-    const catalogAfter = await catalog.listIndexedDbCatalogWorlds(db);
+    const catalogAfter = await ordinaryCatalogRows();
     db.close();
     db = await catalog.openWorldDb();
     /** @type {Record<string, any>} */

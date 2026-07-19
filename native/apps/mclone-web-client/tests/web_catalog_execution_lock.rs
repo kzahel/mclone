@@ -1,0 +1,49 @@
+use std::fs;
+use std::path::PathBuf;
+
+fn app_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+#[test]
+fn ordinary_catalog_policy_is_rust_owned() {
+    let root = app_root();
+    let app = fs::read_to_string(root.join("www/mclone-web-app.ts")).unwrap();
+    let indexed_db = fs::read_to_string(root.join("www/mclone-web-world-catalog.ts")).unwrap();
+    let scene = fs::read_to_string(root.join("src/web_scene_host.rs")).unwrap();
+    let execution = fs::read_to_string(root.join("src/web_catalog_execution.rs")).unwrap();
+
+    assert!(app.contains("takeWorldCatalogExecution"));
+    assert!(app.contains("applyWorldCatalogExecution"));
+    assert!(!app.contains("catalogOperation"));
+    assert!(!app.contains("catalogGenerationProfile"));
+    assert!(!app.contains("catalogRequestedId"));
+    assert!(!app.contains("executeWorldCatalogRequest"));
+
+    assert!(indexed_db.contains("executeIndexedDbCatalogExecution"));
+    assert!(indexed_db.contains("enqueueCatalogStorageAction"));
+    assert!(indexed_db.contains("acceptStorageRead"));
+    assert!(!indexed_db.contains("listIndexedDbCatalogWorlds"));
+    assert!(!indexed_db.contains("createIndexedDbCatalogWorld"));
+    assert!(!indexed_db.contains("mclone_web_catalog_prepare_create_world"));
+
+    assert!(scene.contains("PendingWebCatalogOperation"));
+    assert!(!scene.contains("write_catalog_request"));
+    assert!(!scene.contains("catalogOperation"));
+
+    assert!(execution.contains("CatalogExecutionCore"));
+    assert!(execution.contains("WorldCatalogRequest::CreateWorld"));
+    assert!(execution.contains("DeleteManyStage"));
+    assert!(execution.contains("clear_world_transactions"));
+}
+
+#[test]
+fn indexed_db_schema_and_record_played_atomicity_stay_locked() {
+    let indexed_db =
+        fs::read_to_string(app_root().join("www/mclone-web-world-catalog.ts")).unwrap();
+
+    assert!(indexed_db.contains("WORLD_DB_VERSION = 6"));
+    assert!(indexed_db.contains("Enqueue read-dependent writes synchronously"));
+    assert!(indexed_db.contains("record-played get/put must remain in one"));
+    assert!(indexed_db.contains("Promise.all(step.transactions.map"));
+}

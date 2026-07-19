@@ -57,10 +57,11 @@ use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
 use crate::web_canvas::{
-    WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, decode_world_catalog_response,
-    gui_key_from_label, prepare_web_scene_assets_from_pack,
-    prepare_web_scene_assets_from_selection, ui_action_label, web_asset_pack_catalog,
+    WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, gui_key_from_label,
+    prepare_web_scene_assets_from_pack, prepare_web_scene_assets_from_selection, ui_action_label,
+    web_asset_pack_catalog,
 };
+use crate::web_catalog_execution::WebCatalogExecution;
 use crate::web_render_worker::WebRenderWorkerCoordinator;
 use crate::web_scene_protocol::{
     WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState,
@@ -264,7 +265,7 @@ pub struct WebSceneHost {
     update_count: usize,
     interaction_count: usize,
     mesh_build_count: usize,
-    catalog_tokens: HashMap<String, PlatformOperationToken>,
+    catalog_operations: HashMap<String, PendingWebCatalogOperation>,
     managed_provision_tokens: HashMap<
         String,
         (
@@ -277,6 +278,13 @@ pub struct WebSceneHost {
     render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
+}
+
+#[derive(Debug)]
+struct PendingWebCatalogOperation {
+    token: PlatformOperationToken,
+    request: Option<WorldCatalogRequest>,
+    active_world: Option<LocalWorldId>,
 }
 
 #[wasm_bindgen]
@@ -1543,22 +1551,36 @@ impl WebSceneHost {
         self.complete_started_runtime(pending, runtime)
     }
 
-    #[wasm_bindgen(js_name = applyWorldCatalogResponse)]
-    pub fn apply_world_catalog_response(
+    #[wasm_bindgen(js_name = takeWorldCatalogExecution)]
+    pub fn take_world_catalog_execution(
         &mut self,
         request_id: String,
-        operation: String,
-        payload: JsValue,
+    ) -> Result<WebCatalogExecution, JsValue> {
+        let pending = self
+            .catalog_operations
+            .get_mut(&request_id)
+            .ok_or_else(|| JsValue::from_str("unknown catalog request execution"))?;
+        let request = pending
+            .request
+            .take()
+            .ok_or_else(|| JsValue::from_str("catalog request execution was already taken"))?;
+        WebCatalogExecution::new(request, pending.active_world.clone()).map_err(JsValue::from)
+    }
+
+    #[wasm_bindgen(js_name = applyWorldCatalogExecution)]
+    pub fn apply_world_catalog_execution(
+        &mut self,
+        request_id: String,
+        execution: &WebCatalogExecution,
     ) -> Result<JsValue, JsValue> {
-        let token = self
-            .catalog_tokens
+        let response = execution.response().map_err(JsValue::from)?;
+        let pending = self
+            .catalog_operations
             .remove(&request_id)
             .ok_or_else(|| JsValue::from_str("unknown catalog request completion"))?;
-        let response =
-            decode_world_catalog_response(&operation, &payload).map_err(JsValue::from)?;
         self.platform
             .complete_catalog_operation(PlatformOperationCompletion {
-                token,
+                token: pending.token,
                 result: Ok(response),
             });
         let (device, queue) = (&self.context.device, &self.context.queue);
@@ -1576,13 +1598,13 @@ impl WebSceneHost {
         request_id: String,
         message: String,
     ) -> Result<JsValue, JsValue> {
-        let token = self
-            .catalog_tokens
+        let pending = self
+            .catalog_operations
             .remove(&request_id)
             .ok_or_else(|| JsValue::from_str("unknown catalog request failure"))?;
         self.platform
             .complete_catalog_operation(PlatformOperationCompletion {
-                token,
+                token: pending.token,
                 result: Err(WorldCatalogError::new(
                     WorldCatalogErrorKind::StorageFailure,
                     message,
@@ -2064,7 +2086,7 @@ async fn create_scene_host(
         update_count: 0,
         interaction_count: 0,
         mesh_build_count: 0,
-        catalog_tokens: HashMap::new(),
+        catalog_operations: HashMap::new(),
         managed_provision_tokens: HashMap::new(),
         managed_world_starts: HashMap::new(),
         stale_managed_start_completion_count: 0,
@@ -2315,16 +2337,17 @@ impl WebSceneHost {
             }
         }
         if let Some(operation) = self.platform.take_catalog_operation() {
-            let request = &operation.kind.request;
-            let request_id = request.id.0.to_string();
-            self.catalog_tokens
-                .insert(request_id.clone(), operation.token);
+            let request_id = operation.kind.request.id.0.to_string();
+            self.catalog_operations.insert(
+                request_id.clone(),
+                PendingWebCatalogOperation {
+                    token: operation.token,
+                    request: Some(operation.kind.request.request),
+                    active_world: operation.kind.active_world,
+                },
+            );
             report_set_bool(&object, "catalogRequest", true)?;
             report_set_string(&object, "catalogRequestId", &request_id)?;
-            if let Some(active) = operation.kind.active_world {
-                report_set_string(&object, "activeWorldId", active.as_str())?;
-            }
-            write_catalog_request(&object, &request.request)?;
         }
         Ok(object.into())
     }
@@ -3912,55 +3935,6 @@ fn write_block_target(
     report_set_number(object, "hitX", hit.location.x)?;
     report_set_number(object, "hitY", hit.location.y)?;
     report_set_number(object, "hitZ", hit.location.z)
-}
-
-fn write_catalog_request(
-    object: &js_sys::Object,
-    request: &WorldCatalogRequest,
-) -> Result<(), String> {
-    match request {
-        WorldCatalogRequest::ListWorlds => {
-            report_set_string(object, "catalogOperation", "listWorlds")
-        }
-        WorldCatalogRequest::CreateWorld { options } => {
-            report_set_string(object, "catalogOperation", "createWorld")?;
-            report_set_string(object, "catalogDisplayName", &options.display_name)?;
-            report_set_number(object, "catalogWorldSeed", options.seed as f64)?;
-            report_set_string(object, "catalogWorldSeedText", &options.seed.to_string())?;
-            report_set_string(
-                object,
-                "catalogGenerationProfile",
-                options.world_generation_profile.label(),
-            )?;
-            if let Some(id) = &options.requested_id {
-                report_set_string(object, "catalogRequestedId", id.as_str())?;
-            }
-            Ok(())
-        }
-        WorldCatalogRequest::OpenWorld { id } => {
-            report_set_string(object, "catalogOperation", "openWorld")?;
-            report_set_string(object, "catalogWorldId", id.as_str())
-        }
-        WorldCatalogRequest::RecordWorldPlayed { id } => {
-            report_set_string(object, "catalogOperation", "recordWorldPlayed")?;
-            report_set_string(object, "catalogWorldId", id.as_str())
-        }
-        WorldCatalogRequest::DeleteWorld { id } => {
-            report_set_string(object, "catalogOperation", "deleteWorld")?;
-            report_set_string(object, "catalogWorldId", id.as_str())
-        }
-        WorldCatalogRequest::DeleteAllLocalWorlds {
-            include_managed_content,
-        } => report_set_string(
-            object,
-            "catalogOperation",
-            if *include_managed_content {
-                "factoryResetLocalData"
-            } else {
-                "deleteAllLocalWorlds"
-            },
-        ),
-    }
 }
 
 fn write_external_session_start(

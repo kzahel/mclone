@@ -20,22 +20,12 @@ import type { TouchControlsMode } from "./mclone-web-settings.js";
 import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
 import type { TouchOverlayState } from "./mclone-web-touch.js";
 import {
-  createIndexedDbCatalogWorld,
-  deleteIndexedDbCatalogWorld,
-  deleteAllIndexedDbCatalogWorlds,
-  factoryResetIndexedDbLocalData,
-  listIndexedDbCatalogWorlds,
-  openIndexedDbCatalogWorld,
-  recordIndexedDbCatalogWorldPlayed,
+  executeIndexedDbCatalogExecution,
   openWorldDb,
   provisionIndexedDbManagedScenarioWorldInWorker,
   setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
-import type {
-  WebLocalWorldCreateOptions,
-  WebLocalWorldSummary,
-} from "./mclone-web-world-catalog.js";
-import type { WebSceneHost } from "mclone-web-client-wasm";
+import type { WebCatalogExecution, WebSceneHost } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
 // Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
@@ -427,11 +417,6 @@ class WebFrameDriver {
       "mclone_web_startup_options_from_query",
       "mclone_web_create_worker_scene_host_with_startup",
       "mclone_web_create_remote_scene_host_with_startup",
-      "mclone_web_catalog_validate_world_id",
-      "mclone_web_catalog_prepare_world_list",
-      "mclone_web_catalog_prepare_create_world",
-      "mclone_web_catalog_prepare_open_world",
-      "mclone_web_catalog_prepare_delete_world",
       "mclone_web_managed_scenario_prepare_world",
       "mclone_web_managed_scenario_validate_world",
     ];
@@ -521,7 +506,8 @@ class WebFrameDriver {
       "handleUiPointerUp",
       "startLocalWorld",
       "startIndexedDbLocalWorld",
-      "applyWorldCatalogResponse",
+      "takeWorldCatalogExecution",
+      "applyWorldCatalogExecution",
       "applyWorldCatalogError",
       "joinRemoteWebSocket",
       "setDebugOverlayVisible",
@@ -1837,13 +1823,14 @@ class WebFrameDriver {
     }
     const session = this.session;
     const requestId = String(report.catalogRequestId ?? "").trim();
-    const operation = String(report.catalogOperation ?? "").trim();
     let db: IDBDatabase | null = null;
+    let execution: WebCatalogExecution | null = null;
     try {
       db = await openWorldDb();
-      const payload = await this.executeWorldCatalogRequest(db, operation, report);
+      execution = session.takeWorldCatalogExecution(requestId);
+      await executeIndexedDbCatalogExecution(db, execution);
       await this.waitForSessionIdle();
-      const completion = session.applyWorldCatalogResponse(requestId, operation, payload);
+      const completion = session.applyWorldCatalogExecution(requestId, execution);
       runtime.state.worldCatalogCompletionCount += 1;
       this.applyNativeUiReport(completion, options);
     } catch (error) {
@@ -1861,59 +1848,8 @@ class WebFrameDriver {
         publishRuntimeState(runtime.state);
       }
     } finally {
+      execution?.free();
       db?.close();
-    }
-  }
-
-  async executeWorldCatalogRequest(
-    db: IDBDatabase,
-    operation: string,
-    report: WasmReport,
-  ): Promise<WebLocalWorldSummary | WebLocalWorldSummary[] | { deletedCount: number }> {
-    switch (operation) {
-      case "listWorlds":
-        return listIndexedDbCatalogWorlds(db);
-      case "createWorld": {
-        const seed = Number(report.catalogWorldSeedText ?? report.catalogWorldSeed);
-        const options: WebLocalWorldCreateOptions = {
-          displayName: String(report.catalogDisplayName ?? ""),
-          seed,
-          requestedId: report.catalogRequestedId ?? null,
-          generationProfile: String(report.catalogGenerationProfile ?? "overworld"),
-        };
-        return createIndexedDbCatalogWorld(db, options);
-      }
-      case "openWorld":
-        return openIndexedDbCatalogWorld(db, String(report.catalogWorldId ?? ""));
-      case "recordWorldPlayed":
-        return recordIndexedDbCatalogWorldPlayed(
-          db,
-          String(report.catalogWorldId ?? ""),
-        );
-      case "deleteWorld": {
-        const activeWorldId = String(report.activeWorldId ?? "").trim();
-        return deleteIndexedDbCatalogWorld(
-          db,
-          String(report.catalogWorldId ?? ""),
-          activeWorldId.length > 0 ? activeWorldId : null,
-        );
-      }
-      case "deleteAllLocalWorlds": {
-        const activeWorldId = String(report.activeWorldId ?? "").trim();
-        return deleteAllIndexedDbCatalogWorlds(
-          db,
-          activeWorldId.length > 0 ? activeWorldId : null,
-        );
-      }
-      case "factoryResetLocalData": {
-        const activeWorldId = String(report.activeWorldId ?? "").trim();
-        return factoryResetIndexedDbLocalData(
-          db,
-          activeWorldId.length > 0 ? activeWorldId : null,
-        );
-      }
-      default:
-        throw new Error(`unsupported world catalog operation ${JSON.stringify(operation)}`);
     }
   }
 

@@ -4,6 +4,7 @@ use web_sys::HtmlCanvasElement;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
+use crate::web_catalog_execution::WEB_WORLD_BACKEND_LABEL;
 use crate::web_render_compiler_abi::*;
 use crate::web_render_worker::{WebRenderWorkerCoordinator, WebRenderWorkerWorldHandle};
 use crate::web_world_catalog_descriptor;
@@ -48,10 +49,7 @@ use mclone_app_runtime::startup_args::{
 };
 use mclone_app_runtime::world_catalog::{
     LOCAL_WORLD_CATALOG_SCHEMA_VERSION, LOCAL_WORLD_TARGET_MINECRAFT_VERSION,
-    LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
-    WorldCatalogError, WorldCatalogErrorKind, WorldCatalogResponse, duplicate_world_id,
-    sort_local_world_summaries, validate_delete_inactive_world, validate_local_world_compatible,
-    world_not_found,
+    LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary,
 };
 use mclone_app_runtime::{
     GameplayCommandSubmission, GameplayCommandTiming, GameplayCommandUpdatePolicy,
@@ -100,7 +98,6 @@ const WEB_DEFAULT_RENDER_DISTANCE: u32 = 3;
 const WEB_QUERY_WORLD_STORAGE: &str = "worldStorage";
 const WEB_QUERY_WORLD_ID: &str = "worldId";
 const WEB_QUERY_CLEAR_WORLD_STORAGE: &str = "clearWorldStorage";
-const WEB_WORLD_BACKEND_LABEL: &str = "web-indexeddb";
 // 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
@@ -2689,89 +2686,6 @@ async fn render_canvas_clear(canvas: HtmlCanvasElement) -> Result<CanvasRenderRe
     })
 }
 
-#[wasm_bindgen(js_name = mclone_web_catalog_validate_world_id)]
-pub fn mclone_web_catalog_validate_world_id(id: String) -> Result<String, JsValue> {
-    LocalWorldId::new(id)
-        .map(LocalWorldId::into_string)
-        .map_err(|error| JsValue::from(error.message))
-}
-
-#[wasm_bindgen(js_name = mclone_web_catalog_prepare_world_list)]
-pub fn mclone_web_catalog_prepare_world_list(records: JsValue) -> Result<JsValue, JsValue> {
-    let mut worlds = decode_web_local_world_summaries(&records).map_err(JsValue::from)?;
-    sort_local_world_summaries(&mut worlds);
-    encode_web_local_world_summaries(&worlds).map_err(JsValue::from)
-}
-
-#[wasm_bindgen(js_name = mclone_web_catalog_prepare_create_world)]
-pub fn mclone_web_catalog_prepare_create_world(
-    options: JsValue,
-    existing_records: JsValue,
-    now_unix_millis: f64,
-) -> Result<JsValue, JsValue> {
-    let options = decode_web_local_world_create_options(&options).map_err(JsValue::from)?;
-    let existing = decode_web_local_world_summaries(&existing_records).map_err(JsValue::from)?;
-    let id = options
-        .resolve_id(existing.iter().map(|world| &world.id))
-        .map_err(|error| JsValue::from(error.message))?;
-    if existing.iter().any(|world| world.id == id) {
-        return Err(JsValue::from(duplicate_world_id(&id).message));
-    }
-
-    let now = parse_web_unix_millis(now_unix_millis, "nowUnixMillis").map_err(JsValue::from)?;
-    let mut summary = LocalWorldSummary::new(id, options.display_name, options.seed, now)
-        .map_err(|error| JsValue::from(error.message))?;
-    summary.world_generation_profile = options.world_generation_profile;
-    summary.last_played_unix_millis = Some(now);
-    summary.backend_label = Some(WEB_WORLD_BACKEND_LABEL.to_owned());
-    encode_web_catalog_mutation(&summary).map_err(JsValue::from)
-}
-
-#[wasm_bindgen(js_name = mclone_web_catalog_prepare_open_world)]
-pub fn mclone_web_catalog_prepare_open_world(
-    id: String,
-    record: JsValue,
-    now_unix_millis: f64,
-) -> Result<JsValue, JsValue> {
-    let id = LocalWorldId::new(id).map_err(|error| JsValue::from(error.message))?;
-    let mut summary =
-        decode_required_web_local_world_summary(&record, &id).map_err(JsValue::from)?;
-    validate_local_world_compatible(&summary).map_err(|error| JsValue::from(error.message))?;
-    summary.last_played_unix_millis =
-        Some(parse_web_unix_millis(now_unix_millis, "nowUnixMillis").map_err(JsValue::from)?);
-    encode_web_catalog_mutation(&summary).map_err(JsValue::from)
-}
-
-#[wasm_bindgen(js_name = mclone_web_catalog_prepare_record_world_played)]
-pub fn mclone_web_catalog_prepare_record_world_played(
-    id: String,
-    record: JsValue,
-    now_unix_millis: f64,
-) -> Result<JsValue, JsValue> {
-    // Recording active play has the same metadata validation and timestamp
-    // transition as an ordinary open, but the IndexedDB adapter never opens a
-    // runtime or world store for this operation.
-    mclone_web_catalog_prepare_open_world(id, record, now_unix_millis)
-}
-
-#[wasm_bindgen(js_name = mclone_web_catalog_prepare_delete_world)]
-pub fn mclone_web_catalog_prepare_delete_world(
-    id: String,
-    active_world_id: String,
-    record: JsValue,
-) -> Result<JsValue, JsValue> {
-    let id = LocalWorldId::new(id).map_err(|error| JsValue::from(error.message))?;
-    let active_world = if active_world_id.is_empty() {
-        None
-    } else {
-        Some(LocalWorldId::new(active_world_id).map_err(|error| JsValue::from(error.message))?)
-    };
-    validate_delete_inactive_world(&id, active_world.as_ref())
-        .map_err(|error| JsValue::from(error.message))?;
-    let summary = decode_required_web_local_world_summary(&record, &id).map_err(JsValue::from)?;
-    encode_web_local_world_summary(&summary).map_err(JsValue::from)
-}
-
 /// Produce one storage-neutral managed-world publication payload. The browser
 /// adapter only carries these opaque Rust-authored bytes into IndexedDB.
 #[wasm_bindgen(js_name = mclone_web_managed_scenario_prepare_world)]
@@ -3216,44 +3130,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
     }
 }
 
-pub(super) fn decode_world_catalog_response(
-    operation: &str,
-    payload: &JsValue,
-) -> Result<WorldCatalogResponse, String> {
-    match operation {
-        "listWorlds" => Ok(WorldCatalogResponse::WorldList {
-            capabilities: WorldCatalogCapabilities::persistent_local(),
-            worlds: {
-                let mut worlds = decode_web_local_world_summaries(payload)?;
-                sort_local_world_summaries(&mut worlds);
-                worlds
-            },
-        }),
-        "createWorld" => Ok(WorldCatalogResponse::WorldCreated {
-            summary: decode_web_local_world_summary(payload)?,
-        }),
-        "openWorld" => Ok(WorldCatalogResponse::WorldOpened {
-            summary: decode_web_local_world_summary(payload)?,
-        }),
-        "recordWorldPlayed" => Ok(WorldCatalogResponse::WorldPlayRecorded {
-            summary: decode_web_local_world_summary(payload)?,
-        }),
-        "deleteWorld" => Ok(WorldCatalogResponse::WorldDeleted {
-            id: LocalWorldId::new(js_string_property(payload, "id")?)
-                .map_err(|error| error.message)?,
-        }),
-        "deleteAllLocalWorlds" | "factoryResetLocalData" => {
-            Ok(WorldCatalogResponse::AllLocalWorldsDeleted {
-                deleted_count: js_u64_property(payload, "deletedCount")? as usize,
-            })
-        }
-        other => Err(format!(
-            "unsupported world catalog response operation {other:?}"
-        )),
-    }
-}
-
-fn decode_web_local_world_create_options(
+pub(crate) fn decode_web_local_world_create_options(
     value: &JsValue,
 ) -> Result<LocalWorldCreateOptions, String> {
     let mut options = LocalWorldCreateOptions::new(
@@ -3275,7 +3152,9 @@ fn decode_web_local_world_create_options(
     Ok(options)
 }
 
-fn decode_web_local_world_summaries(value: &JsValue) -> Result<Vec<LocalWorldSummary>, String> {
+pub(crate) fn decode_web_local_world_summaries(
+    value: &JsValue,
+) -> Result<Vec<LocalWorldSummary>, String> {
     if !js_sys::Array::is_array(value) {
         return Err("world catalog list response must be an array".to_owned());
     }
@@ -3289,25 +3168,7 @@ fn decode_web_local_world_summaries(value: &JsValue) -> Result<Vec<LocalWorldSum
         .collect()
 }
 
-fn decode_required_web_local_world_summary(
-    value: &JsValue,
-    id: &LocalWorldId,
-) -> Result<LocalWorldSummary, String> {
-    if value.is_null() || value.is_undefined() {
-        return Err(world_not_found(id).message);
-    }
-    let summary = decode_web_local_world_summary(value)?;
-    if &summary.id != id {
-        return Err(WorldCatalogError::new(
-            WorldCatalogErrorKind::StorageFailure,
-            format!("local world record `{}` identified `{}`", id, summary.id),
-        )
-        .message);
-    }
-    Ok(summary)
-}
-
-fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, String> {
+pub(crate) fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, String> {
     let descriptor = js_property(value, "descriptor")?;
     if !descriptor.is_null() && !descriptor.is_undefined() {
         if !descriptor.is_instance_of::<js_sys::Uint8Array>() {
@@ -3357,15 +3218,9 @@ fn decode_web_local_world_summary(value: &JsValue) -> Result<LocalWorldSummary, 
     Ok(summary)
 }
 
-fn encode_web_local_world_summaries(worlds: &[LocalWorldSummary]) -> Result<JsValue, String> {
-    let array = js_sys::Array::new();
-    for summary in worlds {
-        array.push(&encode_web_local_world_summary(summary)?);
-    }
-    Ok(array.into())
-}
-
-fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue, String> {
+pub(crate) fn encode_web_local_world_summary(
+    summary: &LocalWorldSummary,
+) -> Result<JsValue, String> {
     let object = js_sys::Object::new();
     set_string(&object, "id", summary.id.as_str())?;
     set_string(&object, "displayName", &summary.display_name)?;
@@ -3416,7 +3271,7 @@ fn encode_web_local_world_summary(summary: &LocalWorldSummary) -> Result<JsValue
     Ok(object.into())
 }
 
-fn encode_web_catalog_record(summary: &LocalWorldSummary) -> Result<JsValue, String> {
+pub(crate) fn encode_web_catalog_record(summary: &LocalWorldSummary) -> Result<JsValue, String> {
     let object = js_sys::Object::new();
     let descriptor = web_world_catalog_descriptor::encode(summary)?;
     set_string(&object, "id", summary.id.as_str())?;
@@ -3429,24 +3284,7 @@ fn encode_web_catalog_record(summary: &LocalWorldSummary) -> Result<JsValue, Str
     Ok(object.into())
 }
 
-fn encode_web_catalog_mutation(summary: &LocalWorldSummary) -> Result<JsValue, String> {
-    let object = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("record"),
-        &encode_web_catalog_record(summary)?,
-    )
-    .map_err(|error| format!("failed to attach world catalog record: {error:?}"))?;
-    js_sys::Reflect::set(
-        &object,
-        &JsValue::from_str("summary"),
-        &encode_web_local_world_summary(summary)?,
-    )
-    .map_err(|error| format!("failed to attach world catalog UI summary: {error:?}"))?;
-    Ok(object.into())
-}
-
-fn parse_web_unix_millis(value: f64, label: &str) -> Result<u64, String> {
+pub(crate) fn parse_web_unix_millis(value: f64, label: &str) -> Result<u64, String> {
     if !value.is_finite() || value.fract() != 0.0 || value < 0.0 || value > u64::MAX as f64 {
         return Err(format!("{label} must be a non-negative integer timestamp"));
     }
