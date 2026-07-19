@@ -1,9 +1,10 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: planned 2026-07-19. Slices 0 and 1 are implementation-ready. Slice 2
-has a concrete ownership target but begins only after the small server-job
-actor proves the broker contract. Later integrated-server consolidation remains
-provisional and must not widen this tactical into a shared-Wasm-memory runtime.
+Status: active 2026-07-19. Slice 0 has landed its executable baseline. Slice 1
+is in progress. Slice 2 has a concrete ownership target but begins only after
+the small server-job actor proves the broker contract. Later integrated-server
+consolidation remains provisional and must not widen this tactical into a
+shared-Wasm-memory runtime.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -149,7 +150,7 @@ and reusable state machines remain in their shared crates. Do not move browser
 
 ## Slice 0 — Whole-Worker Ownership And Copy Baseline
 
-Status: ready.
+Status: complete 2026-07-19.
 
 Add a new executable inventory, preferably
 `scripts/check-web-worker-ownership.mjs`, and expose it as a package command.
@@ -220,9 +221,27 @@ Human review is useful here because the allowed-mechanism/debt classification
 becomes the architectural contract. Implementation can proceed autonomously
 after that classification is accepted.
 
+### Slice 0 evidence
+
+`pnpm native:web:worker-ownership` now inventories all 14 authored TypeScript
+modules, six Worker entries, two TypeScript construction sites, 7,417 baseline
+lines, registered domain debt, eight explicit copy sites, and the external SAB
+ABI locks. Its self-test rejects an unregistered Worker entry, growth in a
+registered domain selector, and production shared-Wasm-memory vocabulary.
+Machine-readable output is available through `--json`.
+
+The thin-adapter purity gate, web typecheck, local app, chunk, movement, and
+lobby scenario probes passed. App, movement, and lobby captures were inspected
+under `/tmp`. The remote WebSocket scenario reached normal shared-memory
+rendering and settled its compiler queue, but its later block-break interaction
+timed out twice on the unchanged baseline. Because Slice 0 changes only checks
+and package wiring, this is recorded as a pre-existing red scenario rather than
+attributed to the ownership gate. Slice 1 must preserve that exact boundary and
+must not claim the remote scenario green without new evidence.
+
 ## Slice 1 — Server-Job Rust Actor Proof
 
-Status: ready after Slice 0.
+Status: in progress 2026-07-19.
 
 Use `mclone-server-job-worker.ts` as the first bounded proof. It is small, has
 two domain variants, already uses isolated Wasm instances, and carries both SAB

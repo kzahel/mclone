@@ -68,4 +68,5 @@ fi
 ./scripts/check-scene-host-purity.sh
 ./scripts/check-xr-frame-driver-purity.sh
 node ./scripts/check-web-scene-host-adoption.mjs
+node ./scripts/check-web-worker-ownership.mjs
 echo "native and browser client adapters remain thin"

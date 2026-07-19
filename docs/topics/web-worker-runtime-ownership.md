@@ -2,10 +2,11 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: accepted direction 2026-07-19. The production browser keeps isolated
-Wasm heaps and the existing external `SharedArrayBuffer` transports while
-worker coordination is moved toward Rust-owned actors behind domain-blind
-TypeScript browser brokers. Tactical
+Status: active 2026-07-19. The production browser keeps isolated Wasm heaps and
+the existing external `SharedArrayBuffer` transports while worker coordination
+is moved toward Rust-owned actors behind domain-blind TypeScript browser
+brokers. The executable whole-worker ownership and copy baseline has landed;
+the server-job Rust actor proof is next. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the first
 implementation slices. A shared Wasm linear-memory runtime remains a separate,
 measurement-gated investigation rather than an implied destination of the
@@ -339,7 +340,7 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Run Tactical 197 Slice 0 to establish a whole-worker ownership and copy
-baseline, then Slice 1 to make the worldgen/light job Worker the first
-domain-blind isolated Rust actor. Only after that proof should the larger
+Complete Tactical 197 Slice 1 to make the worldgen/light job Worker the first
+domain-blind isolated Rust actor. Preserve the Slice 0 external-SAB copy ledger
+and isolated heaps. Only after that proof and boundary review should the larger
 render-compiler broker move from TypeScript into browser-specific Rust.
