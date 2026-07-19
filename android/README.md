@@ -1,7 +1,7 @@
 # Flat Android
 
 This directory owns the flat, non-XR Android package and validation lane for
-the native Rust engine. It builds `mclone-android-client` as a `NativeActivity`
+the shared Rust engine. It builds `mclone-android-client` as a `NativeActivity`
 APK, stages the packed Minecraft asset source onto the device, launches the
 app, captures screenshots under `/tmp`, and scans logcat for fatal failures.
 
@@ -11,7 +11,7 @@ Current status:
 - The Android host owns only NativeActivity lifecycle, `wgpu` surface/config
   resize, package paths, asset staging paths, and touch input.
 - Runtime, render-section streaming, texture/mesh asset loading, and full-frame
-  sky/terrain composition come from shared native Rust crates.
+  sky/terrain composition come from shared Rust crates.
 - The default host mode is local integrated. Launch-scoped startup arguments
   are passed as JSON argv through intent extra `mclone.startup.argv`; the flat
   Android app feeds those tokens into the shared startup parser.

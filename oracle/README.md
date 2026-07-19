@@ -1,6 +1,6 @@
 # Oracle Harness
 
-Small Java fixtures live here so the native Rust parity code can compare against real Minecraft 1.17.1 behavior.
+Small Java fixtures live here so the Rust parity code can compare against real Minecraft 1.17.1 behavior.
 
 ## PRNG oracle
 

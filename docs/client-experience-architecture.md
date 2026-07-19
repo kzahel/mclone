@@ -79,7 +79,8 @@ runtime policy.
 
 We keep hitting the same friction:
 
-- desktop flat is the fastest lane, so policy tends to land there first;
+- platform-local implementation convenience has repeatedly pulled shared policy
+  into app adapters;
 - web has real shape differences: promises, workers, IndexedDB, TypeScript
   glue, `SharedArrayBuffer`, browser lifecycle;
 - XR has real shape differences: stereo views, world-space panels,
@@ -519,8 +520,9 @@ dependencies.
 The order below is deliberate: it burns down the violations in order of
 compounding cost, and it front-loads the XR merge because that fork grows
 harder to close with every session/catalog improvement that lands twice.
-Desktop remains the first validation lane for each slice, per
-[`platforms.md`](platforms.md); that is validation order, not ownership order.
+Validation for each slice follows the shared contracts and platform boundaries
+it changes, per [`platforms.md`](platforms.md). No client target is the default
+adopter or validation baseline.
 Tactical
 [`143-client-experience-convergence-burn-down.md`](tactical/143-client-experience-convergence-burn-down.md)
 carried the executable version of these slices (plus an enforcement-baseline
@@ -644,10 +646,11 @@ The migration order enforces this: the XR session merge is slice 4, not the
 tail of the plan, and the emulated-XR profile test (slice 5) makes
 display-neutrality a standing gate rather than a device-lane afterthought.
 
-### Desktop Is A Fast Lane, Not The Architecture
+### No Client Target Defines The Architecture
 
-Desktop flat remains the fastest validation lane. That should make it the
-first adopter for many shared slices, not the permanent owner.
+Every client target presents the same product through different adapters.
+Implementation and validation order must follow the contracts at risk rather
+than making one target the recurring first adopter.
 
 ### Emulation Is A First-Class Validation Shape
 
@@ -666,9 +669,9 @@ emulated profile exercises the identical state machine.
 
 ## Enforcement
 
-Intent has not held against the "desktop is the fastest lane" gradient; these
-mechanical gates are part of the architecture, not optional hygiene. They are
-listed roughly in adoption order.
+Intent alone has not prevented app-local policy growth; these mechanical gates
+are part of the architecture, not optional hygiene. They are listed roughly in
+adoption order.
 
 ### Diff footprint tripwire (available now)
 

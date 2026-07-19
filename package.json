@@ -2,7 +2,7 @@
   "name": "mclone",
   "version": "0.0.0",
   "private": true,
-  "description": "Native-first Minecraft-inspired voxel sandbox (private, personal use).",
+  "description": "Cross-platform Minecraft-inspired voxel sandbox built in Rust.",
   "type": "module",
   "scripts": {
     "test": "cargo test --manifest-path native/Cargo.toml",

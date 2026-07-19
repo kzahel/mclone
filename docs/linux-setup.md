@@ -1,6 +1,6 @@
 # Linux Development Setup
 
-This guide covers native Rust development and no-window offscreen validation
+This guide covers Rust development and no-window offscreen validation
 on Linux. It was first validated on Ubuntu 24.04.4 LTS on 2026-07-12, using an
 AMD Radeon 890M through Mesa RADV. The full-frame screenshot path does not need
 X11, Wayland, a window manager, or a `DISPLAY` value.
@@ -61,7 +61,7 @@ Validated host versions were:
 
 ## Rust, Node, And pnpm
 
-The native workspace declares `rust-version = "1.92"`. Install rustup and use a
+The Rust workspace declares `rust-version = "1.92"`. Install rustup and use a
 current stable toolchain:
 
 ```bash

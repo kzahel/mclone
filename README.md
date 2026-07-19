@@ -48,8 +48,8 @@ Current project posture and work indexes:
 
 - [`docs/platforms.md`](docs/platforms.md) — current platform matrix
 - [`docs/topics/platform-parity.md`](docs/topics/platform-parity.md) — feature and shared-contract parity matrix
-- [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) — durable native architecture
-- [`docs/tactical/`](docs/tactical/README.md) — native Rust workstream tacticals
+- [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) — durable engine architecture
+- [`docs/tactical/`](docs/tactical/README.md) — implementation tacticals and execution records
 - [`docs/topics/`](docs/topics/README.md) — durable subsystem progress indexes
 - [`docs/native-web.md`](docs/native-web.md) — Rust/WASM web build, smoke, and deploy notes
 - [`docs/linux-setup.md`](docs/linux-setup.md) — Linux toolchain, assets, GPU access, and no-window smoke setup
@@ -90,7 +90,7 @@ Reference and oracle material:
 
 - `reference/minecraft-1.17.1/src/` — generated, gitignored local source tree for vanilla behavior and visual correctness
 - [`oracle/`](oracle/) — retained Java and TypeScript reference tooling
-- [`test/fixtures/`](test/fixtures/) — shared oracle fixture data consumed by native Rust tests
+- [`test/fixtures/`](test/fixtures/) — shared oracle fixture data consumed by Rust tests
 
 The generated reference tree and extracted Minecraft assets are not part of the
 live engine or distributable content. World generation aims for **seed parity**
@@ -106,7 +106,7 @@ with Minecraft Java 1.17.1 so it can be oracle-tested against reference output.
 - [`native/apps/mclone-dedicated-server/`](native/apps/mclone-dedicated-server/) - headless dedicated server
 - [`native/crates/`](native/crates/) - shared engine, protocol, runtime, renderer, UI, worldgen, asset, mesh, lighting, and XR crates
 - [`oracle/`](oracle/) - Java and TypeScript fixture-generation helpers
-- [`test/fixtures/`](test/fixtures/) - shared oracle fixture data consumed by native Rust tests
+- [`test/fixtures/`](test/fixtures/) - shared oracle fixture data consumed by Rust tests
 - `reference/minecraft-1.17.1/` - generated, gitignored Minecraft reference tree
 
 ## Validation

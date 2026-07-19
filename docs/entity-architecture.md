@@ -1,7 +1,7 @@
 # Entity Architecture
 
-Durable architecture notes for the native Rust entity, mob, spawning, and
-presentation stack.
+Durable architecture notes for the Rust entity, mob, spawning, and presentation
+stack.
 
 This document is intentionally stricter than a roadmap. The systems below are
 not optional later polish. They are the foundation that every entity feature has
@@ -48,14 +48,14 @@ submodules for state, section storage, visibility, ticking, tracking, mobs,
 goals, navigation, spawning, and persistence.
 
 Do not add a platform-local gameplay implementation unless the behavior is
-genuinely platform-specific. Desktop may validate first, but shared behavior
-belongs in shared crates and server/runtime modules.
+genuinely platform-specific. Shared behavior belongs in shared crates and
+server/runtime modules, and validation follows the affected contracts.
 
 Do not model creatures as decorative render assets. A cow or chicken placed in
 the world is an entity with authoritative identity, chunk/section ownership,
 tracking, tick eligibility, and eventual persistence.
 
-## Current Native Status
+## Current Status
 
 As of 2026-07-01, the native runtime has an explicit debug passive showcase
 path, enabled by default through shared startup/server options

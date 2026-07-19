@@ -273,11 +273,11 @@ exclusion.
   392 desired / 360 visible / 81 real-suppressed tiles at range 6 and exact
   far-LOD lifecycle coherence. One hidden inner ring plus two outer rings gives
   600 settled resident tiles without generating the real-terrain interior.
-- Validation for the moving-coverage fix: full native workspace tests,
+- Validation for the moving-coverage fix: full Rust workspace tests,
   thin-adapter purity, direct web/WASM build, far-LOD-off offscreen smoke,
   movement smoke, timedemo, and flat/Quest Android release APK builds passed.
   No ADB device was attached for a fresh on-device Quest run.
-- Validation for the stable-shell correction: full native workspace tests,
+- Validation for the stable-shell correction: full Rust workspace tests,
   thin-adapter purity, direct web/WASM build, flat Android APK, and Android XR
   release APK passed. The complete 14-waypoint probe matched; the 340-frame
   flight passed three consecutive zero-allowance runs with no uncovered frame

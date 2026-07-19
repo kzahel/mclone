@@ -1,7 +1,7 @@
 # Structures
 
 Status: reference architecture and future native plan. No true structure
-runtime is implemented in the live native Rust tree. Earlier claims that
+runtime is implemented in the live Rust tree. Earlier claims that
 structure starts/references and buried treasure were landed described the
 retired TypeScript engine and are retained only in Git history.
 
@@ -120,7 +120,7 @@ Several vanilla worldgen features look like structures but do not use the start/
 Implement these through the existing configured-feature/decorator path, not through `STRUCTURE_STARTS` / `STRUCTURE_REFERENCES`.
 
 The retired TypeScript engine implemented these ordinary-feature families, but
-the live native Rust `ConfiguredFeature` set does not currently include desert
+the live Rust `ConfiguredFeature` set does not currently include desert
 wells, monster rooms, or overworld fossils. When ported or replaced, they
 should remain on the ordinary configured-feature/decorator path rather than
 being modeled as structure starts/references.

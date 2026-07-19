@@ -1,24 +1,30 @@
-# Native Engine Architecture
+# Engine Architecture
 
-This document owns the durable architecture shape for the current Rust engine. Mclone is no longer in a transition from an older live engine; the native Rust workspace under [`../native/`](../native/) is the default implementation surface.
+This document owns the durable architecture shape for the Rust engine under
+[`../native/`](../native/). That workspace contains the shared engine and every
+current app target, including browser/WASM; its directory name does not imply a
+platform preference.
 
 Current platform posture, validation lanes, Playbox references, and platform boundary details live in [`platforms.md`](platforms.md). Numbered implementation plans and work logs live in [`tactical/`](tactical/README.md).
 
-The draft target for keeping flat, XR, web, Android, offscreen, and emulated
-validation lanes on one product behavior surface lives in
+The accepted rulebook for keeping flat, XR, web, Android, offscreen, and
+emulated validation paths on one product behavior surface lives in
 [`client-experience-architecture.md`](client-experience-architecture.md).
 
 ## Direction
 
-The engine is native-first Rust with five validated client/platform lanes:
+The shared Rust engine supports five first-class client targets:
 
+- flat Android
+- Android XR / Quest standalone
 - desktop flat
 - desktop OpenXR
-- Android XR / Quest standalone
-- flat Android
 - web/WASM
 
-Desktop flat remains the fastest daily interactive development loop. That is an iteration choice, not permission to make shared engine APIs desktop-shaped. For feature work that does not name a platform, use the default framing: **shared implementation, desktop validation first**.
+All five are equally valid product targets. Features belong in shared owners
+unless they are genuinely platform-specific, and validation follows the
+contracts and platform boundaries affected by a change rather than a preferred
+client target.
 
 Client platform and server host mode are separate axes. Local integrated play, remote dedicated play, and future session/P2P modes should reuse shared command/update contracts instead of becoming platform forks.
 The durable command/update topology and local-vs-remote transport boundary live
@@ -81,7 +87,7 @@ Shared engine crates own:
 - adaptive client render-section admission (`mclone-scene`), consuming the
   shared frame report and timed sync costs; platform drivers provide only their
   target frame period, while an XR upload cap is an optional grant clamp
-- one exhaustive native client-experience settings dispatcher
+- one exhaustive shared client-experience settings dispatcher
   (`mclone-scene`); thin `HostEffects` adapters own mouse lock, desktop frame
   pacing requests, touch-mode forwarding, and host/session exit requests
 - surface-neutral frame-pacing/timing snapshots and debug-overlay aggregation
@@ -293,7 +299,7 @@ support in `mclone-render` is feature-gated and enabled by the desktop app,
 not by shared scene consumers.
 
 The executable `pnpm native:thin-adapters:purity` source gate protects this
-boundary across the native apps and browser driver. It composes scene-host,
+boundary across the app adapters and browser driver. It composes scene-host,
 OpenXR-frame-driver, and enforced web-adoption source checks. `AGENTS.md`
 carries the same shared-first ownership rule; no Tactical 168 or 170 guidance
 depends on app-local orchestration.
@@ -305,7 +311,7 @@ depends on app-local orchestration.
 - Keep renderer-facing view/projection and render-target data explicit.
 - Keep headless/offscreen validation available.
 - Use `reference/minecraft-1.17.1/src/` as the source of truth for vanilla gameplay, assets, rendering semantics, and visual correctness; see [`reference-minecraft.md`](reference-minecraft.md).
-- Use `~/code/playbox` as a native app/render/XR pattern library only; see [`platforms.md`](platforms.md#reference-engine).
+- Use `~/code/playbox` as an app/render/XR pattern library only; see [`platforms.md`](platforms.md#reference-engine).
 
 ## Current Alignment Work
 

@@ -2,16 +2,16 @@
 
 Status: draft for review.
 
-This document describes the shared native GUI architecture for mclone. The UI
+This document describes the shared GUI architecture for mclone. The UI
 system is owned by `mclone-ui`; GPU execution, glyph atlases, batching, item
 icon rendering, and panel texture caching are owned by `mclone-render`.
 Platform apps own only window/session/input glue.
 
 The target is a vanilla-shaped Minecraft GUI model with a retained, cached GPU
 implementation. Menus, HUD, hotbar, in-game block picker, tooltips, and XR
-world-space panels must all use the same shared UI contracts. Desktop remains
-the fastest validation path, but the design must work for desktop flat, desktop
-OpenXR, Android XR, flat Android, and web/WASM.
+world-space panels must all use the same shared UI contracts. Validation should
+exercise the relevant flat, XR, Android, and web boundaries without treating
+one client target as the baseline.
 
 ## Core Decisions
 
@@ -558,7 +558,7 @@ Performance:
 - assert block picker scroll/search dirties only the visible slot window and
   tooltip/hover layers
 
-For any native slice that produces pixels, capture and inspect screenshots
+For any slice that produces pixels, capture and inspect screenshots
 before moving on, per `AGENTS.md`.
 
 ## Migration Plan

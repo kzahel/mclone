@@ -203,15 +203,15 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 
 Reading the matrix:
 
-- **desktop-flat** is the reference; the remaining flat-class gaps are
-  connect-UI, persistence, full audio validation/categories, and an in-world
-  crosshair.
+- **desktop-flat** currently lacks connect UI, complete persistence, full audio
+  validation/categories, and an in-world crosshair.
 - **offscreen-flat** is the desired real no-window validation host. Today it has
   full-frame screenshots and scripted attack/use through neutral
   `FlatInputFrame`, plus shared startup readiness CLI with desktop window mode,
   but still lacks a long-lived client loop, broader input stream, and frame
   sinks. Tactical 105 owns that cleanup.
-- **web** now uses the same scene-policy host as native. Product gaps include
+- **web** now uses the same shared scene-policy host as the other clients.
+  Product gaps include
   connect-screen text/smoke, full persistence lifecycle/metadata beyond the
   IndexedDB catalog plus chunk/entity records, audio, and the exact four
   reason-bearing feature-axis exceptions tracked below.
@@ -376,12 +376,12 @@ them into shared contracts, and own platform resources. If a target needs a
 temporary app-local implementation, mark it as a fork in Matrix 2 and add a
 follow-up tactical to converge it.
 
-Desktop flat is the fastest validation lane, not the default implementation
-target. New feature work should be described as "shared implementation, desktop
-validation first" unless the user explicitly asked for desktop platform glue.
-Treat substantial new `mclone-native-client` logic as a warning sign: if the
-same behavior will matter to flat Android, web/WASM, desktop XR, or Android XR,
-move or extend the shared owner before building more desktop-local surface area.
+No client is the default implementation or validation target. New feature work
+should be described through its shared owner and the platform boundaries it
+affects unless the request is specifically for platform glue. Treat substantial
+new `mclone-native-client` logic as a warning sign: if the same behavior will
+matter to flat Android, web/WASM, desktop XR, or Android XR, move or extend the
+shared owner before building more desktop-local surface area.
 
 | Feature area | Shared owner / next shared owner | App crates may own only |
 |---|---|---|
@@ -452,8 +452,8 @@ lower-level render residency and explicit product/evidence gaps:
    should not keep
    accumulating startup-loop policy, loading/progress state, session lifecycle,
    render policy, UI/HUD/menu behavior, input semantics, persistence, or
-   gameplay. Move those into the shared owners in the checklist above, then use
-   desktop flat as the first validation lane.
+   gameplay. Move those into the shared owners in the checklist above, then
+   validate the affected app and platform contracts.
 2. **Close the connect-UI gap and automate XR replacement/menu smoke.** Every
    lane now has shared local/remote session identity and a replacement code
    path. Flat Android New World replacement is covered by AVD touch-menu smoke,

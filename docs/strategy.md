@@ -1,63 +1,105 @@
-# Translation strategy
+# Translation and Release Strategy
 
-Current approach: native-first Rust direct translation for parity-critical engine logic, with web/WASM kept alive as an early compatibility gate. The retired browser engine has been removed from the live tree; Git history is the archive for that implementation.
+Mclone uses Minecraft Java 1.17.1 as a behavioral and visual reference while
+building a shared Rust engine and original product content. The live engine
+under [`../native/`](../native/) serves all five client targets; reference use
+does not define a separate implementation track or a preferred platform.
 
-The durable native engine architecture lives in [`native-engine-architecture.md`](native-engine-architecture.md). This document owns translation/oracle policy and the legal distinction between private direct translation and any future clean-room release.
+This document owns the boundary between reference-backed parity development
+and eventual public distribution. Runtime and host ownership live in
+[`architecture.md`](architecture.md), durable crate and app ownership live in
+[`native-engine-architecture.md`](native-engine-architecture.md), and reference
+bootstrap details live in
+[`reference-minecraft.md`](reference-minecraft.md).
 
-For runtime boundaries that are intentionally not a 1:1 translation of Minecraft's host architecture, see [`architecture.md`](./architecture.md).
+## Current Reference Use
 
-## Phase 1 — native direct translation (now)
+The local, gitignored Minecraft 1.17.1 decomp and extracted assets support:
 
-- **Goal:** working terrain gen + voxel engine running on the LAN for personal use (my daughter's laptop).
-- **Approach:** line-by-line translate the relevant parts of the 1.17.1 decomp into **Rust** crates under [`../native/`](../native/). Native desktop is the main development loop; the web target stays compiling/smoke-tested early so WASM/browser constraints remain visible. Android XR / Quest standalone is a future native target, so original Rust systems should avoid desktop-only shared contracts even while desktop is the active bring-up surface.
-- **Tooling:** AI agents (Claude / Codex / etc.) with the decomp in context can do the bulk of the translation. We review each layer, preserve Java primitive semantics explicitly (`int` wrapping, `long` arithmetic, float/double behavior, truncation vs floor, JavaRandom draw counts), and stitch modules together behind oracle tests.
-- **Legal status:** this code is a derivative work of Mojang's source. **Do not distribute.** `~/code/mclone` is a private GitHub repo; it stays private for this phase.
-- **Why direct-first:** a literal translation is the shortest path to something that actually produces correct Minecraft-shaped terrain. Clean-room-first means debugging two unknowns at once ("is my reimplementation wrong, or does it just legitimately differ from MC?"). Direct-first gives us a known-working baseline and lets us oracle-test cleanly.
+- behavioral research before parity-sensitive implementation;
+- oracle fixtures and deterministic output comparisons;
+- development-only visual comparison and asset-pipeline bring-up;
+- the reference-locked `overworld` generation profile.
 
-## Phase 2 — clean-room (only if we decide to distribute)
+Parity-sensitive implementations preserve Java primitive semantics explicitly,
+including integer wrapping, floating-point behavior, truncation versus floor,
+and random draw order. The Minecraft reference tree remains a development
+input, not live engine code or distributable product content.
 
-Not automatic. Triggered by an explicit decision to release as open source.
+The `overworld` profile targets Minecraft Java 1.17.1 seed parity as an oracle
+and regression surface. The original `mclone-overworld-v1` profile owns the
+product's creative terrain, biome, surface, decoration, cave, geology,
+landmark, and structure direction. See
+[`topics/mclone-overworld-generation.md`](topics/mclone-overworld-generation.md)
+and [`worldgen-status.md`](worldgen-status.md).
 
-- Decomp + Phase-1 translation become *reference manuals*, not the codebase.
-- Write a fresh implementation from functional specs (prose, not code snippets).
-- AI agents can assist, but source must be walled off from their context. Two-agent pattern: one session reads the decomp and writes prose specs; a fresh session implements from specs.
-- Validate against the same oracle fixtures as Phase 1 (see below). If both implementations match real MC, they're behaviorally equivalent; courts judge textual similarity of the *code*, not the output.
+## Public Release Boundary
 
-## Oracle testing
+Public release is planned once Mclone can ship as an independently
+distributable product. Release readiness includes:
 
-Ground truth for tests is **real Minecraft**, not our Phase-1 translation.
+- a complete first-party visual and audio asset set with verified provenance;
+- sufficiently complete original Mclone world generation and gameplay;
+- no packaged Minecraft jars, decompiled source, extracted assets, models,
+  textures, sounds, structure data, or other reference payloads;
+- review and, where necessary, independent replacement of implementation that
+  was produced as a direct source translation;
+- release-artifact audits proving that development-only reference inputs are
+  absent.
 
-- `decompile-mc.sh --server` fetches the official server jar (same pipeline, different side).
-- Run it headless with a pinned seed, let it generate a region, read `world/region/*.mca` directly (Anvil format — parsers exist in JS/TS `prismarine-nbt` + a thin region reader, Python `anvil-parser`, etc.).
-- Dump block IDs, biome IDs, heightmaps at specific coordinates → JSON fixtures.
-- Tests assert our port produces identical output.
-- **Fixtures are factual measurements of behavior, not expression.** Safe to distribute even if the implementation isn't.
-- Build the oracle harness once. Reuses across Phase 1 (validate direct translation works) and Phase 2 (validate clean-room is equivalent).
+The repository is internal and unreleased while those conditions remain open.
+That is a current release state, not a personal/home-use product goal.
 
-## What to translate vs. use as-is
+First-party asset-pack provenance and the remaining reference-free startup
+boundary are tracked in
+[`topics/asset-pack-profiles.md`](topics/asset-pack-profiles.md). Original world
+generation status is tracked separately so completion of the reference-locked
+`overworld` profile is never mistaken for completion of Mclone's product
+generator.
 
-| Component | Approach |
-|---|---|
-| 1.17.1 worldgen (PRNG, noise, biome source, terrain, carvers, surface, features, structure positions) | Direct translation from Java → Rust in Phase 1 |
-| 1.18+ density functions (if we go that route later) | Direct translation from 1.18 decomp into Rust after the target is explicitly changed |
-| Textures, block models, structure NBT | Use Minecraft's for dev (`docs/assets-plan.md`); replace for Phase 2 release |
-| Renderer, physics, UI, networking, chunk storage | Original Rust/native work, shaped by [`native-engine-architecture.md`](native-engine-architecture.md) |
+## Independent Implementation Process
 
-## AI agents and copyright
+When release review requires source-derived logic to be replaced, use a
+separated specification and implementation process:
 
-Running decomp through an AI to produce translated code still yields a derivative work — the tool and the output language don't change the legal status. What matters is whether the AI *had access to the source* during generation. For Phase 1 that's fine (not distributing). For Phase 2, discipline about agent context is essential: source code lives in one session, specs live in another, and implementation happens in a third with only specs visible.
+1. A reference session studies the relevant behavior and writes a functional
+   specification without reusable source expression.
+2. A separate implementation session works from that specification and public
+   factual interfaces, without access to the decomp or translated code.
+3. Oracle fixtures and black-box measurements validate behavior without making
+   the reference implementation the code under test.
+4. Release review checks both implementation provenance and packaged content.
 
-## Action items
+AI assistance does not remove the need for this separation. Project policy
+treats code produced with source access as reference-derived until it has been
+reviewed or replaced for distribution.
 
-Ordered dependency chain for the native worldgen track:
+## Oracle Testing
 
-- [x] Stand up Rust workspace and crate boundaries under [`../native/`](../native/)
-- [x] Reuse existing oracle fixtures and Java reference tree as correctness inputs
-- [x] Translate PRNG and JavaRandom-compatible worldgen seed helpers
-- [x] Translate noise primitives, `NoiseSampler`, and terrain density fill
-- [x] Translate `OverworldBiomeSource` enough for terrain/fixture parity
-- [x] Translate surface and bedrock stage
-- [x] Translate classic overworld AIR and LIQUID carvers
-- [ ] Translate decorator composition and feature placement core
-- [ ] Translate first block-mutating feature family, likely ores/underground features
-- [ ] Reach native full decorated chunk parity against committed oracle fixtures
+Ground truth for parity tests is observed Minecraft behavior, not an earlier
+Mclone translation.
+
+- The Java oracle harness and pinned server/client artifacts generate focused
+  behavioral measurements.
+- Fixtures record block, biome, heightmap, protocol, rendering, or runtime facts
+  needed by Rust tests.
+- Tests compare Mclone output with those committed facts.
+- Fixtures intended for release must contain factual measurements only and
+  remain subject to the release-artifact review.
+
+Bootstrap and fixture-generation commands live in
+[`reference-minecraft.md`](reference-minecraft.md). Shared fixtures live under
+[`../test/fixtures/`](../test/fixtures/).
+
+## Component Policy
+
+| Component | Development policy | Release direction |
+|---|---|---|
+| Minecraft 1.17.1 `overworld` profile | Reference-locked parity and oracle surface | Retain only if implementation and distribution review permit it; never substitute it for original Mclone world generation |
+| `mclone-overworld-v1` | Original terrain and content over shared engine mechanisms | Complete as the product world-generation profile |
+| Textures, models, sounds, and structure data | Local Minecraft content may be used for development comparison | Ship only first-party or otherwise redistributable content |
+| Renderer, physics, UI, networking, persistence, and platform adapters | Original shared Rust implementation informed by behavioral references | Ship after ordinary provenance and release review |
+| Oracle fixtures and tooling | Retained development infrastructure | Include only factual, review-approved artifacts needed by the released project |
+
+The detailed implementation state changes frequently. Current facts belong in
+the linked topic and status documents rather than a second checklist here.

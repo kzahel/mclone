@@ -14,7 +14,7 @@ assemblies, and impact effects.
 
 The immediate question is how "tree physics" works in the current mod ecosystem:
 whether the tree mod owns physics itself, what Sable provides, and which ideas
-are useful for mclone's native Rust engine.
+are useful for mclone's Rust engine.
 
 ## Reference Clones
 
@@ -179,7 +179,7 @@ idea is a product feature decomposition:
 5. Emit impact effects and optionally settle the assembly into drops or placed
    debris.
 
-mclone should implement this, if pursued, in shared native engine crates rather
+mclone should implement this, if pursued, in shared engine crates rather
 than app code. Likely ownership:
 
 - tree detection and felling gameplay: `mclone-server` or a future shared
@@ -209,4 +209,3 @@ once the engine owns the right abstractions.
   moving voxel assemblies?
 - Can web/WASM support the same physics path, or does it need a compatible
   fallback behind the same engine contract?
-

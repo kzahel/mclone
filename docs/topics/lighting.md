@@ -2,15 +2,16 @@
 
 Status: active living index.
 
-This document is the current map for native Java 1.17.1-style lighting work.
+This document is the current map for Java 1.17.1-style lighting work in the
+Rust engine.
 The broad architecture reference remains [`../lighting.md`](../lighting.md);
-the first concrete native slice is
+the first concrete Rust slice is
 [`../tactical/026-lighting-pipeline.md`](../tactical/026-lighting-pipeline.md).
 Presentation-side point lights and dynamic shadows are a separate concern in
 [`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort this
 stored-light parity contract.
 This topic records where the subsystem stands now, how the next slices should
-compose, and which Java/native boundaries to preserve.
+compose, and which Java/Rust boundaries to preserve.
 
 Update this file whenever a lighting tactical lands, a validation result changes
 the next recommendation, or the implementation shape needs correction.
@@ -514,7 +515,7 @@ Read the relevant Java source before porting each piece:
 | solid block lighting/AO | `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/block/ModelBlockRenderer.java` |
 | liquid lighting | `reference/minecraft-1.17.1/src/net/minecraft/client/renderer/block/LiquidBlockRenderer.java` |
 
-## Native Code Map
+## Rust Code Map
 
 Current native entry points:
 
@@ -1002,7 +1003,7 @@ Primary native lighting docs:
 - [`../tactical/054-native-block-render-facts-parity.md`](../tactical/054-native-block-render-facts-parity.md)
 
 Reference-only prior art from the retired browser engine now lives only in Git
-history. New implementation work belongs in the native Rust crates and should
+history. New implementation work belongs in the shared Rust crates and should
 read the Java source plus committed oracle fixtures before porting parity logic.
 
 ## Validation Lanes
@@ -1044,6 +1045,6 @@ cargo run --quiet --manifest-path native/Cargo.toml -p mclone-native-client --bi
 - Keep the current recommendation in this file; keep detailed implementation
   notes in tacticals.
 - When a solver/status/rendering slice lands, update Current Baseline, Known
-  gaps, Native Code Map, and Recommended Next Slices.
+  gaps, Rust Code Map, and Recommended Next Slices.
 - If a native module starts collecting multiple Java-class responsibilities,
   split it before extending the subsystem further.

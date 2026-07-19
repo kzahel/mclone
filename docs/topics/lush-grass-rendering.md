@@ -559,7 +559,7 @@ headset measurement; it must not be inferred from desktop or AVD results.
 - Reuse the existing biome tint and packed-light sampling.
 - Add one original tapered template and instanced mono renderer.
 - Add per-eye and full-frame multiview variants in the same slice.
-- At the first drawable milestone, capture a native headless screenshot in
+- At the first drawable milestone, capture an offscreen screenshot in
   `/tmp`, inspect it, and iterate before continuing.
 - Include plains/forest/swamp or another strong biome-boundary fixture to prove
   tint continuity, plus exposed/covered grass eligibility.

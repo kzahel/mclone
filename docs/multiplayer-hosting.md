@@ -8,7 +8,7 @@ in the translated worldgen and host runtime. The logical messages are in
 
 > This doc originally described the retired TypeScript/Node hosting model
 > (`pnpm host:dedicated`, a Deno harness, HTTP/query-param joins, a JSON server
-> config). That is gone. The dedicated server is now the native Rust
+> config). That is gone. The dedicated server is now the Rust
 > `mclone-dedicated-server`. The "server config / world ids / asset hosting"
 > shape under **Target Shape** is still aspirational and labeled as such.
 
@@ -43,7 +43,7 @@ over every carrier.
 
 ## Current Implementation
 
-`mclone-dedicated-server` is a native Rust headless host with no renderer. It
+`mclone-dedicated-server` is a Rust headless host with no renderer. It
 builds directly on `mclone-server::RealmServer` and drives clients through
 the same protocol/client/server boundary as singleplayer.
 

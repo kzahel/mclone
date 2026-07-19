@@ -58,17 +58,17 @@ Browser and Node hosts should use the same worker-backed interface. Command prom
 
 Solver unit tests and Java-oracle comparisons may instantiate the ported lighting classes directly below this service boundary. They should not provide a synchronous host-facing `LightingService`, because that hides accidental host-tick lighting work.
 
-## Native Status
+## Current Rust Status
 
 The retired browser engine had a worker-backed lighting service following this
-shape. That implementation is no longer live code. The native workspace keeps
+shape. That implementation is no longer live code. The Rust workspace keeps
 the useful boundaries in Rust:
 
 - `native/crates/mclone-light` owns the ported level/block/sky light engine data structures.
 - `native/crates/mclone-server/src/light_status.rs`, `light_mailbox.rs`, and `light_world.rs` own server-side light-status work and mailbox execution.
 - `native/crates/mclone-server/src/level_light_bridge.rs`, `block_light_bridge.rs`, and `sky_light_bridge.rs` bridge chunk facts into the light engine.
 - `native/crates/mclone-render/src/light_texture.rs` owns render-facing light texture timing.
-- native desktop and web clients expose lighting/fullbright switches and light-status diagnostics through the shared runtime path.
+- desktop and web clients expose lighting/fullbright switches and light-status diagnostics through the shared runtime path.
 
 Still pending in the native shape:
 

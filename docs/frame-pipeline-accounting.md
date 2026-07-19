@@ -346,7 +346,8 @@ one-shot.
 
 Target shape:
 
-- desktop-first wgpu timestamp layer: pass-boundary `timestamp_writes`
+- wgpu timestamp layer for supported desktop backends: pass-boundary
+  `timestamp_writes`
   (whole-pass, not per-draw), a query/resolve pool sized to frames in flight,
   asynchronous readback only — results are allowed to be one or two frames
   late, which the accounting model already tolerates. "Desktop" is two
@@ -547,9 +548,9 @@ tactical.
    record maintenance.
 5. Add local integrated peer-thread activity to headset summaries: server
    runner, worldgen, light/status, render compile workers.
-6. Build the GPU timing layer: desktop-first wgpu pass timestamps, promote the
-   Quest perf-metrics probe to a periodic sampler, record cross-source
-   agreement.
+6. Build the GPU timing layer: wgpu pass timestamps on supported adapters,
+   promote the Quest perf-metrics probe to a periodic sampler, and record
+   cross-source agreement.
 7. Land the instrumentation-validation harness: conservation invariants,
    CPU/GPU calibration lanes, and the meter-overhead A/B with a recorded
    ceiling.

@@ -1,12 +1,25 @@
-# mclone native workspace
+# mclone Rust workspace
 
-This workspace is the Rust track for the native-first engine. It currently has five validated client/platform lanes: desktop flat, desktop OpenXR, Android XR / Quest standalone, flat Android, and web/WASM. Native desktop flat remains the fastest daily loop, but shared client/server/runtime/mesh/asset/UI/renderer contracts must stay platform-neutral. The workspace lives inside the existing repository so it can reuse the project oracle fixtures, reference notes, and asset extraction scripts.
+This is the live engine workspace. It contains shared Rust crates plus five
+first-class client targets: flat Android, Android XR / Quest standalone,
+desktop flat, desktop OpenXR, and web/WASM. All five are equally valid product
+targets over shared client, server, runtime, mesh, asset, UI, and renderer
+contracts. The `native/` directory name is repository history, not a platform
+priority.
 
-The durable direction is documented in [`../docs/native-rewrite-roadmap.md`](../docs/native-rewrite-roadmap.md), current platform posture is documented in [`../docs/platforms.md`](../docs/platforms.md), flat Android build/validation commands are documented in [`../android/README.md`](../android/README.md), and Quest/OpenXR commands are documented in [`../android-xr/README.md`](../android-xr/README.md). The short version: desktop flat is the primary development loop; desktop XR, Android XR, flat Android, and web/WASM are active validation lanes over shared engine contracts.
+Durable crate and app ownership is documented in
+[`../docs/native-engine-architecture.md`](../docs/native-engine-architecture.md),
+and current platform posture and validation live in
+[`../docs/platforms.md`](../docs/platforms.md). Flat Android build and validation
+commands are documented in [`../android/README.md`](../android/README.md), and
+Quest/OpenXR commands are documented in
+[`../android-xr/README.md`](../android-xr/README.md).
 
-Native Rust tactical docs live in [`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric filenames such as `000-native-render-bringup.md`.
+Implementation tacticals live in
+[`../docs/tactical/`](../docs/tactical/README.md) and use zero-padded numeric
+filenames such as `000-native-render-bringup.md`.
 
-Use `~/code/playbox` as the reference Rust engine for native app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, Android NativeActivity, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
+Use `~/code/playbox` as the reference Rust engine for app/render/XR patterns. In particular, its `winit`/`wgpu` setup, frame pacing, headless capture, render-target, camera, diagnostics, Android NativeActivity, and OpenXR code are useful references. Do not depend on Playbox directly, and do not copy its PhysX/VaM-specific runtime shape.
 
 Use `../reference/minecraft-1.17.1/src/` as the reference for vanilla behavior and visual correctness. For renderer work that has a Java client counterpart, inspect the Minecraft source before borrowing behavior from Playbox. This includes block/entity model baking, texture atlas stitching, mipmap generation/filtering, UV shrink/bleed behavior, light texture math, fog, sky, render layers, transparency/cutout state, particles, and render-section traversal.
 
@@ -19,15 +32,17 @@ Playbox reference entry points:
 - `~/code/playbox/android-xr/README.md`: Quest/OpenXR package, runtime, and validation notes.
 - `~/code/playbox/docs/tactical/106-desktop-xr-companion-window.md`: desktop OpenXR companion window/mirror/input design notes.
 
-This workspace intentionally keeps native `profile.dev` optimized at `opt-level = 2`, following Playbox's policy. Debug assertions and incremental rebuild behavior remain enabled, but movement/render/worldgen perf smokes should not be interpreted as fully unoptimized Rust numbers.
+This workspace intentionally keeps Rust `profile.dev` optimized at
+`opt-level = 2`, following Playbox's policy. Debug assertions and incremental
+rebuild behavior remain enabled, but movement/render/worldgen perf smokes
+should not be interpreted as fully unoptimized Rust numbers.
 
 The Rust workspace owns live engine implementation:
 
 - Rust crates may read shared docs, fixtures, and extracted assets.
-- Rust crates should not import, execute, or depend on retired browser-engine code from Git history.
 - Minecraft Java `1.17.1` and the existing oracle fixtures remain the correctness target.
-- The browser target should be kept alive early, but native desktop is the main development loop.
-- Flat Android should remain a focused non-XR validation lane; do not fold Quest/OpenXR assumptions into it.
+- Shared changes must preserve every affected client target rather than treating one target as the implementation baseline.
+- Flat Android remains independent from Quest/OpenXR; do not fold XR assumptions into it.
 - Desktop XR and Android XR should share reusable OpenXR host/graphics/scene contracts, while keeping desktop runtime launch behavior and Android activity/JNI/Horizon behavior in app/platform adapters.
 - `winit`, Android activity glue, browser glue, and OpenXR session/swapchain code belong in app/platform adapters or dedicated app/platform XR crates, not in shared client/server/mesh/asset/worldgen/light crates.
 
@@ -48,13 +63,13 @@ The Rust workspace owns live engine implementation:
 - `mclone-ui`: shared Rust/WebGPU UI model.
 - `mclone-xr-host`: shared OpenXR host/session/frame/action/view helpers.
 - `mclone-xr-graphics`: shared Vulkan OpenXR/`wgpu` graphics bridge.
-- `mclone-scene`: shared native scene host for mono, stereo, and multiview
+- `mclone-scene`: shared scene host for mono, stereo, and multiview
   runtime/render/UI orchestration.
 
 Applications:
 
 - `mclone-native-client`: desktop client.
-- `mclone-dedicated-server`: headless native server.
+- `mclone-dedicated-server`: headless Rust server.
 - `mclone-web-client`: browser/WASM client shell.
 - `mclone-android-client`: flat Android `NativeActivity` client shell.
 - `mclone-android-xr-client`: standalone Quest/OpenXR client shell.
@@ -71,6 +86,12 @@ Useful gates:
 - `pnpm native:xr:windows:mclone:connected`
 - `pnpm native:android-xr:validate`
 
-Native benchmark baselines are recorded in [`../docs/performance-records.md`](../docs/performance-records.md). Use `pnpm native:worldgen:smoke`, `pnpm native:movement:smoke`, and `pnpm native:timedemo:smoke` for the standard optimized-dev smoke lanes; use the matching `:perf` scripts for release-oriented runs.
+Benchmark baselines are recorded in
+[`../docs/performance-records.md`](../docs/performance-records.md). Use
+`pnpm native:worldgen:smoke`, `pnpm native:movement:smoke`, and
+`pnpm native:timedemo:smoke` for the standard optimized-dev smoke lanes; use
+the matching `:perf` scripts for release-oriented runs.
 
-Start narrow: prefer oracle-backed engine slices, shared contract tests, and targeted platform smokes over broad scaffolding. Use the full Android, desktop XR, and Quest lanes when a change touches the platform boundary they uniquely exercise; otherwise keep shared logic covered by shared tests and representative desktop/web gates.
+Start narrow: prefer oracle-backed engine slices, shared contract tests, and
+targeted platform smokes over broad scaffolding. Choose validation from the
+contracts and platform boundaries changed, not from a preferred target.

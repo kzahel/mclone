@@ -1,10 +1,10 @@
-# 035: Native Codebase Health Refactor Plan
+# 035: Codebase Health Refactor Plan
 
 Status: active parent.
 
 ## Purpose
 
-Track preventative refactors for the native Rust workspace before the largest
+Track preventative refactors for the Rust workspace before the largest
 files become harder to change safely.
 
 The goal is not to rewrite behavior. The first pass for each area should be a

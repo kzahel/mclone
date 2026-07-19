@@ -232,7 +232,7 @@ engine request or select a Rust algorithm by a domain string.
 ## Target Isolated-Actor Shape
 
 ```text
-shared/native Rust owner
+shared Rust owner
   -> constructs typed request
   -> web Rust adapter encodes an opaque actor frame
   -> generic browser broker forwards frame / SAB handles

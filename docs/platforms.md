@@ -1,10 +1,10 @@
 # Platform Direction
 
-This document owns Mclone's current platform posture for the native Rust
-engine. It is the entrypoint for supported client/platform lanes, validation
+This document owns Mclone's current platform posture. It is the entrypoint for
+supported client targets, validation
 commands, and the boundaries that keep shared engine crates platform-neutral.
 
-The durable native engine architecture lives in
+The durable engine architecture lives in
 [`native-engine-architecture.md`](native-engine-architecture.md). This page is
 narrower: app hosts, surfaces, packaging, validation lanes, and cross-platform
 contract health.
@@ -16,11 +16,11 @@ offscreen flat and headset-free stereo validation hosts:
 
 | Target | Status | Validation shape |
 |---|---|---|
-| Desktop flat | primary development lane | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition/presentation, keyboard/mouse input, frame pacing, and desktop diagnostics. Basics validated: integrated runtime, locomotion, world rendering, chunk loading/generation. |
-| Desktop OpenXR | active XR lane | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Two run intents share one frame loop: the real `--desktop-xr` verb is a first-class **persistent desktop XR run** (renders the mclone world until you quit, with a 2D companion window carrying status and an OS Close control for a non-headset quit; `--no-window` drops back to headless), while `--xr-clear-smoke` / `--xr-mclone-smoke --frames N` stay the frame-bounded headless CI/liveness gates. Both a companion-window Close and the headset system menu drive one graceful OpenXR shutdown (`tactical/164`). Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, controller locomotion, shared world-panel menu/pointer UI, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR (Windows VDXR) and the macOS WiVRn USB lane; user headset validation says the shared XR menu works mostly fine, while an automated replacement-menu headset click smoke remains pending. A headset mirror into the companion window is a deferred follow-up (must reuse an existing per-eye/multiview renderer, not a new per-view path). |
-| Android XR / Quest standalone | active XR lane | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Embedded first-party packs stage under writable internal app data; external app data is a read-only discovery root for ADB-installed reference assets. Validated with all three packs, stereo terrain and actors, controller actions, basic locomotion, remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path, plus launch-scoped in-headset New World replacement smoke. User headset validation says the shared XR menu works mostly fine; an automated controller-click replacement-menu smoke remains pending. |
-| Flat Android | active mobile lane | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity`, Vulkan surface/lifecycle, startup properties, and raw touch/input translation over the shared Mono scene host. Validated on the arm64 `jstorrent-tablet` AVD with real terrain/HUD pixels, shared touch movement/look plus sneak, populated frame-pipeline overlay, New World replacement, and background/foreground surface rebuild. The three sentinel lanes are `native:android:avd-smoke`, `:avd-touch-smoke`, and `:avd-session-smoke`. |
-| Web/WASM | active browser lane | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown` and drives the shared `McloneSceneHost` through a thin rAF/canvas/DOM rim. Local worker, IndexedDB local-world, and remote WebSocket modes share that owner while browser workers, promises, WebGPU targets, mobile controls, and deployment remain platform glue. The full behavioral matrix is documented in [`native-web.md`](native-web.md). |
+| Desktop flat | first-class desktop target | `native/apps/mclone-native-client` owns desktop `winit`, surface acquisition/presentation, keyboard/mouse input, frame pacing, and desktop diagnostics. Validated with integrated and remote sessions, locomotion, world/actor/UI rendering, persistence, and chunk loading/generation. |
+| Desktop OpenXR | first-class desktop XR target | `mclone-native-client --features xr` owns desktop runtime selection and OpenXR startup. Two run intents share one frame loop: the real `--desktop-xr` verb is a first-class **persistent desktop XR run** (renders the mclone world until you quit, with a 2D companion window carrying status and an OS Close control for a non-headset quit; `--no-window` drops back to headless), while `--xr-clear-smoke` / `--xr-mclone-smoke --frames N` stay the frame-bounded headless CI/liveness gates. Both a companion-window Close and the headset system menu drive one graceful OpenXR shutdown (`tactical/164`). Shared XR crates provide host/session helpers, graphics wrapping, scene alignment, controller locomotion, shared world-panel menu/pointer UI, and shared New World / Join Remote scene replacement. Validated with real stereo mclone terrain on Quest 3 through VirtualDesktopXR (Windows VDXR) and the macOS WiVRn USB lane; user headset validation says the shared XR menu works mostly fine, while an automated replacement-menu headset click smoke remains pending. A headset mirror into the companion window is a deferred follow-up (must reuse an existing per-eye/multiview renderer, not a new per-view path). |
+| Android XR / Quest standalone | first-class standalone XR target | `native/apps/mclone-android-xr-client` plus [`../android-xr/`](../android-xr/) own Quest package, Android OpenXR loader, activity glue, asset staging, launch-scoped remote-address argv, and validation. Embedded first-party packs stage under writable internal app data; external app data is a read-only discovery root for ADB-installed reference assets. Validated with all three packs, stereo terrain and actors, controller actions, basic locomotion, remote-dedicated play over direct LAN and through the `--adb-reverse` USB tunnel path, plus launch-scoped in-headset New World replacement smoke. User headset validation says the shared XR menu works mostly fine; an automated controller-click replacement-menu smoke remains pending. |
+| Flat Android | first-class mobile target | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity`, Vulkan surface/lifecycle, startup properties, and raw touch/input translation over the shared Mono scene host. Validated on the arm64 `jstorrent-tablet` AVD with real terrain/HUD pixels, shared touch movement/look plus sneak, populated frame-pipeline overlay, New World replacement, and background/foreground surface rebuild. The three sentinel lanes are `native:android:avd-smoke`, `:avd-touch-smoke`, and `:avd-session-smoke`. |
+| Web/WASM | first-class browser target | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown` and drives the shared `McloneSceneHost` through a thin rAF/canvas/DOM rim. Local worker, IndexedDB local-world, and remote WebSocket modes share that owner while browser workers, promises, WebGPU targets, mobile controls, and deployment remain platform glue. The full behavioral matrix is documented in [`native-web.md`](native-web.md). |
 
 Additional host lane:
 
@@ -28,7 +28,7 @@ Additional host lane:
 |---|---|---|
 | Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path with shared `--startup-wait none\|playable\|idle\|frames:N` readiness policy; screenshots default to `idle`, while desktop defaults to `playable`. Older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
 | Headset-free XR emulation | active acceptance lane | The default desktop binary feeds fixed-IPD synthetic Stereo views and optional keyboard-translated controller input through `OffscreenDriver` and the same `McloneSceneHost` used by OpenXR. `pnpm native:xr-emulation:smoke` writes a side-by-side capture to `/tmp/mclone-xr-emulation.png`; it does not initialize or depend on OpenXR. This is a render/input/host seam gate, not an OpenXR runtime substitute. |
-| Native dedicated server | active | `native/apps/mclone-dedicated-server` owns listener/CLI/process lifecycle around the shared authoritative host. TCP and direct WebSocket peers share one registry, autonomous cadence, and per-peer 64-frame / 64 MiB outbound policy. Transient and persistent SQLite-backed worlds are supported. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
+| Dedicated server | active | `native/apps/mclone-dedicated-server` owns listener/CLI/process lifecycle around the shared authoritative host. TCP and direct WebSocket peers share one registry, autonomous cadence, and per-peer 64-frame / 64 MiB outbound policy. Transient and persistent SQLite-backed worlds are supported. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The shared warm-world diagnostic is validated in desktop flat and synthetic
 per-eye stereo, including A-to-B-to-A selection, no-request performance, paired
@@ -99,10 +99,10 @@ helpers and fixtures remain active reference assets.
 
 ## Current Direction
 
-Desktop flat remains the fastest daily loop. That is an iteration and
-validation choice, not a feature target and not permission to make shared engine
-APIs desktop-shaped. For feature work that does not name a platform, use the
-default framing: **shared implementation, desktop validation first**.
+All five client targets are equal product surfaces over the shared engine. No
+target is the default implementation or validation baseline. New behavior
+belongs in shared contracts first, and validation should cover the specific
+platform boundaries affected by the change.
 
 Client platform and server host mode are separate axes. Local integrated play
 is a useful default for bring-up and offline validation, but every supported
@@ -124,7 +124,7 @@ run every device and headset lane unless the change touches platform adapter,
 renderer target/view ownership, OpenXR behavior, Android packaging, browser
 worker/ABI glue, or another boundary where that platform can fail uniquely.
 
-The draft shared client-experience target lives in
+The accepted shared client-experience rulebook lives in
 [`client-experience-architecture.md`](client-experience-architecture.md). Use
 that document when deciding whether behavior belongs in a profile-neutral
 client core, a flat/XR/offscreen projection, or a platform adapter.
@@ -413,18 +413,18 @@ pnpm --silent assets:validate:first-party \
 
 Run the narrowest lane that can catch the bug class:
 
-- simulation/content changes: native tests, oracle fixtures, and web compile
-  gates before platform device lanes
-- renderer/view/target changes: offscreen full-frame screenshot first, then web
-  or one device/headset lane depending on the affected boundary
-- shared runtime/render-session changes: desktop flat plus web build/smoke;
-  add Android/XR checks when app-runtime or XR scene contracts change
+- simulation/content changes: shared Rust tests and oracle fixtures, plus each
+  affected app or platform contract gate
+- renderer/view/target changes: the smallest rendered-output gate that reaches
+  the changed path, plus any uniquely affected browser, device, or headset lane
+- shared runtime/render-session changes: shared tests plus the app targets whose
+  cadence, lifecycle, worker, surface, or view contracts are affected
 - Android activity/package changes: the relevant Android APK and validation
   lane
 - OpenXR host/graphics/action changes: desktop XR and Android XR compile gates;
   run at least one real headset lane before treating the change as validated
-- browser worker/ABI changes: web typecheck/smoke lanes before unrelated
-  native device work
+- browser worker/ABI changes: web typecheck and smoke lanes; unrelated device
+  gates are not required
 
 ## Adapter Footprint Audit
 

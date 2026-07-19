@@ -51,6 +51,11 @@ For browser/native deployment, the loose extracted tree is packed into `referenc
 
 Sounds aren't in `client.jar` — they live in a per-version asset index (`totalSize: ~348MB`), each `.ogg` addressed by SHA1 from `resources.download.minecraft.net`. `scripts/fetch-sound-assets.ps1` downloads the current allowlist into `reference/minecraft-1.17.1/local-sounds/`. These files are gitignored, kept out of `extracted.zip`, and staged to Android separately.
 
-## Legal reminder
+## Distribution boundary
 
-Personal/home use only, per the project's stance. These assets are Mojang's IP. Don't commit them, don't publish them, don't include them in any public release. For any eventual distribution, replace with originals or a CC0 pack (e.g. Kenney's voxel assets).
+These Minecraft reference assets are local development inputs only. Do not
+commit, publish, or include them in a public release. Mclone's planned public
+release requires first-party or otherwise redistributable replacements and a
+release-artifact audit proving that the reference payload is absent. Current
+first-party pack status lives in
+[`topics/asset-pack-profiles.md`](topics/asset-pack-profiles.md).

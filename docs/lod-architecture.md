@@ -4,8 +4,9 @@ Durable guidance for distant terrain LOD in `mclone`.
 
 This document records the current target shape after reviewing Distant Horizons
 and Voxy. It is not an implementation tactical. The initial implementation
-should be a small shared-engine experiment validated on desktop first, with
-Quest/Web/XR constraints kept in the design from the start.
+should be a small shared-engine experiment, with flat, Quest, web, and XR
+constraints represented from the start and validation chosen by the boundary
+under test.
 
 ## Decision
 
@@ -201,14 +202,14 @@ controls what facts are kept for distant rendering.
   Quest-class hardware.
 - Keep normal chunk generation, lighting, simulation, and publication higher
   priority than all LOD work.
-- Keep the implementation shared-first: desktop validation first, but no
-  desktop-only LOD policy.
+- Keep implementation and validation shared across the affected target
+  contracts; no target owns LOD policy.
 - Keep the renderer path multiview-aware and compatible with desktop flat,
   desktop XR, Android XR, flat Android, and web/WASM.
 - Keep LOD data non-authoritative and removable.
 - Keep generation and rendering independently disableable.
-- Learn from a minimal desktop prototype before investing in durable persistence
-  or exact correctness.
+- Learn from the smallest representative prototype before investing in durable
+  persistence or exact correctness.
 
 ## Non-Goals For The First Slice
 
@@ -521,7 +522,7 @@ Do not let LOD invalidation block gameplay block edits.
 
 ## Validation Plan
 
-Desktop validation first:
+Shared validation sequence:
 
 1. Render normal chunks only.
 2. Add generated surface LOD with a fixed seed and fixed camera.
@@ -530,7 +531,7 @@ Desktop validation first:
 5. Measure frame, generation, mesh build, and upload cost.
 6. Add a disable flag and prove it removes generation and rendering.
 
-Quest/Web follow after the shape is stable enough to test:
+Target-specific checks follow wherever the changed boundary requires them:
 
 - Quest: check frame headroom, stereo correctness, and pop comfort.
 - Web/WASM: check worker/budget shape and memory pressure.

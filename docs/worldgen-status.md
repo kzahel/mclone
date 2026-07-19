@@ -1,6 +1,6 @@
-# Native Worldgen Status
+# Worldgen Status
 
-Living status page for native Rust world generation. Live procedural profiles
+Living status page for Rust world generation. Live procedural profiles
 are the Minecraft Java 1.17.1-shaped overworld, the deliberately minimal
 `flat-grass-v1` proof generator, the seeded `small-island-v1` proof generator,
 and the first continuous `mclone-overworld-v1` terrain caller.
@@ -95,7 +95,7 @@ Important native entry points:
 
 ## Oracle Inputs
 
-The retained fixture root is `test/fixtures/`. These fixtures are generated from Java/oracle tooling under `oracle/` and are consumed directly by native Rust tests.
+The retained fixture root is `test/fixtures/`. These fixtures are generated from Java/oracle tooling under `oracle/` and are consumed directly by Rust tests.
 
 Current fixture families include:
 

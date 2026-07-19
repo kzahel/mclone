@@ -221,6 +221,6 @@ The visually inspected seed-12345 cards are:
 - `/tmp/mclone-alpha-final/alpha-v1-winter-seed-12345-chunk-0-0-card.png`
 
 Validation passed with the focused Alpha fixture and scheduling tests, the full
-native workspace test suite, thin-adapter purity check, browser WASM build, and
+Rust workspace test suite, thin-adapter purity check, browser WASM build, and
 desktop offscreen smoke. The deferred exactness list above remains intentional;
 in particular, population is flavor-close rather than a promise of byte parity.

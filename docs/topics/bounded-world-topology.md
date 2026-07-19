@@ -389,7 +389,8 @@ Presentation bending must:
 - define interaction projection honestly if a strong bend makes an unwarped
   camera ray visibly disagree with the displayed target.
 
-The first proof should be desktop/offscreen and inspected at the first drawable
+The first proof should use the smallest supported capture path that exercises
+the changed presentation contract and be inspected at the first drawable
 milestone. XR enablement is a separate explicit acceptance step because a
 camera-relative world warp can be uncomfortable even when technically correct.
 
@@ -441,7 +442,7 @@ reconciliation.
 
 ## Shared Ownership and Routing
 
-This is a shared native Rust engine concern. No platform app owns topology,
+This is a shared Rust engine concern. No platform app owns topology,
 bounds, wrapping, generation seams, object identity, or presentation policy.
 
 - a foundational shared contract below server and client owns validated

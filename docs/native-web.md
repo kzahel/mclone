@@ -1,4 +1,4 @@
-# Native Web
+# Web/WASM
 
 The Rust/WASM web app is served from:
 
@@ -6,7 +6,8 @@ The Rust/WASM web app is served from:
 https://mclone.kzahel.com/
 ```
 
-The live web client is the native Rust/WASM lane under [`../native/apps/mclone-web-client/`](../native/apps/mclone-web-client/). The retired browser engine is not part of the live tree.
+The live web client is the Rust/WASM target under
+[`../native/apps/mclone-web-client/`](../native/apps/mclone-web-client/).
 
 ## Runtime Ownership
 
@@ -87,7 +88,7 @@ pnpm native:web:far-lod-smoke
 pnpm native:web:far-lod-indexeddb-smoke
 pnpm native:web:far-lod-remote-smoke
 
-# Validate native Rust menu-driven world catalog create/open/delete over IndexedDB.
+# Validate Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke
 
 # Enter the shared protected lobby, wait for its live island preview and

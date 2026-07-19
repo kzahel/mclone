@@ -1,13 +1,13 @@
-# 145: Native Rust Organization Refactor
+# 145: Rust Organization Refactor
 
 Status: active parent; ORG-04 XR scene non-render split landed. Next slice:
 ORG-05. The Gate State section below is the authoritative expected result for
 every gate command; older per-slice logs are historical.
 Opened 2026-07-06. This tactical is the current implementation tracker for
-reducing oversized native Rust modules while preserving behavior, public
+reducing oversized Rust modules while preserving behavior, public
 coherence, vanilla parity, platform boundaries, and benchmark performance.
 
-Workstream: native Rust shared architecture plus platform adapter cleanup.
+Scope: shared architecture plus platform adapter cleanup.
 This is a successor checkpoint to
 [`035-native-codebase-health-refactor-plan.md`](035-native-codebase-health-refactor-plan.md):
 035 records earlier cleanup history and durable principles; this document owns

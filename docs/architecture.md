@@ -6,7 +6,7 @@ For rough sequencing of the active runtime refactor work, see the Client Runtime
 
 This document exists to answer a different question than [`strategy.md`](./strategy.md), [`worldgen-status.md`](./worldgen-status.md), and the more specific runtime contract docs:
 
-- `strategy.md`: how we translate Minecraft 1.17.1 into native Rust
+- `strategy.md`: how we use Minecraft 1.17.1 references in the Rust engine
 - `worldgen-status.md`: what parts of worldgen are landed today
 - `worldgen-deterministic-order.md`: vanilla chunk-status order, decoration finality, lighting gates, and publication gates
 - `runtime-data-model.md`: the shared chunk/block-state data model across simulation, storage, protocol, client workers, and meshing
@@ -339,7 +339,7 @@ This mode does not need local worldgen for authority, though it may still use lo
 
 Recommended shape:
 
-- native process as authoritative server runtime
+- Rust process as authoritative server runtime
 - file-backed or database-backed persistence adapter
 - remote transport adapter for clients
 - optional worker-thread job pools later for chunk generation, meshing-independent preprocessing, or heavy simulation tasks
@@ -349,8 +349,8 @@ The dedicated server should be headless and should not depend on renderer code, 
 The first dedicated-host slice is now landed in that shape:
 
 - `FilesystemChunkSnapshotStore` provides the initial file-backed persistence adapter behind `ChunkSnapshotStore`.
-- `native/apps/mclone-dedicated-server/src/main.rs` provides the native headless server bootstrap.
-- the native desktop integrated path, native dedicated server, and native web integrated server all use the same protocol/client/server crate boundaries.
+- `native/apps/mclone-dedicated-server/src/main.rs` provides the headless server bootstrap.
+- the desktop integrated path, dedicated server, and web integrated server all use the same protocol/client/server crate boundaries.
 
 What is still missing is remote client connectivity, not a separate server runtime core.
 

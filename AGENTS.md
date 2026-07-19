@@ -24,7 +24,7 @@ The Android SDK/NDK, `cargo-ndk`, and the Rust android targets are provisioned o
 Background docs own the long-form project context:
 
 - [`docs/platforms.md`](docs/platforms.md) owns the current platform posture, Playbox reference entry points, platform boundaries, and validation matrix.
-- [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) owns the current native engine architecture and shared crate/app ownership shape.
+- [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) owns the current engine architecture and shared crate/app ownership shape.
 - [`docs/reference-minecraft.md`](docs/reference-minecraft.md) owns the Minecraft 1.17.1 reference tree, bootstrap/mapping notes, vanilla target, and disabled Caves & Cliffs Part 1 systems.
 - [`docs/native-web.md`](docs/native-web.md) owns Rust/WASM web build, smoke, deploy, and local deploy-hook notes.
 
@@ -32,15 +32,13 @@ Agent guardrails:
 
 - Use `~/code/playbox` as a native `winit`/`wgpu`/headless/Android/OpenXR pattern library only. Do not depend on it directly or copy its PhysX/VaM-specific runtime shape. When the user mentions "Playbox", inspect that sibling repo directly.
 - Use `reference/minecraft-1.17.1/src/` before Playbox for vanilla gameplay, assets, rendering semantics, and visual correctness.
-- For feature requests without an explicit platform constraint, use **shared implementation, desktop validation first**. Keep gameplay, runtime, asset, mesh, UI, renderer, and XR contracts host-neutral.
+- For feature requests without an explicit platform constraint, implement behavior in its shared owner and validate every platform boundary affected by the change. No client target is the default or preferred product target. Keep gameplay, runtime, asset, mesh, UI, renderer, and XR contracts host-neutral.
 - Treat code that heavily grows `mclone-native-client` as a cleanup smell unless it is genuinely `winit`, desktop surface, native input, CLI, headless capture, or desktop diagnostics glue.
 - Keep `winit`, Android activity glue, browser glue, and OpenXR session/swapchain ownership in app/platform adapters.
 
 For web/WASM, keep `wasm32-unknown-unknown` as the browser target unless a tactical explicitly changes it, but do not treat that as permission for a single-threaded or reduced engine architecture. Browser CPU work should converge on the same job/worker lifecycle as desktop: desktop uses native OS threads, while browser/WASM uses Web Workers with shared Wasm memory (`SharedArrayBuffer`/atomics) once that slice is implemented. Inline synchronous WASM paths are acceptable only as temporary smoke/fallback implementations behind the same compiler/session interfaces, not as the target threading model.
 
-The retired browser engine has been removed from the live tree. Git history is the archive for old implementation context. Retained oracle helpers under `oracle/lib/**` and shared fixture data under `test/fixtures/**` are active reference assets, not legacy engine code.
-
-Native Rust tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Historical legacy tacticals, if still present during cleanup, are not implementation guidance for new work.
+Implementation tactical docs live under `docs/tactical/` and use zero-padded numeric filenames such as `000-topic.md`, `001-next-topic.md`. Completed tacticals are execution records; use current topic and architecture docs for continuing guidance.
 
 Focused, living topic docs live under `docs/topics/`. Before working on a
 continuing concern, look for a relevant topic doc and read it before changing
@@ -60,21 +58,22 @@ filename's slug in its `Topic:` trailers. This is a convention, not a one-to-one
 requirement: a durable topic may exist without an active commit series, and a
 small commit series may not warrant a durable topic doc.
 
-## Workstream routing
+## Implementation routing
 
-Default implementation target is the native Rust workspace under `native/`.
+The live engine is the Rust workspace under `native/`, including the shared
+crates and the desktop, Android, XR, dedicated-server, and browser/WASM apps.
+The directory name is repository history, not a platform priority.
 
-For any request about engine behavior, client/runtime behavior, renderer behavior, input, movement, camera controls, assets, mesh, server, worldgen, UI, or platform work, inspect and edit the native Rust path first. Relevant native entry points include:
+For any request about engine behavior, client/runtime behavior, renderer
+behavior, input, movement, camera controls, assets, mesh, server, worldgen, UI,
+or platform work, inspect and edit the shared owner under `native/` first.
+Relevant entry points include:
 
 - `native/Cargo.toml`
 - `native/apps/mclone-native-client/src/main.rs`
 - `native/apps/mclone-web-client/src/lib.rs`
 - `native/crates/mclone-*`
 - `docs/tactical/README.md`
-
-Do not recreate or maintain the retired TypeScript engine surface. If a request explicitly needs old behavior context, use Git history or retained oracle fixtures as reference before changing live native code.
-
-Before the first edit, identify the workstream being modified: `native Rust`, `native web/WASM`, `oracle/reference only`, or `documentation cleanup`.
 
 ## Shared-first feature policy
 
@@ -114,7 +113,7 @@ Default shared routing:
   and transient effects, entity AI/spawning, localization: define or extend a
   shared contract before adding app-local behavior.
 
-Native client frame orchestration converges on `mclone-scene`: session/runtime
+Client frame orchestration converges on `mclone-scene`: session/runtime
 ownership, lifecycle save policy, camera reconcile, effects, UI/HUD assembly,
 render admission, and mono/stereo/multiview frame preparation belong there.
 App/platform code may own only the cadence/event pump, raw input translation,
@@ -153,7 +152,7 @@ The main rule is:
 - runtime orchestration may diverge when platform constraints require it
 - any such divergence must preserve a clear path for future parity work instead of making it opaque or harder to recover
 
-Before making an architectural divergence, explicitly determine what the reference Minecraft source does today, why that shape is a poor fit for the native/web/runtime target, the exact scope of the divergence, and whether the divergence makes future parity work easier, neutral, or harder.
+Before making an architectural divergence, explicitly determine what the reference Minecraft source does today, why that shape is a poor fit for the engine or affected platform target, the exact scope of the divergence, and whether the divergence makes future parity work easier, neutral, or harder.
 
 ### Reference tree must be present
 
@@ -170,15 +169,15 @@ Before doing oracle work, make sure the local Minecraft artifacts are actually h
 - If any of those download steps fail because the sandbox cannot reach Mojang hosts, request escalation immediately and rerun the same command with elevation. For this repo, elevation is explicitly allowed for downloading the decomp inputs, Mojang runtime libraries, and the pinned 1.17.1 server jar.
 - Do not stop at "network failed" when oracle work is part of the task. The expected recovery path is: rerun the same bootstrap/download command with elevation, then continue with fixture generation or parity testing.
 
-## Native validation
+## Rendered-output validation
 
-For any native slice that produces pixels, **capture a screenshot and look at it before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone, then keep checking as complexity increases.
+For any slice that produces pixels, **capture a screenshot and look at it before moving on.** Do not finish a whole slice and then check. Check at the first drawable milestone, then keep checking as complexity increases.
 
-If a required native headless render/screenshot fails because `wgpu` cannot see a GPU adapter, rerun the same command with elevation before treating GPU validation as blocked.
+If a required offscreen render or screenshot fails because `wgpu` cannot see a GPU adapter, rerun the same command with elevation before treating GPU validation as blocked.
 
 Use the current default and platform-specific validation commands in [`docs/platforms.md`](docs/platforms.md#validation-policy) rather than duplicating the command matrix here.
 
-For rendered-output validation, use native headless captures where available and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-native-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed.
+For rendered-output validation, use the smallest capture path that exercises the affected target contract and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed.
 
 ## Target: Minecraft Java 1.17.1 vanilla overworld
 

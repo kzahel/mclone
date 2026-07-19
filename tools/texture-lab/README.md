@@ -161,7 +161,7 @@ generated-assets/texture-lab/runtime-pack/assets/minecraft/textures/block/iron_o
 ```
 
 This is a development bridge, not a standalone distributable pack. It overrides
-PNG textures while the native engine still reads local vanilla blockstate/model
+PNG textures while the engine still reads local vanilla blockstate/model
 JSON from `reference/minecraft-1.17.1/extracted/` or `extracted.zip`. To try it
 with the native runtime:
 

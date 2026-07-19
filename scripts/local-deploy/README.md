@@ -7,7 +7,7 @@ It is intentionally local automation rather than a GitHub-hosted workflow.
 
 The project already deploys with `pnpm run deploy`, which builds the Rust/WASM web
 bundle, uploads it to R2, and deploys the Cloudflare Worker. That command depends
-on this machine's native Rust/pnpm setup, Cloudflare authentication, ignored
+on this machine's Rust/pnpm setup, Cloudflare authentication, ignored
 Minecraft reference assets, and incremental build cache.
 
 The usual wrapper, `git push && pnpm run deploy`, does not work well when another
