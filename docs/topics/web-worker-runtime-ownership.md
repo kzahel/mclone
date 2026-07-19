@@ -2,16 +2,15 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: first actor proof and validation baseline cleanup complete; the
-main-side render coordinator cutover was approved 2026-07-19. The production
-browser keeps isolated Wasm heaps and the existing external `SharedArrayBuffer`
-transports while worker coordination moves toward Rust-owned actors behind
-domain-blind TypeScript browser transports. The whole-worker baseline and
-server-job Rust actor proof have landed. Tactical
-[`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the first
-implementation slices. A shared Wasm linear-memory runtime remains a separate,
-measurement-gated investigation rather than an implied destination of the
-TypeScript reduction work.
+Status: server-job actor proof and main-side render coordinator cutover
+complete 2026-07-19. Production keeps isolated Wasm heaps and the existing
+external `SharedArrayBuffer` transports. One Rust coordinator now owns the
+ordinary render Worker's main-side lifecycle behind a 47-line domain-blind
+TypeScript transport. Tactical
+[`197`](../tactical/197-domain-blind-web-worker-broker.md) is stopped at the
+Slice 2 human-review gate before any worker-side render migration. A shared
+Wasm linear-memory runtime remains a separate, measurement-gated investigation
+rather than an implied destination of the TypeScript reduction work.
 
 ## Scope
 
@@ -82,13 +81,14 @@ TypeScript coordination. The authored `.ts` inventory on 2026-07-19 is:
 
 | Family | Lines | Main contents |
 |---|---:|---|
-| `mclone-web-app.ts` | 2,650 | rAF/platform assembly plus compiler wake, asset swap, async operation, smoke/report coordination |
+| `mclone-web-app.ts` | 2,487 | rAF/platform assembly, browser async operations, and smoke/report coordination |
 | server, job, remote, and provision Workers | 1,611 | integrated-server lifecycle, IndexedDB servicing, opaque job-actor forwarding, WebSocket, provisioning |
-| render compiler broker, Worker, and declarations | 1,349 | queueing, priority, request schemas, SAB doorbells, worker sessions, diagnostics |
+| render compiler Worker, shim, and declarations | 536 | worker-side dispatch, SAB doorbells, ABI declarations, and generic transport export |
 | input and touch | 886 | browser input mechanics |
-| world catalog and settings | 867 | IndexedDB mechanics, stored-record projection, browser settings |
+| world catalog and settings | 870 | IndexedDB mechanics, stored-record projection, browser settings |
 | threading smoke Worker | 47 | shared-memory capability proof |
-| **total** | **7,410** | authored TypeScript, excluding JavaScript smoke harnesses |
+| generic Worker transport | 47 | opaque `post`/`poll`/`terminate` browser mechanics |
+| **total** | **6,484** | authored TypeScript, excluding JavaScript smoke harnesses |
 
 Line count is a warning signal, not a correctness metric. Input, touch,
 IndexedDB transactions, and browser presentation can legitimately remain
@@ -102,20 +102,55 @@ registered server-job dispatch debts and seven net TypeScript lines by replacing
 the worldgen/light selector with one opaque Rust actor call. The line delta is
 incidental; the zero domain-selector counts are the acceptance evidence.
 
-The subsequent validation cleanup corrected an independent semantic leak:
+The subsequent Slice 1 validation cleanup corrected an independent semantic leak:
 gameplay dispatch success had been reported as `changed` even though it proved
 only command submission. The browser now establishes block changes causally by
 observing the exact replica block state, section-update progress, and the
-resulting remesh. This added three explanatory TypeScript lines, for a current
-7,413-line inventory, without restoring any server-job domain selector.
+resulting remesh. This added three explanatory TypeScript lines, for a
+7,413-line pre-Slice-2 inventory, without restoring any server-job domain
+selector.
 
 That stronger probe exposed the actual intermittent remote failure. The
 dedicated server's nonblocking WebSocket writer disconnected on `WouldBlock`
 instead of retrying Tungstenite's buffered frame. It now retains a
 pending-flush state, has a deterministic regression test, and passed five
 consecutive fresh remote interaction smokes. The baseline is therefore green;
-work remains stopped at the Slice 1 boundary review rather than proceeding to
-render ownership.
+that evidence authorized the bounded render cutover.
+
+Slice 2 replaced the main-side TypeScript render compiler broker atomically.
+`WebRenderWorkerCoordinator` now owns worker generation/readiness, globally
+qualified request identity, active/standby admission, stale completion and
+timeout handling, quiescent world release, asset candidate activation and
+rollback, failure reconstruction, and compile diagnostics. `WebSceneHost`
+owns exactly one coordinator, while each scene runtime carries a
+world-qualified handle. The TypeScript boundary is a generic polled transport
+that constructs one ordinary Worker and forwards opaque messages, transfer
+handles, browser errors, and termination.
+
+The cutover removed the TypeScript broker class, priority queue, pending
+promises, compiler-wake relay, release policy, and asset-worker swap policy.
+Authored TypeScript is now 6,484 lines: 933 below the Slice 0 baseline and 929
+below the pre-Slice-2 tree. The render-worker family fell from 1,349 to 536
+lines and `mclone-web-app.ts` from 2,650 to 2,487; the new generic transport is
+47 lines. All main-side render ownership debt counters are zero. The eight-site
+copy ledger, private Wasm heaps, external SAB ABI, and worker-side render actor
+remain unchanged.
+
+Two complete pre-cutover control runs separated coordinator evidence from
+unrelated browser-fixture debt:
+
+- the lobby lifecycle probe hard-codes returned live actors `1`/`2`, while
+  both trees correctly returned later live actors after simulation; and
+- the Far LOD movement leg settled at exactly 936 desired, 899 visible, and
+  1,225 resident tiles with zero pending work on both trees, but accumulated
+  ten `suppressed_without_replacement` events.
+
+The mobile smoke likewise fails its unchanged startup-camera ledger on both
+trees (`112` hold versus `93.62` recorded minimum). Its added hidden/resume leg
+did advance the background save and hidden-frame counters successfully. These
+are confirmed baseline debts, not coordinator regressions or weakened checks.
+The focused desktop/mobile lobby, asset replacement, IndexedDB, movement,
+local, and five fresh remote interaction lanes are green.
 
 The existing scene-host purity gate covers known competing scene-policy
 owners in `mclone-web-app.ts`, and focused Rust tests forbid particular
@@ -366,12 +401,14 @@ ownership checks and unchanged behavior/performance evidence are load-bearing.
 Primary implementation surfaces:
 
 - `native/apps/mclone-web-client/src/web_canvas.rs`
+- `native/apps/mclone-web-client/src/web_render_worker.rs`
 - `native/apps/mclone-web-client/src/web_scene_host.rs`
 - `native/apps/mclone-web-client/src/web_server_worker.rs`
 - `native/apps/mclone-web-client/src/web_remote_session.rs`
 - `native/apps/mclone-web-client/www/mclone-web-app.ts`
 - `native/apps/mclone-web-client/www/mclone-render-compiler-shared.ts`
 - `native/apps/mclone-web-client/www/mclone-render-compiler-worker.ts`
+- `native/apps/mclone-web-client/www/mclone-worker-transport.ts`
 - `native/apps/mclone-web-client/www/mclone-integrated-server-worker.ts`
 - `native/apps/mclone-web-client/www/mclone-server-job-worker.ts`
 - `scripts/check-web-scene-host-adoption.mjs`
@@ -379,7 +416,9 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Review Tactical 197 Slice 1's actor/broker boundary. If accepted, begin Slice 2
-by moving the main-side render compiler broker into browser-specific Rust while
-preserving the external-SAB copy ledger and isolated heaps. Do not begin shared
-Wasm linear-memory work as part of that continuation.
+Review Tactical 197 Slice 2's coordinator boundary, captures, metrics, and
+confirmed baseline debts. If accepted, Slice 3 may move worker-side render/Far
+LOD dispatch and per-world compiler sessions into a resident Rust actor. Keep
+the current isolated heaps, external SAB copy ledger, and single ordinary
+render Worker. Do not begin integrated-server consolidation or shared Wasm
+linear-memory work as part of that continuation.

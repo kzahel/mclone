@@ -114,11 +114,12 @@ series implements the same concern, normally reuse the document slug in its
   in Tactical 171 — Convergence And Parity Closeout.
 - [`web-worker-runtime-ownership.md`](web-worker-runtime-ownership.md): accepted
   isolated-Rust-actor and domain-blind-TypeScript direction for browser
-  Workers, including the current 7,417-line authored TypeScript inventory,
-  external-SAB-mailbox versus shared-Wasm-heap distinction, ownership rules,
-  copy/lifecycle tradeoffs, and explicit shared-linear-memory revisit gates.
-  Tactical [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the
-  first executable inventory and server-job actor proof.
+  Workers, including the landed server-job actor and main-side Rust render
+  coordinator, current 6,484-line TypeScript inventory, external-SAB-mailbox
+  versus shared-Wasm-heap distinction, copy/lifecycle tradeoffs, and explicit
+  shared-linear-memory revisit gates. Tactical
+  [`197`](../tactical/197-domain-blind-web-worker-broker.md) is stopped for
+  review before worker-side render migration.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted

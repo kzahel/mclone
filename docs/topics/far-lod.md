@@ -273,6 +273,14 @@ exclusion.
   392 desired / 360 visible / 81 real-suppressed tiles at range 6 and exact
   far-LOD lifecycle coherence. One hidden inner ring plus two outer rings gives
   600 settled resident tiles without generating the real-terrain interior.
+- Browser-smoke debt confirmed 2026-07-19 during Tactical 197 validation: the
+  production flight settled with 936 desired, 899 visible, and 1,225 resident
+  tiles, zero pending/inflight/upload work, 68 level flips, and maximum
+  double-residency one, but `suppressed_without_replacement` advanced by ten.
+  The exact result reproduced on the pre-render-coordinator commit, so it is
+  not attributed to Worker ownership. The browser probe now uses the current
+  visible-plus-suppressed contract and preserves C5 as a red assertion; do not
+  weaken it or confuse the idle lifecycle with painted-coverage correctness.
 - Validation for the moving-coverage fix: full Rust workspace tests,
   thin-adapter purity, direct web/WASM build, far-LOD-off offscreen smoke,
   movement smoke, timedemo, and flat/Quest Android release APK builds passed.

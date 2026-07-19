@@ -1,10 +1,10 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: Slice 2 approved and in progress 2026-07-19. Slices 0 and 1 and the
-validation baseline cleanup have landed. The main-side render cutover uses a
-Rust coordinator behind a generic polled TypeScript Worker transport and stops
-for review before Slice 3. Later integrated-server consolidation remains
-provisional and must not widen this tactical into a shared-Wasm-memory runtime.
+Status: Slice 2 complete 2026-07-19 and stopped for human review before Slice
+3. The main-side render cutover uses one Rust coordinator behind a generic
+polled TypeScript Worker transport. Later worker-side and integrated-server
+work remains provisional and must not widen this tactical into a
+shared-Wasm-memory runtime.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -426,7 +426,7 @@ workstream before Slice 2.
 
 ## Slice 2 — Rust-Owned Single Render-Worker Coordinator
 
-Status: approved 2026-07-19; implementation in progress.
+Status: complete 2026-07-19; stopped at the required review gate.
 
 Move the main-side `RenderSectionWorkerCompiler` policy and queue from
 `mclone-render-compiler-shared.ts` into Rust while leaving the worker-side
@@ -539,6 +539,92 @@ memory, Worker count, copies, overflow, and retained-session metrics regress
 materially. Otherwise drive the complete main-side cutover autonomously,
 commit coherent stages, and stop after Slice 2 for human review before any
 worker-side Slice 3 work.
+
+### Slice 2 evidence
+
+The implementation landed as a reviewable sequence:
+
+- `d60d0267` added the 47-line generic polled Worker transport and direct
+  transport proof without changing production ownership;
+- `9cc974a4` added deterministic Rust coordinator and asset-swap state with
+  fake traces for priority, stale completion, failure, release, and rollback;
+- `24138036` cut production over atomically and removed the TypeScript broker,
+  wake relay, promises, timing maps, release policy, and asset-worker swap;
+- `499eeee1` made the source ownership gate reject any return of those
+  TypeScript owners; and
+- `c8071a5c` repaired stale Far LOD browser-probe assumptions, retained its
+  real coverage assertion, and added hidden/resume coverage to the mobile lane.
+
+`WebSceneHost` now owns one `WebRenderWorkerCoordinator`. Scene runtimes hold
+world-qualified handles and set active/standby priority through Rust. The
+coordinator owns worker generations/readiness, global broker request IDs,
+single-in-flight admission, stale/failure/timeout handling, quiescent world
+release, candidate asset generations, activation/rollback, reconstruction,
+and public timing/worker metrics. Its monotonic timeout clock is internal, so
+browser callers cannot mix `Date.now()` and `performance.now()` domains.
+
+Production TypeScript no longer owns `RenderSectionWorkerCompiler`, compiler
+promises, request/world timing association, queue priority, wake callbacks,
+release messages, or asset-worker replacement. The retained
+`mclone-render-compiler-shared.ts` is a 32-line compatibility export over the
+generic transport. Authored TypeScript moved from the 7,417-line Slice 0
+baseline and 7,413-line pre-Slice-2 tree to 6,484 lines across 15 modules:
+
+| Family | Before | After | Delta |
+|---|---:|---:|---:|
+| render workers | 1,349 | 536 | -813 |
+| web app | 2,650 | 2,487 | -163 |
+| generic Worker transport | 0 | 47 | +47 |
+| all authored TypeScript | 7,417 | 6,484 | -933 |
+
+The ownership checker reports six Worker entries, two TypeScript construction
+sites, zero server-job and main-side render ownership debts, and the unchanged
+eight-site copy ledger. Production still has private Wasm heaps, one ordinary
+render Worker, external SAB input/result arenas, zero transferred response
+bytes, and the worker-side TypeScript render actor reserved for Slice 3.
+
+The complete Rust workspace format, check, and test gates passed, including
+the 293-test app-runtime, 512-test server, and 21-test web-client suites. All
+three required Wasm target checks, generated-bindgen TypeScript check, Worker
+ownership self-test, thread, app, chunk, movement, desktop/mobile lobby, asset
+replacement, and IndexedDB reload lanes passed. Five consecutive fresh remote
+WebSocket interaction runs also passed authoritative placement/break,
+accepted remesh, and zero pending work.
+
+Representative movement evidence retained one Worker initialization, 453
+accepted compiles, shared-result-buffer transport, zero result overflow, zero
+transferred response bytes, and zero pending work. The retained 16-sample
+round-trip range was 14.9–25.7 ms (19.1 ms average), while the browser movement
+lane's maximum frame gap was 10.3 ms. The desktop lobby used one Worker across
+three qualified world identities and two resident compiler sessions; the
+standby world retained 81 chunks, was switchable, and the A→B→A path settled.
+Asset replacement advanced from epoch 0/generation 1 to epoch 1/generation 2
+with two Worker initializations, two asset-pack sends, active state, no result
+overflow, and no pending compile jobs.
+
+App, chunk, asset-replacement, IndexedDB, desktop/mobile lobby, movement, and
+Far LOD on/off captures under `/tmp` were inspected. Terrain, HUD, touch UI,
+embedded preview, and asset replacement remained visually correct. The Far LOD
+enabled capture visibly added the coarse synthetic shell without corrupting
+the nearby authoritative terrain.
+
+Three broader harness failures were reproduced on the exact pre-cutover
+`d8004e77` control and therefore remain explicit baseline debt rather than
+weakened Slice 2 acceptance:
+
+- the lobby lifecycle fixture requires returned actor IDs `1`/`2` after live
+  simulation, while both trees return later valid actors;
+- the browser Far LOD flight settles at exactly 936 desired, 899 visible, and
+  1,225 resident tiles with no pending work on both trees, but advances
+  `suppressed_without_replacement` by ten, correctly failing C5; and
+- the mobile smoke's startup ledger records hold Y `112` and minimum
+  pre-admission Y `93.62` on both trees. Before that unchanged assertion fires,
+  the new hidden/resume leg advances background saves from zero to one and
+  records one hidden-frame skip.
+
+No gameplay, Far LOD, actor, or startup policy was changed to make the
+coordinator appear green. Slice 2 is complete and remains stopped here for
+human review.
 
 ## Slice 3 — Worker-Side Render Rust Actor
 
