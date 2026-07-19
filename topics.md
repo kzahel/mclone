@@ -63,4 +63,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   vertical or cubic residency
 - `web-worker-runtime-ownership` — isolated Rust worker actors,
   domain-blind TypeScript browser brokers, explicit SAB mailbox ownership, and
-  measurement-gated shared-Wasm-linear-memory reconsideration; Tactical 197
+  measurement-gated shared-Wasm-linear-memory reconsideration; Tacticals 197
+  and 198

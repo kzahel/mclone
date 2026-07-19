@@ -2,14 +2,14 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: high-value isolated-actor campaign complete 2026-07-19. Production
-keeps isolated Wasm heaps and the existing external `SharedArrayBuffer`
-transports. Tactical
-[`197`](../tactical/197-domain-blind-web-worker-broker.md) moved the render
-coordinator and worker actor, integrated-server startup and authority policy,
-server-job dispatch, and catalog descriptors into Rust. Its closeout found no
-evidence that justifies shared Wasm linear memory or further browser-native
-long-tail reduction without a new human decision.
+Status: bounded continuation approved 2026-07-19. Tactical
+[`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
+high-value isolated-actor campaign without justifying shared Wasm memory.
+Human review then authorized Tactical
+[`198`](../tactical/198-opaque-websocket-and-indexeddb-adapters.md) to move
+remote WebSocket protocol state and ordinary catalog operation meaning into
+Rust while preserving browser-owned WebSocket and IndexedDB mechanics. It
+stops before managed provisioning or integrated-server persistence.
 
 ## Scope
 
@@ -561,10 +561,9 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Keep isolated heaps, the seven-site external SAB copy ledger, one ordinary
-render Worker, browser-owned IndexedDB/timers/events, and native typed
-channels. Treat the remaining TypeScript as an intentionally isolated browser
-adapter, not an unfinished line-count target. Reopen this topic only when new
-profiling identifies a concrete user-felt copy bottleneck or a domain-policy
-owner appears in TypeScript. A new explicit human decision is required before
-browser-native long-tail reduction or shared Wasm linear-memory work.
+Execute Tactical 198 in order: baseline the current remote and catalog lanes,
+land the worker-resident remote protocol actor, then replace the ordinary
+catalog report/switch with a Rust-owned continuation over thin IndexedDB CRUD.
+Preserve asynchronous yielding and exact transaction boundaries. Remeasure and
+stop before managed provisioning, integrated-server persistence, or shared
+Wasm memory.
