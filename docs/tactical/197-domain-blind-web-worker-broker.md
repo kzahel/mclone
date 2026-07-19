@@ -1,10 +1,11 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: Slice 2 complete 2026-07-19 and stopped for human review before Slice
-3. The main-side render cutover uses one Rust coordinator behind a generic
-polled TypeScript Worker transport. Later worker-side and integrated-server
-work remains provisional and must not widen this tactical into a
-shared-Wasm-memory runtime.
+Status: autonomous high-value continuation approved 2026-07-19 after Slice 2
+review. Drive worker-side render ownership, proven common Worker mechanics,
+opaque integrated-server startup, bounded authority/session policy, and
+Rust-authored catalog descriptors as atomic cuts. Then remeasure and stop for a
+human decision before the browser-native long tail. This campaign must not
+widen into a shared-Wasm-memory runtime.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -628,7 +629,7 @@ human review.
 
 ## Slice 3 — Worker-Side Render Rust Actor
 
-Status: provisional after Slice 2.
+Status: approved for autonomous implementation 2026-07-19.
 
 Once main-side ownership is Rust, move worker-side domain dispatch into a
 resident Rust actor. The actor should own:
@@ -651,28 +652,62 @@ Acceptance is the Slice 2 matrix plus a source gate that removes render/Far LOD,
 world priority, per-world session, and asset-selection vocabulary from the
 worker TypeScript.
 
+After the actor lands, compare the server-job and render Worker shells. Extract
+only common Wasm loading, opaque forwarding, SAB publication, browser failure,
+yield, and close mechanics that are actually identical. Do not introduce a
+general browser-thread runtime or force unlike asset/session protocols through
+one abstraction merely to reduce line count.
+
 ## Slice 4 — Integrated-Server Responsibility Split
 
-Status: decision checkpoint, not yet implementation-ready.
+Status: approved as bounded autonomous sub-slices after Slice 3.
 
 `mclone-integrated-server-worker.ts` is the largest and most entangled worker.
 It combines legitimate browser mechanisms—timers, IndexedDB requests,
 job-worker servicing, SAB views—with descriptor projection and lifecycle
 coordination. Do not port it wholesale or create one giant Rust browser actor.
 
-After Slices 1-3, inventory it against the proven broker contracts and split it
-into:
+After Slices 1-3, inventory it against the proven broker contracts and preserve
+this split:
 
 1. Rust authority/session actor policy;
 2. generic runner mailbox mechanics;
 3. typed IndexedDB platform operations; and
 4. browser cadence/yield/shutdown mechanics.
 
-Draft a focused follow-up tactical if this cannot be expressed as one bounded
-cut. IndexedDB schema/migration mechanics may remain TypeScript; generation,
+Implement it in this order:
+
+1. Replace generation, topology, realm, behavior, and authority defaults with
+   one strict versioned opaque startup frame authored and decoded by Rust.
+2. Move authority/session admission, state transitions, job policy, typed
+   failures, and graceful domain shutdown into a worker-resident Rust actor.
+3. Keep `setTimeout`, Worker messages, SAB typed views, IndexedDB requests and
+   transactions, browser yielding, and forced termination in a domain-blind
+   TypeScript shell.
+
+Each production transfer must delete its previous TypeScript owner atomically.
+If the authority cut cannot remain bounded, draft a focused follow-up tactical
+and stop that sub-slice rather than creating one giant browser actor.
+IndexedDB schema/migration mechanics may remain TypeScript; generation,
 topology, realm, profile, and behavior defaults may not.
 
-## Slice 5 — Remeasure And Stop Or Escalate
+## Slice 5 — Rust-Authored Catalog Descriptors
+
+Status: approved after the integrated-server descriptor boundary is proven.
+
+Keep IndexedDB CRUD, request/transaction mechanics, browser settings storage,
+and DOM-facing file acquisition in TypeScript. Remove its duplicated
+generation-profile, topology, behavior, and persisted-world unions by having
+Rust own one versioned opaque descriptor and one Rust-authored UI projection.
+The catalog adapter may index stable opaque IDs and browser timestamps; it must
+not reconstruct domain defaults or validate domain variants independently.
+
+Acceptance requires create/list/open/reopen/delete coverage for plane and
+periodic worlds, existing generator-profile fixtures, managed-world isolation,
+and unchanged stored-record compatibility. Do not bundle an IndexedDB schema
+migration unless the opaque descriptor cannot fit the current record envelope.
+
+## Slice 6 — Remeasure And Stop Or Escalate
 
 Status: required closeout.
 
@@ -688,7 +723,7 @@ Record per lane:
 - TypeScript responsibility and line-count change; and
 - worker restart/failure containment.
 
-Shared Wasm linear memory is not Slice 6. If the
+Shared Wasm linear memory is not Slice 7. If the
 [`web-worker-runtime-ownership`](../topics/web-worker-runtime-ownership.md)
 revisit gates are satisfied, create a separate tactical with a current
 toolchain proof, allocator and memory-growth instrumentation, cooperative
@@ -736,15 +771,23 @@ follow the platform validation policy in `docs/platforms.md`.
 
 ## Human Review Gates
 
-The workstream can be driven autonomously within these stops:
+The 2026-07-19 continuation decision accepts the Slice 2 evidence and
+authorizes Slices 3-6 autonomously at the high-value ownership boundary. Commit
+each atomic proof/cutover and preserve exact pre-cutover controls for any red
+lane. Stop early for a new decision if a slice requires:
 
-1. Review Slice 0's allowed browser-mechanism versus domain-debt
-   classification.
-2. Review Slice 1's actor/broker contract before applying it to render.
-3. Inspect render and lobby captures after Slice 2; performance/pixel gates are
-   load-bearing even when the refactor is intended to be invisible.
-4. Review the integrated-server decomposition before Slice 4.
-5. Require a new explicit decision before any shared Wasm linear-memory work.
+- a new SAB ABI or copy strategy;
+- a persistence schema or authority cadence change;
+- more production Workers, shared Wasm memory, or a general thread runtime;
+- a long-lived old/new implementation;
+- DOM, rAF, input, WebSocket, or IndexedDB mechanics moving into Rust;
+- weaker gameplay, pixel, lifecycle, performance, or failure assertions; or
+- a material frame-time, memory, copy, Worker-count, or visual regression.
+
+Otherwise stop after Slice 6 with a residual ownership/copy/performance
+decision package. Require a new explicit human decision before browser-native
+long-tail reduction, integrated storage migration, or any shared Wasm
+linear-memory work.
 
 ## Non-Goals
 

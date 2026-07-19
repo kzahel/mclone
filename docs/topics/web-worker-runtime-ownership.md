@@ -2,15 +2,15 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: server-job actor proof and main-side render coordinator cutover
-complete 2026-07-19. Production keeps isolated Wasm heaps and the existing
-external `SharedArrayBuffer` transports. One Rust coordinator now owns the
-ordinary render Worker's main-side lifecycle behind a 47-line domain-blind
-TypeScript transport. Tactical
-[`197`](../tactical/197-domain-blind-web-worker-broker.md) is stopped at the
-Slice 2 human-review gate before any worker-side render migration. A shared
-Wasm linear-memory runtime remains a separate, measurement-gated investigation
-rather than an implied destination of the TypeScript reduction work.
+Status: autonomous high-value continuation approved 2026-07-19 after the
+server-job actor and main-side render coordinator cutovers. Production keeps
+isolated Wasm heaps and the existing external `SharedArrayBuffer` transports.
+Tactical [`197`](../tactical/197-domain-blind-web-worker-broker.md) now owns the
+worker-side render actor, proven common Worker mechanics, opaque
+integrated-server startup, bounded authority/session policy, and Rust-authored
+catalog descriptors. It then remeasures and stops before the browser-native
+long tail. A shared Wasm linear-memory runtime remains a separate,
+measurement-gated investigation rather than an implied destination.
 
 ## Scope
 
@@ -416,9 +416,10 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Review Tactical 197 Slice 2's coordinator boundary, captures, metrics, and
-confirmed baseline debts. If accepted, Slice 3 may move worker-side render/Far
-LOD dispatch and per-world compiler sessions into a resident Rust actor. Keep
-the current isolated heaps, external SAB copy ledger, and single ordinary
-render Worker. Do not begin integrated-server consolidation or shared Wasm
-linear-memory work as part of that continuation.
+Execute Tactical 197 Slices 3-6 autonomously at the recorded high-value
+boundary: worker-side render actor, only proven common Worker mechanics,
+versioned integrated-server startup and policy actor, Rust-authored catalog
+descriptors, then residual measurement. Keep isolated heaps, the external SAB
+copy ledger, one ordinary render Worker, browser-owned IndexedDB/timers/events,
+and native typed channels. Stop for a human decision before browser-native
+long-tail reduction or shared Wasm linear-memory work.

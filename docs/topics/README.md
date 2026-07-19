@@ -118,8 +118,8 @@ series implements the same concern, normally reuse the document slug in its
   coordinator, current 6,484-line TypeScript inventory, external-SAB-mailbox
   versus shared-Wasm-heap distinction, copy/lifecycle tradeoffs, and explicit
   shared-linear-memory revisit gates. Tactical
-  [`197`](../tactical/197-domain-blind-web-worker-broker.md) is stopped for
-  review before worker-side render migration.
+  [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the approved
+  autonomous high-value continuation and final long-tail review stop.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted
