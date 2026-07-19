@@ -61,3 +61,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `world-height-and-volumetric-streaming` — authoritative finite per-dimension
   height, taller-world cost controls, and the separate path toward partial
   vertical or cubic residency
+- `web-worker-runtime-ownership` — isolated Rust worker actors,
+  domain-blind TypeScript browser brokers, explicit SAB mailbox ownership, and
+  measurement-gated shared-Wasm-linear-memory reconsideration; Tactical 197

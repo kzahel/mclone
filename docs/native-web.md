@@ -27,15 +27,27 @@ mutable island into catalog-excluded IndexedDB records, starts two independent
 integrated-server Workers, multiplexes both stable world identities through one
 compiler Worker, and submits the live island through the shared scene/render
 path. The two draw stores share compatible immutable atlas/pipeline resources.
-TypeScript owns only IndexedDB, Promise, Worker, input, and presentation
-mechanics; it does not choose or author scenario content, decide readiness,
-place geometry, or activate worlds. The temporary profile used while those
-services are installed reports a pending initialization state and is promoted
-atomically before the title is presented. Tactical
+At the scene and product-policy boundary, TypeScript owns only IndexedDB,
+Promise, Worker, input, and presentation mechanics; it does not choose or
+author scenario content, decide readiness, place geometry, or activate worlds.
+The temporary profile used while those services are installed reports a
+pending initialization state and is promoted atomically before the title is
+presented. Tactical
 [`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
 records the completed parity refactor and feature-off/scenario-on performance
 evidence. Far LOD is supported through the production shared resident
 compiler/cache/render path.
+
+The lower-level Worker adapters still contain substantial hand-authored
+TypeScript coordination. The accepted next ownership direction keeps each
+Worker's private Wasm heap and current external `SharedArrayBuffer` mailboxes,
+but moves domain dispatch and lifecycle policy into worker-resident Rust actors
+behind domain-blind TypeScript brokers. This is tracked in
+[`topics/web-worker-runtime-ownership.md`](topics/web-worker-runtime-ownership.md)
+and Tactical
+[`197-domain-blind-web-worker-broker.md`](tactical/197-domain-blind-web-worker-broker.md).
+It is not a commitment to one shared Wasm linear memory.
+
 That path now uses 4/8/16 rings with two-chunk hysteresis and
 replacement-before-suppress transitions. Browser audio and teleport preview
 remain explicit absent service capabilities.
