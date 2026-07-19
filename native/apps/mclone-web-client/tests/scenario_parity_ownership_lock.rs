@@ -49,6 +49,10 @@ const WEB_SCENE_HOST: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_scene_host.rs"
 ));
+const WEB_RENDER_WORKER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_render_worker.rs"
+));
 const WEB_SERVER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_server_worker.rs"
@@ -216,17 +220,21 @@ fn stale_browser_starts_are_rejected_before_slot_installation() {
 
 #[test]
 fn browser_compiler_broker_and_shared_renderer_boundary_are_singular() {
-    assert!(WEB_APP.contains("compiler: RenderCompiler | null;"));
-    assert!(WEB_APP.contains("pendingTimings: Map<string, PendingCompile>;"));
+    assert!(!WEB_APP.contains("compiler: RenderCompiler | null;"));
+    assert!(!WEB_APP.contains("pendingTimings: Map<string, PendingCompile>;"));
     assert!(!WEB_APP.contains("Map<WorldInstanceId"));
-    assert!(WEB_APP.contains("this.compiler?.releaseWorld("));
-    assert!(WEB_RENDER_COMPILER_SHARED.contains("nextBrokerRequestId"));
-    assert!(WEB_RENDER_COMPILER_SHARED.contains("worldPriority === \"active\""));
-    assert!(WEB_RENDER_COMPILER_SHARED.contains("release-render-compiler-world"));
+    assert!(!WEB_APP.contains("this.compiler?.releaseWorld("));
+    assert!(WEB_APP.contains("new PolledWorkerTransport("));
+    assert!(!WEB_RENDER_COMPILER_SHARED.contains("nextBrokerRequestId"));
+    assert!(!WEB_RENDER_COMPILER_SHARED.contains("worldPriority === \"active\""));
+    assert!(!WEB_RENDER_COMPILER_SHARED.contains("release-render-compiler-world"));
+    assert!(WEB_RENDER_WORKER.contains("struct WebRenderWorkerCoordinator"));
+    assert!(WEB_RENDER_WORKER.contains("RenderWorkerAssetSwapState"));
+    assert!(WEB_RENDER_WORKER.contains("RenderWorkerPriority::Active"));
+    assert!(WEB_RENDER_WORKER.contains("release-render-compiler-world"));
     assert!(WEB_RENDER_COMPILER_WORKER.contains("compilerSessions = new Map"));
     assert!(WEB_RENDER_COMPILER_WORKER.contains("compilerTemplate.forkWorldSession()"));
-    assert!(WEB_CANVAS.contains("worldInstanceId"));
-    assert!(WEB_CANVAS.contains("worldPriority"));
+    assert!(WEB_CANVAS.contains("WebRenderWorkerWorldHandle"));
 
     let shared_constructor = TERRAIN_RENDERER
         .split("impl TexturedSectionSharedResources {")
