@@ -45,6 +45,10 @@ pub use web_scene_host::{
 mod web_compile_timing;
 #[cfg(target_arch = "wasm32")]
 mod web_remote_session;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_remote_worker_actor;
+#[cfg(target_arch = "wasm32")]
+pub use web_remote_worker_actor::{WebRemoteSocketWorkerAction, WebRemoteSocketWorkerActor};
 #[cfg(target_arch = "wasm32")]
 mod web_render_compiler_abi;
 #[cfg(target_arch = "wasm32")]
@@ -121,83 +125,6 @@ pub fn mclone_web_dead_player_record_fixture(
     let encoded = mclone_server::encode_player_record(&record)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
     Ok(js_sys::Uint8Array::from(encoded.as_slice()))
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn mclone_web_remote_handshake_frame(
-    profile_id: js_sys::Uint8Array,
-    display_name: String,
-) -> Result<js_sys::Uint8Array, JsValue> {
-    let profile_id: [u8; 16] = profile_id
-        .to_vec()
-        .try_into()
-        .map_err(|_| JsValue::from_str("remote profile UUID must contain 16 bytes"))?;
-    let identity = mclone_protocol::ClientIdentity::new(
-        mclone_protocol::PlayerProfileId::new(profile_id),
-        display_name,
-    )
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let frame = mclone_net::encode_websocket_client_handshake_with_identity(
-        mclone_protocol::PROTOCOL_VERSION,
-        &identity,
-    )
-    .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    Ok(js_sys::Uint8Array::from(frame.as_slice()))
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn mclone_web_validate_remote_handshake(frame: js_sys::Uint8Array) -> Result<(), JsValue> {
-    mclone_net::decode_websocket_server_handshake(
-        &frame.to_vec(),
-        mclone_protocol::PROTOCOL_VERSION,
-    )
-    .map(|_| ())
-    .map_err(|error| JsValue::from_str(&error.to_string()))
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn mclone_web_canonicalize_remote_command(
-    frame: js_sys::Uint8Array,
-) -> Result<js_sys::Uint8Array, JsValue> {
-    let command = mclone_net::decode_websocket_client_command(&frame.to_vec())
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let canonical = mclone_net::encode_websocket_client_command(&command)
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    Ok(js_sys::Uint8Array::from(canonical.as_slice()))
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn mclone_web_decode_remote_update_batch(
-    frame: js_sys::Uint8Array,
-) -> Result<js_sys::Array, JsValue> {
-    let updates = mclone_net::decode_websocket_server_update_batch(&frame.to_vec())
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let frames = js_sys::Array::new();
-    for update in updates {
-        let canonical =
-            encode_server_update(&update).map_err(|error| JsValue::from_str(&error.to_string()))?;
-        frames.push(&js_sys::Uint8Array::from(canonical.as_slice()));
-    }
-    Ok(frames)
-}
-
-#[cfg(target_arch = "wasm32")]
-#[wasm_bindgen::prelude::wasm_bindgen]
-pub fn mclone_web_remote_control_response(
-    frame: js_sys::Uint8Array,
-) -> Result<js_sys::Uint8Array, JsValue> {
-    let update = decode_server_update(&frame.to_vec())
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    let ServerUpdate::KeepAlive { id } = update else {
-        return Ok(js_sys::Uint8Array::new_with_length(0));
-    };
-    let response = mclone_net::encode_websocket_client_command(&ClientCommand::KeepAlive { id })
-        .map_err(|error| JsValue::from_str(&error.to_string()))?;
-    Ok(js_sys::Uint8Array::from(response.as_slice()))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

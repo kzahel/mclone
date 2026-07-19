@@ -9,7 +9,8 @@ Human review then authorized Tactical
 [`198`](../tactical/198-opaque-websocket-and-indexeddb-adapters.md) to move
 remote WebSocket protocol state and ordinary catalog operation meaning into
 Rust while preserving browser-owned WebSocket and IndexedDB mechanics. It
-stops before managed provisioning or integrated-server persistence.
+stops before managed provisioning or integrated-server persistence. Its
+remote-actor cut is complete; the ordinary catalog continuation is next.
 
 ## Scope
 
@@ -248,6 +249,23 @@ copy, and compute time inside the Worker, so it cannot establish copy
 dominance. Tactical 068's most recent decomposition remains the stronger
 evidence: lighting was about 98% compute and cold world generation about 88%
 generation after transport attribution.
+
+Tactical 198 Slice 1 subsequently moved the remote WebSocket protocol owner
+into `WebRemoteSocketWorkerActor`. The worker-resident Rust actor now owns
+handshake/readiness, command canonicalization, keepalive responses,
+backpressure, update-batch sequence and release accounting, failures, and
+shutdown. Main Rust and the actor communicate through strict versioned `MCRW`
+frames. The five old free codec exports and all corresponding TypeScript
+protocol state were removed.
+
+The remaining 161-line remote Worker owns only Wasm loading, browser
+`WebSocket` callbacks, and execution of generic Rust-authored actions. Five
+new ownership debts prevent handshake, codec, canonicalization, batch-limit,
+or release vocabulary from returning to TypeScript. Five fresh remote smokes
+passed with maximum frame gaps from 18.620 to 19.260 ms and zero final command,
+update, job, or compile backlog. Authored TypeScript is now 5,738 lines across
+the unchanged 15 modules, six Worker entries, and two construction sites; the
+seven-site copy ledger is unchanged.
 
 The desktop lobby passed with a 9.925 ms p95 and 41.055 ms maximum frame gap;
 the two-times CPU-throttled mobile lobby passed with 10.065 ms p95 and 100.985
@@ -561,9 +579,8 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Execute Tactical 198 in order: baseline the current remote and catalog lanes,
-land the worker-resident remote protocol actor, then replace the ordinary
-catalog report/switch with a Rust-owned continuation over thin IndexedDB CRUD.
-Preserve asynchronous yielding and exact transaction boundaries. Remeasure and
-stop before managed provisioning, integrated-server persistence, or shared
+Continue Tactical 198 with the ordinary catalog cut: replace the catalog
+report/switch with a Rust-owned continuation over thin IndexedDB CRUD. Preserve
+asynchronous yielding and the exact existing transaction boundaries. Remeasure
+and stop before managed provisioning, integrated-server persistence, or shared
 Wasm memory.

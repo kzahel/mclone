@@ -1,201 +1,161 @@
-type WasmModule = typeof import("mclone-web-client-wasm") & {
-  mclone_web_remote_handshake_frame(profileId: Uint8Array, displayName: string): Uint8Array;
-  mclone_web_validate_remote_handshake(frame: Uint8Array): void;
-  mclone_web_canonicalize_remote_command(frame: Uint8Array): Uint8Array;
-  mclone_web_decode_remote_update_batch(frame: Uint8Array): Array<Uint8Array>;
-  mclone_web_remote_control_response(frame: Uint8Array): Uint8Array;
-};
+import type {
+  WebRemoteSocketWorkerAction,
+  WebRemoteSocketWorkerActor,
+} from "mclone-web-client-wasm";
+
+// The generated wasm-bindgen namespace is loaded through a versioned browser URL.
+// The bare specifier is a type-only path mapping used by the no-emit TS gate.
+type WasmModule = typeof import("mclone-web-client-wasm");
 
 export {};
 
-interface RemoteWorkerMessage {
-  kind?: string;
-  url?: string;
+// Browser-only bootstrap fields plus a Rust-authored opaque actor frame. The
+// worker shell deliberately does not know the transport protocol or lifecycle.
+interface RemoteWorkerEnvelope {
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
-  frame?: Uint8Array;
-  profileId?: Uint8Array;
-  displayName?: string;
-  batchSequence?: number;
+  actorFrame?: Uint8Array;
 }
 
 const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
-const MAX_SOCKET_BUFFERED_COMMAND_BYTES = 8 * 1024 * 1024;
-const MAX_UNCONSUMED_UPDATE_BYTES = 64 * 1024 * 1024;
-
-let wasmModule: WasmModule | null = null;
+let wasmModulePromise: Promise<WasmModule> | null = null;
+let actor: WebRemoteSocketWorkerActor | null = null;
 let socket: WebSocket | null = null;
-let handshakeComplete = false;
-let nextBatchSequence = 1;
-let unconsumedUpdateBytes = 0;
-const unconsumedBatches = new Map<number, number>();
+let draining = false;
 
 workerSelf.onmessage = async (event: MessageEvent) => {
-  const message = (event.data ?? {}) as RemoteWorkerMessage;
+  const envelope = (event.data ?? {}) as RemoteWorkerEnvelope;
   try {
-    switch (message.kind) {
-      case "start":
-        await start(message);
-        break;
-      case "command":
-        sendCommand(message);
-        break;
-      case "updates-drained":
-        releaseUpdateBatch(message);
-        break;
-      case "shutdown":
-        shutdown();
-        break;
-      default:
-        throw new Error(`unexpected remote websocket worker message ${String(message.kind)}`);
+    if (!(envelope.actorFrame instanceof Uint8Array)) {
+      throw new Error("remote websocket worker message has no actor frame");
     }
+    let activeActor = actor;
+    if (activeActor === null) {
+      const module = await loadWasmModule(envelope.bindgenJsUrl, envelope.bindgenWasmUrl);
+      activeActor = new module.WebRemoteSocketWorkerActor(envelope.actorFrame);
+      actor = activeActor;
+    } else {
+      activeActor.handleMainFrame(envelope.actorFrame);
+    }
+    drainActions();
   } catch (error) {
-    fail(stringifyError(error));
+    failBootstrapOrFfi(stringifyError(error));
   }
 };
 
-async function start(message: RemoteWorkerMessage): Promise<void> {
-  if (socket) throw new Error("remote websocket worker was already started");
-  if (!message.url || !message.bindgenJsUrl || !message.bindgenWasmUrl
-      || !message.profileId || !message.displayName) {
-    throw new Error("remote websocket worker start is missing a required URL");
+function drainActions(): void {
+  const activeActor = actor;
+  if (activeActor === null || draining) return;
+  draining = true;
+  try {
+    for (;;) {
+      const action = activeActor.takeAction(socket?.bufferedAmount ?? 0);
+      if (action === undefined) return;
+      try {
+        executeAction(activeActor, action);
+      } finally {
+        action.free();
+      }
+      if (actor === null) return;
+    }
+  } finally {
+    draining = false;
   }
-  const module = await import(message.bindgenJsUrl) as WasmModule;
-  await module.default(message.bindgenWasmUrl);
-  wasmModule = module;
-
-  const activeSocket = new WebSocket(message.url);
-  socket = activeSocket;
-  activeSocket.binaryType = "arraybuffer";
-  activeSocket.onopen = () => {
-    try {
-      activeSocket.send(requireModule().mclone_web_remote_handshake_frame(
-        message.profileId!,
-        message.displayName!,
-      ));
-    } catch (error) {
-      fail(stringifyError(error));
-    }
-  };
-  activeSocket.onmessage = (event: MessageEvent) => {
-    try {
-      receiveFrame(new Uint8Array(event.data as ArrayBuffer));
-    } catch (error) {
-      fail(stringifyError(error));
-    }
-  };
-  activeSocket.onerror = () => fail("remote websocket transport failed");
-  activeSocket.onclose = () => {
-    socket = null;
-    workerSelf.postMessage({ kind: "closed", message: "remote websocket transport closed" });
-  };
 }
 
-function receiveFrame(frame: Uint8Array): void {
-  const module = requireModule();
-  if (!handshakeComplete) {
-    module.mclone_web_validate_remote_handshake(frame);
-    handshakeComplete = true;
-    workerSelf.postMessage({ kind: "ready" });
-    return;
-  }
-
-  const decodeStart = performance.now();
-  const canonicalFrames = module.mclone_web_decode_remote_update_batch(frame);
-  for (const canonical of canonicalFrames) {
-    const response = module.mclone_web_remote_control_response(canonical);
-    if (response.byteLength > 0) {
+function executeAction(
+  activeActor: WebRemoteSocketWorkerActor,
+  action: WebRemoteSocketWorkerAction,
+): void {
+  switch (action.kind) {
+    case "open":
+      openSocket(activeActor, action.url);
+      return;
+    case "send": {
       const activeSocket = socket;
       if (!activeSocket || activeSocket.readyState !== WebSocket.OPEN) {
-        throw new Error("remote websocket closed before keepalive response");
+        activeActor.socketFailed("remote websocket is not open for a Rust send action");
+        return;
       }
-      if (activeSocket.bufferedAmount > MAX_SOCKET_BUFFERED_COMMAND_BYTES) {
-        throw new Error(
-          `remote control socket buffer exceeded ${MAX_SOCKET_BUFFERED_COMMAND_BYTES} bytes`,
-        );
-      }
-      activeSocket.send(response);
+      activeSocket.send(action.takeBytes());
+      return;
     }
+    case "post":
+      workerSelf.postMessage(action.message(), action.transfers());
+      return;
+    case "close-socket":
+      closeSocket();
+      return;
+    case "close-worker":
+      closeSocket();
+      actor = null;
+      workerSelf.close();
+      return;
+    default:
+      throw new Error(`unsupported remote actor action ${action.kind}`);
   }
-  const decodeMs = Math.max(0, performance.now() - decodeStart);
-  const batchSequence = nextBatchSequence++;
-  const batchBytes = frame.byteLength;
-  unconsumedUpdateBytes += batchBytes;
-  unconsumedBatches.set(batchSequence, batchBytes);
-  if (unconsumedUpdateBytes > MAX_UNCONSUMED_UPDATE_BYTES) {
-    throw new Error(
-      `remote update queue exceeded ${MAX_UNCONSUMED_UPDATE_BYTES} bytes`,
-    );
-  }
+}
 
-  const frames = canonicalFrames.map((canonical) => {
-    const owned = canonical.byteOffset === 0 && canonical.byteLength === canonical.buffer.byteLength
-      ? canonical
-      : canonical.slice();
-    return owned.buffer;
+function openSocket(activeActor: WebRemoteSocketWorkerActor, url: string | undefined): void {
+  if (!url) throw new Error("remote actor open action has no URL");
+  if (socket !== null) throw new Error("remote actor requested a second WebSocket");
+  const activeSocket = new WebSocket(url);
+  socket = activeSocket;
+  activeSocket.binaryType = "arraybuffer";
+  activeSocket.onopen = () => forwardSocketEvent(() => activeActor.socketOpened());
+  activeSocket.onmessage = (event: MessageEvent) => forwardSocketEvent(() => {
+    activeActor.socketFrame(new Uint8Array(event.data as ArrayBuffer));
   });
-  workerSelf.postMessage(
-    {
-      kind: "updates",
-      batchSequence,
-      receivedBytes: batchBytes,
-      decodeMs,
-      frames,
-    },
-    frames,
-  );
+  activeSocket.onerror = () => forwardSocketEvent(() => {
+    activeActor.socketFailed("remote websocket transport failed");
+  });
+  activeSocket.onclose = () => {
+    if (socket === activeSocket) socket = null;
+    forwardSocketEvent(() => activeActor.socketClosed());
+  };
 }
 
-function sendCommand(message: RemoteWorkerMessage): void {
-  const activeSocket = socket;
-  if (!activeSocket || !handshakeComplete || activeSocket.readyState !== WebSocket.OPEN) {
-    throw new Error("remote websocket is not ready for commands");
+function forwardSocketEvent(forward: () => void): void {
+  try {
+    forward();
+    drainActions();
+  } catch (error) {
+    failBootstrapOrFfi(stringifyError(error));
   }
-  if (!message.frame) throw new Error("remote command message has no frame");
-  if (activeSocket.bufferedAmount > MAX_SOCKET_BUFFERED_COMMAND_BYTES) {
-    throw new Error(
-      `remote command socket buffer exceeded ${MAX_SOCKET_BUFFERED_COMMAND_BYTES} bytes`,
-    );
-  }
-  const canonical = requireModule().mclone_web_canonicalize_remote_command(message.frame);
-  activeSocket.send(canonical);
-  workerSelf.postMessage({ kind: "command-sent", bytes: canonical.byteLength });
 }
 
-function releaseUpdateBatch(message: RemoteWorkerMessage): void {
-  const sequence = Number(message.batchSequence) || 0;
-  const bytes = unconsumedBatches.get(sequence);
-  if (bytes === undefined) return;
-  unconsumedBatches.delete(sequence);
-  unconsumedUpdateBytes = Math.max(0, unconsumedUpdateBytes - bytes);
-}
-
-function shutdown(): void {
+function closeSocket(): void {
   const activeSocket = socket;
   socket = null;
-  handshakeComplete = false;
-  if (activeSocket) {
-    activeSocket.onopen = null;
-    activeSocket.onmessage = null;
-    activeSocket.onerror = null;
-    activeSocket.onclose = null;
-    activeSocket.close();
+  if (!activeSocket) return;
+  activeSocket.onopen = null;
+  activeSocket.onmessage = null;
+  activeSocket.onerror = null;
+  activeSocket.onclose = null;
+  activeSocket.close();
+}
+
+function loadWasmModule(
+  bindgenJsUrl: string | undefined,
+  bindgenWasmUrl: string | undefined,
+): Promise<WasmModule> {
+  if (!bindgenJsUrl || !bindgenWasmUrl) {
+    return Promise.reject(new Error("remote websocket worker bootstrap URLs are missing"));
   }
-  workerSelf.close();
+  wasmModulePromise ??= import(bindgenJsUrl).then(async (module: WasmModule) => {
+    await module.default(bindgenWasmUrl);
+    return module;
+  });
+  return wasmModulePromise;
 }
 
-function requireModule(): WasmModule {
-  if (!wasmModule) throw new Error("remote websocket worker wasm is not initialized");
-  return wasmModule;
-}
-
-function fail(message: string): void {
+function failBootstrapOrFfi(message: string): void {
+  // Rust owns ordinary failures. This envelope is only the last resort when
+  // module loading, browser API execution, or the wasm-bindgen boundary fails.
   workerSelf.postMessage({ kind: "error", message });
-  const activeSocket = socket;
-  socket = null;
-  if (activeSocket) activeSocket.close();
+  closeSocket();
 }
 
 function stringifyError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  return error instanceof Error ? (error.stack ?? error.message) : String(error);
 }

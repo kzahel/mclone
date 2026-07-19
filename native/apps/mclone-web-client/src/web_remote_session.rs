@@ -20,6 +20,11 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
+use crate::web_remote_worker_actor::{
+    encode_remote_actor_command_frame, encode_remote_actor_release_frame,
+    encode_remote_actor_shutdown_frame, encode_remote_actor_start_frame,
+};
+
 const DEFAULT_REMOTE_WORKER_URL: &str = "./mclone-remote-websocket-worker.js";
 const DEFAULT_BINDGEN_JS_URL: &str = "./pkg/mclone_web_client.js";
 const DEFAULT_BINDGEN_WASM_URL: &str = "./pkg/mclone_web_client_bg.wasm";
@@ -171,15 +176,12 @@ impl WebSocketServerSession {
             }
         });
         let start = Object::new();
-        set_string(&start, "kind", "start")?;
-        set_string(&start, "url", &config.url)?;
         set_string(&start, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&start, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
-        set_string(&start, "displayName", &config.identity.display_name)?;
-        let profile_id = Uint8Array::from(config.identity.profile_id.bytes().as_slice());
-        Reflect::set(&start, &JsValue::from_str("profileId"), &profile_id)
-            .map_err(|error| format!("failed to attach remote profile UUID: {error:?}"))?;
-        if let Err(error) = worker.post_message(&start) {
+        let actor_frame = encode_remote_actor_start_frame(&config.url, &config.identity)
+            .map_err(|error| format!("encode remote actor start frame: {error}"))?;
+        let transfer = attach_actor_frame(&start, &actor_frame)?;
+        if let Err(error) = worker.post_message_with_transfer(&start, &transfer) {
             worker.terminate();
             return Err(format!(
                 "failed to start remote websocket worker: {error:?}"
@@ -222,16 +224,13 @@ impl WebSocketServerSession {
         let protocol_codec_roundtrip = decode_client_command(&frame)
             .map(|decoded| decoded == command)
             .unwrap_or(false);
-        let bytes = Uint8Array::from(frame.as_slice());
-        let transfer = Array::new();
-        transfer.push(&bytes.buffer());
-        let message = Object::new();
-        set_string(&message, "kind", "command")?;
-        Reflect::set(&message, &JsValue::from_str("frame"), &bytes)
-            .map_err(|error| format!("failed to attach remote command frame: {error:?}"))?;
-        self.worker
-            .post_message_with_transfer(&message, &transfer)
-            .map_err(|error| format!("failed to enqueue remote command: {error:?}"))?;
+        let actor_frame = encode_remote_actor_command_frame(&frame)
+            .map_err(|error| format!("encode remote actor command frame: {error}"))?;
+        post_actor_frame(
+            &self.worker,
+            &actor_frame,
+            "failed to enqueue remote command",
+        )?;
         {
             let mut depth = self.command_queue_depth.borrow_mut();
             *depth = depth.saturating_add(1);
@@ -327,22 +326,24 @@ impl WebSocketServerSession {
         }
         let _ = self.queue_command(ClientCommand::Disconnect(ClientDisconnectReason::Quit));
         self.shutdown_requested = true;
-        let message = Object::new();
-        let posted = set_string(&message, "kind", "shutdown").is_ok()
-            && self.worker.post_message(&message).is_ok();
-        if !posted {
+        if post_actor_frame(
+            &self.worker,
+            &encode_remote_actor_shutdown_frame(),
+            "failed to request remote worker shutdown",
+        )
+        .is_err()
+        {
             self.worker.terminate();
         }
         *self.running.borrow_mut() = false;
     }
 
     fn acknowledge_batch(&self, batch_sequence: u64) -> Result<(), String> {
-        let message = Object::new();
-        set_string(&message, "kind", "updates-drained")?;
-        set_number(&message, "batchSequence", batch_sequence as f64)?;
-        self.worker
-            .post_message(&message)
-            .map_err(|error| format!("failed to acknowledge drained remote batch: {error:?}"))
+        post_actor_frame(
+            &self.worker,
+            &encode_remote_actor_release_frame(batch_sequence),
+            "failed to acknowledge drained remote batch",
+        )
     }
 }
 
@@ -539,10 +540,21 @@ fn set_string(object: &Object, name: &str, value: &str) -> Result<(), String> {
         .map_err(|error| format!("failed to set remote worker field {name}: {error:?}"))
 }
 
-fn set_number(object: &Object, name: &str, value: f64) -> Result<(), String> {
-    Reflect::set(object, &JsValue::from_str(name), &JsValue::from_f64(value))
-        .map(|_| ())
-        .map_err(|error| format!("failed to set remote worker field {name}: {error:?}"))
+fn attach_actor_frame(message: &Object, frame: &[u8]) -> Result<Array, String> {
+    let bytes = Uint8Array::from(frame);
+    let transfer = Array::new();
+    transfer.push(&bytes.buffer());
+    Reflect::set(message, &JsValue::from_str("actorFrame"), &bytes)
+        .map_err(|error| format!("failed to attach remote actor frame: {error:?}"))?;
+    Ok(transfer)
+}
+
+fn post_actor_frame(worker: &Worker, frame: &[u8], context: &str) -> Result<(), String> {
+    let message = Object::new();
+    let transfer = attach_actor_frame(&message, frame)?;
+    worker
+        .post_message_with_transfer(&message, &transfer)
+        .map_err(|error| format!("{context}: {error:?}"))
 }
 
 fn required_string(value: &JsValue, name: &str) -> Result<String, String> {

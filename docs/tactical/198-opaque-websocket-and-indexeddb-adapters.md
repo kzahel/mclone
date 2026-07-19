@@ -201,7 +201,7 @@ recorded by Tactical 197 remain unrelated and are not weakened here.
 
 ## Slice 1: Worker-Resident Remote Protocol Actor
 
-Status: pending.
+Status: complete 2026-07-19.
 
 Implement and test the Rust actor, keep the TypeScript WebSocket shell, cut
 production over atomically, then delete the old TypeScript protocol state.
@@ -221,6 +221,43 @@ Required focused tests:
 Browser acceptance repeats the production remote interaction smoke five times
 and preserves Worker count, byte/queue metrics, zero pending work, and rendered
 remote output.
+
+### Slice 1 evidence
+
+`WebRemoteSocketWorkerActor` now owns the handshake and readiness state,
+command canonicalization, keepalive responses, socket-buffer admission,
+update-batch sequence and byte accounting, release handling, typed failures,
+and idempotent shutdown. Main Rust authors strict versioned `MCRW` frames for
+start, command, release, and shutdown. The old five free remote codec exports
+were deleted.
+
+The TypeScript Worker is now a 161-line browser shell. It loads the independent
+Wasm instance, constructs and closes `WebSocket`, forwards browser callbacks,
+executes generic `open`/`send`/`post`/`close` actor actions, and retains only a
+last-resort bootstrap/FFI error envelope. It contains no handshake state,
+protocol codec call, keepalive choice, batch-accounting limit, release-message
+vocabulary, or command/update selector.
+
+Nine focused actor tests cover strict frame decoding, pre-handshake command
+failure, valid and invalid handshake behavior, canonical commands and
+acknowledgement, keepalive generation, batch release, actor-owned
+backpressure, browser failure/close reports, measured decode time, and
+idempotent shutdown. A tenth test proves stale socket events after shutdown are
+ignored. The inverted remote source lock and the ownership checker register
+five new remote debts at zero.
+
+The Wasm check, generated-bindgen TypeScript gate, remote source lock, and
+ownership self-test pass. Five fresh production remote smokes passed with 49
+loaded chunks, authoritative break/place interaction, zero final command and
+update queue depth, zero pending jobs and compile work, and maximum frame gaps
+of 18.620, 19.260, 18.840, 18.735, and 18.830 ms. The capture at
+`/tmp/mclone-native-web-app-canvas.png` was inspected after the cutover and
+showed coherent remote terrain, actors, HUD, and diagnostics.
+
+Authored TypeScript is now 5,738 lines. The 40-line reduction is incidental;
+the acceptance result is that the remote Worker has become a browser-mechanics
+executor while private Wasm heaps, one-Worker topology, transferable update
+frames, queue limits, and main-side client semantics remain unchanged.
 
 ## Slice 2: Rust-Owned Ordinary Catalog Continuation
 

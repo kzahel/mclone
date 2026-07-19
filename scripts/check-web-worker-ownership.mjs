@@ -33,7 +33,10 @@ const moduleRegistry = {
     baselineLines: 201,
     workerEntry: true,
     workerConstruction: false,
-    responsibilities: ["browser WebSocket mechanics", "opaque protocol-frame forwarding"],
+    responsibilities: [
+      "browser WebSocket mechanics",
+      "opaque worker-resident Rust actor execution",
+    ],
   },
   "mclone-render-compiler-abi.d.ts": {
     family: "render-workers",
@@ -276,6 +279,41 @@ const domainDebt = [
     needle: 'kind: "command-result"',
     maximum: 0,
     destination: "worker-resident Rust integrated-server actor",
+  },
+  {
+    id: "remote-worker-handshake-state",
+    file: "mclone-remote-websocket-worker.ts",
+    needle: "handshakeComplete",
+    maximum: 0,
+    destination: "worker-resident Rust remote socket actor",
+  },
+  {
+    id: "remote-worker-protocol-decode",
+    file: "mclone-remote-websocket-worker.ts",
+    needle: "mclone_web_decode_remote_update_batch",
+    maximum: 0,
+    destination: "worker-resident Rust remote socket actor",
+  },
+  {
+    id: "remote-worker-command-canonicalization",
+    file: "mclone-remote-websocket-worker.ts",
+    needle: "mclone_web_canonicalize_remote_command",
+    maximum: 0,
+    destination: "worker-resident Rust remote socket actor",
+  },
+  {
+    id: "remote-worker-batch-accounting",
+    file: "mclone-remote-websocket-worker.ts",
+    needle: "MAX_UNCONSUMED_UPDATE_BYTES",
+    maximum: 0,
+    destination: "worker-resident Rust remote socket actor",
+  },
+  {
+    id: "remote-worker-release-vocabulary",
+    file: "mclone-remote-websocket-worker.ts",
+    needle: "updates-drained",
+    maximum: 0,
+    destination: "opaque Rust-authored actor frames",
   },
   {
     id: "catalog-generation-profile-union",
