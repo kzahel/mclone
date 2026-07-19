@@ -1,4 +1,4 @@
-import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
+import { fetchAssetPack } from "./mclone-render-compiler-shared.js";
 import { PolledWorkerTransport } from "./mclone-worker-transport.js";
 import {
   WORLD_CHUNK_STORE,
@@ -386,13 +386,10 @@ async function renderCanvas() {
       fetchAssetPack(AUTHORED_ASSET_PACK_URL),
       fetchAssetPack(FALLBACK_ASSET_PACK_URL),
     ]);
-    const compiler = new RenderSectionWorkerCompiler(assetPack, {
-      workerUrl: RENDER_COMPILER_WORKER_URL,
-      bindgenJsUrl: BINDGEN_JS_URL,
-      bindgenWasmUrl: BINDGEN_WASM_URL,
-      workerName: "mclone-render-compiler-smoke",
-    });
-    const compilerMetrics = createCompilerWake(compiler);
+    const renderWorkerTransportFactory = () => new PolledWorkerTransport(
+      RENDER_COMPILER_WORKER_URL,
+      "mclone-render-compiler-smoke",
+    );
     const startup = module.mclone_web_startup_options_from_query(
       "?renderDistance=1&movementMode=fly",
     );
@@ -406,7 +403,7 @@ async function renderCanvas() {
       SERVER_JOB_WORKER_URL.href,
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
-      compilerMetrics.wake,
+      renderWorkerTransportFactory,
     );
     if (
       typeof session.syncOverviewRenderFrame !== "function"
@@ -427,8 +424,8 @@ async function renderCanvas() {
       // the previous compile and arm the next; JS only relays the doorbell, the Rust loop
       // owns scheduling/coalescing/acceptance. Center (1,0) reuses the resident worker mesh
       // catalog + ring, so it incrementally streams the shifted view on top of (0,0).
-      const firstCenter = await streamOverviewToIdle(session, compilerMetrics, 0, 0, 1);
-      const secondCenter = await streamOverviewToIdle(session, compilerMetrics, 1, 0, 1);
+      const firstCenter = await streamOverviewToIdle(session, 0, 0, 1);
+      const secondCenter = await streamOverviewToIdle(session, 1, 0, 1);
       const firstReport = firstCenter.report;
       const report = secondCenter.report;
       const shutdownReport = session.shutdown();
@@ -436,7 +433,6 @@ async function renderCanvas() {
         module,
         assetPack,
         canvas,
-        compilerMetrics,
       );
       const indexedDbCatalog = await runIndexedDbCatalogSmoke();
       const sharedTopologyStress = await runSharedTopologyStress(module);
@@ -474,7 +470,7 @@ async function renderCanvas() {
         status: report.ok ? "rendered" : "failed",
         firstCenter: publicOverviewCenter(firstCenter),
         secondCenter: publicOverviewCenter(secondCenter),
-        renderCompilerPendingJobCount: compiler.pendingJobCount(),
+        renderCompilerPendingJobCount: Number(report.renderWorkerPendingRequestCount) || 0,
         sessionPendingCompileJobCount: session.pendingChunkRenderCompileJobCount(),
         firstReport,
         report,
@@ -485,7 +481,9 @@ async function renderCanvas() {
         remoteWebSocket,
       };
     } finally {
-      compiler.terminate();
+      try {
+        session.shutdown();
+      } catch {}
     }
   } catch (error) {
     return {
@@ -501,9 +499,8 @@ async function renderCanvas() {
  * @param {WasmModule} module
  * @param {Uint8Array} assetPack
  * @param {HTMLCanvasElement} canvas
- * @param {ReturnType<typeof createCompilerWake>} compilerMetrics
  */
-async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compilerMetrics) {
+async function runIndexedDbPersistenceSmoke(module, assetPack, canvas) {
   if (typeof module.mclone_web_create_worker_scene_host_with_startup !== "function") {
     return {
       ok: false,
@@ -512,7 +509,7 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compilerM
   }
   const worldId = `smoke-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   const first = await createIndexedDbSmokeSession(
-    module, assetPack, canvas, worldId, true, compilerMetrics.wake,
+    module, assetPack, canvas, worldId, true,
   );
   if (typeof first.shutdownAsync !== "function") {
     return {
@@ -521,11 +518,11 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compilerM
     };
   }
   try {
-    const firstCenter = await streamOverviewToIdle(first, compilerMetrics, 0, 0, 1);
+    const firstCenter = await streamOverviewToIdle(first, 0, 0, 1);
     const firstShutdown = await first.shutdownAsync();
     const afterFirst = await waitForIndexedDbWorldRecords(worldId, 1);
     const second = await createIndexedDbSmokeSession(
-      module, assetPack, canvas, worldId, false, compilerMetrics.wake,
+      module, assetPack, canvas, worldId, false,
     );
     if (typeof second.shutdownAsync !== "function") {
       return {
@@ -534,7 +531,7 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compilerM
       };
     }
     try {
-      const secondCenter = await streamOverviewToIdle(second, compilerMetrics, 0, 0, 1);
+      const secondCenter = await streamOverviewToIdle(second, 0, 0, 1);
       const secondShutdown = await second.shutdownAsync();
       const afterSecond = await waitForIndexedDbWorldRecords(worldId, afterFirst.chunks);
       return {
@@ -572,10 +569,9 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas, compilerM
  * @param {HTMLCanvasElement} canvas
  * @param {string} worldId
  * @param {boolean} clearWorldStorage
- * @param {(doorbell: any) => void} compilerWake
  */
 async function createIndexedDbSmokeSession(
-  module, assetPack, canvas, worldId, clearWorldStorage, compilerWake,
+  module, assetPack, canvas, worldId, clearWorldStorage,
 ) {
   const [authoredAssetPack, fallbackAssetPack] = await Promise.all([
     fetchAssetPack(AUTHORED_ASSET_PACK_URL),
@@ -594,7 +590,10 @@ async function createIndexedDbSmokeSession(
     SERVER_JOB_WORKER_URL.href,
     BINDGEN_JS_URL.href,
     BINDGEN_WASM_URL.href,
-    compilerWake,
+    () => new PolledWorkerTransport(
+      RENDER_COMPILER_WORKER_URL,
+      "mclone-render-compiler-indexeddb-smoke",
+    ),
   );
 }
 
@@ -781,48 +780,23 @@ function transactionDone(transaction) {
   });
 }
 
-/** @param {RenderSectionWorkerCompiler} compiler */
-function createCompilerWake(compiler) {
-  const metrics = {
-    compileCount: 0,
-    pendingCount: 0,
-    lastWorkerReport: null,
-    error: "",
-    /** @param {any} doorbell */
-    wake(doorbell) {
-      if (doorbell?.kind === "release-world") {
-        compiler.releaseWorld(String(doorbell.worldInstanceId ?? ""));
-        return;
-      }
-      metrics.compileCount += 1;
-      metrics.pendingCount += 1;
-      void compiler.compileWithDoorbell(doorbell).then((compiled) => {
-        if (compiled?.report) metrics.lastWorkerReport = compiled.report;
-      }).catch((error) => {
-        metrics.error = stringifyError(error);
-      }).finally(() => {
-        metrics.pendingCount = Math.max(0, metrics.pendingCount - 1);
-      });
-    },
-  };
-  return metrics;
-}
-
 // Drive the production shared host to idle at a fixed chunk center. The Rust
-// runtime service owns compiler admission and invokes the browser wake sink;
-// JavaScript only executes the worker doorbell and observes its metrics.
+// runtime service and render-worker coordinator own admission and lifecycle;
+// JavaScript observes only the frame report.
 /**
  * @param {WebSceneHost} session
- * @param {ReturnType<typeof createCompilerWake>} compilerMetrics
  * @param {number} centerX
  * @param {number} centerZ
  * @param {number} radius
  */
-async function streamOverviewToIdle(session, compilerMetrics, centerX, centerZ, radius) {
+async function streamOverviewToIdle(session, centerX, centerZ, radius) {
   const deadline = performance.now() + 30_000;
   /** @type {RenderFrameReport | null} */
   let frame = null;
-  const compileCountBefore = compilerMetrics.compileCount;
+  const baseline = session.cameraFrameState();
+  const compileCountBefore = Number(baseline?.lastCompileReport?.compileCount) || 0;
+  let compileCount = compileCountBefore;
+  let lastWorkerReport = baseline?.lastCompileReport ?? null;
   let stableFrames = 0;
   // A center change requests a new view, but the runner registers the new generation
   // jobs asynchronously. Right after the change the runner can momentarily look drained
@@ -837,10 +811,11 @@ async function streamOverviewToIdle(session, compilerMetrics, centerX, centerZ, 
         `overview render frame failed at center ${centerX},${centerZ}: ${frame?.reason ?? "unknown"}`,
       );
     }
-    if (compilerMetrics.error) {
-      throw new Error(compilerMetrics.error);
-    }
-    if (overviewRunnerBusy(frame) || compilerMetrics.compileCount > compileCountBefore) {
+    const workerReport = frame.lastCompileReport ?? null;
+    const observedCompileCount = Number(workerReport?.compileCount) || 0;
+    compileCount = Math.max(compileCount, observedCompileCount);
+    if (workerReport) lastWorkerReport = workerReport;
+    if (overviewRunnerBusy(frame) || compileCount > compileCountBefore) {
       observedRunnerWork = true;
     }
     if (observedRunnerWork && overviewFrameSettled(frame)) {
@@ -870,10 +845,10 @@ async function streamOverviewToIdle(session, compilerMetrics, centerX, centerZ, 
     centerX,
     centerZ,
     settled,
-    compileCount: compilerMetrics.compileCount - compileCountBefore,
+    compileCount: compileCount - compileCountBefore,
     residentSectionCount: Number(settledFrame.residentSectionCount) || 0,
     report: settledFrame,
-    workerReport: compilerMetrics.lastWorkerReport,
+    workerReport: lastWorkerReport,
   };
 }
 
@@ -912,6 +887,7 @@ function overviewFrameSettled(frame) {
     && Number(frame.runnerPendingPublications) === 0
     && Number(frame.runnerPendingPersistenceLoads) === 0
     && Number(frame.runnerPendingPersistenceSaves) === 0
+    && Number(frame.renderWorkerPendingRequestCount) === 0
     && Number(frame.residentSectionCount) > 0
   );
 }

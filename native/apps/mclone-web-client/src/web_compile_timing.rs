@@ -6,12 +6,12 @@
 //! render-compile worker report, and the apply frame) and re-coerced with
 //! `Number(...)`/`Boolean(...)` at every read. That coercion now lives here behind
 //! typed accessors; `WebCompileTiming` owns the bag and emits the public snapshot the
-//! HUD and the smoke harness read. JS keeps only the orchestration it must: the
-//! `pendingTimings` map, the worker promise, and the `performance.now()` measurements
-//! it passes in. The public snapshot shape is contract — `assertCompileTimingDiagnostics`
-//! in `scripts/browser-smoke.mjs` checks ~40 of its fields — so this is a faithful 1:1
-//! port of the JS coercion semantics (`Number(x) || 0`, `|| null`, `Boolean(x)`,
-//! `String(x || "unknown")`, and the two `sharedResult`/`transferredResponse` fallbacks).
+//! HUD and the smoke harness read. The Rust render-worker coordinator now owns the
+//! pending timing map and lifecycle measurements as well. The public snapshot shape is
+//! contract — `assertCompileTimingDiagnostics` in `scripts/browser-smoke.mjs` checks
+//! ~40 of its fields — so this remains a faithful port of the former JS coercion
+//! semantics (`Number(x) || 0`, `|| null`, `Boolean(x)`, `String(x || "unknown")`, and
+//! the two `sharedResult`/`transferredResponse` fallbacks).
 
 use js_sys::{Object, Reflect};
 use wasm_bindgen::prelude::*;

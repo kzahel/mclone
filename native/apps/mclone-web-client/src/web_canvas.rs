@@ -4,6 +4,8 @@ use web_sys::HtmlCanvasElement;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
+use crate::web_render_worker::{WebRenderWorkerCoordinator, WebRenderWorkerWorldHandle};
+
 use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime,
 };
@@ -720,7 +722,7 @@ async fn remote_websocket_smoke_report(websocket_url: String) -> Result<JsValue,
     Ok(object.into())
 }
 
-async fn wait_for_remote_worker_turn(timeout_ms: i32) -> Result<(), String> {
+pub(crate) async fn wait_for_remote_worker_turn(timeout_ms: i32) -> Result<(), String> {
     let promise = js_sys::Promise::new(&mut |resolve, reject| {
         let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
             let _ = resolve.call0(&JsValue::NULL);
@@ -1457,8 +1459,8 @@ impl WebSharedCompileInFlight {
 /// `submit` diffs the request's loaded snapshots against `mirror_tracking` — a cheap
 /// `(pos, revision)` shadow of what the worker mirror holds — to compute the changed
 /// columns (upserts) and unloaded columns (evictions), encodes only that delta into the
-/// resident input arena, and arms the result control word; JavaScript posts a tiny
-/// doorbell to the worker (JS still owns the Worker lifecycle and diagnostics).
+/// resident input arena, and arms the result control word; the Rust coordinator posts
+/// a tiny doorbell through the generic browser Worker transport.
 /// `try_recv_completed` polls the result control word from main wasm via `js_sys::Atomics`
 /// and decodes the packed report in place — no JavaScript in the result data path. A
 /// single compile is in flight at a time, matching the existing busy-flag streaming model,
@@ -1569,9 +1571,39 @@ impl WebRenderSectionCompiler {
         self.in_flight.take()
     }
 
+    fn fail_in_flight(&mut self, message: String) {
+        let Some(in_flight) = self.take_in_flight() else {
+            return;
+        };
+        self.mirror_tracking.clear();
+        self.staged_delta = None;
+        match in_flight {
+            WebSharedCompileInFlight::Sections {
+                target_sections,
+                section_revisions,
+                ..
+            } => self
+                .completed_sections
+                .push_back(RenderSectionCompileResult {
+                    target_sections,
+                    section_revisions,
+                    result: Err(message),
+                }),
+            WebSharedCompileInFlight::FarLod { .. } => {
+                self.far_lod_error = Some(message);
+            }
+        }
+    }
+
+    fn reset_worker_mirror(&mut self) {
+        self.mirror_tracking.clear();
+        self.staged_delta = None;
+    }
+
     /// Attach the resident shared buffers + byte counts to a worker doorbell message.
-    /// JavaScript adds the message kind / bindgen URLs and posts it; the worker reads
-    /// the input and writes the packed result into the same buffers this compiler polls.
+    /// The Rust coordinator adds transport metadata and posts it through the generic
+    /// browser Worker transport; the worker reads the input and writes the packed result
+    /// into the same buffers this compiler polls.
     fn write_doorbell_arenas(&self, object: &js_sys::Object) -> Result<(), String> {
         let Some(arena) = self.shared.as_ref() else {
             return Ok(());
@@ -1634,9 +1666,10 @@ impl WebRenderSectionCompiler {
     /// Build a complete worker doorbell for the in-flight compile (067 Stage 3): the
     /// request id, the budget's target section keys (so the worker compiles only those —
     /// the per-frame increment, not a whole-view job), the delta input width, and the
-    /// resident shared buffers. JS posts it verbatim; the worker writes the packed result
-    /// back into the same buffers `try_recv_completed` polls. Returns whether a doorbell
-    /// was written (false when no compile is in flight).
+    /// resident shared buffers. The Rust coordinator posts it through the generic
+    /// transport; the worker writes the packed result back into the same buffers
+    /// `try_recv_completed` polls. Returns whether a doorbell was written (false when no
+    /// compile is in flight).
     fn write_doorbell(&self, object: &js_sys::Object) -> Result<bool, String> {
         let Some(in_flight) = self.in_flight.as_ref() else {
             return Ok(false);
@@ -2018,63 +2051,11 @@ impl FarTerrainLodCompiler for WebRenderSectionCompiler {
     }
 }
 
-/// Browser-owned compiler wake capability. The shared scene sees only
-/// `RenderSectionCompiler`; the JavaScript callback and doorbell object remain
-/// private to this adapter.
-#[derive(Clone)]
-struct WebRenderCompilerWakeSink {
-    callback: js_sys::Function,
-    world_instance_id: u64,
-    priority: RuntimeRenderPriority,
-}
-
-impl std::fmt::Debug for WebRenderCompilerWakeSink {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("WebRenderCompilerWakeSink")
-            .finish_non_exhaustive()
-    }
-}
-
-impl WebRenderCompilerWakeSink {
-    fn wake(&self, compiler: &WebRenderSectionCompiler) -> anyhow::Result<()> {
-        let doorbell = js_sys::Object::new();
-        if compiler
-            .write_doorbell(&doorbell)
-            .map_err(anyhow::Error::msg)?
-        {
-            set_string(
-                &doorbell,
-                "worldInstanceId",
-                &self.world_instance_id.to_string(),
-            )
-            .map_err(anyhow::Error::msg)?;
-            set_string(&doorbell, "worldPriority", self.priority.label())
-                .map_err(anyhow::Error::msg)?;
-            self.callback
-                .call1(&JsValue::NULL, &doorbell)
-                .map_err(|error| anyhow::anyhow!("render-compiler wake failed: {error:?}"))?;
-        }
-        Ok(())
-    }
-
-    fn release_world(&self) {
-        let message = js_sys::Object::new();
-        let _ = set_string(&message, "kind", "release-world");
-        let _ = set_string(
-            &message,
-            "worldInstanceId",
-            &self.world_instance_id.to_string(),
-        );
-        let _ = self.callback.call1(&JsValue::NULL, &message);
-    }
-}
-
 /// Browser implementation of the neutral scene runtime boundary.
 ///
 /// It reuses the resident server worker/WebSocket connection and render
 /// compiler. Production browser hosts inject this service into
-/// `McloneSceneHost`; JavaScript sees only the private wake callback.
+/// `McloneSceneHost`; the Rust coordinator owns the browser worker lifecycle.
 pub struct WebSceneRuntimeService {
     runtime: WebRuntime,
     mesh_assets: TexturedMeshAssets,
@@ -2082,7 +2063,8 @@ pub struct WebSceneRuntimeService {
     far_lod_cache: FarTerrainLodCache,
     lod_coverage: LodCoverageCoordinator,
     clock: MonotonicClockHandle,
-    compiler_wake: WebRenderCompilerWakeSink,
+    render_worker: WebRenderWorkerWorldHandle,
+    worker_generation: u64,
     deferred_chunk_drops: BoundedDeferredDropQueue,
 }
 
@@ -2100,21 +2082,17 @@ impl std::fmt::Debug for WebSceneRuntimeService {
     }
 }
 
-impl Drop for WebSceneRuntimeService {
-    fn drop(&mut self) {
-        self.compiler_wake.release_world();
-    }
-}
-
 impl WebSceneRuntimeService {
     pub fn new(
         runtime: WebRuntime,
         mesh_assets: TexturedMeshAssets,
-        compiler_wake: js_sys::Function,
+        render_worker: WebRenderWorkerCoordinator,
         clock: MonotonicClockHandle,
         world_instance_id: u64,
         priority: RuntimeRenderPriority,
     ) -> Self {
+        let render_worker = render_worker.world_handle(world_instance_id, priority);
+        let worker_generation = render_worker.active_generation();
         Self {
             runtime,
             mesh_assets,
@@ -2122,11 +2100,8 @@ impl WebSceneRuntimeService {
             far_lod_cache: FarTerrainLodCache::new(),
             lod_coverage: LodCoverageCoordinator::new(),
             clock,
-            compiler_wake: WebRenderCompilerWakeSink {
-                callback: compiler_wake,
-                world_instance_id,
-                priority,
-            },
+            render_worker,
+            worker_generation,
             deferred_chunk_drops: BoundedDeferredDropQueue::new(DEFAULT_DEFERRED_DROP_MAX_ITEMS),
         }
     }
@@ -2171,6 +2146,7 @@ impl WebSceneRuntimeService {
         chunk_budget: usize,
         completed_result_accept_budget: Option<usize>,
     ) -> anyhow::Result<RenderSectionCacheUpdate> {
+        self.reconcile_render_worker();
         let previous_request = self.render_compiler.in_flight_request_id();
         let compiler = &mut self.render_compiler;
         let update = self
@@ -2185,9 +2161,31 @@ impl WebSceneRuntimeService {
             )?;
         let current_request = self.render_compiler.in_flight_request_id();
         if current_request.is_some() && current_request != previous_request {
-            self.compiler_wake.wake(&self.render_compiler)?;
+            let doorbell = js_sys::Object::new();
+            if self
+                .render_compiler
+                .write_doorbell(&doorbell)
+                .map_err(anyhow::Error::msg)?
+            {
+                self.render_worker
+                    .wake(&doorbell)
+                    .map_err(anyhow::Error::msg)?;
+            }
         }
         Ok(update)
+    }
+
+    fn reconcile_render_worker(&mut self) {
+        if let Some(request_id) = self.render_compiler.in_flight_request_id()
+            && let Some(message) = self.render_worker.take_failure(request_id)
+        {
+            self.render_compiler.fail_in_flight(message);
+        }
+        let generation = self.render_worker.active_generation();
+        if generation != self.worker_generation {
+            self.worker_generation = generation;
+            self.render_compiler.reset_worker_mirror();
+        }
     }
 
     fn timed_sync_once(
@@ -2240,7 +2238,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
     }
 
     fn set_render_priority(&mut self, priority: RuntimeRenderPriority) {
-        self.compiler_wake.priority = priority;
+        self.render_worker.set_priority(priority);
     }
 
     fn core(&self) -> &mclone_app_runtime::SingleViewRuntime {
@@ -2267,6 +2265,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
             .replace_asset_epoch_sections(epoch, sections);
         self.clear_far_lod();
         self.render_compiler = WebRenderSectionCompiler::new();
+        self.worker_generation = self.render_worker.active_generation();
         self.mesh_assets = mesh_assets;
         Ok(())
     }
@@ -2287,6 +2286,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         build_budget: usize,
         upload_budget: usize,
     ) -> anyhow::Result<Option<&FarTerrainLodFrameUpdate>> {
+        self.reconcile_render_worker();
         if !config.enabled {
             self.clear_far_lod();
             return Ok(None);
@@ -2311,7 +2311,16 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         )?;
         let current_request = self.render_compiler.in_flight_request_id();
         if current_request.is_some() && current_request != previous_request {
-            self.compiler_wake.wake(&self.render_compiler)?;
+            let doorbell = js_sys::Object::new();
+            if self
+                .render_compiler
+                .write_doorbell(&doorbell)
+                .map_err(anyhow::Error::msg)?
+            {
+                self.render_worker
+                    .wake(&doorbell)
+                    .map_err(anyhow::Error::msg)?;
+            }
         }
         self.far_lod_cache
             .drain_render_uploads(upload_budget, &mut self.render_compiler);

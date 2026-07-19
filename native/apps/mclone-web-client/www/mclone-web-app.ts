@@ -1,5 +1,5 @@
-import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
-import type { RenderCompilerAssetSelection } from "./mclone-render-compiler-shared.js";
+import { fetchAssetPack } from "./mclone-render-compiler-shared.js";
+import { PolledWorkerTransport } from "./mclone-worker-transport.js";
 import {
   INPUT_KEY_NAMES,
   applyHotbarState,
@@ -36,7 +36,7 @@ import type {
   WebLocalWorldSummary,
   WebWorldGenerationProfile,
 } from "./mclone-web-world-catalog.js";
-import type { WebSceneHost, WebCompileTiming } from "mclone-web-client-wasm";
+import type { WebSceneHost } from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
 // Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
@@ -51,15 +51,8 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 // the boundary documents intent and keeps internal field reads consistent.
 type WasmReport = Record<string, any>;
 
-type RenderCompiler = InstanceType<typeof RenderSectionWorkerCompiler>;
 type InputKeys = Record<string, boolean>;
 type TouchMovementImpulse = ReturnType<typeof defaultMovementImpulse>;
-
-interface PendingCompile {
-  timing: WebCompileTiming;
-  workerPromise: Promise<any> | null;
-  workerError: string | null;
-}
 
 interface WebStartupPlan extends WasmReport {
   renderDistance: number;
@@ -348,7 +341,6 @@ class WebFrameDriver {
   canvas: HTMLCanvasElement;
   module: WasmModule | null;
   session: WebSceneHost | null;
-  compiler: RenderCompiler | null;
   assetPack: Uint8Array | null;
   authoredAssetPack: Uint8Array | null;
   fallbackAssetPack: Uint8Array | null;
@@ -361,9 +353,6 @@ class WebFrameDriver {
   touchControlsMode: TouchControlsMode;
   mouseDeltaX: number;
   mouseDeltaY: number;
-  compileSequence: number;
-  pendingTimings: Map<string, PendingCompile>;
-  finalizingCount: number;
   hasRendered: boolean;
   loadedCenter: { centerX: number, centerZ: number } | null;
   pointerDragging: boolean;
@@ -375,11 +364,6 @@ class WebFrameDriver {
   lastFrameTime: number;
   tickFrameBusy: boolean;
   sessionBusy: boolean;
-  pendingAssetCompilerSwap: {
-    previous: RenderCompiler;
-    candidate: RenderCompiler;
-    epoch: number;
-  } | null;
   managedProvisionControllers: Map<string, AbortController>;
   pendingManagedRuntimeStarts: Set<Promise<void>>;
   managedScenarioLaunchObservedActive: boolean;
@@ -393,7 +377,6 @@ class WebFrameDriver {
     this.canvas = document.getElementById("mclone-canvas") as HTMLCanvasElement;
     this.module = null;
     this.session = null;
-    this.compiler = null;
     this.assetPack = null;
     this.authoredAssetPack = null;
     this.fallbackAssetPack = null;
@@ -409,13 +392,6 @@ class WebFrameDriver {
     runtime.state.touchControlsMode = this.touchControlsMode;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
-    this.compileSequence = 0;
-    // 067 Stage 3: per-compile timings keyed by request id while in flight (submitted +
-    // worker round-trip) plus a count of timings whose apply finalize is still awaiting
-    // the worker metrics. The streaming loop posts a doorbell per compile and finalizes
-    // the timing when the next frame's poll applies the result.
-    this.pendingTimings = new Map();
-    this.finalizingCount = 0;
     this.hasRendered = false;
     this.loadedCenter = null;
     this.pointerDragging = false;
@@ -427,7 +403,6 @@ class WebFrameDriver {
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
     this.sessionBusy = false;
-    this.pendingAssetCompilerSwap = null;
     this.managedProvisionControllers = new Map();
     this.pendingManagedRuntimeStarts = new Set();
     this.managedScenarioLaunchObservedActive = false;
@@ -489,14 +464,10 @@ class WebFrameDriver {
     this.assetPack = assetPack;
     this.authoredAssetPack = authoredAssetPack;
     this.fallbackAssetPack = fallbackAssetPack;
-    this.compiler = this.createRenderCompiler();
-    const compilerWake = (doorbell: WasmReport): void => {
-      if (doorbell.kind === "release-world") {
-        this.compiler?.releaseWorld(String(doorbell.worldInstanceId ?? ""));
-        return;
-      }
-      void this.wakeRenderCompiler(doorbell);
-    };
+    const renderWorkerTransportFactory = () => new PolledWorkerTransport(
+      RENDER_COMPILER_WORKER_URL,
+      "mclone-render-compiler-app",
+    );
     runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
     if (remoteWebSocketUrl) {
@@ -508,7 +479,9 @@ class WebFrameDriver {
         authoredAssetPack,
         fallbackAssetPack,
         startup,
-        compilerWake,
+        BINDGEN_JS_URL.href,
+        BINDGEN_WASM_URL.href,
+        renderWorkerTransportFactory,
       );
     } else {
       this.session = await module.mclone_web_create_worker_scene_host_with_startup(
@@ -521,7 +494,7 @@ class WebFrameDriver {
         SERVER_JOB_WORKER_URL.href,
         BINDGEN_JS_URL.href,
         BINDGEN_WASM_URL.href,
-        compilerWake,
+        renderWorkerTransportFactory,
       );
     }
     for (const name of [
@@ -584,11 +557,19 @@ class WebFrameDriver {
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     document.addEventListener("visibilitychange", () => {
       const hidden = document.visibilityState === "hidden";
-      const report = this.session?.setHidden(hidden);
-      if (!hidden) {
-        this.lastFrameTime = performance.now();
-      }
-      this.applyNativeUiReport(report);
+      void this.withSessionAsync(() => this.session?.setHidden(hidden) ?? null)
+        .then((report) => {
+          if (!hidden) {
+            this.lastFrameTime = performance.now();
+          }
+          this.applyNativeUiReport(report);
+        })
+        .catch((error) => {
+          runtime.state.ok = false;
+          runtime.state.status = stringifyError(error);
+          console.error(error);
+          publishRuntimeState(runtime.state);
+        });
     });
     this.touchControls = new TouchControls(this, runtime.state);
     this.setNativeTouchControlsMode(this.touchControlsMode, false);
@@ -709,7 +690,7 @@ class WebFrameDriver {
   }
 
   beginManagedScenarioSmoke(chunkSpan = 2): WasmReport | null {
-    if (!this.session) {
+    if (!this.session || this.sessionBusy) {
       return null;
     }
     const report = this.session.beginManagedScenarioSmokeWithChunkSpan(chunkSpan);
@@ -728,14 +709,9 @@ class WebFrameDriver {
     while (this.tickFrameBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    await this.waitForSessionIdle();
     await this.worldCatalogOperationTail;
     await Promise.allSettled([...this.pendingManagedRuntimeStarts]);
-    await Promise.allSettled(
-      [...this.pendingTimings.values()]
-        .map((pending) => pending.workerPromise)
-        .filter((promise): promise is Promise<any> => promise !== null),
-    );
-    this.compiler?.terminate();
     const report = this.session?.shutdown() ?? null;
     if (report?.ok) {
       runtime.state.shutdownComplete = Boolean(report.shutdownComplete);
@@ -745,6 +721,9 @@ class WebFrameDriver {
   }
 
   backgroundSaveForSmoke(): WasmReport | null {
+    if (this.sessionBusy) {
+      return null;
+    }
     const report = this.session?.setHidden(true) ?? null;
     this.applyNativeUiReport(report);
     const resumed = this.session?.setHidden(false) ?? null;
@@ -754,7 +733,7 @@ class WebFrameDriver {
   }
 
   drainManagedScenarioOperations(): void {
-    if (!this.session || this.managedOperationDrainActive) {
+    if (!this.session || this.sessionBusy || this.managedOperationDrainActive) {
       return;
     }
     this.managedOperationDrainActive = true;
@@ -794,7 +773,8 @@ class WebFrameDriver {
       operationToken: requestId,
       scenarioId: String(operation.scenarioId ?? ""),
       role: String(operation.role ?? ""),
-    }, controller.signal).then((result) => {
+    }, controller.signal).then(async (result) => {
+      await this.waitForSessionIdle();
       if (!this.session) return;
       const report = this.session.completeManagedScenarioProvision(
         requestId,
@@ -804,7 +784,9 @@ class WebFrameDriver {
       runtime.state.lastManagedProvision = result;
       this.applyNativeUiReport(report);
       this.drainManagedScenarioOperations();
-    }).catch((error: unknown) => {
+    }).catch(async (error: unknown) => {
+      if (!this.session || controller.signal.aborted) return;
+      await this.waitForSessionIdle();
       if (!this.session || controller.signal.aborted) return;
       const report = this.session.completeManagedScenarioProvision(
         requestId,
@@ -836,6 +818,7 @@ class WebFrameDriver {
     const task = (async () => {
       try {
         await start.start();
+        await this.waitForSessionIdle();
         if (!this.session) return;
         const report = this.session.completeManagedScenarioWorldStart(start);
         this.applyNativeUiReport(report);
@@ -913,7 +896,9 @@ class WebFrameDriver {
       analogForward: movement.forward,
     });
     this.handleSceneFrame(frame);
-    this.applyTargetState(this.session.previewBlockTarget());
+    if (!this.sessionBusy) {
+      this.applyTargetState(this.session.previewBlockTarget());
+    }
   }
 
   async warmUpStreamingToIdle(): Promise<void> {
@@ -924,6 +909,10 @@ class WebFrameDriver {
     const deadline = performance.now() + 60_000;
     let stableFrames = 0;
     while (performance.now() < deadline) {
+      if (this.sessionBusy) {
+        await nextAnimationFrame();
+        continue;
+      }
       const idle = await this.streamFrameOnce({ awaitWorker: true });
       stableFrames = idle && this.hasRendered && Number(runtime.state.residentSectionCount) > 0
         ? stableFrames + 1
@@ -957,12 +946,8 @@ class WebFrameDriver {
       analogForward: 0,
     });
     this.handleSceneFrame(frame);
-    if (options.awaitWorker && this.pendingTimings.size > 0) {
-      await Promise.allSettled(
-        [...this.pendingTimings.values()]
-          .map((pending) => pending.workerPromise)
-          .filter((promise): promise is Promise<any> => promise !== null),
-      );
+    if (options.awaitWorker && Number(frame.renderWorkerPendingRequestCount) > 0) {
+      await nextAnimationFrame();
     }
     return runtime.state.streamingSettled === true;
   }
@@ -1025,20 +1010,8 @@ class WebFrameDriver {
     if (frame.rendered) {
       hideBootstrapStatus();
     }
-    this.settleAssetCompilerSwap(frame);
-    if (
-      Number(frame.acceptedCompileSectionCount) > 0
-      && runtime.state.lastCompileReport
-    ) {
-      runtime.state.lastCompileReport = {
-        ...runtime.state.lastCompileReport,
-        commandCount: Number(frame.commandCount) || 0,
-        acceptedCompileSectionCount: Number(frame.acceptedCompileSectionCount) || 0,
-        meshBuildCount: Number(frame.meshBuildCount) || 0,
-        pendingCompileJobCount: Number(frame.pendingCompileJobCount) || 0,
-      };
-    }
     const pendingJobs = Number(frame.pendingCompileJobCount) || 0;
+    const pendingWorkerRequests = Number(frame.renderWorkerPendingRequestCount) || 0;
     const runnerSettled = Number(frame.runnerCommandQueueDepth) === 0
       && Number(frame.runnerUpdateQueueDepth) === 0
       && Number(frame.runnerPendingJobs) === 0
@@ -1046,10 +1019,10 @@ class WebFrameDriver {
     const streamingSettled = Boolean(frame.streamingIdle)
       && runnerSettled
       && pendingJobs === 0
-      && this.pendingTimings.size === 0;
+      && pendingWorkerRequests === 0;
     runtime.state.pendingCompileJobCount = pendingJobs;
     runtime.state.compileInFlight = pendingJobs > 0;
-    runtime.state.compileInFlightCount = this.pendingTimings.size;
+    runtime.state.compileInFlightCount = pendingWorkerRequests;
     runtime.state.compileFinalizingCount = 0;
     runtime.state.streamingSettled = streamingSettled;
     if (streamingSettled) {
@@ -1059,82 +1032,9 @@ class WebFrameDriver {
     }
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(frame);
-    this.drainManagedScenarioOperations();
-  }
-
-  wakeRenderCompiler(doorbell: WasmReport): Promise<any> {
-    const compiler = this.compiler as RenderCompiler;
-    const module = this.module as WasmModule;
-    const requestId = Number(doorbell.requestId);
-    const worldInstanceId = String(doorbell.worldInstanceId ?? "");
-    const requestKey = `${worldInstanceId}:${requestId}`;
-    const timing = new module.WebCompileTiming(
-      ++this.compileSequence,
-      "stream",
-      this.loadedCenter?.centerX ?? null,
-      this.loadedCenter?.centerZ ?? null,
-      runtime.state.frameCount,
-      runtime.state.renderCount,
-      performance.now(),
-    );
-    timing.updateFromRequest(doorbell);
-    timing.setBeginRequestMs(0);
-    const pending: PendingCompile = { timing, workerPromise: null, workerError: null };
-    const started = performance.now();
-    const promise = compiler.compileWithDoorbell(doorbell).then((compiled: any) => {
-      timing.setWorkerRoundTripMs(performance.now() - started);
-      if (compiled?.report) {
-        timing.updateFromWorker(compiled.report);
-      }
-      timing.setDecodeFinishApplyMs(0);
-      timing.finish(
-        "accepted",
-        null,
-        performance.now(),
-        runtime.state.frameCount,
-        runtime.state.renderCount,
-        runtime.state.lastFrameGapMs,
-      );
-      recordCompileTiming(timing);
-      const priorCompileReport = runtime.state.lastCompileReport;
-      runtime.state.lastCompileReport = compiled?.report
-        ? {
-            ...priorCompileReport,
-            ...compiled.report,
-            workerCompileUsed: true,
-            commandCount: Number(priorCompileReport?.commandCount) || 0,
-            acceptedCompileSectionCount:
-              Number(priorCompileReport?.acceptedCompileSectionCount) || 0,
-            meshBuildCount: Number(priorCompileReport?.meshBuildCount) || 0,
-            pendingCompileJobCount:
-              Number(priorCompileReport?.pendingCompileJobCount) || 0,
-          }
-        : null;
-      this.pendingTimings.delete(requestKey);
-      runtime.state.compileInFlightCount = this.pendingTimings.size;
-      publishRuntimeState(runtime.state);
-      return compiled;
-    }).catch((error: unknown) => {
-      const message = stringifyError(error);
-      pending.workerError = message;
-      timing.finish(
-        "failed",
-        message,
-        performance.now(),
-        runtime.state.frameCount,
-        runtime.state.renderCount,
-        runtime.state.lastFrameGapMs,
-      );
-      recordCompileTiming(timing);
-      this.pendingTimings.delete(requestKey);
-      runtime.state.compileInFlightCount = this.pendingTimings.size;
-      throw error;
-    });
-    pending.workerPromise = promise;
-    this.pendingTimings.set(requestKey, pending);
-    runtime.state.compileInFlightCount = this.pendingTimings.size;
-    publishActiveCompileTiming(timing);
-    return promise;
+    if (!this.sessionBusy) {
+      this.drainManagedScenarioOperations();
+    }
   }
 
   applyCameraState(camera: WasmReport): void {
@@ -1415,6 +1315,17 @@ class WebFrameDriver {
     if (typeof report.debugOverlayVisible !== "undefined") {
       runtime.state.debugOverlayVisible = Boolean(report.debugOverlayVisible);
     }
+    runtime.state.compileTimingCount = Number(report.compileTimingCount) || 0;
+    runtime.state.compileTimings = Array.isArray(report.compileTimings)
+      ? report.compileTimings
+      : [];
+    runtime.state.activeCompileTiming = report.activeCompileTiming ?? null;
+    runtime.state.lastCompileTiming = report.lastCompileTiming ?? null;
+    runtime.state.lastCompileReport = report.lastCompileReport ?? null;
+    runtime.state.renderWorkerGeneration = Number(report.renderWorkerGeneration) || 0;
+    runtime.state.renderWorkerStaleCompletionCount = Number(
+      report.renderWorkerStaleCompletionCount,
+    ) || 0;
     runtime.state.status = "ready";
     this.setNativeStatusOverlay("ready", true, false);
     runtime.state.lastReport = report;
@@ -1429,14 +1340,14 @@ class WebFrameDriver {
   }
 
   blockStateAt(x: number, y: number, z: number): WasmReport | null {
-    if (!this.session) {
+    if (!this.session || this.sessionBusy) {
       return null;
     }
     return this.session.blockStateAt(Math.trunc(x), Math.trunc(y), Math.trunc(z));
   }
 
   frameEmbeddedPreview(): WasmReport | null {
-    if (!this.session) {
+    if (!this.session || this.sessionBusy) {
       return null;
     }
     const report = this.session.frameEmbeddedPreview();
@@ -1445,7 +1356,7 @@ class WebFrameDriver {
   }
 
   frameInteractionSurface(): WasmReport | null {
-    if (!this.session) {
+    if (!this.session || this.sessionBusy) {
       return null;
     }
     const report = this.session.frameInteractionSurface();
@@ -1795,7 +1706,9 @@ class WebFrameDriver {
     this.dispatchSceneSessionOperation(report, options);
     this.dispatchWorldCatalogOperation(report, options);
     this.dispatchAssetPackOperation(report);
-    this.drainManagedScenarioOperations();
+    if (!this.sessionBusy) {
+      this.drainManagedScenarioOperations();
+    }
   }
 
   dispatchSceneSessionOperation(
@@ -1882,56 +1795,29 @@ class WebFrameDriver {
     void this.completeAssetPackSelection(report);
   }
 
-  async completeAssetPackSelection(report: WasmReport): Promise<void> {
+  async completeAssetPackSelection(_report: WasmReport): Promise<void> {
     if (
       !this.session
       || !this.assetPack
       || !this.authoredAssetPack
       || !this.fallbackAssetPack
-      || !this.compiler
       || this.sessionBusy
     ) {
       return;
     }
     this.sessionBusy = true;
     runtime.state.sessionBusy = true;
-    const priorCompiler = this.compiler;
-    let candidateCompiler: RenderCompiler | null = null;
     try {
-      await Promise.allSettled(
-        [...this.pendingTimings.values()]
-          .map((pending) => pending.workerPromise)
-          .filter((promise): promise is Promise<any> => promise !== null),
-      );
-      const selection: RenderCompilerAssetSelection = {
-        authoredPack: this.authoredAssetPack,
-        referencePack: this.assetPack,
-        fallbackPack: this.fallbackAssetPack,
-        authoredEnabled: Boolean(report.assetPackAuthoredEnabled),
-        referenceEnabled: Boolean(report.assetPackReferenceEnabled),
-        epoch: Number(report.assetPackRequestEpoch) || 0,
-      };
-      candidateCompiler = this.createRenderCompiler(selection);
-      await candidateCompiler.ready;
-      this.compiler = candidateCompiler;
       const completion = await this.session.completeAssetPackSelection(
         this.authoredAssetPack,
         this.assetPack,
         this.fallbackAssetPack,
       );
       await nextAnimationFrame();
-      this.pendingAssetCompilerSwap = {
-        previous: priorCompiler,
-        candidate: candidateCompiler,
-        epoch: selection.epoch,
-      };
-      candidateCompiler = null;
       this.applyNativeUiReport(completion);
       runtime.state.assetPackCompletionCount =
         (Number(runtime.state.assetPackCompletionCount) || 0) + 1;
     } catch (error) {
-      candidateCompiler?.terminate();
-      this.compiler = priorCompiler;
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       console.error(error);
@@ -1940,26 +1826,6 @@ class WebFrameDriver {
       this.sessionBusy = false;
       runtime.state.sessionBusy = false;
       this.flushNativeTouchControlsOverlay();
-    }
-  }
-
-  settleAssetCompilerSwap(report: WasmReport): void {
-    const swap = this.pendingAssetCompilerSwap;
-    if (!swap) {
-      return;
-    }
-    if (
-      report.assetReplacementState === "active"
-      && Number(report.activeAssetEpoch) === swap.epoch
-    ) {
-      swap.previous.terminate();
-      this.pendingAssetCompilerSwap = null;
-      return;
-    }
-    if (report.assetReplacementState === "failed") {
-      swap.candidate.terminate();
-      this.compiler = swap.previous;
-      this.pendingAssetCompilerSwap = null;
     }
   }
 
@@ -1977,6 +1843,7 @@ class WebFrameDriver {
     try {
       db = await openWorldDb();
       const payload = await this.executeWorldCatalogRequest(db, operation, report);
+      await this.waitForSessionIdle();
       const completion = session.applyWorldCatalogResponse(requestId, operation, payload);
       runtime.state.worldCatalogCompletionCount += 1;
       this.applyNativeUiReport(completion, options);
@@ -1984,6 +1851,7 @@ class WebFrameDriver {
       const message = stringifyError(error);
       console.error(error);
       try {
+        await this.waitForSessionIdle();
         const failure = session.applyWorldCatalogError(requestId, message);
         runtime.state.worldCatalogCompletionCount += 1;
         this.applyNativeUiReport(failure, options);
@@ -2131,23 +1999,9 @@ class WebFrameDriver {
     }
   }
 
-  createRenderCompiler(selection?: RenderCompilerAssetSelection): RenderCompiler {
-    if (!this.assetPack) {
-      throw new Error("asset pack is not loaded");
-    }
-    return new RenderSectionWorkerCompiler(selection ?? this.assetPack, {
-      workerUrl: RENDER_COMPILER_WORKER_URL,
-      bindgenJsUrl: BINDGEN_JS_URL,
-      bindgenWasmUrl: BINDGEN_WASM_URL,
-      workerName: "mclone-render-compiler-app",
-    });
-  }
-
   resetStreamingStateForSessionRestart(): void {
     this.hasRendered = false;
     this.loadedCenter = null;
-    this.pendingTimings.clear();
-    this.finalizingCount = 0;
     runtime.state.loadedCenterX = null;
     runtime.state.loadedCenterZ = null;
     runtime.state.pendingCompileJobCount = 0;
@@ -2310,11 +2164,6 @@ class WebFrameDriver {
     }
     runtime.state.lastFrameGapMs = frameGapMs;
     runtime.state.maxFrameGapMs = Math.max(runtime.state.maxFrameGapMs, frameGapMs);
-    // 067 Stage 3: many compiles can be in flight across frames; charge the frame gap to
-    // every pending timing so each compile's window reflects presentation stalls.
-    for (const pending of this.pendingTimings.values()) {
-      pending.timing.observeFrameGap(frameGapMs);
-    }
   }
 
   requestPointerLock(): void {
@@ -2360,18 +2209,6 @@ class WebFrameDriver {
       runtime.state.height = Number(report.height) || height;
     }
   }
-}
-
-function publishActiveCompileTiming(timing: WebCompileTiming): void {
-  runtime.state.activeCompileTiming = timing.publicSnapshot(performance.now());
-}
-
-function recordCompileTiming(timing: WebCompileTiming): void {
-  const snapshot = timing.publicSnapshot(performance.now());
-  runtime.state.lastCompileTiming = snapshot;
-  runtime.state.compileTimings = [...runtime.state.compileTimings, snapshot].slice(-16);
-  runtime.state.compileTimingCount += 1;
-  runtime.state.activeCompileTiming = null;
 }
 
 function defaultDebugOverlayVisible(): boolean {

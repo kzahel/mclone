@@ -61,6 +61,7 @@ use crate::web_canvas::{
     gui_key_from_label, prepare_web_scene_assets_from_pack,
     prepare_web_scene_assets_from_selection, ui_action_label, web_asset_pack_catalog,
 };
+use crate::web_render_worker::WebRenderWorkerCoordinator;
 use crate::web_scene_protocol::{
     WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState,
     WebScenePlatformServices, WebSceneSessionCompletionDisposition, WebSceneSessionOperation,
@@ -249,7 +250,7 @@ pub struct WebSceneHost {
     max_resume_poll_updates: usize,
     max_resume_drop_backlog: usize,
     shutdown_complete: bool,
-    compiler_wake: js_sys::Function,
+    render_worker: WebRenderWorkerCoordinator,
     asset_pack_file_count: usize,
     pending_asset_pack_file_count: Option<(u64, usize)>,
     status_overlay: StatusOverlay,
@@ -679,6 +680,14 @@ impl WebSceneHost {
         analog_left: f32,
         analog_forward: f32,
     ) -> Result<JsValue, JsValue> {
+        self.render_worker
+            .poll(
+                now_millis,
+                self.frame_count,
+                self.rendered_frame_count,
+                self.max_frame_gap_millis,
+            )
+            .map_err(|error| JsValue::from_str(&error))?;
         self.platform.observe_frame_time_millis(now_millis);
         let admission = self.frame_policy.admit_frame(now_millis);
         let WebSceneFrameAdmission::Render {
@@ -807,9 +816,11 @@ impl WebSceneHost {
                 } if *active_epoch == epoch => {
                     self.asset_pack_file_count = file_count;
                     self.pending_asset_pack_file_count = None;
+                    self.render_worker.settle_asset_epoch(epoch, true);
                 }
                 AssetReplacementStatus::Failed { .. } => {
                     self.pending_asset_pack_file_count = None;
+                    self.render_worker.settle_asset_epoch(epoch, false);
                 }
                 _ => {}
             }
@@ -1694,6 +1705,7 @@ impl WebSceneHost {
             );
             self.shutdown_complete = disposition == WebSceneSessionCompletionDisposition::Applied;
         }
+        self.render_worker.terminate();
         self.frame_policy.shutdown();
         self.report(None, false, 0.0, false).map_err(JsValue::from)
     }
@@ -1740,6 +1752,22 @@ impl WebSceneHost {
         .map_err(|error| JsValue::from_str(&format!("failed to inspect selected packs: {error}")))?
         .into_iter()
         .sum();
+        if let Err(error) = self
+            .render_worker
+            .prepare_asset_candidate(
+                pending.epoch,
+                authored.clone(),
+                reference.clone(),
+                fallback.clone(),
+                authored_enabled,
+                reference_enabled,
+            )
+            .await
+        {
+            self.host_mut()?
+                .fail_external_asset_pack_preparation(error.clone());
+            return Err(JsValue::from_str(&error));
+        }
         let assets = match prepare_web_scene_assets_from_selection(
             pending.epoch,
             authored,
@@ -1750,6 +1778,7 @@ impl WebSceneHost {
         ) {
             Ok(assets) => assets,
             Err(error) => {
+                self.render_worker.settle_asset_epoch(pending.epoch, false);
                 self.host_mut()?
                     .fail_external_asset_pack_preparation(error.clone());
                 return Err(JsValue::from_str(&error));
@@ -1760,6 +1789,7 @@ impl WebSceneHost {
             .complete_external_asset_pack_preparation(assets)
         {
             let message = format!("failed to complete browser asset replacement: {error:#}");
+            self.render_worker.settle_asset_epoch(pending.epoch, false);
             self.host_mut()?
                 .fail_external_asset_pack_preparation(message.clone());
             return Err(JsValue::from_str(&message));
@@ -1780,7 +1810,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     server_job_worker_url: String,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
-    compiler_wake: js_sys::Function,
+    render_worker_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let (options, storage) = startup.into_parts();
     let scene_startup = options.scene;
@@ -1790,8 +1820,8 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         scene_startup.seed,
         server_worker_url,
         server_job_worker_url,
-        bindgen_js_url,
-        bindgen_wasm_url,
+        bindgen_js_url.clone(),
+        bindgen_wasm_url.clone(),
     )
     .with_world_generation_profile(scene_startup.world_generation_profile)
     .with_world_topology(scene_startup.world_topology)
@@ -1833,7 +1863,9 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
         descriptor,
         scene,
         render_options,
-        compiler_wake,
+        bindgen_js_url,
+        bindgen_wasm_url,
+        render_worker_transport_factory,
     )
     .await
 }
@@ -1845,7 +1877,9 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
     authored_pack_bytes: js_sys::Uint8Array,
     fallback_pack_bytes: js_sys::Uint8Array,
     startup: WebStartupConfig,
-    compiler_wake: js_sys::Function,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+    render_worker_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let (options, _storage) = startup.into_parts();
     let scene_startup = options.scene;
@@ -1883,7 +1917,9 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
         descriptor,
         scene,
         render_options,
-        compiler_wake,
+        bindgen_js_url,
+        bindgen_wasm_url,
+        render_worker_transport_factory,
     )
     .await
 }
@@ -1898,7 +1934,9 @@ async fn create_scene_host(
     descriptor: ActiveSessionDescriptor,
     scene: McloneSceneHostOptions,
     render_options: TexturedSectionRenderOptions,
-    compiler_wake: js_sys::Function,
+    bindgen_js_url: String,
+    bindgen_wasm_url: String,
+    render_worker_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let render_color_profile = render_options.color_profile.as_str().to_owned();
     let initial_center = scene.center();
@@ -1906,6 +1944,13 @@ async fn create_scene_host(
     let asset_pack_file_count = PackedAssetSource::from_bytes(reference_pack_bytes.clone())
         .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
         .file_count();
+    let render_worker = WebRenderWorkerCoordinator::new(
+        render_worker_transport_factory,
+        bindgen_js_url,
+        bindgen_wasm_url,
+        reference_pack_bytes.clone(),
+    )
+    .map_err(|error| JsValue::from_str(&error))?;
     let catalog = web_asset_pack_catalog(
         authored_pack_bytes,
         reference_pack_bytes.clone(),
@@ -1921,7 +1966,7 @@ async fn create_scene_host(
     let runtime = WebSceneRuntimeService::new(
         runtime,
         active_assets.mesh.clone(),
-        compiler_wake.clone(),
+        render_worker.clone(),
         clock.clone(),
         1,
         RuntimeRenderPriority::Active,
@@ -2005,7 +2050,7 @@ async fn create_scene_host(
         max_resume_poll_updates: 0,
         max_resume_drop_backlog: 0,
         shutdown_complete: false,
-        compiler_wake,
+        render_worker,
         asset_pack_file_count,
         pending_asset_pack_file_count: None,
         status_overlay: StatusOverlay::hidden(),
@@ -2111,7 +2156,7 @@ impl WebSceneHost {
         let runtime = WebSceneRuntimeService::new(
             runtime,
             active_assets.mesh.clone(),
-            self.compiler_wake.clone(),
+            self.render_worker.clone(),
             self.platform.clock_handle(),
             pending.instance_id.get(),
             match &pending.target {
@@ -3702,6 +3747,13 @@ impl WebSceneHost {
             self.last_frame.far_lod_uploaded_bytes as f64,
         )?;
         report_set_number(&object, "meshBuildCount", self.mesh_build_count as f64)?;
+        self.render_worker.write_report(
+            &object,
+            self.command_count,
+            summary.map_or(0, |summary| summary.upload.accepted_compile_result_count),
+            self.mesh_build_count,
+            self.pending_chunk_render_compile_job_count(),
+        )?;
         Ok(object.into())
     }
 }

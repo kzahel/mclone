@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), allow(dead_code))]
+#![cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
 
 use std::collections::{BTreeSet, VecDeque};
 
@@ -91,6 +91,31 @@ impl RenderWorkerAssetSwapState {
 
     pub(crate) const fn active(&self) -> RenderWorkerGeneration {
         self.active
+    }
+
+    pub(crate) fn candidate(&self) -> Option<RenderWorkerGeneration> {
+        self.candidate.map(|(generation, _)| generation)
+    }
+
+    pub(crate) const fn previous(&self) -> Option<RenderWorkerGeneration> {
+        self.previous
+    }
+
+    pub(crate) fn restart_active(&mut self) -> RenderWorkerGenerationActions {
+        assert!(
+            self.candidate.is_none() && self.previous.is_none(),
+            "cannot restart the active render worker during asset replacement"
+        );
+        let failed = self.active;
+        self.active = RenderWorkerGeneration {
+            asset_epoch: failed.asset_epoch,
+            worker_generation: self.allocate_worker_generation(),
+        };
+        RenderWorkerGenerationActions {
+            activated: Some(self.active),
+            terminate_generation: Some(failed.worker_generation),
+            ..RenderWorkerGenerationActions::default()
+        }
     }
 
     pub(crate) fn begin_candidate(&mut self, asset_epoch: u64) -> RenderWorkerGeneration {
@@ -196,6 +221,7 @@ impl RenderWorkerCoordinatorState {
         }
     }
 
+    #[cfg(test)]
     pub(crate) const fn generation(&self) -> u64 {
         self.generation
     }
@@ -325,6 +351,11 @@ impl RenderWorkerCoordinatorState {
         usize::from(self.active.is_some()).saturating_add(self.queued.len())
     }
 
+    pub(crate) fn active_request(&self) -> Option<&RenderWorkerRequest> {
+        self.active.as_ref()
+    }
+
+    #[cfg(test)]
     pub(crate) const fn stale_completion_count(&self) -> usize {
         self.stale_completion_count
     }
@@ -564,5 +595,16 @@ mod tests {
             Some(7)
         );
         assert_eq!(state.active().worker_generation, 7);
+    }
+
+    #[test]
+    fn active_restart_preserves_asset_epoch_and_advances_generation() {
+        let mut state = RenderWorkerAssetSwapState::new(3, 7);
+
+        let restart = state.restart_active();
+
+        assert_eq!(restart.terminate_generation, Some(7));
+        assert_eq!(restart.activated.map(|value| value.asset_epoch), Some(3));
+        assert_eq!(state.active().worker_generation, 8);
     }
 }
