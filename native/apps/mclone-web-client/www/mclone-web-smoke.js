@@ -601,8 +601,28 @@ async function runIndexedDbCatalogSmoke(module) {
   const constraintWorldId = `${worldId}-constraint`;
   const nonResurrectionWorldId = `${worldId}-non-resurrection`;
   const db = await openWorldDb();
+  const operationTimingsMs = {};
+  const timedCatalogOperation = async (
+    label,
+    operation,
+    options = {},
+    activeWorldId = "",
+  ) => {
+    const startedAt = performance.now();
+    try {
+      return await executeCatalogSmoke(
+        module,
+        db,
+        operation,
+        options,
+        activeWorldId,
+      );
+    } finally {
+      operationTimingsMs[label] = performance.now() - startedAt;
+    }
+  };
   try {
-    const before = await executeCatalogSmoke(module, db, "listWorlds");
+    const before = await timedCatalogOperation("listBefore", "listWorlds");
     const legacyTransaction = db.transaction(WORLD_CATALOG_STORE, "readwrite");
     legacyTransaction.objectStore(WORLD_CATALOG_STORE).add({
       id: legacyWorldId,
@@ -643,7 +663,7 @@ async function runIndexedDbCatalogSmoke(module) {
     );
     await executeCatalogSmoke(module, db, "deleteWorld", { id: legacyWorldId });
 
-    const created = await executeCatalogSmoke(module, db, "createWorld", {
+    const created = await timedCatalogOperation("create", "createWorld", {
       displayName: "Smoke Catalog World",
       seed: 424242,
       requestedId: worldId,
@@ -725,16 +745,29 @@ async function runIndexedDbCatalogSmoke(module) {
     await putIndexedDbSmokeRecord(db, WORLD_ENTITY_CHUNK_STORE, worldId, 0, 0);
     const recordsBeforeDelete = await countIndexedDbWorldRecords(worldId);
 
-    const afterCreate = await executeCatalogSmoke(module, db, "listWorlds");
-    const opened = await executeCatalogSmoke(module, db, "openWorld", { id: worldId });
-    const recorded = await executeCatalogSmoke(
-      module,
-      db,
+    const afterCreate = await timedCatalogOperation(
+      "listAfterCreate",
+      "listWorlds",
+    );
+    const opened = await timedCatalogOperation(
+      "open",
+      "openWorld",
+      { id: worldId },
+    );
+    const recorded = await timedCatalogOperation(
+      "recordPlayed",
       "recordWorldPlayed",
       { id: worldId },
     );
-    const deleted = await executeCatalogSmoke(module, db, "deleteWorld", { id: worldId });
-    const afterDelete = await executeCatalogSmoke(module, db, "listWorlds");
+    const deleted = await timedCatalogOperation(
+      "delete",
+      "deleteWorld",
+      { id: worldId },
+    );
+    const afterDelete = await timedCatalogOperation(
+      "listAfterDelete",
+      "listWorlds",
+    );
     const openDeletedRejected = await rejectsWithMessage(
       () => executeCatalogSmoke(module, db, "openWorld", { id: worldId }),
       "was not found",
@@ -784,6 +817,7 @@ async function runIndexedDbCatalogSmoke(module) {
       continuedAfterAbort,
       nonResurrection,
       openDeletedRejected,
+      operationTimingsMs,
     };
   } finally {
     db.close();

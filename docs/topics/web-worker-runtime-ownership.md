@@ -2,16 +2,16 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: bounded continuation in closeout 2026-07-19. Tactical
+Status: bounded campaign complete 2026-07-19. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) completed the
 high-value isolated-actor campaign without justifying shared Wasm memory.
 Human review then authorized Tactical
 [`198`](../tactical/198-opaque-websocket-and-indexeddb-adapters.md) to move
 remote WebSocket protocol state and ordinary catalog operation meaning into
 Rust while preserving browser-owned WebSocket and IndexedDB mechanics. It
-stops before managed provisioning or integrated-server persistence. Its
-remote actor and ordinary catalog continuation are complete; validation and
-closeout remain.
+stopped before managed provisioning or integrated-server persistence. Its
+remote actor, ordinary catalog continuation, and closeout validation are
+complete.
 
 ## Scope
 
@@ -305,6 +305,33 @@ remote-player walk-distance monotonicity assertion. A detached run of the
 pre-catalog `7b2ef0ed` commit reproduced the same walk-distance decrease while
 the player still moved, so the assertion remains intact and is recorded as
 baseline fixture debt rather than a catalog regression.
+
+Tactical 198 closed with the standard target rebuilt cleanly after cache
+cleanup: the full workspace check and all 2,410 executed Rust tests passed,
+along with the Wasm, generated TypeScript, ownership, and scene-host gates.
+Three sequential warm remote smokes remained in the established band at
+17.945--19.465 ms maximum frame gap and ended with zero pending work. The last
+run carried 995 request bytes and 4,035,024 inbound bytes over 36 and 52 frames
+respectively. One first post-resume run produced a 593.705 ms maximum-gap
+outlier before those immediate repeats; it passed functionally and is retained
+as environment-sensitive evidence rather than hidden.
+
+Smoke-only catalog transaction timings now expose the browser async boundary.
+Across three sequential runs, initial list took 1.120--1.185 ms; create, open,
+record-played, and delete were each below 0.61 ms; and the two follow-up lists
+were below 0.14 ms. The catalog UI maximum frame gap was 20.655 ms. These
+numbers measure whole browser transaction completion at the smoke clock's
+precision, not Rust codec or IndexedDB-engine components. Schema version 6,
+transaction ordering, Worker count, private heaps, and the seven-copy ledger
+remain unchanged.
+
+The 5,686-line final TypeScript inventory contains no registered competing
+engine owner: all 34 domain debts are zero. The remaining code owns browser
+mechanics, including DOM/rAF/input, IndexedDB requests and upgrades, WebSocket
+callbacks, Worker/timer/yield mechanics, SAB views, settings, provisioning,
+and smoke exposure. Further movement is not an automatic continuation of this
+campaign; it requires a new human decision tied to a specific ownership or
+performance problem.
 
 The desktop lobby passed with a 9.925 ms p95 and 41.055 ms maximum frame gap;
 the two-times CPU-throttled mobile lobby passed with 10.065 ms p95 and 100.985
@@ -607,6 +634,9 @@ Primary implementation surfaces:
 - `native/apps/mclone-web-client/src/web_scene_host.rs`
 - `native/apps/mclone-web-client/src/web_server_worker.rs`
 - `native/apps/mclone-web-client/src/web_remote_session.rs`
+- `native/apps/mclone-web-client/src/web_remote_worker_actor.rs`
+- `native/apps/mclone-web-client/src/web_catalog_execution.rs`
+- `native/apps/mclone-web-client/src/web_world_catalog_descriptor.rs`
 - `native/apps/mclone-web-client/www/mclone-web-app.ts`
 - `native/apps/mclone-web-client/www/mclone-render-compiler-shared.ts`
 - `native/apps/mclone-web-client/www/mclone-render-compiler-worker.ts`
@@ -618,7 +648,8 @@ Primary implementation surfaces:
 
 ## Recommended Next Work
 
-Close Tactical 198 by rerunning the full workspace and browser matrix,
-remeasuring the final ownership and performance ledgers, and recording the
-bounded stop. Do not continue into managed provisioning, integrated-server
-persistence, or shared Wasm memory without a new human decision.
+No automatic continuation is recommended. Keep the ownership and scene-host
+checks as regression gates. Do not continue into managed provisioning,
+integrated-server persistence, shared Wasm memory, or browser-native long-tail
+movement without a new human decision and a focused tactical supported by
+specific ownership or measured performance evidence.

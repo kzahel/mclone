@@ -1,6 +1,6 @@
 # Tactical 198: Opaque WebSocket And IndexedDB Adapters
 
-Status: approved and active 2026-07-19.
+Status: complete 2026-07-19.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -354,7 +354,7 @@ not weakened and is carried as baseline fixture debt.
 
 ## Slice 3: Closeout And Stop
 
-Status: pending.
+Status: complete 2026-07-19.
 
 Remeasure:
 
@@ -368,6 +368,68 @@ Remeasure:
 
 Stop before managed-scenario provisioning or integrated-server persistence.
 Recommend any follow-up with exact evidence; do not infer it from line count.
+
+### Slice 3 evidence
+
+The final ownership inventory reports 5,686 authored TypeScript lines across
+15 modules, six Worker entries, two TypeScript construction sites, all 34
+registered domain-ownership debts at zero, and the unchanged seven-site copy
+ledger. The remote and catalog cuts added no Worker, shared Wasm heap, SAB ABI,
+or production copy.
+
+The standard target was rebuilt after its compile cache was cleared. Formatting
+and the complete workspace check passed, followed by 81 Rust test suites with
+2,410 passed, zero failed, and ten ignored tests. The Wasm target check,
+generated-bindgen TypeScript check, ownership checker, and scene-host adoption
+gate also passed.
+
+Three sequential warm remote interaction smokes reported maximum frame gaps of
+18.170, 17.945, and 19.465 ms. The last run sent 36 request frames totaling 995
+bytes and received 52 frames totaling 4,035,024 bytes, with a maximum 21
+pending frames during the run and zero final command, update, job, publication,
+or compile backlog. A first run immediately after machine resume and the cold
+toolchain rebuild reported one 593.705 ms maximum gap; the same functional lane
+passed, and the three immediate warm repeats returned to the established
+18--19 ms band. This is recorded as an isolated environment-sensitive outlier,
+not hidden or treated as evidence of a sustained cutover regression.
+
+The direct catalog smoke now exposes smoke-only wall-clock operation timing.
+Three sequential runs measured initial list at 1.120--1.185 ms, create at
+0.255--0.345 ms, post-create list at 0.085--0.140 ms, open at
+0.150--0.200 ms, record-played at 0.120--0.185 ms, delete at
+0.475--0.605 ms, and post-delete list at 0.065--0.075 ms. These are browser
+transaction completion times at the smoke clock's precision, not a codec or
+IndexedDB engine decomposition. The catalog UI lane's maximum frame gap was
+20.655 ms and its inspected final capture showed the expected coherent
+one-row world list.
+
+The exact Rust action traces retain one readonly transaction for list, two
+transactions for create and open, one atomic get/put transaction for
+record-played, and the existing ordered/parallel clear shapes for delete,
+delete-all, and factory reset. The real IndexedDB constraint abort recovered
+into a successful next operation, the concurrent record/delete race did not
+resurrect its row, and legacy clear rows still rewrote to opaque descriptors.
+IndexedDB remains version 6 with unchanged stores, keys, indices, and startup
+migration behavior.
+
+Ordinary mutation/reopen and the periodic `flat-grass-v1`/`cylinder-x:32`
+proof passed. The latter reopened 121 chunks, two entity chunks, and one
+dimension record and recovered state 5 at canonical X 0 and lifted X 512. Its
+inspected frame showed coherent terrain and the cyan seam visualization.
+Managed storage again reported zero ordinary catalog rows before and after,
+and the ordinary lobby lane passed.
+
+The aggregate catalog-lobby lane remains red only on its recorded
+remote-player walk-distance monotonicity fixture: walk distance decreased
+while source position changed. All catalog predicates passed, and the same
+failure was already reproduced at pre-cutover commit `7b2ef0ed`. The assertion
+remains intact. This is baseline fixture debt, not a weakened gate or a reason
+to extend this tactical into unrelated actor animation work.
+
+The bounded campaign stops here. Managed-scenario provisioning,
+integrated-server persistence, shared Wasm memory, and further browser-native
+long-tail movement remain outside this tactical and require a new human
+decision supported by specific ownership or performance evidence.
 
 ## Validation
 
