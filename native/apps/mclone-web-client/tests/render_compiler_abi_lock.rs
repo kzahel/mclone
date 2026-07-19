@@ -12,7 +12,7 @@
 //! `#[cfg(target_arch = "wasm32")]`-gated, so a `#[cfg(test)]` unit test placed inside it would
 //! never run under `cargo test` on the host.
 
-const RUST_SRC: &str = include_str!("../src/web_canvas.rs");
+const RUST_SRC: &str = include_str!("../src/web_render_compiler_abi.rs");
 const JS_ABI: &str = include_str!("../www/mclone-render-compiler-abi.js");
 
 /// The numeric SAB-ring constants that exist on both sides and must agree. The
@@ -47,6 +47,7 @@ fn const_value(src: &str, name: &str, what: &str) -> i64 {
             // Accept both the Rust (`const NAME: T = V;`) and JS (`export const NAME = V;`) forms.
             let after = line
                 .strip_prefix("const ")
+                .or_else(|| line.strip_prefix("pub(crate) const "))
                 .or_else(|| line.strip_prefix("export const "))?;
             let rest = after.strip_prefix(name)?;
             // The char immediately after the name must end the identifier, so a name that is a
@@ -75,11 +76,11 @@ fn const_value(src: &str, name: &str, what: &str) -> i64 {
 #[test]
 fn js_and_rust_render_compiler_abi_agree() {
     for name in ABI_NAMES {
-        let rust = const_value(RUST_SRC, name, "src/web_canvas.rs");
+        let rust = const_value(RUST_SRC, name, "src/web_render_compiler_abi.rs");
         let js = const_value(JS_ABI, name, "www/mclone-render-compiler-abi.js");
         assert_eq!(
             rust, js,
-            "render-compile ABI drift for `{name}`: web_canvas.rs has {rust}, \
+            "render-compile ABI drift for `{name}`: web_render_compiler_abi.rs has {rust}, \
              mclone-render-compiler-abi.js has {js}"
         );
     }

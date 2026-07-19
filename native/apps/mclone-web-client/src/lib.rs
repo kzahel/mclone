@@ -42,6 +42,8 @@ mod web_compile_timing;
 #[cfg(target_arch = "wasm32")]
 mod web_remote_session;
 #[cfg(target_arch = "wasm32")]
+mod web_render_compiler_abi;
+#[cfg(target_arch = "wasm32")]
 mod web_render_worker;
 #[cfg(target_arch = "wasm32")]
 mod web_server_worker;

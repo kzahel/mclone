@@ -4,6 +4,7 @@ use web_sys::HtmlCanvasElement;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
+use crate::web_render_compiler_abi::*;
 use crate::web_render_worker::{WebRenderWorkerCoordinator, WebRenderWorkerWorldHandle};
 
 use super::{
@@ -117,32 +118,6 @@ const WEB_RENDER_COMPILE_DELTA_MAGIC: &[u8; 8] = b"MCWRCD2\0";
 const WEB_RENDER_COMPILE_DELTA_FLAG_RESET: u32 = 1;
 const WEB_RENDER_COMPILE_DELTA_FLAG_BIOME_ZOOM_SEED: u32 = 2;
 const WEB_FAR_LOD_TILE_MESH_MAGIC: &[u8; 8] = b"MCWLOD1\0";
-
-// 067 Stage 2 ABI / Stage 5 lock: resident render-compiler shared ring constants.
-// The worker writes the result control word + payload and main wasm reads them back
-// here via `js_sys::Atomics`. The JS side now authors these once in
-// `www/mclone-render-compiler-abi.js` (imported by the worker producer + the app/smoke
-// consumers); this Rust block is the main-wasm reader's copy. The two authored copies
-// are kept in lockstep by the host test `tests/render_compiler_abi_lock.rs`, which parses
-// both files and fails on any drift — so a mismatched status-word index is a failing test,
-// not a silent SAB corruption. (A `build.rs`/codegen single-source was considered but
-// rejected: there is no codegen precedent in this crate, and a parse-and-assert lock has a
-// far smaller blast radius than wiring a generated, committed JS artifact.)
-const RENDER_COMPILER_SHARED_RESULT_CONTROL_WORDS: u32 = 4;
-const RENDER_COMPILER_SHARED_RESULT_STATUS_INDEX: u32 = 0;
-const RENDER_COMPILER_SHARED_RESULT_BYTES_INDEX: u32 = 1;
-const RENDER_COMPILER_SHARED_RESULT_CAPACITY_INDEX: u32 = 2;
-const RENDER_COMPILER_SHARED_RESULT_PENDING: i32 = 1;
-const RENDER_COMPILER_SHARED_RESULT_COMPLETE: i32 = 2;
-const RENDER_COMPILER_SHARED_RESULT_OVERFLOW: i32 = 3;
-const RENDER_COMPILER_SHARED_RESULT_FAILED: i32 = 4;
-const RENDER_COMPILER_SHARED_INPUT_CONTROL_WORDS: u32 = 4;
-const RENDER_COMPILER_SHARED_INPUT_STATUS_INDEX: u32 = 0;
-const RENDER_COMPILER_SHARED_INPUT_BYTES_INDEX: u32 = 1;
-const RENDER_COMPILER_SHARED_INPUT_CAPACITY_INDEX: u32 = 2;
-const RENDER_COMPILER_SHARED_INPUT_READY: i32 = 2;
-const RENDER_COMPILER_DEFAULT_SHARED_RESULT_CAPACITY: u32 = 16 * 1024 * 1024;
-const RENDER_COMPILER_DEFAULT_SHARED_INPUT_CAPACITY: u32 = 1024 * 1024;
 
 #[wasm_bindgen]
 pub fn mclone_web_canvas_clear_bits(width: u32, height: u32) -> u32 {

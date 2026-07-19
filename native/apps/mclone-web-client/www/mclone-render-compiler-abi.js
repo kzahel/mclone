@@ -5,8 +5,8 @@
 // JS copies into one.
 //
 // The Rust main-wasm reader keeps its own copy of the numeric constants below in
-// native/apps/mclone-web-client/src/web_canvas.rs (it cannot import this JS file at compile
-// time). The two authored copies are locked by the host test
+// native/apps/mclone-web-client/src/web_render_compiler_abi.rs (it cannot import this JS file
+// at compile time). The two authored copies are locked by the host test
 // native/apps/mclone-web-client/tests/render_compiler_abi_lock.rs, which parses both files and
 // fails on any drift — so a mismatched status-word index becomes a failing test instead of a
 // silent SAB corruption.
