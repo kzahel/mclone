@@ -69,10 +69,10 @@ use crate::startup_render_seed::StartupRenderSectionSeed;
 use crate::world_catalog::NativeWorldCatalog;
 use crate::{
     DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET, DEFAULT_RENDER_CHUNK_MESH_BUDGET,
-    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimePollTiming,
-    RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget, SingleViewRuntime, SingleViewRuntimeStats,
-    TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
-    chunk_tracking_radius_for_render_distance, elapsed_ms,
+    GameplayCommandSubmission, GameplayCommandTiming, GameplayCommandUpdatePolicy,
+    RuntimePollDiagnostics, RuntimePollTiming, RuntimeUpdateApplyReport, RuntimeUpdatePumpBudget,
+    SingleViewRuntime, SingleViewRuntimeStats, TargetRenderWorkStats,
+    TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance, elapsed_ms,
     loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 
@@ -1451,24 +1451,23 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         Ok(true)
     }
 
-    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
-        self.send_gameplay_command_timed(command)
-            .map(|(changed, _)| changed)
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<()> {
+        self.send_gameplay_command_timed(command).map(|_| ())
     }
 
     pub fn send_gameplay_command_with_update_policy(
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         self.send_gameplay_command_with_update_policy_timed(command, policy)
-            .map(|(changed, _)| changed)
+            .map(|_| ())
     }
 
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(
             command,
             GameplayCommandUpdatePolicy::DrainImmediately,
@@ -1479,7 +1478,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         let total_start = Instant::now();
         let send_start = Instant::now();
         self.connection
@@ -1499,9 +1498,8 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             }
             GameplayCommandUpdatePolicy::SendOnly => (0.0, RuntimeUpdateApplyReport::default()),
         };
-        Ok((
-            true,
-            GameplayCommandTiming {
+        Ok(GameplayCommandSubmission {
+            timing: GameplayCommandTiming {
                 total_ms: elapsed_ms(total_start.elapsed()),
                 send_ms,
                 drain_updates_ms,
@@ -1513,7 +1511,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 section_block_updates: apply_report.section_block_updates,
                 unload_updates: apply_report.unload_updates,
             },
-        ))
+        })
     }
 
     pub fn poll(&mut self) -> Result<bool> {
@@ -2195,7 +2193,9 @@ where
                 ) else {
                     return Ok((false, GameplayCommandTiming::default()));
                 };
-                scene.send_gameplay_command_with_update_policy_timed(command, policy)
+                scene
+                    .send_gameplay_command_with_update_policy_timed(command, policy)
+                    .map(|submission| (true, submission.timing))
             }
             Self::RemoteDedicated(scene) => {
                 let Some(command) = scene.core_mut().set_chunk_view_command(
@@ -2205,12 +2205,14 @@ where
                 ) else {
                     return Ok((false, GameplayCommandTiming::default()));
                 };
-                scene.send_gameplay_command_with_update_policy_timed(command, policy)
+                scene
+                    .send_gameplay_command_with_update_policy_timed(command, policy)
+                    .map(|submission| (true, submission.timing))
             }
         }
     }
 
-    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<()> {
         match self {
             Self::Local(scene) => scene.send_gameplay_command(command),
             Self::RemoteDedicated(scene) => scene.send_gameplay_command(command),
@@ -2221,15 +2223,15 @@ where
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         self.send_gameplay_command_with_update_policy_timed(command, policy)
-            .map(|(changed, _)| changed)
+            .map(|_| ())
     }
 
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(
             command,
             GameplayCommandUpdatePolicy::DrainImmediately,
@@ -2240,7 +2242,7 @@ where
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         match self {
             Self::Local(scene) => {
                 scene.send_gameplay_command_with_update_policy_timed(command, policy)
@@ -3025,24 +3027,23 @@ where
         self.loaded_chunk_count() > 0
     }
 
-    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
-        self.send_gameplay_command_timed(command)
-            .map(|(changed, _)| changed)
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<()> {
+        self.send_gameplay_command_timed(command).map(|_| ())
     }
 
     pub fn send_gameplay_command_with_update_policy(
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         self.send_gameplay_command_with_update_policy_timed(command, policy)
-            .map(|(changed, _)| changed)
+            .map(|_| ())
     }
 
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(
             command,
             GameplayCommandUpdatePolicy::DrainImmediately,
@@ -3053,12 +3054,10 @@ where
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         let total_start = Instant::now();
         let mut drain_updates_ms = 0.0;
         let mut apply_report = RuntimeUpdateApplyReport::default();
-        let mut changed = true;
-
         if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately)
             && self.connection.pending_update_metrics()?.update_depth() > 0
         {
@@ -3068,7 +3067,6 @@ where
                 RuntimeUpdatePumpBudget::unlimited(),
             )?;
             drain_updates_ms += pump_report.drain_updates_ms;
-            changed |= pump_report.apply_report.changed;
             apply_report.accumulate(pump_report.apply_report);
         }
 
@@ -3087,15 +3085,13 @@ where
                     RuntimeUpdatePumpBudget::unlimited(),
                 )?;
                 drain_updates_ms += pump_report.drain_updates_ms;
-                changed |= pump_report.apply_report.changed;
                 apply_report.accumulate(pump_report.apply_report);
             }
             GameplayCommandUpdatePolicy::SendOnly => {}
         }
 
-        Ok((
-            changed,
-            GameplayCommandTiming {
+        Ok(GameplayCommandSubmission {
+            timing: GameplayCommandTiming {
                 total_ms: elapsed_ms(total_start.elapsed()),
                 send_ms,
                 drain_updates_ms,
@@ -3107,7 +3103,7 @@ where
                 section_block_updates: apply_report.section_block_updates,
                 unload_updates: apply_report.unload_updates,
             },
-        ))
+        })
     }
 
     /// Reconnect and request the current view from a clean replica/queue state.
@@ -3569,7 +3565,7 @@ where
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         NativeSceneServices::send_gameplay_command_with_update_policy_timed(self, command, policy)
     }
 
@@ -3986,12 +3982,13 @@ mod tests {
             0,
             chunk_tracking_radius_for_render_distance(0),
         ));
-        let (_changed, timing) = runtime
+        let submission = runtime
             .send_gameplay_command_with_update_policy_timed(
                 command,
                 GameplayCommandUpdatePolicy::SendOnly,
             )
             .unwrap();
+        let timing = submission.timing;
         assert_eq!(timing.drain_updates_ms, 0.0);
         assert_eq!(timing.updates, 0);
         assert!(runtime.client().chunk_snapshot(next_center).is_none());
@@ -4114,12 +4111,13 @@ mod tests {
             0,
             chunk_tracking_radius_for_render_distance(0),
         ));
-        let (_changed, timing) = runtime
+        let submission = runtime
             .send_gameplay_command_with_update_policy_timed(
                 command,
                 GameplayCommandUpdatePolicy::SendOnly,
             )
             .unwrap();
+        let timing = submission.timing;
 
         assert_eq!(timing.drain_updates_ms, 0.0);
         assert_eq!(timing.updates, 0);

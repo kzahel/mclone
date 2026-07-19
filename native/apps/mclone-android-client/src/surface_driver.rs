@@ -824,16 +824,15 @@ impl AndroidGpuState {
             (frame.use_item, FlatInputAction::Use),
         ] {
             if pressed
-                && let MonoWorldActionStatus::Sent { target, changed } =
+                && let MonoWorldActionStatus::Submitted { target } =
                     self.host.handle_mono_world_action(action)?
             {
                 log::info!(
-                    "Android gameplay interaction {:?} at ({}, {}, {}) changed={}",
+                    "Android gameplay interaction {:?} submitted at ({}, {}, {})",
                     action,
                     target.hit.block_pos.x,
                     target.hit.block_pos.y,
-                    target.hit.block_pos.z,
-                    changed
+                    target.hit.block_pos.z
                 );
             }
         }

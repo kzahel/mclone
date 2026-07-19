@@ -269,6 +269,7 @@ const requireThreading = process.argv.includes("--require-threading")
 // smoke run.
 const buildOnly = process.argv.includes("--build-only")
   || process.env.MCLONE_NATIVE_WEB_BUILD_ONLY === "1";
+const AIR_BLOCK_STATE_ID = 0;
 const DIRT_BLOCK_STATE_ID = 5;
 
 run().catch((error) => {
@@ -3623,13 +3624,13 @@ async function runBlockEditProbe(page, canvas) {
       undefined,
       { timeout: 10_000 },
     );
-    const placement = await clickBlockInteraction(page, canvas, "right", "place", {
+    const placement = await submitBlockInteraction(page, "place", {
       expectedSelectedHotbarSlot: 1,
-      expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+      expectedWorldBlockStateId: DIRT_BLOCK_STATE_ID,
       expectedCarriedItemSynced: true,
     });
     placements.push(placement);
-    const interaction = await clickBlockInteraction(page, canvas, "left", "break");
+    const interaction = await submitBlockInteraction(page, "break");
     interactions.push(interaction);
     await page.waitForFunction(
       () => {
@@ -3654,10 +3655,16 @@ async function runBlockEditProbe(page, canvas) {
   const interactionDeltas = interactions.map((interaction) => ({
     action: interaction?.interaction?.action ?? null,
     ok: interaction?.ok === true,
-    updateCountDelta: Number(interaction?.interaction?.updateCountDelta) || 0,
-    snapshotUpdateCountDelta: Number(interaction?.interaction?.snapshotUpdateCountDelta) || 0,
-    sectionBlockUpdateCountDelta: Number(interaction?.interaction?.sectionBlockUpdateCountDelta) || 0,
-    unloadUpdateCountDelta: Number(interaction?.interaction?.unloadUpdateCountDelta) || 0,
+    worldBlock: interaction?.authoritative?.worldBlock ?? null,
+    updateCountDelta: (Number(interaction?.authoritative?.updateCount) || 0)
+      - (Number(interaction?.start?.updateCount) || 0),
+    snapshotUpdateCountDelta: (Number(interaction?.authoritative?.snapshotUpdateCount) || 0)
+      - (Number(interaction?.start?.snapshotUpdateCount) || 0),
+    sectionBlockUpdateCountDelta:
+      (Number(interaction?.authoritative?.sectionBlockUpdateCount) || 0)
+      - (Number(interaction?.start?.sectionBlockUpdateCount) || 0),
+    unloadUpdateCountDelta: (Number(interaction?.authoritative?.unloadUpdateCount) || 0)
+      - (Number(interaction?.start?.unloadUpdateCount) || 0),
   }));
   return {
     ok: interactions.length === blockEditProbeBreaks
@@ -3813,9 +3820,9 @@ async function runIndexedDbReloadProbe(
     undefined,
     { timeout: 10_000 },
   );
-  const placement = await clickBlockInteraction(page, canvas, "right", "place", {
+  const placement = await submitBlockInteraction(page, "place", {
     expectedSelectedHotbarSlot: 1,
-    expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedWorldBlockStateId: DIRT_BLOCK_STATE_ID,
     expectedCarriedItemSynced: true,
   });
   try {
@@ -3943,9 +3950,9 @@ async function placeCylinderIndexedDbEditForSmoke(page, canvas, worldTopology) {
     undefined,
     { timeout: 10_000 },
   );
-  const placement = await clickBlockInteraction(page, canvas, "right", "place", {
+  const placement = await submitBlockInteraction(page, "place", {
     expectedSelectedHotbarSlot: 1,
-    expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedWorldBlockStateId: DIRT_BLOCK_STATE_ID,
     expectedCarriedItemSynced: true,
   });
   const placedCandidates = placedBlockCandidates(placement?.interaction);
@@ -6722,12 +6729,12 @@ async function exerciseBlockInteraction(page, canvas) {
   const selectedSlotProbe = await page.evaluate(() => ({
     selectedHotbarSlot: globalThis.__mcloneWebApp.state.selectedHotbarSlot,
   }));
-  const placeProbe = await clickBlockInteraction(page, canvas, "right", "place", {
+  const placeProbe = await submitBlockInteraction(page, "place", {
     expectedSelectedHotbarSlot: 1,
-    expectedResultBlockStateId: DIRT_BLOCK_STATE_ID,
+    expectedWorldBlockStateId: DIRT_BLOCK_STATE_ID,
     expectedCarriedItemSynced: true,
   });
-  const breakProbe = await clickBlockInteraction(page, canvas, "left", "break");
+  const breakProbe = await submitBlockInteraction(page, "break");
   return {
     ok: breakProbe.ok && selectedSlotProbe.selectedHotbarSlot === 1 && placeProbe.ok,
     break: breakProbe,
@@ -6738,58 +6745,178 @@ async function exerciseBlockInteraction(page, canvas) {
 
 /**
  * @param {Page} page
- * @param {Locator} canvas
- * @param {"left" | "right" | "middle"} button
  * @param {string} action
- * @param {{ expectedSelectedHotbarSlot?: number, expectedResultBlockStateId?: number, expectedCarriedItemSynced?: boolean }} [options]
+ * @param {{ expectedSelectedHotbarSlot?: number, expectedWorldBlockStateId?: number, expectedCarriedItemSynced?: boolean }} [options]
  */
-async function clickBlockInteraction(page, canvas, button, action, options = {}) {
+async function submitBlockInteraction(page, action, options = {}) {
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.ok === true
+        && state.streamingSettled === true
+        && state.pendingCompileJobCount === 0
+        && state.lastCompileReport?.pendingCompileJobCount === 0;
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
   const start = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
+    const report = state.lastReport ?? {};
     return {
-      commandCount: state.lastReport?.commandCount ?? 0,
+      commandCount: Number(report.commandCount) || 0,
       interactionCount: state.interactionCount ?? 0,
       meshBuildCount: state.lastCompileReport?.meshBuildCount ?? state.lastReport?.meshBuildCount ?? 0,
+      updateCount: Number(report.updateCount) || 0,
+      snapshotUpdateCount: Number(report.snapshotUpdateCount) || 0,
+      sectionBlockUpdateCount: Number(report.sectionBlockUpdateCount) || 0,
+      unloadUpdateCount: Number(report.unloadUpdateCount) || 0,
+      currentTarget: state.currentTarget ?? null,
     };
   });
-  await canvas.click({ position: { x: 640, y: 360 }, button });
+  const expectedWorldBlockStateId = options.expectedWorldBlockStateId
+    ?? (action === "break" ? AIR_BLOCK_STATE_ID : null);
+  if (expectedWorldBlockStateId === null) {
+    throw new Error(`${action} interaction needs an expected authoritative block state`);
+  }
+  const candidatePositions = action === "place"
+    ? placedBlockCandidates(start.currentTarget)
+    : placedBlockCandidates(start.currentTarget).filter((candidate) => candidate.source === "hit");
+  if (candidatePositions.length === 0) {
+    throw new Error(`${action} interaction had no current target before submission`);
+  }
+  const beforeCandidates = await Promise.all(
+    candidatePositions.map(async (candidate) => ({
+      ...await blockStateAt(page, candidate),
+      source: candidate.source,
+    })),
+  );
+  const changedCandidates = beforeCandidates.filter(
+    (candidate) => candidate.loaded === true
+      && candidate.blockStateId !== expectedWorldBlockStateId,
+  );
+  if (changedCandidates.length === 0) {
+    throw new Error(`${action} interaction had no candidate whose authoritative state could change:\n${JSON.stringify({ start, beforeCandidates, expectedWorldBlockStateId }, null, 2)}`);
+  }
+  const submittedInteraction = await page.evaluate(
+    (action) => globalThis.__mcloneWebApp.interactBlock?.(action) ?? null,
+    action,
+  );
   const waitArgs = {
     start,
     action,
     expectedSelectedHotbarSlot: options.expectedSelectedHotbarSlot ?? null,
-    expectedResultBlockStateId: options.expectedResultBlockStateId ?? null,
     expectedCarriedItemSynced: options.expectedCarriedItemSynced ?? null,
   };
+  if (!submittedInteraction) {
+    const diagnostic = await page.evaluate(blockInteractionSubmittedDiagnostic, waitArgs);
+    throw new Error(`${action} interaction adapter returned no submission report:\n${JSON.stringify(diagnostic, null, 2)}`);
+  }
   try {
     await page.waitForFunction(
-      blockInteractionReadyPredicate,
+      blockInteractionSubmittedPredicate,
       waitArgs,
       { timeout: 60_000 },
     );
   } catch (error) {
-    const diagnostic = await page.evaluate(blockInteractionReadyDiagnostic, waitArgs);
-    throw new Error(`timed out waiting for ${action} interaction: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(diagnostic, null, 2)}`);
+    const diagnostic = await page.evaluate(blockInteractionSubmittedDiagnostic, waitArgs);
+    throw new Error(`timed out waiting for ${action} command submission: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(diagnostic, null, 2)}`);
+  }
+  const interaction = await page.evaluate(() => globalThis.__mcloneWebApp.state.lastInteraction);
+  const authoritativeArgs = {
+    candidates: changedCandidates.map(({ x, y, z, source }) => ({ x, y, z, source })),
+    expectedWorldBlockStateId,
+    startSectionBlockUpdateCount: start.sectionBlockUpdateCount,
+  };
+  try {
+    await page.waitForFunction(
+      ({ candidates, expectedWorldBlockStateId, startSectionBlockUpdateCount }) => {
+        const app = globalThis.__mcloneWebApp;
+        const sectionBlockUpdateCount = Number(app?.state?.lastReport?.sectionBlockUpdateCount) || 0;
+        return sectionBlockUpdateCount > startSectionBlockUpdateCount
+          && candidates.some((candidate) => {
+            const report = app?.blockStateAt?.(candidate.x, candidate.y, candidate.z);
+            return report?.ok === true
+              && report.loaded === true
+              && Number(report.blockStateId) === expectedWorldBlockStateId;
+          });
+      },
+      authoritativeArgs,
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    const candidateStates = await Promise.all(
+      authoritativeArgs.candidates.map((candidate) => blockStateAt(page, candidate)),
+    );
+    const telemetry = await captureBlockEditTelemetry(page);
+    throw new Error(`timed out waiting for authoritative ${action} block update: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ start, interaction, beforeCandidates, candidateStates, telemetry, expectedWorldBlockStateId }, null, 2)}`);
+  }
+  const authoritative = await page.evaluate(
+    ({ candidates, expectedWorldBlockStateId }) => {
+      const app = globalThis.__mcloneWebApp;
+      const state = app.state;
+      const report = state.lastReport ?? {};
+      const worldBlock = candidates
+        .map((candidate) => ({
+          ...candidate,
+          report: app.blockStateAt?.(candidate.x, candidate.y, candidate.z) ?? null,
+        }))
+        .find((candidate) => Number(candidate.report?.blockStateId) === expectedWorldBlockStateId);
+      return {
+        worldBlock: worldBlock ? {
+          x: worldBlock.x,
+          y: worldBlock.y,
+          z: worldBlock.z,
+          source: worldBlock.source,
+          blockStateId: Number(worldBlock.report?.blockStateId),
+        } : null,
+        updateCount: Number(report.updateCount) || 0,
+        snapshotUpdateCount: Number(report.snapshotUpdateCount) || 0,
+        sectionBlockUpdateCount: Number(report.sectionBlockUpdateCount) || 0,
+        unloadUpdateCount: Number(report.unloadUpdateCount) || 0,
+      };
+    },
+    authoritativeArgs,
+  );
+  const compileArgs = { startMeshBuildCount: start.meshBuildCount };
+  try {
+    await page.waitForFunction(
+      ({ startMeshBuildCount }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const compileReport = state?.lastCompileReport;
+        return state?.ok === true
+          && state.pendingCompileJobCount === 0
+          && compileReport?.pendingCompileJobCount === 0
+          && (compileReport?.acceptedCompileSectionCount ?? 0) > 0
+          && (compileReport?.meshBuildCount ?? 0) > startMeshBuildCount;
+      },
+      compileArgs,
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    const telemetry = await captureBlockEditTelemetry(page);
+    throw new Error(`timed out waiting for ${action} remesh after authoritative update: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify({ start, interaction, beforeCandidates, authoritative, telemetry }, null, 2)}`);
   }
   return page.evaluate(
-    ({ start, action, expectedSelectedHotbarSlot, expectedResultBlockStateId, expectedCarriedItemSynced }) => {
+    ({ start, action, expectedSelectedHotbarSlot, expectedWorldBlockStateId, expectedCarriedItemSynced, authoritative }) => {
       const state = globalThis.__mcloneWebApp.state;
       const interaction = state.lastInteraction;
       const compileReport = state.lastCompileReport;
-      const recompiled = compileReport?.commandCount >= interaction?.commandCount
-        && compileReport?.acceptedCompileSectionCount > 0
+      const recompiled = compileReport?.acceptedCompileSectionCount > 0
         && compileReport?.meshBuildCount > start.meshBuildCount;
       return {
         ok: state.ok === true
           && interaction?.action === action
           && interaction?.hit === true
           && interaction?.commandSent === true
-          && interaction?.changed === true
           && (expectedSelectedHotbarSlot === null || interaction?.selectedHotbarSlot === expectedSelectedHotbarSlot)
-          && (expectedResultBlockStateId === null || interaction?.resultBlockStateId === expectedResultBlockStateId)
           && (expectedCarriedItemSynced === null || interaction?.carriedItemSynced === expectedCarriedItemSynced)
+          && authoritative?.worldBlock?.blockStateId === expectedWorldBlockStateId
+          && authoritative.sectionBlockUpdateCount > start.sectionBlockUpdateCount
           && recompiled,
         start,
         interaction,
+        authoritative,
         compileReport: {
           commandCount: compileReport?.commandCount ?? 0,
           acceptedCompileSectionCount: compileReport?.acceptedCompileSectionCount ?? 0,
@@ -6798,7 +6925,7 @@ async function clickBlockInteraction(page, canvas, button, action, options = {})
         },
       };
     },
-    waitArgs,
+    { ...waitArgs, expectedWorldBlockStateId, authoritative },
   );
 }
 
@@ -6807,71 +6934,51 @@ async function clickBlockInteraction(page, canvas, button, action, options = {})
  * @property {{ commandCount: number, interactionCount: number, meshBuildCount: number }} start
  * @property {string} action
  * @property {number | null} expectedSelectedHotbarSlot
- * @property {number | null} expectedResultBlockStateId
  * @property {boolean | null} expectedCarriedItemSynced
  */
 
 /** @param {BlockInteractionWaitArgs} args */
-function blockInteractionReadyPredicate(args) {
+function blockInteractionSubmittedPredicate(args) {
   const {
     start,
     action,
     expectedSelectedHotbarSlot,
-    expectedResultBlockStateId,
     expectedCarriedItemSynced,
   } = args;
   const state = globalThis.__mcloneWebApp?.state;
   const interaction = state?.lastInteraction;
-  const compileReport = state?.lastCompileReport;
   return state?.ok === true
-    && state.pendingCompileJobCount === 0
     && (state.interactionCount ?? 0) > start.interactionCount
     && interaction?.ok === true
     && interaction.action === action
     && interaction.hit === true
     && interaction.commandSent === true
-    && interaction.changed === true
-    && (interaction.interactionUpdateCount ?? 0) > 0
     && (interaction.commandCount ?? 0) > start.commandCount
     && (expectedSelectedHotbarSlot === null || interaction.selectedHotbarSlot === expectedSelectedHotbarSlot)
-    && (expectedResultBlockStateId === null || interaction.resultBlockStateId === expectedResultBlockStateId)
-    && (expectedCarriedItemSynced === null || interaction.carriedItemSynced === expectedCarriedItemSynced)
-    && compileReport?.commandCount >= interaction.commandCount
-    && compileReport?.acceptedCompileSectionCount > 0
-    && compileReport?.meshBuildCount > start.meshBuildCount;
+    && (expectedCarriedItemSynced === null || interaction.carriedItemSynced === expectedCarriedItemSynced);
 }
 
 /** @param {BlockInteractionWaitArgs} args */
-function blockInteractionReadyDiagnostic({
+function blockInteractionSubmittedDiagnostic({
   start,
   action,
   expectedSelectedHotbarSlot,
-  expectedResultBlockStateId,
   expectedCarriedItemSynced,
 }) {
   const state = globalThis.__mcloneWebApp?.state;
   const interaction = state?.lastInteraction;
-  const compileReport = state?.lastCompileReport;
   const checks = {
     stateOk: state?.ok === true,
-    pendingCompileJobCountZero: state?.pendingCompileJobCount === 0,
     interactionAdvanced: (state?.interactionCount ?? 0) > start.interactionCount,
     interactionOk: interaction?.ok === true,
     actionMatches: interaction?.action === action,
     hit: interaction?.hit === true,
     commandSent: interaction?.commandSent === true,
-    changed: interaction?.changed === true,
-    interactionUpdateCountPositive: (interaction?.interactionUpdateCount ?? 0) > 0,
     commandCountAdvanced: (interaction?.commandCount ?? 0) > start.commandCount,
     selectedSlotMatches: expectedSelectedHotbarSlot === null
       || interaction?.selectedHotbarSlot === expectedSelectedHotbarSlot,
-    resultBlockMatches: expectedResultBlockStateId === null
-      || interaction?.resultBlockStateId === expectedResultBlockStateId,
     carriedItemSyncedMatches: expectedCarriedItemSynced === null
       || interaction?.carriedItemSynced === expectedCarriedItemSynced,
-    compileCommandCoversInteraction: compileReport?.commandCount >= interaction?.commandCount,
-    compileAcceptedSections: (compileReport?.acceptedCompileSectionCount ?? 0) > 0,
-    compileMeshBuildAdvanced: (compileReport?.meshBuildCount ?? 0) > start.meshBuildCount,
   };
   return {
     ok: Object.values(checks).every(Boolean),
@@ -6890,7 +6997,6 @@ function blockInteractionReadyDiagnostic({
       meshBuildCount: state.lastReport?.meshBuildCount,
     } : null,
     interaction,
-    compileReport,
   };
 }
 

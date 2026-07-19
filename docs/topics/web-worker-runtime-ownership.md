@@ -2,12 +2,12 @@
 
 Topic: web-worker-runtime-ownership
 
-Status: first actor proof complete 2026-07-19. The production browser keeps
-isolated Wasm heaps and the existing external `SharedArrayBuffer` transports
-while worker coordination moves toward Rust-owned actors behind domain-blind
-TypeScript browser brokers. The whole-worker baseline and server-job Rust actor
-proof have landed; the actor/broker boundary now awaits review before render
-ownership work. Tactical
+Status: first actor proof and validation baseline cleanup complete 2026-07-19.
+The production browser keeps isolated Wasm heaps and the existing external
+`SharedArrayBuffer` transports while worker coordination moves toward
+Rust-owned actors behind domain-blind TypeScript browser brokers. The
+whole-worker baseline and server-job Rust actor proof have landed; the
+actor/broker boundary now awaits review before render ownership work. Tactical
 [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the first
 implementation slices. A shared Wasm linear-memory runtime remains a separate,
 measurement-gated investigation rather than an implied destination of the
@@ -101,6 +101,21 @@ Slice 0 locked the pre-cutover 7,417-line baseline. Slice 1 removed all four
 registered server-job dispatch debts and seven net TypeScript lines by replacing
 the worldgen/light selector with one opaque Rust actor call. The line delta is
 incidental; the zero domain-selector counts are the acceptance evidence.
+
+The subsequent validation cleanup corrected an independent semantic leak:
+gameplay dispatch success had been reported as `changed` even though it proved
+only command submission. The browser now establishes block changes causally by
+observing the exact replica block state, section-update progress, and the
+resulting remesh. This added three explanatory TypeScript lines, for a current
+7,413-line inventory, without restoring any server-job domain selector.
+
+That stronger probe exposed the actual intermittent remote failure. The
+dedicated server's nonblocking WebSocket writer disconnected on `WouldBlock`
+instead of retrying Tungstenite's buffered frame. It now retains a
+pending-flush state, has a deterministic regression test, and passed five
+consecutive fresh remote interaction smokes. The baseline is therefore green;
+work remains stopped at the Slice 1 boundary review rather than proceeding to
+render ownership.
 
 The existing scene-host purity gate covers known competing scene-policy
 owners in `mclone-web-app.ts`, and focused Rust tests forbid particular

@@ -952,6 +952,17 @@ pub struct GameplayCommandTiming {
     pub unload_updates: usize,
 }
 
+/// Evidence that a gameplay command was accepted by the client-side transport.
+///
+/// A successful receipt proves submission only. The timing may include updates
+/// drained while submitting under [`GameplayCommandUpdatePolicy::DrainImmediately`],
+/// but those updates are not a command-specific acknowledgement and must not be
+/// interpreted as an authoritative `changed` result.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct GameplayCommandSubmission {
+    pub timing: GameplayCommandTiming,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RuntimePollTiming {
     pub total_ms: f64,

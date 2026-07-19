@@ -1,4 +1,4 @@
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -139,8 +139,9 @@ fn websocket_connection_loop(
 
     let mut command_count = 0_usize;
     let mut reason = None;
+    let mut outbound_state = WebSocketOutboundState::default();
     'connected: loop {
-        if let Err(err) = flush_outbound(&mut websocket, &outbound_rx) {
+        if let Err(err) = flush_outbound(&mut websocket, &outbound_rx, &mut outbound_state) {
             reason = Some(format!("failed to write websocket server updates: {err:#}"));
             break;
         }
@@ -193,31 +194,72 @@ fn websocket_connection_loop(
     let _ = websocket.close(None);
 }
 
-fn flush_outbound(
-    websocket: &mut tungstenite::WebSocket<TcpStream>,
+#[derive(Debug, Default)]
+struct WebSocketOutboundState {
+    flush_pending: bool,
+    close_after_flush: Option<String>,
+}
+
+fn flush_outbound<S>(
+    websocket: &mut tungstenite::WebSocket<S>,
     outbound: &DedicatedOutboundReceiver,
-) -> Result<()> {
+    state: &mut WebSocketOutboundState,
+) -> Result<()>
+where
+    S: Read + Write,
+{
     loop {
-        match outbound.try_recv() {
+        if state.flush_pending {
+            match websocket.flush() {
+                Ok(()) => {
+                    state.flush_pending = false;
+                    if let Some(detail) = state.close_after_flush.take() {
+                        bail!(detail);
+                    }
+                }
+                Err(WebSocketError::Io(err)) if err.kind() == io::ErrorKind::WouldBlock => {
+                    return Ok(());
+                }
+                Err(error) => {
+                    return Err(error).context("failed to flush websocket server update batch");
+                }
+            }
+        }
+
+        let (message, close_after_flush) = match outbound.try_recv() {
             Ok(DedicatedOutboundMessage::Updates { updates, .. }) => {
                 let frame = encode_websocket_server_update_batch(&updates)
                     .context("failed to encode websocket server update batch")?;
-                websocket
-                    .send(Message::Binary(frame.into()))
-                    .context("failed to send websocket server update batch")?;
+                (Message::Binary(frame.into()), None)
             }
             Ok(DedicatedOutboundMessage::Close(reason)) => {
                 let frame = encode_websocket_server_update_batch(&[ServerUpdate::Disconnect(
                     reason.clone(),
                 )])
                 .context("failed to encode websocket disconnect update")?;
-                websocket
-                    .send(Message::Binary(frame.into()))
-                    .context("failed to send websocket disconnect update")?;
-                bail!(reason.detail)
+                (Message::Binary(frame.into()), Some(reason.detail))
             }
             Err(TryRecvError::Empty) => return Ok(()),
             Err(TryRecvError::Disconnected) => bail!("dedicated websocket publisher stopped"),
+        };
+        match websocket.send(message) {
+            Ok(()) => {
+                if let Some(detail) = close_after_flush {
+                    bail!(detail);
+                }
+            }
+            Err(WebSocketError::Io(err)) if err.kind() == io::ErrorKind::WouldBlock => {
+                // Tungstenite guarantees that a frame remains queued after a
+                // stream write failure unless it returns WriteBufferFull. A
+                // nonblocking socket reaching kernel backpressure therefore
+                // needs a later flush, not a connection teardown.
+                state.flush_pending = true;
+                state.close_after_flush = close_after_flush;
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(error).context("failed to send websocket server update batch");
+            }
         }
     }
 }
@@ -281,6 +323,8 @@ fn complete_websocket_protocol_handshake(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io;
+
     use mclone_core::ChunkPos;
     use mclone_net::{
         NativeClientIoSession, decode_websocket_server_handshake,
@@ -296,6 +340,54 @@ mod tests {
             day_time,
             daylight_cycle_running: true,
         }
+    }
+
+    #[derive(Debug, Default)]
+    struct WouldBlockOnceStream {
+        blocked_write: bool,
+        written: Vec<u8>,
+    }
+
+    impl Read for WouldBlockOnceStream {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::WouldBlock))
+        }
+    }
+
+    impl Write for WouldBlockOnceStream {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            if !self.blocked_write {
+                self.blocked_write = true;
+                return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            }
+            self.written.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn websocket_outbound_retries_buffered_frame_after_would_block() {
+        let mut websocket = tungstenite::WebSocket::from_raw_socket(
+            WouldBlockOnceStream::default(),
+            tungstenite::protocol::Role::Server,
+            None,
+        );
+        let (outbound, outbound_rx) = DedicatedOutbound::channel();
+        outbound.publish(vec![time_update(123)]).unwrap();
+        let mut state = WebSocketOutboundState::default();
+
+        flush_outbound(&mut websocket, &outbound_rx, &mut state).unwrap();
+        assert!(state.flush_pending);
+        assert!(websocket.get_ref().written.is_empty());
+
+        flush_outbound(&mut websocket, &outbound_rx, &mut state).unwrap();
+        assert!(!state.flush_pending);
+        assert!(!websocket.get_ref().written.is_empty());
+        assert_eq!(outbound.queue_metrics().queued_frames, 0);
     }
 
     #[test]

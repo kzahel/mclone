@@ -92,10 +92,7 @@ pub enum MonoWorldActionStatus {
     NoCommand,
     DeniedByWorldBehavior,
     EmbeddedWorldActivationRequested,
-    Sent {
-        target: BlockInteractionTarget,
-        changed: bool,
-    },
+    Submitted { target: BlockInteractionTarget },
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1106,6 +1103,7 @@ impl McloneSceneHost {
             .as_mut()
             .expect("runtime presence checked")
             .send_gameplay_command(mclone_protocol::ClientCommand::ShootDebugPhysicsCube)
+            .map(|_| true)
             .map_err(Into::into)
     }
 
@@ -1157,13 +1155,12 @@ impl McloneSceneHost {
         let Some(command) = command else {
             return Ok(MonoWorldActionStatus::NoCommand);
         };
-        let changed = self
-            .active_world
+        self.active_world
             .runtime
             .as_mut()
             .expect("runtime presence checked")
             .send_gameplay_command(command)?;
-        Ok(MonoWorldActionStatus::Sent { target, changed })
+        Ok(MonoWorldActionStatus::Submitted { target })
     }
 
     pub fn mono_block_target(&self) -> Option<BlockInteractionTarget> {

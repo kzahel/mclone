@@ -1,9 +1,10 @@
 # Tactical 197: Domain-Blind Web Worker Broker
 
-Status: awaiting boundary review 2026-07-19. Slices 0 and 1 have landed. Slice
-2 has a concrete ownership target but begins only after review of the small
-server-job actor/broker contract. Later integrated-server consolidation remains
-provisional and must not widen this tactical into a shared-Wasm-memory runtime.
+Status: awaiting boundary review 2026-07-19. Slices 0 and 1 and the validation
+baseline cleanup have landed. Slice 2 has a concrete ownership target but
+begins only after review of the small server-job actor/broker contract. Later
+integrated-server consolidation remains provisional and must not widen this
+tactical into a shared-Wasm-memory runtime.
 
 Topic: `web-worker-runtime-ownership`
 
@@ -238,6 +239,10 @@ and package wiring, this is recorded as a pre-existing red scenario rather than
 attributed to the ownership gate. Slice 1 must preserve that exact boundary and
 must not claim the remote scenario green without new evidence.
 
+The baseline cleanup below later established that the old interaction report
+proved command submission, not an authoritative mutation. This paragraph is a
+historical record of the observed red run, not causal mutation evidence.
+
 ## Slice 1 — Server-Job Rust Actor Proof
 
 Status: complete 2026-07-19; awaiting boundary review before Slice 2.
@@ -353,11 +358,71 @@ failure. All other remote interaction checks and the compiler settled state
 were green. This remains tracked as pre-existing validation debt, not as Slice
 1 evidence of a green remote path.
 
+The baseline cleanup below supersedes that interpretation. The then-current
+probe called successful command enqueue `changed` and could associate unrelated
+updates or compiler work with the interaction; it did not prove an
+authoritative mutation. Repeated causal runs exposed a real intermittent
+WebSocket disconnect.
+
 ### Slice 1 review
 
 No product-design review should be necessary if byte, timing, failure, and
 pixel evidence remain equivalent. Review the Rust/TypeScript boundary itself
 before using it as the render template.
+
+## Validation Baseline Cleanup
+
+Status: complete 2026-07-19; no Slice 2 work included.
+
+The Slice 0/1 review stop first required resolving every supposedly known red
+baseline. Investigation found two coupled problems:
+
+- gameplay command APIs returned a `changed` boolean even though successful
+  local and remote dispatch only proved submission; updates drained near the
+  command were not a command-specific acknowledgement; and
+- the dedicated WebSocket adapter treated `WouldBlock` from a nonblocking
+  Tungstenite send/flush as fatal. Under kernel backpressure the authoritative
+  server could apply a command, disconnect before publishing the update, and
+  leave the browser waiting indefinitely.
+
+The runtime now returns a `GameplayCommandSubmission` receipt with timing only.
+Native, Android, XR, offscreen, and web callers report submission rather than
+claiming a world change. Browser interaction reports no longer synthesize a
+result block state or update count from enqueue success.
+
+The block interaction smoke now records the exact candidate states before
+submission, waits for the expected authoritative block state in the client
+replica and a newer section-block update, then waits for an accepted remesh and
+an idle compiler. It invokes the explicit web interaction adapter so pointer
+gesture thresholds cannot masquerade as authority failures; physical input is
+covered separately by the app input probes.
+
+The WebSocket writer now retains a pending-flush state when Tungstenite reports
+`WouldBlock` and retries its already-buffered frame on a later connection-loop
+turn. A deterministic mock stream forces one blocked write and proves that the
+connection survives and the frame is subsequently written. The pre-existing
+`rustfmt` drift in the composable-world presentation contract was normalized as
+part of restoring a genuinely green baseline.
+
+### Cleanup evidence
+
+- `cargo fmt --all --check` passed.
+- the app-runtime, scene, and web-client suites passed; the dedicated-server
+  suite passed all 42 tests, including the forced-`WouldBlock` regression;
+- `cargo check --workspace`, the Wasm build/typecheck, Worker ownership gate,
+  and scene-host adoption gate passed;
+- the local block-edit proof observed dirt state `5`, a section update and
+  remesh, followed by air state `0`, another section update and remesh;
+- five consecutive fresh remote WebSocket smokes passed the same authoritative
+  placement/break and remesh contract with settled compiler queues; and
+- the local block-edit and final remote canvas captures were inspected under
+  `/tmp` and remained visually correct.
+
+Authored TypeScript is now 7,413 lines. The three-line increase from the Slice
+1 result is the clearer submitted/not-submitted interaction status; the four
+server-job domain-debt counters remain zero and the copy ledger is unchanged.
+The baseline is green, but the existing human review gate still stops the
+workstream before Slice 2.
 
 ## Slice 2 — Rust-Owned Main-Side Render Broker
 
@@ -505,15 +570,21 @@ pnpm native:web:thread-smoke
 pnpm native:web:app-smoke
 pnpm native:web:chunk-smoke
 pnpm native:web:movement-perf
-pnpm native:web:remote-smoke
 pnpm native:web:lobby-scenario-smoke
 pnpm native:web:lobby-scenario-mobile-smoke
 pnpm native:web:lobby-scenario-lifecycle-smoke
+for attempt in 1 2 3 4 5; do
+  pnpm native:web:remote-smoke
+done
 ```
 
 Run focused subsets for small preparatory commits; run the complete applicable
 matrix before each production owner cutover. Any slice that can change pixels
 must capture to `/tmp` and inspect the image before continuing.
+
+Remote interaction validation is intentionally repeated. One green run does
+not establish transport stability after the intermittent nonblocking-write
+failure found during the baseline cleanup.
 
 Native regression coverage remains required where a shared trait or engine
 owner changes. Browser-only broker mechanics do not justify rebuilding every

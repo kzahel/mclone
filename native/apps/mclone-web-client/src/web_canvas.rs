@@ -50,9 +50,9 @@ use mclone_app_runtime::world_catalog::{
     world_not_found,
 };
 use mclone_app_runtime::{
-    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollTiming, RuntimeUpdatePumpBudget,
-    TimedRenderSectionCacheUpdate, loading_progress_overlay_from_diagnostics,
-    view_readiness_overlay_from_diagnostics,
+    GameplayCommandSubmission, GameplayCommandTiming, GameplayCommandUpdatePolicy,
+    RuntimePollTiming, RuntimeUpdatePumpBudget, TimedRenderSectionCacheUpdate,
+    loading_progress_overlay_from_diagnostics, view_readiness_overlay_from_diagnostics,
 };
 use mclone_assets::{AssetPackId, AssetPackSelection, PackedAssetSource, SharedAssetSource};
 use mclone_audio::PreparedAudioAssets;
@@ -2402,7 +2402,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> anyhow::Result<(bool, GameplayCommandTiming)> {
+    ) -> anyhow::Result<GameplayCommandSubmission> {
         let mut report = self
             .runtime
             .send_gameplay_command_deferred(command)
@@ -2414,13 +2414,12 @@ impl SceneRuntimeService for WebSceneRuntimeService {
                 .map_err(anyhow::Error::msg)?;
             report.update_count = report.update_count.saturating_add(drained.update_count);
         }
-        Ok((
-            true,
-            GameplayCommandTiming {
+        Ok(GameplayCommandSubmission {
+            timing: GameplayCommandTiming {
                 updates: report.update_count,
                 ..GameplayCommandTiming::default()
             },
-        ))
+        })
     }
 
     fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> anyhow::Result<bool> {

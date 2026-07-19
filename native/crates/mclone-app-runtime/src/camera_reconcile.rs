@@ -15,7 +15,9 @@ use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
 use mclone_render_session::EngineCameraController;
 
 use crate::monotonic::MonotonicClockHandle;
-use crate::{GameplayCommandTiming, GameplayCommandUpdatePolicy, elapsed_ms};
+use crate::{
+    GameplayCommandSubmission, GameplayCommandTiming, GameplayCommandUpdatePolicy, elapsed_ms,
+};
 
 /// The target-neutral runtime facts/actions needed to reconcile the engine
 /// camera. Native and browser session owners implement this narrow contract;
@@ -26,13 +28,13 @@ pub trait EngineCameraRuntime {
         HorizontalTopology::UNBOUNDED
     }
 
-    fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool>;
+    fn send_camera_command(&mut self, command: ClientCommand) -> Result<()>;
 
     fn send_camera_command_with_policy_timed(
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)>;
+    ) -> Result<GameplayCommandSubmission>;
 
     fn drain_camera_position_updates(&mut self) -> Vec<PlayerPositionUpdate>;
 
@@ -52,7 +54,7 @@ where
         self.client().topology()
     }
 
-    fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
+    fn send_camera_command(&mut self, command: ClientCommand) -> Result<()> {
         self.send_gameplay_command(command)
     }
 
@@ -60,7 +62,7 @@ where
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(command, policy)
     }
 
@@ -82,7 +84,7 @@ impl EngineCameraRuntime for crate::scene_session_runtime::SceneSessionRuntime {
         self.client().topology()
     }
 
-    fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
+    fn send_camera_command(&mut self, command: ClientCommand) -> Result<()> {
         self.send_gameplay_command(command)
     }
 
@@ -90,7 +92,7 @@ impl EngineCameraRuntime for crate::scene_session_runtime::SceneSessionRuntime {
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(command, policy)
     }
 
@@ -218,14 +220,14 @@ where
         .is_some()
         .then(|| clock.expect("timed reconcile needs clock").now());
     let topology = runtime.camera_topology();
-    let changed = if let Some(report) = camera.next_pose_sync_command_in(topology) {
-        let (changed, command_timing) = runtime
+    let submitted = if let Some(report) = camera.next_pose_sync_command_in(topology) {
+        let submission = runtime
             .send_camera_command_with_policy_timed(report.command, context.pose_sync_policy)
             .with_context(|| format!("failed to sync {} player pose to server", context.lane))?;
         if let Some(timing) = timing.as_deref_mut() {
-            timing.server_command = command_timing;
+            timing.server_command = submission.timing;
         }
-        changed
+        true
     } else {
         false
     };
@@ -248,7 +250,7 @@ where
                 .elapsed_since(start),
         );
     }
-    Ok(changed || position_updates_changed)
+    Ok(submitted || position_updates_changed)
 }
 
 /// Accept every queued server player-position correction, acknowledge it,
@@ -364,18 +366,18 @@ mod tests {
     }
 
     impl EngineCameraRuntime for CameraFacts {
-        fn send_camera_command(&mut self, command: ClientCommand) -> Result<bool> {
+        fn send_camera_command(&mut self, command: ClientCommand) -> Result<()> {
             self.commands.push(command);
-            Ok(true)
+            Ok(())
         }
 
         fn send_camera_command_with_policy_timed(
             &mut self,
             command: ClientCommand,
             _policy: GameplayCommandUpdatePolicy,
-        ) -> Result<(bool, GameplayCommandTiming)> {
+        ) -> Result<GameplayCommandSubmission> {
             self.commands.push(command);
-            Ok((true, GameplayCommandTiming::default()))
+            Ok(GameplayCommandSubmission::default())
         }
 
         fn drain_camera_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {

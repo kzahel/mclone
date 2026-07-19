@@ -34,9 +34,10 @@ use crate::session::{
     ActiveSessionDescriptor, GameSessionCoordinator, GameSessionState, SessionStatus,
 };
 use crate::{
-    GameplayCommandTiming, GameplayCommandUpdatePolicy, RuntimePollDiagnostics,
-    RuntimeUpdatePumpBudget, SingleViewRuntime, SingleViewRuntimeStats, TargetRenderWorkStats,
-    TimedRenderSectionCacheUpdate, chunk_tracking_radius_for_render_distance,
+    GameplayCommandSubmission, GameplayCommandTiming, GameplayCommandUpdatePolicy,
+    RuntimePollDiagnostics, RuntimeUpdatePumpBudget, SingleViewRuntime, SingleViewRuntimeStats,
+    TargetRenderWorkStats, TimedRenderSectionCacheUpdate,
+    chunk_tracking_radius_for_render_distance,
 };
 
 pub const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120);
@@ -135,7 +136,7 @@ pub trait SceneRuntimeService {
         &mut self,
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
-    ) -> Result<(bool, GameplayCommandTiming)>;
+    ) -> Result<GameplayCommandSubmission>;
     fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool>;
     fn poll_until_idle_with_timeout(&mut self, timeout: Duration) -> Result<(usize, f64)>;
     fn sync_render_sections_with_completed_result_acceptance_timed(
@@ -305,18 +306,18 @@ impl SceneSessionRuntime {
         .map(|(changed, _)| changed)
     }
 
-    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<bool> {
+    pub fn send_gameplay_command(&mut self, command: ClientCommand) -> Result<()> {
         self.send_gameplay_command_with_update_policy_timed(
             command,
             GameplayCommandUpdatePolicy::SendOnly,
         )
-        .map(|(changed, _)| changed)
+        .map(|_| ())
     }
 
     pub fn send_gameplay_command_timed(
         &mut self,
         command: ClientCommand,
-    ) -> Result<(bool, GameplayCommandTiming)> {
+    ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(
             command,
             GameplayCommandUpdatePolicy::DrainImmediately,

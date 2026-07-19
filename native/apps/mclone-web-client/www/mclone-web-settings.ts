@@ -79,5 +79,8 @@ export function formatInteractionStatus(interaction: WasmReport | null | undefin
   if (!interaction.hit) {
     return `${interaction.action}: miss`;
   }
-  return `${interaction.action}: ${interaction.changed ? "changed" : "same"}`;
+  if (interaction.commandSent) {
+    return `${interaction.action}: submitted`;
+  }
+  return `${interaction.action}: not submitted`;
 }

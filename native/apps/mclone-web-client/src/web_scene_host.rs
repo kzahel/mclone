@@ -241,7 +241,6 @@ pub struct WebSceneHost {
     movement_input_applied: bool,
     dom_input_frame_count: u64,
     interaction_sent: bool,
-    interaction_changed: bool,
     settings_effect_applied: bool,
     pause_ui_rendered: bool,
     resized: bool,
@@ -925,30 +924,15 @@ impl WebSceneHost {
         )
         .map_err(JsValue::from)?;
         match status {
-            MonoWorldActionStatus::Sent { target, changed } => {
+            MonoWorldActionStatus::Submitted { target } => {
                 self.interaction_count = self.interaction_count.saturating_add(1);
                 self.command_count = self.command_count.saturating_add(1);
-                self.update_count = self.update_count.saturating_add(usize::from(changed));
                 self.interaction_sent = true;
-                self.interaction_changed |= changed;
                 write_block_target(&object, &target).map_err(JsValue::from)?;
-                let result_state = if action == FlatInputAction::Use {
-                    self.host_ref()?.selected_mono_hotbar_block_state()
-                } else {
-                    self.host_ref()?
-                        .mono_client()
-                        .and_then(|client| client.block_state_at_block_pos(target.hit.block_pos))
-                };
                 report_set_number(
                     &object,
                     "hitBlockStateId",
                     before_state.map_or(-1.0, |state| f64::from(state.0)),
-                )
-                .map_err(JsValue::from)?;
-                report_set_number(
-                    &object,
-                    "resultBlockStateId",
-                    result_state.map_or(-1.0, |state| f64::from(state.0)),
                 )
                 .map_err(JsValue::from)?;
                 report_set_number(
@@ -959,23 +943,13 @@ impl WebSceneHost {
                 .map_err(JsValue::from)?;
                 report_set_bool(&object, "carriedItemSynced", action == FlatInputAction::Use)
                     .map_err(JsValue::from)?;
-                report_set_number(
-                    &object,
-                    "interactionUpdateCount",
-                    if changed { 1.0 } else { 0.0 },
-                )
-                .map_err(JsValue::from)?;
                 report_set_bool(&object, "commandSent", true).map_err(JsValue::from)?;
-                report_set_bool(&object, "changed", changed).map_err(JsValue::from)?;
                 report_set_number(&object, "commandCountDelta", 1.0).map_err(JsValue::from)?;
-                report_set_number(&object, "updateCountDelta", if changed { 1.0 } else { 0.0 })
-                    .map_err(JsValue::from)?;
             }
             MonoWorldActionStatus::DeniedByWorldBehavior => {
                 report_set_bool(&object, "hit", before_target.is_some()).map_err(JsValue::from)?;
                 report_set_bool(&object, "deniedByWorldBehavior", true).map_err(JsValue::from)?;
                 report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
-                report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
             }
             MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
                 report_set_bool(&object, "hit", true).map_err(JsValue::from)?;
@@ -983,13 +957,11 @@ impl WebSceneHost {
                     .map_err(JsValue::from)?;
                 report_set_bool(&object, "deniedByWorldBehavior", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
-                report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
             }
             _ => {
                 report_set_bool(&object, "hit", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "deniedByWorldBehavior", false).map_err(JsValue::from)?;
                 report_set_bool(&object, "commandSent", false).map_err(JsValue::from)?;
-                report_set_bool(&object, "changed", false).map_err(JsValue::from)?;
             }
         }
         self.write_common_counts(&object).map_err(JsValue::from)?;
@@ -1659,9 +1631,8 @@ impl WebSceneHost {
             .handle_mono_world_action(FlatInputAction::Attack)
             .map_err(js_error)?
         {
-            MonoWorldActionStatus::Sent { changed, .. } => {
+            MonoWorldActionStatus::Submitted { .. } => {
                 self.interaction_sent = true;
-                self.interaction_changed |= changed;
             }
             status => {
                 let camera = host.camera_frame_state().camera;
@@ -2026,7 +1997,6 @@ async fn create_scene_host(
         movement_input_applied: false,
         dom_input_frame_count: 0,
         interaction_sent: false,
-        interaction_changed: false,
         settings_effect_applied: false,
         pause_ui_rendered: false,
         resized: false,
@@ -2432,7 +2402,6 @@ impl WebSceneHost {
             self.dom_input_frame_count as f64,
         )?;
         report_set_bool(&object, "interactionSent", self.interaction_sent)?;
-        report_set_bool(&object, "interactionChanged", self.interaction_changed)?;
         report_set_bool(
             &object,
             "settingsEffectApplied",

@@ -75,7 +75,7 @@ pub(crate) enum OffscreenScriptStep {
     },
     InputFrame {
         frame: FlatInputFrame,
-        require_changed_action: Option<FlatInputAction>,
+        require_submitted_action: Option<FlatInputAction>,
     },
     #[allow(dead_code)]
     UiPointerClick {
@@ -184,7 +184,7 @@ impl OffscreenScriptRunner {
                                 forward: true,
                                 ..FlatInputFrame::default()
                             },
-                            require_changed_action: None,
+                            require_submitted_action: None,
                         }]),
                         device,
                         queue,
@@ -747,13 +747,13 @@ impl OffscreenFlatClientHost {
                 }
                 OffscreenScriptStep::InputFrame {
                     frame,
-                    require_changed_action,
+                    require_submitted_action,
                 } => {
                     report.input_frame_count += 1;
                     let statuses = self.driver.apply_input_frame(frame)?;
                     report.world_action_count += statuses.len();
-                    if let Some(action) = require_changed_action {
-                        require_world_action_changed(
+                    if let Some(action) = require_submitted_action {
+                        require_world_action_submitted(
                             &statuses,
                             action,
                             "offscreen script input frame",
@@ -2229,11 +2229,11 @@ fn scripted_interaction_script(target: ScriptedInteractionTarget) -> OffscreenSc
         },
         OffscreenScriptStep::InputFrame {
             frame: hotbar_input_frame(8),
-            require_changed_action: None,
+            require_submitted_action: None,
         },
         OffscreenScriptStep::InputFrame {
             frame: action_input_frame(FlatInputAction::Use),
-            require_changed_action: Some(FlatInputAction::Use),
+            require_submitted_action: Some(FlatInputAction::Use),
         },
         OffscreenScriptStep::SetCameraLookAt {
             eye: final_position,
@@ -3227,7 +3227,7 @@ fn aim_current_eye_at_embedded_preview(host: &mut OffscreenFlatClientHost) -> Re
     Ok(())
 }
 
-fn require_world_action_changed(
+fn require_world_action_submitted(
     statuses: &[(FlatInputAction, MonoWorldActionStatus)],
     action: FlatInputAction,
     label: &str,
@@ -3239,10 +3239,7 @@ fn require_world_action_changed(
         bail!("{label} did not run");
     };
     match status {
-        MonoWorldActionStatus::Sent { changed: true, .. } => Ok(()),
-        MonoWorldActionStatus::Sent { changed: false, .. } => {
-            bail!("{label} sent a command but reported no world change")
-        }
+        MonoWorldActionStatus::Submitted { .. } => Ok(()),
         MonoWorldActionStatus::NoRuntime => bail!("{label} had no active runtime"),
         MonoWorldActionStatus::NoTarget => bail!("{label} found no interaction target"),
         MonoWorldActionStatus::NoCommand => bail!("{label} produced no gameplay command"),
@@ -3289,13 +3286,13 @@ mod tests {
                     selected_hotbar_slot: Some(8),
                     ..
                 },
-                require_changed_action: None,
+                require_submitted_action: None,
             }
         ));
         assert!(matches!(
             script.steps()[2],
             OffscreenScriptStep::InputFrame {
-                require_changed_action: Some(FlatInputAction::Use),
+                require_submitted_action: Some(FlatInputAction::Use),
                 ..
             }
         ));

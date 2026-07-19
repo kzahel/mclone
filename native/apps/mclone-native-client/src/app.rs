@@ -1045,15 +1045,14 @@ impl ChunkApp {
             return Ok(());
         };
         match driver.handle_world_action(action)? {
-            MonoWorldActionStatus::Sent { target, changed } => {
+            MonoWorldActionStatus::Submitted { target } => {
                 log::info!(
-                    "gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+                    "gameplay interaction {:?} submitted at ({}, {}, {}) face={:?}",
                     action,
                     target.hit.block_pos.x,
                     target.hit.block_pos.y,
                     target.hit.block_pos.z,
-                    target.hit.direction,
-                    changed
+                    target.hit.direction
                 );
             }
             MonoWorldActionStatus::EmbeddedWorldActivationRequested => {

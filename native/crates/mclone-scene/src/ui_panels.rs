@@ -1126,6 +1126,7 @@ impl McloneSceneHost {
         };
         runtime
             .send_gameplay_command(command)
+            .map(|_| true)
             .context("failed to sync XR carried item to server")
     }
 
@@ -1137,6 +1138,7 @@ impl McloneSceneHost {
             .send_gameplay_command(set_player_appearance_command_for_ui_model(
                 self.active_world.player_model,
             ))
+            .map(|_| true)
             .context("failed to sync XR player appearance to server")
     }
 
@@ -1157,6 +1159,7 @@ impl McloneSceneHost {
         };
         runtime
             .send_gameplay_command(command)
+            .map(|_| true)
             .context("failed to assign XR debug hotbar slot")
     }
 
@@ -1181,6 +1184,7 @@ impl McloneSceneHost {
         };
         runtime
             .send_gameplay_command(command)
+            .map(|_| true)
             .context("failed to assign XR debug actor hotbar slot")
     }
 
@@ -1260,17 +1264,16 @@ impl McloneSceneHost {
         let Some(runtime) = &mut self.active_world.runtime else {
             return Ok(());
         };
-        let changed = runtime
+        runtime
             .send_gameplay_command(command)
             .context("failed to send XR gameplay interaction command")?;
         log::info!(
-            "XR gameplay interaction {:?} at ({}, {}, {}) face={:?} changed={}",
+            "XR gameplay interaction {:?} submitted at ({}, {}, {}) face={:?}",
             action,
             target.hit.block_pos.x,
             target.hit.block_pos.y,
             target.hit.block_pos.z,
-            target.hit.direction,
-            changed
+            target.hit.direction
         );
         Ok(())
     }
