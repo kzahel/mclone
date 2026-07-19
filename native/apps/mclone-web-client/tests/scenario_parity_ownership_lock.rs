@@ -61,6 +61,10 @@ const WEB_SERVER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_server_worker.rs"
 ));
+const WEB_INTEGRATED_SERVER_STARTUP: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_integrated_server_startup.rs"
+));
 const INTEGRATED_SERVER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-integrated-server-worker.ts"
@@ -97,8 +101,9 @@ fn browser_runtime_honors_the_shared_managed_actor_policy() {
         WEB_SCENE_HOST
             .contains(".with_debug_passive_showcase(pending.scene.debug_passive_showcase)")
     );
-    assert!(WEB_SERVER_WORKER.contains("\"debugPassiveShowcase\""));
-    assert!(INTEGRATED_SERVER_WORKER.contains("setDebugPassiveShowcaseEnabled"));
+    assert!(WEB_SERVER_WORKER.contains("self.config.debug_passive_showcase"));
+    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("debug_passive_showcase: bool"));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("debugPassiveShowcase"));
 }
 
 #[test]
@@ -107,8 +112,9 @@ fn browser_auxiliary_player_control_only_enables_the_shared_rust_script() {
     assert!(WEB_SCENE_HOST.contains(
         ".with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)"
     ));
-    assert!(WEB_SERVER_WORKER.contains("\"debugAuxiliaryPlayerScript\""));
-    assert!(INTEGRATED_SERVER_WORKER.contains("setDebugAuxiliaryPlayerScriptEnabled"));
+    assert!(WEB_SERVER_WORKER.contains("self.config.debug_auxiliary_player_script"));
+    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("debug_auxiliary_player_script: bool"));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("debugAuxiliaryPlayerScript"));
     for forwarded_fact in [
         "embeddedPreviewRemotePlayerObservationCount",
         "embeddedPreviewFirstRemotePlayerId",
@@ -131,6 +137,34 @@ fn browser_auxiliary_player_control_only_enables_the_shared_rust_script() {
         assert!(
             !INTEGRATED_SERVER_WORKER.contains(forbidden),
             "TypeScript integrated-server Worker must not author {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
+    assert!(WEB_SERVER_WORKER.contains("WebIntegratedServerStartupConfig"));
+    assert!(WEB_SERVER_WORKER.contains("\"startupFrame\""));
+    assert!(WEB_SERVER_WORKER.contains("pub struct WebIntegratedServerStartup"));
+    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_MAGIC"));
+    assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_VERSION"));
+    assert!(INTEGRATED_SERVER_WORKER.contains("new module.WebIntegratedServerStartup("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("startup.createTransient("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDbExternalLoads("));
+    for forbidden in [
+        "generationProfile",
+        "worldTopology",
+        "behaviorProfile",
+        "lightStatusBatchSize",
+        "freezeScheduledFluidTicks",
+        "debugPassiveShowcase",
+        "debugAuxiliaryPlayerScript",
+        "observerOnly",
+        "setLocalPlayerIdentity",
+    ] {
+        assert!(
+            !INTEGRATED_SERVER_WORKER.contains(forbidden),
+            "TypeScript integrated-server startup must not own {forbidden}"
         );
     }
 }

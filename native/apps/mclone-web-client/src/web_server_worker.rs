@@ -11,7 +11,7 @@ use mclone_app_runtime::client_connection::{
 };
 use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
 use mclone_app_runtime::startup_args::parse_world_topology_arg;
-use mclone_core::{AxisTopology, ChunkPos, ChunkStatus, HorizontalTopology};
+use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology};
 use mclone_protocol::{
     ChunkView, ClientCommand, ClientIdentity, DimensionChunkPos, DimensionKey, PlayerProfileId,
     ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
@@ -36,6 +36,8 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
+use crate::web_integrated_server_startup::WebIntegratedServerStartupConfig;
+
 const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
 // Server-worker SharedArrayBuffer ring ABI. This is the Rust copy of the control-word layout
 // authored once on the JS side in www/mclone-runner-shared-abi.js (imported by both the
@@ -55,22 +57,6 @@ const RUNNER_SHARED_STATUS_FAILED: i32 = -1;
 const MAX_RUNNER_SHARED_POOL_SLOTS: usize = 2;
 const MIN_RUNNER_SHARED_REQUEST_BYTES: u32 = 4 * 1024;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
-
-fn web_world_topology_label(topology: HorizontalTopology) -> Result<String, String> {
-    match (topology.x, topology.z) {
-        (AxisTopology::Unbounded, AxisTopology::Unbounded) => Ok("plane".to_owned()),
-        (
-            AxisTopology::Periodic {
-                minimum_chunk: 0,
-                period_chunks,
-            },
-            AxisTopology::Unbounded,
-        ) => Ok(format!("cylinder-x:{period_chunks}")),
-        _ => Err(format!(
-            "browser startup does not yet expose topology {topology:?}"
-        )),
-    }
-}
 
 fn web_dimension_definition(
     seed: i64,
@@ -524,55 +510,26 @@ impl WebIntegratedServerRunner {
         let message = Object::new();
         set_string(&message, "kind", "start")?;
         set_number(&message, "requestId", f64::from(request_id))?;
-        set_number(&message, "seed", config.seed as f64)?;
-        set_string(
-            &message,
-            "generationProfile",
-            config.world_generation_profile.label(),
-        )?;
-        set_string(
-            &message,
-            "worldTopology",
-            &web_world_topology_label(config.world_topology)?,
-        )?;
-        set_string(
-            &message,
-            "behaviorProfile",
-            config.world_behavior_profile.label(),
-        )?;
-        set_bool(
-            &message,
-            "freezeScheduledFluidTicks",
-            config.freeze_scheduled_fluid_ticks,
-        )?;
-        set_bool(
-            &message,
-            "debugPassiveShowcase",
-            config.debug_passive_showcase,
-        )?;
-        set_bool(
-            &message,
-            "debugAuxiliaryPlayerScript",
-            config.debug_auxiliary_player_script,
-        )?;
-        set_bool(&message, "observerOnly", config.observer_only)?;
-        set_number(
-            &message,
-            "lightStatusBatchSize",
-            config.light_status_batch_size as f64,
+        let startup_frame = WebIntegratedServerStartupConfig {
+            seed: config.seed,
+            world_generation_profile: config.world_generation_profile,
+            world_topology: config.world_topology,
+            world_behavior_profile: config.world_behavior_profile,
+            freeze_scheduled_fluid_ticks: config.freeze_scheduled_fluid_ticks,
+            debug_passive_showcase: config.debug_passive_showcase,
+            debug_auxiliary_player_script: config.debug_auxiliary_player_script,
+            light_status_batch_size: config.light_status_batch_size,
+            local_player_identity: config.local_player_identity.clone(),
+            observer_only: config.observer_only,
+        }
+        .encode()?;
+        let startup_frame = Uint8Array::from(startup_frame.as_slice());
+        Reflect::set(&message, &JsValue::from_str("startupFrame"), &startup_frame).map_err(
+            |error| format!("failed to attach integrated-server startup frame: {error:?}"),
         )?;
         set_string(&message, "bindgenJsUrl", &config.bindgen_js_url)?;
         set_string(&message, "bindgenWasmUrl", &config.bindgen_wasm_url)?;
         set_string(&message, "jobWorkerUrl", &config.job_worker_url)?;
-        set_string(
-            &message,
-            "displayName",
-            &config.local_player_identity.display_name,
-        )?;
-        let profile_id =
-            Uint8Array::from(config.local_player_identity.profile_id.bytes().as_slice());
-        Reflect::set(&message, &JsValue::from_str("profileId"), &profile_id)
-            .map_err(|error| format!("failed to attach local profile UUID: {error:?}"))?;
         match &config.world_storage {
             WebIntegratedServerWorldStorage::Transient => {
                 set_string(&message, "worldStorage", "transient")?;
@@ -592,7 +549,11 @@ impl WebIntegratedServerRunner {
             "tickIntervalMs",
             f64::from(WEB_WORKER_TICK_INTERVAL_MS),
         )?;
-        let response = self.post_request(request_id, &message, None).await?;
+        let transfer = Array::new();
+        transfer.push(&startup_frame.buffer());
+        let response = self
+            .post_request(request_id, &message, Some(&transfer))
+            .await?;
         ensure_worker_response_ok(&response)
     }
 
@@ -1774,6 +1735,14 @@ pub struct McloneWebIntegratedServerWorker {
     running: bool,
 }
 
+/// Decoded, versioned authority configuration for one browser integrated
+/// server. TypeScript retains browser storage and cadence mechanics, but never
+/// projects these domain fields or chooses their defaults.
+#[wasm_bindgen]
+pub struct WebIntegratedServerStartup {
+    config: WebIntegratedServerStartupConfig,
+}
+
 #[derive(Debug, Default)]
 struct WebIndexedDbWorldStoreState {
     world_metadata: Option<WorldMetadata>,
@@ -1839,6 +1808,29 @@ fn web_dimension_definition_for_state(
         return Ok(record.definition.clone());
     }
     web_dimension_definition(seed, generation_profile, world_topology)
+}
+
+fn web_dimension_definition_from_startup(
+    config: &WebIntegratedServerStartupConfig,
+) -> mclone_server::DimensionDefinition {
+    let mut definition =
+        mclone_server::DimensionDefinition::overworld(config.seed, config.world_generation_profile);
+    definition.topology = config.world_topology;
+    definition
+}
+
+fn web_dimension_definition_for_startup_state(
+    config: &WebIntegratedServerStartupConfig,
+    state: &Rc<RefCell<WebIndexedDbWorldStoreState>>,
+) -> mclone_server::DimensionDefinition {
+    state
+        .borrow()
+        .dimensions
+        .get(&DimensionKey::overworld())
+        .map_or_else(
+            || web_dimension_definition_from_startup(config),
+            |record| record.definition.clone(),
+        )
 }
 
 fn apply_stored_world_metadata_profiles(
@@ -1968,6 +1960,146 @@ impl WorldStore for WebIndexedDbWorldStore {
             .dirty_players
             .insert(record.player.clone(), record.clone());
         Ok(())
+    }
+}
+
+#[wasm_bindgen]
+impl WebIntegratedServerStartup {
+    #[wasm_bindgen(constructor)]
+    pub fn new(frame: Uint8Array) -> Result<Self, JsValue> {
+        let config = WebIntegratedServerStartupConfig::decode(&frame.to_vec())
+            .map_err(|error| JsValue::from_str(&error))?;
+        Ok(Self { config })
+    }
+
+    #[wasm_bindgen(js_name = createTransient)]
+    pub fn create_transient(
+        &self,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Result<McloneWebIntegratedServerWorker, JsValue> {
+        let definition = web_dimension_definition_from_startup(&self.config);
+        let server = if job_worker_url.trim().is_empty() {
+            LocalRealmSession::local_integrated_with_dimension_definition(definition)
+        } else {
+            LocalRealmSession::local_integrated_with_dimension_definition_and_wasm_job_workers(
+                definition,
+                WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
+            )
+        };
+        self.finish_startup(
+            McloneWebIntegratedServerWorker::from_server(self.config.seed, server, None),
+            false,
+            false,
+        )
+        .map_err(|error| JsValue::from_str(&error))
+    }
+
+    #[wasm_bindgen(js_name = createIndexedDbExternalLoads)]
+    pub fn create_indexed_db_external_loads(
+        &self,
+        dimension_records: JsValue,
+        world_metadata_record: JsValue,
+        legacy_records_present: bool,
+        job_worker_url: String,
+        bindgen_js_url: String,
+        bindgen_wasm_url: String,
+    ) -> Result<McloneWebIntegratedServerWorker, JsValue> {
+        let stored_world_metadata_present =
+            !world_metadata_record.is_null() && !world_metadata_record.is_undefined();
+        let state = Rc::new(RefCell::new(
+            WebIndexedDbWorldStoreState::from_js_metadata(
+                dimension_records,
+                world_metadata_record,
+                legacy_records_present,
+            )
+            .map_err(|error| JsValue::from_str(&error))?,
+        ));
+        let definition = web_dimension_definition_for_startup_state(&self.config, &state);
+        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
+        let mut server = if job_worker_url.trim().is_empty() {
+            LocalRealmSession::
+                local_integrated_with_external_load_world_store_and_dimension_definition(
+                    definition, store,
+                )
+        } else {
+            LocalRealmSession::
+                local_integrated_with_external_load_world_store_dimension_definition_and_wasm_job_workers(
+                    definition,
+                    store,
+                    WasmServerJobWorkerConfig::new(
+                        job_worker_url,
+                        bindgen_js_url,
+                        bindgen_wasm_url,
+                    ),
+                )
+        };
+        apply_stored_world_metadata_profiles(&mut server, &state)
+            .map_err(|error| JsValue::from_str(&error))?;
+        self.finish_startup(
+            McloneWebIntegratedServerWorker::from_server(self.config.seed, server, Some(state)),
+            true,
+            stored_world_metadata_present,
+        )
+        .map_err(|error| JsValue::from_str(&error))
+    }
+}
+
+impl WebIntegratedServerStartup {
+    fn finish_startup(
+        &self,
+        mut worker: McloneWebIntegratedServerWorker,
+        indexed_db: bool,
+        stored_world_metadata_present: bool,
+    ) -> Result<McloneWebIntegratedServerWorker, String> {
+        if !stored_world_metadata_present {
+            worker
+                .server
+                .set_world_generation_profile(self.config.world_generation_profile)
+                .map_err(|error| error.to_string())?;
+            worker
+                .server
+                .set_world_behavior_profile(self.config.world_behavior_profile);
+        }
+        if indexed_db {
+            worker
+                .server
+                .initialize_world_metadata_blocking()
+                .map_err(|error| error.to_string())?;
+        }
+        if self.config.observer_only {
+            worker
+                .server
+                .begin_observing(
+                    DimensionKey::overworld(),
+                    ChunkView {
+                        center: ChunkPos::new(0, 0),
+                        render_distance: 0,
+                        chunk_tracking_radius: 0,
+                    },
+                    ObserverSimulationInterest::BlockAndEntityTicking,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        worker
+            .server
+            .configure_local_player_identity(self.config.local_player_identity.clone())
+            .map_err(|error| error.to_string())?;
+        worker
+            .server
+            .set_scheduled_fluid_ticks_frozen(self.config.freeze_scheduled_fluid_ticks);
+        worker
+            .server
+            .set_debug_passive_showcase_enabled(self.config.debug_passive_showcase);
+        worker
+            .server
+            .set_debug_auxiliary_player_script_enabled(self.config.debug_auxiliary_player_script);
+        worker
+            .server
+            .set_light_status_batch_size(self.config.light_status_batch_size);
+        worker.refresh_diagnostics(None, false, None);
+        Ok(worker)
     }
 }
 

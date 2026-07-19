@@ -19,7 +19,10 @@ import {
   clearIndexedDbWorldRecords,
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
-import type { McloneWebIntegratedServerWorker } from "mclone-web-client-wasm";
+import type {
+  McloneWebIntegratedServerWorker,
+  WebIntegratedServerStartup,
+} from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
 // Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
@@ -31,16 +34,7 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 interface IntegratedServerWorkerMessage {
   kind?: string;
   requestId?: number;
-  seed?: number | string;
-  worldTopology?: "plane" | "cylinder-x" | `cylinder-x:${number}`;
-  generationProfile?:
-    | "overworld"
-    | "flat-grass-v1"
-    | "small-island-v1"
-    | "mclone-overworld-v1"
-    | "authored-only";
-  behaviorProfile?: "mutable" | "protected-lobby";
-  lightStatusBatchSize?: number;
+  startupFrame?: Uint8Array;
   jobWorkerUrl?: string;
   bindgenJsUrl?: string;
   bindgenWasmUrl?: string;
@@ -49,13 +43,7 @@ interface IntegratedServerWorkerMessage {
   clearWorldStorage?: boolean;
   runnerTransportKind?: string;
   tickIntervalMs?: number;
-  freezeScheduledFluidTicks?: boolean;
-  debugPassiveShowcase?: boolean;
-  debugAuxiliaryPlayerScript?: boolean;
-  observerOnly?: boolean;
   frame?: Uint8Array;
-  profileId?: Uint8Array;
-  displayName?: string;
   transportKind?: "shared-memory" | "message-transfer";
   controlBuffer?: SharedArrayBuffer;
   requestBuffer?: SharedArrayBuffer;
@@ -90,14 +78,6 @@ interface IndexedDbRecord {
   x: number;
   z: number;
   record: Uint8Array;
-}
-
-interface IndexedDbWorldRecords {
-  chunks: IndexedDbRecord[];
-  entityChunks: IndexedDbRecord[];
-  dimensions: IndexedDbDimensionRecord[];
-  worldMetadataRecord?: Uint8Array;
-  legacyRecordsPresent: boolean;
 }
 
 interface IndexedDbWorldMetadata {
@@ -196,147 +176,45 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
 
   const module = await loadWasmModule(message.bindgenJsUrl, message.bindgenWasmUrl);
   wasmModule = module;
-  const seed = toBigIntSeed(message.seed);
-  const generationProfile = String(message.generationProfile ?? "overworld");
-  const worldTopology = String(message.worldTopology ?? "plane");
-  const workerConstructor = module.McloneWebIntegratedServerWorker as any;
-  const hasJobWorkers = Boolean(message.jobWorkerUrl)
-    && typeof workerConstructor.withJobWorkers === "function";
+  if (!(message.startupFrame instanceof Uint8Array)) {
+    throw new Error("integrated server start is missing its opaque Rust startup frame");
+  }
+  const startup: WebIntegratedServerStartup = new module.WebIntegratedServerStartup(
+    message.startupFrame,
+  );
   const indexedDbMode = message.worldStorage === "indexeddb";
-  let storedWorldMetadataPresent = false;
-  if (indexedDbMode) {
-    if (
-      hasJobWorkers
-      && typeof workerConstructor.withJobWorkersAndIndexedDbExternalLoads === "function"
-    ) {
+  try {
+    if (indexedDbMode) {
       const metadata = await prepareIndexedDbWorldForStart(message);
-      storedWorldMetadataPresent = metadata.worldMetadataRecord !== undefined;
-      server = workerConstructor.withJobWorkersAndIndexedDbExternalLoads(
-        seed,
-        String(message.jobWorkerUrl),
-        String(message.bindgenJsUrl),
-        String(message.bindgenWasmUrl),
+      server = startup.createIndexedDbExternalLoads(
         metadata.dimensions,
         metadata.worldMetadataRecord,
         metadata.legacyRecordsPresent,
-        generationProfile,
-        worldTopology,
-      );
-    } else if (typeof workerConstructor.withIndexedDbExternalLoads === "function") {
-      const metadata = await prepareIndexedDbWorldForStart(message);
-      storedWorldMetadataPresent = metadata.worldMetadataRecord !== undefined;
-      server = workerConstructor.withIndexedDbExternalLoads(
-        seed,
-        metadata.dimensions,
-        metadata.worldMetadataRecord,
-        metadata.legacyRecordsPresent,
-        generationProfile,
-        worldTopology,
+        String(message.jobWorkerUrl ?? ""),
+        String(message.bindgenJsUrl ?? ""),
+        String(message.bindgenWasmUrl ?? ""),
       );
     } else {
-      const indexedRecords = await loadIndexedDbWorldForStart(message);
-      storedWorldMetadataPresent = indexedRecords.worldMetadataRecord !== undefined;
-      if (
-        hasJobWorkers
-        && typeof workerConstructor.withJobWorkersAndIndexedDbRecords === "function"
-      ) {
-        server = workerConstructor.withJobWorkersAndIndexedDbRecords(
-          seed,
-          String(message.jobWorkerUrl),
-          String(message.bindgenJsUrl),
-          String(message.bindgenWasmUrl),
-          indexedRecords.chunks,
-          indexedRecords.entityChunks,
-          indexedRecords.dimensions,
-          indexedRecords.worldMetadataRecord,
-          indexedRecords.legacyRecordsPresent,
-          generationProfile,
-          worldTopology,
-        );
-      } else if (typeof workerConstructor.withIndexedDbRecords === "function") {
-        server = workerConstructor.withIndexedDbRecords(
-          seed,
-          indexedRecords.chunks,
-          indexedRecords.entityChunks,
-          indexedRecords.dimensions,
-          indexedRecords.worldMetadataRecord,
-          indexedRecords.legacyRecordsPresent,
-          generationProfile,
-          worldTopology,
-        );
-      } else {
-        throw new Error("wasm module does not expose IndexedDB integrated-server constructors");
-      }
+      indexedDbWorldId = null;
+      server = startup.createTransient(
+        String(message.jobWorkerUrl ?? ""),
+        String(message.bindgenJsUrl ?? ""),
+        String(message.bindgenWasmUrl ?? ""),
+      );
     }
-  } else {
-    indexedDbWorldId = null;
-    server = hasJobWorkers
-      ? workerConstructor.withDefinitionAndJobWorkers(
-        seed,
-        generationProfile,
-        worldTopology,
-        String(message.jobWorkerUrl),
-        String(message.bindgenJsUrl),
-        String(message.bindgenWasmUrl),
-      )
-      : workerConstructor.withDefinition(seed, generationProfile, worldTopology);
-  }
-  if (
-    !storedWorldMetadataPresent
-    && typeof (server as any).setWorldGenerationProfile === "function"
-  ) {
-    (server as any).setWorldGenerationProfile(generationProfile);
-  }
-  const behaviorProfile = String(message.behaviorProfile ?? "mutable");
-  if (
-    !storedWorldMetadataPresent
-    && typeof (server as any).setWorldBehaviorProfile === "function"
-  ) {
-    (server as any).setWorldBehaviorProfile(behaviorProfile);
-  }
-  if (indexedDbMode) {
-    if (typeof (server as any).initializeWorldMetadata !== "function") {
-      throw new Error("wasm module does not expose IndexedDB world metadata initialization");
-    }
-    (server as any).initializeWorldMetadata();
-  }
-  if (message.observerOnly) {
-    if (typeof (server as any).enableObserverMode !== "function") {
-      throw new Error("wasm module does not expose observer-only local sessions");
-    }
-    (server as any).enableObserverMode();
-  }
-  if (typeof (server as any).setLocalPlayerIdentity === "function") {
-    if (!message.profileId || !message.displayName) {
-      throw new Error("integrated server start is missing local player identity");
-    }
-    (server as any).setLocalPlayerIdentity(message.profileId, message.displayName);
-  }
-  if (typeof (server as any).setScheduledFluidTicksFrozen === "function") {
-    (server as any).setScheduledFluidTicksFrozen(Boolean(message.freezeScheduledFluidTicks));
-  }
-  if (typeof (server as any).setDebugPassiveShowcaseEnabled === "function") {
-    (server as any).setDebugPassiveShowcaseEnabled(message.debugPassiveShowcase !== false);
-  }
-  if (typeof (server as any).setDebugAuxiliaryPlayerScriptEnabled === "function") {
-    (server as any).setDebugAuxiliaryPlayerScriptEnabled(
-      Boolean(message.debugAuxiliaryPlayerScript),
-    );
-  }
-  const rawLightStatusBatchSize = Number(message.lightStatusBatchSize);
-  const lightStatusBatchSize = Number.isFinite(rawLightStatusBatchSize)
-    ? Math.trunc(rawLightStatusBatchSize)
-    : 0;
-  if (lightStatusBatchSize > 0 && typeof (server as any).setLightStatusBatchSize === "function") {
-    (server as any).setLightStatusBatchSize(lightStatusBatchSize);
+  } finally {
+    startup.free();
   }
   runnerTransportKind = message.runnerTransportKind === "shared-memory" && sharedTransportAvailable()
     ? "shared-memory"
     : "message-transfer";
-  const intervalMs = Math.max(1, Number(message.tickIntervalMs) || 50);
+  const intervalMs = Number(message.tickIntervalMs);
+  if (!Number.isFinite(intervalMs) || intervalMs < 1) {
+    throw new Error("integrated server start has an invalid Rust-authored tick interval");
+  }
   tickTimer = setInterval(() => {
     void tickServer();
-  }, intervalMs);
+  }, Math.trunc(intervalMs));
   if (!server) {
     throw new Error("integrated server worker did not start");
   }
@@ -581,27 +459,6 @@ async function prepareIndexedDbWorldForStart(
   }
 }
 
-async function loadIndexedDbWorldForStart(
-  message: IntegratedServerWorkerMessage,
-): Promise<IndexedDbWorldRecords> {
-  const worldId = indexedDbWorldIdFromMessage(message);
-  indexedDbWorldId = worldId;
-  const db = await openWorldDb();
-  try {
-    if (message.clearWorldStorage) {
-      await clearIndexedDbWorldRecords(db, worldId);
-    }
-    const [chunks, entityChunks, metadata] = await Promise.all([
-      loadIndexedDbRecords(db, WORLD_CHUNK_STORE, worldId),
-      loadIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, worldId),
-      loadIndexedDbWorldMetadata(db, worldId),
-    ]);
-    return { chunks, entityChunks, ...metadata };
-  } finally {
-    db.close();
-  }
-}
-
 async function loadIndexedDbWorldMetadata(
   db: IDBDatabase,
   worldId: string,
@@ -673,22 +530,7 @@ function indexedDbWorldIdFromMessage(message: IntegratedServerWorkerMessage): st
   if (explicit.length > 0) {
     return explicit;
   }
-  return `seed-${String(message.seed ?? "0")}`;
-}
-
-async function loadIndexedDbRecords(
-  db: IDBDatabase,
-  storeName: string,
-  worldId: string,
-): Promise<IndexedDbRecord[]> {
-  const transaction = db.transaction(storeName, "readonly");
-  const request = transaction
-    .objectStore(storeName)
-    .index(WORLD_ID_INDEX)
-    .getAll(IDBKeyRange.only(worldId));
-  const records = await idbRequest<unknown[]>(request);
-  await transactionDone(transaction);
-  return records.map((record) => normalizeIndexedDbRecord(worldId, record));
+  throw new Error("IndexedDB integrated server start is missing its Rust-authored world id");
 }
 
 async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string, any>): Promise<void> {
@@ -1187,11 +1029,6 @@ function sharedTransportAvailable(): boolean {
     && typeof Atomics.store === "function"
     && typeof Atomics.notify === "function"
   );
-}
-
-function toBigIntSeed(seed: number | string | undefined): bigint {
-  const number = Number(seed);
-  return BigInt(Number.isFinite(number) ? Math.trunc(number) : 0);
 }
 
 function stringifyError(error: unknown): string {

@@ -169,6 +169,24 @@ Factoring only the tiny loader would add indirection without reducing domain
 ownership or copies, so the shells remain specialized until another Rust actor
 makes a larger contract genuinely identical.
 
+The first integrated-server cut is also complete. Main Rust now authors a
+strict versioned opaque startup frame containing all generation, topology,
+behavior, player/observer authority, debug, light, and identity configuration.
+A worker-resident `WebIntegratedServerStartup` decodes it, constructs the
+transient or external-load IndexedDB realm, honors stored metadata precedence,
+and applies the authority configuration. TypeScript no longer names or defaults
+any of those fields; it retains IndexedDB transactions, URLs, runner transport,
+and timer mechanics. Its unreachable bulk-record constructor fallback was
+removed.
+
+This cut reduced the integrated-server Worker from 1,202 to 1,039 lines and the
+authored TypeScript inventory from 6,072 to 5,909 lines. The ordinary browser
+lane passed shared and transfer runner stress, IndexedDB mutation/reload passed,
+and the desktop lobby passed protected interaction, warm standby, embedded
+preview, and activation checks. The next high-value owner is the live
+integrated-server authority/session actor; the external SAB and IndexedDB
+platform contracts remain deliberately unchanged.
+
 Two complete pre-cutover control runs separated coordinator evidence from
 unrelated browser-fixture debt:
 

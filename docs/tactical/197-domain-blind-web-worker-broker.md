@@ -729,7 +729,7 @@ server-job transport policy.
 
 ## Slice 4 — Integrated-Server Responsibility Split
 
-Status: approved as bounded autonomous sub-slices after Slice 3.
+Status: in progress; opaque startup complete 2026-07-19.
 
 `mclone-integrated-server-worker.ts` is the largest and most entangled worker.
 It combines legitimate browser mechanisms—timers, IndexedDB requests,
@@ -759,6 +759,44 @@ If the authority cut cannot remain bounded, draft a focused follow-up tactical
 and stop that sub-slice rather than creating one giant browser actor.
 IndexedDB schema/migration mechanics may remain TypeScript; generation,
 topology, realm, profile, and behavior defaults may not.
+
+### Slice 4.1 execution — opaque authority startup
+
+Main-side Rust now encodes one strict `MCSI` version-1 startup frame. Its codec
+owns the seed, generation profile, horizontal topology, behavior profile,
+scheduled-fluid policy, passive and auxiliary debug policy, light batch size,
+observer role, and local player identity. The decoder rejects bad magic,
+unknown versions and flags, unsupported or invalid topology, truncation,
+oversized or invalid player names, and trailing bytes. Pure Rust tests cover a
+complete round trip and each failure family.
+
+Worker Rust decodes that frame into `WebIntegratedServerStartup`. It constructs
+the transient or external-load IndexedDB `LocalRealmSession`, applies stored
+metadata precedence, initializes new metadata, configures player versus
+observer authority, and applies all domain settings before returning the live
+server object. TypeScript only loads Wasm, performs the selected browser
+IndexedDB operations, passes their records to Rust, selects the browser runner
+transport, and arms the Rust-authored tick interval. The old bulk-record
+constructor fallback was unreachable with the current Wasm API and has been
+deleted rather than retained as a second production path.
+
+`mclone-integrated-server-worker.ts` fell from 1,202 to 1,039 lines. Authored
+TypeScript is now 5,909 lines, and all registered integrated-server startup
+projection debts are locked at zero. The external SAB contracts, private Wasm
+heaps, IndexedDB schema, cadence, and worker count are unchanged.
+
+The Wasm build and generated TypeScript gate passed. The ordinary browser smoke
+passed both shared-memory and message-transfer runner stress, including active
+worldgen and light job mailboxes. IndexedDB placement/reload passed with its
+persisted mutation visible after reload. The desktop lobby passed protected
+break/place denial, warm standby, embedded preview, actor motion, and A-to-B-to-A
+activation. The IndexedDB capture was inspected and remained visually coherent.
+
+The next bounded sub-slice is the resident authority/session actor. It may take
+ownership of admission, command/tick/poll transitions, job-pending policy,
+typed failures, and graceful domain shutdown. Timer, yield, IndexedDB
+transactions, SAB view mechanics, and forced Worker termination remain browser
+mechanics unless that cut proves a smaller neutral boundary.
 
 ## Slice 5 — Rust-Authored Catalog Descriptors
 
