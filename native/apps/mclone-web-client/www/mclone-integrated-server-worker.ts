@@ -20,7 +20,7 @@ import {
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
 import type {
-  McloneWebIntegratedServerWorker,
+  WebIntegratedServerActor,
   WebIntegratedServerStartup,
 } from "mclone-web-client-wasm";
 
@@ -104,7 +104,6 @@ interface IndexedDbLoadCompletion extends IndexedDbLoadRequest {
 interface ServicedServerResult {
   result: Record<string, any>;
   updates: unknown[];
-  diagnostics: any;
 }
 
 let wasmModulePromise: Promise<WasmModule> | null = null;
@@ -113,7 +112,7 @@ let wasmModulePromise: Promise<WasmModule> | null = null;
 // single owner. Non-null for the lifetime of any update-posting path (they run only after the
 // server is started).
 let wasmModule: WasmModule | null = null;
-let server: McloneWebIntegratedServerWorker | null = null;
+let server: WebIntegratedServerActor | null = null;
 let indexedDbWorldId: string | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
 let tickInFlight = false;
@@ -133,38 +132,16 @@ const INDEXED_DB_COMPLETION_BATCH_SIZE = 16;
 workerSelf.onmessage = async (event: MessageEvent) => {
   const message = (event.data ?? {}) as IntegratedServerWorkerMessage;
   try {
-    switch (message.kind) {
-      case "start":
-        await startServer(message);
-        break;
-      case "command":
-        await handleCommand(message);
-        break;
-      case "release-shared-buffer":
-        releaseRunnerSharedBuffer(message);
-        break;
-      case "shutdown":
-        await shutdown(message);
-        break;
-      case "flush-persistence":
-        await flushPersistence(message);
-        break;
-      case "promote-observer":
-        await promoteObserver(message);
-        break;
-      case "demote-player":
-        await demotePlayer(message);
-        break;
-      default:
-        postFailure(
-          message.requestId,
-          `unexpected integrated server worker message kind ${String(message.kind)}`,
-        );
-        break;
+    if (message.kind === "start") {
+      await startServer(message);
+    } else if (message.kind === "release-shared-buffer") {
+      releaseRunnerSharedBuffer(message);
+    } else {
+      await driveActorMessage(message);
     }
   } catch (error) {
     markRunnerSharedFailure(message);
-    postFailure(message.requestId, stringifyError(error));
+    postActorFailure(message.requestId, error);
   }
 };
 
@@ -218,17 +195,10 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   if (!server) {
     throw new Error("integrated server worker did not start");
   }
-  const diagnostics = server.diagnostics();
-  workerSelf.postMessage({
-    ok: true,
-    kind: "ready",
-    requestId: Number(message.requestId) || 0,
-    updates: [],
-    diagnostics,
-  });
+  workerSelf.postMessage(server.readyReport(Number(message.requestId) || 0));
 }
 
-async function handleCommand(message: IntegratedServerWorkerMessage): Promise<void> {
+async function driveActorMessage(message: IntegratedServerWorkerMessage): Promise<void> {
   if (!server) {
     postFailure(message.requestId, "integrated server worker is not started");
     return;
@@ -237,33 +207,18 @@ async function handleCommand(message: IntegratedServerWorkerMessage): Promise<vo
   try {
     const activeServer = server;
     if (!activeServer) {
-      postFailure(message.requestId, "integrated server worker stopped before command execution");
+      postFailure(message.requestId, "integrated server worker stopped before actor dispatch");
       return;
     }
-    const frame = commandFrame(message);
-    let serviced = await serviceIndexedDbResultForCurrentWorld(
+    const initial = activeServer.beginMessage(message, commandFrame(message));
+    await driveActorOperation(
       activeServer,
-      activeServer.handleCommandFrame(frame),
+      initial as Record<string, any>,
+      message,
     );
-    const updates = [...serviced.updates];
-    let diagnostics = serviced.diagnostics;
-    for (let attempt = 0; hasPendingServerJobs(diagnostics) && attempt < 60000; attempt += 1) {
-      await waitForJobTurn();
-      serviced = await serviceIndexedDbResultForCurrentWorld(activeServer, activeServer.poll());
-      updates.push(...serviced.updates);
-      diagnostics = serviced.diagnostics;
-    }
-    if (hasPendingServerJobs(diagnostics)) {
-      postFailure(message.requestId, "timed out waiting for web integrated server jobs");
-      return;
-    }
-    postUpdates({
-      ok: true,
-      kind: "command-result",
-      requestId: Number(message.requestId) || 0,
-      updates,
-      diagnostics,
-    }, message);
+  } catch (error) {
+    markRunnerSharedFailure(message);
+    postActorFailure(message.requestId, error);
   } finally {
     serverOperationInFlight = false;
   }
@@ -275,18 +230,10 @@ async function tickServer(): Promise<void> {
   tickInFlight = true;
   serverOperationInFlight = true;
   try {
-    const serviced = await serviceIndexedDbResultForCurrentWorld(activeServer, activeServer.tick());
-    if (serviced.updates.length > 0) {
-      postUpdates({
-        ok: true,
-        kind: "updates",
-        requestId: 0,
-        updates: serviced.updates,
-        diagnostics: serviced.diagnostics,
-      }, null);
-    }
+    const initial = activeServer.beginTick();
+    await driveActorOperation(activeServer, initial as Record<string, any>, null);
   } catch (error) {
-    postFailure(0, stringifyError(error));
+    postActorFailure(0, error);
   } finally {
     tickInFlight = false;
     serverOperationInFlight = false;
@@ -300,122 +247,51 @@ async function acquireServerOperation(): Promise<void> {
   serverOperationInFlight = true;
 }
 
-async function shutdown(message: IntegratedServerWorkerMessage): Promise<void> {
-  if (tickTimer) {
-    clearInterval(tickTimer);
-    tickTimer = 0;
+async function driveActorOperation(
+  activeServer: WebIntegratedServerActor,
+  initialResult: Record<string, any>,
+  requestMessage: IntegratedServerWorkerMessage | null,
+): Promise<void> {
+  let serviced = await serviceIndexedDbResultForCurrentWorld(activeServer, initialResult);
+  const updates = [...serviced.updates];
+  while (activeServer.hasPendingJobs()) {
+    await waitForJobTurn();
+    serviced = await serviceIndexedDbResultForCurrentWorld(
+      activeServer,
+      activeServer.pollPendingJobs() as Record<string, any>,
+    );
+    updates.push(...serviced.updates);
   }
-  await acquireServerOperation();
-  try {
-    const result = server?.shutdown?.() ?? { updates: [], diagnostics: null };
+  const report = activeServer.finishOperation(serviced.result, updates) as Record<string, any>;
+  if (report.postMessage === true) {
+    postUpdates(report.message as RunnerOutboundMessage, requestMessage);
+  }
+  if (report.closeWorker === true) {
+    if (tickTimer) {
+      clearInterval(tickTimer);
+      tickTimer = 0;
+    }
     server = null;
-    await saveIndexedDbDirtyRecordsForCurrentWorld(result);
     indexedDbWorldId = null;
-    workerSelf.postMessage({
-      ok: true,
-      kind: "shutdown-complete",
-      requestId: Number(message.requestId) || 0,
-      updates: [],
-      diagnostics: result.diagnostics,
-    });
     workerSelf.close();
-  } finally {
-    serverOperationInFlight = false;
-  }
-}
-
-async function flushPersistence(message: IntegratedServerWorkerMessage): Promise<void> {
-  if (!server || typeof (server as any).flushPersistence !== "function") {
-    postFailure(message.requestId, "integrated server worker cannot flush persistence");
-    return;
-  }
-  await acquireServerOperation();
-  try {
-    const activeServer = server;
-    if (!activeServer) throw new Error("integrated server worker stopped before persistence flush");
-    const serviced = await serviceIndexedDbResultForCurrentWorld(
-      activeServer,
-      (activeServer as any).flushPersistence(),
-    );
-    postUpdates({
-      ok: true,
-      kind: "flush-complete",
-      requestId: Number(message.requestId) || 0,
-      updates: serviced.updates,
-      diagnostics: serviced.diagnostics,
-    });
-  } finally {
-    serverOperationInFlight = false;
-  }
-}
-
-async function promoteObserver(message: IntegratedServerWorkerMessage): Promise<void> {
-  if (!server || typeof (server as any).promoteObserverToPlayer !== "function") {
-    postFailure(message.requestId, "integrated server worker cannot promote its observer");
-    return;
-  }
-  await acquireServerOperation();
-  try {
-    const activeServer = server;
-    if (!activeServer) throw new Error("integrated server worker stopped before observer promotion");
-    const serviced = await serviceIndexedDbResultForCurrentWorld(
-      activeServer,
-      (activeServer as any).promoteObserverToPlayer(),
-    );
-    postUpdates({
-      ok: true,
-      kind: "observer-promoted",
-      requestId: Number(message.requestId) || 0,
-      updates: serviced.updates,
-      diagnostics: serviced.diagnostics,
-    }, null);
-  } finally {
-    serverOperationInFlight = false;
-  }
-}
-
-async function demotePlayer(message: IntegratedServerWorkerMessage): Promise<void> {
-  if (!server || typeof (server as any).demotePlayerToObserver !== "function") {
-    postFailure(message.requestId, "integrated server worker cannot demote its player");
-    return;
-  }
-  await acquireServerOperation();
-  try {
-    const activeServer = server;
-    if (!activeServer) throw new Error("integrated server worker stopped before player demotion");
-    const serviced = await serviceIndexedDbResultForCurrentWorld(
-      activeServer,
-      (activeServer as any).demotePlayerToObserver(),
-    );
-    postUpdates({
-      ok: true,
-      kind: "player-demoted",
-      requestId: Number(message.requestId) || 0,
-      updates: serviced.updates,
-      diagnostics: serviced.diagnostics,
-    }, null);
-  } finally {
-    serverOperationInFlight = false;
   }
 }
 
 async function serviceIndexedDbResultForCurrentWorld(
-  activeServer: McloneWebIntegratedServerWorker,
+  activeServer: WebIntegratedServerActor,
   initialResult: Record<string, any>,
 ): Promise<ServicedServerResult> {
   let result = initialResult;
   const updates: unknown[] = [];
-  let diagnostics = result?.diagnostics ?? null;
   for (let attempt = 0; attempt < 60000; attempt += 1) {
     if (Array.isArray(result?.updates)) {
       updates.push(...result.updates);
     }
-    diagnostics = result?.diagnostics ?? diagnostics;
     await saveIndexedDbDirtyRecordsForCurrentWorld(result);
 
     const requests = indexedDbLoadRequestsFromResult(result);
     if (requests.length === 0) {
-      return { result, updates, diagnostics };
+      return { result, updates };
     }
     if (!indexedDbWorldId) {
       throw new Error("IndexedDB load requests were emitted without an active browser world");
@@ -423,12 +299,11 @@ async function serviceIndexedDbResultForCurrentWorld(
     const completions = await loadIndexedDbCompletions(indexedDbWorldId, requests);
     for (let offset = 0; offset < completions.length; offset += INDEXED_DB_COMPLETION_BATCH_SIZE) {
       const batch = completions.slice(offset, offset + INDEXED_DB_COMPLETION_BATCH_SIZE);
-      result = (activeServer as any).completeIndexedDbLoadRecords(batch) as Record<string, any>;
+      result = activeServer.completeIndexedDbLoadRecords(batch) as Record<string, any>;
       if (Array.isArray(result?.updates)) {
         updates.push(...result.updates);
         result.updates = [];
       }
-      diagnostics = result?.diagnostics ?? diagnostics;
       await saveIndexedDbDirtyRecordsForCurrentWorld(result);
       result.indexedDbChunks = [];
       result.indexedDbEntityChunks = [];
@@ -971,6 +846,23 @@ function postFailure(requestId: number | undefined, reason: string): void {
   });
 }
 
+function postActorFailure(requestId: number | undefined, error: unknown): void {
+  const reason = stringifyError(error);
+  const activeServer = server;
+  if (!activeServer) {
+    postFailure(requestId, reason);
+    return;
+  }
+  try {
+    workerSelf.postMessage(activeServer.failOperation(Number(requestId) || 0, reason));
+  } catch (actorError) {
+    postFailure(
+      requestId,
+      `${reason}\nfailed to author Rust actor failure: ${stringifyError(actorError)}`,
+    );
+  }
+}
+
 function loadWasmModule(
   bindgenJsUrl: string | undefined,
   bindgenWasmUrl: string | undefined,
@@ -991,18 +883,6 @@ function requireWasmModule(): WasmModule {
     throw new Error("integrated server worker wasm module is not loaded");
   }
   return wasmModule;
-}
-
-function hasPendingServerJobs(diagnostics: any): boolean {
-  if (!diagnostics) return false;
-  return (
-    Number(diagnostics.pendingJobs) > 0
-    || Number(diagnostics.pendingPublications) > 0
-    || Number(diagnostics.pendingPersistenceLoads) > 0
-    || Number(diagnostics.pendingPersistenceSaves) > 0
-    || Number(diagnostics.worldgenMailboxPendingJobs) > 0
-    || Number(diagnostics.lightStatusMailboxPendingStatuses) > 0
-  );
 }
 
 function waitForJobTurn(): Promise<void> {

@@ -187,6 +187,19 @@ preview, and activation checks. The next high-value owner is the live
 integrated-server authority/session actor; the external SAB and IndexedDB
 platform contracts remain deliberately unchanged.
 
+The live authority/session cut is now complete as well. A resident
+`WebIntegratedServerActor` owns operation admission, message-to-session
+dispatch, command-only pending-job policy and poll limit, completion/failure
+envelopes, and graceful domain shutdown. TypeScript retains the browser event
+exclusion guard, IndexedDB batching, zero-delay yields, SAB views/publication,
+message posting, timer cadence, and final Worker close. This is deliberately a
+bounded actor rather than a Rust reimplementation of browser mechanics.
+
+The integrated-server Worker is now 919 lines and total authored TypeScript is
+5,789 lines. The cut added no copy, worker, heap, schema, cadence, or SAB-ABI
+change. Shared/transfer runner stress, IndexedDB reload, and the desktop lobby
+remain green, including protected behavior and observer/player transitions.
+
 Two complete pre-cutover control runs separated coordinator evidence from
 unrelated browser-fixture debt:
 

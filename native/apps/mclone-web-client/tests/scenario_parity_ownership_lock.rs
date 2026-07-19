@@ -146,11 +146,17 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(WEB_SERVER_WORKER.contains("WebIntegratedServerStartupConfig"));
     assert!(WEB_SERVER_WORKER.contains("\"startupFrame\""));
     assert!(WEB_SERVER_WORKER.contains("pub struct WebIntegratedServerStartup"));
+    assert!(WEB_SERVER_WORKER.contains("pub struct WebIntegratedServerActor"));
+    assert!(WEB_SERVER_WORKER.contains("enum WebIntegratedServerOperationKind"));
+    assert!(WEB_SERVER_WORKER.contains("MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS"));
     assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_MAGIC"));
     assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_VERSION"));
     assert!(INTEGRATED_SERVER_WORKER.contains("new module.WebIntegratedServerStartup("));
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.createTransient("));
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDbExternalLoads("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginMessage("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
+    assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.finishOperation("));
     for forbidden in [
         "generationProfile",
         "worldTopology",
@@ -161,6 +167,11 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
         "debugAuxiliaryPlayerScript",
         "observerOnly",
         "setLocalPlayerIdentity",
+        "hasPendingServerJobs",
+        "handleCommandFrame",
+        "promoteObserverToPlayer",
+        "demotePlayerToObserver",
+        "kind: \"command-result\"",
     ] {
         assert!(
             !INTEGRATED_SERVER_WORKER.contains(forbidden),

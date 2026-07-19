@@ -729,7 +729,7 @@ server-job transport policy.
 
 ## Slice 4 — Integrated-Server Responsibility Split
 
-Status: in progress; opaque startup complete 2026-07-19.
+Status: complete 2026-07-19.
 
 `mclone-integrated-server-worker.ts` is the largest and most entangled worker.
 It combines legitimate browser mechanisms—timers, IndexedDB requests,
@@ -797,6 +797,38 @@ ownership of admission, command/tick/poll transitions, job-pending policy,
 typed failures, and graceful domain shutdown. Timer, yield, IndexedDB
 transactions, SAB view mechanics, and forced Worker termination remain browser
 mechanics unless that cut proves a smaller neutral boundary.
+
+### Slice 4.2 execution — resident authority/session actor
+
+`WebIntegratedServerActor` now owns the live Rust session returned by startup
+and admits exactly one domain operation at a time. It decodes the browser
+message kind, selects command, flush, observer promotion, player demotion, or
+graceful shutdown, authors ready/completion/failure envelopes, and decides
+whether an empty tick response should be posted. It also owns the 60,000-poll
+command-job limit and the exact pending-job predicate. Tick, flush, role, and
+shutdown operations preserve their prior non-draining behavior; only commands
+perform the pending-job drain, matching the pre-cutover cadence.
+
+The TypeScript shell now has only two browser-owned message cases: initial
+startup and runner-SAB slot release. All other messages and timer ticks enter
+the resident actor. The shell serializes asynchronous browser callbacks,
+executes and batches IndexedDB requests, yields with `setTimeout(0)`, extracts
+or publishes external SAB bytes, posts the Rust-authored report, and performs
+the final forced Worker close. Its operation-in-flight flag is an event-loop
+exclusion guard; Rust independently rejects a second admitted domain operation.
+
+This reduced `mclone-integrated-server-worker.ts` from 1,039 to 919 lines and
+the authored TypeScript inventory from 5,909 to 5,789 lines. Source locks now
+forbid TypeScript pending-job predicates, direct command/role dispatch, and
+command completion policy. No copy site, Wasm heap, IndexedDB schema, timer
+cadence, worker count, or SAB ABI changed.
+
+The Wasm build, generated TypeScript gate, focused ownership tests, and Worker
+inventory self-test passed. Ordinary smoke again passed shared-memory and
+message-transfer runner stress and graceful shutdown. IndexedDB mutation/reload
+passed through batched external loads. The desktop lobby passed protected
+interaction, observer/player role transitions, warm standby, actor motion, and
+A-to-B-to-A activation. No browser fixture assertion was weakened.
 
 ## Slice 5 — Rust-Authored Catalog Descriptors
 

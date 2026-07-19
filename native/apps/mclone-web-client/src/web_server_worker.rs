@@ -1743,6 +1743,58 @@ pub struct WebIntegratedServerStartup {
     config: WebIntegratedServerStartupConfig,
 }
 
+/// Resident domain actor for one browser integrated-server Worker.
+///
+/// Browser code retains event-loop serialization, IndexedDB transactions and
+/// external SAB views. This actor admits one domain operation at a time,
+/// selects the authoritative session transition, owns pending-job polling
+/// policy, and authors completion/failure envelopes.
+#[wasm_bindgen]
+pub struct WebIntegratedServerActor {
+    server: McloneWebIntegratedServerWorker,
+    operation: Option<WebIntegratedServerOperation>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WebIntegratedServerOperationKind {
+    Command,
+    Tick,
+    FlushPersistence,
+    PromoteObserver,
+    DemotePlayer,
+    Shutdown,
+}
+
+impl WebIntegratedServerOperationKind {
+    const fn response_kind(self) -> &'static str {
+        match self {
+            Self::Command => "command-result",
+            Self::Tick => "updates",
+            Self::FlushPersistence => "flush-complete",
+            Self::PromoteObserver => "observer-promoted",
+            Self::DemotePlayer => "player-demoted",
+            Self::Shutdown => "shutdown-complete",
+        }
+    }
+
+    const fn posts_empty_response(self) -> bool {
+        !matches!(self, Self::Tick)
+    }
+
+    const fn closes_worker(self) -> bool {
+        matches!(self, Self::Shutdown)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct WebIntegratedServerOperation {
+    kind: WebIntegratedServerOperationKind,
+    request_id: u32,
+    pending_job_polls: u32,
+}
+
+const MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS: u32 = 60_000;
+
 #[derive(Debug, Default)]
 struct WebIndexedDbWorldStoreState {
     world_metadata: Option<WorldMetadata>,
@@ -1978,7 +2030,7 @@ impl WebIntegratedServerStartup {
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
-    ) -> Result<McloneWebIntegratedServerWorker, JsValue> {
+    ) -> Result<WebIntegratedServerActor, JsValue> {
         let definition = web_dimension_definition_from_startup(&self.config);
         let server = if job_worker_url.trim().is_empty() {
             LocalRealmSession::local_integrated_with_dimension_definition(definition)
@@ -2005,7 +2057,7 @@ impl WebIntegratedServerStartup {
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
-    ) -> Result<McloneWebIntegratedServerWorker, JsValue> {
+    ) -> Result<WebIntegratedServerActor, JsValue> {
         let stored_world_metadata_present =
             !world_metadata_record.is_null() && !world_metadata_record.is_undefined();
         let state = Rc::new(RefCell::new(
@@ -2052,7 +2104,7 @@ impl WebIntegratedServerStartup {
         mut worker: McloneWebIntegratedServerWorker,
         indexed_db: bool,
         stored_world_metadata_present: bool,
-    ) -> Result<McloneWebIntegratedServerWorker, String> {
+    ) -> Result<WebIntegratedServerActor, String> {
         if !stored_world_metadata_present {
             worker
                 .server
@@ -2099,8 +2151,218 @@ impl WebIntegratedServerStartup {
             .server
             .set_light_status_batch_size(self.config.light_status_batch_size);
         worker.refresh_diagnostics(None, false, None);
-        Ok(worker)
+        Ok(WebIntegratedServerActor {
+            server: worker,
+            operation: None,
+        })
     }
+}
+
+#[wasm_bindgen]
+impl WebIntegratedServerActor {
+    #[wasm_bindgen(js_name = readyReport)]
+    pub fn ready_report(&self, request_id: u32) -> Result<JsValue, JsValue> {
+        let response = Object::new();
+        set_bool(&response, "ok", true).map_err(|error| JsValue::from_str(&error))?;
+        set_string(&response, "kind", "ready").map_err(|error| JsValue::from_str(&error))?;
+        set_number(&response, "requestId", f64::from(request_id))
+            .map_err(|error| JsValue::from_str(&error))?;
+        let updates = Array::new();
+        Reflect::set(&response, &JsValue::from_str("updates"), &updates)
+            .map_err(|error| JsValue::from_str(&format!("attach ready updates: {error:?}")))?;
+        Reflect::set(
+            &response,
+            &JsValue::from_str("diagnostics"),
+            &diagnostics_to_js(&self.server.diagnostics).map_err(JsValue::from)?,
+        )
+        .map_err(|error| JsValue::from_str(&format!("attach ready diagnostics: {error:?}")))?;
+        Ok(response.into())
+    }
+
+    #[wasm_bindgen(js_name = beginMessage)]
+    pub fn begin_message(
+        &mut self,
+        message: JsValue,
+        frame: Uint8Array,
+    ) -> Result<JsValue, JsValue> {
+        let kind = string_prop(&message, "kind")
+            .ok_or_else(|| JsValue::from_str("integrated-server actor message is missing kind"))?;
+        let request_id = number_prop(&message, "requestId").unwrap_or(0.0) as u32;
+        let operation_kind = match kind.as_str() {
+            "command" => WebIntegratedServerOperationKind::Command,
+            "flush-persistence" => WebIntegratedServerOperationKind::FlushPersistence,
+            "promote-observer" => WebIntegratedServerOperationKind::PromoteObserver,
+            "demote-player" => WebIntegratedServerOperationKind::DemotePlayer,
+            "shutdown" => WebIntegratedServerOperationKind::Shutdown,
+            other => {
+                return Err(JsValue::from_str(&format!(
+                    "unexpected integrated server worker message kind {other}"
+                )));
+            }
+        };
+        self.begin_operation(operation_kind, request_id)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let result = match operation_kind {
+            WebIntegratedServerOperationKind::Command => self.server.handle_command_frame(frame),
+            WebIntegratedServerOperationKind::FlushPersistence => self.server.flush_persistence(),
+            WebIntegratedServerOperationKind::PromoteObserver => {
+                self.server.promote_observer_to_player()
+            }
+            WebIntegratedServerOperationKind::DemotePlayer => {
+                self.server.demote_player_to_observer()
+            }
+            WebIntegratedServerOperationKind::Shutdown => self.server.shutdown(),
+            WebIntegratedServerOperationKind::Tick => unreachable!("ticks have a dedicated entry"),
+        };
+        if result.is_err() {
+            self.operation = None;
+        }
+        result
+    }
+
+    #[wasm_bindgen(js_name = beginTick)]
+    pub fn begin_tick(&mut self) -> Result<JsValue, JsValue> {
+        self.begin_operation(WebIntegratedServerOperationKind::Tick, 0)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let result = self.server.tick();
+        if result.is_err() {
+            self.operation = None;
+        }
+        result
+    }
+
+    #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]
+    pub fn complete_indexed_db_load_records(
+        &mut self,
+        completions: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.require_operation()?;
+        self.server.complete_indexed_db_load_records(completions)
+    }
+
+    #[wasm_bindgen(js_name = hasPendingJobs)]
+    pub fn has_pending_jobs(&self) -> bool {
+        self.operation.is_some_and(|operation| {
+            operation.kind == WebIntegratedServerOperationKind::Command
+                && integrated_server_has_pending_jobs(&self.server.diagnostics)
+        })
+    }
+
+    #[wasm_bindgen(js_name = pollPendingJobs)]
+    pub fn poll_pending_jobs(&mut self) -> Result<JsValue, JsValue> {
+        let operation = self
+            .operation
+            .as_mut()
+            .ok_or_else(|| JsValue::from_str("integrated-server actor has no active operation"))?;
+        operation.pending_job_polls = operation.pending_job_polls.saturating_add(1);
+        if operation.pending_job_polls > MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS {
+            return Err(JsValue::from_str(
+                "timed out waiting for web integrated server jobs",
+            ));
+        }
+        self.server.poll()
+    }
+
+    #[wasm_bindgen(js_name = finishOperation)]
+    pub fn finish_operation(
+        &mut self,
+        result: JsValue,
+        updates: Array,
+    ) -> Result<JsValue, JsValue> {
+        let operation = self
+            .operation
+            .take()
+            .ok_or_else(|| JsValue::from_str("integrated-server actor has no active operation"))?;
+        set_string(
+            &Object::from(result.clone()),
+            "kind",
+            operation.kind.response_kind(),
+        )
+        .map_err(|error| JsValue::from_str(&error))?;
+        Reflect::set(&result, &JsValue::from_str("updates"), &updates)
+            .map_err(|error| JsValue::from_str(&format!("attach actor updates: {error:?}")))?;
+        Reflect::set(
+            &result,
+            &JsValue::from_str("updateCount"),
+            &JsValue::from_f64(f64::from(updates.length())),
+        )
+        .map_err(|error| JsValue::from_str(&format!("attach actor update count: {error:?}")))?;
+        Reflect::set(
+            &result,
+            &JsValue::from_str("requestId"),
+            &JsValue::from_f64(f64::from(operation.request_id)),
+        )
+        .map_err(|error| JsValue::from_str(&format!("attach actor request id: {error:?}")))?;
+
+        let report = Object::new();
+        Reflect::set(&report, &JsValue::from_str("message"), &result)
+            .map_err(|error| JsValue::from_str(&format!("attach actor message: {error:?}")))?;
+        set_bool(
+            &report,
+            "postMessage",
+            operation.kind.posts_empty_response() || updates.length() > 0,
+        )
+        .map_err(|error| JsValue::from_str(&error))?;
+        set_bool(&report, "closeWorker", operation.kind.closes_worker())
+            .map_err(|error| JsValue::from_str(&error))?;
+        Ok(report.into())
+    }
+
+    #[wasm_bindgen(js_name = failOperation)]
+    pub fn fail_operation(
+        &mut self,
+        fallback_request_id: u32,
+        reason: String,
+    ) -> Result<JsValue, JsValue> {
+        let request_id = self
+            .operation
+            .take()
+            .map_or(fallback_request_id, |operation| operation.request_id);
+        let response = Object::new();
+        set_bool(&response, "ok", false).map_err(|error| JsValue::from_str(&error))?;
+        set_string(&response, "kind", "error").map_err(|error| JsValue::from_str(&error))?;
+        set_number(&response, "requestId", f64::from(request_id))
+            .map_err(|error| JsValue::from_str(&error))?;
+        set_string(&response, "reason", &reason).map_err(|error| JsValue::from_str(&error))?;
+        Ok(response.into())
+    }
+}
+
+impl WebIntegratedServerActor {
+    fn begin_operation(
+        &mut self,
+        kind: WebIntegratedServerOperationKind,
+        request_id: u32,
+    ) -> Result<(), String> {
+        if self.operation.is_some() {
+            return Err("integrated-server actor already has an active operation".to_owned());
+        }
+        if !self.server.running {
+            return Err("integrated-server actor is shut down".to_owned());
+        }
+        self.operation = Some(WebIntegratedServerOperation {
+            kind,
+            request_id,
+            pending_job_polls: 0,
+        });
+        Ok(())
+    }
+
+    fn require_operation(&self) -> Result<(), JsValue> {
+        self.operation
+            .as_ref()
+            .map(|_| ())
+            .ok_or_else(|| JsValue::from_str("integrated-server actor has no active operation"))
+    }
+}
+
+fn integrated_server_has_pending_jobs(diagnostics: &ServerRunnerDiagnostics) -> bool {
+    diagnostics.pending_jobs > 0
+        || diagnostics.pending_publications > 0
+        || diagnostics.pending_persistence_loads > 0
+        || diagnostics.pending_persistence_saves > 0
+        || diagnostics.worldgen_mailbox_pending_jobs > 0
+        || diagnostics.light_status_mailbox_pending_statuses > 0
 }
 
 #[wasm_bindgen]
