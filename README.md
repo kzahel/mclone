@@ -1,32 +1,45 @@
 # mclone
 
-Minecraft-inspired voxel sandbox. Private project — primary target is home/LAN use for my daughter to play with.
+Mclone is a Minecraft-inspired voxel sandbox built on a shared Rust engine.
 
-## Current Direction
+The project is internal and unreleased today, but it is being built for an
+eventual public release rather than only personal or home/LAN use. Release
+readiness requires a complete distributable first-party asset set, sufficiently
+complete world generation and gameplay, and the remaining product and release
+work. Local Minecraft 1.17.1 reference code and assets are development and
+parity-testing inputs only; they are not public release content.
 
-The current direction is a native-first Rust engine with five validated client/platform lanes:
+## Project Status
 
+Mclone has five first-class client targets:
+
+- flat Android
+- Android XR / Quest standalone
 - desktop flat
 - desktop OpenXR
-- Android XR / Quest standalone
-- flat Android
 - web/WASM
 
-The basic gameplay/rendering loop is proven across those lanes:
+All five are equally valid product targets. None is the preferred product,
+implementation home, or measure of completeness for the others. Target-specific
+adapters own operating-system, browser, activity, surface, input, and OpenXR
+integration while the product behavior stays in shared contracts.
 
-- local integrated runtime
-- locomotion and input
-- world rendering
-- chunk loading and generation
+The established shared product path includes local integrated and remote
+dedicated-server sessions, persistence, locomotion and interaction, chunk
+generation and streaming, and world, actor, HUD, and menu rendering. Offscreen
+flat and headset-free synthetic-stereo hosts exercise the same scene and
+renderer contracts as additional validation hosts; they are not separate
+product targets.
 
-Native desktop flat remains the fastest daily bring-up path. The headless/offscreen path is being promoted into a real no-window flat-client validation host rather than a screenshot-only helper.
+Gameplay, runtime, asset, mesh, UI, renderer, and XR contracts stay
+host-neutral. Client platform and server host mode are separate axes: every
+client target supports the shared local/remote session model, with future
+P2P/session topologies fitting behind the same command/update contracts.
 
-Shared gameplay, runtime, asset, mesh, UI, renderer, and XR contracts must stay host-neutral. Client platform and server host mode are separate axes: every client lane should be able to play against a dedicated server, with future P2P/session topologies fitting behind the same shared command/update contracts.
-
-The current architecture target is a shared client-experience core with
-profile-specific presentation/adapters, so flat, XR, web, Android, offscreen,
-and emulated validation lanes keep one product behavior surface instead of
-separate platform clients. See
+The architecture centers on a shared client-experience core with
+profile-specific presentation and adapters, so flat, XR, web, Android,
+offscreen, and emulated validation paths keep one product behavior surface
+instead of becoming separate platform clients. See
 [`docs/client-experience-architecture.md`](docs/client-experience-architecture.md).
 
 ## Project Map
@@ -34,6 +47,7 @@ separate platform clients. See
 Current project posture and work indexes:
 
 - [`docs/platforms.md`](docs/platforms.md) — current platform matrix
+- [`docs/topics/platform-parity.md`](docs/topics/platform-parity.md) — feature and shared-contract parity matrix
 - [`docs/native-engine-architecture.md`](docs/native-engine-architecture.md) — durable native architecture
 - [`docs/tactical/`](docs/tactical/README.md) — native Rust workstream tacticals
 - [`docs/topics/`](docs/topics/README.md) — durable subsystem progress indexes
@@ -43,7 +57,7 @@ Current project posture and work indexes:
 
 Core architecture docs:
 
-- [`docs/client-experience-architecture.md`](docs/client-experience-architecture.md) — draft shared client-experience core, profiles, adapters, and platform parity guardrails
+- [`docs/client-experience-architecture.md`](docs/client-experience-architecture.md) — accepted shared client-experience core, profiles, adapters, and platform parity guardrails
 - [`docs/offscreen-flat-client.md`](docs/offscreen-flat-client.md) — offscreen flat-client target
 - [`docs/architecture.md`](docs/architecture.md) — runtime/host split
 - [`docs/runtime-data-model.md`](docs/runtime-data-model.md) — shared chunk/block-state data contracts
@@ -69,16 +83,18 @@ Worldgen, rendering, and subsystem docs:
 - [`docs/creatures.md`](docs/creatures.md) — overworld creature spawning architecture
 - [`docs/topics/performance.md`](docs/topics/performance.md) — high-priority known performance issues and current pickup queue
 - [`docs/performance-records.md`](docs/performance-records.md) — native benchmark baselines
-- [`docs/assets-plan.md`](docs/assets-plan.md) — asset extraction
+- [`docs/assets-plan.md`](docs/assets-plan.md) — local Minecraft reference-asset extraction
+- [`docs/topics/asset-pack-profiles.md`](docs/topics/asset-pack-profiles.md) — first-party asset packs, provenance, and remaining distribution boundary
 
-Reference material:
+Reference and oracle material:
 
-- [`reference/minecraft-1.17.1/src/`](reference/minecraft-1.17.1/src/) — primary source for vanilla behavior and visual correctness
-- `~/code/playbox` — local Rust `winit`/`wgpu`, headless capture, diagnostics, Android, and OpenXR pattern library
+- `reference/minecraft-1.17.1/src/` — generated, gitignored local source tree for vanilla behavior and visual correctness
 - [`oracle/`](oracle/) — retained Java and TypeScript reference tooling
 - [`test/fixtures/`](test/fixtures/) — shared oracle fixture data consumed by native Rust tests
 
-The retired browser engine has been removed from the live tree. Worldgen aims for **seed parity** with Minecraft Java 1.17.1 so we can oracle-test against real MC output.
+The generated reference tree and extracted Minecraft assets are not part of the
+live engine or distributable content. World generation aims for **seed parity**
+with Minecraft Java 1.17.1 so it can be oracle-tested against reference output.
 
 ## Code Layout
 
@@ -91,16 +107,18 @@ The retired browser engine has been removed from the live tree. Worldgen aims fo
 - [`native/crates/`](native/crates/) - shared engine, protocol, runtime, renderer, UI, worldgen, asset, mesh, lighting, and XR crates
 - [`oracle/`](oracle/) - Java and TypeScript fixture-generation helpers
 - [`test/fixtures/`](test/fixtures/) - shared oracle fixture data consumed by native Rust tests
-- [`reference/minecraft-1.17.1/`](reference/minecraft-1.17.1/) - generated, gitignored Minecraft reference tree
+- `reference/minecraft-1.17.1/` - generated, gitignored Minecraft reference tree
 
-## Common Validation
+## Validation
 
-Recommended default gates:
+The shared Rust workspace gate is:
 
 ```bash
 cargo test --manifest-path native/Cargo.toml
-pnpm native:desktop-offscreen:smoke
-pnpm native:web:build
 ```
 
-Use [`docs/platforms.md`](docs/platforms.md) for the full platform validation matrix. Rendered-output work should use the native headless/offscreen capture paths where available and keep screenshots outside the repo, for example under `/tmp`.
+Each client target has appropriate build, smoke, device, and rendered-output
+gates. Use [`docs/platforms.md`](docs/platforms.md) for the complete validation
+matrix and choose gates based on the contracts changed, not a ranking of
+targets. Keep generated screenshots outside the repo, for example under
+`/tmp`.
