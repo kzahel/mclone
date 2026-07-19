@@ -1,4 +1,5 @@
 import { RenderSectionWorkerCompiler, fetchAssetPack } from "./mclone-render-compiler-shared.js";
+import { PolledWorkerTransport } from "./mclone-worker-transport.js";
 import {
   WORLD_CHUNK_STORE,
   WORLD_ENTITY_CHUNK_STORE,
@@ -172,37 +173,40 @@ async function probeThreading() {
  */
 function runThreadWorker(memory, addend) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(THREAD_WORKER_URL.href, {
-      type: "module",
-      name: "mclone-thread-smoke",
-    });
+    const transport = new PolledWorkerTransport(
+      THREAD_WORKER_URL,
+      "mclone-thread-smoke",
+    );
     let settled = false;
     const timeout = setTimeout(() => {
       if (settled) return;
       settled = true;
-      worker.terminate();
+      transport.terminate();
       reject(new Error("timed out waiting for thread smoke worker"));
     }, 5_000);
 
-    worker.onmessage = (event) => {
+    const poll = () => {
       if (settled) return;
+      const event = transport.poll();
+      if (event === null) {
+        setTimeout(poll, 0);
+        return;
+      }
       settled = true;
       clearTimeout(timeout);
-      worker.terminate();
-      resolve(event.data);
+      transport.terminate();
+      if (event.kind === "error") {
+        reject(new Error(event.message));
+      } else {
+        resolve(event.data);
+      }
     };
-    worker.onerror = (event) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      worker.terminate();
-      reject(new Error(event.message || "thread smoke worker failed"));
-    };
-    worker.postMessage({
+    transport.post({
       kind: "mclone-thread-smoke",
       memory,
       addend,
     });
+    poll();
   });
 }
 

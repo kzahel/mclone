@@ -120,6 +120,17 @@ const moduleRegistry = {
     workerConstruction: false,
     responsibilities: ["DOM touch/pointer translation and fullscreen gesture"],
   },
+  "mclone-worker-transport.ts": {
+    family: "worker-transports",
+    baselineLines: 0,
+    workerEntry: false,
+    workerConstruction: true,
+    responsibilities: [
+      "generic browser Worker construction",
+      "opaque polled event transport",
+      "postMessage transfer mechanics",
+    ],
+  },
   "mclone-web-world-catalog.ts": {
     family: "catalog-settings",
     baselineLines: 784,
@@ -277,6 +288,15 @@ const copyFacts = [
   },
 ];
 
+const genericTransportForbidden = [
+  "assetEpoch",
+  "compile",
+  "farLod",
+  "requestId",
+  "worldInstance",
+  "worldPriority",
+];
+
 const requiredAbiLocks = [
   "native/apps/mclone-web-client/tests/render_compiler_abi_lock.rs",
   "native/apps/mclone-web-client/tests/runner_shared_abi_lock.rs",
@@ -384,6 +404,15 @@ function inventoryFor(sources) {
     return { ...item, count };
   });
 
+  const genericTransport = sources["mclone-worker-transport.ts"] ?? "";
+  for (const token of genericTransportForbidden) {
+    if (genericTransport.includes(token)) {
+      errors.push(
+        `mclone-worker-transport.ts: generic transport contains domain token ${token}`,
+      );
+    }
+  }
+
   const copies = copyFacts.map((fact) => {
     const text = readFileSync(resolve(repoRoot, fact.path), "utf8");
     const count = countOccurrences(text, fact.needle);
@@ -457,6 +486,14 @@ function runSelfTest(sources) {
   };
   if (!inventoryFor(withSharedHeap).errors.some((error) => error.includes("shared Wasm memory"))) {
     failures.push("synthetic production shared-Wasm-memory introduction was not rejected");
+  }
+
+  const withTransportDomain = {
+    ...sources,
+    "mclone-worker-transport.ts": `${sources["mclone-worker-transport.ts"]}\n// worldPriority\n`,
+  };
+  if (!inventoryFor(withTransportDomain).errors.some((error) => error.includes("domain token"))) {
+    failures.push("synthetic generic-transport domain vocabulary was not rejected");
   }
 
   return failures;
