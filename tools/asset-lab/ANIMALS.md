@@ -186,14 +186,14 @@ reviewed rigs and then filling macro gaps.
 | Mouse / Rat | P2 | ☐ | Q | — | tiny; long tail |
 | Squirrel | P2 | ✅ | Q/H | gray, red; flying squirrel | `examples/red_squirrel` — approved 18-box Eurasian red squirrel with synchronized bound, deep haunches, and three-stage plume tail |
 | Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit`; rounded A/B in `legacy-examples/rabbit_rounded` |
-| Hedgehog | P3 | ☐ | Q | — | spine texture |
+| Hedgehog | P3 | ✅ | Q | — | `examples/hedgehog` — approved 19-box low quadruped with pointed cream face, tiny legs, and four-step pixel-textured spine coat |
 | Porcupine | P3 | ☐ | Q | — | quill texture; hedgehog cousin |
 | Raccoon | P2 | ✅ | Q | — | `examples/raccoon` — approved 18-box adult with broad face mask, dark paws, cautious walk, and four-stage ringed tail |
 | Beaver | P3 | ☐ | Q | — | flat tail |
 | Bat | P2 | ☐ | W | — | flying mammal; reuses `wingFlap` |
-| Meerkat | P2 | ☐ | Q | — | upright sentry idle pose is the signature |
+| Meerkat | P2 | ✅ | Q | — | `examples/meerkat` — approved 19-box upright sentry with striped torso, dark eye patches, folded forepaws, planted feet, balancing tail, and scanning cycle |
 | Otter | P2 | ✅ | Q/S | river, sea | `examples/river_otter` — approved 17-box river otter with elongated body, webbed paws, and two-stage lateral swim tail |
-| Red panda | P2 | ☐ | Q | — | ringed tail; zoo favorite |
+| Red panda | P2 | ✅ | Q | — | `examples/red_panda` — approved 21-box adult with rust coat, white mask and ruff, dark legs, and plush six-section ringed tail |
 | Sloth | P3 | ☐ | Q | two-toe, three-toe | very slow / hanging; mostly ST |
 | Capybara | P3 | ☐ | Q | — | giant rodent; semi-aquatic |
 | Anteater | P3 | ☐ | Q | giant, tamandua | long snout + tongue |
