@@ -189,13 +189,13 @@ reviewed rigs and then filling macro gaps.
 | Hedgehog | P3 | ✅ | Q | — | `examples/hedgehog` — approved 19-box low quadruped with pointed cream face, tiny legs, and four-step pixel-textured spine coat |
 | Porcupine | P3 | ☐ | Q | — | quill texture; hedgehog cousin |
 | Raccoon | P2 | ✅ | Q | — | `examples/raccoon` — approved 18-box adult with broad face mask, dark paws, cautious walk, and four-stage ringed tail |
-| Beaver | P3 | ☐ | Q | — | flat tail |
+| Beaver | P3 | ✅ | Q | — | `examples/beaver` — approved 19-box adult with blunt muzzle, orange incisors, compact legs, and broad crosshatched two-stage paddle tail |
 | Bat | P2 | ☐ | W | — | flying mammal; reuses `wingFlap` |
 | Meerkat | P2 | ✅ | Q | — | `examples/meerkat` — approved 19-box upright sentry with striped torso, dark eye patches, folded forepaws, planted feet, balancing tail, and scanning cycle |
 | Otter | P2 | ✅ | Q/S | river, sea | `examples/river_otter` — approved 17-box river otter with elongated body, webbed paws, and two-stage lateral swim tail |
 | Red panda | P2 | ✅ | Q | — | `examples/red_panda` — approved 21-box adult with rust coat, white mask and ruff, dark legs, and plush six-section ringed tail |
 | Sloth | P3 | ☐ | Q | two-toe, three-toe | very slow / hanging; mostly ST |
-| Capybara | P3 | ☐ | Q | — | giant rodent; semi-aquatic |
+| Capybara | P3 | ✅ | Q | — | `examples/capybara` — approved 16-box tailless barrel with high blunt head, tiny ears, short planted legs, and calm walk |
 | Anteater | P3 | ☐ | Q | giant, tamandua | long snout + tongue |
 | Armadillo | P3 | ☐ | Q | — | **roll-up** ball pose (see Snail/roly-poly note) |
 | Pangolin | P3 | ☐ | Q | — | scale texture; **roll-up** ball pose |
@@ -211,7 +211,7 @@ reviewed rigs and then filling macro gaps.
 | Wombat | P3 | ☐ | Q | — | stocky; raccoon-class rig |
 | Opossum | P3 | ☐ | Q | — | prehensile tail; hangs |
 | Tasmanian devil | P3 | ☐ | Q | — | |
-| Platypus | P3 | ☐ | Q/S | — | bill + webbed feet; semi-aquatic |
+| Platypus | P3 | ✅ | Q/S | — | `examples/platypus` — approved 15-box low swimmer with broad slate bill, four webbed feet, two-stage paddle tail, and alternating paddle cycle |
 | Echidna | P3 | ☐ | Q | — | spiny anteater; quill texture |
 
 ## Birds
