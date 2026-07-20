@@ -30,6 +30,15 @@ use mclone_protocol::{
 
 use crate::{WorldBehaviorProfile, WorldGenerationProfile};
 
+mod record_executor;
+pub use record_executor::{
+    MemoryRecordExecutor, MemoryRecordExecutorFault, NullRecordExecutor, PersistenceRecordAddress,
+    PersistenceRecordBatch, PersistenceRecordExecutor, PersistenceRecordKeyPart,
+    PersistenceRecordMutation, PersistenceRecordNamespace, PersistenceRecordPayload,
+    PersistenceRecordRequest, PersistenceRecordRequestId, PersistenceRecordResponse,
+    RecordExecutorWorldStore,
+};
+
 use mclone_core::{
     BlockStateId, ChunkStatus, LIGHT_DATA_LAYER_BYTE_COUNT, PackedChunkSection, PackedLightSection,
 };
@@ -58,11 +67,50 @@ pub type PersistenceRequestId = u64;
 
 pub type ChunkStoreResult<T> = Result<T, ChunkStoreError>;
 
+/// Stable failure categories shared by persistence coordinators and physical
+/// executors. The diagnostic message remains backend-specific; engine policy
+/// branches on this category instead of parsing that message.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PersistenceErrorKind {
+    Io,
+    InvalidData,
+    Corrupt,
+    Incompatible,
+    Quota,
+    Unavailable,
+    LeaseConflict,
+    Closed,
+    Cancelled,
+    Backend,
+}
+
 #[derive(Debug)]
 pub enum ChunkStoreError {
     Io(io::Error),
     InvalidData(String),
     Closed(String),
+    Classified {
+        kind: PersistenceErrorKind,
+        message: String,
+    },
+}
+
+impl ChunkStoreError {
+    pub const fn kind(&self) -> PersistenceErrorKind {
+        match self {
+            Self::Io(_) => PersistenceErrorKind::Io,
+            Self::InvalidData(_) => PersistenceErrorKind::InvalidData,
+            Self::Closed(_) => PersistenceErrorKind::Closed,
+            Self::Classified { kind, .. } => *kind,
+        }
+    }
+
+    pub fn classified(kind: PersistenceErrorKind, message: impl Into<String>) -> Self {
+        Self::Classified {
+            kind,
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for ChunkStoreError {
@@ -71,6 +119,7 @@ impl fmt::Display for ChunkStoreError {
             Self::Io(error) => write!(f, "{error}"),
             Self::InvalidData(message) => f.write_str(message),
             Self::Closed(message) => f.write_str(message),
+            Self::Classified { message, .. } => f.write_str(message),
         }
     }
 }
@@ -85,11 +134,14 @@ impl From<io::Error> for ChunkStoreError {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn sqlite_error(error: rusqlite::Error) -> ChunkStoreError {
-    ChunkStoreError::InvalidData(format!("sqlite world store error: {error}"))
+    ChunkStoreError::classified(
+        PersistenceErrorKind::Backend,
+        format!("sqlite world store error: {error}"),
+    )
 }
 
 fn duplicate_store_error(error: &ChunkStoreError) -> ChunkStoreError {
-    ChunkStoreError::InvalidData(error.to_string())
+    ChunkStoreError::classified(error.kind(), error.to_string())
 }
 
 fn closed_error() -> ChunkStoreError {

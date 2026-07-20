@@ -1,7 +1,7 @@
 # Tactical 199: Unified Persistence Interface
 
-Status: active 2026-07-20; full autonomous campaign authorized. Slice 0
-baseline is complete and Slice 1 is next.
+Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-1
+are complete and Slice 2 is next.
 
 Topic: `unified-persistence-interface`
 
@@ -194,7 +194,7 @@ is diagnosed rather than attributed to the refactor.
 
 ## Slice 1: Conformance And Typed Failure Contract
 
-Status: planned.
+Status: complete 2026-07-20.
 
 Add a reusable persistence behavior harness before moving backend ownership:
 
@@ -214,6 +214,33 @@ do not broaden gameplay saved-data content in this campaign.
 
 Exit: one contract describes every backend; current backends pass through
 compatibility adapters before extraction.
+
+Evidence and decisions:
+
+- `PersistenceErrorKind` now classifies IO, invalid data, corruption,
+  incompatibility, quota, unavailable access, writer-lease conflict, closed,
+  cancellation, and backend failure without parsing diagnostics.
+- The owned `PersistenceRecordRequest`/`PersistenceRecordResponse` vocabulary
+  fixes stable namespace ids, generic key parts, opaque payloads, atomic
+  put/delete batches, probes, flush, close, and request correlation.
+- `MemoryRecordExecutor` and `NullRecordExecutor` prove the physical contract.
+  The memory executor supplies deterministic read/probe/commit/flush/close
+  fault injection; its failed multi-mutation commit proves apply-all-or-none.
+- `RecordExecutorWorldStore` is the synchronous compatibility/codec adapter.
+  Its conformance proof covers misses, all five live record families, flush,
+  close/reopen, persisted revision precedence, and corrupt-byte
+  classification. Existing actor tests continue to own pending visibility,
+  durability-lane ordering, coalescing, superseded acknowledgements, and close
+  behavior.
+- `SavedData` remains an explicitly reserved unsupported engine family. Making
+  it live in IndexedDB would require either a database-version/store change or
+  an opaque-key hack in another family, both excluded by the frozen schema and
+  not required by a consumer. The generic namespace remains reserved so a
+  later schema decision does not change the executor ABI.
+- `cargo test -p mclone-server -p mclone-app-runtime -p mclone-web-client`
+  passed with 517 server tests (five new contract tests in that run), 293
+  app-runtime tests, 47 web-client tests, and all integration locks. The
+  focused adapter expansion then passed eight record-executor tests.
 
 ## Slice 2: Coordinator And Record-Executor Seam
 
