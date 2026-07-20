@@ -1744,7 +1744,7 @@ impl McloneSceneHost {
                     mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
                         let destination = self.prepare_managed_lobby_fallback_destination(
                             &launch.manifest,
-                            value.key.clone(),
+                            mclone_app_runtime::scenario_content::AppPrivateWorldKey::LobbyFallback,
                             launch.intent.preview_bounds,
                         )?;
                         launch.destination = Some(destination);
@@ -1888,7 +1888,7 @@ impl McloneSceneHost {
     fn prepare_managed_lobby_fallback_destination(
         &self,
         manifest: &mclone_app_runtime::scenario_content::ManagedScenarioManifest,
-        managed_world_key: mclone_app_runtime::scenario_content::ManagedWorldKey,
+        private_world_key: mclone_app_runtime::scenario_content::AppPrivateWorldKey,
         preview_bounds: mclone_app_runtime::scenario::ScenarioPreviewBounds,
     ) -> Result<PreparedEmbeddedWorldScenario> {
         let primary_fixture = manifest
@@ -1932,8 +1932,10 @@ impl McloneSceneHost {
         )?;
         let descriptor = ActiveSessionDescriptor::new_seed_local_world(destination_manifest.seed());
         let destination = WarmWorldStandbyRequest::new(destination_manifest.seed(), center)
-            .with_managed_world_key(
-                managed_world_key,
+            .with_storage_source(
+                mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::AppPrivate(
+                    private_world_key,
+                ),
                 destination_manifest.world_generation_profile(),
             )
             .with_descriptor(descriptor)
@@ -2043,9 +2045,14 @@ impl McloneSceneHost {
             );
             launch.destination = Some(destination);
         } else {
-            launch.issue_destination_provision();
+            let destination = self.prepare_managed_lobby_fallback_destination(
+                &launch.manifest,
+                mclone_app_runtime::scenario_content::AppPrivateWorldKey::LobbyFallback,
+                launch.intent.preview_bounds,
+            )?;
+            launch.destination = Some(destination);
             log::info!(
-                "selected lobby destination source=managed-fallback seed={}",
+                "selected lobby destination source=app-private seed={}",
                 mclone_app_runtime::scenario_content::LOBBY_PREVIEW_FALLBACK_SEED
             );
         }
@@ -2540,6 +2547,19 @@ impl McloneSceneHost {
                     })?
                     .to_owned(),
             ),
+            (
+                None,
+                Some(
+                    mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::AppPrivate(
+                        key,
+                    ),
+                ),
+            ) => Some(native_app_private_world_dir(
+                catalog_world_root
+                    .as_deref()
+                    .context("app-private destination requires a native world root")?,
+                *key,
+            )),
             (
                 None,
                 Some(mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(id)),
@@ -6540,6 +6560,20 @@ pub fn local_integrated_scene_options(
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+fn native_app_private_world_dir(
+    world_root: &std::path::Path,
+    key: mclone_app_runtime::scenario_content::AppPrivateWorldKey,
+) -> PathBuf {
+    let app_root = world_root.parent().unwrap_or(world_root);
+    match key {
+        mclone_app_runtime::scenario_content::AppPrivateWorldKey::LobbyFallback => app_root
+            .join("scenarios")
+            .join(mclone_app_runtime::scenario_content::LOBBY_PREVIEW_DIRECTORY)
+            .join(mclone_app_runtime::scenario_content::MANAGED_SCENARIO_OVERWORLD_DIRECTORY),
+    }
+}
+
 fn reconcile_observer_preview_entry(
     scene: &McloneSceneHostOptions,
     client: &mclone_client::ClientRuntime,
@@ -6612,6 +6646,17 @@ pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) ->
 mod camera_config_tests {
     use super::*;
     use mclone_server::WorldGenerationProfile;
+
+    #[test]
+    fn private_lobby_fallback_reuses_the_legacy_storage_location() {
+        assert_eq!(
+            native_app_private_world_dir(
+                std::path::Path::new("/app/worlds"),
+                mclone_app_runtime::scenario_content::AppPrivateWorldKey::LobbyFallback,
+            ),
+            PathBuf::from("/app/scenarios/lobby-preview-v3/fallback-overworld")
+        );
+    }
 
     #[test]
     fn configured_camera_applies_launch_defaults_once() {

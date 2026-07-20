@@ -67,6 +67,7 @@ pub struct ProvisionedManagedScenarioWorld {
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ScenarioWorldStorageSource {
     TransientAuthored(AuthoredWorldFixtureKind),
+    AppPrivate(AppPrivateWorldKey),
     Managed(ManagedWorldKey),
     Catalog(LocalWorldId),
 }
@@ -75,6 +76,7 @@ impl ScenarioWorldStorageSource {
     pub fn world_id(&self) -> &str {
         match self {
             Self::TransientAuthored(fixture) => fixture.fixture_id(),
+            Self::AppPrivate(key) => key.storage_id(),
             Self::Managed(key) => key.as_str(),
             Self::Catalog(id) => id.as_str(),
         }
@@ -83,6 +85,7 @@ impl ScenarioWorldStorageSource {
     pub const fn kind_label(&self) -> &'static str {
         match self {
             Self::TransientAuthored(_) => "transient-authored",
+            Self::AppPrivate(_) => "app-private",
             Self::Managed(_) => "managed",
             Self::Catalog(_) => "catalog",
         }
@@ -91,14 +94,31 @@ impl ScenarioWorldStorageSource {
     pub fn managed_world_key(&self) -> Option<&ManagedWorldKey> {
         match self {
             Self::Managed(key) => Some(key),
-            Self::TransientAuthored(_) | Self::Catalog(_) => None,
+            Self::TransientAuthored(_) | Self::AppPrivate(_) | Self::Catalog(_) => None,
         }
     }
 
     pub const fn authored_fixture(&self) -> Option<AuthoredWorldFixtureKind> {
         match self {
             Self::TransientAuthored(fixture) => Some(*fixture),
-            Self::Managed(_) | Self::Catalog(_) => None,
+            Self::AppPrivate(_) | Self::Managed(_) | Self::Catalog(_) => None,
+        }
+    }
+}
+
+/// Stable identity for a persistent world owned by the application rather
+/// than the user-visible catalog.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum AppPrivateWorldKey {
+    LobbyFallback,
+}
+
+impl AppPrivateWorldKey {
+    /// Preserve the original browser storage identity so the cleanup does not
+    /// orphan an already-generated private fallback world.
+    pub const fn storage_id(self) -> &'static str {
+        match self {
+            Self::LobbyFallback => "managed.lobby-preview-v3.overworld-v3",
         }
     }
 }

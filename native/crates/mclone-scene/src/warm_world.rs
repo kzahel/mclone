@@ -1938,22 +1938,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn managed_launch_provisions_only_the_persistent_fallback() {
+    fn managed_launch_has_no_content_provision_operations() {
         let intent = ScenarioLaunchIntent::lobby_preview();
         let mut launch = ManagedScenarioLaunchState::new(intent);
         assert!(launch.take_provision_request().is_none());
-        launch.issue_destination_provision();
-        let destination = launch.take_provision_request().unwrap();
-        assert_eq!(destination.kind.role, ManagedScenarioWorldRole::Destination);
-        assert!(launch.take_provision_request().is_none());
-        assert_eq!(launch.cancel(), 1);
-        assert!(matches!(
-            launch.complete_provision(PlatformOperationCompletion {
-                token: destination.token,
-                result: Err("late".to_owned()),
-            }),
-            PlatformOperationResolution::Stale(_)
-        ));
+        assert_eq!(launch.cancel(), 0);
     }
 
     #[test]

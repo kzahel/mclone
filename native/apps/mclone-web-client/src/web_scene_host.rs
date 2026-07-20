@@ -1492,7 +1492,8 @@ impl WebSceneHost {
             mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::TransientAuthored(
                 fixture,
             ) => config.with_transient_authored_fixture(*fixture),
-            mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Managed(_)
+            mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::AppPrivate(_)
+            | mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Managed(_)
             | mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(_) => {
                 config.with_indexed_db_world(storage_source.world_id(), false)
             }
