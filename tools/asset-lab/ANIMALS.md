@@ -69,7 +69,7 @@ used body-plan coverage and likely rig reuse to choose each wave.
 | Wave | Animals | Why |
 |---|---|---|
 | Canonical now | Elephant, Tiger, Rabbit, Butterfly, Chicken | Approved box-only sources promoted to their ordinary names; rounded comparisons archived explicitly |
-| Wave 1 | Cat, Cow, Goat | Best mix of remaining curved-part cleanup, recognizable silhouettes, and reusable quadruped anatomy |
+| Completed Wave 1 | Cat, Cow, Goat | Re-authored as 62 boxes total; pixel markings replace whiskers, hide patches, socks, nostrils, and cloven-toe geometry |
 | Wave 2 | Dog, Fox, Wolf | Shared canid anatomy with distinct proportions and textures |
 | Wave 3 | Piglet, Sheep, Horse | Farm silhouettes spanning compact, woolly, and long-legged rigs |
 | Wave 4 | Bear, Lion, Bearfolk, Lionfolk | Heavy quadrupeds plus the two player-derived anthropomorphic rigs |
@@ -103,10 +103,10 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Pig | P0 | 🔨 | Q | piglet, adult pink, spotted, boar (tusks) | Rounded source retained at `legacy-examples/piglet_rounded`; canonical box-only re-authoring is Wave 3 |
 | Sheep | P0 | 🔨 | Q | white, black, brown, shorn (no wool), lamb, dyed (MC nod) | Rounded source retained at `legacy-examples/sheep_rounded`; canonical box-only re-authoring is Wave 3 |
-| Cow | P0 | 🔨 | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | Rounded source retained at `legacy-examples/cow_rounded`; canonical box-only re-authoring is Wave 1 |
+| Cow | P0 | ✅ | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | `examples/cow` — canonical 22-box Holstein with stepped horns, udder, texture-painted hide and socks; rounded A/B retained at `legacy-examples/cow_rounded` |
 | Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — canonical 14-box hen; `legacy-examples/chicken_rounded` retains the rounded A/B; both preserve `bipedWalk` wing/head motion |
 | Horse | P0 | 🔨 | Q | brown, black, white, palomino, foal; pony | Rounded source retained at `legacy-examples/horse_rounded`; canonical box-only re-authoring is Wave 3 |
-| Goat | P1 | 🔨 | Q | white, brown, kid, billy (horns + beard) | Rounded source retained at `legacy-examples/goat_rounded`; canonical box-only re-authoring is Wave 1 |
+| Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — canonical 24-box billy with stepped swept horns, beard, cloven-hoof texture, and upturned tail; rounded A/B retained at `legacy-examples/goat_rounded` |
 | Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — canonical 18-box rabbit; `legacy-examples/rabbit_rounded` retains the rounded A/B and matching synchronized hop |
 | Donkey / Mule | P2 | ☐ | Q | donkey, mule | horse variant; big ears |
 | Duck | P2 | ☐ | W/S | mallard drake, hen, duckling | walks + paddles; pairs with swim work |
@@ -118,7 +118,7 @@ gaps in the current eight figures.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Dog | P0 | 🔨 | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | Rounded source retained at `legacy-examples/dog_rounded`; canonical box-only re-authoring is Wave 2 |
-| Cat | P0 | 🔨 | Q | tabby, black, white, calico, orange, siamese; kitten | Rounded source retained at `legacy-examples/cat_rounded`; canonical box-only re-authoring is Wave 1 |
+| Cat | P0 | ✅ | Q | tabby, black, white, calico, orange, siamese; kitten | `examples/cat` — canonical 16-box tabby with pixel face/stripes and an attached two-piece cuboid tail; rounded A/B retained at `legacy-examples/cat_rounded` |
 | Hamster / Guinea pig | P3 | ☐ | Q | — | tiny, rounded |
 | Parrot (pet) | P2 | ☐ | W | see Birds | |
 

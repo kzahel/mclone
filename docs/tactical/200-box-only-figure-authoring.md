@@ -1,9 +1,10 @@
 # 200: Box-Only Figure Authoring
 
-Status: active 2026-07-20. The authoring-policy and canonical Chicken slice is
-implemented and test-green; four re-authoring waves and final compatibility
-cleanup follow. The final native offscreen pixel rerun remains pending because
-the current host's Metal review process stalled before producing its receipt.
+Status: active 2026-07-20. The authoring-policy, canonical Chicken, and first
+quadruped re-authoring slices are implemented and test-green; three content
+waves and final compatibility cleanup follow. The final native offscreen pixel
+rerun remains pending because the current host's Metal review process stalled
+before producing its receipt.
 
 Topic: `compiled-figure-rendering`
 
@@ -101,6 +102,26 @@ Implemented evidence:
 Re-author the highest-priority remaining quadrupeds. Preserve the cat tail,
 cow horns/udder, and goat horns/beard as sparse cuboid silhouettes or pixel
 detail. Render clean A/B sheets and three-cycle movies before committing.
+
+Implemented evidence:
+
+- Cat is 16 boxes rather than 20 mixed parts. Whiskers are omitted, tabby
+  stripes move to textures, and an attached two-box vanilla-ocelot-style tail
+  replaces the capsule.
+- Cow is 22 boxes rather than 38 mixed parts. Its Holstein hide, lower-leg
+  socks, face, and nostrils are textures; stepped horn pairs, a box udder, and
+  tail tuft keep the identifying silhouette.
+- Goat is 24 boxes rather than 32 mixed parts. Two-box swept horns, the
+  articulated beard, slim legs, and an upturned two-box tail retain the billy
+  goat read; a hoof-face texture carries the cloven split.
+- All three keep their original `quadrupedWalk` duration, cycle distance,
+  stance, body/head motion, and secondary ear/tail/beard tracks.
+- Canonical and rounded clean sheets plus six three-cycle movies were rendered
+  under `/tmp/mclone-asset-lab` and inspected. Sampled cycles stay grounded and
+  all tail, horn, ear, muzzle, hoof, and beard attachments remain connected.
+- The three canonical sources total 62 boxes versus 90 mixed legacy parts.
+  Their exact Three.js preview total is 744 triangles versus 5,488, a 7.4x
+  reduction; canonical part count is 31% lower.
 
 ### Slice 3: Dog, Fox, and Wolf
 

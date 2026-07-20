@@ -151,11 +151,16 @@ native cuboid approximations, and will change as source figures are revised.
 | Figure | Parts | Vertices | Triangles |
 |---|---:|---:|---:|
 | player | 12 | 288 | 144 |
-| piglet | 14 | 809 | 1,052 |
-| dog | 18 | 991 | 1,268 |
+| piglet_rounded (legacy) | 14 | 809 | 1,052 |
+| dog_rounded (legacy) | 18 | 991 | 1,268 |
+| cat | 16 | 384 | 192 |
+| cat_rounded (legacy) | 20 | 1,103 | 1,340 |
 | chicken | 14 | 336 | 168 |
 | chicken_rounded (legacy) | 21 | 2,209 | 3,108 |
+| cow | 22 | 528 | 264 |
 | cow_rounded (legacy) | 38 | 1,946 | 2,208 |
+| goat | 24 | 576 | 288 |
+| goat_rounded (legacy) | 32 | 1,697 | 1,940 |
 | rabbit | 18 | 432 | 216 |
 | rabbit_rounded (legacy) | 25 | 3,050 | 4,640 |
 | butterfly | 9 | 216 | 108 |
@@ -172,8 +177,8 @@ make CPU world-space rebaking a prerequisite for later, richer figure assets.
 
 ### Box-only animal style A/B
 
-The elephant, tiger, rabbit, chicken, and butterfly now have retained
-authoring pairs for direct style review:
+The elephant, tiger, rabbit, chicken, butterfly, cat, cow, and goat now have
+retained authoring pairs for direct style review:
 
 - `examples/elephant` uses 40 boxes exclusively, including its stepped
   articulated trunk, tusks, ears, eyes, feet, and secondary details, while
@@ -187,14 +192,19 @@ authoring pairs for direct style review:
 - `examples/chicken` uses 14 boxes for a compact walking hen whose face,
   wing feathers, and toes move to pixel textures; and
 - `examples/butterfly` uses nine boxes, including separate fore- and
-  hindwing slabs whose border and spot detail is entirely texture-driven.
+  hindwing slabs whose border and spot detail is entirely texture-driven;
+- `examples/cat` uses 16 boxes, with pixel tabby detail and a two-piece tail;
+- `examples/cow` uses 22 boxes, with texture-painted Holstein patches and
+  socks plus stepped horns, an udder, and a tail tuft; and
+- `examples/goat` uses 24 boxes, with stepped swept horns, beard, narrow
+  legs, a cloven-hoof texture, and a short upturned tail.
 
-Both variants use the same `1.6`-second, `0.9`-unit `quadrupedWalk` timing and
-matching independent trunk, ear, head, and tail motion. Clean multi-angle
-sheets and three-cycle movies were rendered under `/tmp`, inspected
-individually, and combined into direct side-by-side reviews. Human review
-preferred the box-only version for its charm and stronger fit with the voxel
-world's visual language.
+The Elephant pair uses the same `1.6`-second, `0.9`-unit `quadrupedWalk`
+timing and matching independent trunk, ear, head, and tail motion. Clean
+multi-angle sheets and three-cycle movies were rendered under `/tmp`,
+inspected individually, and combined into direct side-by-side reviews. Human
+review preferred the box-only version for its charm and stronger fit with the
+voxel world's visual language.
 
 The tiger pair uses identical `1.02`-second, `1.02`-unit walk timing. Direct
 review found much less stylistic separation than the elephant pair because the
@@ -232,8 +242,18 @@ The box-only rabbit has the strongest stylistic change; the chicken remains
 immediately legible through its comb, beak, wattle, wings, tail, and feet; and
 the butterfly preserves its colorful identity by replacing rounded spots and
 antenna tips with pixel wing patterns and a simpler silhouette. The next
-high-value quadruped conversions are Cat, Cow, and Goat; increasingly
-box-dominant animals can follow later.
+high-value conversion was the Cat, Cow, and Goat quadruped wave.
+
+That wave retains every original walk duration, cycle distance, stance ratio,
+body/head motion, and secondary track while reducing 90 mixed parts to 62
+boxes. Cat drops from 1,340 to 192 exact preview triangles, Cow from 2,208 to
+264, and Goat from 1,940 to 288. Together that is 5,488 versus 744 triangles,
+a 7.4x authoring-preview reduction, plus a 31% part-count reduction relevant
+to the current prepared cuboid path. Clean canonical/legacy sheets and all six
+three-cycle movies were rendered under `/tmp/mclone-asset-lab` and inspected;
+the sampled motion remains grounded and the sparse versions preserve the cat
+tail, cow horn/udder, and goat horn/beard signatures. Dog, Fox, and Wolf are
+the next anatomy-sharing wave.
 
 These topology ratios do not by themselves prove an end-to-end frame-time
 improvement. Material ranges, atlas residency, draw batching, animation
@@ -256,23 +276,23 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 25 |
-| total parts | 670 |
-| boxes | 465 |
+| figures | 28 |
+| total parts | 732 |
+| boxes | 527 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 45 |
-| parts with any texture reference | 55 |
-| individual texture applications | 83 |
+| ASCII textures | 55 |
+| parts with any texture reference | 72 |
+| individual texture applications | 117 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 7 | 128 | 128 | 0 / 0 / 0 |
+| canonical `examples/` | 10 | 190 | 190 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
-All 83 applications target an explicit face of a box. They range from single
+All 117 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
