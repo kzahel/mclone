@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 80 |
-| total parts | 1,749 |
-| boxes | 1,544 |
+| figures | 83 |
+| total parts | 1,811 |
+| boxes | 1,606 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 231 |
-| parts with any texture reference | 338 |
-| individual texture applications | 550 |
+| ASCII textures | 245 |
+| parts with any texture reference | 370 |
+| individual texture applications | 598 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 62 | 1,207 | 1,207 | 0 / 0 / 0 |
+| canonical `examples/` | 65 | 1,269 | 1,269 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -518,7 +518,21 @@ under `/tmp/mclone-asset-lab/batch-14` and inspected for identity, grounding or
 swim posture, attachment continuity, gait or paddle cadence, secondary motion,
 and loop continuity, and approved by the user on 2026-07-20.
 
-All 550 applications target an explicit face of a box. They range from single
+The fifteenth post-migration content batch adds Porcupine, Echidna, and
+Armadillo as approved canonical box-only rigs. Porcupine is a
+21-part heavy quadruped with a high stepped pale-tipped quill mantle, small
+face, sturdy legs, and short thick tail; Echidna is an 18-part low monotreme
+with a domed spine coat, elongated two-stage snout, broad clawed feet, and
+compact walk; and Armadillo is a 23-part scuttling rig with four stepped armor
+bands, pointed head, upright ears, broad clawed feet, and a three-stage plated
+tail. All 62 parts are canonical boxes and use 14 combined pixel textures.
+Clean multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-15` and
+inspected for identity, grounding, attachment continuity, gait cadence, rigid
+shell or quill behavior, tail follow-through, and loop continuity, and approved
+by the user on 2026-07-20.
+
+All 598 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1346,10 +1360,11 @@ Crocodile/Sea Turtle/King Cobra, Penguin/Flamingo/Peacock,
 Raccoon/Red Squirrel/River Otter, and
 Chimpanzee/Orangutan/Ring-tailed Lemur, Polar Bear/Cheetah/Jaguar, and
 Moose/American Bison/Gemsbok Oryx, Donkey/Mallard Duck/Wild Turkey,
-Red Panda/Meerkat/Hedgehog, and Beaver/Capybara/Platypus content batches extend
-the canonical authoring roster to 62 without changing the promoted runtime
-set. Instancing is now the strongest independent performance candidate;
-box-part LOD and a measured sampled/GPU pose path remain separate follow-ups.
+Red Panda/Meerkat/Hedgehog, Beaver/Capybara/Platypus, and
+Porcupine/Echidna/Armadillo content batches extend the canonical authoring
+roster to 65 without changing the promoted runtime set. Instancing is now the
+strongest independent performance candidate; box-part LOD and a measured
+sampled/GPU pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
