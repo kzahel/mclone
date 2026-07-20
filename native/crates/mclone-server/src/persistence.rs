@@ -36,7 +36,9 @@ pub use record_executor::{
     PersistenceRecordBatch, PersistenceRecordExecutor, PersistenceRecordKeyPart,
     PersistenceRecordMutation, PersistenceRecordNamespace, PersistenceRecordPayload,
     PersistenceRecordRequest, PersistenceRecordRequestId, PersistenceRecordResponse,
-    RecordExecutorWorldStore,
+    RecordExecutorWorldStore, chunk_record_address, dimension_record_address,
+    player_record_address, record_read_for_world_store_request, world_metadata_record_address,
+    world_store_completion_from_record_read,
 };
 
 use mclone_core::{
@@ -113,6 +115,39 @@ impl ChunkStoreError {
         Self::Classified {
             kind,
             message: message.into(),
+        }
+    }
+}
+
+impl PersistenceErrorKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Io => "io",
+            Self::InvalidData => "invalid-data",
+            Self::Corrupt => "corrupt",
+            Self::Incompatible => "incompatible",
+            Self::Quota => "quota",
+            Self::Unavailable => "unavailable",
+            Self::LeaseConflict => "lease-conflict",
+            Self::Closed => "closed",
+            Self::Cancelled => "cancelled",
+            Self::Backend => "backend",
+        }
+    }
+
+    pub fn parse_label(label: &str) -> Option<Self> {
+        match label {
+            "io" => Some(Self::Io),
+            "invalid-data" => Some(Self::InvalidData),
+            "corrupt" => Some(Self::Corrupt),
+            "incompatible" => Some(Self::Incompatible),
+            "quota" => Some(Self::Quota),
+            "unavailable" => Some(Self::Unavailable),
+            "lease-conflict" => Some(Self::LeaseConflict),
+            "closed" => Some(Self::Closed),
+            "cancelled" => Some(Self::Cancelled),
+            "backend" => Some(Self::Backend),
+            _ => None,
         }
     }
 }

@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::rc::Rc;
 
@@ -13,22 +13,22 @@ use mclone_app_runtime::host_mode::diagnostics_worker_exchange_drained;
 use mclone_app_runtime::startup_args::parse_world_topology_arg;
 use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology};
 use mclone_protocol::{
-    ChunkView, ClientCommand, ClientIdentity, DimensionChunkPos, DimensionKey, PlayerProfileId,
-    ServerUpdate, decode_client_command, decode_server_update, encode_client_command,
-    encode_server_update,
+    ChunkView, ClientCommand, ClientIdentity, DimensionKey, PlayerProfileId, ServerUpdate,
+    decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_server::{
-    ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkRecord,
-    ChunkStoreError, ChunkStoreResult, DimensionRecord, EntityChunkRecord, INITIAL_DAY_TIME,
-    IntegratedServerRunner, LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest,
-    PlayerRecord, PlayerRecordKey, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
+    ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
+    ChunkStoreError, ChunkStoreResult, DimensionRecord, INITIAL_DAY_TIME, IntegratedServerRunner,
+    LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest, PersistenceErrorKind,
+    PersistenceRecordAddress, PersistenceRecordBatch, PersistenceRecordExecutor,
+    PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
+    PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
+    RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
     ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
     WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
-    WorldGenerationProfile, WorldMetadata, WorldMetadataLoad, WorldStore, WorldStoreCompletion,
-    WorldStoreRequest, WorldgenMailboxKind, decode_chunk_record, decode_dimension_record,
-    decode_entity_chunk_record, decode_player_record, decode_world_metadata, encode_chunk_record,
-    encode_dimension_record, encode_entity_chunk_record, encode_player_record,
-    encode_world_metadata,
+    WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
+    dimension_record_address, record_read_for_world_store_request, world_metadata_record_address,
+    world_store_completion_from_record_read,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -36,6 +36,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{ErrorEvent, MessageEvent, Worker, WorkerOptions, WorkerType};
 
+use crate::web_catalog_execution::web_world_writer_lease_name;
 use crate::web_integrated_server_startup::WebIntegratedServerStartupConfig;
 
 const WEB_WORKER_TICK_INTERVAL_MS: u32 = 50;
@@ -1730,7 +1731,8 @@ fn ensure_worker_response_ok(value: &JsValue) -> Result<(), String> {
 pub struct McloneWebIntegratedServerWorker {
     server: LocalRealmSession,
     diagnostics: ServerRunnerDiagnostics,
-    indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
+    indexed_db_state: Option<Rc<RefCell<WebPersistenceRecordState>>>,
+    pending_indexed_db_reads: BTreeMap<u64, WorldStoreRequest>,
     command_queue_depth: usize,
     running: bool,
 }
@@ -1795,71 +1797,230 @@ struct WebIntegratedServerOperation {
 
 const MAX_INTEGRATED_SERVER_PENDING_JOB_POLLS: u32 = 60_000;
 
-#[derive(Debug, Default)]
-struct WebIndexedDbWorldStoreState {
-    world_metadata: Option<WorldMetadata>,
-    dirty_world_metadata: Option<WorldMetadata>,
-    dimensions: BTreeMap<DimensionKey, DimensionRecord>,
-    dirty_dimensions: BTreeMap<DimensionKey, DimensionRecord>,
+const WEB_EXECUTOR_REQUEST_ID_BASE: u64 = 1_u64 << 63;
+
+#[derive(Debug)]
+struct WebPersistenceRecordState {
+    records: BTreeMap<PersistenceRecordAddress, Option<PersistenceRecordPayload>>,
     legacy_records_present: bool,
-    chunks: BTreeMap<DimensionChunkPos, ChunkRecord>,
-    entity_chunks: BTreeMap<DimensionChunkPos, EntityChunkRecord>,
-    dirty_chunks: BTreeMap<DimensionChunkPos, ChunkRecord>,
-    dirty_entity_chunks: BTreeMap<DimensionChunkPos, EntityChunkRecord>,
-    players: BTreeMap<PlayerRecordKey, PlayerRecord>,
-    dirty_players: BTreeMap<PlayerRecordKey, PlayerRecord>,
+    outgoing: VecDeque<PersistenceRecordRequest>,
+    pending_executor_requests: BTreeSet<u64>,
+    next_request_id: u64,
+    fatal_error: Option<(PersistenceErrorKind, String)>,
+    closed: bool,
 }
 
-impl WebIndexedDbWorldStoreState {
-    fn from_js_records(
-        chunk_records: JsValue,
-        entity_chunk_records: JsValue,
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
+impl WebPersistenceRecordState {
+    fn new(
+        records: BTreeMap<PersistenceRecordAddress, Option<PersistenceRecordPayload>>,
         legacy_records_present: bool,
-    ) -> Result<Rc<RefCell<Self>>, String> {
-        let mut state = Self::from_js_metadata(
-            dimension_records,
-            world_metadata_record,
+    ) -> Self {
+        Self {
+            records,
             legacy_records_present,
-        )?;
-        for (address, record) in decode_chunk_records_from_js(&chunk_records)? {
-            state.chunks.insert(address, record);
+            outgoing: VecDeque::new(),
+            pending_executor_requests: BTreeSet::new(),
+            next_request_id: WEB_EXECUTOR_REQUEST_ID_BASE,
+            fatal_error: None,
+            closed: false,
         }
-        for (address, record) in decode_entity_chunk_records_from_js(&entity_chunk_records)? {
-            state.entity_chunks.insert(address, record);
-        }
-        state.legacy_records_present |= !state.chunks.is_empty() || !state.entity_chunks.is_empty();
-        Ok(Rc::new(RefCell::new(state)))
     }
 
-    fn from_js_metadata(
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
-        legacy_records_present: bool,
-    ) -> Result<Self, String> {
-        let mut state = Self {
-            world_metadata: decode_world_metadata_from_js(&world_metadata_record)?,
-            legacy_records_present,
-            ..Self::default()
+    fn check_healthy(&self) -> ChunkStoreResult<()> {
+        if let Some((kind, message)) = &self.fatal_error {
+            return Err(ChunkStoreError::classified(*kind, message.clone()));
+        }
+        if self.closed {
+            return Err(ChunkStoreError::classified(
+                PersistenceErrorKind::Closed,
+                "browser persistence record executor is closed",
+            ));
+        }
+        Ok(())
+    }
+
+    fn queue_executor_request(&mut self, build: impl FnOnce(u64) -> PersistenceRecordRequest) {
+        let request_id = self.next_request_id;
+        self.next_request_id = self.next_request_id.saturating_add(1);
+        self.pending_executor_requests.insert(request_id);
+        self.outgoing.push_back(build(request_id));
+    }
+
+    fn apply_external_read(
+        &mut self,
+        address: PersistenceRecordAddress,
+        result: &ChunkStoreResult<Option<PersistenceRecordPayload>>,
+    ) {
+        if let Ok(payload) = result {
+            self.records.insert(address, payload.clone());
+        }
+    }
+
+    fn complete_executor_response(
+        &mut self,
+        response: &PersistenceRecordResponse,
+    ) -> ChunkStoreResult<()> {
+        let request_id = response.request_id();
+        if !self.pending_executor_requests.remove(&request_id) {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "browser record executor completion {request_id} was not pending"
+            )));
+        }
+        let result = match response {
+            PersistenceRecordResponse::Read { result, .. } => result.as_ref().map(|_| ()),
+            PersistenceRecordResponse::ProbeAny { result, .. } => result.as_ref().map(|_| ()),
+            PersistenceRecordResponse::Commit { result, .. }
+            | PersistenceRecordResponse::Flush { result, .. }
+            | PersistenceRecordResponse::Close { result, .. } => result.as_ref().map(|_| ()),
         };
-        for (key, record) in decode_dimension_records_from_js(&dimension_records)? {
-            state.dimensions.insert(key, record);
+        if let Err(error) = result {
+            let kind = error.kind();
+            let message = error.to_string();
+            self.fatal_error = Some((kind, message.clone()));
+            return Err(ChunkStoreError::classified(kind, message));
         }
-        Ok(state)
+        Ok(())
+    }
+
+    fn drain_outgoing(&mut self) -> Vec<PersistenceRecordRequest> {
+        self.outgoing.drain(..).collect()
     }
 }
 
-fn web_dimension_definition_for_state(
-    seed: i64,
-    generation_profile: &str,
-    world_topology: &str,
-    state: &Rc<RefCell<WebIndexedDbWorldStoreState>>,
-) -> Result<mclone_server::DimensionDefinition, String> {
-    if let Some(record) = state.borrow().dimensions.get(&DimensionKey::overworld()) {
-        return Ok(record.definition.clone());
+#[derive(Clone, Debug)]
+struct WebPersistenceRecordExecutor {
+    state: Rc<RefCell<WebPersistenceRecordState>>,
+}
+
+impl WebPersistenceRecordExecutor {
+    fn new(state: Rc<RefCell<WebPersistenceRecordState>>) -> Self {
+        Self { state }
     }
-    web_dimension_definition(seed, generation_profile, world_topology)
+}
+
+impl PersistenceRecordExecutor for WebPersistenceRecordExecutor {
+    fn read(
+        &mut self,
+        address: &PersistenceRecordAddress,
+    ) -> ChunkStoreResult<Option<PersistenceRecordPayload>> {
+        let state = self.state.borrow();
+        state.check_healthy()?;
+        Ok(state.records.get(address).cloned().flatten())
+    }
+
+    fn probe_any(&mut self, namespaces: &[PersistenceRecordNamespace]) -> ChunkStoreResult<bool> {
+        let state = self.state.borrow();
+        state.check_healthy()?;
+        Ok(state.legacy_records_present
+            || state.records.iter().any(|(address, payload)| {
+                payload.is_some() && namespaces.contains(&address.namespace)
+            }))
+    }
+
+    fn commit(&mut self, batch: &PersistenceRecordBatch) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        state.check_healthy()?;
+        for mutation in &batch.mutations {
+            let address = match mutation {
+                PersistenceRecordMutation::Put { address, .. }
+                | PersistenceRecordMutation::Delete { address } => address,
+            };
+            if !state.records.contains_key(address) {
+                return Err(ChunkStoreError::classified(
+                    PersistenceErrorKind::Unavailable,
+                    format!(
+                        "browser record {address:?} must be read before revision-safe mutation"
+                    ),
+                ));
+            }
+        }
+        for mutation in &batch.mutations {
+            match mutation {
+                PersistenceRecordMutation::Put { address, payload } => {
+                    state.records.insert(address.clone(), Some(payload.clone()));
+                }
+                PersistenceRecordMutation::Delete { address } => {
+                    state.records.insert(address.clone(), None);
+                }
+            }
+        }
+        let batch = batch.clone();
+        state.queue_executor_request(|request_id| PersistenceRecordRequest::Commit {
+            request_id,
+            batch,
+        });
+        Ok(())
+    }
+
+    fn flush(&mut self) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        state.check_healthy()?;
+        state.queue_executor_request(|request_id| PersistenceRecordRequest::Flush { request_id });
+        Ok(())
+    }
+
+    fn close(&mut self) -> ChunkStoreResult<()> {
+        let mut state = self.state.borrow_mut();
+        state.check_healthy()?;
+        state.queue_executor_request(|request_id| PersistenceRecordRequest::Close { request_id });
+        state.closed = true;
+        Ok(())
+    }
+}
+
+fn web_persistence_state_from_bootstrap(
+    responses: Vec<PersistenceRecordResponse>,
+) -> ChunkStoreResult<(
+    Rc<RefCell<WebPersistenceRecordState>>,
+    Option<WorldMetadata>,
+    Option<DimensionRecord>,
+)> {
+    let mut records = BTreeMap::new();
+    let mut legacy_records_present = None;
+    for response in responses {
+        match response {
+            PersistenceRecordResponse::Read {
+                request_id,
+                address,
+                result,
+            } if request_id == 1 || request_id == 2 => {
+                records.insert(address, result?);
+            }
+            PersistenceRecordResponse::ProbeAny {
+                request_id: 3,
+                result,
+            } => {
+                legacy_records_present = Some(result?);
+            }
+            other => {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "unexpected IndexedDB bootstrap completion {other:?}"
+                )));
+            }
+        }
+    }
+    for address in [
+        world_metadata_record_address(),
+        dimension_record_address(&DimensionKey::overworld()),
+    ] {
+        if !records.contains_key(&address) {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "IndexedDB bootstrap omitted record address {address:?}"
+            )));
+        }
+    }
+    let legacy_records_present = legacy_records_present.ok_or_else(|| {
+        ChunkStoreError::InvalidData("IndexedDB bootstrap omitted record probe".to_owned())
+    })?;
+    let state = Rc::new(RefCell::new(WebPersistenceRecordState::new(
+        records,
+        legacy_records_present,
+    )));
+    let mut store =
+        RecordExecutorWorldStore::new(WebPersistenceRecordExecutor::new(Rc::clone(&state)), true);
+    let metadata = store.load_world_metadata()?.record;
+    let dimension = store.load_dimension(&DimensionKey::overworld())?;
+    Ok((state, metadata, dimension))
 }
 
 fn web_dimension_definition_from_startup(
@@ -1873,23 +2034,18 @@ fn web_dimension_definition_from_startup(
 
 fn web_dimension_definition_for_startup_state(
     config: &WebIntegratedServerStartupConfig,
-    state: &Rc<RefCell<WebIndexedDbWorldStoreState>>,
+    dimension: Option<&DimensionRecord>,
 ) -> mclone_server::DimensionDefinition {
-    state
-        .borrow()
-        .dimensions
-        .get(&DimensionKey::overworld())
-        .map_or_else(
-            || web_dimension_definition_from_startup(config),
-            |record| record.definition.clone(),
-        )
+    dimension.map_or_else(
+        || web_dimension_definition_from_startup(config),
+        |record| record.definition.clone(),
+    )
 }
 
 fn apply_stored_world_metadata_profiles(
     server: &mut LocalRealmSession,
-    state: &Rc<RefCell<WebIndexedDbWorldStoreState>>,
+    metadata: Option<&WorldMetadata>,
 ) -> Result<(), String> {
-    let metadata = state.borrow().world_metadata.clone();
     let Some(metadata) = metadata else {
         return Ok(());
     };
@@ -1900,121 +2056,6 @@ fn apply_stored_world_metadata_profiles(
     Ok(())
 }
 
-#[derive(Clone, Debug)]
-struct WebIndexedDbWorldStore {
-    state: Rc<RefCell<WebIndexedDbWorldStoreState>>,
-}
-
-impl WebIndexedDbWorldStore {
-    fn new(state: Rc<RefCell<WebIndexedDbWorldStoreState>>) -> Self {
-        Self { state }
-    }
-}
-
-impl WorldStore for WebIndexedDbWorldStore {
-    fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
-        let state = self.state.borrow();
-        Ok(WorldMetadataLoad {
-            record: state.world_metadata.clone(),
-            legacy_records_present: state.legacy_records_present,
-        })
-    }
-
-    fn save_world_metadata(&mut self, record: &WorldMetadata) -> ChunkStoreResult<()> {
-        let mut state = self.state.borrow_mut();
-        if state
-            .world_metadata
-            .as_ref()
-            .is_some_and(|stored| stored.revision > record.revision)
-        {
-            return Ok(());
-        }
-        state.world_metadata = Some(record.clone());
-        state.dirty_world_metadata = Some(record.clone());
-        Ok(())
-    }
-
-    fn supports_entity_chunks(&self) -> bool {
-        true
-    }
-
-    fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
-        Ok(self.state.borrow().dimensions.get(key).cloned())
-    }
-
-    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
-        let mut state = self.state.borrow_mut();
-        state.dimensions.insert(record.key.clone(), record.clone());
-        state
-            .dirty_dimensions
-            .insert(record.key.clone(), record.clone());
-        Ok(())
-    }
-
-    fn load_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        pos: ChunkPos,
-    ) -> ChunkStoreResult<Option<ChunkRecord>> {
-        Ok(self
-            .state
-            .borrow()
-            .chunks
-            .get(&DimensionChunkPos::new(dimension.clone(), pos))
-            .cloned())
-    }
-
-    fn save_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        record: &ChunkRecord,
-    ) -> ChunkStoreResult<()> {
-        let mut state = self.state.borrow_mut();
-        let address = DimensionChunkPos::new(dimension.clone(), record.pos());
-        state.chunks.insert(address.clone(), record.clone());
-        state.dirty_chunks.insert(address, record.clone());
-        Ok(())
-    }
-
-    fn load_entity_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        pos: ChunkPos,
-    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-        Ok(self
-            .state
-            .borrow()
-            .entity_chunks
-            .get(&DimensionChunkPos::new(dimension.clone(), pos))
-            .cloned())
-    }
-
-    fn save_entity_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        record: &EntityChunkRecord,
-    ) -> ChunkStoreResult<()> {
-        let mut state = self.state.borrow_mut();
-        let address = DimensionChunkPos::new(dimension.clone(), record.pos);
-        state.entity_chunks.insert(address.clone(), record.clone());
-        state.dirty_entity_chunks.insert(address, record.clone());
-        Ok(())
-    }
-
-    fn load_player(&mut self, key: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
-        Ok(self.state.borrow().players.get(key).cloned())
-    }
-
-    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
-        let mut state = self.state.borrow_mut();
-        state.players.insert(record.player.clone(), record.clone());
-        state
-            .dirty_players
-            .insert(record.player.clone(), record.clone());
-        Ok(())
-    }
-}
-
 #[wasm_bindgen]
 impl WebIntegratedServerStartup {
     #[wasm_bindgen(constructor)]
@@ -2022,6 +2063,41 @@ impl WebIntegratedServerStartup {
         let config = WebIntegratedServerStartupConfig::decode(&frame.to_vec())
             .map_err(|error| JsValue::from_str(&error))?;
         Ok(Self { config })
+    }
+
+    #[wasm_bindgen(js_name = indexedDbBootstrapRequests)]
+    pub fn indexed_db_bootstrap_requests(&self) -> Result<Array, JsValue> {
+        let requests = vec![
+            PersistenceRecordRequest::Read {
+                request_id: 1,
+                address: world_metadata_record_address(),
+            },
+            PersistenceRecordRequest::Read {
+                request_id: 2,
+                address: dimension_record_address(&DimensionKey::overworld()),
+            },
+            PersistenceRecordRequest::ProbeAny {
+                request_id: 3,
+                namespaces: vec![
+                    PersistenceRecordNamespace::Dimension,
+                    PersistenceRecordNamespace::Chunk,
+                    PersistenceRecordNamespace::EntityChunk,
+                    PersistenceRecordNamespace::Player,
+                ],
+            },
+        ];
+        persistence_record_requests_to_js(requests).map_err(|error| JsValue::from_str(&error))
+    }
+
+    #[wasm_bindgen(js_name = indexedDbWriterLeaseName)]
+    pub fn indexed_db_writer_lease_name(&self, world_id: String) -> Result<String, JsValue> {
+        let world_id = world_id.trim();
+        if world_id.is_empty() {
+            return Err(JsValue::from_str(
+                "IndexedDB writer lease requires a non-empty world id",
+            ));
+        }
+        Ok(web_world_writer_lease_name(world_id))
     }
 
     #[wasm_bindgen(js_name = createTransient)]
@@ -2048,28 +2124,27 @@ impl WebIntegratedServerStartup {
         .map_err(|error| JsValue::from_str(&error))
     }
 
-    #[wasm_bindgen(js_name = createIndexedDbExternalLoads)]
-    pub fn create_indexed_db_external_loads(
+    #[wasm_bindgen(js_name = createIndexedDb)]
+    pub fn create_indexed_db(
         &self,
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
-        legacy_records_present: bool,
+        bootstrap_completions: JsValue,
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
     ) -> Result<WebIntegratedServerActor, JsValue> {
-        let stored_world_metadata_present =
-            !world_metadata_record.is_null() && !world_metadata_record.is_undefined();
-        let state = Rc::new(RefCell::new(
-            WebIndexedDbWorldStoreState::from_js_metadata(
-                dimension_records,
-                world_metadata_record,
-                legacy_records_present,
-            )
-            .map_err(|error| JsValue::from_str(&error))?,
+        let responses = decode_persistence_record_responses_from_js(&bootstrap_completions)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let (state, metadata, dimension) = web_persistence_state_from_bootstrap(responses)
+            .map_err(|error| {
+                JsValue::from_str(&format!("initialize IndexedDB record executor: {error}"))
+            })?;
+        let stored_world_metadata_present = metadata.is_some();
+        let definition =
+            web_dimension_definition_for_startup_state(&self.config, dimension.as_ref());
+        let store = Box::new(RecordExecutorWorldStore::new(
+            WebPersistenceRecordExecutor::new(Rc::clone(&state)),
+            true,
         ));
-        let definition = web_dimension_definition_for_startup_state(&self.config, &state);
-        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
         let mut server = if job_worker_url.trim().is_empty() {
             LocalRealmSession::
                 local_integrated_with_external_load_world_store_and_dimension_definition(
@@ -2087,7 +2162,7 @@ impl WebIntegratedServerStartup {
                     ),
                 )
         };
-        apply_stored_world_metadata_profiles(&mut server, &state)
+        apply_stored_world_metadata_profiles(&mut server, metadata.as_ref())
             .map_err(|error| JsValue::from_str(&error))?;
         self.finish_startup(
             McloneWebIntegratedServerWorker::from_server(self.config.seed, server, Some(state)),
@@ -2231,13 +2306,12 @@ impl WebIntegratedServerActor {
         result
     }
 
-    #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]
-    pub fn complete_indexed_db_load_records(
+    #[wasm_bindgen(js_name = completeIndexedDbRecordRequests)]
+    pub fn complete_indexed_db_record_requests(
         &mut self,
         completions: JsValue,
     ) -> Result<JsValue, JsValue> {
-        self.require_operation()?;
-        self.server.complete_indexed_db_load_records(completions)
+        self.server.complete_indexed_db_record_requests(completions)
     }
 
     #[wasm_bindgen(js_name = hasPendingJobs)]
@@ -2347,13 +2421,6 @@ impl WebIntegratedServerActor {
         });
         Ok(())
     }
-
-    fn require_operation(&self) -> Result<(), JsValue> {
-        self.operation
-            .as_ref()
-            .map(|_| ())
-            .ok_or_else(|| JsValue::from_str("integrated-server actor has no active operation"))
-    }
 }
 
 fn integrated_server_has_pending_jobs(diagnostics: &ServerRunnerDiagnostics) -> bool {
@@ -2416,148 +2483,6 @@ impl McloneWebIntegratedServerWorker {
                 WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
             );
         Ok(Self::from_server(seed, server, None))
-    }
-
-    #[wasm_bindgen(js_name = withIndexedDbRecords)]
-    pub fn with_indexed_db_records(
-        seed: i64,
-        chunk_records: JsValue,
-        entity_chunk_records: JsValue,
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
-        legacy_records_present: bool,
-        generation_profile: String,
-        world_topology: String,
-    ) -> Result<Self, JsValue> {
-        let state = WebIndexedDbWorldStoreState::from_js_records(
-            chunk_records,
-            entity_chunk_records,
-            dimension_records,
-            world_metadata_record,
-            legacy_records_present,
-        )
-        .map_err(|error| JsValue::from_str(&error))?;
-        let definition =
-            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
-                .map_err(|error| JsValue::from_str(&error))?;
-        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server =
-            LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
-                definition, store,
-            );
-        apply_stored_world_metadata_profiles(&mut server, &state)
-            .map_err(|error| JsValue::from_str(&error))?;
-        Ok(Self::from_server(seed, server, Some(state)))
-    }
-
-    #[wasm_bindgen(js_name = withIndexedDbExternalLoads)]
-    pub fn with_indexed_db_external_loads(
-        seed: i64,
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
-        legacy_records_present: bool,
-        generation_profile: String,
-        world_topology: String,
-    ) -> Result<Self, JsValue> {
-        let state = Rc::new(RefCell::new(
-            WebIndexedDbWorldStoreState::from_js_metadata(
-                dimension_records,
-                world_metadata_record,
-                legacy_records_present,
-            )
-            .map_err(|error| JsValue::from_str(&error))?,
-        ));
-        let definition =
-            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
-                .map_err(|error| JsValue::from_str(&error))?;
-        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server = LocalRealmSession::
-            local_integrated_with_external_load_world_store_and_dimension_definition(
-                definition, store,
-            );
-        apply_stored_world_metadata_profiles(&mut server, &state)
-            .map_err(|error| JsValue::from_str(&error))?;
-        Ok(Self::from_server(seed, server, Some(state)))
-    }
-
-    #[wasm_bindgen(js_name = withJobWorkersAndIndexedDbRecords)]
-    pub fn with_job_workers_and_indexed_db_records(
-        seed: i64,
-        job_worker_url: String,
-        bindgen_js_url: String,
-        bindgen_wasm_url: String,
-        chunk_records: JsValue,
-        entity_chunk_records: JsValue,
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
-        legacy_records_present: bool,
-        generation_profile: String,
-        world_topology: String,
-    ) -> Result<Self, JsValue> {
-        let state = WebIndexedDbWorldStoreState::from_js_records(
-            chunk_records,
-            entity_chunk_records,
-            dimension_records,
-            world_metadata_record,
-            legacy_records_present,
-        )
-        .map_err(|error| JsValue::from_str(&error))?;
-        let definition =
-            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
-                .map_err(|error| JsValue::from_str(&error))?;
-        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server = LocalRealmSession::
-            local_integrated_with_world_store_dimension_definition_and_wasm_job_workers(
-                definition,
-                store,
-                WasmServerJobWorkerConfig::new(
-                    job_worker_url,
-                    bindgen_js_url,
-                    bindgen_wasm_url,
-                ),
-            );
-        apply_stored_world_metadata_profiles(&mut server, &state)
-            .map_err(|error| JsValue::from_str(&error))?;
-        Ok(Self::from_server(seed, server, Some(state)))
-    }
-
-    #[wasm_bindgen(js_name = withJobWorkersAndIndexedDbExternalLoads)]
-    pub fn with_job_workers_and_indexed_db_external_loads(
-        seed: i64,
-        job_worker_url: String,
-        bindgen_js_url: String,
-        bindgen_wasm_url: String,
-        dimension_records: JsValue,
-        world_metadata_record: JsValue,
-        legacy_records_present: bool,
-        generation_profile: String,
-        world_topology: String,
-    ) -> Result<Self, JsValue> {
-        let state = Rc::new(RefCell::new(
-            WebIndexedDbWorldStoreState::from_js_metadata(
-                dimension_records,
-                world_metadata_record,
-                legacy_records_present,
-            )
-            .map_err(|error| JsValue::from_str(&error))?,
-        ));
-        let definition =
-            web_dimension_definition_for_state(seed, &generation_profile, &world_topology, &state)
-                .map_err(|error| JsValue::from_str(&error))?;
-        let store = Box::new(WebIndexedDbWorldStore::new(Rc::clone(&state)));
-        let mut server = LocalRealmSession::
-            local_integrated_with_external_load_world_store_dimension_definition_and_wasm_job_workers(
-                definition,
-                store,
-                WasmServerJobWorkerConfig::new(
-                    job_worker_url,
-                    bindgen_js_url,
-                    bindgen_wasm_url,
-                ),
-            );
-        apply_stored_world_metadata_profiles(&mut server, &state)
-            .map_err(|error| JsValue::from_str(&error))?;
-        Ok(Self::from_server(seed, server, Some(state)))
     }
 
     #[wasm_bindgen(js_name = setLightStatusBatchSize)]
@@ -2665,18 +2590,46 @@ impl McloneWebIntegratedServerWorker {
             .set_debug_auxiliary_player_script_enabled(enabled);
     }
 
-    #[wasm_bindgen(js_name = completeIndexedDbLoadRecords)]
-    pub fn complete_indexed_db_load_records(
+    #[wasm_bindgen(js_name = completeIndexedDbRecordRequests)]
+    pub fn complete_indexed_db_record_requests(
         &mut self,
         completions: JsValue,
     ) -> Result<JsValue, JsValue> {
-        let completions = decode_indexed_db_load_completions_from_js(&completions)
+        let completions = decode_persistence_record_responses_from_js(&completions)
             .map_err(|error| JsValue::from_str(&error))?;
-        for completion in completions {
-            self.server
-                .scheduler_mut()
-                .complete_external_persistence_request(completion)
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        for response in completions {
+            let request_id = response.request_id();
+            if let Some(request) = self.pending_indexed_db_reads.remove(&request_id) {
+                let PersistenceRecordResponse::Read {
+                    address, result, ..
+                } = &response
+                else {
+                    return Err(JsValue::from_str(&format!(
+                        "IndexedDB record read {request_id} completed with {response:?}"
+                    )));
+                };
+                let state = self.indexed_db_state.as_ref().ok_or_else(|| {
+                    JsValue::from_str("IndexedDB record completion has no active executor")
+                })?;
+                state
+                    .borrow_mut()
+                    .apply_external_read(address.clone(), result);
+                let completion = world_store_completion_from_record_read(request, response)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+                self.server
+                    .scheduler_mut()
+                    .complete_external_persistence_request(completion)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            } else {
+                self.indexed_db_state
+                    .as_ref()
+                    .ok_or_else(|| {
+                        JsValue::from_str("IndexedDB record completion has no active executor")
+                    })?
+                    .borrow_mut()
+                    .complete_executor_response(&response)
+                    .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            }
         }
         match self.server.try_poll() {
             Ok(updates) => {
@@ -2809,7 +2762,7 @@ impl McloneWebIntegratedServerWorker {
     fn from_server(
         seed: i64,
         server: LocalRealmSession,
-        indexed_db_state: Option<Rc<RefCell<WebIndexedDbWorldStoreState>>>,
+        indexed_db_state: Option<Rc<RefCell<WebPersistenceRecordState>>>,
     ) -> Self {
         let mut diagnostics =
             ServerRunnerDiagnostics::initial(ServerRunnerKind::WebWorker, seed, server.day_time());
@@ -2819,6 +2772,7 @@ impl McloneWebIntegratedServerWorker {
             server,
             diagnostics,
             indexed_db_state,
+            pending_indexed_db_reads: BTreeMap::new(),
             command_queue_depth: 0,
             running: true,
         };
@@ -2828,14 +2782,30 @@ impl McloneWebIntegratedServerWorker {
 
     fn worker_response(&mut self, updates: Vec<ServerUpdate>) -> Result<JsValue, String> {
         let response = worker_response(updates, &mut self.diagnostics)?;
-        if let Some(state) = &self.indexed_db_state {
-            attach_indexed_db_dirty_records(&response, &mut state.borrow_mut())?;
-            attach_indexed_db_load_requests(
-                &response,
-                self.server
-                    .scheduler_mut()
-                    .drain_external_persistence_requests(),
-            )?;
+        if self.indexed_db_state.is_some() {
+            let external = self
+                .server
+                .scheduler_mut()
+                .drain_external_persistence_requests();
+            let mut requests = self
+                .indexed_db_state
+                .as_ref()
+                .expect("checked above")
+                .borrow_mut()
+                .drain_outgoing();
+            for request in external {
+                let record_request = record_read_for_world_store_request(&request)
+                    .map_err(|error| error.to_string())?;
+                if self
+                    .pending_indexed_db_reads
+                    .insert(request.request_id(), request)
+                    .is_some()
+                {
+                    return Err("duplicate IndexedDB persistence request id".to_owned());
+                }
+                requests.push(record_request);
+            }
+            attach_persistence_record_requests(&response, requests)?;
         }
         Ok(response)
     }
@@ -2941,90 +2911,6 @@ fn worker_response(
     Ok(object.into())
 }
 
-fn decode_chunk_records_from_js(
-    value: &JsValue,
-) -> Result<Vec<(DimensionChunkPos, ChunkRecord)>, String> {
-    if value.is_null() || value.is_undefined() {
-        return Ok(Vec::new());
-    }
-    Array::from(value)
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| {
-            let bytes = js_record_bytes(&entry)
-                .map_err(|error| format!("indexedDB chunk record {index}: {error}"))?;
-            let record = decode_chunk_record(&bytes)
-                .map_err(|error| format!("decode indexedDB chunk record {index}: {error}"))?;
-            let dimension = indexed_db_dimension_key(&entry).map_err(|error| {
-                format!("indexedDB chunk record {index} had invalid dimension: {error}")
-            })?;
-            Ok((DimensionChunkPos::new(dimension, record.pos()), record))
-        })
-        .collect()
-}
-
-fn decode_dimension_records_from_js(
-    value: &JsValue,
-) -> Result<Vec<(DimensionKey, DimensionRecord)>, String> {
-    if value.is_null() || value.is_undefined() {
-        return Ok(Vec::new());
-    }
-    Array::from(value)
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| {
-            let bytes = js_record_bytes(&entry)
-                .map_err(|error| format!("indexedDB dimension record {index}: {error}"))?;
-            let record = decode_dimension_record(&bytes)
-                .map_err(|error| format!("decode indexedDB dimension record {index}: {error}"))?;
-            let key = indexed_db_dimension_key(&entry).map_err(|error| {
-                format!("indexedDB dimension record {index} had invalid key: {error}")
-            })?;
-            if record.key != key {
-                return Err(format!(
-                    "indexedDB dimension record {index} key {key} did not match payload key {}",
-                    record.key
-                ));
-            }
-            Ok((key, record))
-        })
-        .collect()
-}
-
-fn decode_entity_chunk_records_from_js(
-    value: &JsValue,
-) -> Result<Vec<(DimensionChunkPos, EntityChunkRecord)>, String> {
-    if value.is_null() || value.is_undefined() {
-        return Ok(Vec::new());
-    }
-    Array::from(value)
-        .iter()
-        .enumerate()
-        .map(|(index, entry)| {
-            let bytes = js_record_bytes(&entry)
-                .map_err(|error| format!("indexedDB entity chunk record {index}: {error}"))?;
-            let record = decode_entity_chunk_record(&bytes).map_err(|error| {
-                format!("decode indexedDB entity chunk record {index}: {error}")
-            })?;
-            let dimension = indexed_db_dimension_key(&entry).map_err(|error| {
-                format!("indexedDB entity chunk record {index} had invalid dimension: {error}")
-            })?;
-            Ok((DimensionChunkPos::new(dimension, record.pos), record))
-        })
-        .collect()
-}
-
-fn decode_world_metadata_from_js(value: &JsValue) -> Result<Option<WorldMetadata>, String> {
-    if value.is_null() || value.is_undefined() {
-        return Ok(None);
-    }
-    let bytes = js_record_bytes(value)
-        .map_err(|error| format!("indexedDB world metadata record: {error}"))?;
-    decode_world_metadata(&bytes)
-        .map(Some)
-        .map_err(|error| format!("decode indexedDB world metadata record: {error}"))
-}
-
 fn js_record_bytes(value: &JsValue) -> Result<Vec<u8>, String> {
     if let Some(bytes) = value.dyn_ref::<Uint8Array>() {
         return Ok(bytes.to_vec());
@@ -3037,95 +2923,74 @@ fn js_record_bytes(value: &JsValue) -> Result<Vec<u8>, String> {
         .ok_or_else(|| "record bytes must be a Uint8Array".to_owned())
 }
 
-fn attach_indexed_db_dirty_records(
+fn attach_persistence_record_requests(
     response: &JsValue,
-    state: &mut WebIndexedDbWorldStoreState,
+    requests: Vec<PersistenceRecordRequest>,
 ) -> Result<(), String> {
-    let chunks = chunk_records_to_js(&state.dirty_chunks)?;
-    let entity_chunks = entity_chunk_records_to_js(&state.dirty_entity_chunks)?;
-    let dimensions = dimension_records_to_js(&state.dirty_dimensions)?;
-    let players = player_records_to_js(&state.dirty_players)?;
-    let world_metadata = world_metadata_to_js(state.dirty_world_metadata.as_ref())?;
-    Reflect::set(response, &JsValue::from_str("indexedDbChunks"), &chunks)
-        .map_err(|error| format!("failed to attach indexedDB chunks: {error:?}"))?;
+    let requests = persistence_record_requests_to_js(requests)?;
     Reflect::set(
         response,
-        &JsValue::from_str("indexedDbEntityChunks"),
-        &entity_chunks,
-    )
-    .map_err(|error| format!("failed to attach indexedDB entity chunks: {error:?}"))?;
-    Reflect::set(response, &JsValue::from_str("indexedDbPlayers"), &players)
-        .map_err(|error| format!("failed to attach indexedDB players: {error:?}"))?;
-    Reflect::set(
-        response,
-        &JsValue::from_str("indexedDbDimensions"),
-        &dimensions,
-    )
-    .map_err(|error| format!("failed to attach indexedDB dimensions: {error:?}"))?;
-    Reflect::set(
-        response,
-        &JsValue::from_str("indexedDbWorldMetadata"),
-        &world_metadata,
-    )
-    .map_err(|error| format!("failed to attach indexedDB world metadata: {error:?}"))?;
-    state.dirty_chunks.clear();
-    state.dirty_entity_chunks.clear();
-    state.dirty_dimensions.clear();
-    state.dirty_players.clear();
-    state.dirty_world_metadata = None;
-    Ok(())
-}
-
-fn attach_indexed_db_load_requests(
-    response: &JsValue,
-    requests: Vec<WorldStoreRequest>,
-) -> Result<(), String> {
-    let requests = indexed_db_load_requests_to_js(requests)?;
-    Reflect::set(
-        response,
-        &JsValue::from_str("indexedDbLoadRequests"),
+        &JsValue::from_str("persistenceRecordRequests"),
         &requests,
     )
-    .map_err(|error| format!("failed to attach indexedDB load requests: {error:?}"))?;
+    .map_err(|error| format!("attach persistence record requests: {error:?}"))?;
     Ok(())
 }
 
-fn indexed_db_load_requests_to_js(requests: Vec<WorldStoreRequest>) -> Result<Array, String> {
+fn persistence_record_requests_to_js(
+    requests: Vec<PersistenceRecordRequest>,
+) -> Result<Array, String> {
     let array = Array::new();
     for request in requests {
         let object = Object::new();
+        set_string(&object, "requestId", &request.request_id().to_string())?;
         match request {
-            WorldStoreRequest::LoadChunk {
-                request_id,
-                dimension,
-                pos,
-            } => {
-                set_string(&object, "kind", "chunk")?;
-                set_number(&object, "requestId", request_id as f64)?;
-                set_string(&object, "dimensionKey", dimension.as_str())?;
-                set_number(&object, "x", f64::from(pos.x))?;
-                set_number(&object, "z", f64::from(pos.z))?;
+            PersistenceRecordRequest::Read { address, .. } => {
+                set_string(&object, "kind", "read")?;
+                encode_persistence_record_address(&object, &address)?;
             }
-            WorldStoreRequest::LoadEntityChunk {
-                request_id,
-                dimension,
-                pos,
-            } => {
-                set_string(&object, "kind", "entityChunk")?;
-                set_number(&object, "requestId", request_id as f64)?;
-                set_string(&object, "dimensionKey", dimension.as_str())?;
-                set_number(&object, "x", f64::from(pos.x))?;
-                set_number(&object, "z", f64::from(pos.z))?;
+            PersistenceRecordRequest::ProbeAny { namespaces, .. } => {
+                set_string(&object, "kind", "probeAny")?;
+                let encoded = Array::new();
+                for namespace in namespaces {
+                    encoded.push(&JsValue::from_f64(f64::from(namespace.stable_id())));
+                }
+                Reflect::set(&object, &JsValue::from_str("namespaces"), &encoded)
+                    .map_err(|error| format!("attach record probe namespaces: {error:?}"))?;
             }
-            WorldStoreRequest::LoadPlayer { request_id, player } => {
-                set_string(&object, "kind", "player")?;
-                set_number(&object, "requestId", request_id as f64)?;
-                set_string(&object, "playerKey", player.as_str())?;
+            PersistenceRecordRequest::Commit { batch, .. } => {
+                set_string(&object, "kind", "commit")?;
+                let mutations = Array::new();
+                for mutation in batch.mutations {
+                    let encoded = Object::new();
+                    match mutation {
+                        PersistenceRecordMutation::Put { address, payload } => {
+                            set_string(&encoded, "kind", "put")?;
+                            encode_persistence_record_address(&encoded, &address)?;
+                            set_number(&encoded, "codecVersion", f64::from(payload.codec_version))?;
+                            set_string(&encoded, "revision", &payload.revision.to_string())?;
+                            Reflect::set(
+                                &encoded,
+                                &JsValue::from_str("record"),
+                                &Uint8Array::from(payload.bytes.as_slice()),
+                            )
+                            .map_err(|error| format!("attach record mutation bytes: {error:?}"))?;
+                        }
+                        PersistenceRecordMutation::Delete { address } => {
+                            set_string(&encoded, "kind", "delete")?;
+                            encode_persistence_record_address(&encoded, &address)?;
+                        }
+                    }
+                    mutations.push(&encoded);
+                }
+                Reflect::set(&object, &JsValue::from_str("mutations"), &mutations)
+                    .map_err(|error| format!("attach record mutations: {error:?}"))?;
             }
-            other => {
-                return Err(format!(
-                    "IndexedDB external persistence emitted unsupported request {other:?}"
-                ));
+            PersistenceRecordRequest::Flush { .. } => {
+                set_string(&object, "kind", "flush")?;
+            }
+            PersistenceRecordRequest::Close { .. } => {
+                set_string(&object, "kind", "close")?;
             }
         }
         array.push(&object);
@@ -3133,263 +2998,189 @@ fn indexed_db_load_requests_to_js(requests: Vec<WorldStoreRequest>) -> Result<Ar
     Ok(array)
 }
 
-fn decode_indexed_db_load_completions_from_js(
+fn encode_persistence_record_address(
+    object: &Object,
+    address: &PersistenceRecordAddress,
+) -> Result<(), String> {
+    set_number(
+        object,
+        "namespace",
+        f64::from(address.namespace.stable_id()),
+    )?;
+    let key = Array::new();
+    for part in &address.key {
+        let encoded = Object::new();
+        match part {
+            PersistenceRecordKeyPart::Text(value) => {
+                set_string(&encoded, "kind", "text")?;
+                set_string(&encoded, "value", value)?;
+            }
+            PersistenceRecordKeyPart::I32(value) => {
+                set_string(&encoded, "kind", "i32")?;
+                set_number(&encoded, "value", f64::from(*value))?;
+            }
+        }
+        key.push(&encoded);
+    }
+    Reflect::set(object, &JsValue::from_str("key"), &key)
+        .map_err(|error| format!("attach persistence record key: {error:?}"))?;
+    Ok(())
+}
+
+fn decode_persistence_record_responses_from_js(
     value: &JsValue,
-) -> Result<Vec<WorldStoreCompletion>, String> {
+) -> Result<Vec<PersistenceRecordResponse>, String> {
     let array = value
         .dyn_ref::<Array>()
-        .ok_or_else(|| "indexedDB load completions must be an array".to_owned())?;
-    let mut completions = Vec::with_capacity(array.length() as usize);
+        .ok_or_else(|| "persistence record completions must be an array".to_owned())?;
+    let mut responses = Vec::with_capacity(array.length() as usize);
     for index in 0..array.length() {
         let value = array.get(index);
         let kind = string_prop(&value, "kind")
-            .ok_or_else(|| format!("indexedDB load completion {index} is missing kind"))?;
-        let request_id = number_prop(&value, "requestId")
-            .ok_or_else(|| format!("indexedDB load completion {index} is missing requestId"))?
-            as u64;
-        match kind.as_str() {
-            "chunk" => {
-                let pos = indexed_db_completion_pos(&value, index)?;
-                let dimension = indexed_db_dimension_key(&value)?;
-                let result = decode_indexed_db_chunk_load_result(&value, pos).map_err(|error| {
-                    ChunkStoreError::InvalidData(format!(
-                        "indexedDB chunk load completion {index}: {error}"
-                    ))
-                });
-                completions.push(WorldStoreCompletion::ChunkLoaded {
+            .ok_or_else(|| format!("record completion {index} is missing kind"))?;
+        let request_id = u64_prop(&value, "requestId")
+            .map_err(|error| format!("record completion {index}: {error}"))?;
+        let error = persistence_record_error_from_js(&value, index)?;
+        let response = match kind.as_str() {
+            "read" => {
+                let address = decode_persistence_record_address(&value, index)?;
+                let result = if let Some(error) = error {
+                    Err(error)
+                } else if bool_prop(&value, "found") == Some(false) {
+                    Ok(None)
+                } else {
+                    Ok(Some(PersistenceRecordPayload::new(
+                        number_prop(&value, "codecVersion").unwrap_or(0.0) as u32,
+                        optional_u64_prop(&value, "revision")?.unwrap_or(0),
+                        js_record_bytes(&value)?,
+                    )))
+                };
+                PersistenceRecordResponse::Read {
                     request_id,
-                    dimension,
-                    pos,
+                    address,
                     result,
-                });
+                }
             }
-            "entityChunk" => {
-                let pos = indexed_db_completion_pos(&value, index)?;
-                let dimension = indexed_db_dimension_key(&value)?;
-                let result =
-                    decode_indexed_db_entity_chunk_load_result(&value, pos).map_err(|error| {
-                        ChunkStoreError::InvalidData(format!(
-                            "indexedDB entity chunk load completion {index}: {error}"
-                        ))
-                    });
-                completions.push(WorldStoreCompletion::EntityChunkLoaded {
-                    request_id,
-                    dimension,
-                    pos,
-                    result,
-                });
-            }
-            "player" => {
-                let player =
-                    PlayerRecordKey::Uuid(string_prop(&value, "playerKey").ok_or_else(|| {
-                        format!("indexedDB load completion {index} is missing playerKey")
-                    })?);
-                let result =
-                    decode_indexed_db_player_load_result(&value, &player).map_err(|error| {
-                        ChunkStoreError::InvalidData(format!(
-                            "indexedDB player load completion {index}: {error}"
-                        ))
-                    });
-                completions.push(WorldStoreCompletion::PlayerLoaded {
-                    request_id,
-                    player,
-                    result,
-                });
-            }
-            _ => {
+            "probeAny" => PersistenceRecordResponse::ProbeAny {
+                request_id,
+                result: match error {
+                    Some(error) => Err(error),
+                    None => Ok(bool_prop(&value, "value").unwrap_or(false)),
+                },
+            },
+            "commit" => PersistenceRecordResponse::Commit {
+                request_id,
+                result: error.map_or(Ok(()), Err),
+            },
+            "flush" => PersistenceRecordResponse::Flush {
+                request_id,
+                result: error.map_or(Ok(()), Err),
+            },
+            "close" => PersistenceRecordResponse::Close {
+                request_id,
+                result: error.map_or(Ok(()), Err),
+            },
+            other => {
                 return Err(format!(
-                    "indexedDB load completion {index} has unsupported kind {kind}"
+                    "record completion {index} has unsupported kind {other}"
+                ));
+            }
+        };
+        responses.push(response);
+    }
+    Ok(responses)
+}
+
+fn decode_persistence_record_address(
+    value: &JsValue,
+    index: u32,
+) -> Result<PersistenceRecordAddress, String> {
+    let namespace_id = number_prop(value, "namespace")
+        .ok_or_else(|| format!("record completion {index} is missing namespace"))?;
+    if namespace_id.fract() != 0.0 || !(0.0..=f64::from(u8::MAX)).contains(&namespace_id) {
+        return Err(format!(
+            "record completion {index} has invalid namespace {namespace_id}"
+        ));
+    }
+    let namespace = PersistenceRecordNamespace::from_stable_id(namespace_id as u8)
+        .ok_or_else(|| format!("record completion {index} has unknown namespace {namespace_id}"))?;
+    let key_value = Reflect::get(value, &JsValue::from_str("key"))
+        .map_err(|error| format!("read record completion key: {error:?}"))?;
+    let key_array = key_value
+        .dyn_ref::<Array>()
+        .ok_or_else(|| format!("record completion {index} key must be an array"))?;
+    let mut key = Vec::with_capacity(key_array.length() as usize);
+    for key_index in 0..key_array.length() {
+        let part = key_array.get(key_index);
+        match string_prop(&part, "kind").as_deref() {
+            Some("text") => key.push(PersistenceRecordKeyPart::Text(
+                string_prop(&part, "value").ok_or_else(|| {
+                    format!("record completion {index} text key {key_index} is missing value")
+                })?,
+            )),
+            Some("i32") => {
+                let value = number_prop(&part, "value").ok_or_else(|| {
+                    format!("record completion {index} i32 key {key_index} is missing value")
+                })?;
+                if value.fract() != 0.0
+                    || value < f64::from(i32::MIN)
+                    || value > f64::from(i32::MAX)
+                {
+                    return Err(format!(
+                        "record completion {index} i32 key {key_index} is out of range"
+                    ));
+                }
+                key.push(PersistenceRecordKeyPart::I32(value as i32));
+            }
+            other => {
+                return Err(format!(
+                    "record completion {index} key {key_index} has invalid kind {other:?}"
                 ));
             }
         }
     }
-    Ok(completions)
+    Ok(PersistenceRecordAddress::new(namespace, key))
 }
 
-fn decode_indexed_db_chunk_load_result(
+fn persistence_record_error_from_js(
     value: &JsValue,
-    pos: ChunkPos,
-) -> ChunkStoreResult<Option<ChunkRecord>> {
-    if let Some(error) = string_prop(value, "error")
-        && !error.is_empty()
-    {
-        return Err(ChunkStoreError::InvalidData(error));
-    }
-    if bool_prop(value, "found") == Some(false) {
+    index: u32,
+) -> Result<Option<ChunkStoreError>, String> {
+    if bool_prop(value, "ok") != Some(false) {
         return Ok(None);
     }
-    let bytes = js_record_bytes(value).map_err(ChunkStoreError::InvalidData)?;
-    let record = decode_chunk_record(&bytes)?;
-    if record.pos() != pos {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "record position ({}, {}) does not match requested ({}, {})",
-            record.pos().x,
-            record.pos().z,
-            pos.x,
-            pos.z
-        )));
-    }
-    Ok(Some(record))
+    let kind_label = string_prop(value, "errorKind").unwrap_or_else(|| "backend".to_owned());
+    let kind = PersistenceErrorKind::parse_label(&kind_label).ok_or_else(|| {
+        format!("record completion {index} has unknown error kind {kind_label:?}")
+    })?;
+    let message = string_prop(value, "error")
+        .unwrap_or_else(|| "browser persistence request failed".to_owned());
+    Ok(Some(ChunkStoreError::classified(kind, message)))
 }
 
-fn decode_indexed_db_entity_chunk_load_result(
-    value: &JsValue,
-    pos: ChunkPos,
-) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-    if let Some(error) = string_prop(value, "error")
-        && !error.is_empty()
-    {
-        return Err(ChunkStoreError::InvalidData(error));
-    }
-    if bool_prop(value, "found") == Some(false) {
+fn u64_prop(value: &JsValue, name: &str) -> Result<u64, String> {
+    optional_u64_prop(value, name)?.ok_or_else(|| format!("missing {name}"))
+}
+
+fn optional_u64_prop(value: &JsValue, name: &str) -> Result<Option<u64>, String> {
+    let raw = Reflect::get(value, &JsValue::from_str(name))
+        .map_err(|error| format!("read {name}: {error:?}"))?;
+    if raw.is_null() || raw.is_undefined() {
         return Ok(None);
     }
-    let bytes = js_record_bytes(value).map_err(ChunkStoreError::InvalidData)?;
-    let record = decode_entity_chunk_record(&bytes)?;
-    if record.pos != pos {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "record position ({}, {}) does not match requested ({}, {})",
-            record.pos.x, record.pos.z, pos.x, pos.z
-        )));
+    if let Some(text) = raw.as_string() {
+        return text
+            .parse::<u64>()
+            .map(Some)
+            .map_err(|error| format!("invalid {name} {text:?}: {error}"));
     }
-    Ok(Some(record))
-}
-
-fn decode_indexed_db_player_load_result(
-    value: &JsValue,
-    player: &PlayerRecordKey,
-) -> ChunkStoreResult<Option<PlayerRecord>> {
-    if let Some(error) = string_prop(value, "error")
-        && !error.is_empty()
-    {
-        return Err(ChunkStoreError::InvalidData(error));
+    let number = raw
+        .as_f64()
+        .ok_or_else(|| format!("{name} must be a decimal string"))?;
+    if number.fract() != 0.0 || number < 0.0 || number > 9_007_199_254_740_991.0 {
+        return Err(format!("{name} number is not an exact nonnegative integer"));
     }
-    if bool_prop(value, "found") == Some(false) {
-        return Ok(None);
-    }
-    let bytes = js_record_bytes(value).map_err(ChunkStoreError::InvalidData)?;
-    let record = decode_player_record(&bytes)?;
-    if record.player != *player {
-        return Err(ChunkStoreError::InvalidData(
-            "player record key does not match the requested key".to_owned(),
-        ));
-    }
-    Ok(Some(record))
-}
-
-fn indexed_db_completion_pos(value: &JsValue, index: u32) -> Result<ChunkPos, String> {
-    Ok(ChunkPos::new(
-        number_prop(value, "x")
-            .ok_or_else(|| format!("indexedDB load completion {index} is missing x"))?
-            as i32,
-        number_prop(value, "z")
-            .ok_or_else(|| format!("indexedDB load completion {index} is missing z"))?
-            as i32,
-    ))
-}
-
-fn indexed_db_dimension_key(value: &JsValue) -> Result<DimensionKey, String> {
-    match string_prop(value, "dimensionKey") {
-        Some(value) => DimensionKey::parse(&value).map_err(|error| error.to_string()),
-        None => Ok(DimensionKey::overworld()),
-    }
-}
-
-fn chunk_records_to_js(
-    records: &BTreeMap<DimensionChunkPos, ChunkRecord>,
-) -> Result<Array, String> {
-    let array = Array::new();
-    for (address, record) in records {
-        let bytes = encode_chunk_record(record).map_err(|error| {
-            format!(
-                "encode indexedDB chunk record {} ({}, {}): {error}",
-                address.dimension, address.pos.x, address.pos.z
-            )
-        })?;
-        let object: JsValue =
-            indexed_db_record_to_js(&address.dimension, address.pos, bytes)?.into();
-        array.push(&object);
-    }
-    Ok(array)
-}
-
-fn entity_chunk_records_to_js(
-    records: &BTreeMap<DimensionChunkPos, EntityChunkRecord>,
-) -> Result<Array, String> {
-    let array = Array::new();
-    for (address, record) in records {
-        let bytes = encode_entity_chunk_record(record).map_err(|error| {
-            format!(
-                "encode indexedDB entity chunk record {} ({}, {}): {error}",
-                address.dimension, address.pos.x, address.pos.z
-            )
-        })?;
-        let object: JsValue =
-            indexed_db_record_to_js(&address.dimension, address.pos, bytes)?.into();
-        array.push(&object);
-    }
-    Ok(array)
-}
-
-fn dimension_records_to_js(
-    records: &BTreeMap<DimensionKey, DimensionRecord>,
-) -> Result<Array, String> {
-    let array = Array::new();
-    for (key, record) in records {
-        let bytes = encode_dimension_record(record)
-            .map_err(|error| format!("encode indexedDB dimension record {key}: {error}"))?;
-        let object = Object::new();
-        set_string(&object, "dimensionKey", key.as_str())?;
-        Reflect::set(
-            &object,
-            &JsValue::from_str("record"),
-            &Uint8Array::from(bytes.as_slice()),
-        )
-        .map_err(|error| format!("failed to attach IndexedDB dimension bytes: {error:?}"))?;
-        array.push(&object);
-    }
-    Ok(array)
-}
-
-fn player_records_to_js(
-    records: &BTreeMap<PlayerRecordKey, PlayerRecord>,
-) -> Result<Array, String> {
-    let array = Array::new();
-    for (key, record) in records {
-        let bytes = encode_player_record(record)
-            .map_err(|error| format!("encode indexedDB player record {key:?}: {error}"))?;
-        let object = Object::new();
-        set_string(&object, "playerKey", key.as_str())?;
-        let bytes = Uint8Array::from(bytes.as_slice());
-        Reflect::set(&object, &JsValue::from_str("record"), &bytes)
-            .map_err(|error| format!("failed to attach indexedDB player bytes: {error:?}"))?;
-        array.push(&object);
-    }
-    Ok(array)
-}
-
-fn world_metadata_to_js(record: Option<&WorldMetadata>) -> Result<JsValue, String> {
-    let Some(record) = record else {
-        return Ok(JsValue::UNDEFINED);
-    };
-    let bytes = encode_world_metadata(record)
-        .map_err(|error| format!("encode indexedDB world metadata record: {error}"))?;
-    Ok(Uint8Array::from(bytes.as_slice()).into())
-}
-
-fn indexed_db_record_to_js(
-    dimension: &DimensionKey,
-    pos: ChunkPos,
-    bytes: Vec<u8>,
-) -> Result<Object, String> {
-    let object = Object::new();
-    set_string(&object, "dimensionKey", dimension.as_str())?;
-    set_number(&object, "x", f64::from(pos.x))?;
-    set_number(&object, "z", f64::from(pos.z))?;
-    let bytes = Uint8Array::from(bytes.as_slice());
-    Reflect::set(&object, &JsValue::from_str("record"), &bytes)
-        .map_err(|error| format!("failed to attach indexedDB record bytes: {error:?}"))?;
-    Ok(object)
+    Ok(Some(number as u64))
 }
 
 fn diagnostics_to_js(diagnostics: &ServerRunnerDiagnostics) -> Result<JsValue, String> {

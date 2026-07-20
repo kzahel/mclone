@@ -15,7 +15,7 @@ const moduleRegistry = {
     workerConstruction: false,
     responsibilities: [
       "browser timer/yield mechanics",
-      "IndexedDB request execution",
+      "generic persistence executor servicing",
       "server-job Worker servicing",
       "external SAB runner mailbox",
       "opaque Rust startup forwarding",
@@ -108,6 +108,16 @@ const moduleRegistry = {
     workerConstruction: false,
     responsibilities: ["DOM keyboard/mouse/game-input translation"],
   },
+  "mclone-web-persistence-executor.ts": {
+    family: "server-workers",
+    baselineLines: 0,
+    workerEntry: false,
+    workerConstruction: false,
+    responsibilities: [
+      "generic IndexedDB namespace/store mapping",
+      "opaque record transactions and browser error classification",
+    ],
+  },
   "mclone-web-settings.ts": {
     family: "catalog-settings",
     baselineLines: 83,
@@ -143,6 +153,13 @@ const moduleRegistry = {
       "managed-provision Worker construction",
       "opaque Rust catalog record and UI projection transport",
     ],
+  },
+  "mclone-web-world-lease.ts": {
+    family: "catalog-settings",
+    baselineLines: 0,
+    workerEntry: false,
+    workerConstruction: false,
+    responsibilities: ["generic world-keyed Web Lock lifetime mechanics"],
   },
 };
 
@@ -279,6 +296,34 @@ const domainDebt = [
     needle: 'kind: "command-result"',
     maximum: 0,
     destination: "worker-resident Rust integrated-server actor",
+  },
+  {
+    id: "integrated-worker-domain-load-protocol",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "indexedDbLoadRequests",
+    maximum: 0,
+    destination: "Rust record coordinator and generic IndexedDB executor",
+  },
+  {
+    id: "integrated-worker-domain-dirty-projection",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "indexedDbWorldMetadata",
+    maximum: 0,
+    destination: "Rust record coordinator and generic IndexedDB executor",
+  },
+  {
+    id: "integrated-worker-domain-dimension-key",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "dimensionKey",
+    maximum: 0,
+    destination: "Rust record coordinator and generic IndexedDB executor",
+  },
+  {
+    id: "integrated-worker-domain-player-key",
+    file: "mclone-integrated-server-worker.ts",
+    needle: "playerKey",
+    maximum: 0,
+    destination: "Rust record coordinator and generic IndexedDB executor",
   },
   {
     id: "remote-worker-handshake-state",

@@ -14,6 +14,10 @@ use mclone_app_runtime::world_catalog::{
 
 pub(crate) const WEB_WORLD_BACKEND_LABEL: &str = "web-indexeddb";
 
+pub(crate) fn web_world_writer_lease_name(world_id: &str) -> String {
+    format!("mclone:indexeddb-world-writer:{world_id}")
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StorageStore {
     Catalog,
@@ -296,6 +300,22 @@ impl CatalogExecutionCore {
             outstanding: None,
             response: None,
         })
+    }
+
+    fn required_writer_lease_names(&self) -> Vec<String> {
+        match &self.flow {
+            CatalogFlow::Delete { id, .. } => {
+                vec![web_world_writer_lease_name(id.as_str())]
+            }
+            CatalogFlow::DeleteMany {
+                world_ids: Some(world_ids),
+                ..
+            } => world_ids
+                .iter()
+                .map(|id| web_world_writer_lease_name(id.as_str()))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     fn is_complete(&self) -> bool {
@@ -887,6 +907,15 @@ mod wasm {
 
     #[wasm_bindgen]
     impl WebCatalogExecution {
+        #[wasm_bindgen(js_name = requiredWriterLeaseNames)]
+        pub fn required_writer_lease_names(&self) -> Array {
+            self.core
+                .required_writer_lease_names()
+                .into_iter()
+                .map(JsValue::from)
+                .collect()
+        }
+
         #[wasm_bindgen(js_name = nextStorageStep)]
         pub fn next_storage_step(&mut self) -> Result<JsValue, JsValue> {
             self.core
@@ -1183,6 +1212,7 @@ mod tests {
     fn list_is_one_readonly_get_all_and_sorts_in_rust() {
         let mut execution =
             CatalogExecutionCore::new(WorldCatalogRequest::ListWorlds, None).unwrap();
+        assert!(execution.required_writer_lease_names().is_empty());
         let step = execution.next_step().unwrap().unwrap();
         assert_eq!(step.transactions[0].mode, StorageMode::ReadOnly);
         assert!(matches!(
@@ -1317,6 +1347,10 @@ mod tests {
         let mut execution =
             CatalogExecutionCore::new(WorldCatalogRequest::DeleteWorld { id: id("world") }, None)
                 .unwrap();
+        assert_eq!(
+            execution.required_writer_lease_names(),
+            vec![web_world_writer_lease_name("world")]
+        );
         let read = execution.next_step().unwrap().unwrap();
         accept(
             &mut execution,
@@ -1359,6 +1393,7 @@ mod tests {
             None,
         )
         .unwrap();
+        assert!(execution.required_writer_lease_names().is_empty());
         let list = execution.next_step().unwrap().unwrap();
         accept(
             &mut execution,
@@ -1367,6 +1402,10 @@ mod tests {
             None,
         );
         execution.complete_step(list.id).unwrap();
+        assert_eq!(
+            execution.required_writer_lease_names(),
+            vec![web_world_writer_lease_name("world")]
+        );
         let read = execution.next_step().unwrap().unwrap();
         accept(
             &mut execution,

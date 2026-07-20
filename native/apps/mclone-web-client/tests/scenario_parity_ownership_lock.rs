@@ -153,7 +153,8 @@ fn integrated_server_startup_domain_is_an_opaque_rust_frame() {
     assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("const STARTUP_VERSION"));
     assert!(INTEGRATED_SERVER_WORKER.contains("new module.WebIntegratedServerStartup("));
     assert!(INTEGRATED_SERVER_WORKER.contains("startup.createTransient("));
-    assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDbExternalLoads("));
+    assert!(INTEGRATED_SERVER_WORKER.contains("startup.indexedDbBootstrapRequests()"));
+    assert!(INTEGRATED_SERVER_WORKER.contains("startup.createIndexedDb("));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.beginMessage("));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.hasPendingJobs()"));
     assert!(INTEGRATED_SERVER_WORKER.contains("activeServer.finishOperation("));

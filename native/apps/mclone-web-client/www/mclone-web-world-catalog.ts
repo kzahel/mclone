@@ -12,6 +12,8 @@ export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
 export const WORLD_ID_INDEX = "worldId";
 
 import type { WebCatalogExecution } from "mclone-web-client-wasm";
+import { acquireWorldWriterLease } from "./mclone-web-world-lease.js";
+import type { HeldWorldWriterLease } from "./mclone-web-world-lease.js";
 
 type WasmModule = typeof import("mclone-web-client-wasm");
 
@@ -141,16 +143,27 @@ export async function executeIndexedDbCatalogExecution(
   db: IDBDatabase,
   execution: WebCatalogExecution,
 ): Promise<void> {
-  while (!execution.isComplete()) {
-    const step = execution.nextStorageStep() as CatalogStorageStep | undefined;
-    if (!step) {
-      if (execution.isComplete()) break;
-      throw new Error("Rust catalog continuation returned no storage step");
+  const leases = new Map<string, HeldWorldWriterLease>();
+  try {
+    while (!execution.isComplete()) {
+      const requiredLeases = (execution.requiredWriterLeaseNames() as string[]).sort();
+      for (const name of requiredLeases) {
+        if (!leases.has(name)) {
+          leases.set(name, await acquireWorldWriterLease(name));
+        }
+      }
+      const step = execution.nextStorageStep() as CatalogStorageStep | undefined;
+      if (!step) {
+        if (execution.isComplete()) break;
+        throw new Error("Rust catalog continuation returned no storage step");
+      }
+      await Promise.all(step.transactions.map((transaction) => (
+        executeCatalogStorageTransaction(db, execution, step.stepId, transaction)
+      )));
+      execution.completeStorageStep(step.stepId);
     }
-    await Promise.all(step.transactions.map((transaction) => (
-      executeCatalogStorageTransaction(db, execution, step.stepId, transaction)
-    )));
-    execution.completeStorageStep(step.stepId);
+  } finally {
+    for (const lease of [...leases.values()].reverse()) await lease.release();
   }
 }
 

@@ -97,9 +97,12 @@ pub use persistence::{
     RecordExecutorWorldStore, SaveDurability, ScheduledTickRecord, StoreWriteOutcome,
     SynchronousPersistenceFacade, WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION,
     WorldMetadata, WorldMetadataLoad, WorldRecordKey, WorldStore, WorldStoreCompletion,
-    WorldStoreRequest, decode_chunk_record, decode_dimension_record, decode_entity_chunk_record,
-    decode_player_record, decode_world_metadata, encode_chunk_record, encode_dimension_record,
-    encode_entity_chunk_record, encode_player_record, encode_world_metadata,
+    WorldStoreRequest, chunk_record_address, decode_chunk_record, decode_dimension_record,
+    decode_entity_chunk_record, decode_player_record, decode_world_metadata,
+    dimension_record_address, encode_chunk_record, encode_dimension_record,
+    encode_entity_chunk_record, encode_player_record, encode_world_metadata, player_record_address,
+    record_read_for_world_store_request, world_metadata_record_address,
+    world_store_completion_from_record_read,
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use persistence::{SQLITE_WORLD_DATABASE_FILE, SqliteWorldStore, WORLD_WRITER_LOCK_FILE};

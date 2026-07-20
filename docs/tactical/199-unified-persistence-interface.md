@@ -1,7 +1,7 @@
 # Tactical 199: Unified Persistence Interface
 
-Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-3
-are complete and Slice 4 is next.
+Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-5
+are complete and Slice 6 is next.
 
 Topic: `unified-persistence-interface`
 
@@ -328,7 +328,7 @@ Evidence and implementation:
 
 ## Slice 4: Generic IndexedDB Executor Proof
 
-Status: planned.
+Status: complete 2026-07-20.
 
 Build the browser executor below the same coordinator without cutting
 production yet:
@@ -345,9 +345,30 @@ production yet:
 Exit: an isolated real IndexedDB backend passes the same semantics as memory
 and SQLite while production still uses the old bridge.
 
+Evidence and implementation:
+
+- Stable Rust-authored namespace ids and owned text/i32 key parts map to the
+  unchanged IndexedDB v6 stores and physical compound keys in
+  `mclone-web-persistence-executor.ts`. TypeScript sees only namespace ids,
+  keys, opaque bytes, transaction mode, request ids, and browser failures.
+- Reads, probes, atomic multi-store commits, flush, and close use owned request
+  and completion values. Request ids cross JavaScript as decimal strings so
+  the full Rust `u64` correlation space remains exact.
+- Rust owns all record-address construction, codec/version interpretation,
+  world-request translation, revision selection, and typed completion
+  construction. The browser executor maps DOM quota, abort, access, invalid,
+  corrupt-byte, and backend failures into the shared stable error vocabulary.
+- The generic cache refuses mutation of an address which has not first been
+  read. This preserves revision precedence across bootstrap and lazy records
+  without loading the entire world or letting TypeScript compare revisions.
+- Shared translation tests, the real production IndexedDB reopen proof, and
+  the unchanged catalog constraint-abort proof cover the extracted seam. The
+  user-authorized single bounded browser cutover followed immediately, so no
+  separately selectable production fallback was retained.
+
 ## Slice 5: Atomic Browser World Cutover
 
-Status: planned.
+Status: complete 2026-07-20.
 
 - acquire a world-keyed exclusive Web Lock in the integrated-server Worker;
 - drive metadata, dimensions, chunks, entity chunks, players, SavedData slot,
@@ -361,6 +382,37 @@ Status: planned.
 
 Exit: production ordinary and periodic local worlds reopen through the unified
 backend, and no runtime selector can re-enter the old path.
+
+Evidence and implementation:
+
+- Production startup now acquires the Rust-named Web Lock, executes a
+  Rust-authored generic bootstrap, and constructs one record-executor-backed
+  world. Every subsequent result is serviced through
+  `persistenceRecordRequests`; there is no old/new runtime selector.
+- `WebIndexedDbWorldStoreState`, `WebIndexedDbWorldStore`, the old
+  `indexedDbLoadRequests`, five dirty-record projections, and the TypeScript
+  chunk/entity/player/dimension/metadata switchboard were deleted. The
+  integrated Worker fell from 919 to 565 lines; the physical generic executor
+  is isolated in a 325-line module and the reusable Web Lock adapter is 51
+  lines.
+- Ordinary catalog delete and delete-all continuations now publish their
+  required Rust-authored world lease names. TypeScript briefly holds those
+  exact leases across record clear and catalog deletion; list/open/create do
+  not take a deletion lease.
+- `pnpm native:web:indexeddb-smoke` passed the production mutation,
+  background-save, all-family reopen, player-statistic, and block-state proof:
+  121 chunks, two entity chunks, one dimension, one metadata record, and 124
+  total records. A same-profile second browser tab could not acquire the live
+  lease, while the subsequent reload reacquired it after the old Worker was
+  destroyed.
+- The observed maximum frame gap was 19.31 ms versus the frozen 20.01 ms
+  ordinary-world baseline. The `/tmp` reload canvas capture was inspected and
+  showed healthy textured world, HUD, actor, and recovered edit output.
+- All 47 web unit tests and ABI/ownership integration locks passed, as did the
+  wasm target check, TypeScript typecheck, and the expanded 38-entry Worker
+  ownership ledger. The ledger now explicitly prevents the domain load,
+  dirty-projection, dimension-key, or player-key protocols from returning to
+  the integrated TypeScript Worker.
 
 ## Slice 6: Lifecycle, Quota, And Lease Recovery
 

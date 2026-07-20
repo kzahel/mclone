@@ -11,9 +11,11 @@ the durable architecture in
 Implementation status, 2026-07-20: the typed generic record contract,
 memory/null live mailbox cutover, SQLite executor adaptation, explicit
 read-only SQLite inspector, world-scoped native writer lease, and guarded
-native deletion path are landed. The production browser IndexedDB executor
-and Web Lock cutover are the next active phase; the old browser mirror remains
-live only until that bounded cutover.
+native deletion path are landed. Production browser worlds now use the generic
+IndexedDB executor under a world-scoped Web Lock; catalog deletion takes the
+same lease, and the old domain-specific mirror/load/dirty TypeScript bridge has
+been removed. Lifecycle, quota, cross-platform, and closeout validation remain
+active in Tactical 199.
 
 ## Scope
 
@@ -389,27 +391,25 @@ to persist its durable work.
 
 ### Browser opened-world persistence
 
-The browser uses IndexedDB successfully, but the ownership boundary is more
-specialized than the target:
+The browser now uses IndexedDB as the physical executor beneath the same Rust
+record/coordinator boundary. Rust constructs logical addresses, owns codecs,
+revisions, durability, bootstrap, and typed completions. The integrated-server
+Worker services generic requests containing stable namespace ids, physical key
+parts, opaque owned bytes, transaction boundaries, and browser errors.
 
-- `WebIndexedDbWorldStoreState` in
-  [`web_server_worker.rs`](../../native/apps/mclone-web-client/src/web_server_worker.rs)
-  keeps loaded and dirty Rust maps for metadata, dimensions, chunks,
-  entity chunks, and players;
-- `WebIndexedDbWorldStore` implements the synchronous `WorldStore` API over
-  that memory mirror;
-- the external-load persistence actor emits missing-load requests for the
-  Worker shell to service;
-- Rust attaches domain-specific dirty-record arrays to operation results; and
-- [`mclone-integrated-server-worker.ts`](../../native/apps/mclone-web-client/www/mclone-integrated-server-worker.ts)
-  understands chunk/entity/player/dimension/metadata request kinds, keys,
-  stores, normalization, reads, and writes.
+[`mclone-web-persistence-executor.ts`](../../native/apps/mclone-web-client/www/mclone-web-persistence-executor.ts)
+maps that vocabulary to the unchanged IndexedDB v6 stores and keys. It does
+not distinguish chunks from entity chunks or metadata as engine concepts;
+those are only physical namespace mappings. The former
+`WebIndexedDbWorldStoreState`, `WebIndexedDbWorldStore`, external-load request
+projection, dirty-record result projection, and TypeScript record switchboard
+are gone, with no old/new runtime selector.
 
-The path is asynchronous and functionally useful, but it is not yet “IndexedDB
-as another `WorldStore` strategy.” It is a synchronous Rust mirror plus two
-special bridges: external load requests going out and dirty records coming
-back. This explains why browser storage glue grew domain knowledge despite the
-shared persistence architecture.
+Each persistent Worker holds the Rust-named world Web Lock from before database
+bootstrap through close. Ordinary catalog delete and delete-all acquire the
+same lease around record clearing and catalog removal. A real same-profile
+second-tab contention proof rejects the second lease, while graceful reload
+and document/Worker destruction permit reacquisition.
 
 ### Existing browser proof of the thinner boundary
 

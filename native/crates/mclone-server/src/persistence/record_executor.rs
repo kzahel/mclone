@@ -7,10 +7,10 @@ use mclone_protocol::DimensionKey;
 use super::{
     ChunkRecord, ChunkStoreError, ChunkStoreResult, DimensionRecord, EntityChunkRecord,
     PersistenceErrorKind, PlayerRecord, PlayerRecordKey, SNAPSHOT_FORMAT_VERSION, WorldMetadata,
-    WorldMetadataLoad, WorldStore, decode_chunk_record, decode_dimension_record,
-    decode_entity_chunk_record, decode_player_record, decode_world_metadata, encode_chunk_record,
-    encode_dimension_record, encode_entity_chunk_record, encode_player_record,
-    encode_world_metadata,
+    WorldMetadataLoad, WorldStore, WorldStoreCompletion, WorldStoreRequest, decode_chunk_record,
+    decode_dimension_record, decode_entity_chunk_record, decode_player_record,
+    decode_world_metadata, encode_chunk_record, encode_dimension_record,
+    encode_entity_chunk_record, encode_player_record, encode_world_metadata,
 };
 
 pub type PersistenceRecordRequestId = u64;
@@ -277,7 +277,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
     fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
         let record = self
             .executor
-            .read(&world_metadata_address())?
+            .read(&world_metadata_record_address())?
             .map(|payload| decode_world_metadata_payload(&payload))
             .transpose()?;
         let legacy_records_present = if record.is_some() {
@@ -305,7 +305,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
             return Ok(());
         }
         self.executor.commit(&PersistenceRecordBatch::put(
-            world_metadata_address(),
+            world_metadata_record_address(),
             PersistenceRecordPayload::new(
                 record.codec_version,
                 record.revision,
@@ -315,7 +315,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
     }
 
     fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
-        let address = dimension_address(key);
+        let address = dimension_record_address(key);
         let Some(payload) = self.executor.read(&address)? else {
             return Ok(None);
         };
@@ -337,7 +337,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
             return Ok(());
         }
         self.executor.commit(&PersistenceRecordBatch::put(
-            dimension_address(&record.key),
+            dimension_record_address(&record.key),
             PersistenceRecordPayload::new(
                 record.codec_version,
                 record.revision,
@@ -351,7 +351,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
         dimension: &DimensionKey,
         pos: ChunkPos,
     ) -> ChunkStoreResult<Option<ChunkRecord>> {
-        let address = chunk_address(PersistenceRecordNamespace::Chunk, dimension, pos);
+        let address = chunk_record_address(PersistenceRecordNamespace::Chunk, dimension, pos);
         let Some(payload) = self.executor.read(&address)? else {
             return Ok(None);
         };
@@ -381,7 +381,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
             return Ok(());
         }
         self.executor.commit(&PersistenceRecordBatch::put(
-            chunk_address(PersistenceRecordNamespace::Chunk, dimension, record.pos()),
+            chunk_record_address(PersistenceRecordNamespace::Chunk, dimension, record.pos()),
             PersistenceRecordPayload::new(
                 SNAPSHOT_FORMAT_VERSION,
                 record.revision().0,
@@ -395,7 +395,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
         dimension: &DimensionKey,
         pos: ChunkPos,
     ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-        let address = chunk_address(PersistenceRecordNamespace::EntityChunk, dimension, pos);
+        let address = chunk_record_address(PersistenceRecordNamespace::EntityChunk, dimension, pos);
         let Some(payload) = self.executor.read(&address)? else {
             return Ok(None);
         };
@@ -424,7 +424,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
             return Ok(());
         }
         self.executor.commit(&PersistenceRecordBatch::put(
-            chunk_address(
+            chunk_record_address(
                 PersistenceRecordNamespace::EntityChunk,
                 dimension,
                 record.pos,
@@ -438,7 +438,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
     }
 
     fn load_player(&mut self, player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
-        let address = player_address(player);
+        let address = player_record_address(player);
         let Some(payload) = self.executor.read(&address)? else {
             return Ok(None);
         };
@@ -460,7 +460,7 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
             return Ok(());
         }
         self.executor.commit(&PersistenceRecordBatch::put(
-            player_address(&record.player),
+            player_record_address(&record.player),
             PersistenceRecordPayload::new(
                 record.codec_version,
                 record.revision,
@@ -478,18 +478,18 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
     }
 }
 
-pub(crate) fn world_metadata_address() -> PersistenceRecordAddress {
+pub fn world_metadata_record_address() -> PersistenceRecordAddress {
     PersistenceRecordAddress::new(PersistenceRecordNamespace::WorldMetadata, Vec::new())
 }
 
-pub(crate) fn dimension_address(key: &DimensionKey) -> PersistenceRecordAddress {
+pub fn dimension_record_address(key: &DimensionKey) -> PersistenceRecordAddress {
     PersistenceRecordAddress::new(
         PersistenceRecordNamespace::Dimension,
         vec![PersistenceRecordKeyPart::Text(key.as_str().to_owned())],
     )
 }
 
-pub(crate) fn chunk_address(
+pub fn chunk_record_address(
     namespace: PersistenceRecordNamespace,
     dimension: &DimensionKey,
     pos: ChunkPos,
@@ -508,11 +508,130 @@ pub(crate) fn chunk_address(
     )
 }
 
-pub(crate) fn player_address(player: &PlayerRecordKey) -> PersistenceRecordAddress {
+pub fn player_record_address(player: &PlayerRecordKey) -> PersistenceRecordAddress {
     PersistenceRecordAddress::new(
         PersistenceRecordNamespace::Player,
         vec![PersistenceRecordKeyPart::Text(player.as_str().to_owned())],
     )
+}
+
+/// Translate an engine load into the generic record read served by an
+/// asynchronous platform executor. Save policy and decoding remain in Rust;
+/// browser adapters only see this physical address.
+pub fn record_read_for_world_store_request(
+    request: &WorldStoreRequest,
+) -> ChunkStoreResult<PersistenceRecordRequest> {
+    let (request_id, address) = match request {
+        WorldStoreRequest::LoadChunk {
+            request_id,
+            dimension,
+            pos,
+        } => (
+            *request_id,
+            chunk_record_address(PersistenceRecordNamespace::Chunk, dimension, *pos),
+        ),
+        WorldStoreRequest::LoadEntityChunk {
+            request_id,
+            dimension,
+            pos,
+        } => (
+            *request_id,
+            chunk_record_address(PersistenceRecordNamespace::EntityChunk, dimension, *pos),
+        ),
+        WorldStoreRequest::LoadPlayer { request_id, player } => {
+            (*request_id, player_record_address(player))
+        }
+        other => {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "world-store request is not an externally serviced record read: {other:?}"
+            )));
+        }
+    };
+    Ok(PersistenceRecordRequest::Read {
+        request_id,
+        address,
+    })
+}
+
+/// Convert one generic record response back into the typed engine completion
+/// for the original load. This is the inverse of
+/// [`record_read_for_world_store_request`] and is deliberately shared so a
+/// platform adapter never decodes an engine record family.
+pub fn world_store_completion_from_record_read(
+    request: WorldStoreRequest,
+    response: PersistenceRecordResponse,
+) -> ChunkStoreResult<WorldStoreCompletion> {
+    let PersistenceRecordResponse::Read {
+        request_id,
+        address,
+        result,
+    } = response
+    else {
+        return Err(ChunkStoreError::InvalidData(
+            "external world-store load completed with a non-read record response".to_owned(),
+        ));
+    };
+    if request.request_id() != request_id {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "record response id {request_id} did not match world-store request {}",
+            request.request_id()
+        )));
+    }
+    let expected = record_read_for_world_store_request(&request)?;
+    let PersistenceRecordRequest::Read {
+        address: expected_address,
+        ..
+    } = expected
+    else {
+        unreachable!("record-read translation always returns Read")
+    };
+    if address != expected_address {
+        return Err(ChunkStoreError::InvalidData(format!(
+            "record response address {address:?} did not match {expected_address:?}"
+        )));
+    }
+
+    match request {
+        WorldStoreRequest::LoadChunk { dimension, pos, .. } => {
+            let decoded = result.and_then(|payload| {
+                payload
+                    .map(|payload| decode_chunk_payload(&payload))
+                    .transpose()
+            });
+            Ok(WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                dimension,
+                pos,
+                result: decoded,
+            })
+        }
+        WorldStoreRequest::LoadEntityChunk { dimension, pos, .. } => {
+            let decoded = result.and_then(|payload| {
+                payload
+                    .map(|payload| decode_entity_chunk_payload(&payload))
+                    .transpose()
+            });
+            Ok(WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                dimension,
+                pos,
+                result: decoded,
+            })
+        }
+        WorldStoreRequest::LoadPlayer { player, .. } => {
+            let decoded = result.and_then(|payload| {
+                payload
+                    .map(|payload| decode_player_payload(&payload))
+                    .transpose()
+            });
+            Ok(WorldStoreCompletion::PlayerLoaded {
+                request_id,
+                player,
+                result: decoded,
+            })
+        }
+        _ => unreachable!("record-read translation rejected non-load requests"),
+    }
 }
 
 fn decode_world_metadata_payload(
@@ -919,7 +1038,7 @@ mod tests {
     fn world_store_adapter_classifies_corrupt_physical_bytes() {
         let overworld = DimensionKey::overworld();
         let pos = ChunkPos::new(6, 7);
-        let address = chunk_address(PersistenceRecordNamespace::Chunk, &overworld, pos);
+        let address = chunk_record_address(PersistenceRecordNamespace::Chunk, &overworld, pos);
         let mut store = RecordExecutorWorldStore::memory();
         store
             .executor_mut()
@@ -933,6 +1052,56 @@ mod tests {
             store.load_chunk(&overworld, pos).unwrap_err().kind(),
             PersistenceErrorKind::Corrupt
         );
+    }
+
+    #[test]
+    fn external_record_read_roundtrips_without_platform_domain_projection() {
+        let dimension = DimensionKey::overworld();
+        let pos = ChunkPos::new(-7, 9);
+        let request = WorldStoreRequest::LoadChunk {
+            request_id: 41,
+            dimension: dimension.clone(),
+            pos,
+        };
+        let record_request = record_read_for_world_store_request(&request).unwrap();
+        let PersistenceRecordRequest::Read {
+            request_id,
+            address,
+        } = record_request
+        else {
+            panic!("chunk load did not become a generic read");
+        };
+        assert_eq!(request_id, 41);
+        assert_eq!(address.namespace, PersistenceRecordNamespace::Chunk);
+        assert_eq!(
+            address.key,
+            vec![
+                PersistenceRecordKeyPart::Text(dimension.as_str().to_owned()),
+                PersistenceRecordKeyPart::I32(-7),
+                PersistenceRecordKeyPart::I32(9),
+            ]
+        );
+
+        let record = chunk_record(pos, 12);
+        let completion = world_store_completion_from_record_read(
+            request,
+            PersistenceRecordResponse::Read {
+                request_id,
+                address,
+                result: Ok(Some(PersistenceRecordPayload::new(
+                    SNAPSHOT_FORMAT_VERSION,
+                    12,
+                    encode_chunk_record(&record).unwrap(),
+                ))),
+            },
+        )
+        .unwrap();
+        match completion {
+            WorldStoreCompletion::ChunkLoaded { result, .. } => {
+                assert_eq!(result.unwrap(), Some(record));
+            }
+            other => panic!("unexpected completion {other:?}"),
+        }
     }
 
     fn chunk_record(pos: ChunkPos, revision: u64) -> ChunkRecord {

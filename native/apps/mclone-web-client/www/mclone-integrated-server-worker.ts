@@ -10,15 +10,15 @@ import {
   RUNNER_SHARED_STATUS_FAILED,
 } from "./mclone-runner-shared-abi.js";
 import {
-  WORLD_CHUNK_STORE,
-  WORLD_ENTITY_CHUNK_STORE,
-  WORLD_DIMENSION_STORE,
-  WORLD_METADATA_STORE,
-  WORLD_PLAYER_STORE,
-  WORLD_ID_INDEX,
   clearIndexedDbWorldRecords,
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
+import {
+  executeIndexedDbRecordRequests,
+} from "./mclone-web-persistence-executor.js";
+import type { PersistenceRecordRequest } from "./mclone-web-persistence-executor.js";
+import { acquireWorldWriterLease } from "./mclone-web-world-lease.js";
+import type { HeldWorldWriterLease } from "./mclone-web-world-lease.js";
 import type {
   WebIntegratedServerActor,
   WebIntegratedServerStartup,
@@ -72,35 +72,6 @@ type RunnerOutboundMessage = Record<string, any> & {
   updates?: unknown[];
 };
 
-interface IndexedDbRecord {
-  worldId: string;
-  dimensionKey: string;
-  x: number;
-  z: number;
-  record: Uint8Array;
-}
-
-interface IndexedDbWorldMetadata {
-  dimensions: IndexedDbDimensionRecord[];
-  worldMetadataRecord?: Uint8Array;
-  legacyRecordsPresent: boolean;
-}
-
-interface IndexedDbLoadRequest {
-  kind: "chunk" | "entityChunk" | "player";
-  requestId: number;
-  x?: number;
-  z?: number;
-  dimensionKey?: string;
-  playerKey?: string;
-}
-
-interface IndexedDbLoadCompletion extends IndexedDbLoadRequest {
-  found: boolean;
-  record?: Uint8Array;
-  error?: string;
-}
-
 interface ServicedServerResult {
   result: Record<string, any>;
   updates: unknown[];
@@ -114,6 +85,7 @@ let wasmModulePromise: Promise<WasmModule> | null = null;
 let wasmModule: WasmModule | null = null;
 let server: WebIntegratedServerActor | null = null;
 let indexedDbWorldId: string | null = null;
+let indexedDbWriterLease: HeldWorldWriterLease | null = null;
 let tickTimer: ReturnType<typeof setInterval> | 0 = 0;
 let tickInFlight = false;
 let serverOperationInFlight = false;
@@ -128,7 +100,6 @@ const workerSelf = self as unknown as DedicatedWorkerGlobalScope;
 // runner's pool, so these need not agree with any Rust constant.
 const MAX_RUNNER_SHARED_POOL_SLOTS = 2;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES = 2 * 1024 * 1024;
-const INDEXED_DB_COMPLETION_BATCH_SIZE = 16;
 workerSelf.onmessage = async (event: MessageEvent) => {
   const message = (event.data ?? {}) as IntegratedServerWorkerMessage;
   try {
@@ -162,11 +133,18 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   const indexedDbMode = message.worldStorage === "indexeddb";
   try {
     if (indexedDbMode) {
-      const metadata = await prepareIndexedDbWorldForStart(message);
-      server = startup.createIndexedDbExternalLoads(
-        metadata.dimensions,
-        metadata.worldMetadataRecord,
-        metadata.legacyRecordsPresent,
+      const worldId = indexedDbWorldIdFromMessage(message);
+      indexedDbWorldId = worldId;
+      indexedDbWriterLease = await acquireWorldWriterLease(
+        startup.indexedDbWriterLeaseName(worldId),
+      );
+      await prepareIndexedDbWorldForStart(message);
+      const bootstrap = await executeIndexedDbRecordRequests(
+        worldId,
+        persistenceRecordRequestsFromValue(startup.indexedDbBootstrapRequests()),
+      );
+      server = startup.createIndexedDb(
+        bootstrap,
         String(message.jobWorkerUrl ?? ""),
         String(message.bindgenJsUrl ?? ""),
         String(message.bindgenWasmUrl ?? ""),
@@ -179,6 +157,10 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
         String(message.bindgenWasmUrl ?? ""),
       );
     }
+  } catch (error) {
+    await releaseIndexedDbWriterLease();
+    indexedDbWorldId = null;
+    throw error;
   } finally {
     startup.free();
   }
@@ -195,7 +177,14 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   if (!server) {
     throw new Error("integrated server worker did not start");
   }
-  workerSelf.postMessage(server.readyReport(Number(message.requestId) || 0));
+  const ready = await servicePersistenceResultForCurrentWorld(
+    server,
+    server.readyReport(Number(message.requestId) || 0) as Record<string, any>,
+  );
+  ready.result.kind = "ready";
+  ready.result.requestId = Number(message.requestId) || 0;
+  ready.result.updates = ready.updates;
+  workerSelf.postMessage(ready.result);
 }
 
 async function driveActorMessage(message: IntegratedServerWorkerMessage): Promise<void> {
@@ -252,11 +241,11 @@ async function driveActorOperation(
   initialResult: Record<string, any>,
   requestMessage: IntegratedServerWorkerMessage | null,
 ): Promise<void> {
-  let serviced = await serviceIndexedDbResultForCurrentWorld(activeServer, initialResult);
+  let serviced = await servicePersistenceResultForCurrentWorld(activeServer, initialResult);
   const updates = [...serviced.updates];
   while (activeServer.hasPendingJobs()) {
     await waitForJobTurn();
-    serviced = await serviceIndexedDbResultForCurrentWorld(
+    serviced = await servicePersistenceResultForCurrentWorld(
       activeServer,
       activeServer.pollPendingJobs() as Record<string, any>,
     );
@@ -272,12 +261,13 @@ async function driveActorOperation(
       tickTimer = 0;
     }
     server = null;
+    await releaseIndexedDbWriterLease();
     indexedDbWorldId = null;
     workerSelf.close();
   }
 }
 
-async function serviceIndexedDbResultForCurrentWorld(
+async function servicePersistenceResultForCurrentWorld(
   activeServer: WebIntegratedServerActor,
   initialResult: Record<string, any>,
 ): Promise<ServicedServerResult> {
@@ -287,117 +277,36 @@ async function serviceIndexedDbResultForCurrentWorld(
     if (Array.isArray(result?.updates)) {
       updates.push(...result.updates);
     }
-    await saveIndexedDbDirtyRecordsForCurrentWorld(result);
-
-    const requests = indexedDbLoadRequestsFromResult(result);
+    const requests = persistenceRecordRequestsFromValue(result?.persistenceRecordRequests);
     if (requests.length === 0) {
       return { result, updates };
     }
     if (!indexedDbWorldId) {
-      throw new Error("IndexedDB load requests were emitted without an active browser world");
+      throw new Error("persistence record requests were emitted without an active browser world");
     }
-    const completions = await loadIndexedDbCompletions(indexedDbWorldId, requests);
-    for (let offset = 0; offset < completions.length; offset += INDEXED_DB_COMPLETION_BATCH_SIZE) {
-      const batch = completions.slice(offset, offset + INDEXED_DB_COMPLETION_BATCH_SIZE);
-      result = activeServer.completeIndexedDbLoadRecords(batch) as Record<string, any>;
-      if (Array.isArray(result?.updates)) {
-        updates.push(...result.updates);
-        result.updates = [];
-      }
-      await saveIndexedDbDirtyRecordsForCurrentWorld(result);
-      result.indexedDbChunks = [];
-      result.indexedDbEntityChunks = [];
-      result.indexedDbDimensions = [];
-      result.indexedDbPlayers = [];
-      result.indexedDbWorldMetadata = undefined;
-      if (offset + INDEXED_DB_COMPLETION_BATCH_SIZE < completions.length) {
-        await waitForJobTurn();
-      }
+    const completions = await executeIndexedDbRecordRequests(indexedDbWorldId, requests);
+    result = activeServer.completeIndexedDbRecordRequests(completions) as Record<string, any>;
+    if (Array.isArray(result?.updates)) {
+      updates.push(...result.updates);
+      result.updates = [];
     }
+    await waitForJobTurn();
   }
-  throw new Error("timed out servicing IndexedDB persistence load requests");
+  throw new Error("timed out servicing IndexedDB persistence record requests");
 }
 
 async function prepareIndexedDbWorldForStart(
   message: IntegratedServerWorkerMessage,
-): Promise<IndexedDbWorldMetadata> {
+): Promise<void> {
   const worldId = indexedDbWorldIdFromMessage(message);
-  indexedDbWorldId = worldId;
   const db = await openWorldDb();
   try {
     if (message.clearWorldStorage) {
       await clearIndexedDbWorldRecords(db, worldId);
     }
-    return await loadIndexedDbWorldMetadata(db, worldId);
   } finally {
     db.close();
   }
-}
-
-async function loadIndexedDbWorldMetadata(
-  db: IDBDatabase,
-  worldId: string,
-): Promise<IndexedDbWorldMetadata> {
-  const [stored, dimensions, chunkCount, entityChunkCount, playerCount] = await Promise.all([
-    loadIndexedDbWorldMetadataRecord(db, worldId),
-    loadIndexedDbDimensionRecords(db, worldId),
-    countIndexedDbRecords(db, WORLD_CHUNK_STORE, worldId),
-    countIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, worldId),
-    countIndexedDbRecords(db, WORLD_PLAYER_STORE, worldId),
-  ]);
-  return {
-    dimensions,
-    worldMetadataRecord: stored,
-    legacyRecordsPresent: chunkCount + entityChunkCount + playerCount > 0,
-  };
-}
-
-async function loadIndexedDbDimensionRecords(
-  db: IDBDatabase,
-  worldId: string,
-): Promise<IndexedDbDimensionRecord[]> {
-  const transaction = db.transaction(WORLD_DIMENSION_STORE, "readonly");
-  const request = transaction
-    .objectStore(WORLD_DIMENSION_STORE)
-    .index(WORLD_ID_INDEX)
-    .getAll(IDBKeyRange.only(worldId));
-  const records = await idbRequest<unknown[]>(request);
-  await transactionDone(transaction);
-  return records.map((value) => {
-    const record = (value ?? {}) as Record<string, unknown>;
-    return {
-      worldId,
-      dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
-      record: uint8ArrayFromUnknown(record.record),
-    };
-  });
-}
-
-async function loadIndexedDbWorldMetadataRecord(
-  db: IDBDatabase,
-  worldId: string,
-): Promise<Uint8Array | undefined> {
-  const transaction = db.transaction(WORLD_METADATA_STORE, "readonly");
-  const value = await idbRequest<unknown>(
-    transaction.objectStore(WORLD_METADATA_STORE).get(worldId),
-  );
-  await transactionDone(transaction);
-  if (!value) return undefined;
-  const record = (value ?? {}) as Record<string, unknown>;
-  return uint8ArrayFromUnknown(record.record);
-}
-
-async function countIndexedDbRecords(
-  db: IDBDatabase,
-  storeName: string,
-  worldId: string,
-): Promise<number> {
-  const transaction = db.transaction(storeName, "readonly");
-  const count = await idbRequest<number>(
-    transaction.objectStore(storeName).index(WORLD_ID_INDEX).count(IDBKeyRange.only(worldId)),
-  );
-  await transactionDone(transaction);
-  return count;
 }
 
 function indexedDbWorldIdFromMessage(message: IntegratedServerWorkerMessage): string {
@@ -408,278 +317,15 @@ function indexedDbWorldIdFromMessage(message: IntegratedServerWorkerMessage): st
   throw new Error("IndexedDB integrated server start is missing its Rust-authored world id");
 }
 
-async function saveIndexedDbDirtyRecords(worldId: string, result: Record<string, any>): Promise<void> {
-  const chunks = indexedDbRecordsFromResult(worldId, result.indexedDbChunks);
-  const entityChunks = indexedDbRecordsFromResult(worldId, result.indexedDbEntityChunks);
-  const dimensions = indexedDbDimensionRecordsFromResult(worldId, result.indexedDbDimensions);
-  const players = indexedDbPlayerRecordsFromResult(worldId, result.indexedDbPlayers);
-  const worldMetadata = indexedDbWorldMetadataFromResult(
-    worldId,
-    result.indexedDbWorldMetadata,
-  );
-  if (
-    chunks.length === 0
-    && entityChunks.length === 0
-    && dimensions.length === 0
-    && players.length === 0
-    && !worldMetadata
-  ) {
-    return;
-  }
-  const db = await openWorldDb();
-  try {
-    await Promise.all([
-      putIndexedDbRecords(db, WORLD_CHUNK_STORE, chunks),
-      putIndexedDbRecords(db, WORLD_ENTITY_CHUNK_STORE, entityChunks),
-      putIndexedDbDimensionRecords(db, dimensions),
-      putIndexedDbPlayerRecords(db, players),
-      putIndexedDbWorldMetadata(db, worldMetadata),
-    ]);
-  } finally {
-    db.close();
-  }
-}
-
-interface IndexedDbWorldMetadataRecord {
-  worldId: string;
-  record: Uint8Array;
-}
-
-function indexedDbWorldMetadataFromResult(
-  worldId: string,
-  value: unknown,
-): IndexedDbWorldMetadataRecord | null {
-  if (value === null || value === undefined) return null;
-  return { worldId, record: uint8ArrayFromUnknown(value) };
-}
-
-async function putIndexedDbWorldMetadata(
-  db: IDBDatabase,
-  metadata: IndexedDbWorldMetadataRecord | null,
-): Promise<void> {
-  if (!metadata) return;
-  const transaction = db.transaction(WORLD_METADATA_STORE, "readwrite");
-  transaction.objectStore(WORLD_METADATA_STORE).put(metadata);
-  await transactionDone(transaction);
-}
-
-async function saveIndexedDbDirtyRecordsForCurrentWorld(result: Record<string, any>): Promise<void> {
-  if (!indexedDbWorldId) {
-    return;
-  }
-  await saveIndexedDbDirtyRecords(indexedDbWorldId, result);
-}
-
-function indexedDbLoadRequestsFromResult(result: Record<string, any>): IndexedDbLoadRequest[] {
-  const value = result?.indexedDbLoadRequests;
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((request) => {
-    const record = (request ?? {}) as Record<string, unknown>;
-    const kind = String(record.kind ?? "");
-    if (kind !== "chunk" && kind !== "entityChunk" && kind !== "player") {
-      throw new Error(`unsupported IndexedDB load request kind ${kind}`);
-    }
-    return {
-      kind,
-      requestId: Math.trunc(Number(record.requestId) || 0),
-      x: Math.trunc(Number(record.x) || 0),
-      z: Math.trunc(Number(record.z) || 0),
-      dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
-      playerKey: String(record.playerKey ?? ""),
-    };
-  });
-}
-
-async function loadIndexedDbCompletions(
-  worldId: string,
-  requests: IndexedDbLoadRequest[],
-): Promise<IndexedDbLoadCompletion[]> {
-  if (requests.length === 0) {
-    return [];
-  }
-  const db = await openWorldDb();
-  try {
-    return await Promise.all(
-      requests.map((request) => loadIndexedDbCompletion(db, worldId, request)),
-    );
-  } finally {
-    db.close();
-  }
-}
-
-async function loadIndexedDbCompletion(
-  db: IDBDatabase,
-  worldId: string,
-  request: IndexedDbLoadRequest,
-): Promise<IndexedDbLoadCompletion> {
-  const storeName = request.kind === "chunk"
-    ? WORLD_CHUNK_STORE
-    : request.kind === "entityChunk"
-      ? WORLD_ENTITY_CHUNK_STORE
-      : WORLD_PLAYER_STORE;
-  const transaction = db.transaction(storeName, "readonly");
-  let key: IDBValidKey;
-  if (request.kind === "player") {
-    if (typeof request.playerKey !== "string") {
-      throw new Error("IndexedDB player load request is missing playerKey");
-    }
-    key = [worldId, request.playerKey];
-  } else {
-    if (typeof request.x !== "number" || typeof request.z !== "number") {
-      throw new Error(`IndexedDB ${request.kind} load request is missing coordinates`);
-    }
-    key = [
-      worldId,
-      request.dimensionKey ?? "minecraft:overworld",
-      request.x,
-      request.z,
-    ];
-  }
-  const requestHandle = transaction.objectStore(storeName).get(key);
-  const record = await idbRequest<unknown>(requestHandle);
-  await transactionDone(transaction);
-  if (!record) {
-    return { ...request, found: false };
-  }
-  return {
-    ...request,
-    found: true,
-    record: request.kind === "player"
-      ? normalizeIndexedDbPlayerRecord(worldId, record).record
-      : normalizeIndexedDbRecord(worldId, record).record,
-  };
-}
-
-async function putIndexedDbRecords(
-  db: IDBDatabase,
-  storeName: string,
-  records: IndexedDbRecord[],
-): Promise<void> {
-  if (records.length === 0) return;
-  const transaction = db.transaction(storeName, "readwrite");
-  const store = transaction.objectStore(storeName);
-  for (const record of records) {
-    store.put(record);
-  }
-  await transactionDone(transaction);
-}
-
-interface IndexedDbPlayerRecord {
-  worldId: string;
-  playerKey: string;
-  record: Uint8Array;
-}
-
-interface IndexedDbDimensionRecord {
-  worldId: string;
-  dimensionKey: string;
-  record: Uint8Array;
-}
-
-async function putIndexedDbDimensionRecords(
-  db: IDBDatabase,
-  records: IndexedDbDimensionRecord[],
-): Promise<void> {
-  if (records.length === 0) return;
-  const transaction = db.transaction(WORLD_DIMENSION_STORE, "readwrite");
-  const store = transaction.objectStore(WORLD_DIMENSION_STORE);
-  for (const record of records) store.put(record);
-  await transactionDone(transaction);
-}
-
-function indexedDbDimensionRecordsFromResult(
-  worldId: string,
-  value: unknown,
-): IndexedDbDimensionRecord[] {
+function persistenceRecordRequestsFromValue(value: unknown): PersistenceRecordRequest[] {
   if (!Array.isArray(value)) return [];
-  return value.map((entry) => {
-    const record = (entry ?? {}) as Record<string, unknown>;
-    return {
-      worldId,
-      dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
-      record: uint8ArrayFromUnknown(record.record),
-    };
-  });
+  return value as PersistenceRecordRequest[];
 }
 
-async function putIndexedDbPlayerRecords(
-  db: IDBDatabase,
-  records: IndexedDbPlayerRecord[],
-): Promise<void> {
-  if (records.length === 0) return;
-  const transaction = db.transaction(WORLD_PLAYER_STORE, "readwrite");
-  const store = transaction.objectStore(WORLD_PLAYER_STORE);
-  for (const record of records) store.put(record);
-  await transactionDone(transaction);
-}
-
-function indexedDbPlayerRecordsFromResult(
-  worldId: string,
-  value: unknown,
-): IndexedDbPlayerRecord[] {
-  if (!Array.isArray(value)) return [];
-  return value.map((record) => normalizeIndexedDbPlayerRecord(worldId, record));
-}
-
-function normalizeIndexedDbPlayerRecord(
-  worldId: string,
-  value: unknown,
-): IndexedDbPlayerRecord {
-  const record = (value ?? {}) as Record<string, unknown>;
-  return {
-    worldId,
-    playerKey: String(record.playerKey ?? ""),
-    record: uint8ArrayFromUnknown(record.record),
-  };
-}
-
-function indexedDbRecordsFromResult(worldId: string, value: unknown): IndexedDbRecord[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.map((record) => normalizeIndexedDbRecord(worldId, record));
-}
-
-function normalizeIndexedDbRecord(worldId: string, value: unknown): IndexedDbRecord {
-  const record = (value ?? {}) as Record<string, unknown>;
-  return {
-    worldId,
-    dimensionKey: String(record.dimensionKey ?? "minecraft:overworld"),
-    x: Math.trunc(Number(record.x) || 0),
-    z: Math.trunc(Number(record.z) || 0),
-    record: uint8ArrayFromUnknown(record.record),
-  };
-}
-
-function uint8ArrayFromUnknown(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) {
-    return value;
-  }
-  if (value instanceof ArrayBuffer) {
-    return new Uint8Array(value);
-  }
-  if (ArrayBuffer.isView(value)) {
-    const view = value as ArrayBufferView;
-    return new Uint8Array(view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength));
-  }
-  return new Uint8Array();
-}
-
-function idbRequest<T>(request: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB request failed"));
-  });
-}
-
-function transactionDone(transaction: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    transaction.oncomplete = () => resolve();
-    transaction.onerror = () => reject(transaction.error ?? new Error("IndexedDB transaction failed"));
-    transaction.onabort = () => reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
-  });
+async function releaseIndexedDbWriterLease(): Promise<void> {
+  const lease = indexedDbWriterLease;
+  indexedDbWriterLease = null;
+  if (lease) await lease.release();
 }
 
 function postUpdates(

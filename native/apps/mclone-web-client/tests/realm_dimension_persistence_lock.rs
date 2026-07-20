@@ -9,6 +9,10 @@ const INTEGRATED_SERVER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-integrated-server-worker.ts"
 ));
+const RECORD_EXECUTOR: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-web-persistence-executor.ts"
+));
 const SERVER_WORKER: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_server_worker.rs"
@@ -23,25 +27,23 @@ fn indexed_db_v6_qualifies_dimension_records_and_migrates_v5_to_overworld() {
     assert!(WORLD_CATALOG.contains("dimensionKey: \"minecraft:overworld\""));
     assert!(WORLD_CATALOG.contains("migrateLegacyWorldRecordsToOverworld"));
 
-    assert!(INTEGRATED_SERVER_WORKER.contains("request.dimensionKey ?? \"minecraft:overworld\""));
-    assert!(INTEGRATED_SERVER_WORKER.contains("WORLD_DIMENSION_STORE"));
-    assert!(SERVER_WORKER.contains("set_string(&object, \"dimensionKey\", dimension.as_str())?;"));
-    assert!(SERVER_WORKER.contains("set_number(&object, \"x\", f64::from(pos.x))?;"));
-    assert!(SERVER_WORKER.contains("set_number(&object, \"z\", f64::from(pos.z))?;"));
+    assert!(RECORD_EXECUTOR.contains("store: WORLD_DIMENSION_STORE"));
+    assert!(RECORD_EXECUTOR.contains("valueFields: [\"dimensionKey\", \"x\", \"z\"]"));
+    assert!(SERVER_WORKER.contains("record_read_for_world_store_request"));
+    assert!(SERVER_WORKER.contains("persistenceRecordRequests"));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("dimensionKey"));
 }
 
 #[test]
 fn indexed_db_player_lifecycle_records_remain_opaque_rust_owned_blobs() {
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"playerKey\"]"));
-    assert!(INTEGRATED_SERVER_WORKER.contains("request.kind === \"player\""));
-    assert!(INTEGRATED_SERVER_WORKER.contains("key = [worldId, request.playerKey];"));
-    assert!(INTEGRATED_SERVER_WORKER.contains("putIndexedDbPlayerRecords"));
-    assert!(INTEGRATED_SERVER_WORKER.contains("normalizeIndexedDbPlayerRecord"));
-    assert!(SERVER_WORKER.contains("decode_player_record"));
-    assert!(SERVER_WORKER.contains("encode_player_record(record)"));
-    assert!(SERVER_WORKER.contains("\"indexedDbPlayers\""));
+    assert!(RECORD_EXECUTOR.contains("store: WORLD_PLAYER_STORE"));
+    assert!(RECORD_EXECUTOR.contains("valueFields: [\"playerKey\"]"));
+    assert!(RECORD_EXECUTOR.contains("record: uint8ArrayFromUnknown(stored.record)"));
+    assert!(SERVER_WORKER.contains("world_store_completion_from_record_read"));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("playerKey"));
 
-    for platform_source in [WORLD_CATALOG, INTEGRATED_SERVER_WORKER] {
+    for platform_source in [WORLD_CATALOG, INTEGRATED_SERVER_WORKER, RECORD_EXECUTOR] {
         assert!(!platform_source.contains("pending_death_cause"));
         assert!(!platform_source.contains("pendingDeathCause"));
         assert!(!platform_source.contains("PlayerDamageCause"));

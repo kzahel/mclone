@@ -306,7 +306,7 @@ async function run() {
         ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
       ],
     });
-    const page = await browser.newPage(mobileViewport
+    const context = await browser.newContext(mobileViewport
       ? {
           viewport: { width: 390, height: 844 },
           deviceScaleFactor: 2,
@@ -314,6 +314,7 @@ async function run() {
           hasTouch: true,
         }
       : undefined);
+    const page = await context.newPage();
     if (deathUiProbe) {
       await page.addInitScript(() => {
         globalThis.localStorage?.setItem("mclone.playerProfile.v1", JSON.stringify({
@@ -3731,6 +3732,7 @@ async function runIndexedDbReloadProbe(
       worldId,
       initialMetadata.worldMetadataBytes,
     );
+    const writerLeaseConflict = await probeHeldWorldWriterLease(page, baseUrl, worldId);
 
     // Carry the descriptor alongside the direct smoke URL just as the product
     // catalog carries it in the open request. The worker also adopts stored
@@ -3771,6 +3773,7 @@ async function runIndexedDbReloadProbe(
         && afterReloadRecordCounts.chunks > 0
         && afterReloadRecordCounts.dimensions === 1
         && afterReloadRecordCounts.worldMetadata === 1
+        && writerLeaseConflict.conflictObserved === true
         && (!cylinderEdit
           || (afterReloadCylinderEdit?.canonical?.blockStateId === DIRT_BLOCK_STATE_ID
             && afterReloadCylinderEdit?.liftedAlias?.blockStateId === DIRT_BLOCK_STATE_ID))
@@ -3787,6 +3790,7 @@ async function runIndexedDbReloadProbe(
       afterReloadDayTime,
       initialMetadata,
       savedMetadata,
+      writerLeaseConflict,
       backgroundSaveResult,
       afterReloadRecordCounts,
     };
@@ -3865,6 +3869,7 @@ async function runIndexedDbReloadProbe(
     worldId,
     initialMetadata.worldMetadataBytes,
   );
+  const writerLeaseConflict = await probeHeldWorldWriterLease(page, baseUrl, worldId);
 
   const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
   await page.goto(reloadUrl, { waitUntil: "load" });
@@ -3889,6 +3894,7 @@ async function runIndexedDbReloadProbe(
       && afterReload?.blockStateId === DIRT_BLOCK_STATE_ID
       && afterReloadRecordCounts.chunks > 0
       && afterReloadRecordCounts.worldMetadata === 1
+      && writerLeaseConflict.conflictObserved === true
       && afterPlacementStatistic === beforePlacementStatistic + 1
       && afterReloadDayTime >= beforeReloadDayTime,
     worldId,
@@ -3903,10 +3909,39 @@ async function runIndexedDbReloadProbe(
     afterReloadDayTime,
     initialMetadata,
     savedMetadata,
+    writerLeaseConflict,
     backgroundSaveResult,
     afterReload,
     afterReloadRecordCounts,
   };
+}
+
+/**
+ * Prove that a second same-origin browser context cannot acquire the live
+ * world's exclusive writer lease. The subsequent reload in the caller proves
+ * the old Worker releases it when its owning document is replaced.
+ *
+ * @param {Page} page
+ * @param {string} baseUrl
+ * @param {string} worldId
+ */
+async function probeHeldWorldWriterLease(page, baseUrl, worldId) {
+  const contender = await page.context().newPage();
+  try {
+    await contender.goto(`${baseUrl}/mclone-runner-shared-abi.js`, { waitUntil: "load" });
+    const leaseName = `mclone:indexeddb-world-writer:${worldId}`;
+    const acquired = await contender.evaluate(async (name) => {
+      if (!navigator.locks) throw new Error("Web Locks are unavailable in contender context");
+      return await navigator.locks.request(
+        name,
+        { mode: "exclusive", ifAvailable: true },
+        (lock) => lock !== null,
+      );
+    }, leaseName);
+    return { leaseName, conflictObserved: acquired === false };
+  } finally {
+    await contender.close();
+  }
 }
 
 /**
