@@ -8,16 +8,16 @@ use std::io::{Read, Write};
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::{
-    fs::{self, File},
-    io::{BufReader, BufWriter},
+    fs::{self, File, OpenOptions},
+    io::{BufReader, BufWriter, Seek, SeekFrom},
     path::{Path, PathBuf},
     sync::mpsc,
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 
 use mclone_core::{
     AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, Vec3d,
@@ -53,6 +53,10 @@ const DIMENSION_RECORD_MAGIC: &[u8; 12] = b"MCLONEDIM\0\0\0";
 const SQLITE_WORLD_SCHEMA_VERSION: i64 = 2;
 #[cfg(not(target_arch = "wasm32"))]
 pub const SQLITE_WORLD_DATABASE_FILE: &str = "world.sqlite3";
+#[cfg(not(target_arch = "wasm32"))]
+pub const WORLD_WRITER_LOCK_FILE: &str = "world.writer.lock";
+#[cfg(not(target_arch = "wasm32"))]
+const WORLD_ADMISSION_LOCK_FILE: &str = ".mclone-world-admission.lock";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
 pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
@@ -3426,19 +3430,148 @@ impl WorldStore for FilesystemChunkSnapshotStore {
 #[derive(Debug)]
 pub struct SqliteWorldStore {
     path: PathBuf,
-    connection: Connection,
+    inner: RecordExecutorWorldStore<SqliteRecordExecutor>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 impl SqliteWorldStore {
     pub fn new(path: impl Into<PathBuf>) -> ChunkStoreResult<Self> {
         let path = path.into();
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            fs::create_dir_all(parent)?;
-        }
+        let world_dir = path.parent().unwrap_or_else(|| Path::new("."));
+        fs::create_dir_all(world_dir)?;
+        let _admission = NativeFileLease::acquire_blocking(&world_admission_lock_path(world_dir))?;
+        let writer_lease =
+            NativeFileLease::acquire_writer(&world_dir.join(WORLD_WRITER_LOCK_FILE))?;
+        let executor = SqliteRecordExecutor::open_writer(path.clone(), writer_lease)?;
+        Ok(Self {
+            path,
+            inner: RecordExecutorWorldStore::new(executor, true),
+        })
+    }
+
+    pub fn open_world_dir(world_dir: impl AsRef<Path>) -> ChunkStoreResult<Self> {
+        Self::new(Self::database_path_for_world_dir(world_dir))
+    }
+
+    /// Open a non-authoritative SQLite reader without acquiring the world
+    /// writer lease. Mutation methods fail with `Unavailable`.
+    pub fn open_world_dir_read_only(world_dir: impl AsRef<Path>) -> ChunkStoreResult<Self> {
+        let path = Self::database_path_for_world_dir(world_dir);
+        let executor = SqliteRecordExecutor::open_read_only(path.clone())?;
+        Ok(Self {
+            path,
+            inner: RecordExecutorWorldStore::new(executor, true),
+        })
+    }
+
+    /// Remove one world while excluding both live writers and concurrent
+    /// open/create transitions. The short parent admission lock closes the
+    /// Windows gap between releasing the in-directory handle and deletion.
+    pub fn remove_world_dir_exclusive(world_dir: impl AsRef<Path>) -> ChunkStoreResult<()> {
+        let world_dir = world_dir.as_ref();
+        let _admission = NativeFileLease::acquire_blocking(&world_admission_lock_path(world_dir))?;
+        let writer_lease =
+            NativeFileLease::acquire_writer(&world_dir.join(WORLD_WRITER_LOCK_FILE))?;
+        writer_lease.release()?;
+        fs::remove_dir_all(world_dir)?;
+        Ok(())
+    }
+
+    pub fn database_path_for_world_dir(world_dir: impl AsRef<Path>) -> PathBuf {
+        world_dir.as_ref().join(SQLITE_WORLD_DATABASE_FILE)
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn is_read_only(&self) -> bool {
+        self.inner.executor().read_only
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl WorldStore for SqliteWorldStore {
+    fn supports_entity_chunks(&self) -> bool {
+        true
+    }
+
+    fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
+        self.inner.load_world_metadata()
+    }
+
+    fn save_world_metadata(&mut self, record: &WorldMetadata) -> ChunkStoreResult<()> {
+        self.inner.save_world_metadata(record)
+    }
+
+    fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
+        self.inner.load_dimension(key)
+    }
+
+    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
+        self.inner.save_dimension(record)
+    }
+
+    fn load_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<ChunkRecord>> {
+        self.inner.load_chunk(dimension, pos)
+    }
+
+    fn save_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &ChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        self.inner.save_chunk(dimension, record)
+    }
+
+    fn load_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
+        self.inner.load_entity_chunk(dimension, pos)
+    }
+
+    fn save_entity_chunk(
+        &mut self,
+        dimension: &DimensionKey,
+        record: &EntityChunkRecord,
+    ) -> ChunkStoreResult<()> {
+        self.inner.save_entity_chunk(dimension, record)
+    }
+
+    fn load_player(&mut self, player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
+        self.inner.load_player(player)
+    }
+
+    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
+        self.inner.save_player(record)
+    }
+
+    fn flush(&mut self) -> ChunkStoreResult<()> {
+        self.inner.flush()
+    }
+
+    fn close(&mut self) -> ChunkStoreResult<()> {
+        self.inner.close()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct SqliteRecordExecutor {
+    connection: Option<Connection>,
+    writer_lease: Option<NativeFileLease>,
+    read_only: bool,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl SqliteRecordExecutor {
+    fn open_writer(path: PathBuf, writer_lease: NativeFileLease) -> ChunkStoreResult<Self> {
         let connection = Connection::open(&path).map_err(sqlite_error)?;
         connection
             .execute_batch(
@@ -3450,67 +3583,254 @@ impl SqliteWorldStore {
             row.get::<_, String>(0)
         });
         initialize_sqlite_world_schema(&connection)?;
-        Ok(Self { path, connection })
+        Ok(Self {
+            connection: Some(connection),
+            writer_lease: Some(writer_lease),
+            read_only: false,
+        })
     }
 
-    pub fn open_world_dir(world_dir: impl AsRef<Path>) -> ChunkStoreResult<Self> {
-        Self::new(Self::database_path_for_world_dir(world_dir))
+    fn open_read_only(path: PathBuf) -> ChunkStoreResult<Self> {
+        let connection = Connection::open_with_flags(
+            &path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(sqlite_error)?;
+        validate_sqlite_world_schema_read_only(&connection)?;
+        Ok(Self {
+            connection: Some(connection),
+            writer_lease: None,
+            read_only: true,
+        })
     }
 
-    pub fn database_path_for_world_dir(world_dir: impl AsRef<Path>) -> PathBuf {
-        world_dir.as_ref().join(SQLITE_WORLD_DATABASE_FILE)
+    fn connection(&self) -> ChunkStoreResult<&Connection> {
+        self.connection
+            .as_ref()
+            .ok_or_else(|| ChunkStoreError::Closed("sqlite world store is closed".to_owned()))
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    fn writer_connection(&mut self) -> ChunkStoreResult<&mut Connection> {
+        if self.read_only {
+            return Err(ChunkStoreError::classified(
+                PersistenceErrorKind::Unavailable,
+                "read-only sqlite world store cannot mutate records",
+            ));
+        }
+        self.connection
+            .as_mut()
+            .ok_or_else(|| ChunkStoreError::Closed("sqlite world store is closed".to_owned()))
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-impl WorldStore for SqliteWorldStore {
-    fn supports_entity_chunks(&self) -> bool {
-        true
-    }
-
-    fn load_world_metadata(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
-        let blob = self
-            .connection
-            .query_row(
-                "SELECT record_blob FROM world_metadata WHERE singleton_id = 1",
-                [],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let record = blob.as_deref().map(decode_world_metadata).transpose()?;
-        let legacy_records_present = if record.is_some() {
-            false
-        } else {
-            self.connection
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM chunk_records LIMIT 1)
-                        OR EXISTS(SELECT 1 FROM entity_chunk_records LIMIT 1)
-                        OR EXISTS(SELECT 1 FROM player_records LIMIT 1)",
-                    [],
-                    |row| row.get::<_, bool>(0),
-                )
-                .map_err(sqlite_error)?
+impl PersistenceRecordExecutor for SqliteRecordExecutor {
+    fn read(
+        &mut self,
+        address: &PersistenceRecordAddress,
+    ) -> ChunkStoreResult<Option<PersistenceRecordPayload>> {
+        let connection = self.connection()?;
+        let stored = match address.namespace {
+            PersistenceRecordNamespace::WorldMetadata => {
+                require_empty_record_key(address)?;
+                connection
+                    .query_row(
+                        "SELECT codec_version, revision, record_blob
+                         FROM world_metadata WHERE singleton_id = 1",
+                        [],
+                        sqlite_payload_row,
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?
+            }
+            PersistenceRecordNamespace::Dimension => {
+                let key = require_text_record_key(address)?;
+                connection
+                    .query_row(
+                        "SELECT codec_version, revision, record_blob
+                         FROM dimension_records WHERE dimension_key = ?1",
+                        params![key],
+                        sqlite_payload_row,
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?
+            }
+            PersistenceRecordNamespace::Chunk | PersistenceRecordNamespace::EntityChunk => {
+                let (dimension, x, z) = require_chunk_record_key(address)?;
+                let statement = match address.namespace {
+                    PersistenceRecordNamespace::Chunk => {
+                        "SELECT codec_version, revision, record_blob FROM chunk_records
+                         WHERE dimension_key = ?1 AND x = ?2 AND z = ?3"
+                    }
+                    PersistenceRecordNamespace::EntityChunk => {
+                        "SELECT codec_version, revision, record_blob FROM entity_chunk_records
+                         WHERE dimension_key = ?1 AND x = ?2 AND z = ?3"
+                    }
+                    _ => unreachable!(),
+                };
+                connection
+                    .query_row(statement, params![dimension, x, z], sqlite_payload_row)
+                    .optional()
+                    .map_err(sqlite_error)?
+            }
+            PersistenceRecordNamespace::Player | PersistenceRecordNamespace::SavedData => {
+                let key = require_text_record_key(address)?;
+                let statement = match address.namespace {
+                    PersistenceRecordNamespace::Player => {
+                        "SELECT codec_version, revision, record_blob
+                         FROM player_records WHERE player_key = ?1"
+                    }
+                    PersistenceRecordNamespace::SavedData => {
+                        "SELECT codec_version, revision, record_blob
+                         FROM saved_data_records WHERE data_key = ?1"
+                    }
+                    _ => unreachable!(),
+                };
+                connection
+                    .query_row(statement, params![key], sqlite_payload_row)
+                    .optional()
+                    .map_err(sqlite_error)?
+            }
         };
-        Ok(WorldMetadataLoad {
-            record,
-            legacy_records_present,
-        })
+        stored.map(sqlite_payload).transpose()
     }
 
-    fn save_world_metadata(&mut self, record: &WorldMetadata) -> ChunkStoreResult<()> {
-        if let Some(stored) = self.load_world_metadata()?.record
-            && stored.revision > record.revision
-        {
+    fn probe_any(&mut self, namespaces: &[PersistenceRecordNamespace]) -> ChunkStoreResult<bool> {
+        let connection = self.connection()?;
+        for namespace in namespaces {
+            let statement = match namespace {
+                PersistenceRecordNamespace::WorldMetadata => {
+                    "SELECT EXISTS(SELECT 1 FROM world_metadata LIMIT 1)"
+                }
+                PersistenceRecordNamespace::Dimension => {
+                    "SELECT EXISTS(SELECT 1 FROM dimension_records LIMIT 1)"
+                }
+                PersistenceRecordNamespace::Chunk => {
+                    "SELECT EXISTS(SELECT 1 FROM chunk_records LIMIT 1)"
+                }
+                PersistenceRecordNamespace::EntityChunk => {
+                    "SELECT EXISTS(SELECT 1 FROM entity_chunk_records LIMIT 1)"
+                }
+                PersistenceRecordNamespace::Player => {
+                    "SELECT EXISTS(SELECT 1 FROM player_records LIMIT 1)"
+                }
+                PersistenceRecordNamespace::SavedData => {
+                    "SELECT EXISTS(SELECT 1 FROM saved_data_records LIMIT 1)"
+                }
+            };
+            if connection
+                .query_row(statement, [], |row| row.get::<_, bool>(0))
+                .map_err(sqlite_error)?
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn commit(&mut self, batch: &PersistenceRecordBatch) -> ChunkStoreResult<()> {
+        let transaction = self
+            .writer_connection()?
+            .transaction()
+            .map_err(sqlite_error)?;
+        for mutation in &batch.mutations {
+            apply_sqlite_mutation(&transaction, mutation)?;
+        }
+        transaction.commit().map_err(sqlite_error)
+    }
+
+    fn flush(&mut self) -> ChunkStoreResult<()> {
+        if self.read_only {
+            self.connection()?;
             return Ok(());
         }
-        let blob = encode_world_metadata(record)?;
-        self.connection
-            .execute(
+        let _busy: i64 = self
+            .connection()?
+            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(0))
+            .map_err(sqlite_error)?;
+        Ok(())
+    }
+
+    fn close(&mut self) -> ChunkStoreResult<()> {
+        self.flush()?;
+        let connection = self
+            .connection
+            .take()
+            .ok_or_else(|| ChunkStoreError::Closed("sqlite world store is closed".to_owned()))?;
+        connection
+            .close()
+            .map_err(|(_, error)| sqlite_error(error))?;
+        if let Some(lease) = self.writer_lease.take() {
+            lease.release()?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for SqliteRecordExecutor {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.take() {
+            let _ = connection.close();
+        }
+        if let Some(lease) = self.writer_lease.take() {
+            let _ = lease.release();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sqlite_payload_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<(i64, String, Vec<u8>)> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sqlite_payload(
+    (codec_version, revision, bytes): (i64, String, Vec<u8>),
+) -> ChunkStoreResult<PersistenceRecordPayload> {
+    let codec_version = u32::try_from(codec_version).map_err(|_| {
+        ChunkStoreError::classified(
+            PersistenceErrorKind::Corrupt,
+            format!("sqlite record codec version {codec_version} does not fit in u32"),
+        )
+    })?;
+    let revision = revision.parse::<u64>().map_err(|error| {
+        ChunkStoreError::classified(
+            PersistenceErrorKind::Corrupt,
+            format!("sqlite record revision {revision:?} is invalid: {error}"),
+        )
+    })?;
+    Ok(PersistenceRecordPayload::new(
+        codec_version,
+        revision,
+        bytes,
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_sqlite_mutation(
+    transaction: &Transaction<'_>,
+    mutation: &PersistenceRecordMutation,
+) -> ChunkStoreResult<()> {
+    match mutation {
+        PersistenceRecordMutation::Put { address, payload } => {
+            put_sqlite_record(transaction, address, payload)
+        }
+        PersistenceRecordMutation::Delete { address } => delete_sqlite_record(transaction, address),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn put_sqlite_record(
+    transaction: &Transaction<'_>,
+    address: &PersistenceRecordAddress,
+    payload: &PersistenceRecordPayload,
+) -> ChunkStoreResult<()> {
+    let revision = payload.revision.to_string();
+    match address.namespace {
+        PersistenceRecordNamespace::WorldMetadata => {
+            require_empty_record_key(address)?;
+            transaction.execute(
                 "INSERT INTO world_metadata
                     (singleton_id, codec_version, revision, record_blob)
                  VALUES (1, ?1, ?2, ?3)
@@ -3518,45 +3838,12 @@ impl WorldStore for SqliteWorldStore {
                     codec_version = excluded.codec_version,
                     revision = excluded.revision,
                     record_blob = excluded.record_blob",
-                params![record.codec_version, record.revision.to_string(), blob],
+                params![payload.codec_version, revision, payload.bytes],
             )
-            .map_err(sqlite_error)?;
-        Ok(())
-    }
-
-    fn load_dimension(&mut self, key: &DimensionKey) -> ChunkStoreResult<Option<DimensionRecord>> {
-        let blob = self
-            .connection
-            .query_row(
-                "SELECT record_blob FROM dimension_records WHERE dimension_key = ?1",
-                params![key.as_str()],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let Some(blob) = blob else {
-            return Ok(None);
-        };
-        let record = decode_dimension_record(&blob)?;
-        if record.key != *key {
-            return Err(ChunkStoreError::InvalidData(format!(
-                "sqlite dimension record for {key} contained key {}",
-                record.key
-            )));
         }
-        Ok(Some(record))
-    }
-
-    fn save_dimension(&mut self, record: &DimensionRecord) -> ChunkStoreResult<()> {
-        if self
-            .load_dimension(&record.key)?
-            .is_some_and(|stored| stored.revision > record.revision)
-        {
-            return Ok(());
-        }
-        let blob = encode_dimension_record(record)?;
-        self.connection
-            .execute(
+        PersistenceRecordNamespace::Dimension => {
+            let key = require_text_record_key(address)?;
+            transaction.execute(
                 "INSERT INTO dimension_records
                     (dimension_key, codec_version, revision, record_blob)
                  VALUES (?1, ?2, ?3, ?4)
@@ -3564,191 +3851,254 @@ impl WorldStore for SqliteWorldStore {
                     codec_version = excluded.codec_version,
                     revision = excluded.revision,
                     record_blob = excluded.record_blob",
+                params![key, payload.codec_version, revision, payload.bytes],
+            )
+        }
+        PersistenceRecordNamespace::Chunk | PersistenceRecordNamespace::EntityChunk => {
+            let (dimension, x, z) = require_chunk_record_key(address)?;
+            let statement = match address.namespace {
+                PersistenceRecordNamespace::Chunk => {
+                    "INSERT INTO chunk_records
+                        (dimension_key, x, z, codec_version, revision, record_blob)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(dimension_key, x, z) DO UPDATE SET
+                        codec_version = excluded.codec_version,
+                        revision = excluded.revision,
+                        record_blob = excluded.record_blob"
+                }
+                PersistenceRecordNamespace::EntityChunk => {
+                    "INSERT INTO entity_chunk_records
+                        (dimension_key, x, z, codec_version, revision, record_blob)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                     ON CONFLICT(dimension_key, x, z) DO UPDATE SET
+                        codec_version = excluded.codec_version,
+                        revision = excluded.revision,
+                        record_blob = excluded.record_blob"
+                }
+                _ => unreachable!(),
+            };
+            transaction.execute(
+                statement,
                 params![
-                    record.key.as_str(),
-                    record.codec_version,
-                    record.revision.to_string(),
-                    blob
+                    dimension,
+                    x,
+                    z,
+                    payload.codec_version,
+                    revision,
+                    payload.bytes
                 ],
             )
-            .map_err(sqlite_error)?;
-        Ok(())
-    }
-
-    fn load_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        pos: ChunkPos,
-    ) -> ChunkStoreResult<Option<ChunkRecord>> {
-        let blob = self
-            .connection
-            .query_row(
-                "SELECT record_blob FROM chunk_records
-                 WHERE dimension_key = ?1 AND x = ?2 AND z = ?3",
-                params![dimension.as_str(), pos.x, pos.z],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let Some(blob) = blob else {
-            return Ok(None);
-        };
-        let record = read_chunk_record(&mut blob.as_slice())?;
-        if record.pos() != pos {
-            return Err(ChunkStoreError::InvalidData(format!(
-                "sqlite chunk record for ({}, {}) contained position ({}, {})",
-                pos.x,
-                pos.z,
-                record.pos().x,
-                record.pos().z
-            )));
         }
-        Ok(Some(record))
-    }
-
-    fn save_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        record: &ChunkRecord,
-    ) -> ChunkStoreResult<()> {
-        let mut blob = Vec::new();
-        write_chunk_record(&mut blob, record)?;
-        self.connection
-            .execute(
-                "INSERT INTO chunk_records
-                    (dimension_key, x, z, codec_version, revision, record_blob)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(dimension_key, x, z) DO UPDATE SET
-                    codec_version = excluded.codec_version,
-                    revision = excluded.revision,
-                    record_blob = excluded.record_blob",
-                params![
-                    dimension.as_str(),
-                    record.pos().x,
-                    record.pos().z,
-                    SNAPSHOT_FORMAT_VERSION,
-                    record.revision().0.to_string(),
-                    blob
-                ],
-            )
-            .map_err(sqlite_error)?;
-        Ok(())
-    }
-
-    fn load_entity_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        pos: ChunkPos,
-    ) -> ChunkStoreResult<Option<EntityChunkRecord>> {
-        let blob = self
-            .connection
-            .query_row(
-                "SELECT record_blob FROM entity_chunk_records
-                 WHERE dimension_key = ?1 AND x = ?2 AND z = ?3",
-                params![dimension.as_str(), pos.x, pos.z],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let Some(blob) = blob else {
-            return Ok(None);
-        };
-        let record = read_entity_chunk_record(&mut blob.as_slice())?;
-        if record.pos != pos {
-            return Err(ChunkStoreError::InvalidData(format!(
-                "sqlite entity chunk record for ({}, {}) contained position ({}, {})",
-                pos.x, pos.z, record.pos.x, record.pos.z
-            )));
-        }
-        Ok(Some(record))
-    }
-
-    fn save_entity_chunk(
-        &mut self,
-        dimension: &DimensionKey,
-        record: &EntityChunkRecord,
-    ) -> ChunkStoreResult<()> {
-        let mut blob = Vec::new();
-        write_entity_chunk_record(&mut blob, record)?;
-        self.connection
-            .execute(
-                "INSERT INTO entity_chunk_records
-                    (dimension_key, x, z, codec_version, revision, record_blob)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-                 ON CONFLICT(dimension_key, x, z) DO UPDATE SET
-                    codec_version = excluded.codec_version,
-                    revision = excluded.revision,
-                    record_blob = excluded.record_blob",
-                params![
-                    dimension.as_str(),
-                    record.pos.x,
-                    record.pos.z,
-                    record.codec_version,
-                    record.revision.to_string(),
-                    blob
-                ],
-            )
-            .map_err(sqlite_error)?;
-        Ok(())
-    }
-
-    fn load_player(&mut self, player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
-        let blob = self
-            .connection
-            .query_row(
-                "SELECT record_blob FROM player_records WHERE player_key = ?1",
-                params![player.as_str()],
-                |row| row.get::<_, Vec<u8>>(0),
-            )
-            .optional()
-            .map_err(sqlite_error)?;
-        let Some(blob) = blob else {
-            return Ok(None);
-        };
-        let record = read_player_record(&mut blob.as_slice())?;
-        if record.player != *player {
-            return Err(ChunkStoreError::InvalidData(format!(
-                "sqlite player record for {} contained key {}",
-                player.as_str(),
-                record.player.as_str()
-            )));
-        }
-        Ok(Some(record))
-    }
-
-    fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
-        let mut blob = Vec::new();
-        write_player_record(&mut blob, record)?;
-        self.connection
-            .execute(
-                "INSERT INTO player_records (player_key, codec_version, revision, record_blob)
+        PersistenceRecordNamespace::Player | PersistenceRecordNamespace::SavedData => {
+            let key = require_text_record_key(address)?;
+            let (table, column) = match address.namespace {
+                PersistenceRecordNamespace::Player => ("player_records", "player_key"),
+                PersistenceRecordNamespace::SavedData => ("saved_data_records", "data_key"),
+                _ => unreachable!(),
+            };
+            let statement = format!(
+                "INSERT INTO {table} ({column}, codec_version, revision, record_blob)
                  VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(player_key) DO UPDATE SET
+                 ON CONFLICT({column}) DO UPDATE SET
                     codec_version = excluded.codec_version,
                     revision = excluded.revision,
-                    record_blob = excluded.record_blob",
-                params![
-                    record.player.as_str(),
-                    record.codec_version,
-                    record.revision.to_string(),
-                    blob
-                ],
+                    record_blob = excluded.record_blob"
+            );
+            transaction.execute(
+                &statement,
+                params![key, payload.codec_version, revision, payload.bytes],
             )
-            .map_err(sqlite_error)?;
+        }
+    }
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn delete_sqlite_record(
+    transaction: &Transaction<'_>,
+    address: &PersistenceRecordAddress,
+) -> ChunkStoreResult<()> {
+    match address.namespace {
+        PersistenceRecordNamespace::WorldMetadata => {
+            require_empty_record_key(address)?;
+            transaction.execute("DELETE FROM world_metadata WHERE singleton_id = 1", [])
+        }
+        PersistenceRecordNamespace::Dimension => transaction.execute(
+            "DELETE FROM dimension_records WHERE dimension_key = ?1",
+            params![require_text_record_key(address)?],
+        ),
+        PersistenceRecordNamespace::Chunk | PersistenceRecordNamespace::EntityChunk => {
+            let (dimension, x, z) = require_chunk_record_key(address)?;
+            let statement = match address.namespace {
+                PersistenceRecordNamespace::Chunk => {
+                    "DELETE FROM chunk_records WHERE dimension_key = ?1 AND x = ?2 AND z = ?3"
+                }
+                PersistenceRecordNamespace::EntityChunk => {
+                    "DELETE FROM entity_chunk_records
+                     WHERE dimension_key = ?1 AND x = ?2 AND z = ?3"
+                }
+                _ => unreachable!(),
+            };
+            transaction.execute(statement, params![dimension, x, z])
+        }
+        PersistenceRecordNamespace::Player | PersistenceRecordNamespace::SavedData => {
+            let key = require_text_record_key(address)?;
+            let statement = match address.namespace {
+                PersistenceRecordNamespace::Player => {
+                    "DELETE FROM player_records WHERE player_key = ?1"
+                }
+                PersistenceRecordNamespace::SavedData => {
+                    "DELETE FROM saved_data_records WHERE data_key = ?1"
+                }
+                _ => unreachable!(),
+            };
+            transaction.execute(statement, params![key])
+        }
+    }
+    .map_err(sqlite_error)?;
+    Ok(())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn require_empty_record_key(address: &PersistenceRecordAddress) -> ChunkStoreResult<()> {
+    if address.key.is_empty() {
         Ok(())
+    } else {
+        Err(invalid_record_key(address))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn require_text_record_key(address: &PersistenceRecordAddress) -> ChunkStoreResult<&str> {
+    match address.key.as_slice() {
+        [PersistenceRecordKeyPart::Text(key)] => Ok(key),
+        _ => Err(invalid_record_key(address)),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn require_chunk_record_key(
+    address: &PersistenceRecordAddress,
+) -> ChunkStoreResult<(&str, i32, i32)> {
+    match address.key.as_slice() {
+        [
+            PersistenceRecordKeyPart::Text(dimension),
+            PersistenceRecordKeyPart::I32(x),
+            PersistenceRecordKeyPart::I32(z),
+        ] => Ok((dimension, *x, *z)),
+        _ => Err(invalid_record_key(address)),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn invalid_record_key(address: &PersistenceRecordAddress) -> ChunkStoreError {
+    ChunkStoreError::InvalidData(format!(
+        "invalid key {:?} for persistence namespace {:?}",
+        address.key, address.namespace
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+struct NativeFileLease {
+    file: Option<File>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl NativeFileLease {
+    fn acquire_blocking(path: &Path) -> ChunkStoreResult<Self> {
+        let file = open_lock_file(path)?;
+        file.lock()?;
+        Ok(Self { file: Some(file) })
     }
 
-    fn flush(&mut self) -> ChunkStoreResult<()> {
-        let _busy: i64 = self
-            .connection
-            .query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| row.get(0))
-            .map_err(sqlite_error)?;
-        Ok(())
+    fn acquire_writer(path: &Path) -> ChunkStoreResult<Self> {
+        let mut file = open_lock_file(path)?;
+        if let Err(error) = file.try_lock() {
+            return Err(match error {
+                std::fs::TryLockError::WouldBlock => ChunkStoreError::classified(
+                    PersistenceErrorKind::LeaseConflict,
+                    format!(
+                        "world already has an active writer lease at `{}`",
+                        path.display()
+                    ),
+                ),
+                std::fs::TryLockError::Error(error) => error.into(),
+            });
+        }
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        let acquired_unix_millis = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        writeln!(
+            file,
+            "pid={} acquired_unix_millis={} backend=sqlite",
+            std::process::id(),
+            acquired_unix_millis
+        )?;
+        file.sync_data()?;
+        Ok(Self { file: Some(file) })
     }
 
-    fn close(&mut self) -> ChunkStoreResult<()> {
-        self.flush()
+    fn release(mut self) -> ChunkStoreResult<()> {
+        if let Some(file) = self.file.take() {
+            file.unlock()?;
+        }
+        Ok(())
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for NativeFileLease {
+    fn drop(&mut self) {
+        if let Some(file) = self.file.take() {
+            let _ = file.unlock();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn open_lock_file(path: &Path) -> ChunkStoreResult<File> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+    Ok(OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn world_admission_lock_path(world_dir: &Path) -> PathBuf {
+    world_dir
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."))
+        .join(WORLD_ADMISSION_LOCK_FILE)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn validate_sqlite_world_schema_read_only(connection: &Connection) -> ChunkStoreResult<()> {
+    let user_version: i64 = connection
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .map_err(sqlite_error)?;
+    if user_version != SQLITE_WORLD_SCHEMA_VERSION {
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!(
+                "read-only sqlite world schema version {user_version}; expected {SQLITE_WORLD_SCHEMA_VERSION}"
+            ),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -3757,9 +4107,12 @@ fn initialize_sqlite_world_schema(connection: &Connection) -> ChunkStoreResult<(
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .map_err(sqlite_error)?;
     if !(0..=SQLITE_WORLD_SCHEMA_VERSION).contains(&user_version) {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported sqlite world schema version {user_version}; expected {SQLITE_WORLD_SCHEMA_VERSION}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!(
+                "unsupported sqlite world schema version {user_version}; expected {SQLITE_WORLD_SCHEMA_VERSION}"
+            ),
+        ));
     }
 
     if user_version == 1 {
@@ -3934,9 +4287,10 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
 
     let version = read_u32(reader)?;
     if !(1..=SNAPSHOT_FORMAT_VERSION).contains(&version) {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported chunk snapshot format version {version}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!("unsupported chunk snapshot format version {version}"),
+        ));
     }
 
     let pos = ChunkPos::new(read_i32(reader)?, read_i32(reader)?);
@@ -4028,17 +4382,19 @@ fn read_entity_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<EntityCh
     }
     let version = read_u32(reader)?;
     if version != ENTITY_CHUNK_RECORD_VERSION {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported entity chunk record version {version}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!("unsupported entity chunk record version {version}"),
+        ));
     }
     let pos = ChunkPos::new(read_i32(reader)?, read_i32(reader)?);
     let revision = read_u64(reader)?;
     let codec_version = read_u32(reader)?;
     if codec_version != ENTITY_CHUNK_RECORD_VERSION {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported entity chunk codec version {codec_version}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!("unsupported entity chunk codec version {codec_version}"),
+        ));
     }
     let entity_count = read_len(reader)?;
     let mut entities = Vec::with_capacity(entity_count);
@@ -4173,9 +4529,10 @@ fn read_dimension_record(reader: &mut impl Read) -> ChunkStoreResult<DimensionRe
     }
     let codec_version = read_u32(reader)?;
     if !(1..=DIMENSION_RECORD_VERSION).contains(&codec_version) {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported dimension record codec version {codec_version}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!("unsupported dimension record codec version {codec_version}"),
+        ));
     }
     let key_text = read_string(reader)?;
     let key = DimensionKey::parse(&key_text).map_err(|error| {
@@ -4286,9 +4643,10 @@ fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata
     }
     let codec_version = read_u32(reader)?;
     if !(1..=WORLD_METADATA_VERSION).contains(&codec_version) {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported world metadata codec version {codec_version}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!("unsupported world metadata codec version {codec_version}"),
+        ));
     }
     let realm_id = if codec_version >= 2 {
         let mut bytes = [0_u8; 16];
@@ -4314,10 +4672,13 @@ fn read_world_metadata(reader: &mut impl Read) -> ChunkStoreResult<WorldMetadata
         do_daylight_cycle: read_bool(reader)?,
     };
     if record.target_minecraft_version != WORLD_METADATA_TARGET_MINECRAFT_VERSION {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported world metadata target {}; expected {}",
-            record.target_minecraft_version, WORLD_METADATA_TARGET_MINECRAFT_VERSION
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!(
+                "unsupported world metadata target {}; expected {}",
+                record.target_minecraft_version, WORLD_METADATA_TARGET_MINECRAFT_VERSION
+            ),
+        ));
     }
     Ok(record)
 }
@@ -4371,9 +4732,10 @@ fn read_player_record(reader: &mut impl Read) -> ChunkStoreResult<PlayerRecord> 
     }
     let codec_version = read_u32(reader)?;
     if !(LEGACY_PLAYER_RECORD_VERSION..=PLAYER_RECORD_VERSION).contains(&codec_version) {
-        return Err(ChunkStoreError::InvalidData(format!(
-            "unsupported player record codec version {codec_version}"
-        )));
+        return Err(ChunkStoreError::classified(
+            PersistenceErrorKind::Incompatible,
+            format!("unsupported player record codec version {codec_version}"),
+        ));
     }
     let player = PlayerRecordKey::Uuid(read_string(reader)?);
     let record = PlayerRecord {
@@ -5299,9 +5661,10 @@ mod tests {
     fn binary_world_metadata_rejects_unknown_versions_and_trailing_bytes() {
         let mut unknown_version = encode_world_metadata(&test_world_metadata(1)).unwrap();
         unknown_version[WORLD_METADATA_MAGIC.len()] = 3;
+        let error = decode_world_metadata(&unknown_version).unwrap_err();
+        assert_eq!(error.kind(), PersistenceErrorKind::Incompatible);
         assert!(
-            decode_world_metadata(&unknown_version)
-                .unwrap_err()
+            error
                 .to_string()
                 .contains("unsupported world metadata codec version 3")
         );
@@ -5832,6 +6195,83 @@ mod tests {
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
+    fn sqlite_writer_lease_is_world_scoped_and_close_releases_it() {
+        let parent = unique_temp_dir("sqlite_writer_lease_is_world_scoped");
+        let first_world = parent.join("first");
+        let second_world = parent.join("second");
+        let mut first = SqliteWorldStore::open_world_dir(&first_world).unwrap();
+
+        let conflict = SqliteWorldStore::open_world_dir(&first_world).unwrap_err();
+        assert_eq!(conflict.kind(), PersistenceErrorKind::LeaseConflict);
+
+        let mut second = SqliteWorldStore::open_world_dir(&second_world).unwrap();
+        second.close().unwrap();
+
+        let mut reader = SqliteWorldStore::open_world_dir_read_only(&first_world).unwrap();
+        assert!(reader.is_read_only());
+        assert_eq!(reader.load_world_metadata().unwrap().record, None);
+        let save_error = reader
+            .save_world_metadata(&test_world_metadata(1))
+            .unwrap_err();
+        assert_eq!(save_error.kind(), PersistenceErrorKind::Unavailable);
+        reader.close().unwrap();
+
+        first.close().unwrap();
+        fs::write(
+            first_world.join(WORLD_WRITER_LOCK_FILE),
+            b"stale diagnostics",
+        )
+        .unwrap();
+        let mut reopened = SqliteWorldStore::open_world_dir(&first_world).unwrap();
+        reopened.close().unwrap();
+
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn sqlite_exclusive_delete_rejects_live_writer_and_removes_after_close() {
+        let parent = unique_temp_dir("sqlite_exclusive_delete");
+        let world = parent.join("world");
+        let mut store = SqliteWorldStore::open_world_dir(&world).unwrap();
+
+        let conflict = SqliteWorldStore::remove_world_dir_exclusive(&world).unwrap_err();
+        assert_eq!(conflict.kind(), PersistenceErrorKind::LeaseConflict);
+        assert!(world.is_dir());
+
+        store.close().unwrap();
+        SqliteWorldStore::remove_world_dir_exclusive(&world).unwrap();
+        assert!(!world.exists());
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn sqlite_writer_lease_releases_after_subprocess_exit() {
+        const CHILD_WORLD_ENV: &str = "MCLONE_SQLITE_LEASE_CRASH_WORLD";
+        if let Some(world) = std::env::var_os(CHILD_WORLD_ENV) {
+            let _store = SqliteWorldStore::open_world_dir(PathBuf::from(world)).unwrap();
+            std::process::exit(73);
+        }
+
+        let parent = unique_temp_dir("sqlite_writer_lease_subprocess_exit");
+        let world = parent.join("world");
+        let status = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("persistence::tests::sqlite_writer_lease_releases_after_subprocess_exit")
+            .arg("--nocapture")
+            .env(CHILD_WORLD_ENV, &world)
+            .status()
+            .unwrap();
+        assert_eq!(status.code(), Some(73));
+
+        let mut reopened = SqliteWorldStore::open_world_dir(&world).unwrap();
+        reopened.close().unwrap();
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
     fn filesystem_chunk_store_roundtrips_snapshot() {
         let root = unique_temp_dir("filesystem_chunk_store_roundtrips_snapshot");
         let mut store = FilesystemChunkSnapshotStore::new(&root);
@@ -6096,8 +6536,8 @@ mod tests {
                 Some(metadata)
             );
 
-            let mut statement = reopened
-                .connection
+            let connection = reopened.inner.executor().connection().unwrap();
+            let mut statement = connection
                 .prepare("PRAGMA table_info(chunk_records)")
                 .unwrap();
             let columns = statement
@@ -6116,8 +6556,7 @@ mod tests {
                     "record_blob"
                 ]
             );
-            let schema_version: i64 = reopened
-                .connection
+            let schema_version: i64 = connection
                 .query_row("PRAGMA user_version", [], |row| row.get(0))
                 .unwrap();
             assert_eq!(schema_version, SQLITE_WORLD_SCHEMA_VERSION);

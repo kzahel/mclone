@@ -2247,16 +2247,23 @@ mod native {
 
             assert!(runner.flush_persistence().unwrap() >= 1);
 
-            // Keep the original runner alive: the verifier must observe the
-            // explicit durable flush, not the Drop/join shutdown save path.
-            let mut verifier = NativeIntegratedServerRunner::new(
-                test_runner_config(seed).with_persistent_world_dir(root.clone()),
+            // Keep the original authority alive: an explicitly read-only
+            // inspector must observe the flush without becoming a second
+            // writer for the same world.
+            let mut verifier = crate::SqliteWorldStore::open_world_dir_read_only(&root).unwrap();
+            let record = crate::WorldStore::load_chunk(
+                &mut verifier,
+                &DimensionKey::overworld(),
+                target.chunk_pos(),
             )
-            .unwrap();
-            let (snapshot, _updates) = load_chunk_snapshot(&mut verifier, target.chunk_pos());
-            assert_eq!(snapshot_block_state(&snapshot, target), AIR_BLOCK_STATE_ID);
+            .unwrap()
+            .expect("flushed chunk must be visible to the read-only inspector");
+            assert_eq!(
+                snapshot_block_state(&record.snapshot, target),
+                AIR_BLOCK_STATE_ID
+            );
+            crate::WorldStore::close(&mut verifier).unwrap();
 
-            verifier.join_shutdown().unwrap();
             runner.join_shutdown().unwrap();
             let _ = fs::remove_dir_all(root);
         }

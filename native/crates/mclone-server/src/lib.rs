@@ -84,8 +84,6 @@ pub use loading_progress::{
     ChunkLoadingProgress, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
     ChunkLoadingProgressStats,
 };
-#[cfg(not(target_arch = "wasm32"))]
-pub use persistence::SqliteWorldStore;
 pub use persistence::{
     CHUNK_LIGHT_ALGORITHM_VERSION, ChunkRecord, ChunkSnapshotStore, ChunkSnapshotWorldStore,
     ChunkStoreError, ChunkStoreResult, DIMENSION_RECORD_VERSION, DimensionDefinition,
@@ -103,6 +101,8 @@ pub use persistence::{
     decode_player_record, decode_world_metadata, encode_chunk_record, encode_dimension_record,
     encode_entity_chunk_record, encode_player_record, encode_world_metadata,
 };
+#[cfg(not(target_arch = "wasm32"))]
+pub use persistence::{SQLITE_WORLD_DATABASE_FILE, SqliteWorldStore, WORLD_WRITER_LOCK_FILE};
 pub use player_chunk_tracking::{
     DimensionInterestSource, ObserverChunkTrackingDiagnostics, ObserverId,
     ObserverSimulationInterest, PlayerChunkTrackingDiagnostics,

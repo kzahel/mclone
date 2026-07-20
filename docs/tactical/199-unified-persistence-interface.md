@@ -1,7 +1,7 @@
 # Tactical 199: Unified Persistence Interface
 
-Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-2
-are complete and Slice 3 is next.
+Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-3
+are complete and Slice 4 is next.
 
 Topic: `unified-persistence-interface`
 
@@ -277,7 +277,7 @@ Evidence:
 
 ## Slice 3: SQLite Control And Native Writer Lease
 
-Status: planned.
+Status: complete 2026-07-20; Windows-host execution remains part of Slice 7.
 
 - adapt SQLite to the executor without changing schema or record bytes;
 - keep the connection and world writer lease inside the threaded storage actor;
@@ -294,6 +294,37 @@ Status: planned.
 
 Exit: memory and SQLite are full controls through the extracted seam; desktop
 and dedicated same-world split brain is rejected.
+
+Evidence and implementation:
+
+- `SqliteRecordExecutor` now implements the same generic read/probe/atomic
+  commit/flush/close seam as memory/null. `SqliteWorldStore` is a codec adapter
+  over it; schema version 2, table names, keys, record bytes, WAL, and FULL
+  synchronous behavior are unchanged. Existing v1-to-v2 migration and record
+  reopen tests remain green.
+- Every writer-capable open acquires the stable in-world
+  `world.writer.lock` with `File::try_lock()` before SQLite opens. The
+  uncloneable handle stays beside the connection, diagnostic contents have no
+  authority, and close orders checkpoint, connection close, unlock, then
+  drop. Conflict is a typed `LeaseConflict`.
+- A read-only SQLite open path takes no writer lease and rejects mutation with
+  typed `Unavailable`. The pre-existing explicit-flush test now uses that
+  inspector while the original authority remains live instead of opening a
+  second writer.
+- Different worlds may remain open concurrently. Same-world same-process and
+  subprocess owners conflict; orderly close, stale diagnostic contents, and
+  abrupt subprocess exit all permit reacquisition.
+- Native catalog deletion now uses `remove_world_dir_exclusive`. A short
+  process-shared parent admission lock serializes only open/create/delete
+  transitions; deletion acquires the in-world lease, releases its own inner
+  handle, removes the directory while still holding admission, then releases
+  admission. This closes the Windows release/delete/recreate gap without
+  making the long-lived authority lock process- or catalog-wide.
+- All 42 focused persistence tests, the migrated live-reader regression, and
+  all 20 native world-catalog tests passed. A full server rerun passed 523
+  tests. One terrain-generation assertion flickered during the first highly
+  parallel run, passed immediately in isolation, and passed in the full rerun;
+  it is retained as baseline test noise rather than a persistence failure.
 
 ## Slice 4: Generic IndexedDB Executor Proof
 

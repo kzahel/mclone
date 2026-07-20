@@ -8,6 +8,13 @@ authorized autonomous implementation campaign. This topic does not supersede
 the durable architecture in
 [`persistence-architecture.md`](../persistence-architecture.md).
 
+Implementation status, 2026-07-20: the typed generic record contract,
+memory/null live mailbox cutover, SQLite executor adaptation, explicit
+read-only SQLite inspector, world-scoped native writer lease, and guarded
+native deletion path are landed. The production browser IndexedDB executor
+and Web Lock cutover are the next active phase; the old browser mirror remains
+live only until that bounded cutover.
+
 ## Scope
 
 Define one engine-facing Rust persistence interface while allowing each

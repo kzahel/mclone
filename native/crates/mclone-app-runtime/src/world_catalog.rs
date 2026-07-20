@@ -721,7 +721,7 @@ impl NativeWorldCatalog {
         let summary = self.read_summary(id)?;
         summary.can_delete(active_world, self.capabilities())?;
         let world_dir = self.world_dir(id);
-        fs::remove_dir_all(&world_dir).map_err(|error| {
+        SqliteWorldStore::remove_world_dir_exclusive(&world_dir).map_err(|error| {
             storage_error(
                 format!(
                     "failed to delete local world directory `{}`",
