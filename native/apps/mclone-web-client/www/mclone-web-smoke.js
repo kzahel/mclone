@@ -1204,10 +1204,10 @@ function decodeSceneAdapterContract(bits) {
     bits,
     ok: (bits & 0x1f) === 0x1f,
     monotonicClockClamped: (bits & 0x1) !== 0,
-    supersededCompletionRejected: (bits & 0x2) !== 0,
-    reconnectStateExplicit: (bits & 0x4) !== 0,
+    sharedSessionCoordinator: (bits & 0x2) !== 0,
+    staleOperationRejected: (bits & 0x4) !== 0,
     catalogCompletionTyped: (bits & 0x8) !== 0,
-    postTeardownCompletionRejected: (bits & 0x10) !== 0,
+    catalogEpochRejectsLateCompletion: (bits & 0x10) !== 0,
   };
 }
 

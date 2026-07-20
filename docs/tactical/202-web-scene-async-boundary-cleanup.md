@@ -115,6 +115,8 @@ Evidence:
 
 ## Slice 1: Delete The Redundant Web Session Lifecycle
 
+Status: complete 2026-07-20.
+
 - remove `WebSceneSessionLifecycle`, its browser-only operation/result/state
   enums, and the unused production reconnect state machine;
 - retain clock projection and deferred catalog services in the web platform
@@ -125,6 +127,19 @@ Evidence:
 
 Exit: there is one session lifecycle owner, not a shared coordinator plus a
 browser-only mirror whose token begins after the asynchronous work.
+
+Evidence:
+
+- `WebSceneSessionLifecycle`, all four browser-only operation/result/state
+  enums, and the test-only reconnect state machine are deleted;
+- initial host construction, replacement completion, and shutdown now use the
+  already-authoritative `McloneSceneHost` lifecycle directly;
+- the unchanged five-bit adapter receipt now proves projected time, shared
+  `GameSessionCoordinator` state, shared operation-ledger stale rejection,
+  typed catalog completion, and catalog epoch invalidation instead of testing
+  the deleted mirror; and
+- the focused adapter, frame-policy, and source-lock tests passed, as did the
+  `wasm32-unknown-unknown` package check.
 
 ## Slice 2: Rust-Owned Active Session Start Dispatch
 

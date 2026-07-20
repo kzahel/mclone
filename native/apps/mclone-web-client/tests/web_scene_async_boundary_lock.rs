@@ -38,9 +38,13 @@ fn baseline_pins_clear_typescript_session_and_lobby_dispatch() {
 }
 
 #[test]
-fn baseline_pins_duplicate_lifecycle_readiness_and_ready_envelope() {
-    assert!(WEB_SCENE_PROTOCOL.contains("pub struct WebSceneSessionLifecycle"));
-    assert!(WEB_SCENE_PROTOCOL.contains("ReconnectRemote"));
+fn browser_session_lifecycle_is_not_mirrored() {
+    assert!(!WEB_SCENE_PROTOCOL.contains("pub struct WebSceneSessionLifecycle"));
+    assert!(!WEB_SCENE_PROTOCOL.contains("ReconnectRemote"));
+}
+
+#[test]
+fn baseline_pins_readiness_and_ready_envelope_reconstruction() {
     assert!(WEB_APP.contains("const streamingSettled = Boolean(frame.streamingIdle)"));
     assert!(INTEGRATED_SERVER_WORKER.contains("ready.result.kind = \"ready\""));
     assert!(INTEGRATED_SERVER_WORKER.contains("ready.result.requestId ="));

@@ -17,8 +17,7 @@ use mclone_app_runtime::prepared_assets::{
 };
 use mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority;
 use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionRuntimeKind,
-    SessionStartRequest,
+    ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
 };
 use mclone_app_runtime::world_catalog::{
     LocalWorldCreateOptions, LocalWorldId, WorldCatalogError, WorldCatalogErrorKind,
@@ -62,9 +61,7 @@ use crate::web_canvas::{
 use crate::web_catalog_execution::WebCatalogExecution;
 use crate::web_render_worker::WebRenderWorkerCoordinator;
 use crate::web_scene_protocol::{
-    WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState,
-    WebScenePlatformServices, WebSceneSessionCompletionDisposition, WebSceneSessionOperation,
-    WebSceneSessionOperationResult,
+    WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState, WebScenePlatformServices,
 };
 
 use mclone_app_runtime::local_profile::WEB_ASSET_PACK_PREFERENCE_KEY;
@@ -110,7 +107,6 @@ impl mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage
 }
 use crate::web_server_worker::WebIntegratedServerRunnerConfig;
 
-const DEFAULT_SEED: i64 = 12_345;
 const RESUME_OBSERVATION_FRAMES: u8 = 8;
 const TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.1;
 const TOUCH_LOOK_SENSITIVITY_MAX: f32 = 6.0;
@@ -1656,16 +1652,9 @@ impl WebSceneHost {
             self.last_runner_kind = kind.label().to_owned();
         }
         if let Some(mut host) = self.host.take() {
-            let operation = self.platform.lifecycle_mut().begin_shutdown();
             host.enter_mono_title(&self.context.device, &self.context.queue)
                 .map_err(js_error)?;
-            let disposition = self.platform.lifecycle_mut().complete(
-                mclone_app_runtime::platform_operation::PlatformOperationCompletion {
-                    token: operation.token,
-                    result: Ok(WebSceneSessionOperationResult::Shutdown),
-                },
-            );
-            self.shutdown_complete = disposition == WebSceneSessionCompletionDisposition::Applied;
+            self.shutdown_complete = true;
         }
         self.render_worker.terminate();
         self.frame_policy.shutdown();
@@ -1924,7 +1913,7 @@ async fn create_scene_host(
     let context = WebCanvasContext::new_with_color_profile(canvas, render_options.color_profile)
         .await
         .map_err(JsValue::from)?;
-    let (mut platform, clock, catalog_operations) = WebScenePlatformServices::new();
+    let (platform, clock, catalog_operations) = WebScenePlatformServices::new();
     let runtime = WebSceneRuntimeService::new(
         runtime,
         active_assets.mesh.clone(),
@@ -1934,29 +1923,6 @@ async fn create_scene_host(
         RuntimeRenderPriority::Active,
     )
     .into_scene_session_runtime(descriptor.clone());
-    let operation = match &descriptor {
-        ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
-            WebSceneSessionOperation::StartLocal {
-                seed: *seed,
-                world_id: id.as_ref().map(|id| id.as_str().to_owned()),
-            }
-        }
-        ActiveSessionDescriptor::Remote { endpoint } => WebSceneSessionOperation::ConnectRemote {
-            url: endpoint.address.clone(),
-        },
-    };
-    let start = platform.lifecycle_mut().begin_start(operation);
-    let start_disposition = platform
-        .lifecycle_mut()
-        .complete(PlatformOperationCompletion {
-            token: start.token,
-            result: Ok(WebSceneSessionOperationResult::Started(descriptor)),
-        });
-    if start_disposition != WebSceneSessionCompletionDisposition::Applied {
-        return Err(JsValue::from_str(
-            "scene host lifecycle start was not applied",
-        ));
-    }
     let mut host = McloneSceneHost::with_scene_runtime(
         &context.device,
         &context.queue,
@@ -2101,19 +2067,6 @@ impl WebSceneHost {
         runtime: crate::WebRuntime,
     ) -> Result<JsValue, JsValue> {
         let descriptor = pending.descriptor.clone();
-        let operation = match pending.runtime_kind {
-            SessionRuntimeKind::Local => WebSceneSessionOperation::StartLocal {
-                seed: descriptor.local_seed().unwrap_or(DEFAULT_SEED),
-                world_id: descriptor.local_world_id().map(|id| id.as_str().to_owned()),
-            },
-            SessionRuntimeKind::Remote => WebSceneSessionOperation::ConnectRemote {
-                url: match &descriptor {
-                    ActiveSessionDescriptor::Remote { endpoint } => endpoint.address.clone(),
-                    ActiveSessionDescriptor::LocalWorld { .. } => String::new(),
-                },
-            },
-        };
-        let lifecycle = self.platform.lifecycle_mut().begin_start(operation);
         let active_assets = self
             .host_ref()?
             .active_asset_snapshot_for_epoch(self.host_ref()?.active_asset_epoch());
@@ -2142,18 +2095,6 @@ impl WebSceneHost {
             .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
             .complete_external_session_start(device, queue, pending, runtime)
             .map_err(js_error)?;
-        let disposition = self
-            .platform
-            .lifecycle_mut()
-            .complete(PlatformOperationCompletion {
-                token: lifecycle.token,
-                result: Ok(WebSceneSessionOperationResult::Started(descriptor)),
-            });
-        if disposition != WebSceneSessionCompletionDisposition::Applied {
-            return Err(JsValue::from_str(
-                "scene lifecycle rejected external session completion",
-            ));
-        }
         self.last_frame = LastFrameStats::default();
         self.ui_report(false, None).map_err(JsValue::from)
     }
