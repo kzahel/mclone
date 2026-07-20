@@ -42,6 +42,9 @@ web-sys = { workspace = true, features = [
 rusqlite.workspace = true
 serde_json.workspace = true
 
+[target.'cfg(target_os = "android")'.dependencies]
+fs4.workspace = true
+
 [dev-dependencies]
 serde_json.workspace = true
 

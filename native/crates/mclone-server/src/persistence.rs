@@ -4045,13 +4045,13 @@ struct NativeFileLease {
 impl NativeFileLease {
     fn acquire_blocking(path: &Path) -> ChunkStoreResult<Self> {
         let file = open_lock_file(path)?;
-        file.lock()?;
+        native_file_lock(&file)?;
         Ok(Self { file: Some(file) })
     }
 
     fn acquire_writer(path: &Path) -> ChunkStoreResult<Self> {
         let mut file = open_lock_file(path)?;
-        if let Err(error) = file.try_lock() {
+        if let Err(error) = native_file_try_lock(&file) {
             return Err(match error {
                 std::fs::TryLockError::WouldBlock => ChunkStoreError::classified(
                     PersistenceErrorKind::LeaseConflict,
@@ -4081,7 +4081,7 @@ impl NativeFileLease {
 
     fn release(mut self) -> ChunkStoreResult<()> {
         if let Some(file) = self.file.take() {
-            file.unlock()?;
+            native_file_unlock(&file)?;
         }
         Ok(())
     }
@@ -4091,9 +4091,47 @@ impl NativeFileLease {
 impl Drop for NativeFileLease {
     fn drop(&mut self) {
         if let Some(file) = self.file.take() {
-            let _ = file.unlock();
+            let _ = native_file_unlock(&file);
         }
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn native_file_lock(file: &File) -> io::Result<()> {
+    file.lock()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn native_file_try_lock(file: &File) -> Result<(), std::fs::TryLockError> {
+    file.try_lock()
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn native_file_unlock(file: &File) -> io::Result<()> {
+    file.unlock()
+}
+
+// Rust 1.92's `std::fs::File` lock implementation returns `Unsupported` on
+// Android even though bionic exposes the same `flock(2)` API used by std on
+// Linux. Keep the lifetime-owned lock contract through fs4's safe rustix
+// adapter instead of weakening Android admission.
+#[cfg(target_os = "android")]
+fn native_file_lock(file: &File) -> io::Result<()> {
+    fs4::FileExt::lock(file)
+}
+
+#[cfg(target_os = "android")]
+fn native_file_try_lock(file: &File) -> Result<(), std::fs::TryLockError> {
+    match fs4::FileExt::try_lock(file) {
+        Ok(()) => Ok(()),
+        Err(fs4::TryLockError::WouldBlock) => Err(std::fs::TryLockError::WouldBlock),
+        Err(fs4::TryLockError::Error(error)) => Err(std::fs::TryLockError::Error(error)),
+    }
+}
+
+#[cfg(target_os = "android")]
+fn native_file_unlock(file: &File) -> io::Result<()> {
+    fs4::FileExt::unlock(file)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
