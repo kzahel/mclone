@@ -72,7 +72,7 @@ used body-plan coverage and likely rig reuse to choose each wave.
 | Completed Wave 1 | Cat, Cow, Goat | Re-authored as 62 boxes total; pixel markings replace whiskers, hide patches, socks, nostrils, and cloven-toe geometry |
 | Completed Wave 2 | Dog, Fox, Wolf | Re-authored as 51 boxes with visibly distinct domestic, low fox, and tall wolf proportions |
 | Completed Wave 3 | Piglet, Sheep, Horse | Re-authored as 51 boxes spanning compact, wool-mass, and long-legged farm silhouettes |
-| Wave 4 | Bear, Lion, Bearfolk, Lionfolk | Heavy quadrupeds plus the two player-derived anthropomorphic rigs |
+| Completed Wave 4 | Bear, Lion, Bearfolk, Lionfolk | Re-authored as 75 boxes across heavy quadruped and player-derived biped silhouettes |
 
 Humanoid figures are outside this animal conversion queue. `player` and
 `upright_bear` are already box-only.
@@ -135,7 +135,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Lion | P1 | 🔨 | Q | male (mane), lioness, cub | Rounded source retained at `legacy-examples/lion_rounded`; canonical box-only re-authoring is Wave 4 |
+| Lion | P1 | ✅ | Q | male (mane), lioness, cub | `examples/lion` — canonical 23-box male with chest/head mane frame, light feline barrel, textured paws, and attached tufted tail; rounded A/B retained at `legacy-examples/lion_rounded` |
 | Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — canonical 20-box tiger with pixel-textured stripes; `legacy-examples/tiger_rounded` retains the rounded A/B |
 | Leopard / Jaguar | P2 | ☐ | Q | spotted, melanistic (black panther) | spot rosette texture |
 | Cheetah | P2 | ☐ | Q | — | slender; tear-mark face |
@@ -145,7 +145,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Bear | P1 | 🔨 | Q | brown/grizzly, black, polar (Arctic), cub | Rounded source retained at `legacy-examples/bear_rounded`; canonical box-only re-authoring is Wave 4 |
+| Bear | P1 | ✅ | Q | brown/grizzly, black, polar (Arctic), cub | `examples/bear` — canonical 17-box brown bear with vanilla-derived two-mass torso, shoulder hump, broad feet, and tiny tail; rounded A/B retained at `legacy-examples/bear_rounded` |
 | Panda | P2 | ☐ | Q | adult, cub | bear rig + iconic black/white texture |
 | Polar bear | P2 | ☐ | Q | adult, cub | also lives in Polar/Arctic set |
 
@@ -309,8 +309,8 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Figure | Pri | Status | Notes |
 |---|---|---|---|
 | Player (humanoid base) | — | ✅ | `examples/player`; not an animal, the rig reference |
-| Bearfolk | — | 🔨 | Rounded source at `legacy-examples/bearfolk_rounded`; canonical box-only re-authoring is Wave 4 |
-| Lionfolk | — | 🔨 | Rounded source at `legacy-examples/lionfolk_rounded`; canonical box-only re-authoring is Wave 4 |
+| Bearfolk | — | ✅ | `examples/bearfolk` — canonical 15-box player-derived biped with vest, belly patch, broad head/muzzle, and paw textures; rounded A/B retained at `legacy-examples/bearfolk_rounded` |
+| Lionfolk | — | ✅ | `examples/lionfolk` — canonical 20-box player-derived biped with tunic, mane frame, and attached articulated tail; rounded A/B retained at `legacy-examples/lionfolk_rounded` |
 | Wolffolk / Foxfolk | P3 | ☐ | obvious next anthro canids |
 | Dragon | P3 | ☐ | flagship mythic; W + Q hybrid, likely new tooling |
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
@@ -376,14 +376,16 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures (7):** butterfly, chicken, elephant, player,
-  rabbit, tiger, and upright bear.
-- **Rounded-to-box migration in progress (13):** piglet, sheep, dog, cat,
+- **Canonical box-only figures (20):** bear, bearfolk, butterfly, cat, chicken,
+  cow, dog, elephant, fox, goat, horse, lion, lionfolk, piglet, player, rabbit,
+  sheep, tiger, upright bear, and wolf.
+- **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
   under `legacy-examples/` and remain schema-round-trip tested.
 - **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W).
 - **Macros to build:** `swim` (S), `slither` (SL), `hop` (H — rabbit currently approximates it), N-leg crawl (C).
 - **Biggest single unlock:** the `swim` macro — gates the entire marine family.
-- **Lowest-effort wins next:** the farmyard is done; iconic wild quadrupeds (Wolf, Fox, Bear, Deer) are the cheapest next wave — all ride `quadrupedWalk`.
+- **Lowest-effort wins next:** Deer and zebra can reuse the reviewed
+  horse-class rig; panda and polar bear can reuse the canonical bear.
 - **Cheapest enemy wave:** humanoid baddies (skeleton, zombie, humanoid pig) — all reuse the `player`/`-folk` biped rig + `bipedWalk`, no new tooling.

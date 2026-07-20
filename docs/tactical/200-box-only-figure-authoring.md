@@ -1,10 +1,10 @@
 # 200: Box-Only Figure Authoring
 
-Status: active 2026-07-20. The authoring-policy, canonical Chicken, and first
-three quadruped re-authoring slices are implemented and test-green; one content
-wave and final compatibility cleanup follow. The final native offscreen pixel
-rerun remains pending because the current host's Metal review process stalled
-before producing its receipt.
+Status: active 2026-07-20. The authoring-policy, canonical Chicken, and all four
+content re-authoring waves are implemented and test-green; final compatibility
+cleanup and broad validation follow. The final native offscreen pixel rerun
+remains pending because the current host's Metal review process stalled before
+producing its receipt.
 
 Topic: `compiled-figure-rendering`
 
@@ -179,6 +179,30 @@ Implemented evidence:
 Finish the heavy quadrupeds and the two player-derived anthropomorphic rigs.
 The folk figures should reuse the box-only biped vocabulary rather than carry
 rounded animal limbs into an otherwise cuboid body plan.
+
+Implemented evidence:
+
+- Bear is 17 boxes rather than 41 mixed parts. Its vanilla-polar-bear-derived
+  two-mass torso, shoulder hump, wide short legs, textured claw faces, tiny
+  ears, and projecting muzzle preserve the heavy brown-bear silhouette.
+- Lion is 23 boxes rather than 48 mixed parts. It keeps a lighter feline body,
+  explicit chest/head mane frame, textured paws, and attached two-box tufted
+  tail while omitting separate cheek, brow, haunch, and claw geometry.
+- Bearfolk is a 15-box player-derived biped rather than 17 rounded parts. The
+  broad head/muzzle, tiny ears, vest, belly patch, and paw textures now sit on
+  the same cuboid torso and top-pivoted limb grammar as the canonical player.
+- Lionfolk is a 20-box player-derived biped rather than 18 rounded parts. The
+  slightly higher part count forms a real cuboid mane frame and two-box tail;
+  exact topology still falls from 2,540 to 240 triangles.
+- All four keep their archived clip duration, cycle distance, stance, body and
+  head motion, and secondary neck/ear/mane/tail tracks.
+- Canonical and rounded clean sheets plus eight three-cycle movies were
+  rendered under `/tmp/mclone-asset-lab` and inspected. Sampled cycles remain
+  grounded, every attachment remains connected, and the quadruped/folk pairs
+  remain distinct at thumbnail scale.
+- The four canonical sources total 75 boxes versus 124 mixed legacy parts.
+  Exact Three.js preview topology is 900 triangles versus 9,256, a 10.3x
+  reduction; canonical part count is 40% lower.
 
 ### Slice 6: closeout
 

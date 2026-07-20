@@ -163,6 +163,14 @@ native cuboid approximations, and will change as source figures are revised.
 | sheep_rounded (legacy) | 17 | 1,139 | 1,512 |
 | horse | 22 | 528 | 264 |
 | horse_rounded (legacy) | 30 | 1,365 | 1,580 |
+| bear | 17 | 408 | 204 |
+| bear_rounded (legacy) | 41 | 1,801 | 1,968 |
+| lion | 23 | 552 | 276 |
+| lion_rounded (legacy) | 48 | 2,184 | 2,432 |
+| bearfolk | 15 | 360 | 180 |
+| bearfolk_rounded (legacy) | 17 | 1,612 | 2,316 |
+| lionfolk | 20 | 480 | 240 |
+| lionfolk_rounded (legacy) | 18 | 1,765 | 2,540 |
 | cat | 16 | 384 | 192 |
 | cat_rounded (legacy) | 20 | 1,103 | 1,340 |
 | chicken | 14 | 336 | 168 |
@@ -187,9 +195,8 @@ make CPU world-space rebaking a prerequisite for later, richer figure assets.
 
 ### Box-only animal style A/B
 
-The elephant, tiger, rabbit, chicken, butterfly, cat, cow, goat, dog, fox,
-wolf, piglet, sheep, and horse now have retained authoring pairs for direct
-style review:
+All 18 retained rounded sources now have canonical box-only authoring pairs
+for direct style review. Representative constructions include:
 
 - `examples/elephant` uses 40 boxes exclusively, including its stepped
   articulated trunk, tusks, ears, eyes, feet, and secondary details, while
@@ -289,6 +296,17 @@ texture-edged wool mass, and the horse preserves its long-legged angled-neck
 posture and animated mane. Clean A/B sheets and all six three-cycle movies
 were inspected. Bear, Lion, Bearfolk, and Lionfolk are the final content wave.
 
+The final content wave retains every archived clip duration, cycle distance,
+stance, body/head motion, and secondary track while reducing 124 mixed parts
+to 75 boxes. Bear drops from 1,968 to 204 exact preview triangles, Lion from
+2,432 to 276, Bearfolk from 2,316 to 180, and Lionfolk from 2,540 to 240.
+Together that is 9,256 versus 900 triangles, a 10.3x authoring-preview
+reduction, plus a 40% part-count reduction relevant to the prepared cuboid
+path. Bear and Lion keep visibly different heavy and mane-led quadruped mass;
+Bearfolk and Lionfolk now share the canonical player's cuboid body and joint
+grammar. Clean A/B sheets and all eight three-cycle movies were inspected.
+This completes the 13-source rounded-to-box migration queue.
+
 These topology ratios do not by themselves prove an end-to-end frame-time
 improvement. Material ranges, atlas residency, draw batching, animation
 evaluation, actor count, and the selected renderer quality tier still matter.
@@ -310,23 +328,23 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 34 |
-| total parts | 834 |
-| boxes | 629 |
+| figures | 38 |
+| total parts | 909 |
+| boxes | 704 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 71 |
-| parts with any texture reference | 97 |
-| individual texture applications | 168 |
+| ASCII textures | 80 |
+| parts with any texture reference | 115 |
+| individual texture applications | 186 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 16 | 292 | 292 | 0 / 0 / 0 |
+| canonical `examples/` | 20 | 367 | 367 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
-All 168 applications target an explicit face of a box. They range from single
+All 186 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
