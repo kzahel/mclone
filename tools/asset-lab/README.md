@@ -201,6 +201,22 @@ swim("swim", {
 });
 ```
 
+Segmented legless figures use `slither` to generate a traveling lateral wave
+across an ordered parented chain. Amplitude grows slightly toward the tail;
+`phaseStep` controls how far the wave advances between neighboring segments.
+The helper emits ordinary clip keys and optional `slither` locomotion metadata.
+
+```ts
+slither("slither", {
+  body: "body_1",
+  segments: ["body_1", "body_2", "body_3", "tail"],
+  degrees: 9,
+  phaseStep: 0.12,
+  bodyBob: 0.01,
+  cycleDistance: 0.8,
+});
+```
+
 Use `contactSwing` when you need a lower-level planted/recovery leg curve
 without the full gait macro. `phase` is the contact-start phase; `stanceRatio`
 is the fraction of the cycle spent in planted motion.

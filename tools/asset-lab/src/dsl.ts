@@ -104,7 +104,7 @@ export interface TransformKey {
 
 export type ClipKey = readonly [part: string, time: number, transform: TransformKey];
 
-export type LocomotionKind = "biped-walk" | "quadruped-walk" | "swim" | "wing-flap";
+export type LocomotionKind = "biped-walk" | "quadruped-walk" | "slither" | "swim" | "wing-flap";
 
 export interface LocomotionContactSpec {
   part: string;
@@ -278,6 +278,21 @@ export interface SwimSpec extends CycleTimingSpec {
   tracks?: CycleTrack[];
 }
 
+export interface SlitherSpec extends CycleTimingSpec {
+  axis?: AxisName;
+  body?: string;
+  bodyBob?: number;
+  bodyBobCenter?: number;
+  bodyBobPhase?: number;
+  cycleDistance?: number;
+  degrees?: number;
+  direction?: Vec3;
+  frequency?: number;
+  phaseStep?: number;
+  segments: readonly string[];
+  tracks?: CycleTrack[];
+}
+
 export interface FigureApi {
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
@@ -286,6 +301,7 @@ export interface FigureApi {
   walkCycle(name: string, spec: WalkCycleSpec): void;
   bipedWalk(name: string, spec: BipedWalkSpec): void;
   quadrupedWalk(name: string, spec: QuadrupedWalkSpec): void;
+  slither(name: string, spec: SlitherSpec): void;
   swim(name: string, spec: SwimSpec): void;
   wingFlap(name: string, spec: WingFlapSpec): void;
   swing(part: string, options: SwingOptions): CycleTrack;
@@ -460,6 +476,7 @@ class FigureBuilder {
       walkCycle: (name, spec) => this.clip(name, buildWalkCycleClip(spec)),
       bipedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildBipedWalkCycle(spec))),
       quadrupedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildQuadrupedWalkCycle(spec))),
+      slither: (name, spec) => this.clip(name, buildWalkCycleClip(buildSlitherCycle(spec))),
       swim: (name, spec) => this.clip(name, buildWalkCycleClip(buildSwimCycle(spec))),
       wingFlap: (name, spec) => this.clip(name, buildWalkCycleClip(buildWingFlapCycle(spec))),
       swing,
@@ -886,6 +903,49 @@ function buildSwimCycle(spec: SwimSpec): WalkCycleSpec {
   return cycleSpecFromTiming(spec, tracks, locomotion);
 }
 
+function buildSlitherCycle(spec: SlitherSpec): WalkCycleSpec {
+  if (spec.segments.length < 2) {
+    throw new Error("slither requires at least two segments");
+  }
+
+  const axis = spec.axis ?? "y";
+  const degrees = spec.degrees ?? 9;
+  const frequency = spec.frequency ?? 1;
+  const phaseStep = spec.phaseStep ?? 0.12;
+  const lastIndex = spec.segments.length - 1;
+  const tracks: CycleTrack[] = spec.segments.map((part, index) =>
+    swing(part, {
+      axis,
+      degrees: degrees * (0.7 + (0.3 * index) / lastIndex),
+      frequency,
+      phase: index * phaseStep,
+    })
+  );
+
+  if (spec.body && spec.bodyBob !== 0) {
+    const amount = spec.bodyBob ?? 0.01;
+    tracks.push(bob(spec.body, {
+      axis: "y",
+      amount,
+      center: spec.bodyBobCenter ?? amount,
+      frequency,
+      phase: spec.bodyBobPhase ?? 0.25,
+    }));
+  }
+  tracks.push(...(spec.tracks ?? []));
+
+  const locomotion = spec.cycleDistance === undefined
+    ? undefined
+    : {
+      kind: "slither" as const,
+      cycleDistance: spec.cycleDistance,
+      direction: spec.direction ?? [0, 0, -1] as const,
+      units: "figure" as const,
+    };
+
+  return cycleSpecFromTiming(spec, tracks, locomotion);
+}
+
 function cycleSpecFromTiming(
   timing: CycleTimingSpec,
   tracks: CycleTrack[],
@@ -1077,7 +1137,7 @@ function validateLocomotion(
   partNames: Set<string>,
   errors: string[],
 ): void {
-  if (!["biped-walk", "quadruped-walk", "swim", "wing-flap"].includes(locomotion.kind)) {
+  if (!["biped-walk", "quadruped-walk", "slither", "swim", "wing-flap"].includes(locomotion.kind)) {
     errors.push(`clip '${clipName}' locomotion kind '${locomotion.kind}' is invalid`);
   }
   if (!Number.isFinite(locomotion.cycleDistance) || locomotion.cycleDistance <= 0) {

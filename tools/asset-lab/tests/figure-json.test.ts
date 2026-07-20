@@ -119,6 +119,44 @@ test("swim macro exports ordinary body tail fin keys and locomotion", () => {
   assert.equal(leftFin[2], -rightFin[2]);
 });
 
+test("slither macro exports a phased segment wave and locomotion", () => {
+  const asset = figure("slitherer", ({ mat, part, box, slither }) => {
+    mat("skin", "#447744");
+    part("body", box({ size: [0.4, 0.3, 0.7], material: "skin" }));
+    part("middle", box({ parent: "body", size: [0.3, 0.25, 0.6], material: "skin" }));
+    part("tail", box({ parent: "middle", size: [0.2, 0.2, 0.5], material: "skin" }));
+    slither("slither", {
+      duration: 1,
+      samples: 5,
+      body: "body",
+      bodyBob: 0.01,
+      cycleDistance: 0.8,
+      degrees: 10,
+      phaseStep: 0.125,
+      segments: ["body", "middle", "tail"],
+    });
+  });
+
+  const clip = asset.clips.slither;
+  assert.ok(clip);
+  assert.equal(clip.locomotion?.kind, "slither");
+  assert.equal(clip.locomotion?.cycleDistance, 0.8);
+  assert.deepEqual(clip.locomotion?.direction, [0, 0, -1]);
+  assert.equal(clip.locomotion?.contacts, undefined);
+  assert.deepEqual(
+    new Set(clip.keys.map(([part]) => part)),
+    new Set(["body", "middle", "tail"]),
+  );
+
+  const quarterKeys = clip.keys.filter(([, time]) => time === 0.25);
+  const body = quarterKeys.find(([part]) => part === "body")?.[2];
+  const middle = quarterKeys.find(([part]) => part === "middle")?.[2];
+  assert.ok(body?.rot);
+  assert.ok(body.at);
+  assert.ok(middle?.rot);
+  assert.notEqual(body.rot[1], middle.rot[1]);
+});
+
 test("canonical and legacy examples cross the canonical JSON boundary", async () => {
   const canonicalSources = await discoverFigureSources("examples");
   const legacySources = await discoverFigureSources("legacy-examples");

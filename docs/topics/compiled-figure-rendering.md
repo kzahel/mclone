@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 53 |
-| total parts | 1,213 |
-| boxes | 1,008 |
+| figures | 56 |
+| total parts | 1,263 |
+| boxes | 1,058 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 130 |
-| parts with any texture reference | 181 |
-| individual texture applications | 298 |
+| ASCII textures | 141 |
+| parts with any texture reference | 202 |
+| individual texture applications | 330 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 35 | 671 | 671 | 0 / 0 / 0 |
+| canonical `examples/` | 38 | 721 | 721 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -407,7 +407,21 @@ were rendered under `/tmp/mclone-asset-lab/batch-5`, inspected for identity,
 grounding, attachment continuity, gait or hop cadence, and loop continuity,
 and approved by the user on 2026-07-20.
 
-All 298 applications target an explicit face of a box. They range from single
+The sixth post-migration content batch adds Crocodile, Sea Turtle, and King
+Cobra as approved canonical box-only rigs. It also ships a shared `slither`
+authoring macro that emits ordinary schema-v1 keys and locomotion metadata for
+a phased lateral wave across an ordered segment chain, plus optional body drift
+and custom tracks. Crocodile is a 24-part Nile crocodile with back scutes, long
+jaw, sprawled feet, and articulated tail; Sea Turtle is an 11-part green sea
+turtle with a stepped shell and four paddles; and King Cobra is a 15-part
+raised-hood rig with a forked tongue and seven-stage ground chain. All 50 parts
+are canonical boxes and use 11 combined pixel textures. Clean multi-angle
+sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-6`, inspected for identity, grounding or swim
+posture, attachment continuity, limb or segment-wave motion, and loop
+continuity, and approved by the user on 2026-07-20.
+
+All 330 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1230,11 +1244,11 @@ Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: its
 20-figure migration baseline is entirely sparse cuboid rigs, all 18 rounded
 sources are isolated in the deprecated compatibility lane, and promoted
 Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle,
-Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, and
-Camel/Gorilla/Kangaroo content batches extend the canonical authoring roster
-to 35 without changing the promoted runtime set. Instancing is now the
-strongest independent performance candidate; box-part LOD and a measured
-sampled/GPU pose path remain separate follow-ups.
+Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, Camel/Gorilla/Kangaroo,
+and Crocodile/Sea Turtle/King Cobra content batches extend the canonical
+authoring roster to 38 without changing the promoted runtime set. Instancing
+is now the strongest independent performance candidate; box-part LOD and a
+measured sampled/GPU pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd

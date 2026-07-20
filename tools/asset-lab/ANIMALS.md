@@ -31,7 +31,7 @@ sex). A short fantasy/anthro stretch section at the end continues the existing
 | **B** | Biped walk (2 legs, 2 arms) | ✅ `bipedWalk` exists |
 | **W** | Winged flight | ✅ `wingFlap` exists |
 | **S** | Swim (body/fin/tail undulation) | ✅ `swim` exists with configurable lateral or vertical tail motion |
-| **SL** | Slither (serpentine, legless) | ❌ **needs a `slither` macro** |
+| **SL** | Slither (serpentine, legless) | ✅ `slither` emits a phased lateral segment wave and locomotion metadata |
 | **H** | Hop (rabbit/frog, synchronized hind legs) | ⚠️ approximate with `contactSwing`; a `hop` macro would be cleaner |
 | **C** | Crawl, many legs (insects/arachnids) | ⚠️ hand-author or generalize `quadrupedWalk` to N legs |
 | **ST** | Static / minimal motion (idle sway only) | ✅ plain `walkCycle`/`clip` |
@@ -41,7 +41,7 @@ sex). A short fantasy/anthro stretch section at the end continues the existing
 These unlock whole families, so they should be prioritized as their own slices:
 
 - [x] **`swim` macro** → shipped with Batch 3: body counter-sway, primary/delayed tail motion, mirrored fins, vertical drift, and configurable lateral or vertical tail axes.
-- [ ] **`slither` macro** → unlocks snakes, eels, worms.
+- [x] **`slither` macro** → shipped with Batch 6: phased lateral motion across an ordered segment chain, optional body drift and custom tracks, and ordinary locomotion metadata; unlocks snakes, eels, worms.
 - [ ] **`hop` macro** → rabbit, frog, kangaroo, grasshopper (cleaner than faking with contactSwing). *Rabbit currently ships a hand-authored approximation (`examples/rabbit`: synchronized `contactSwing` legs + phased body `bob`); this macro would replace it.*
 - [ ] **N-leg crawl** (generalize `quadrupedWalk`) → spiders (8), insects (6), crabs.
 - [ ] **roll-up / curl helper** (a pose, not a gait) → roly-poly, armadillo, pangolin.
@@ -254,10 +254,10 @@ reviewed rigs and then filling macro gaps.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Snake | P2 | ☐ | SL | green, brown, cobra (hood), rattlesnake | blocked on `slither` |
+| Snake | P2 | ✅ | SL | green, brown, cobra (hood), rattlesnake | `examples/king_cobra` — approved 15-box king cobra with raised patterned hood, forked tongue, and seven-stage slither chain |
 | Lizard / Gecko | P2 | ☐ | Q | gecko, iguana, chameleon | small sprawled quadruped |
-| Turtle / Tortoise | P2 | ☐ | Q/S | land tortoise, sea turtle, hatchling | |
-| Crocodile / Alligator | P2 | ☐ | Q | croc, gator | sprawled walk + swim |
+| Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles |
+| Crocodile / Alligator | P2 | ✅ | Q | croc, gator | `examples/crocodile` — approved 24-box Nile crocodile with armored back, long jaw, sprawled walk, and articulated tail |
 | Komodo dragon | P3 | ☐ | Q | — | giant monitor lizard; zoo headliner |
 | Frog | P2 | ☐ | H | green, tree-frog morphs, toad; tadpole | wants `hop`; tadpole is S |
 | Salamander / Newt | P3 | ☐ | Q | — | |
