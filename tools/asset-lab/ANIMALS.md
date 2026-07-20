@@ -82,14 +82,15 @@ Humanoid figures are outside this animal conversion queue. `player` and
 ## Recommended next build order
 
 The original farmyard and iconic-wild-animal goals are now represented in the
-23-figure canonical box-only roster. Continue by maximizing reuse of those
+26-figure canonical box-only roster. Continue by maximizing reuse of those
 reviewed rigs and then filling macro gaps.
 
 1. **Low-cost rig variants (P1–P2, Q).** Polar bear can reuse the bear;
    leopard and cheetah can reuse the feline rigs; donkey and mule can reuse
    the horse. Deer, zebra, and panda shipped in the first post-migration batch.
-2. **Birds (P1, W).** Owl, parrot, and eagle can exercise and
-   harden `wingFlap`.
+2. **Birds (P1, W).** Owl, parrot, and eagle shipped in the second
+   post-migration batch and established the reusable flying-bird vocabulary.
+   Duck, turkey, penguin, and smaller birds remain open.
 3. **First swim wave (P1, S) — build the `swim` macro, then** fish, dolphin,
    shark. One tooling investment, large payoff.
 4. **Everything else** by recognizability and by which tooling gap it shares.
@@ -119,7 +120,7 @@ reviewed rigs and then filling macro gaps.
 | Dog | P0 | ✅ | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | `examples/dog` — canonical 17-box broad dog with floppy ears, collar, wide paws, and raised tail; rounded A/B retained at `legacy-examples/dog_rounded` |
 | Cat | P0 | ✅ | Q | tabby, black, white, calico, orange, siamese; kitten | `examples/cat` — canonical 16-box tabby with pixel face/stripes and an attached two-piece cuboid tail; rounded A/B retained at `legacy-examples/cat_rounded` |
 | Hamster / Guinea pig | P3 | ☐ | Q | — | tiny, rounded |
-| Parrot (pet) | P2 | ☐ | W | see Birds | |
+| Parrot (pet) | P2 | ✅ | W | see Birds | `examples/parrot` — approved 15-box scarlet macaw; see Birds |
 
 ## Canids (wild)
 
@@ -218,9 +219,9 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken`; rounded A/B in `legacy-examples/chicken_rounded` |
 | Toucan | P3 | ☐ | W | — | oversized colorful bill |
-| Owl | P1 | ☐ | W | brown, snowy (white) | |
-| Parrot | P1 | ☐ | W | red, green, blue, yellow morphs | color morphs are cheap variants |
-| Eagle / Hawk | P2 | ☐ | W | bald eagle (white head), hawk | |
+| Owl | P1 | ✅ | W | brown, snowy (white) | `examples/owl` — approved 15-box great horned owl with facial disc, layered wings, and tucked talons |
+| Parrot | P1 | ✅ | W | red, green, blue, yellow morphs | `examples/parrot` — approved 15-box scarlet macaw with hooked beak, saturated wing bands, and long tail |
+| Eagle / Hawk | P2 | ✅ | W | bald eagle (white head), hawk | `examples/eagle` — approved 15-box bald eagle with broad wings, white head/tail, hooked beak, and talons |
 | Penguin | P2 | ☐ | B | emperor, chick | waddle, not flight — biped |
 | Duck | P2 | ☐ | W/S | (see Farm) | |
 | Pigeon / Dove | P3 | ☐ | W | — | |

@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 41 |
-| total parts | 973 |
-| boxes | 768 |
+| figures | 44 |
+| total parts | 1,018 |
+| boxes | 813 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 92 |
-| parts with any texture reference | 131 |
-| individual texture applications | 218 |
+| ASCII textures | 103 |
+| parts with any texture reference | 148 |
+| individual texture applications | 248 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 23 | 431 | 431 | 0 / 0 / 0 |
+| canonical `examples/` | 26 | 476 | 476 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -365,7 +365,16 @@ videos were rendered under `/tmp/mclone-asset-lab/batch-1`, inspected for
 identity, grounding, attachment continuity, and motion, and approved by the
 user on 2026-07-20.
 
-All 218 applications target an explicit face of a box. They range from single
+The second post-migration content batch adds Owl, Parrot, and Eagle as approved
+15-part canonical box-only flying rigs. Their two-stage wing tips inherit the
+animated wing-root transforms, while their facial discs, hooked beaks, tails,
+talons, proportions, and 11 combined pixel textures keep the silhouettes
+distinct. Clean multi-angle sheets and four-cycle flight videos were rendered
+under `/tmp/mclone-asset-lab/batch-2`, inspected for identity, attachment
+continuity, cadence, and full upstroke/downstroke motion, and approved by the
+user on 2026-07-20.
+
+All 248 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1187,11 +1196,11 @@ drawable milestone. The eventual campaign should include:
 Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: its
 20-figure migration baseline is entirely sparse cuboid rigs, all 18 rounded
 sources are isolated in the deprecated compatibility lane, and promoted
-Chicken is re-baselined. The approved Deer, Zebra, and Panda content batch
-extends the canonical authoring roster to 23 without changing the promoted
-runtime set. Instancing is now the strongest independent performance
-candidate; box-part LOD and a measured sampled/GPU pose path remain separate
-follow-ups.
+Chicken is re-baselined. The approved Deer/Zebra/Panda and Owl/Parrot/Eagle
+content batches extend the canonical authoring roster to 26 without changing
+the promoted runtime set. Instancing is now the strongest independent
+performance candidate; box-part LOD and a measured sampled/GPU pose path
+remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
