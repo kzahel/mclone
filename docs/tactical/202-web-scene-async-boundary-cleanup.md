@@ -176,6 +176,8 @@ Evidence:
 
 ## Slice 3: Opaque Lobby Runtime Tickets
 
+Status: complete 2026-07-20.
+
 - let browser Rust turn a queued lobby start directly into an owned opaque
   runtime-start ticket;
 - remove the clear lobby operation report, request-id map, and separate
@@ -187,6 +189,26 @@ Evidence:
 
 Exit: lobby source, role, seed, behavior, instance identity, and storage choice
 never enter TypeScript execution code.
+
+Evidence:
+
+- `WebSceneHost::take_lobby_runtime_start` now consumes the shared queued
+  operation and returns an owned `WebLobbyRuntimeStart` with its browser runner
+  configuration already lowered in Rust;
+- the adapter-side request-id map, clear operation report, prepare call,
+  discard call, and duplicated launch-active observation were deleted;
+- TypeScript only supplies browser resource URLs, starts and completes the
+  opaque ticket, and projects a post-start Rust-authored source diagnostic for
+  support and product-smoke evidence without using it for execution;
+- cancellation still clears queued shared operations, while an already
+  running ticket is rejected by the existing shared operation epoch before
+  slot installation;
+- the Wasm check, generated binding/typecheck, focused ownership tests, and
+  51-entry Worker-ownership self-test passed; and
+- the two-runtime browser probe passed with two independent world instances,
+  two integrated-server Workers, one shared render-compiler Worker, and no page
+  errors. Its inspected page and canvas captures reproduced the known black /
+  transparent Linux Chromium capture limitation.
 
 ## Slice 4: Rust-Authored Readiness And Envelopes
 

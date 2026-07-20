@@ -36,12 +36,16 @@ fn active_session_dispatch_is_rust_owned() {
 }
 
 #[test]
-fn baseline_pins_clear_typescript_lobby_dispatch() {
-    assert!(WEB_APP.contains("operation.kind === \"start\""));
-    assert!(WEB_APP.contains("session.prepareLobbyWorldStart("));
+fn lobby_runtime_start_is_an_opaque_rust_ticket() {
+    assert!(!WEB_APP.contains("operation.kind === \"start\""));
+    assert!(!WEB_APP.contains("session.prepareLobbyWorldStart("));
+    assert!(!WEB_APP.contains("operation.requestId"));
+    assert!(WEB_APP.contains("session.takeLobbyRuntimeStart("));
 
-    assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_operation"));
-    assert!(WEB_SCENE_HOST.contains("pub fn prepare_lobby_world_start"));
+    assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_runtime_start"));
+    assert!(!WEB_SCENE_HOST.contains("pub fn take_lobby_operation"));
+    assert!(!WEB_SCENE_HOST.contains("pub fn prepare_lobby_world_start"));
+    assert!(!WEB_SCENE_HOST.contains("lobby_world_starts:"));
 }
 
 #[test]

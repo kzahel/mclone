@@ -250,10 +250,11 @@ fn stale_browser_starts_are_rejected_before_slot_installation() {
 
     assert!(WEB_SCENE_HOST.contains("external_scene_start_is_current(&pending)"));
     assert!(WEB_SCENE_HOST.contains("stale_lobby_start_completion_count"));
-    assert!(WEB_SCENE_HOST.contains("discardLobbyOperations"));
-    assert!(WEB_APP.contains("this.session?.discardLobbyOperations()"));
+    assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_runtime_start"));
+    assert!(!WEB_SCENE_HOST.contains("discardLobbyOperations"));
+    assert!(!WEB_APP.contains("discardLobbyOperations"));
     assert!(WEB_APP.contains("pendingLobbyRuntimeStarts"));
-    assert!(WEB_APP.contains("else if (this.lobbyLaunchObservedActive)"));
+    assert!(!WEB_APP.contains("lobbyLaunchObservedActive"));
 }
 
 #[test]

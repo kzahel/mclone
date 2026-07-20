@@ -217,6 +217,15 @@ impl WebLobbyRuntimeStart {
         if let Some(Err(error)) = &self.outcome {
             report_set_string(&object, "reason", error).map_err(JsValue::from)?;
         }
+        // Source identity is returned only after construction as smoke and
+        // support diagnostics; it is not available to JavaScript when the
+        // browser effect is selected or configured.
+        if let Some(storage_source) = pending.storage_source.as_ref() {
+            report_set_string(&object, "worldId", storage_source.world_id())
+                .map_err(JsValue::from)?;
+            report_set_string(&object, "storageSourceKind", storage_source.kind_label())
+                .map_err(JsValue::from)?;
+        }
         Ok(object.into())
     }
 }
@@ -259,7 +268,6 @@ pub struct WebSceneHost {
     interaction_count: usize,
     mesh_build_count: usize,
     catalog_operations: HashMap<String, PendingWebCatalogOperation>,
-    lobby_world_starts: HashMap<String, ExternalSceneSessionStart>,
     stale_lobby_start_completion_count: usize,
     render_resource_generation: u64,
     render_color_profile: String,
@@ -1277,74 +1285,29 @@ impl WebSceneHost {
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
-    /// Take one shared-policy lobby start. JavaScript starts the Worker from
-    /// this opaque Rust-owned ticket and never chooses content or storage
-    /// policy.
-    #[wasm_bindgen(js_name = takeLobbyOperation)]
-    pub fn take_lobby_operation(&mut self) -> Result<JsValue, JsValue> {
-        if let Some(start) = self.host_mut()?.take_lobby_world_start() {
-            let token = match &start.target {
-                mclone_scene::ExternalSceneStartTarget::Lobby { token, .. } => *token,
-                mclone_scene::ExternalSceneStartTarget::ActiveSession => {
-                    return Err(JsValue::from_str(
-                        "lobby queue produced an active-session start",
-                    ));
-                }
-            };
-            let request_id = platform_operation_key("start", token);
-            let storage_source = start.storage_source.as_ref().ok_or_else(|| {
-                JsValue::from_str("scenario world start omitted its storage source")
-            })?;
-            let world_id = storage_source.world_id().to_owned();
-            let object = js_sys::Object::new();
-            report_set_string(&object, "kind", "start").map_err(JsValue::from)?;
-            report_set_string(&object, "requestId", &request_id).map_err(JsValue::from)?;
-            report_set_string(&object, "worldId", &world_id).map_err(JsValue::from)?;
-            report_set_string(&object, "storageSourceKind", storage_source.kind_label())
-                .map_err(JsValue::from)?;
-            report_set_string(&object, "seedText", &start.scene.seed.to_string())
-                .map_err(JsValue::from)?;
-            report_set_string(
-                &object,
-                "worldInstanceId",
-                &start.instance_id.get().to_string(),
-            )
-            .map_err(JsValue::from)?;
-            report_set_string(
-                &object,
-                "behaviorProfile",
-                start.scene.world_behavior_profile.label(),
-            )
-            .map_err(JsValue::from)?;
-            self.lobby_world_starts.insert(request_id, start);
-            return Ok(object.into());
-        }
-        Ok(JsValue::NULL)
-    }
-
-    /// Release adapter-side token/ticket bookkeeping after shared lifecycle
-    /// policy has cancelled the scenario operation epoch. In-flight Workers
-    /// may still finish, but their opaque start tickets are rejected by
-    /// `external_scene_start_is_current` before any slot installation.
-    #[wasm_bindgen(js_name = discardLobbyOperations)]
-    pub fn discard_lobby_operations(&mut self) -> Result<JsValue, JsValue> {
-        self.lobby_world_starts.clear();
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = prepareLobbyWorldStart)]
-    pub fn prepare_lobby_world_start(
+    /// Lower one shared-policy lobby start directly into an opaque browser
+    /// runtime ticket. JavaScript supplies browser resource URLs but never
+    /// receives fields with which to select the request token, role, content,
+    /// or storage decision.
+    #[wasm_bindgen(js_name = takeLobbyRuntimeStart)]
+    pub fn take_lobby_runtime_start(
         &mut self,
-        request_id: String,
         worker_url: String,
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
-    ) -> Result<WebLobbyRuntimeStart, JsValue> {
-        let pending = self
-            .lobby_world_starts
-            .remove(&request_id)
-            .ok_or_else(|| JsValue::from_str("unknown lobby world start request"))?;
+    ) -> Result<Option<WebLobbyRuntimeStart>, JsValue> {
+        let Some(pending) = self.host_mut()?.take_lobby_world_start() else {
+            return Ok(None);
+        };
+        if matches!(
+            pending.target,
+            mclone_scene::ExternalSceneStartTarget::ActiveSession
+        ) {
+            return Err(JsValue::from_str(
+                "lobby queue produced an active-session start",
+            ));
+        }
         let seed = pending.scene.seed;
         let storage_source = pending
             .storage_source
@@ -1380,11 +1343,11 @@ impl WebSceneHost {
                 config.with_indexed_db_world(storage_source.world_id(), false)
             }
         };
-        Ok(WebLobbyRuntimeStart {
+        Ok(Some(WebLobbyRuntimeStart {
             pending: Some(pending),
             config: Some(config),
             outcome: None,
-        })
+        }))
     }
 
     #[wasm_bindgen(js_name = completeLobbyWorldStart)]
@@ -1921,7 +1884,6 @@ async fn create_scene_host(
         interaction_count: 0,
         mesh_build_count: 0,
         catalog_operations: HashMap::new(),
-        lobby_world_starts: HashMap::new(),
         stale_lobby_start_completion_count: 0,
         render_resource_generation: 1,
         render_color_profile,
@@ -3732,10 +3694,6 @@ fn direction_label(direction: Direction) -> &'static str {
         Direction::West => "west",
         Direction::East => "east",
     }
-}
-
-fn platform_operation_key(prefix: &str, token: PlatformOperationToken) -> String {
-    format!("{prefix}-{}-{}", token.epoch.get(), token.request_id.get())
 }
 
 fn write_block_target(

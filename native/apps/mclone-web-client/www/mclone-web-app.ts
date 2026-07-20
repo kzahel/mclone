@@ -23,7 +23,11 @@ import {
   executeIndexedDbCatalogExecution,
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
-import type { WebCatalogExecution, WebSceneHost } from "mclone-web-client-wasm";
+import type {
+  WebCatalogExecution,
+  WebLobbyRuntimeStart,
+  WebSceneHost,
+} from "mclone-web-client-wasm";
 
 // The wasm-bindgen module namespace (generated `.d.ts`, emitted by `wasm-bindgen --typescript`).
 // Loaded at runtime via a dynamic `import()` of a versioned URL; the bare specifier is path-mapped
@@ -349,7 +353,6 @@ class WebFrameDriver {
   tickFrameBusy: boolean;
   sessionBusy: boolean;
   pendingLobbyRuntimeStarts: Set<Promise<void>>;
-  lobbyLaunchObservedActive: boolean;
   lobbyOperationDrainActive: boolean;
   lobbyRuntimeStartCount: number;
   worldCatalogOperationTail: Promise<void>;
@@ -387,7 +390,6 @@ class WebFrameDriver {
     this.tickFrameBusy = false;
     this.sessionBusy = false;
     this.pendingLobbyRuntimeStarts = new Set();
-    this.lobbyLaunchObservedActive = false;
     this.lobbyOperationDrainActive = false;
     this.lobbyRuntimeStartCount = 0;
     this.worldCatalogOperationTail = Promise.resolve();
@@ -505,10 +507,8 @@ class WebFrameDriver {
       "setTouchControlsOverlay",
       "setHidden",
       "beginLobbySmoke",
-      "takeLobbyOperation",
-      "prepareLobbyWorldStart",
+      "takeLobbyRuntimeStart",
       "completeLobbyWorldStart",
-      "discardLobbyOperations",
       "renderHalfSpaceTerrainProof",
       "renderPreparedFigureProof",
       "renderActorCompositionProof",
@@ -704,15 +704,16 @@ class WebFrameDriver {
     this.lobbyOperationDrainActive = true;
     try {
       for (;;) {
-        const operation = this.session.takeLobbyOperation() as WasmReport | null;
-        if (!operation || typeof operation !== "object") {
+        const start = this.session.takeLobbyRuntimeStart(
+          SERVER_WORKER_URL.href,
+          SERVER_JOB_WORKER_URL.href,
+          BINDGEN_JS_URL.href,
+          BINDGEN_WASM_URL.href,
+        );
+        if (!start) {
           break;
         }
-        if (operation.kind === "start") {
-          this.launchLobbyRuntime(operation);
-        } else {
-          throw new Error(`unknown lobby operation ${String(operation.kind)}`);
-        }
+        this.launchLobbyRuntime(start);
       }
     } catch (error) {
       runtime.state.ok = false;
@@ -724,22 +725,13 @@ class WebFrameDriver {
     }
   }
 
-  launchLobbyRuntime(operation: WasmReport): void {
+  launchLobbyRuntime(start: WebLobbyRuntimeStart): void {
     if (!this.session) return;
-    const requestId = String(operation.requestId ?? "");
-    const start = this.session.prepareLobbyWorldStart(
-      requestId,
-      SERVER_WORKER_URL.href,
-      SERVER_JOB_WORKER_URL.href,
-      BINDGEN_JS_URL.href,
-      BINDGEN_WASM_URL.href,
-    );
     this.lobbyRuntimeStartCount += 1;
     runtime.state.lobbyRuntimeStartCount = this.lobbyRuntimeStartCount;
-    runtime.state.lastLobbyRuntimeStart = operation;
     const task = (async () => {
       try {
-        await start.start();
+        runtime.state.lastLobbyRuntimeStart = await start.start();
         await this.waitForSessionIdle();
         if (!this.session) return;
         const report = this.session.completeLobbyWorldStart(start);
@@ -758,22 +750,12 @@ class WebFrameDriver {
     void task.finally(() => this.pendingLobbyRuntimeStarts.delete(task));
   }
 
-  cancelLobbyAdapterOperations(): void {
-    this.session?.discardLobbyOperations();
-  }
-
   applyLobbyLifecycleReport(report: WasmReport): void {
     if (typeof report.lobbyLaunchActive === "undefined") {
       return;
     }
     const active = Boolean(report.lobbyLaunchActive);
     runtime.state.lobbyLaunchActive = active;
-    if (active) {
-      this.lobbyLaunchObservedActive = true;
-    } else if (this.lobbyLaunchObservedActive) {
-      this.lobbyLaunchObservedActive = false;
-      this.cancelLobbyAdapterOperations();
-    }
   }
 
 
