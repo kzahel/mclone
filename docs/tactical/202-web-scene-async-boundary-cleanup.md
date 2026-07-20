@@ -306,6 +306,51 @@ session runtime meaning, receives a clear lobby-start operation, mirrors the
 shared session lifecycle, reconstructs streaming/initial-presentation policy,
 or rewrites the integrated-server ready envelope.
 
+### Post-Closeout Headed Wayland Render Validation
+
+Completed 2026-07-20 after the desktop session was unlocked. Unlocking alone
+did not change the result: headless Chromium still returned transparent WebGPU
+canvases. The working lane is headed Chrome connected directly to the live
+Wayland session with `HEADED=1`, `WAYLAND_DISPLAY=wayland-0`,
+`XDG_SESSION_TYPE=wayland`, and
+`MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS=--ozone-platform=wayland`.
+
+The following headed checks and visual inspections closed the prior pixel-
+capture gap:
+
+- the minimal host WebGPU probe passed with an opaque blue canvas pixel
+  `[0, 89, 255, 255]`; its blue/red screenshot was inspected;
+- the half-space terrain probe passed with 100,990 orange pixels on the left,
+  106,353 blue pixels on the right, and the expected open seam; both its page
+  and raw-canvas captures were inspected;
+- the ordinary app smoke passed with 878,106 non-clear interior pixels and no
+  transparent interior pixels; textured terrain, HUD, debug overlay, and the
+  Rust title UI were inspected;
+- IndexedDB reload, remote WebSocket, and catalog CRUD all passed their final
+  pixel gates with, respectively, 863,466, 878,178, and 903,780 non-clear
+  interior pixels and no transparent interior pixels; each page and canvas
+  capture was inspected; and
+- the two-runtime lobby probe passed without page errors, and its authored
+  lobby page and canvas captures were inspected.
+
+The headed lifecycle run also rendered and captured its title, embedded island,
+reopened destination, live actors, asset replacement, and resource-rebuild
+stages. This removes the former invalid-device/pixel limitation: resource
+rebuild now passed, and the returned-actor capture contained 905,661 non-clear
+interior pixels with no transparent interior pixels. The combined lifecycle
+result nevertheless remained false for a separate semantic assertion:
+`relaunchedPersistenceOk` was false because its exact fallback actor identities
+changed from `3`/`4` to `5`/`6` and the compared chicken age did not advance.
+The terrain mutation still reopened as air. This is not a screenshot failure
+and was not weakened or repaired in this tactical.
+
+The headed mobile run likewise produced and visually passed bootstrap, startup,
+terrain, native UI, joystick, and pause-menu captures. Its combined acceptance
+then failed the separate startup-camera hold invariant: the recorded hold was
+`112`, while the minimum pre-admission camera height was `93.62`. The earlier
+transparent native-UI pixel failure is gone; this timing/admission finding is
+left explicit rather than conflated with rendered-output validation.
+
 ## Stop Conditions
 
 Stop for review if:
