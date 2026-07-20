@@ -212,6 +212,8 @@ Evidence:
 
 ## Slice 4: Rust-Authored Readiness And Envelopes
 
+Status: complete 2026-07-20.
+
 - make browser Rust expose the complete streaming/initial-presentation fact
   needed by the warmup driver;
 - remove TypeScript reconstruction from server, render, and residency queue
@@ -225,6 +227,28 @@ Evidence:
 
 Exit: TypeScript decides when to yield or post, but Rust decides what ready,
 complete, stale, or failed means.
+
+Evidence:
+
+- `WebSceneHost` now includes the render-worker coordinator's pending requests
+  in `streamingIdle` and owns the resettable, latched six-stable-frame
+  `initialPresentationReady` fact;
+- TypeScript projects `streamingIdle`, waits or schedules the next animation
+  frame, and no longer reconstructs queue settlement, resident-content
+  admission, or the initial-presentation counter;
+- the integrated-server Worker posts `WebIntegratedServerActor::ready_report`
+  unchanged; its former persistence-service call was redundant because that
+  Rust report contains no persistence continuation and already owns the empty
+  update list, kind, request id, and diagnostics;
+- the generic persistence continuation retains a named 60,000-step
+  browser-adapter circuit breaker. It interprets no request semantics: Rust
+  still emits each request and decides whether another continuation exists;
+- the Wasm check, generated binding/typecheck, focused ownership tests, and
+  expanded 56-entry Worker-ownership self-test passed; and
+- the ordinary browser app loop reached its ready state and passed movement,
+  streaming, interaction, compiler, actor, and diagnostic assertions before
+  the unchanged final pixel gate reproduced the all-transparent Linux Chromium
+  capture limitation.
 
 ## Slice 5: Validation And Closeout
 

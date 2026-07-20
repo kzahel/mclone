@@ -341,7 +341,6 @@ class WebFrameDriver {
   touchControlsMode: TouchControlsMode;
   mouseDeltaX: number;
   mouseDeltaY: number;
-  hasRendered: boolean;
   loadedCenter: { centerX: number, centerZ: number } | null;
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
@@ -378,7 +377,6 @@ class WebFrameDriver {
     runtime.state.touchControlsMode = this.touchControlsMode;
     this.mouseDeltaX = 0;
     this.mouseDeltaY = 0;
-    this.hasRendered = false;
     this.loadedCenter = null;
     this.pointerDragging = false;
     this.pointerDown = null;
@@ -806,17 +804,12 @@ class WebFrameDriver {
     // enough room for slower browser/CI worker scheduling while retaining a hard boot
     // failure bound.
     const deadline = performance.now() + 60_000;
-    let stableFrames = 0;
     while (performance.now() < deadline) {
       if (this.sessionBusy) {
         await nextAnimationFrame();
         continue;
       }
-      const idle = await this.streamFrameOnce({ awaitWorker: true });
-      stableFrames = idle && this.hasRendered && Number(runtime.state.residentSectionCount) > 0
-        ? stableFrames + 1
-        : 0;
-      if (stableFrames >= 6) {
+      if (await this.streamFrameOnce({ awaitWorker: true })) {
         return;
       }
       await nextAnimationFrame();
@@ -848,7 +841,7 @@ class WebFrameDriver {
     if (options.awaitWorker && Number(frame.renderWorkerPendingRequestCount) > 0) {
       await nextAnimationFrame();
     }
-    return runtime.state.streamingSettled === true;
+    return Boolean(frame.initialPresentationReady);
   }
 
   async renderHostFrame(
@@ -904,21 +897,13 @@ class WebFrameDriver {
       publishRuntimeState(runtime.state);
       return;
     }
-    this.hasRendered ||= Boolean(frame.rendered);
     this.applyReport(frame);
     if (frame.rendered) {
       hideBootstrapStatus();
     }
     const pendingJobs = Number(frame.pendingCompileJobCount) || 0;
     const pendingWorkerRequests = Number(frame.renderWorkerPendingRequestCount) || 0;
-    const runnerSettled = Number(frame.runnerCommandQueueDepth) === 0
-      && Number(frame.runnerUpdateQueueDepth) === 0
-      && Number(frame.runnerPendingJobs) === 0
-      && Number(frame.runnerPendingPublications) === 0;
-    const streamingSettled = Boolean(frame.streamingIdle)
-      && runnerSettled
-      && pendingJobs === 0
-      && pendingWorkerRequests === 0;
+    const streamingSettled = Boolean(frame.streamingIdle);
     runtime.state.pendingCompileJobCount = pendingJobs;
     runtime.state.compileInFlight = pendingJobs > 0;
     runtime.state.compileInFlightCount = pendingWorkerRequests;
@@ -1810,7 +1795,6 @@ class WebFrameDriver {
   }
 
   resetStreamingStateForSessionRestart(): void {
-    this.hasRendered = false;
     this.loadedCenter = null;
     runtime.state.loadedCenterX = null;
     runtime.state.loadedCenterZ = null;

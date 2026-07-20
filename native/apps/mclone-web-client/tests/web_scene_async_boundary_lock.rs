@@ -55,10 +55,22 @@ fn browser_session_lifecycle_is_not_mirrored() {
 }
 
 #[test]
-fn baseline_pins_readiness_and_ready_envelope_reconstruction() {
+fn readiness_and_ready_envelopes_are_rust_authored() {
     assert!(WEB_APP.contains("const streamingSettled = Boolean(frame.streamingIdle)"));
-    assert!(INTEGRATED_SERVER_WORKER.contains("ready.result.kind = \"ready\""));
-    assert!(INTEGRATED_SERVER_WORKER.contains("ready.result.requestId ="));
+    assert!(WEB_APP.contains("return Boolean(frame.initialPresentationReady)"));
+    assert!(!WEB_APP.contains("const runnerSettled ="));
+    assert!(!WEB_APP.contains("let stableFrames ="));
+    assert!(WEB_SCENE_HOST.contains("fn observe_initial_presentation_frame"));
+    assert!(WEB_SCENE_HOST.contains("self.render_worker.pending_request_count() == 0"));
+
+    assert!(!INTEGRATED_SERVER_WORKER.contains("ready.result.kind = \"ready\""));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("ready.result.requestId ="));
+    assert!(!INTEGRATED_SERVER_WORKER.contains("ready.result.updates ="));
+    assert!(
+        INTEGRATED_SERVER_WORKER
+            .contains("workerSelf.postMessage(server.readyReport(Number(message.requestId) || 0))")
+    );
+    assert!(INTEGRATED_SERVER_WORKER.contains("MAX_BROWSER_PERSISTENCE_CONTINUATIONS"));
 }
 
 #[test]

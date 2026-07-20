@@ -107,6 +107,7 @@ impl mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage
 use crate::web_server_worker::WebIntegratedServerRunnerConfig;
 
 const RESUME_OBSERVATION_FRAMES: u8 = 8;
+const INITIAL_PRESENTATION_STABLE_FRAMES: u8 = 6;
 const TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.1;
 const TOUCH_LOOK_SENSITIVITY_MAX: f32 = 6.0;
 
@@ -240,6 +241,7 @@ pub struct WebSceneHost {
     frame_policy: WebSceneFrameDriverPolicy,
     frame_count: u64,
     rendered_frame_count: u64,
+    initial_presentation_stable_frames: u8,
     last_visible_frame_millis: Option<f64>,
     max_frame_gap_millis: f64,
     movement_input_applied: bool,
@@ -818,6 +820,7 @@ impl WebSceneHost {
                 _ => {}
             }
         }
+        self.observe_initial_presentation_frame();
         self.report(Some(&summary), true, delta_seconds, first_after_resume)
             .map_err(JsValue::from)
     }
@@ -1301,7 +1304,7 @@ impl WebSceneHost {
             return Ok(None);
         };
         if matches!(
-            pending.target,
+            &pending.target,
             mclone_scene::ExternalSceneStartTarget::ActiveSession
         ) {
             return Err(JsValue::from_str(
@@ -1856,6 +1859,7 @@ async fn create_scene_host(
         frame_policy: WebSceneFrameDriverPolicy::default(),
         frame_count: 0,
         rendered_frame_count: 0,
+        initial_presentation_stable_frames: 0,
         last_visible_frame_millis: None,
         max_frame_gap_millis: 0.0,
         movement_input_applied: false,
@@ -2001,6 +2005,14 @@ impl WebSceneHost {
             },
         )
         .into_scene_session_runtime(descriptor.clone());
+        let resets_active_presentation = matches!(
+            pending.target,
+            mclone_scene::ExternalSceneStartTarget::ActiveSession
+                | mclone_scene::ExternalSceneStartTarget::Lobby {
+                    role: mclone_app_runtime::scenario_content::LobbyWorldRole::Primary,
+                    ..
+                }
+        );
         let (device, queue) = (&self.context.device, &self.context.queue);
         self.host
             .as_mut()
@@ -2008,6 +2020,9 @@ impl WebSceneHost {
             .complete_external_session_start(device, queue, pending, runtime)
             .map_err(js_error)?;
         self.last_frame = LastFrameStats::default();
+        if resets_active_presentation {
+            self.initial_presentation_stable_frames = 0;
+        }
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
@@ -2200,6 +2215,44 @@ impl WebSceneHost {
         )
     }
 
+    fn streaming_idle(&self) -> bool {
+        let Some(host) = self.host.as_ref() else {
+            return false;
+        };
+        let Some(stats) = host.runtime_stats() else {
+            return false;
+        };
+        let camera = host.camera_frame_state().camera;
+        let camera_position = Vec3::new(
+            camera.eye.x as f32,
+            camera.eye.y as f32,
+            camera.eye.z as f32,
+        );
+        stats.server_command_queue_depth == 0
+            && stats.server_update_queue_depth == 0
+            && stats.pending_jobs == 0
+            && stats.pending_publications == 0
+            && stats.pending_persistence_loads == 0
+            && stats.pending_persistence_saves == 0
+            && stats.pending_render_compile_jobs == 0
+            && host.pending_stream_work(camera_position) == 0
+            && self.render_worker.pending_request_count() == 0
+    }
+
+    fn observe_initial_presentation_frame(&mut self) {
+        if self.initial_presentation_stable_frames >= INITIAL_PRESENTATION_STABLE_FRAMES {
+            return;
+        }
+        if self.streaming_idle() && self.last_frame.section_count > 0 {
+            self.initial_presentation_stable_frames = self
+                .initial_presentation_stable_frames
+                .saturating_add(1)
+                .min(INITIAL_PRESENTATION_STABLE_FRAMES);
+        } else {
+            self.initial_presentation_stable_frames = 0;
+        }
+    }
+
     fn report(
         &self,
         summary: Option<&MonoSceneFrameSummary>,
@@ -2288,6 +2341,11 @@ impl WebSceneHost {
         report_set_number(&object, "atlasUploadCount", 1.0)?;
         report_set_number(&object, "renderCount", self.rendered_frame_count as f64)?;
         report_set_number(&object, "interactionCount", self.interaction_count as f64)?;
+        report_set_bool(
+            &object,
+            "initialPresentationReady",
+            self.initial_presentation_stable_frames >= INITIAL_PRESENTATION_STABLE_FRAMES,
+        )?;
         self.write_common_counts(&object)?;
 
         if let Some(host) = self.host.as_ref() {
@@ -3359,14 +3417,7 @@ impl WebSceneHost {
                     "residentSectionCount",
                     self.last_frame.section_count as f64,
                 )?;
-                let settled = stats.server_command_queue_depth == 0
-                    && stats.server_update_queue_depth == 0
-                    && stats.pending_jobs == 0
-                    && stats.pending_publications == 0
-                    && stats.pending_persistence_loads == 0
-                    && stats.pending_persistence_saves == 0
-                    && stats.pending_render_compile_jobs == 0
-                    && host.pending_stream_work(camera_position) == 0;
+                let settled = self.streaming_idle();
                 report_set_bool(&object, "streamingIdle", settled)?;
                 report_set_bool(&object, "renderPendingWork", !settled)?;
                 report_set_number(

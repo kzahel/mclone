@@ -77,6 +77,11 @@ interface ServicedServerResult {
   updates: unknown[];
 }
 
+// Adapter-only circuit breaker against a malformed continuation that never
+// quiesces. Rust still authors every request and decides whether another
+// continuation exists.
+const MAX_BROWSER_PERSISTENCE_CONTINUATIONS = 60_000;
+
 let wasmModulePromise: Promise<WasmModule> | null = null;
 // The resolved wasm module, captured once `startServer` loads it. The packed-frame codec
 // (070 Stage 3) lives in Rust and is reached through this handle, so the SAB packing format has a
@@ -177,14 +182,7 @@ async function startServer(message: IntegratedServerWorkerMessage): Promise<void
   if (!server) {
     throw new Error("integrated server worker did not start");
   }
-  const ready = await servicePersistenceResultForCurrentWorld(
-    server,
-    server.readyReport(Number(message.requestId) || 0) as Record<string, any>,
-  );
-  ready.result.kind = "ready";
-  ready.result.requestId = Number(message.requestId) || 0;
-  ready.result.updates = ready.updates;
-  workerSelf.postMessage(ready.result);
+  workerSelf.postMessage(server.readyReport(Number(message.requestId) || 0));
 }
 
 async function driveActorMessage(message: IntegratedServerWorkerMessage): Promise<void> {
@@ -278,7 +276,7 @@ async function servicePersistenceResultForCurrentWorld(
 ): Promise<ServicedServerResult> {
   let result = initialResult;
   const updates: unknown[] = [];
-  for (let attempt = 0; attempt < 60000; attempt += 1) {
+  for (let attempt = 0; attempt < MAX_BROWSER_PERSISTENCE_CONTINUATIONS; attempt += 1) {
     if (Array.isArray(result?.updates)) {
       updates.push(...result.updates);
     }

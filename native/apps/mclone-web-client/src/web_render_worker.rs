@@ -374,6 +374,15 @@ impl WebRenderWorkerCoordinator {
         self.inner.borrow().swap.active().worker_generation
     }
 
+    pub(crate) fn pending_request_count(&self) -> usize {
+        self.inner
+            .borrow()
+            .workers
+            .values()
+            .map(|worker| worker.state.pending_request_count())
+            .sum()
+    }
+
     pub(crate) fn write_report(
         &self,
         object: &Object,
