@@ -289,21 +289,12 @@ pub(crate) struct ManagedScenarioLaunchState {
 impl ManagedScenarioLaunchState {
     pub(crate) fn new(intent: ScenarioLaunchIntent) -> Self {
         let manifest = ManagedScenarioManifest::for_intent(intent);
-        let mut provision_operations = PlatformOperationLedger::new();
-        let mut pending_provision_requests = VecDeque::new();
-        pending_provision_requests.push_back(provision_operations.issue(
-            ProvisionManagedScenarioWorld {
-                intent,
-                role: ManagedScenarioWorldRole::Primary,
-            },
-            intent,
-        ));
         Self {
             intent,
             manifest,
             phase: ManagedScenarioLaunchPhase::ResolvingContent,
-            provision_operations,
-            pending_provision_requests,
+            provision_operations: PlatformOperationLedger::new(),
+            pending_provision_requests: VecDeque::new(),
             start_operations: PlatformOperationLedger::new(),
             pending_start_requests: VecDeque::new(),
             primary_provisioned: None,
@@ -1947,33 +1938,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn managed_launch_issues_independent_portable_operations() {
+    fn managed_launch_provisions_only_the_persistent_fallback() {
         let intent = ScenarioLaunchIntent::lobby_preview();
         let mut launch = ManagedScenarioLaunchState::new(intent);
-        let primary = launch.take_provision_request().unwrap();
         assert!(launch.take_provision_request().is_none());
         launch.issue_destination_provision();
         let destination = launch.take_provision_request().unwrap();
-        assert_eq!(primary.kind.role, ManagedScenarioWorldRole::Primary);
         assert_eq!(destination.kind.role, ManagedScenarioWorldRole::Destination);
-        assert_ne!(primary.token, destination.token);
         assert!(launch.take_provision_request().is_none());
-
-        let primary_key = launch
-            .manifest
-            .world_key(ManagedScenarioWorldRole::Primary)
-            .unwrap();
-        assert!(matches!(
-            launch.complete_provision(PlatformOperationCompletion {
-                token: primary.token,
-                result: Ok(ProvisionedManagedScenarioWorld {
-                    role: ManagedScenarioWorldRole::Primary,
-                    key: primary_key,
-                }),
-            }),
-            PlatformOperationResolution::Applied { kind, .. }
-                if kind.role == ManagedScenarioWorldRole::Primary
-        ));
         assert_eq!(launch.cancel(), 1);
         assert!(matches!(
             launch.complete_provision(PlatformOperationCompletion {
@@ -1988,15 +1960,13 @@ mod tests {
     fn managed_start_identity_is_not_derived_from_role_or_slot() {
         let intent = ScenarioLaunchIntent::lobby_preview();
         let mut launch = ManagedScenarioLaunchState::new(intent);
-        let key = launch
-            .manifest
-            .world_key(ManagedScenarioWorldRole::Primary)
-            .unwrap();
         let scene = McloneSceneHostOptions::default();
         let start = ManagedScenarioWorldStart {
             instance_id: WorldInstanceId::new(41),
             role: ManagedScenarioWorldRole::Primary,
-            storage_source: ScenarioWorldStorageSource::Managed(key),
+            storage_source: ScenarioWorldStorageSource::TransientAuthored(
+                mclone_server::AuthoredWorldFixtureKind::LobbyTableV2,
+            ),
             descriptor: ActiveSessionDescriptor::new_seed_local_world(scene.seed),
             scene,
             destination: None,
@@ -2016,7 +1986,7 @@ mod tests {
             ManagedScenarioWorldRole::Destination,
             WorldInstanceId::new(41),
         ));
-        assert_eq!(launch.cancel(), 2);
+        assert_eq!(launch.cancel(), 1);
         assert!(!launch.owns_start(
             token,
             ManagedScenarioWorldRole::Primary,

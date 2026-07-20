@@ -632,7 +632,12 @@ mod native {
     #[derive(Clone, Debug, Eq, PartialEq)]
     pub enum NativeIntegratedServerWorldStorage {
         Transient,
-        Persistent { dir: PathBuf },
+        TransientAuthored {
+            fixture: crate::AuthoredWorldFixtureKind,
+        },
+        Persistent {
+            dir: PathBuf,
+        },
     }
 
     impl Default for NativeIntegratedServerWorldStorage {
@@ -1198,6 +1203,26 @@ mod native {
                     config.player_chunk_tracking_policy,
                 )
             }
+            NativeIntegratedServerWorldStorage::TransientAuthored { fixture } => {
+                let (_, store) = match crate::authored_world_fixture_memory_store(*fixture) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error.to_string()));
+                        return Ok(());
+                    }
+                };
+                match LocalRealmSession::try_with_threaded_world_store_dimension_definition_and_player_chunk_tracking_policy(
+                    definition.clone(),
+                    Box::new(store),
+                    config.player_chunk_tracking_policy,
+                ) {
+                    Ok(server) => server,
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error.to_string()));
+                        return Ok(());
+                    }
+                }
+            }
             NativeIntegratedServerWorldStorage::Persistent { dir } => {
                 match LocalRealmSession::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
                     definition,
@@ -1217,9 +1242,9 @@ mod native {
             return Ok(());
         }
         server.set_world_behavior_profile(config.world_behavior_profile);
-        if matches!(
+        if !matches!(
             &config.world_storage,
-            NativeIntegratedServerWorldStorage::Persistent { .. }
+            NativeIntegratedServerWorldStorage::Transient
         ) && let Err(error) = server.initialize_world_metadata_blocking()
         {
             let _ = ready_tx.send(Err(error.to_string()));

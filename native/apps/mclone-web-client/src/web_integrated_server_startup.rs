@@ -1,9 +1,9 @@
 use mclone_core::{AxisTopology, HorizontalTopology};
 use mclone_protocol::{ClientIdentity, PlayerProfileId};
-use mclone_server::{WorldBehaviorProfile, WorldGenerationProfile};
+use mclone_server::{AuthoredWorldFixtureKind, WorldBehaviorProfile, WorldGenerationProfile};
 
 const STARTUP_MAGIC: [u8; 4] = *b"MCSI";
-const STARTUP_VERSION: u16 = 1;
+const STARTUP_VERSION: u16 = 2;
 const TOPOLOGY_PLANE: u8 = 0;
 const TOPOLOGY_CYLINDER_X: u8 = 1;
 const FLAG_FREEZE_SCHEDULED_FLUID_TICKS: u8 = 1 << 0;
@@ -22,6 +22,7 @@ pub(crate) struct WebIntegratedServerStartupConfig {
     pub world_generation_profile: WorldGenerationProfile,
     pub world_topology: HorizontalTopology,
     pub world_behavior_profile: WorldBehaviorProfile,
+    pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
     pub freeze_scheduled_fluid_ticks: bool,
     pub debug_passive_showcase: bool,
     pub debug_auxiliary_player_script: bool,
@@ -45,6 +46,7 @@ impl WebIntegratedServerStartupConfig {
         frame.push(generation_profile_tag(self.world_generation_profile));
         encode_topology(self.world_topology, &mut frame)?;
         frame.push(behavior_profile_tag(self.world_behavior_profile));
+        frame.push(authored_fixture_tag(self.transient_authored_fixture));
         let mut flags = 0;
         if self.freeze_scheduled_fluid_ticks {
             flags |= FLAG_FREEZE_SCHEDULED_FLUID_TICKS;
@@ -81,6 +83,7 @@ impl WebIntegratedServerStartupConfig {
         let world_generation_profile = generation_profile_from_tag(decoder.u8()?)?;
         let world_topology = decode_topology(&mut decoder)?;
         let world_behavior_profile = behavior_profile_from_tag(decoder.u8()?)?;
+        let transient_authored_fixture = authored_fixture_from_tag(decoder.u8()?)?;
         let flags = decoder.u8()?;
         if flags & !KNOWN_FLAGS != 0 {
             return Err(format!(
@@ -114,6 +117,7 @@ impl WebIntegratedServerStartupConfig {
             world_generation_profile,
             world_topology,
             world_behavior_profile,
+            transient_authored_fixture,
             freeze_scheduled_fluid_ticks: flags & FLAG_FREEZE_SCHEDULED_FLUID_TICKS != 0,
             debug_passive_showcase: flags & FLAG_DEBUG_PASSIVE_SHOWCASE != 0,
             debug_auxiliary_player_script: flags & FLAG_DEBUG_AUXILIARY_PLAYER_SCRIPT != 0,
@@ -129,6 +133,22 @@ impl WebIntegratedServerStartupConfig {
         validate_browser_topology(self.world_topology)?;
         self.world_generation_profile
             .validate_topology(self.world_topology)?;
+        if let Some(fixture) = self.transient_authored_fixture {
+            if self.seed != fixture.seed() {
+                return Err(format!(
+                    "authored fixture {} requires seed {}, got {}",
+                    fixture.fixture_id(),
+                    fixture.seed(),
+                    self.seed
+                ));
+            }
+            if self.world_generation_profile != WorldGenerationProfile::authored_only() {
+                return Err(format!(
+                    "authored fixture {} requires the authored-only generation profile",
+                    fixture.fixture_id()
+                ));
+            }
+        }
         if self.light_status_batch_size == 0 {
             return Err("integrated-server light batch size must be positive".to_owned());
         }
@@ -184,6 +204,29 @@ fn behavior_profile_from_tag(tag: u8) -> Result<WorldBehaviorProfile, String> {
         1 => Ok(WorldBehaviorProfile::ProtectedLobby),
         _ => Err(format!(
             "integrated-server startup frame has unknown behavior profile {tag}"
+        )),
+    }
+}
+
+const fn authored_fixture_tag(fixture: Option<AuthoredWorldFixtureKind>) -> u8 {
+    match fixture {
+        None => 0,
+        Some(AuthoredWorldFixtureKind::Table) => 1,
+        Some(AuthoredWorldFixtureKind::Island) => 2,
+        Some(AuthoredWorldFixtureKind::LobbyTableV2) => 3,
+        Some(AuthoredWorldFixtureKind::LobbyIslandV2) => 4,
+    }
+}
+
+fn authored_fixture_from_tag(tag: u8) -> Result<Option<AuthoredWorldFixtureKind>, String> {
+    match tag {
+        0 => Ok(None),
+        1 => Ok(Some(AuthoredWorldFixtureKind::Table)),
+        2 => Ok(Some(AuthoredWorldFixtureKind::Island)),
+        3 => Ok(Some(AuthoredWorldFixtureKind::LobbyTableV2)),
+        4 => Ok(Some(AuthoredWorldFixtureKind::LobbyIslandV2)),
+        _ => Err(format!(
+            "integrated-server startup frame has unknown authored fixture {tag}"
         )),
     }
 }
@@ -301,6 +344,7 @@ mod tests {
             world_generation_profile: WorldGenerationProfile::FlatGrassV1,
             world_topology: HorizontalTopology::cylinder_x(0, 32),
             world_behavior_profile: WorldBehaviorProfile::ProtectedLobby,
+            transient_authored_fixture: None,
             freeze_scheduled_fluid_ticks: true,
             debug_passive_showcase: false,
             debug_auxiliary_player_script: true,
@@ -325,15 +369,28 @@ mod tests {
     }
 
     #[test]
+    fn startup_frame_roundtrips_transient_authored_fixture() {
+        let mut expected = config();
+        expected.seed = AuthoredWorldFixtureKind::LobbyTableV2.seed();
+        expected.world_generation_profile = WorldGenerationProfile::authored_only();
+        expected.transient_authored_fixture = Some(AuthoredWorldFixtureKind::LobbyTableV2);
+        let frame = expected.encode().unwrap();
+        assert_eq!(
+            WebIntegratedServerStartupConfig::decode(&frame),
+            Ok(expected)
+        );
+    }
+
+    #[test]
     fn startup_frame_rejects_version_flags_truncation_and_trailing_data() {
         let frame = config().encode().unwrap();
 
         let mut bad_version = frame.clone();
-        bad_version[4..6].copy_from_slice(&2_u16.to_le_bytes());
+        bad_version[4..6].copy_from_slice(&3_u16.to_le_bytes());
         assert!(WebIntegratedServerStartupConfig::decode(&bad_version).is_err());
 
         let mut bad_flags = frame.clone();
-        let flags_index = 4 + 2 + 1 + 1 + 4 + 1;
+        let flags_index = 4 + 2 + 1 + 1 + 4 + 1 + 1;
         bad_flags[flags_index] |= 1 << 7;
         assert!(WebIntegratedServerStartupConfig::decode(&bad_flags).is_err());
 

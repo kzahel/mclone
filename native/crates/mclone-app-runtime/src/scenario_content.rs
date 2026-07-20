@@ -66,6 +66,7 @@ pub struct ProvisionedManagedScenarioWorld {
 /// IndexedDB representation; they never choose which destination is used.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum ScenarioWorldStorageSource {
+    TransientAuthored(AuthoredWorldFixtureKind),
     Managed(ManagedWorldKey),
     Catalog(LocalWorldId),
 }
@@ -73,6 +74,7 @@ pub enum ScenarioWorldStorageSource {
 impl ScenarioWorldStorageSource {
     pub fn world_id(&self) -> &str {
         match self {
+            Self::TransientAuthored(fixture) => fixture.fixture_id(),
             Self::Managed(key) => key.as_str(),
             Self::Catalog(id) => id.as_str(),
         }
@@ -80,6 +82,7 @@ impl ScenarioWorldStorageSource {
 
     pub const fn kind_label(&self) -> &'static str {
         match self {
+            Self::TransientAuthored(_) => "transient-authored",
             Self::Managed(_) => "managed",
             Self::Catalog(_) => "catalog",
         }
@@ -88,7 +91,14 @@ impl ScenarioWorldStorageSource {
     pub fn managed_world_key(&self) -> Option<&ManagedWorldKey> {
         match self {
             Self::Managed(key) => Some(key),
-            Self::Catalog(_) => None,
+            Self::TransientAuthored(_) | Self::Catalog(_) => None,
+        }
+    }
+
+    pub const fn authored_fixture(&self) -> Option<AuthoredWorldFixtureKind> {
+        match self {
+            Self::TransientAuthored(fixture) => Some(*fixture),
+            Self::Managed(_) | Self::Catalog(_) => None,
         }
     }
 }

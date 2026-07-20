@@ -37,7 +37,7 @@ pub const AUTHORED_LOBBY_COW_PERSISTENT_ID: EntityPersistentId =
 pub const AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID: EntityPersistentId =
     EntityPersistentId::new(0x6d63_6c6f_6e65_0002, 2);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AuthoredWorldFixtureKind {
     Table,

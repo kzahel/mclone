@@ -1463,12 +1463,10 @@ impl WebSceneHost {
             .remove(&request_id)
             .ok_or_else(|| JsValue::from_str("unknown managed world start request"))?;
         let seed = pending.scene.seed;
-        let world_id = pending
+        let storage_source = pending
             .storage_source
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("scenario world start omitted its storage source"))?
-            .world_id()
-            .to_owned();
+            .ok_or_else(|| JsValue::from_str("scenario world start omitted its storage source"))?;
         let observer_only = matches!(
             &pending.target,
             mclone_scene::ExternalSceneStartTarget::ManagedScenario {
@@ -1476,14 +1474,13 @@ impl WebSceneHost {
                 ..
             }
         );
-        let config = WebIntegratedServerRunnerConfig::new(
+        let mut config = WebIntegratedServerRunnerConfig::new(
             seed,
             worker_url,
             job_worker_url,
             bindgen_js_url,
             bindgen_wasm_url,
         )
-        .with_indexed_db_world(world_id, false)
         .with_world_generation_profile(pending.scene.world_generation_profile)
         .with_world_topology(pending.scene.world_topology)
         .with_world_behavior_profile(pending.scene.world_behavior_profile)
@@ -1491,6 +1488,15 @@ impl WebSceneHost {
         .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
         .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
         .with_observer_only(observer_only);
+        config = match storage_source {
+            mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::TransientAuthored(
+                fixture,
+            ) => config.with_transient_authored_fixture(*fixture),
+            mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Managed(_)
+            | mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(_) => {
+                config.with_indexed_db_world(storage_source.world_id(), false)
+            }
+        };
         Ok(WebManagedScenarioRuntimeStart {
             pending: Some(pending),
             config: Some(config),

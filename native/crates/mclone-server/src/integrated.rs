@@ -545,6 +545,23 @@ impl RealmServer {
         )
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn try_with_threaded_world_store_dimension_definition_and_player_chunk_tracking_policy(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore + Send>,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> ChunkStoreResult<Self> {
+        let seed = definition.seed;
+        Ok(
+            Self::with_scheduler_dimension_definition_and_player_chunk_tracking_policy(
+                RealmId::LEGACY_SINGLE_REALM,
+                definition,
+                ChunkScheduler::try_with_threaded_world_store(seed, store)?,
+                policy,
+            ),
+        )
+    }
+
     pub(crate) fn with_player_chunk_tracking_policy(
         seed: i64,
         policy: PlayerChunkTrackingPolicy,
@@ -4426,6 +4443,21 @@ impl LocalRealmSession {
             RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
                 definition,
                 world_dir,
+                policy,
+            )?,
+        ))
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn try_with_threaded_world_store_dimension_definition_and_player_chunk_tracking_policy(
+        definition: crate::DimensionDefinition,
+        store: Box<dyn WorldStore + Send>,
+        policy: PlayerChunkTrackingPolicy,
+    ) -> ChunkStoreResult<Self> {
+        Ok(Self::from_server(
+            RealmServer::try_with_threaded_world_store_dimension_definition_and_player_chunk_tracking_policy(
+                definition,
+                store,
                 policy,
             )?,
         ))

@@ -1,7 +1,7 @@
 # Tactical 201: Lobby Content Simplification
 
-Status: active 2026-07-20 — direction accepted; Slices 0-1 complete and Slice 2
-in progress.
+Status: active 2026-07-20 — direction accepted; Slices 0-1 complete, Slice 2
+implementation complete with final rendered-output validation pending.
 
 Topic: `embedded-worlds`
 
@@ -270,6 +270,24 @@ browser-available.
 
 Exit: primary launch performs no managed database inspection or publication on
 either platform.
+
+Implemented 2026-07-20. Shared launch policy now issues the primary runtime
+start directly as `TransientAuthored(LobbyTableV2)` and never issues a primary
+provision operation. Native server assembly seeds a fresh `MemoryWorldStore`
+and retains the ordinary dedicated persistence actor/thread. Browser assembly
+carries the fixture identity only in the opaque Rust startup frame and seeds
+the same store inside the integrated-server Worker; TypeScript sees neither
+fixture records nor a fixture-specific branch.
+
+Focused scene tests (122), startup-frame tests (4), native compilation, Wasm
+library compilation, and browser TypeScript build/typecheck pass. The native
+lobby smoke reached lobby, preview, outbound activation, and return before the
+known fixed 320-frame relaunch deadline. The browser probe made the protected
+lobby playable in 731 ms, denied break/place, produced a switchable preview,
+and completed A-to-B-to-A with no page errors. Its headless screenshots were
+fully transparent despite nonzero drawn-section and actor receipts, so the
+rendered-output portion of this slice remains pending rather than being
+recorded as a pass.
 
 ### Slice 3: ordinary app-private fallback
 

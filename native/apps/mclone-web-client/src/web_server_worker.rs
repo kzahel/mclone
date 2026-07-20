@@ -17,15 +17,16 @@ use mclone_protocol::{
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
 };
 use mclone_server::{
-    ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
-    ChunkStoreError, ChunkStoreResult, DimensionRecord, INITIAL_DAY_TIME, IntegratedServerRunner,
-    LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest, PersistenceErrorKind,
-    PersistenceExecutorFailureLatch, PersistenceRecordAddress, PersistenceRecordBatch,
-    PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
-    PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
-    PersistenceRecordResponse, RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics,
-    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
-    ServerUpdateEnvelope, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    AuthoredWorldFixtureKind, ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot,
+    ChunkLoadingProgressStats, ChunkStoreError, ChunkStoreResult, DimensionRecord,
+    INITIAL_DAY_TIME, IntegratedServerRunner, LightStatusMailboxKind, LocalRealmSession,
+    ObserverSimulationInterest, PersistenceErrorKind, PersistenceExecutorFailureLatch,
+    PersistenceRecordAddress, PersistenceRecordBatch, PersistenceRecordExecutor,
+    PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
+    PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
+    RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
+    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
+    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
     WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
     dimension_record_address, record_read_for_world_store_request, world_metadata_record_address,
     world_store_completion_from_record_read,
@@ -208,6 +209,7 @@ pub struct WebIntegratedServerRunnerConfig {
     pub bindgen_js_url: String,
     pub bindgen_wasm_url: String,
     pub world_storage: WebIntegratedServerWorldStorage,
+    pub transient_authored_fixture: Option<AuthoredWorldFixtureKind>,
     pub runner_transport_kind: Option<WorkerFrameTransportKind>,
     pub runner_initial_inbound_bytes: u32,
     pub local_player_identity: ClientIdentity,
@@ -245,6 +247,7 @@ impl WebIntegratedServerRunnerConfig {
             bindgen_js_url: bindgen_js_url.into(),
             bindgen_wasm_url: bindgen_wasm_url.into(),
             world_storage: WebIntegratedServerWorldStorage::Transient,
+            transient_authored_fixture: None,
             runner_transport_kind: None,
             runner_initial_inbound_bytes: DEFAULT_RUNNER_SHARED_RESPONSE_BYTES,
             local_player_identity: ClientIdentity::test_default(),
@@ -266,6 +269,12 @@ impl WebIntegratedServerRunnerConfig {
             world_id: world_id.into(),
             clear_existing,
         };
+        self
+    }
+
+    pub fn with_transient_authored_fixture(mut self, fixture: AuthoredWorldFixtureKind) -> Self {
+        self.world_storage = WebIntegratedServerWorldStorage::Transient;
+        self.transient_authored_fixture = Some(fixture);
         self
     }
 
@@ -665,6 +674,7 @@ impl WebIntegratedServerRunner {
             world_generation_profile: config.world_generation_profile,
             world_topology: config.world_topology,
             world_behavior_profile: config.world_behavior_profile,
+            transient_authored_fixture: config.transient_authored_fixture,
             freeze_scheduled_fluid_ticks: config.freeze_scheduled_fluid_ticks,
             debug_passive_showcase: config.debug_passive_showcase,
             debug_auxiliary_player_script: config.debug_auxiliary_player_script,
@@ -2264,17 +2274,47 @@ impl WebIntegratedServerStartup {
         bindgen_wasm_url: String,
     ) -> Result<WebIntegratedServerActor, JsValue> {
         let definition = web_dimension_definition_from_startup(&self.config);
-        let server = if job_worker_url.trim().is_empty() {
-            LocalRealmSession::local_integrated_with_dimension_definition(definition)
-        } else {
-            LocalRealmSession::local_integrated_with_dimension_definition_and_wasm_job_workers(
-                definition,
-                WasmServerJobWorkerConfig::new(job_worker_url, bindgen_js_url, bindgen_wasm_url),
-            )
+        let fixture_store = self
+            .config
+            .transient_authored_fixture
+            .map(mclone_server::authored_world_fixture_memory_store)
+            .transpose()
+            .map_err(|error| JsValue::from_str(&error.to_string()))?
+            .map(|(_, store)| store);
+        let server = match (fixture_store, job_worker_url.trim().is_empty()) {
+            (Some(store), true) => {
+                LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+                    definition,
+                    Box::new(store),
+                )
+            }
+            (Some(store), false) => LocalRealmSession::
+                local_integrated_with_world_store_dimension_definition_and_wasm_job_workers(
+                    definition,
+                    Box::new(store),
+                    WasmServerJobWorkerConfig::new(
+                        job_worker_url,
+                        bindgen_js_url,
+                        bindgen_wasm_url,
+                    ),
+                ),
+            (None, true) => {
+                LocalRealmSession::local_integrated_with_dimension_definition(definition)
+            }
+            (None, false) => {
+                LocalRealmSession::local_integrated_with_dimension_definition_and_wasm_job_workers(
+                    definition,
+                    WasmServerJobWorkerConfig::new(
+                        job_worker_url,
+                        bindgen_js_url,
+                        bindgen_wasm_url,
+                    ),
+                )
+            }
         };
         self.finish_startup(
             McloneWebIntegratedServerWorker::from_server(self.config.seed, server, None),
-            false,
+            self.config.transient_authored_fixture.is_some(),
             false,
         )
         .map_err(|error| JsValue::from_str(&error))
@@ -2333,7 +2373,7 @@ impl WebIntegratedServerStartup {
     fn finish_startup(
         &self,
         mut worker: McloneWebIntegratedServerWorker,
-        indexed_db: bool,
+        initialize_world_metadata: bool,
         stored_world_metadata_present: bool,
     ) -> Result<WebIntegratedServerActor, String> {
         if !stored_world_metadata_present {
@@ -2345,7 +2385,7 @@ impl WebIntegratedServerStartup {
                 .server
                 .set_world_behavior_profile(self.config.world_behavior_profile);
         }
-        if indexed_db {
+        if initialize_world_metadata {
             worker
                 .server
                 .initialize_world_metadata_blocking()
