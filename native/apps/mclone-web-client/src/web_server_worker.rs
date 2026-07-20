@@ -20,12 +20,12 @@ use mclone_server::{
     ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats,
     ChunkStoreError, ChunkStoreResult, DimensionRecord, INITIAL_DAY_TIME, IntegratedServerRunner,
     LightStatusMailboxKind, LocalRealmSession, ObserverSimulationInterest, PersistenceErrorKind,
-    PersistenceRecordAddress, PersistenceRecordBatch, PersistenceRecordExecutor,
-    PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
-    PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
-    RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
-    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
+    PersistenceExecutorFailureLatch, PersistenceRecordAddress, PersistenceRecordBatch,
+    PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
+    PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
+    PersistenceRecordResponse, RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics,
+    ServerRunnerError, ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics,
+    ServerUpdateEnvelope, WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
     WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
     dimension_record_address, record_read_for_world_store_request, world_metadata_record_address,
     world_store_completion_from_record_read,
@@ -1806,7 +1806,7 @@ struct WebPersistenceRecordState {
     outgoing: VecDeque<PersistenceRecordRequest>,
     pending_executor_requests: BTreeSet<u64>,
     next_request_id: u64,
-    fatal_error: Option<(PersistenceErrorKind, String)>,
+    failure_latch: PersistenceExecutorFailureLatch,
     closed: bool,
 }
 
@@ -1821,15 +1821,13 @@ impl WebPersistenceRecordState {
             outgoing: VecDeque::new(),
             pending_executor_requests: BTreeSet::new(),
             next_request_id: WEB_EXECUTOR_REQUEST_ID_BASE,
-            fatal_error: None,
+            failure_latch: PersistenceExecutorFailureLatch::default(),
             closed: false,
         }
     }
 
     fn check_healthy(&self) -> ChunkStoreResult<()> {
-        if let Some((kind, message)) = &self.fatal_error {
-            return Err(ChunkStoreError::classified(*kind, message.clone()));
-        }
+        self.failure_latch.check_healthy()?;
         if self.closed {
             return Err(ChunkStoreError::classified(
                 PersistenceErrorKind::Closed,
@@ -1874,10 +1872,7 @@ impl WebPersistenceRecordState {
             | PersistenceRecordResponse::Close { result, .. } => result.as_ref().map(|_| ()),
         };
         if let Err(error) = result {
-            let kind = error.kind();
-            let message = error.to_string();
-            self.fatal_error = Some((kind, message.clone()));
-            return Err(ChunkStoreError::classified(kind, message));
+            return Err(self.failure_latch.poison(error));
         }
         Ok(())
     }

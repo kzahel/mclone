@@ -32,12 +32,13 @@ use crate::{WorldBehaviorProfile, WorldGenerationProfile};
 
 mod record_executor;
 pub use record_executor::{
-    MemoryRecordExecutor, MemoryRecordExecutorFault, NullRecordExecutor, PersistenceRecordAddress,
-    PersistenceRecordBatch, PersistenceRecordExecutor, PersistenceRecordKeyPart,
-    PersistenceRecordMutation, PersistenceRecordNamespace, PersistenceRecordPayload,
-    PersistenceRecordRequest, PersistenceRecordRequestId, PersistenceRecordResponse,
-    RecordExecutorWorldStore, chunk_record_address, dimension_record_address,
-    player_record_address, record_read_for_world_store_request, world_metadata_record_address,
+    MemoryRecordExecutor, MemoryRecordExecutorFault, NullRecordExecutor,
+    PersistenceExecutorFailureLatch, PersistenceRecordAddress, PersistenceRecordBatch,
+    PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
+    PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
+    PersistenceRecordRequestId, PersistenceRecordResponse, RecordExecutorWorldStore,
+    chunk_record_address, dimension_record_address, player_record_address,
+    record_read_for_world_store_request, world_metadata_record_address,
     world_store_completion_from_record_read,
 };
 

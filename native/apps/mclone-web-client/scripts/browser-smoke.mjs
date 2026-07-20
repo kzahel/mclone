@@ -3712,6 +3712,7 @@ async function runIndexedDbReloadProbe(
   generationProfile = null,
   worldTopology = null,
 ) {
+  const recordExecutorProbe = await probeGenericIndexedDbRecordExecutor(page);
   if (generationProfile) {
     await waitForWebAppStreamingSettled(page, 60_000);
     const beforeReloadProfile = await captureGenerationProfileProbe(page, generationProfile);
@@ -3769,6 +3770,7 @@ async function runIndexedDbReloadProbe(
     );
     return {
       ok: beforeReloadProfile.ok === true
+        && recordExecutorProbe.ok === true
         && afterReloadProfile.ok === true
         && afterReloadRecordCounts.chunks > 0
         && afterReloadRecordCounts.dimensions === 1
@@ -3791,6 +3793,7 @@ async function runIndexedDbReloadProbe(
       initialMetadata,
       savedMetadata,
       writerLeaseConflict,
+      recordExecutorProbe,
       backgroundSaveResult,
       afterReloadRecordCounts,
     };
@@ -3869,7 +3872,12 @@ async function runIndexedDbReloadProbe(
     worldId,
     initialMetadata.worldMetadataBytes,
   );
-  const writerLeaseConflict = await probeHeldWorldWriterLease(page, baseUrl, worldId);
+  const writerLeaseConflict = await probeWorldWriterSessionAdmission(
+    page,
+    baseUrl,
+    worldId,
+  );
+  const quotaProbe = await probeBrowserQuotaFailure(page, baseUrl);
 
   const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
   await page.goto(reloadUrl, { waitUntil: "load" });
@@ -3890,11 +3898,16 @@ async function runIndexedDbReloadProbe(
   );
   return {
     ok: placement?.ok === true
+      && recordExecutorProbe.ok === true
       && placedBlock?.blockStateId === DIRT_BLOCK_STATE_ID
       && afterReload?.blockStateId === DIRT_BLOCK_STATE_ID
       && afterReloadRecordCounts.chunks > 0
       && afterReloadRecordCounts.worldMetadata === 1
       && writerLeaseConflict.conflictObserved === true
+      && writerLeaseConflict.sessionConflictObserved === true
+      && writerLeaseConflict.differentWorld.ready === true
+      && writerLeaseConflict.differentWorldShutdownComplete === true
+      && (quotaProbe.supported === false || quotaProbe.quotaObserved === true)
       && afterPlacementStatistic === beforePlacementStatistic + 1
       && afterReloadDayTime >= beforeReloadDayTime,
     worldId,
@@ -3910,10 +3923,129 @@ async function runIndexedDbReloadProbe(
     initialMetadata,
     savedMetadata,
     writerLeaseConflict,
+    quotaProbe,
+    recordExecutorProbe,
     backgroundSaveResult,
     afterReload,
     afterReloadRecordCounts,
   };
+}
+
+/**
+ * Exercise the physical adapter directly with opaque bytes. This proves the
+ * browser-specific half of the shared record contract without manufacturing
+ * any chunk, entity, player, dimension, or metadata meaning in JavaScript.
+ *
+ * @param {Page} page
+ */
+async function probeGenericIndexedDbRecordExecutor(page) {
+  return await page.evaluate(async () => {
+    // @ts-ignore staged browser module is outside this script's Node resolution root
+    const executor = await import("./mclone-web-persistence-executor.js");
+    executor.resetIndexedDbRecordExecutorMetrics();
+    const probeWorldId = `record-executor-probe-${Date.now()}-${Math.trunc(Math.random() * 1_000_000)}`;
+    const metadata = /** @type {any} */ ({ namespace: 0, key: [] });
+    const dimension = /** @type {any} */ ({
+      namespace: 1,
+      key: [{ kind: "text", value: "mclone:probe" }],
+    });
+    const initial = /** @type {any[]} */ (await executor.executeIndexedDbRecordRequests(probeWorldId, [
+      { requestId: "1", kind: "read", ...metadata },
+      {
+        requestId: "2",
+        kind: "commit",
+        mutations: [
+          { kind: "put", ...metadata, record: new Uint8Array([1, 2, 3]) },
+          { kind: "put", ...dimension, record: new Uint8Array([4, 5, 6, 7]) },
+        ],
+      },
+      { requestId: "3", kind: "read", ...metadata },
+      { requestId: "4", kind: "read", ...dimension },
+      { requestId: "5", kind: "probeAny", namespaces: [0, 1] },
+      { requestId: "6", kind: "flush" },
+    ]));
+    const rejectedBatch = /** @type {any[]} */ (await executor.executeIndexedDbRecordRequests(probeWorldId, [{
+      requestId: "7",
+      kind: "commit",
+      mutations: [
+        { kind: "put", ...metadata, record: new Uint8Array([9]) },
+        { kind: "put", namespace: 99, key: [], record: new Uint8Array([8]) },
+      ],
+    }]));
+    const unchanged = /** @type {any[]} */ (await executor.executeIndexedDbRecordRequests(probeWorldId, [
+      { requestId: "8", kind: "read", ...metadata },
+    ]));
+    const cleanup = /** @type {any[]} */ (await executor.executeIndexedDbRecordRequests(probeWorldId, [
+      {
+        requestId: "9",
+        kind: "commit",
+        mutations: [
+          { kind: "delete", ...metadata },
+          { kind: "delete", ...dimension },
+        ],
+      },
+      { requestId: "10", kind: "close" },
+    ]));
+    const errorKinds = {
+      quota: executor.browserPersistenceErrorKind(
+        new DOMException("quota probe", "QuotaExceededError"),
+      ),
+      abort: executor.browserPersistenceErrorKind(
+        new DOMException("abort probe", "AbortError"),
+      ),
+      unavailable: executor.browserPersistenceErrorKind(
+        new DOMException("security probe", "SecurityError"),
+      ),
+      invalidData: executor.browserPersistenceErrorKind(
+        new DOMException("clone probe", "DataCloneError"),
+      ),
+      constraint: executor.browserPersistenceErrorKind(
+        new DOMException("constraint probe", "ConstraintError"),
+      ),
+    };
+    const persistence = await executor.browserStoragePersistenceStatus();
+    const metrics = executor.indexedDbRecordExecutorMetricsSnapshot();
+    /** @param {{record?: Uint8Array}} completion */
+    const bytes = (completion) => Array.from(completion?.record ?? []);
+    return {
+      ok: initial[0]?.ok === true
+        && initial[0]?.found === false
+        && initial[1]?.ok === true
+        && JSON.stringify(bytes(initial[2])) === JSON.stringify([1, 2, 3])
+        && JSON.stringify(bytes(initial[3])) === JSON.stringify([4, 5, 6, 7])
+        && initial[4]?.value === true
+        && initial[5]?.ok === true
+        && rejectedBatch[0]?.ok === false
+        && rejectedBatch[0]?.errorKind === "unavailable"
+        && JSON.stringify(bytes(unchanged[0])) === JSON.stringify([1, 2, 3])
+        && cleanup.every((completion) => completion.ok === true)
+        && errorKinds.quota === "quota"
+        && errorKinds.abort === "cancelled"
+        && errorKinds.unavailable === "unavailable"
+        && errorKinds.invalidData === "invalid-data"
+        && errorKinds.constraint === "backend"
+        && persistence.storageManagerAvailable === true
+        && metrics.transactionCount >= 7
+        && metrics.maxCommitMutationCount === 2
+        && metrics.failedCount === 1
+        && metrics.rustToBrowserOpaqueBytes === 9
+        && metrics.browserToRustOpaqueBytes === 10,
+      probeWorldId,
+      initial: initial.map((completion) => ({
+        ...completion,
+        record: bytes(completion),
+      })),
+      rejectedBatch,
+      unchanged: unchanged.map((completion) => ({
+        ...completion,
+        record: bytes(completion),
+      })),
+      cleanup,
+      errorKinds,
+      persistence,
+      metrics,
+    };
+  });
 }
 
 /**
@@ -3940,6 +4072,131 @@ async function probeHeldWorldWriterLease(page, baseUrl, worldId) {
     }, leaseName);
     return { leaseName, conflictObserved: acquired === false };
   } finally {
+    await contender.close();
+  }
+}
+
+/**
+ * Prove the complete session admission UX: a same-world integrated server is
+ * rejected before authority starts, while another world can run concurrently
+ * and can close cleanly.
+ *
+ * @param {Page} page
+ * @param {string} baseUrl
+ * @param {string} worldId
+ */
+async function probeWorldWriterSessionAdmission(page, baseUrl, worldId) {
+  const directConflict = await probeHeldWorldWriterLease(page, baseUrl, worldId);
+  const contender = await page.context().newPage();
+  const differentWorldId = `writer-positive-control-${Date.now()}-${Math.trunc(Math.random() * 1_000_000)}`;
+  try {
+    const sameWorldUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
+    await contender.goto(sameWorldUrl, { waitUntil: "load" });
+    await contender.waitForFunction(
+      () => globalThis.__mcloneWebApp?.state?.failed === true,
+      undefined,
+      { timeout: 60_000 },
+    );
+    const rejected = await contender.evaluate(() => ({
+      ready: globalThis.__mcloneWebApp?.ready ?? false,
+      failed: globalThis.__mcloneWebApp?.state?.failed ?? false,
+      status: String(globalThis.__mcloneWebApp?.state?.status ?? ""),
+    }));
+
+    const differentWorldUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(differentWorldId)}&generationProfile=flat-grass-v1`;
+    await contender.goto(differentWorldUrl, { waitUntil: "load" });
+    await contender.waitForFunction(
+      () => globalThis.__mcloneWebApp?.ready === true
+        && globalThis.__mcloneWebApp?.state?.ok === true,
+      undefined,
+      { timeout: 60_000 },
+    );
+    const differentWorld = await contender.evaluate(() => ({
+      ready: globalThis.__mcloneWebApp?.ready ?? false,
+      failed: globalThis.__mcloneWebApp?.state?.failed ?? false,
+      status: String(globalThis.__mcloneWebApp?.state?.status ?? ""),
+    }));
+    const shutdown = await contender.evaluate(
+      async () => await globalThis.__mcloneWebApp?.shutdownForSmoke?.() ?? null,
+    );
+    return {
+      ...directConflict,
+      sessionConflictObserved: rejected.failed === true
+        && rejected.ready === false
+        && rejected.status.includes("already open"),
+      rejected,
+      differentWorldId,
+      differentWorld,
+      differentWorldShutdownComplete: shutdown?.shutdownComplete === true,
+    };
+  } finally {
+    await contender.close();
+  }
+}
+
+/**
+ * Exercise a real Chromium quota rejection in a separate origin so the live
+ * world cannot be poisoned by the probe. A browser which lacks the CDP quota
+ * override reports an explicit unsupported result instead of faking success.
+ *
+ * @param {Page} page
+ * @param {string} baseUrl
+ */
+async function probeBrowserQuotaFailure(page, baseUrl) {
+  const isolatedBaseUrl = baseUrl.replace("127.0.0.1", "localhost");
+  const contender = await page.context().newPage();
+  /** @type {import("@playwright/test").CDPSession | undefined} */
+  let cdp;
+  let overrideActive = false;
+  try {
+    await contender.goto(`${isolatedBaseUrl}/mclone-runner-shared-abi.js`, {
+      waitUntil: "load",
+    });
+    cdp = await page.context().newCDPSession(contender);
+    const origin = new URL(isolatedBaseUrl).origin;
+    const before = await contender.evaluate(async () => {
+      // @ts-ignore staged browser module is outside this script's Node resolution root
+      const executor = await import("./mclone-web-persistence-executor.js");
+      return await executor.browserStoragePersistenceStatus();
+    });
+    const quotaSize = Math.max(1, Number(before.usageBytes) || 0) + 128 * 1024;
+    try {
+      await cdp.send("Storage.overrideQuotaForOrigin", { origin, quotaSize });
+      overrideActive = true;
+    } catch (error) {
+      return { supported: false, reason: String(error), before };
+    }
+    const probe = await contender.evaluate(async () => {
+      // @ts-ignore staged browser module is outside this script's Node resolution root
+      const executor = await import("./mclone-web-persistence-executor.js");
+      const probeWorldId = `quota-probe-${Date.now()}-${Math.trunc(Math.random() * 1_000_000)}`;
+      const completion = await executor.executeIndexedDbRecordRequests(probeWorldId, [{
+        requestId: "quota-1",
+        kind: "commit",
+        mutations: [{
+          kind: "put",
+          namespace: 0,
+          key: [],
+          record: new Uint8Array(4 * 1024 * 1024),
+        }],
+      }]);
+      return { probeWorldId, completion };
+    });
+    return {
+      supported: true,
+      quotaObserved: probe.completion[0]?.ok === false
+        && probe.completion[0]?.errorKind === "quota",
+      before,
+      quotaSize,
+      completion: probe.completion,
+    };
+  } finally {
+    if (overrideActive && cdp) {
+      await cdp.send("Storage.overrideQuotaForOrigin", {
+        origin: new URL(isolatedBaseUrl).origin,
+      }).catch(() => undefined);
+    }
+    await cdp?.detach().catch(() => undefined);
     await contender.close();
   }
 }

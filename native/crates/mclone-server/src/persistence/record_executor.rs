@@ -227,6 +227,35 @@ pub trait PersistenceRecordExecutor: fmt::Debug {
     }
 }
 
+/// Fatal-write latch for executors which cannot safely resume after a durable
+/// operation fails. The first failure remains authoritative, so later work can
+/// never make an unhealthy save path appear healthy again.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct PersistenceExecutorFailureLatch {
+    failure: Option<(PersistenceErrorKind, String)>,
+}
+
+impl PersistenceExecutorFailureLatch {
+    pub fn check_healthy(&self) -> ChunkStoreResult<()> {
+        match &self.failure {
+            Some((kind, message)) => Err(ChunkStoreError::classified(*kind, message.clone())),
+            None => Ok(()),
+        }
+    }
+
+    pub fn poison(&mut self, error: &ChunkStoreError) -> ChunkStoreError {
+        if self.failure.is_none() {
+            self.failure = Some((error.kind(), error.to_string()));
+        }
+        self.check_healthy()
+            .expect_err("persistence failure latch was just poisoned")
+    }
+
+    pub const fn is_healthy(&self) -> bool {
+        self.failure.is_none()
+    }
+}
+
 /// Synchronous compatibility adapter used by native storage actors and by
 /// executor conformance tests. It is also the codec/key authority reused by
 /// the asynchronous browser coordinator.
@@ -1102,6 +1131,25 @@ mod tests {
             }
             other => panic!("unexpected completion {other:?}"),
         }
+    }
+
+    #[test]
+    fn fatal_executor_failure_latch_keeps_the_first_typed_error() {
+        let mut health = PersistenceExecutorFailureLatch::default();
+        assert!(health.is_healthy());
+        health.poison(&ChunkStoreError::classified(
+            PersistenceErrorKind::Quota,
+            "browser quota exhausted",
+        ));
+        health.poison(&ChunkStoreError::classified(
+            PersistenceErrorKind::Backend,
+            "later generic backend failure",
+        ));
+
+        assert!(!health.is_healthy());
+        let error = health.check_healthy().unwrap_err();
+        assert_eq!(error.kind(), PersistenceErrorKind::Quota);
+        assert!(error.to_string().contains("browser quota exhausted"));
     }
 
     fn chunk_record(pos: ChunkPos, revision: u64) -> ChunkRecord {

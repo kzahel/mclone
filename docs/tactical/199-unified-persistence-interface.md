@@ -416,7 +416,8 @@ Evidence and implementation:
 
 ## Slice 6: Lifecycle, Quota, And Lease Recovery
 
-Status: planned.
+Status: active 2026-07-20; browser failure and lease recovery are complete,
+with Android/Quest platform gates retained in Slice 7.
 
 - normal close drains all prior durable work before releasing either lock;
 - worker/process termination releases locks and permits reacquisition;
@@ -432,6 +433,29 @@ Status: planned.
 
 Exit: lifecycle failure is explicit and recoverable without split brain or
 stale locks.
+
+Evidence so far:
+
+- `PersistenceExecutorFailureLatch` is shared Rust policy: the first typed
+  durable executor failure permanently poisons that writer, later work cannot
+  make it appear healthy, and the original category/diagnostic is retained.
+- The real IndexedDB adapter reports request/batch/transaction/mutation counts,
+  opaque-byte traffic in both Rust/browser directions, and total/worst request
+  latency. A direct real-browser proof covered hit, miss, cross-namespace
+  atomic commit, probe, flush, close, rejected preflight without partial apply,
+  and cleanup.
+- A real Chromium quota override caused a 4 MiB IndexedDB transaction to fail
+  as typed `quota`; DOM quota, abort, access, data-clone, constraint, and generic
+  backend failures all retain stable categories and backend diagnostics.
+- The adapter exposes `persisted()`, persistence-request availability, current
+  usage, and quota. The proof observed browser storage available and
+  `persisted: false`; startup did not request persistence or represent the
+  best-effort store as durable. `requestBrowserStoragePersistence()` remains an
+  explicit product-policy/user-gesture hook.
+- A complete second app session for the live world failed visibly with the
+  same-world conflict, while a second app session for another world became
+  ready and shut down cleanly. Reload then proved termination/release and
+  reacquisition by the original world identity.
 
 ## Slice 7: Cross-Platform Acceptance And Performance
 

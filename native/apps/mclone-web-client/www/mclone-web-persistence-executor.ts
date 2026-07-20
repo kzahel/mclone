@@ -51,6 +51,35 @@ interface NamespaceSpec {
   valueFields: string[];
 }
 
+export interface IndexedDbRecordExecutorMetrics {
+  requestBatchCount: number;
+  requestCount: number;
+  readCount: number;
+  probeCount: number;
+  commitCount: number;
+  flushCount: number;
+  closeCount: number;
+  failedCount: number;
+  transactionCount: number;
+  committedMutationCount: number;
+  maxRequestBatchLength: number;
+  maxCommitMutationCount: number;
+  rustToBrowserOpaqueBytes: number;
+  browserToRustOpaqueBytes: number;
+  totalRequestLatencyMs: number;
+  maxRequestLatencyMs: number;
+}
+
+export interface BrowserStoragePersistenceStatus {
+  storageManagerAvailable: boolean;
+  persisted: boolean | null;
+  persistenceRequestAvailable: boolean;
+  usageBytes: number | null;
+  quotaBytes: number | null;
+}
+
+const metrics: IndexedDbRecordExecutorMetrics = emptyMetrics();
+
 const NAMESPACE_SPECS = new Map<number, NamespaceSpec>([
   [0, { store: WORLD_METADATA_STORE, keyKinds: [], valueFields: [] }],
   [1, { store: WORLD_DIMENSION_STORE, keyKinds: ["text"], valueFields: ["dimensionKey"] }],
@@ -72,25 +101,84 @@ export async function executeIndexedDbRecordRequests(
   requests: PersistenceRecordRequest[],
 ): Promise<PersistenceRecordCompletion[]> {
   if (requests.length === 0) return [];
+  metrics.requestBatchCount += 1;
+  metrics.maxRequestBatchLength = Math.max(metrics.maxRequestBatchLength, requests.length);
   let db: IDBDatabase | null = null;
   const completions: PersistenceRecordCompletion[] = [];
   try {
     db = await openWorldDb();
     for (const request of requests) {
+      const startedAt = performance.now();
+      observeRequest(request);
       try {
-        completions.push(await executeIndexedDbRecordRequest(db, worldId, request));
+        const completion = await executeIndexedDbRecordRequest(db, worldId, request);
+        observeCompletion(completion);
+        completions.push(completion);
       } catch (error) {
-        completions.push(failedCompletion(request, error));
+        const completion = failedCompletion(request, error);
+        observeCompletion(completion);
+        completions.push(completion);
+      } finally {
+        const elapsedMs = performance.now() - startedAt;
+        metrics.totalRequestLatencyMs += elapsedMs;
+        metrics.maxRequestLatencyMs = Math.max(metrics.maxRequestLatencyMs, elapsedMs);
       }
     }
   } catch (error) {
     for (const request of requests) {
-      completions.push(failedCompletion(request, error));
+      observeRequest(request);
+      const completion = failedCompletion(request, error);
+      observeCompletion(completion);
+      completions.push(completion);
     }
   } finally {
     db?.close();
   }
   return completions;
+}
+
+export function indexedDbRecordExecutorMetricsSnapshot(): IndexedDbRecordExecutorMetrics {
+  return { ...metrics };
+}
+
+export function resetIndexedDbRecordExecutorMetrics(): void {
+  Object.assign(metrics, emptyMetrics());
+}
+
+export async function browserStoragePersistenceStatus(): Promise<BrowserStoragePersistenceStatus> {
+  const storage = navigator.storage;
+  if (!storage) {
+    return {
+      storageManagerAvailable: false,
+      persisted: null,
+      persistenceRequestAvailable: false,
+      usageBytes: null,
+      quotaBytes: null,
+    };
+  }
+  const [persisted, estimate] = await Promise.all([
+    typeof storage.persisted === "function" ? storage.persisted() : Promise.resolve(null),
+    typeof storage.estimate === "function"
+      ? storage.estimate()
+      : Promise.resolve({} as StorageEstimate),
+  ]);
+  return {
+    storageManagerAvailable: true,
+    persisted,
+    persistenceRequestAvailable: typeof storage.persist === "function",
+    usageBytes: Number.isFinite(estimate.usage) ? Number(estimate.usage) : null,
+    quotaBytes: Number.isFinite(estimate.quota) ? Number(estimate.quota) : null,
+  };
+}
+
+/** Product policy may call this from a user gesture; startup never calls it implicitly. */
+export async function requestBrowserStoragePersistence(): Promise<boolean | null> {
+  const storage = navigator.storage;
+  return storage && typeof storage.persist === "function" ? await storage.persist() : null;
+}
+
+export function browserPersistenceErrorKind(error: unknown): string {
+  return classifyBrowserStorageError(error).kind;
 }
 
 async function executeIndexedDbRecordRequest(
@@ -113,6 +201,7 @@ async function readRecord(
   worldId: string,
   request: PersistenceRecordRequest,
 ): Promise<PersistenceRecordCompletion> {
+  metrics.transactionCount += 1;
   const address = requiredAddress(request);
   const spec = namespaceSpec(address.namespace);
   const transaction = db.transaction(spec.store, "readonly");
@@ -143,6 +232,7 @@ async function probeAnyRecord(
   if (specs.length === 0) {
     return { ...successfulCompletion(request), value: false };
   }
+  metrics.transactionCount += 1;
   const transaction = db.transaction(specs.map((spec) => spec.store), "readonly");
   const counts = await Promise.all(specs.map((spec) => idbRequest<number>(
     transaction.objectStore(spec.store).index(WORLD_ID_INDEX).count(IDBKeyRange.only(worldId)),
@@ -164,6 +254,7 @@ async function commitRecords(
     spec: namespaceSpec(mutation.namespace),
   }));
   const stores = [...new Set(addressed.map(({ spec }) => spec.store))];
+  metrics.transactionCount += 1;
   const transaction = db.transaction(stores, "readwrite");
   for (const { mutation, address, spec } of addressed) {
     const store = transaction.objectStore(spec.store);
@@ -174,7 +265,54 @@ async function commitRecords(
     }
   }
   await transactionDone(transaction);
+  metrics.committedMutationCount += mutations.length;
   return successfulCompletion(request);
+}
+
+function observeRequest(request: PersistenceRecordRequest): void {
+  metrics.requestCount += 1;
+  switch (request.kind) {
+    case "read": metrics.readCount += 1; break;
+    case "probeAny": metrics.probeCount += 1; break;
+    case "commit": {
+      metrics.commitCount += 1;
+      const mutations = request.mutations ?? [];
+      metrics.maxCommitMutationCount = Math.max(metrics.maxCommitMutationCount, mutations.length);
+      metrics.rustToBrowserOpaqueBytes += mutations.reduce(
+        (total, mutation) => total + (mutation.record?.byteLength ?? 0),
+        0,
+      );
+      break;
+    }
+    case "flush": metrics.flushCount += 1; break;
+    case "close": metrics.closeCount += 1; break;
+  }
+}
+
+function observeCompletion(completion: PersistenceRecordCompletion): void {
+  if (!completion.ok) metrics.failedCount += 1;
+  metrics.browserToRustOpaqueBytes += completion.record?.byteLength ?? 0;
+}
+
+function emptyMetrics(): IndexedDbRecordExecutorMetrics {
+  return {
+    requestBatchCount: 0,
+    requestCount: 0,
+    readCount: 0,
+    probeCount: 0,
+    commitCount: 0,
+    flushCount: 0,
+    closeCount: 0,
+    failedCount: 0,
+    transactionCount: 0,
+    committedMutationCount: 0,
+    maxRequestBatchLength: 0,
+    maxCommitMutationCount: 0,
+    rustToBrowserOpaqueBytes: 0,
+    browserToRustOpaqueBytes: 0,
+    totalRequestLatencyMs: 0,
+    maxRequestLatencyMs: 0,
+  };
 }
 
 function requiredAddress(value: Partial<PersistenceRecordAddress>): PersistenceRecordAddress {
@@ -280,6 +418,8 @@ function classifyBrowserStorageError(error: unknown): { kind: string; message: s
     ? "quota"
     : name === "AbortError"
       ? "cancelled"
+      : name === "DataCloneError"
+        ? "invalid-data"
       : name === "SecurityError" || name === "NotAllowedError" || name === "InvalidStateError"
         ? "unavailable"
         : "backend";
@@ -320,6 +460,12 @@ function transactionDone(transaction: IDBTransaction): Promise<void> {
 }
 
 function stringifyError(error: unknown): string {
-  if (error instanceof Error) return error.stack ?? error.message;
+  if (error instanceof Error) {
+    const stack = error.stack?.trim();
+    if (stack) return stack;
+    const label = error.name.trim();
+    const message = error.message.trim();
+    return label && message ? `${label}: ${message}` : label || message || "browser storage error";
+  }
   return String(error);
 }
