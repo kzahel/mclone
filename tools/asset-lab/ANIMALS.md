@@ -138,8 +138,8 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Lion | P1 | ✅ | Q | male (mane), lioness, cub | `examples/lion` — canonical 23-box male with chest/head mane frame, light feline barrel, textured paws, and attached tufted tail; rounded A/B retained at `legacy-examples/lion_rounded` |
 | Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — canonical 20-box tiger with pixel-textured stripes; `legacy-examples/tiger_rounded` retains the rounded A/B |
-| Leopard / Jaguar | P2 | ☐ | Q | spotted, melanistic (black panther) | spot rosette texture |
-| Cheetah | P2 | ☐ | Q | — | slender; tear-mark face |
+| Leopard / Jaguar | P2 | ✅ | Q | spotted, melanistic (black panther) | `examples/jaguar` — approved 23-box adult jaguar with heavy shoulder/hip masses, broad cheeks, short legs, and rosette-patterned coat faces |
+| Cheetah | P2 | ✅ | Q | — | `examples/cheetah` — approved 20-box narrow-waisted runner with tall legs, tear-marked face, spotted coat, and paired-leg sprint |
 | Lynx / Bobcat | P3 | ☐ | Q | ear tufts | scaled-up cat rig |
 
 ## Bears
@@ -148,7 +148,7 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Bear | P1 | ✅ | Q | brown/grizzly, black, polar (Arctic), cub | `examples/bear` — canonical 17-box brown bear with vanilla-derived two-mass torso, shoulder hump, broad feet, and tiny tail; rounded A/B retained at `legacy-examples/bear_rounded` |
 | Panda | P2 | ✅ | Q | adult, cub | `examples/panda` — approved 17-box giant panda; bear-derived mass with black shoulder band, limbs, ears, and eye patches |
-| Polar bear | P2 | ☐ | Q | adult, cub | also lives in Polar/Arctic set |
+| Polar bear | P2 | ✅ | Q | adult, cub | `examples/polar_bear` — approved 18-box long-bodied adult with narrow head, small ears, oversized snow paws, and slow planted walk |
 
 ## Hoofed & large herbivores
 

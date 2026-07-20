@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 65 |
-| total parts | 1,440 |
-| boxes | 1,235 |
+| figures | 68 |
+| total parts | 1,501 |
+| boxes | 1,296 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 169 |
-| parts with any texture reference | 243 |
-| individual texture applications | 384 |
+| ASCII textures | 185 |
+| parts with any texture reference | 269 |
+| individual texture applications | 436 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 47 | 898 | 898 | 0 / 0 / 0 |
+| canonical `examples/` | 50 | 959 | 959 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -455,7 +455,19 @@ and four-cycle videos were rendered under `/tmp/mclone-asset-lab/batch-9`,
 inspected for identity, grounding, attachment continuity, gait cadence,
 secondary motion, and loop continuity, and approved by the user on 2026-07-20.
 
-All 384 applications target an explicit face of a box. They range from single
+The tenth post-migration content batch adds Polar Bear, Cheetah, and Jaguar as
+approved canonical box-only rigs. Polar Bear is an
+18-part long-bodied adult with a narrow head, small ears, and oversized snow
+paws; Cheetah is a 20-part narrow-waisted runner with tall legs, tear marks,
+spots, and a paired-leg sprint; and Jaguar is a 23-part compact cat with heavy
+shoulder and hip masses, broad cheeks, short legs, and rosette-patterned coat
+faces. All 61 parts are canonical boxes and use 16 combined pixel textures.
+Clean multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-10`, inspected for identity, grounding, attachment
+continuity, gait cadence, tail follow-through, and loop continuity, and
+approved by the user on 2026-07-20.
+
+All 436 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1281,10 +1293,11 @@ Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle,
 Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, Camel/Gorilla/Kangaroo,
 Crocodile/Sea Turtle/King Cobra, Penguin/Flamingo/Peacock,
 Raccoon/Red Squirrel/River Otter, and
-Chimpanzee/Orangutan/Ring-tailed Lemur content batches extend the canonical
-authoring roster to 47 without changing the promoted runtime set. Instancing
-is now the strongest independent performance candidate; box-part LOD and a
-measured sampled/GPU pose path remain separate follow-ups.
+Chimpanzee/Orangutan/Ring-tailed Lemur plus Polar Bear/Cheetah/Jaguar content
+batches extend the canonical authoring roster to 50 without changing the
+promoted runtime set. Instancing is now the strongest independent performance
+candidate; box-part LOD and a measured sampled/GPU pose path remain separate
+follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
