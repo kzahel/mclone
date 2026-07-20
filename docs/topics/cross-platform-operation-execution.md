@@ -4,9 +4,10 @@ Topic: `cross-platform-operation-execution`
 
 Status: high-level actor/mailbox direction accepted 2026-07-20. Tactical
 [`201`](../tactical/201-lobby-content-simplification.md) removed the accidental
-managed installer and its TypeScript policy surface. Its required fresh
-post-cleanup ownership review is the next work; no successor tactical is
-pre-authorized.
+managed installer and its TypeScript policy surface. The required fresh
+post-cleanup review found no replacement provisioning actor, but did justify
+the bounded existing-owner cleanup in active Tactical
+[`202`](../tactical/202-web-scene-async-boundary-cleanup.md).
 
 ## Top-Level Frame
 
@@ -249,7 +250,9 @@ transports while satisfying the same ownership model.
 Managed-scenario provisioning is not a target actor. Tactical 201 removed that
 special subsystem and retained the embedded-world behavior on ordinary
 primitives. The completed post-cleanup inventory found no replacement
-provisioning operation to standardize.
+provisioning operation to standardize. It did find a few web-scene seams where
+TypeScript still projects decisions already owned by Rust; Tactical 202 cleans
+those seams without adding a new actor.
 
 Out of scope:
 
