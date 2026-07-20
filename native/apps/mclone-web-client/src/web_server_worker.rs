@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::rc::Rc;
@@ -58,6 +58,127 @@ const RUNNER_SHARED_STATUS_FAILED: i32 = -1;
 const MAX_RUNNER_SHARED_POOL_SLOTS: usize = 2;
 const MIN_RUNNER_SHARED_REQUEST_BYTES: u32 = 4 * 1024;
 const DEFAULT_RUNNER_SHARED_RESPONSE_BYTES: u32 = 2 * 1024 * 1024;
+const RETIRED_WORKER_SHUTDOWN_TIMEOUT_MS: f64 = 30_000.0;
+const RETIRED_WORKER_POLL_INTERVAL_MS: i32 = 10;
+
+type RetiredWorkerOutcome = Rc<RefCell<Option<Result<(), String>>>>;
+
+struct RetiredWorldWriter {
+    token: u64,
+    outcome: RetiredWorkerOutcome,
+}
+
+thread_local! {
+    static RETIRED_WORLD_WRITERS: RefCell<BTreeMap<String, RetiredWorldWriter>> =
+        const { RefCell::new(BTreeMap::new()) };
+    static NEXT_RETIRED_WORLD_WRITER_TOKEN: Cell<u64> = const { Cell::new(1) };
+}
+
+pub(crate) async fn await_retired_world_writer(lease_name: &str) -> Result<(), String> {
+    let outcome = RETIRED_WORLD_WRITERS.with(|retired| {
+        retired
+            .borrow()
+            .get(lease_name)
+            .map(|entry| Rc::clone(&entry.outcome))
+    });
+    let Some(outcome) = outcome else {
+        return Ok(());
+    };
+    let deadline_ms = js_sys::Date::now() + RETIRED_WORKER_SHUTDOWN_TIMEOUT_MS;
+    loop {
+        if let Some(result) = outcome.borrow().clone() {
+            return result.map_err(|error| {
+                format!("previous browser world worker did not retire cleanly: {error}")
+            });
+        }
+        if js_sys::Date::now() >= deadline_ms {
+            return Err("timed out waiting for the previous browser world worker to retire".into());
+        }
+        wait_for_browser_delay(RETIRED_WORKER_POLL_INTERVAL_MS).await?;
+    }
+}
+
+fn retain_worker_until_shutdown(
+    worker: Worker,
+    message_closure: Closure<dyn FnMut(MessageEvent)>,
+    error_closure: Closure<dyn FnMut(ErrorEvent)>,
+    lease_name: Option<String>,
+    outcome: RetiredWorkerOutcome,
+) {
+    let token = NEXT_RETIRED_WORLD_WRITER_TOKEN.with(|next| {
+        let token = next.get();
+        next.set(token.wrapping_add(1).max(1));
+        token
+    });
+    if let Some(lease_name) = lease_name.as_ref() {
+        RETIRED_WORLD_WRITERS.with(|retired| {
+            retired.borrow_mut().insert(
+                lease_name.clone(),
+                RetiredWorldWriter {
+                    token,
+                    outcome: Rc::clone(&outcome),
+                },
+            );
+        });
+    }
+    wasm_bindgen_futures::spawn_local(async move {
+        let deadline_ms = js_sys::Date::now() + RETIRED_WORKER_SHUTDOWN_TIMEOUT_MS;
+        loop {
+            if outcome.borrow().is_some() {
+                break;
+            }
+            if js_sys::Date::now() >= deadline_ms {
+                worker.terminate();
+                *outcome.borrow_mut() = Some(Err(
+                    "timed out while gracefully shutting down browser world worker".to_owned(),
+                ));
+                break;
+            }
+            if let Err(error) = wait_for_browser_delay(RETIRED_WORKER_POLL_INTERVAL_MS).await {
+                worker.terminate();
+                *outcome.borrow_mut() = Some(Err(error));
+                break;
+            }
+        }
+        worker.set_onmessage(None);
+        worker.set_onerror(None);
+        drop(message_closure);
+        drop(error_closure);
+        if let Some(lease_name) = lease_name {
+            RETIRED_WORLD_WRITERS.with(|retired| {
+                let mut retired = retired.borrow_mut();
+                if retired
+                    .get(&lease_name)
+                    .is_some_and(|entry| entry.token == token)
+                {
+                    retired.remove(&lease_name);
+                }
+            });
+        }
+    });
+}
+
+async fn wait_for_browser_delay(delay_ms: i32) -> Result<(), String> {
+    let promise = Promise::new(&mut |resolve: Function, reject: Function| {
+        let Some(window) = web_sys::window() else {
+            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("window is unavailable"));
+            return;
+        };
+        let callback = Closure::once_into_js(move || {
+            let _ = resolve.call0(&JsValue::NULL);
+        });
+        if let Err(error) = window.set_timeout_with_callback_and_timeout_and_arguments_0(
+            callback.unchecked_ref(),
+            delay_ms,
+        ) {
+            let _ = reject.call1(&JsValue::NULL, &error);
+        }
+    });
+    JsFuture::from(promise)
+        .await
+        .map(|_| ())
+        .map_err(|error| js_error_string(&error))
+}
 
 fn web_dimension_definition(
     seed: i64,
@@ -222,8 +343,10 @@ pub struct WebIntegratedServerRunner {
     runner_initial_inbound_bytes: u32,
     update_frames: Rc<RefCell<Vec<Vec<u8>>>>,
     diagnostics: Rc<RefCell<ServerRunnerDiagnostics>>,
-    message_closure: Closure<dyn FnMut(MessageEvent)>,
-    error_closure: Closure<dyn FnMut(ErrorEvent)>,
+    message_closure: Option<Closure<dyn FnMut(MessageEvent)>>,
+    error_closure: Option<Closure<dyn FnMut(ErrorEvent)>>,
+    world_writer_lease_name: Option<String>,
+    shutdown_outcome: RetiredWorkerOutcome,
     shutdown_requested: bool,
 }
 
@@ -273,6 +396,15 @@ impl WebIntegratedServerRunner {
             mclone_app_runtime::local_profile::load_or_create_web_local_player_profile()
                 .map_err(|error| format!("load browser player profile: {error:#}"))?
                 .client_identity();
+        let startup_world_writer_lease_name = match &config.world_storage {
+            WebIntegratedServerWorldStorage::Transient => None,
+            WebIntegratedServerWorldStorage::IndexedDb { world_id, .. } => {
+                Some(web_world_writer_lease_name(world_id))
+            }
+        };
+        if let Some(lease_name) = startup_world_writer_lease_name.as_deref() {
+            await_retired_world_writer(lease_name).await?;
+        }
         let options = WorkerOptions::new();
         options.set_type(WorkerType::Module);
         options.set_name("mclone-integrated-server");
@@ -309,6 +441,7 @@ impl WebIntegratedServerRunner {
             config.seed,
             INITIAL_DAY_TIME,
         )));
+        let shutdown_outcome: RetiredWorkerOutcome = Rc::new(RefCell::new(None));
 
         let message_closure = {
             let worker = worker.clone();
@@ -319,6 +452,7 @@ impl WebIntegratedServerRunner {
             let shared_inflight = Rc::clone(&shared_inflight);
             let update_frames = Rc::clone(&update_frames);
             let diagnostics = Rc::clone(&diagnostics);
+            let shutdown_outcome = Rc::clone(&shutdown_outcome);
             Closure::wrap(Box::new(move |event: MessageEvent| {
                 handle_runner_message(
                     event.data(),
@@ -330,14 +464,17 @@ impl WebIntegratedServerRunner {
                     &shared_inflight,
                     &update_frames,
                     &diagnostics,
+                    &shutdown_outcome,
                 );
             }) as Box<dyn FnMut(_)>)
         };
         worker.set_onmessage(Some(message_closure.as_ref().unchecked_ref()));
 
         let error_closure = {
+            let worker = worker.clone();
             let pending = Rc::clone(&pending);
             let diagnostics = Rc::clone(&diagnostics);
+            let shutdown_outcome = Rc::clone(&shutdown_outcome);
             Closure::wrap(Box::new(move |event: ErrorEvent| {
                 let message = if event.message().is_empty() {
                     "integrated server worker failed".to_owned()
@@ -346,6 +483,8 @@ impl WebIntegratedServerRunner {
                 };
                 diagnostics.borrow_mut().last_error = Some(message.clone());
                 reject_all_pending(&pending, &message);
+                worker.terminate();
+                *shutdown_outcome.borrow_mut() = Some(Err(message));
             }) as Box<dyn FnMut(_)>)
         };
         worker.set_onerror(Some(error_closure.as_ref().unchecked_ref()));
@@ -362,11 +501,18 @@ impl WebIntegratedServerRunner {
             runner_initial_inbound_bytes,
             update_frames,
             diagnostics,
-            message_closure,
-            error_closure,
+            message_closure: Some(message_closure),
+            error_closure: Some(error_closure),
+            world_writer_lease_name: None,
+            shutdown_outcome,
             shutdown_requested: false,
         };
-        runner.start(config).await?;
+        if let Err(error) = runner.start(config).await {
+            runner.worker.terminate();
+            *runner.shutdown_outcome.borrow_mut() = Some(Err(error.clone()));
+            return Err(error);
+        }
+        runner.world_writer_lease_name = startup_world_writer_lease_name;
         Ok(runner)
     }
 
@@ -494,6 +640,9 @@ impl WebIntegratedServerRunner {
         self.shutdown_requested = true;
         if self.post_shutdown_with_request_id(0).is_err() {
             self.worker.terminate();
+            *self.shutdown_outcome.borrow_mut() = Some(Err(
+                "failed to post shutdown to integrated server worker".to_owned(),
+            ));
         }
         let mut diagnostics = self.diagnostics.borrow_mut();
         diagnostics.running = false;
@@ -880,10 +1029,20 @@ impl WebIntegratedServerRunner {
 impl Drop for WebIntegratedServerRunner {
     fn drop(&mut self) {
         self.request_shutdown();
-        self.worker.set_onmessage(None);
-        self.worker.set_onerror(None);
-        let _ = &self.message_closure;
-        let _ = &self.error_closure;
+        let Some(message_closure) = self.message_closure.take() else {
+            return;
+        };
+        let Some(error_closure) = self.error_closure.take() else {
+            self.worker.set_onmessage(None);
+            return;
+        };
+        retain_worker_until_shutdown(
+            self.worker.clone(),
+            message_closure,
+            error_closure,
+            self.world_writer_lease_name.clone(),
+            Rc::clone(&self.shutdown_outcome),
+        );
     }
 }
 
@@ -1338,6 +1497,7 @@ fn handle_runner_message(
     shared_inflight: &Rc<RefCell<BTreeMap<u32, RunnerSharedSlot>>>,
     update_frames: &Rc<RefCell<Vec<Vec<u8>>>>,
     diagnostics: &Rc<RefCell<ServerRunnerDiagnostics>>,
+    shutdown_outcome: &RetiredWorkerOutcome,
 ) {
     let request_id = number_prop(&data, "requestId")
         .map(|value| value as u32)
@@ -1448,6 +1608,7 @@ fn handle_runner_message(
     diagnostics.borrow_mut().runner_frame_metrics = *runner_frame_metrics.borrow();
 
     if shutdown_complete {
+        *shutdown_outcome.borrow_mut() = Some(Ok(()));
         worker.terminate();
     }
 

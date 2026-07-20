@@ -903,6 +903,10 @@ mod wasm {
         pub(crate) fn response(&self) -> Result<WorldCatalogResponse, String> {
             self.core.response().cloned()
         }
+
+        pub(crate) fn writer_lease_names(&self) -> Vec<String> {
+            self.core.required_writer_lease_names()
+        }
     }
 
     #[wasm_bindgen]
@@ -914,6 +918,16 @@ mod wasm {
                 .into_iter()
                 .map(JsValue::from)
                 .collect()
+        }
+
+        #[wasm_bindgen(js_name = awaitWriterRetirements)]
+        pub async fn await_writer_retirements(&self) -> Result<(), JsValue> {
+            for lease_name in self.writer_lease_names() {
+                crate::web_server_worker::await_retired_world_writer(&lease_name)
+                    .await
+                    .map_err(JsValue::from)?;
+            }
+            Ok(())
         }
 
         #[wasm_bindgen(js_name = nextStorageStep)]

@@ -252,17 +252,22 @@ async function driveActorOperation(
     updates.push(...serviced.updates);
   }
   const report = activeServer.finishOperation(serviced.result, updates) as Record<string, any>;
-  if (report.postMessage === true) {
-    postUpdates(report.message as RunnerOutboundMessage, requestMessage);
-  }
   if (report.closeWorker === true) {
     if (tickTimer) {
       clearInterval(tickTimer);
       tickTimer = 0;
     }
     server = null;
+    // `shutdown-complete` is the browser host's durable retirement fence. Release
+    // the world writer lease before publishing it so a same-page replacement can
+    // distinguish graceful handoff from genuine cross-tab contention.
     await releaseIndexedDbWriterLease();
     indexedDbWorldId = null;
+  }
+  if (report.postMessage === true) {
+    postUpdates(report.message as RunnerOutboundMessage, requestMessage);
+  }
+  if (report.closeWorker === true) {
     workerSelf.close();
   }
 }

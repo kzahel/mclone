@@ -2147,6 +2147,9 @@ impl WebSceneHost {
                 self.complete_started_runtime(pending, runtime)
             }
             Err(error) => {
+                web_sys::console::error_1(&JsValue::from_str(&format!(
+                    "browser scene session start failed: {error}"
+                )));
                 self.host_mut()?.fail_external_session_start(pending, error);
                 self.ui_report(false, None).map_err(JsValue::from)
             }

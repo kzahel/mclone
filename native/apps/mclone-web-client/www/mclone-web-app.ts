@@ -1828,6 +1828,7 @@ class WebFrameDriver {
     try {
       db = await openWorldDb();
       execution = session.takeWorldCatalogExecution(requestId);
+      await execution.awaitWriterRetirements();
       await executeIndexedDbCatalogExecution(db, execution);
       await this.waitForSessionIdle();
       const completion = session.applyWorldCatalogExecution(requestId, execution);
