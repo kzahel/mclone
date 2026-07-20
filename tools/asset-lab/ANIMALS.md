@@ -223,13 +223,13 @@ reviewed rigs and then filling macro gaps.
 | Owl | P1 | ✅ | W | brown, snowy (white) | `examples/owl` — approved 15-box great horned owl with facial disc, layered wings, and tucked talons |
 | Parrot | P1 | ✅ | W | red, green, blue, yellow morphs | `examples/parrot` — approved 15-box scarlet macaw with hooked beak, saturated wing bands, and long tail |
 | Eagle / Hawk | P2 | ✅ | W | bald eagle (white head), hawk | `examples/eagle` — approved 15-box bald eagle with broad wings, white head/tail, hooked beak, and talons |
-| Penguin | P2 | ☐ | B | emperor, chick | waddle, not flight — biped |
+| Penguin | P2 | ✅ | B | emperor, chick | `examples/penguin` — approved 12-box emperor penguin with hanging flippers, broad webbed feet, and lateral body waddle |
 | Duck | P2 | ☐ | W/S | (see Farm) | |
 | Pigeon / Dove | P3 | ☐ | W | — | |
 | Crow / Raven | P3 | ☐ | W | — | |
-| Flamingo | P3 | ☐ | W | — | one-leg idle pose |
+| Flamingo | P3 | ✅ | W | — | `examples/flamingo` — approved 17-box greater flamingo with angular S-neck, two-stage stilt legs, and slow planted walk |
 | Songbird (robin/sparrow) | P3 | ☐ | W | color morphs | generic small-bird base |
-| Peacock | P3 | ☐ | W | — | tail fan showpiece |
+| Peacock | P3 | ✅ | W | — | `examples/peacock` — approved 22-box Indian peacock with crest, patterned wings, and parented seven-feather tail fan |
 | Ostrich / Emu | P3 | ☐ | B | — | flightless runner |
 
 ## Marine & aquatic

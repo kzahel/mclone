@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 56 |
-| total parts | 1,263 |
-| boxes | 1,058 |
+| figures | 59 |
+| total parts | 1,314 |
+| boxes | 1,109 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 141 |
-| parts with any texture reference | 202 |
-| individual texture applications | 330 |
+| ASCII textures | 151 |
+| parts with any texture reference | 223 |
+| individual texture applications | 358 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 38 | 721 | 721 | 0 / 0 / 0 |
+| canonical `examples/` | 41 | 772 | 772 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -421,7 +421,19 @@ sheets and four-cycle videos were rendered under
 posture, attachment continuity, limb or segment-wave motion, and loop
 continuity, and approved by the user on 2026-07-20.
 
-All 330 applications target an explicit face of a box. They range from single
+The seventh post-migration content batch adds Penguin, Flamingo, and Peacock
+as approved canonical box-only rigs. Penguin is a 12-part emperor penguin with
+hanging flippers, broad webbed feet, and a lateral body waddle; Flamingo is a
+17-part greater flamingo with an angular S-neck, two-stage stilt legs, and
+black-tipped beak; and Peacock is a 22-part Indian peacock with an iridescent
+neck, crest, patterned wings, and a parented seven-feather display fan. All 51
+parts are canonical boxes and use 10 combined pixel textures. Clean
+multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-7`, inspected for identity, grounding, attachment
+continuity, gait and secondary-motion cadence, and loop continuity, and
+approved by the user on 2026-07-20.
+
+All 358 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1245,10 +1257,11 @@ Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: its
 sources are isolated in the deprecated compatibility lane, and promoted
 Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle,
 Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, Camel/Gorilla/Kangaroo,
-and Crocodile/Sea Turtle/King Cobra content batches extend the canonical
-authoring roster to 38 without changing the promoted runtime set. Instancing
-is now the strongest independent performance candidate; box-part LOD and a
-measured sampled/GPU pose path remain separate follow-ups.
+Crocodile/Sea Turtle/King Cobra, and Penguin/Flamingo/Peacock content batches
+extend the canonical authoring roster to 41 without changing the promoted
+runtime set. Instancing is now the strongest independent performance
+candidate; box-part LOD and a measured sampled/GPU pose path remain separate
+follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
