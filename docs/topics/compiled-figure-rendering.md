@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 59 |
-| total parts | 1,314 |
-| boxes | 1,109 |
+| figures | 62 |
+| total parts | 1,367 |
+| boxes | 1,162 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 151 |
-| parts with any texture reference | 223 |
-| individual texture applications | 358 |
+| ASCII textures | 160 |
+| parts with any texture reference | 234 |
+| individual texture applications | 374 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 41 | 772 | 772 | 0 / 0 / 0 |
+| canonical `examples/` | 44 | 825 | 825 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -433,7 +433,18 @@ multi-angle sheets and four-cycle videos were rendered under
 continuity, gait and secondary-motion cadence, and loop continuity, and
 approved by the user on 2026-07-20.
 
-All 358 applications target an explicit face of a box. They range from single
+The eighth post-migration content batch adds Raccoon, Red Squirrel, and River
+Otter as approved canonical box-only rigs. Raccoon is an 18-part compact rig
+with a broad face mask, dark paws, and a four-stage ringed tail; Red Squirrel
+is an 18-part bound rig with deep haunches, tufted ears, and a three-stage
+plume tail; and River Otter is a 17-part elongated swimmer with four webbed
+paws and a two-stage lateral tail. All 53 parts are canonical boxes and use
+nine combined pixel textures. Clean multi-angle sheets and four-cycle videos
+were rendered under `/tmp/mclone-asset-lab/batch-8`, inspected for identity,
+grounding or swim posture, attachment continuity, gait or paddle cadence, and
+loop continuity, and approved by the user on 2026-07-20.
+
+All 374 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1258,10 +1269,10 @@ sources are isolated in the deprecated compatibility lane, and promoted
 Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle,
 Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, Camel/Gorilla/Kangaroo,
 Crocodile/Sea Turtle/King Cobra, and Penguin/Flamingo/Peacock content batches
-extend the canonical authoring roster to 41 without changing the promoted
-runtime set. Instancing is now the strongest independent performance
-candidate; box-part LOD and a measured sampled/GPU pose path remain separate
-follow-ups.
+plus Raccoon/Red Squirrel/River Otter extend the canonical authoring roster to
+44 without changing the promoted runtime set. Instancing is now the strongest
+independent performance candidate; box-part LOD and a measured sampled/GPU
+pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
