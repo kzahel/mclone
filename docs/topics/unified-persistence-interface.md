@@ -2,20 +2,18 @@
 
 Topic: `unified-persistence-interface`
 
-Status: accepted and active, 2026-07-20. Tactical
-[`199`](../tactical/199-unified-persistence-interface.md) owns the explicitly
-authorized autonomous implementation campaign. This topic does not supersede
-the durable architecture in
+Status: implemented 2026-07-20. Tactical
+[`199`](../tactical/199-unified-persistence-interface.md) is the completed
+execution record. This topic does not supersede the durable architecture in
 [`persistence-architecture.md`](../persistence-architecture.md).
 
-Implementation status, 2026-07-20: the typed generic record contract,
-memory/null live mailbox cutover, SQLite executor adaptation, explicit
-read-only SQLite inspector, world-scoped native writer lease, and guarded
-native deletion path are landed. Production browser worlds now use the generic
-IndexedDB executor under a world-scoped Web Lock; catalog deletion takes the
-same lease, and the old domain-specific mirror/load/dirty TypeScript bridge has
-been removed. Lifecycle, quota, cross-platform, and closeout validation remain
-active in Tactical 199.
+The engine now uses one typed Rust completion port over shared coordination and
+generic memory/null, SQLite, and IndexedDB record executors. Native and browser
+worlds hold world-scoped OS/Web Lock writer leases. Production browser worlds
+have no domain-specific mirror/load/dirty TypeScript bridge or alternate old
+runtime path. Typed quota failure, save-unhealthy latching, storage
+observability, graceful retirement fencing, and platform acceptance are also
+complete.
 
 ## Scope
 
@@ -34,7 +32,7 @@ World-catalog policy, managed-content provisioning, migration UX, cloud saves,
 and server administration remain separate higher-level concerns even when they
 eventually reuse the same low-level storage machinery.
 
-## Proposed Direction
+## Implemented Direction
 
 > The engine owns persistence semantics through one Rust interface. Each
 > platform injects a storage strategy beneath that interface. Platform adapters
@@ -66,11 +64,11 @@ platform record executor
        SQLite         IndexedDB      filesystem      memory/null
 ```
 
-This is principally a completion of the direction already established in
+This result completes the direction already established in
 [`persistence-architecture.md`](../persistence-architecture.md) and Tactical
 [`134`](../tactical/134-shared-persistence-architecture.md), not a replacement
-architecture. The live engine has much of the top half. The browser path has
-not yet completed the bottom-half backend boundary.
+architecture. The live engine and browser path now share both the typed upper
+port and the generic lower executor boundary.
 
 ## Ownership Contract
 
@@ -230,7 +228,7 @@ read-only simulation. Read-only previews and observer sessions are useful
 features, but they need explicit authority and freshness semantics and should
 not be invented as persistence-error recovery.
 
-### Recommended first lock mechanisms
+### Implemented lock mechanisms
 
 Do not implement authority as a durable boolean, PID record, heartbeat, or
 “lock file exists” check. Those schemes require stale-lock recovery and can
@@ -241,9 +239,11 @@ On native hosts:
 
 1. Create/open a stable `world.writer.lock` file inside the world directory
    without truncating or deleting it.
-2. Call the standard library's nonblocking `File::try_lock()` before opening a
-   writer-capable SQLite store. `WouldBlock` becomes the typed
-   `WorldAlreadyOpen` result; other IO failures remain storage failures.
+2. Take a nonblocking OS file lock before opening a writer-capable SQLite
+   store. Desktop/dedicated hosts use `File::try_lock()`; Android uses the
+   equivalent safe `fs4`/rustix adapter because Rust 1.92 returns
+   `Unsupported` there. `WouldBlock` becomes typed `LeaseConflict`; other IO
+   failures remain storage failures.
 3. Move the uncloneable file handle into the persistence actor beside the
    SQLite connection. The actor is the `WorldWriteLease` owner.
 4. Only after acquisition, optionally rewrite owner diagnostics such as a
@@ -255,13 +255,12 @@ On native hosts:
    possible; a separately explicit forced-abandon path may drop it after
    reporting potential save loss.
 
-Rust 1.92 already provides the cross-platform file-lock API used by this
-workspace. Closing or dropping the file handle releases the OS lock, including
-on process crash; the inert lock file may remain forever without blocking
-anyone. Keeping one stable file is important: deleting and recreating a locked
-path can produce two different underlying files on some systems. Native world
-directories on network filesystems need separate qualification because both
-SQLite and advisory-lock behavior may differ from local app storage.
+Closing or dropping the file handle releases the OS lock, including on process
+crash; the inert lock file may remain forever without blocking anyone. Keeping
+one stable file is important: deleting and recreating a locked path can produce
+two different underlying files on some systems. Native world directories on
+network filesystems need separate qualification because both SQLite and
+advisory-lock behavior may differ from local app storage.
 
 On web hosts:
 
@@ -342,35 +341,33 @@ platform documents what its strongest committed state can actually guarantee;
 it must not pretend that an IndexedDB transaction completion is literally the
 same hardware guarantee as a particular SQLite/fsync sequence.
 
-## Current State Research
+## Implemented State
 
 ### Shared and native Rust
 
-The live server already has most of the desired engine-facing shape in
+The live server owns the engine-facing shape and the physical executor seam in
 `native/crates/mclone-server/src/persistence.rs`:
 
 - `WorldStoreRequest` and `WorldStoreCompletion` carry typed, tokened logical
   operations;
-- `PersistenceMailbox` presents inline, external-load, and native-threaded
-  execution modes behind one caller surface;
-- the actors implement pending-write visibility, coalescing, durability-aware
-  scheduling, flush, and close behavior;
-- `WorldStore` covers metadata, dimensions, chunks, entity chunks, players,
-  flush, and close;
-- `NullWorldStore` and `MemoryWorldStore` provide transient/test strategies;
-  and
-- `SqliteWorldStore` supplies durable native storage and can run on the
-  threaded mailbox path.
+- `PersistenceMailbox` and its actor own pending-write visibility, revision
+  precedence, bounded coalescing, durability lanes, flush, close, and typed
+  completion correlation;
+- `PersistenceRecordRequest`/`PersistenceRecordResponse` define generic
+  namespaces, owned key parts and payloads, atomic commits, probes, flush, and
+  close;
+- `RecordExecutorWorldStore` translates between typed records/codecs and the
+  executor contract;
+- memory/null mailboxes run through generic executors with deterministic fault
+  injection; and
+- `SqliteRecordExecutor` supplies the same contract on the threaded native
+  path without changing schema version 2, keys, record bytes, WAL, or
+  checkpoint behavior.
 
-This is strong feasibility evidence: the authoritative engine is already
-largely insulated from SQLite and from synchronous native IO. The current
-`WorldStore` trait is synchronous beneath an actor, which is suitable for the
-native executor but not by itself a complete asynchronous-backend abstraction.
-
-The logical record surface is not fully finished. `SavedData` is reserved on
-the request/key side but lacks the complete load/save path, and batching is
-mostly an internal actor behavior rather than an explicit backend transaction
-contract. Those are normal contract gaps, not evidence against the design.
+`SavedData` remains an explicit reserved unsupported engine family. Its generic
+namespace and SQLite table remain reserved, but making it live in IndexedDB
+would require a physical schema decision and no current consumer requires it.
+This is deliberate capability honesty rather than an incomplete request path.
 
 ### Android and Quest persistence
 
@@ -411,6 +408,13 @@ same lease around record clearing and catalog removal. A real same-profile
 second-tab contention proof rejects the second lease, while graceful reload
 and document/Worker destruction permit reacquisition.
 
+On graceful replacement, the Worker releases its Web Lock before posting
+`shutdown-complete`. A Rust-owned same-page retirement registry makes a new
+Worker or catalog delete for that exact world await the acknowledgement with a
+bounded timeout. Startup failures are not registered as retirements, fatal
+Worker errors terminate the Worker, and independent tabs continue to receive
+immediate conditional lock rejection.
+
 ### Existing browser proof of the thinner boundary
 
 Tactical [`198`](../tactical/198-opaque-websocket-and-indexeddb-adapters.md)
@@ -432,8 +436,8 @@ The integrated-server store has more throughput and lifecycle pressure than
 the catalog, so this is feasibility evidence rather than a sufficient
 performance proof. It substantially reduces the architectural uncertainty.
 
-The completed Tactical 198 browser evidence also gives a useful behavioral
-baseline for a future cutover. Ordinary IndexedDB mutation/reopen passed, and
+The completed Tactical 198 browser evidence supplied the behavioral baseline
+for the cutover. Ordinary IndexedDB mutation/reopen passed, and
 the periodic `flat-grass-v1`/`cylinder-x:32` fixture reopened 121 chunks, two
 entity chunks, and one dimension record while recovering the same block state
 at canonical X 0 and lifted X 512. The catalog proof covered real constraint
@@ -441,70 +445,45 @@ abort recovery, concurrent record-played/delete non-resurrection, and record
 cleanup. A replacement backend should preserve these outcomes rather than
 define a smaller web contract.
 
-### Browser exclusivity, quota, and eviction gaps
+### Browser durability and storage-policy limits
 
-The current browser catalog tracks the active world only inside one running
-application. It has no cross-tab world lease. Its IndexedDB `onblocked` handler
-only rejects a blocked schema-version upgrade; it does not prevent two tabs
-from opening and writing the same existing world. Native catalog opening also
-has no explicit cross-process world lease. Both need the single-writer
-admission contract above.
+Cross-tab authority and quota mechanics are implemented. Every persistent
+world has one conditional Web Lock, and `PersistenceErrorKind` distinguishes
+quota, unavailable access, lease conflict, corrupt/incompatible data,
+closed/cancelled work, and backend failure while retaining diagnostics. The
+first durable executor failure latches the writer save-unhealthy so later work
+cannot make it appear healthy.
 
-Browser storage currently also has no persistent-storage request or explicit
-quota policy. IndexedDB errors ultimately become broad storage failures, and
-`ChunkStoreError` currently distinguishes only IO, invalid-data, and closed
-states. A future shared storage error vocabulary should at least distinguish
-quota exhausted, access denied/unavailable, lease conflict, corrupt or
-incompatible data, and closed/cancelled work while retaining backend details
-for diagnostics.
+The adapter exposes current usage/quota, `StorageManager.persisted()`, and an
+explicit persistence-request hook. Startup deliberately does not request
+persistent storage or claim a durability grant. Best-effort browser storage
+can still be evicted outside a normal close; deciding when to request a grant
+and what recovery UX to offer remains product policy above this executor.
 
-Best-effort browser storage may be cleared or evicted independently of normal
-world close, and a quota failure can occur partway through an autosave. The UI
-must never continue to report healthy saving after a durable write or flush has
-failed. Whether the app proactively requests persistent browser storage is a
-product policy above the executor; the adapter should report availability and
-the request result without deciding when to prompt or warn.
+### Implemented result
 
-### Resulting gap
+The reusable asynchronous record-executor middle is complete. The shared
+coordinator drives IndexedDB directly through owned requests/completions, and
+the web memory-mirror/external-load/dirty-record protocol no longer exists.
 
-The project therefore has both ends of the desired design:
+## Implementation Assessment
 
-- a shared typed engine mailbox and mature native backend; and
-- a working generic Rust-authored IndexedDB transaction executor pattern.
+The result confirms the design was feasible without converting gameplay to
+promises, changing SQLite or IndexedDB formats, adopting shared Wasm memory, or
+retaining a dual runtime. Memory/SQLite controls and the ordinary catalog
+continuation made the higher-risk ordering and IndexedDB transaction-lifetime
+work testable before the production cut.
 
-The missing middle is a reusable asynchronous record-executor boundary that
-lets the existing persistence coordinator drive IndexedDB directly, eliminating
-the web memory-mirror/external-load/dirty-record protocol.
+The main implementation risks were real: coordinator semantics had to survive
+extraction, browser handoff needed an explicit retirement acknowledgement, and
+Rust's standard file-lock API proved unsupported on Android. The campaign
+resolved them inside the fixed contract. Android uses `fs4`'s safe rustix
+adapter for the same OS-owned lifetime lock; no platform silently runs without
+writer admission.
 
-## Feasibility Assessment
+## Completed Migration Sequence
 
-The direction appears feasible with moderate implementation risk and low
-research risk.
-
-The core semantic model is already completion-based, so the engine does not
-need to be converted from synchronous gameplay calls to promises. SQLite,
-memory, and null backends provide controls against which a new executor can run
-a shared conformance suite. The ordinary catalog provides an in-repository
-proof for the hardest IndexedDB transaction-lifetime constraint.
-
-The work is still a coherent refactor rather than a mechanical cleanup. The
-current actors combine coordinator behavior with calls to a synchronous
-`WorldStore`; extracting the executor seam must preserve pending-read behavior,
-revision ordering, save acknowledgements, barriers, and shutdown. The web
-cutover must avoid running the mirror bridge and the new backend concurrently.
-
-No fundamental browser limitation requires the current duplication. IndexedDB
-being asynchronous determines the adapter’s execution shape; it does not need
-to determine who owns record meaning or persistence policy.
-
-Single-writer admission and quota UX are adjacent gaps exposed by this review,
-not reasons to keep the mirror bridge. The executor seam is an appropriate
-place to carry their typed mechanism and failures, while the catalog/session
-and UI layers retain the corresponding product decisions.
-
-## Suggested Migration Sequence
-
-This is a proposed review sequence, not an approved tactical.
+Tactical 199 completed the approved sequence:
 
 1. **Freeze the semantic contract and evidence.** Record current request,
    completion, revision, durability, version compatibility, flush, close, and
@@ -516,7 +495,7 @@ This is a proposed review sequence, not an approved tactical.
 3. **Adapt memory/null and SQLite first.** These are the control backends. The
    native SQLite format, threading, reopen behavior, and performance should
    remain unchanged.
-4. **Build the IndexedDB executor behind the same seam.** Prefer a Rust-owned
+4. **Build the IndexedDB executor behind the same seam.** Use a Rust-owned
    plan/continuation with a small TypeScript transaction executor, reusing the
    Tactical 198 pattern. Do not redesign Worker or Wasm-memory topology.
 5. **Cut over one complete browser world.** Route metadata, dimensions,
@@ -534,11 +513,15 @@ This is a proposed review sequence, not an approved tactical.
    interface should permit them; the first campaign need not implement every
    possible backend.
 
-Avoid a long-lived runtime fallback between the old and new browser paths. A
-dual implementation would weaken the very ownership and parity guarantees this
-proposal is meant to establish.
+Steps 1-6 are complete. Step 7 remains a deliberate later cost/benefit
+decision, and step 8 remains consumer-driven. No long-lived old/new browser
+fallback was retained.
 
-## Validation Required By A Future Tactical
+## Acceptance Contract And Evidence
+
+The following remains the durable acceptance contract. Tactical 199 satisfied
+the applicable controls; its execution record owns exact commands, counts,
+timings, screenshots, and platform caveats.
 
 ### Shared conformance
 
@@ -614,8 +597,10 @@ Run one behavioral suite against every backend that claims the capability:
 - Attempt a second-tab writable open and verify the chosen conflict UX and
   absence of writes from the rejected session.
 - Inject quota exhaustion deterministically and verify a typed failure,
-  persistent save-unhealthy state, and visible user notification. Add a bounded
-  isolated-origin fill-toward-quota probe where browser automation permits.
+  persistent save-unhealthy state, and no later false-success completion. A
+  user-facing recovery flow remains separately reviewed product policy. Add a
+  bounded isolated-origin fill-toward-quota probe where browser automation
+  permits.
 - Record whether persistent browser storage is available/requested/granted and
   prove that denial does not masquerade as a durable guarantee.
 - Preserve catalog constraint-abort and non-resurrection coverage.
@@ -708,7 +693,7 @@ path for existing IndexedDB worlds. IndexedDB remains the lower-risk first
 cut because the schema, persisted test data, and Rust-owned transaction-plan
 proof already exist.
 
-The proposed executor seam makes this alternative cheaper rather than locking
+The implemented executor seam makes this alternative cheaper rather than locking
 it out. A measured OPFS/SQLite strategy could later replace or complement
 IndexedDB without changing the authoritative engine port or persistence
 coordinator.
@@ -716,7 +701,7 @@ coordinator.
 ### Use one lowest-common-denominator database API everywhere
 
 A universal SQL-like or IndexedDB-like API would make the abstraction broad,
-leaky, and likely to hold native storage back. The proposed interface unifies
+leaky, and likely to hold native storage back. The implemented interface unifies
 engine semantics, not physical database features.
 
 ### Make the engine `async` over a storage trait
@@ -738,40 +723,34 @@ The completion port is the shared asynchronous abstraction.
 - Changing record codecs or the IndexedDB schema merely to create the seam.
 - Promising zero-copy persistence.
 
-## Review Questions Before A Tactical
+## Resolved Gate Decisions
 
-1. Should the existing `PersistenceMailbox` and actors be refactored in place,
-   or should the coordinator become a small shared persistence crate while
-   preserving the mailbox facade in `mclone-server`?
-2. What is the minimal executor operation set for the first opened-world
-   cut—individual reads plus atomic write batches, or a more general explicit
-   transaction plan from the start?
-3. Which operations require cross-namespace atomicity, and what precise
-   guarantee does each backend claim for them?
-4. Should the first browser cut keep physical IndexedDB schema/version
-   management in TypeScript, with Rust owning only stable store identifiers and
-   record codecs? This draft recommends yes.
-5. Is ordinary catalog reuse part of the first campaign or a later cleanup?
-   This draft recommends later; the existing catalog continuation is already a
-   good proof and need not block world persistence.
-6. Which performance and shutdown thresholds should be hard gates for deleting
-   the old bridge?
-7. Should web request persistent browser storage automatically when a user
-   creates or first opens a durable local world, only expose a settings action,
-   or defer the request until real quota/eviction evidence? Regardless, an
-   actual quota failure must become visible save-unhealthy state.
+1. The coordinator and mailbox were refactored in place in `mclone-server`;
+   this campaign did not create a new shared crate.
+2. The executor vocabulary is reads, probes, explicit atomic put/delete
+   batches, flush, close, owned completions, and stable typed failures.
+3. A commit batch is apply-all-or-none across the namespaces it contains.
+   Memory fault injection, SQLite transactions, and one IndexedDB transaction
+   prove that contract.
+4. Physical IndexedDB v6 schema/version management remains TypeScript browser
+   mechanics. Rust owns stable namespace ids, keys, codecs, and policy.
+5. Catalog policy remains separate. It reuses the exact writer lease for
+   deletion and same-page retirement fencing, but managed/catalog long-tail
+   executor reuse is deferred.
+6. The old bridge could be removed only after native controls and production
+   browser reopen passed without a material frame/tick/storage regression.
+7. Browser persistent-storage request timing remains an explicit product hook;
+   startup does not prompt. Actual quota failure is typed and permanently
+   latches that writer save-unhealthy.
 
-## Recommended Review Outcome
+## Completed Review Outcome
 
-Approve the architectural principle and authorize a bounded contract/conformance
-study before authorizing the browser cutover. The first reviewable product
-change should leave all engine call sites and native SQLite behavior intact
-while demonstrating that memory and SQLite can run through the extracted
-executor seam. The IndexedDB cut should proceed only once those semantics are
-locked, then remove the old bridge rather than preserve it as an alternate
-production path. Record the second-opener and browser save-failure UX decisions
-before that cutover; neither decision needs to delay the memory/SQLite seam
-proof.
+The architecture and full Tactical 199 cutover are accepted. Engine call sites,
+SQLite schema/bytes, IndexedDB version/stores/keys, and private Wasm-memory
+topology were preserved. The old browser bridge was deleted in the production
+cut, and lifecycle/lease/quota/platform evidence passed. Further catalog or
+managed-storage reuse is a new cost/benefit decision rather than unfinished
+work in this campaign.
 
 ## Related Documents And Code
 
@@ -787,17 +766,23 @@ proof.
   completed Rust-owned ordinary-catalog continuation and generic IndexedDB
   executor proof.
 - [`mclone-server/src/persistence.rs`](../../native/crates/mclone-server/src/persistence.rs):
-  live typed requests/completions, actors, mailbox, and native stores.
+  typed requests/completions, coordinator, generic record contract, SQLite
+  executor, and native writer leases.
 - [`web_server_worker.rs`](../../native/apps/mclone-web-client/src/web_server_worker.rs):
-  live browser mirror store, external-load bridge, and dirty-record projection.
+  Rust record translation, Worker lifecycle, and exact-world retirement fence.
 - [`mclone-integrated-server-worker.ts`](../../native/apps/mclone-web-client/www/mclone-integrated-server-worker.ts):
-  live IndexedDB opened-world mechanics and remaining domain-aware bridge.
+  generic request service, executor event loop, and Web Lock lifetime.
+- [`mclone-web-persistence-executor.ts`](../../native/apps/mclone-web-client/www/mclone-web-persistence-executor.ts):
+  domain-blind IndexedDB namespace/key/opaque-byte executor.
+- [`mclone-web-world-lease.ts`](../../native/apps/mclone-web-client/www/mclone-web-world-lease.ts):
+  generic Web Lock acquisition and release mechanics.
 - [`web_catalog_execution.rs`](../../native/apps/mclone-web-client/src/web_catalog_execution.rs)
   and
   [`mclone-web-world-catalog.ts`](../../native/apps/mclone-web-client/www/mclone-web-world-catalog.ts):
   existing Rust-continuation/thin-IDB-executor feasibility proof.
 - [Rust `File::try_lock`](https://doc.rust-lang.org/stable/std/fs/struct.File.html#method.try_lock):
-  cross-platform nonblocking native lifetime-lock contract.
+  standard native nonblocking lifetime lock; Android uses the equivalent safe
+  `fs4`/rustix adapter because Rust 1.92 returns `Unsupported` on that target.
 - [W3C Web Locks API](https://w3c.github.io/web-locks/): browser Worker lock
   scope, callback-promise lifetime, conditional acquisition, and termination
   release contract.

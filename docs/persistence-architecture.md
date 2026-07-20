@@ -419,12 +419,32 @@ saved_data
 OPFS remains a possible later backend, but IndexedDB is the most practical first
 portable browser path.
 
-The current IndexedDB v5 adapter stores one Rust-codec-owned `worldMetadata`
-byte record keyed by world id and preloads it before the worker starts world
-generation. Autosave, page-background lifecycle, and graceful worker shutdown
-queue metadata through the completion-driven store bridge. Per-world deletion,
-delete-all local worlds, and factory reset remove the singleton with the other
-world records.
+The current IndexedDB v6 adapter implements the shared generic record executor
+over the existing `worldMetadata`, `dimensions`, `dimensionChunks`,
+`dimensionEntityChunks`, and `players` stores. Rust owns record addresses,
+codecs, revisions, durability, bootstrap, and typed completions. The Worker
+TypeScript maps stable namespace ids and key parts to those physical stores,
+executes atomic opaque-byte transactions, and reports browser errors; it does
+not decode records or own save policy.
+
+Each writer-capable browser world holds one Rust-named exclusive Web Lock from
+before database bootstrap through durable close. Catalog deletion takes the
+same world lease around record clearing and catalog removal. Autosave,
+page-background flush, and graceful shutdown all run through the completion
+port. Per-world deletion, delete-all local worlds, and factory reset retain
+their existing ordinary/managed storage domains.
+
+Normal shutdown releases the Web Lock before reporting `shutdown-complete`.
+The Rust browser host retains an exact-world same-page retirement fence so a
+replacement session or catalog delete waits for that acknowledgement rather
+than racing the retiring Worker. Other tabs retain immediate conditional lock
+rejection; the fence is not a queued cross-tab admission policy.
+
+Browser storage remains a weaker durability environment than native fsync:
+quota exhaustion is a typed fatal writer failure, and best-effort storage may
+be evicted. The adapter exposes `StorageManager.persisted()`, usage/quota, and
+an explicit persistence-request hook, but startup does not prompt or claim a
+grant it has not received.
 
 The browser adapter uses `players` records keyed by world id plus the stable
 local profile UUID, parallel to native SQLite. The client-global UUID itself is
@@ -438,8 +458,12 @@ separate deletion domains.
 Use app-private storage. The platform app supplies the world root/open handle;
 shared persistence code owns record format and policy.
 
-SQLite per world is also the likely first Android backend. It avoids exposing
-gameplay policy to Android app glue and maps well to app-local storage.
+SQLite per world is the live Android and Quest backend. The shared threaded
+coordinator, generic executor adapter, and world-scoped OS lock are the same as
+desktop/dedicated native; Android app glue supplies only the app-private root
+and lifecycle signals. Rust 1.92 does not implement its standard file-lock API
+on Android, so that target uses `fs4`'s safe rustix adapter for the same
+OS-owned `flock` lifetime instead of weakening admission.
 
 ## Versioning And Migration
 

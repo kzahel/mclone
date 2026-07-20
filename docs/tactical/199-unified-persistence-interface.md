@@ -1,7 +1,7 @@
 # Tactical 199: Unified Persistence Interface
 
-Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-5
-are complete and Slice 6 is next.
+Status: complete 2026-07-20. The full authorized campaign, Slices 0-8, is
+landed and accepted.
 
 Topic: `unified-persistence-interface`
 
@@ -392,9 +392,10 @@ Evidence and implementation:
 - `WebIndexedDbWorldStoreState`, `WebIndexedDbWorldStore`, the old
   `indexedDbLoadRequests`, five dirty-record projections, and the TypeScript
   chunk/entity/player/dimension/metadata switchboard were deleted. The
-  integrated Worker fell from 919 to 565 lines; the physical generic executor
-  is isolated in a 325-line module and the reusable Web Lock adapter is 51
-  lines.
+  integrated Worker fell from 919 to 565 lines at the cutover milestone; the
+  physical generic executor was isolated in a 325-line module and the reusable
+  Web Lock adapter was 51 lines. Slice 6's lifecycle work produced the final
+  counts recorded in Slice 7.
 - Ordinary catalog delete and delete-all continuations now publish their
   required Rust-authored world lease names. TypeScript briefly holds those
   exact leases across record clear and catalog deletion; list/open/create do
@@ -416,8 +417,7 @@ Evidence and implementation:
 
 ## Slice 6: Lifecycle, Quota, And Lease Recovery
 
-Status: active 2026-07-20; browser failure and lease recovery are complete,
-with Android/Quest platform gates retained in Slice 7.
+Status: complete 2026-07-20.
 
 - normal close drains all prior durable work before releasing either lock;
 - worker/process termination releases locks and permits reacquisition;
@@ -456,10 +456,19 @@ Evidence so far:
   same-world conflict, while a second app session for another world became
   ready and shut down cleanly. Reload then proved termination/release and
   reacquisition by the original world identity.
+- Graceful Worker shutdown now releases the world Web Lock before posting
+  `shutdown-complete`. Rust retains the shutdown closures and registers an
+  exact-world same-page retirement fence only for successfully started
+  persistent Workers.
+- Replacement Workers and Rust-authored catalog delete await that retirement
+  for at most 30 seconds. Fatal Worker errors terminate the Worker, while
+  independent tabs retain immediate conditional Web Lock rejection. The
+  catalog create/switch/reopen/delete smoke exposed the original race and
+  passed after the fence covered both session and catalog admission.
 
 ## Slice 7: Cross-Platform Acceptance And Performance
 
-Status: planned.
+Status: complete 2026-07-20.
 
 Required evidence:
 
@@ -482,9 +491,59 @@ world state; screenshots stay under `/tmp`.
 Exit: behavior, durability, lifecycle, and performance are accepted across all
 affected platform boundaries.
 
+### Final evidence
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-server
+  -p mclone-app-runtime -p mclone-web-client` passed 525 server tests, 293
+  app-runtime tests, 47 web unit tests, and every web ABI/catalog/scenario lock.
+  The wasm target check, final TypeScript typecheck, and Worker-ownership check
+  also passed.
+- SQLite executor, schema/migration, read-only inspection, same-process and
+  subprocess contention, crash release, stale diagnostics, guarded deletion,
+  and different-world positive controls passed. The deterministic shared
+  `native_runner_flush_persistence_is_visible_before_shutdown` regression also
+  passed, preserving the second-reader/background barrier from Tactical 168.
+- Ordinary production IndexedDB reopen passed with 121 chunks, two entity
+  chunks, one dimension, one metadata record, 124 total records, a recovered
+  block edit, and recovered player statistic. It also proved same-world full
+  session conflict, different-world concurrency, typed real quota exhaustion,
+  executor atomic rejection, and a 20.4 ms maximum browser frame gap.
+- The `flat-grass-v1`/`cylinder-x:32` reopen passed with the same record counts
+  and recovered canonical/lifted seam edit. Catalog create/switch/reopen/delete,
+  managed cancellation/concurrency/repair/corrupt-refusal/isolation, and the
+  full browser app smoke passed. The IndexedDB, catalog, and app captures under
+  `/tmp` were inspected and showed healthy textured world/UI output.
+- The authored browser surface is 5,873 TypeScript lines in 17 modules, 187
+  above the frozen 5,686-line baseline. The integrated Worker is 570 lines
+  versus 919 before the cut; the generic executor is 471 and Web Lock adapter
+  51. All 38 ownership entries report zero domain debt and the seven-copy
+  ledger is unchanged.
+- The persisted-SQLite loading sample on the M4 measured 592.686 ms to ready,
+  687.349 ms settled, 892.547 ready chunks/s, 769.624 settled chunks/s, zero
+  regeneration/light work, and a 14.579 ms maximum poll. This is healthy
+  against the recorded 572/721 ms, 925/733.7 chunks/s, and 30.172 ms baseline;
+  no material native regression is present.
+- Flat Android arm64 and x86_64 APK builds passed, as did the Quest XR release
+  APK build. The arm64 API 34 AVD created and rendered a live SQLite world,
+  then passed the full place/quit/force-stop/relaunch/reopen smoke; the recovered
+  frame visibly contained the placed stone block and `PLACED 1` statistic.
+- That AVD proof caught Rust 1.92 returning `Unsupported` for its file-lock API
+  on Android. The final implementation keeps the same OS-owned `flock`
+  lifetime through `fs4`'s safe rustix adapter. It also repaired stale shared
+  Android smoke coordinates and log wording so the gate exercises current UI.
+- No Quest was attached for a fresh device Pause/Stop timing sample. No Android
+  lifecycle code changed; both APK lanes, the flat AVD restart, and the shared
+  deterministic flush-before-shutdown regression are green. The pre-existing
+  worn-device spot check remains a non-blocking platform follow-up from
+  Tactical 168 rather than an unproven coordinator contract.
+- This campaign ran on macOS. Cross-platform standard-library lock tests cover
+  process exit and guarded delete ordering; the explicit Windows host smoke
+  remains batched for the next Windows session, as allowed by the host-specific
+  gate. No Windows-only code or schema changed.
+
 ## Slice 8: Closeout
 
-Status: planned.
+Status: complete 2026-07-20.
 
 - update the topic with final contracts, code map, evidence, and remaining
   deliberately deferred work;

@@ -576,6 +576,34 @@ hypothetical shared heap has not been designed or proven, and the required
 human architecture review has not occurred. No shared-memory tactical is
 therefore opened.
 
+## Subsequent Persistence Boundary
+
+The later human-authorized Tactical 199 cut completed integrated-server
+persistence without changing the private-Wasm-memory or SAB posture above.
+Rust authors generic record reads, probes, atomic commits, flushes, closes,
+addresses, revisions, codecs, and typed completions. The Worker executes
+opaque-byte IndexedDB transactions and one world-keyed Web Lock; it no longer
+switches on chunk, entity, player, dimension, or metadata operations.
+
+The domain-specific mirror/load/dirty bridge is gone. The integrated-server
+Worker fell from 919 to 570 lines. Isolating the generic 471-line IndexedDB
+executor and 51-line Web Lock adapter puts total authored TypeScript at 5,873
+lines across 17 modules, 187 above Tactical 198's frozen 5,686-line baseline.
+That increase is browser mechanics, error mapping, persistence/quota
+observability, and metrics rather than engine meaning. The 38-entry ownership
+ledger keeps all domain persistence debts at zero.
+
+Rust also owns same-page retirement coordination. A world-keyed retirement
+fence waits for the old Worker to drain, release its Web Lock, and report
+`shutdown-complete` before a replacement Worker or catalog delete proceeds.
+Independent tabs still use immediate conditional Web Lock admission and cannot
+wait their way into a second authority.
+
+This is the intended middle ground from this topic: real Rust lifecycle and
+coordination policy with private Wasm heaps, owned completion values, and
+small platform executors. It introduced no shared Rust heap, mailbox inside
+Wasm linear memory, new Worker, or additional SAB copy site.
+
 ## Validation And Evidence
 
 Worker-convergence slices must preserve:
@@ -624,6 +652,8 @@ ownership checks and unchanged behavior/performance evidence are load-bearing.
   browser host/service cutover evidence.
 - [`../tactical/197-domain-blind-web-worker-broker.md`](../tactical/197-domain-blind-web-worker-broker.md):
   completed implementation and closeout record.
+- [`../tactical/199-unified-persistence-interface.md`](../tactical/199-unified-persistence-interface.md):
+  generic persistence executor and browser world-lease campaign.
 
 Primary implementation surfaces:
 
@@ -642,6 +672,8 @@ Primary implementation surfaces:
 - `native/apps/mclone-web-client/www/mclone-render-compiler-worker.ts`
 - `native/apps/mclone-web-client/www/mclone-worker-transport.ts`
 - `native/apps/mclone-web-client/www/mclone-integrated-server-worker.ts`
+- `native/apps/mclone-web-client/www/mclone-web-persistence-executor.ts`
+- `native/apps/mclone-web-client/www/mclone-web-world-lease.ts`
 - `native/apps/mclone-web-client/www/mclone-server-job-worker.ts`
 - `scripts/check-web-scene-host-adoption.mjs`
 - `scripts/check-web-worker-ownership.mjs`
@@ -649,7 +681,8 @@ Primary implementation surfaces:
 ## Recommended Next Work
 
 No automatic continuation is recommended. Keep the ownership and scene-host
-checks as regression gates. Do not continue into managed provisioning,
-integrated-server persistence, shared Wasm memory, or browser-native long-tail
-movement without a new human decision and a focused tactical supported by
-specific ownership or measured performance evidence.
+checks as regression gates. Integrated-server persistence is complete under
+Tactical 199; do not continue into managed provisioning, shared Wasm memory,
+or browser-native long-tail movement without a new human decision and a
+focused tactical supported by specific ownership or measured performance
+evidence.
