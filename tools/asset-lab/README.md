@@ -35,9 +35,9 @@ move the floor backward by the authored cycle distance so foot sliding is easy
 to see.
 
 The batch command discovers `examples/*/figure.ts`, exports each asset, renders
-each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. The initial
-batch contains `piglet`, `sheep`, `dog`, `cat`, `butterfly`, `player`,
-`bearfolk`, and `lionfolk`.
+each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. New example
+directories are included automatically; [`ANIMALS.md`](ANIMALS.md) is the
+current animal catalog and conversion queue.
 
 The compare command renders the same canonical semantic JSON through Three.js
 and the shared native startup-prepared renderer. It writes corresponding raw

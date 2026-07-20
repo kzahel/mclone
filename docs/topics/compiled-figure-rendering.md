@@ -98,8 +98,8 @@ was an orphaned, directly edited JSON asset; it now has a DSL source, with its
 geometry and explicit animation keys preserved and only obsolete locomotion
 metadata normalized. `asset-lab:figures:check` covers all three promoted
 figures, rejects stale output, and rejects any promoted figure JSON without a
-declared source. All 21 current Asset Lab examples also pass a discovered
-source-to-canonical-JSON round-trip test; the other 18 are authoring examples,
+declared source. All 25 current Asset Lab examples also pass a discovered
+source-to-canonical-JSON round-trip test; the other 22 are authoring examples,
 not checked runtime assets, so they have no second file to drift against.
 
 Three.js still uses `BoxGeometry`, `SphereGeometry`, `CapsuleGeometry`, and
@@ -146,11 +146,16 @@ native cuboid approximations, and will change as source figures are revised.
 | piglet | 14 | 809 | 1,052 |
 | dog | 18 | 991 | 1,268 |
 | chicken | 21 | 2,209 | 3,108 |
+| chicken_blocky | 14 | 336 | 168 |
 | cow | 38 | 1,946 | 2,208 |
 | rabbit | 25 | 3,050 | 4,640 |
+| rabbit_blocky | 18 | 432 | 216 |
+| butterfly | 17 | 1,816 | 2,516 |
+| butterfly_blocky | 9 | 216 | 108 |
 | elephant | 38 | 2,894 | 3,756 |
 | elephant_blocky | 40 | 960 | 480 |
 | tiger | 86 | 3,648 | 3,856 |
+| tiger_blocky | 20 | 480 | 240 |
 
 These are not extremely large meshes, but most rounded animals are already
 well above vanilla cuboid-mob geometry. The cost also multiplies by visible
@@ -159,13 +164,27 @@ make CPU world-space rebaking a prerequisite for later, richer figure assets.
 
 ### Box-only animal style A/B
 
-The elephant now has two retained authoring examples for direct style review:
+The elephant, tiger, rabbit, chicken, and butterfly now have retained
+authoring pairs for direct style review:
 
 - `examples/elephant` uses spheres, capsules, cylinders, and boxes for a
   rounded interpretation; and
 - `examples/elephant_blocky` starts from the sparse Minecraft quadruped
   grammar and uses 40 boxes exclusively, including its stepped articulated
-  trunk, tusks, ears, eyes, feet, and secondary details.
+  trunk, tusks, ears, eyes, feet, and secondary details;
+- `examples/tiger` is already visually box-dominant: 69 of its 86 parts are
+  boxes, with non-box primitives limited to its legs, ears, nose, whiskers,
+  and tail; and
+- `examples/tiger_blocky` follows the Minecraft ocelot hierarchy with 20
+  boxes and seven pixel textures carrying its face, stripes, paws, and tail
+  rings;
+- `examples/rabbit_blocky` reduces the most curve-heavy original animal to 18
+  boxes while retaining its long ears, muzzle, large hind feet, tail, and
+  synchronized hop;
+- `examples/chicken_blocky` uses 14 boxes for a compact walking hen whose face,
+  wing feathers, and toes move to pixel textures; and
+- `examples/butterfly_blocky` uses nine boxes, including separate fore- and
+  hindwing slabs whose border and spot detail is entirely texture-driven.
 
 Both variants use the same `1.6`-second, `0.9`-unit `quadrupedWalk` timing and
 matching independent trunk, ear, head, and tail motion. Clean multi-angle
@@ -174,11 +193,57 @@ individually, and combined into direct side-by-side reviews. Human review
 preferred the box-only version for its charm and stronger fit with the voxel
 world's visual language.
 
-Keep both sources available as an A/B pair. Box-only is the preferred direction
-for the next animal style study and a likely direction for later re-authoring,
-but this result is not yet a blanket primitive restriction or permission to
-delete the rounded figures. Test the direction across additional body plans
-before selecting a repository-wide conversion policy.
+The tiger pair uses identical `1.02`-second, `1.02`-unit walk timing. Direct
+review found much less stylistic separation than the elephant pair because the
+existing tiger already reads as blocky. The smaller box-only figure retains
+the face, striped coat, gait, and articulated tail at both review-sheet and
+thumbnail scale, but its useful comparison is authored complexity and
+texture-driven detail rather than rounded-versus-blocky style. Review also
+exposed a visibly detached tail root in the first capture; the corrected root
+pivots from inside the rump, and its second segment attaches endpoint-to-
+endpoint. Human review preferred the corrected 20-part version despite the
+smaller stylistic difference.
+
+The tiger comparison also supplies useful authoring-side cost evidence. The
+box-only source has 4.3 times fewer parts, 7.6 times fewer preview vertices,
+and 16.1 times fewer preview triangles than the existing tiger. Tiny cylinders
+for whiskers and tessellated capsules for otherwise block-readable limbs or
+tail bands add topology and authoring complexity without a visible fidelity
+gain at the reviewed scale. Default future animal work to boxes and pixel face
+textures; require a visible silhouette or motion benefit before adding a
+curved primitive.
+
+The second conversion wave deliberately selected the three highest non-box
+shares among existing animals and crossed three different body plans:
+
+| Pair | Original non-box share | Box-only parts | Original / box-only triangles |
+|---|---:|---:|---:|
+| Rabbit | 20 / 25 (80%) | 18 | 4,640 / 216 (21.5x) |
+| Butterfly | 13 / 17 (76%) | 9 | 2,516 / 108 (23.3x) |
+| Chicken | 15 / 21 (71%) | 14 | 3,108 / 168 (18.5x) |
+
+All three retain the original clip timing and locomotion metadata. Clean
+multi-angle sheets, three-cycle movies, direct A/B sheets, and joined A/B
+movies were rendered under `/tmp` and inspected across their sampled cycles.
+The box-only rabbit has the strongest stylistic change; the chicken remains
+immediately legible through its comb, beak, wattle, wings, tail, and feet; and
+the butterfly preserves its colorful identity by replacing rounded spots and
+antenna tips with pixel wing patterns and a simpler silhouette. The next
+high-value quadruped conversions are Cat, Cow, and Goat; increasingly
+box-dominant animals can follow later.
+
+These topology ratios do not by themselves prove an end-to-end frame-time
+improvement. Material ranges, atlas residency, draw batching, animation
+evaluation, actor count, and the selected renderer quality tier still matter.
+The prepared box path keeps pixel textures in an atlas rather than treating
+texture cells as the target geometry model, so texture-driven detail is the
+compatible direction for later runtime measurement.
+
+Keep both sources available as A/B pairs. Box-first is now the default animal
+authoring direction and a likely direction for later re-authoring, but it is
+not a blanket schema restriction or permission to delete the rounded figures.
+Test the direction across additional body plans before selecting a
+repository-wide conversion policy.
 
 ## Current Texture And UV Evidence
 
@@ -187,20 +252,19 @@ An inventory taken on 2026-07-20 from the loaded semantic assets found:
 
 | Fact | Count |
 |---|---:|
-| figures | 21 |
-| total parts | 609 |
-| boxes | 404 |
+| figures | 25 |
+| total parts | 670 |
+| boxes | 465 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 30 |
-| parts with any texture reference | 30 |
-| individual texture applications | 34 |
+| ASCII textures | 45 |
+| parts with any texture reference | 55 |
+| individual texture applications | 83 |
 | texture applications on curved primitives | 0 |
 
-All 34 applications target an explicit face of a box. Most are a single
-front/north face for eyes or a muzzle. The only broader uses are the top and
-bottom faces of the two butterfly wings and the east, west, and top faces of
-the tiger body. No part uses a whole-primitive texture, and all 205 curved
-primitives currently use solid materials.
+All 83 applications target an explicit face of a box. They range from single
+front/north faces for eyes and muzzles to the butterfly wings and the blocky
+tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
+texture, and all 205 curved primitives currently use solid materials.
 
 This distinction matters: GPU geometry may carry deterministic UV attributes
 without requiring authors to unwrap a figure. The current content needs

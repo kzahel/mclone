@@ -48,6 +48,36 @@ These unlock whole families, so they should be prioritized as their own slices:
 
 ---
 
+## Figure style direction
+
+Use a **box-first Minecraft-style vocabulary** for new and re-authored animal
+studies. Start with a sparse cuboid rig and pixel face textures. A sphere,
+capsule, or cylinder should earn its cost through an obvious silhouette or
+motion improvement that survives sheet and in-world review; do not spend
+curved geometry on whiskers or other tiny surface details that a pixel texture
+can express—or that can simply be omitted.
+
+Retain rounded and box-only sources where an A/B pair exists. Box-first is the
+authoring default, not an absolute schema restriction, while additional body
+plans and production rendering costs are measured.
+
+### Blocky conversion queue
+
+The 2026-07-20 inventory ranked existing animal sources by non-box share, then
+used body-plan coverage and likely rig reuse to choose each wave.
+
+| Wave | Animals | Why |
+|---|---|---|
+| Retained A/Bs | Elephant, Tiger | Established the style direction; Tiger also proved texture-driven detail can replace tiny whisker and stripe geometry |
+| Completed now | Rabbit, Butterfly, Chicken | The three most curve-heavy animals at 80%, 76%, and 71%; together cover hopping quadruped, flying insect, and walking bird rigs |
+| Next | Cat, Cow, Goat | Best mix of remaining curved-part cleanup, recognizable silhouettes, and reusable quadruped anatomy |
+| Later | Sheep, Piglet, Dog, Fox, Horse, Wolf, Lion, Bear | Already increasingly box-dominant; convert after the higher-signal comparisons |
+
+Humanoid figures are outside this animal conversion queue. `player` and
+`upright_bear` are already box-only.
+
+---
+
 ## Recommended build order
 
 Ordered to maximize reuse of the macros that already exist and to fill obvious
@@ -73,10 +103,10 @@ gaps in the current eight figures.
 | Pig | P0 | ✅ | Q | piglet ✅, adult pink, spotted, boar (tusks) | `examples/piglet` is the baby; adult is a quick scale-up |
 | Sheep | P0 | ✅ | Q | white ✅, black, brown, shorn (no wool), lamb, dyed (MC nod) | wool vs shorn is a fun material swap |
 | Cow | P0 | ✅ | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | `examples/cow` — Holstein; horns, ears, muzzle, udder, tufted tail; `quadrupedWalk` |
-| Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — hen; comb, wattle, beak, tail fan; `bipedWalk` + wing/head flutter |
+| Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — rounded hen; `examples/chicken_blocky` — 14-part box-only hen; both retain the comb, wattle, beak, tail fan, and `bipedWalk` wing/head motion |
 | Horse | P0 | ✅ | Q | brown, black, white, palomino, foal; pony | `examples/horse` — bay; mane, long tail, blaze, hooves; `quadrupedWalk` |
 | Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — billy; swept horns, beard, cloven hooves; `quadrupedWalk` |
-| Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — white; long ears, hind feet, cotton tail; hop approximated (synchronized `contactSwing` + phased body `bob`) pending a `hop` macro |
+| Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — rounded white rabbit; `examples/rabbit_blocky` — 18-part box-only variant; both use synchronized `contactSwing` legs + phased body `bob` pending a `hop` macro |
 | Donkey / Mule | P2 | ☐ | Q | donkey, mule | horse variant; big ears |
 | Duck | P2 | ☐ | W/S | mallard drake, hen, duckling | walks + paddles; pairs with swim work |
 | Turkey | P2 | ☐ | W | tom (fanned tail), hen | |
@@ -105,7 +135,7 @@ gaps in the current eight figures.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Lion | P1 | ✅ | Q | male (mane), lioness, cub | `examples/lion` — male quadruped; tawny body, dark mane, broad muzzle, strong paws/claws, tufted tail; `quadrupedWalk` |
-| Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — orange tiger; black body/head/leg/tail stripes, white muzzle/chest/belly, whiskers, strong paws/claws; `quadrupedWalk` |
+| Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — rounded; `examples/tiger_blocky` — 20-part box-only style study with pixel-textured stripes; both use `quadrupedWalk` |
 | Leopard / Jaguar | P2 | ☐ | Q | spotted, melanistic (black panther) | spot rosette texture |
 | Cheetah | P2 | ☐ | Q | — | slender; tear-mark face |
 | Lynx / Bobcat | P3 | ☐ | Q | ear tufts | scaled-up cat rig |
@@ -153,7 +183,7 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Mouse / Rat | P2 | ☐ | Q | — | tiny; long tail |
 | Squirrel | P2 | ☐ | Q/H | gray, red; flying squirrel | huge tail |
-| Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit` |
+| Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit` and `examples/rabbit_blocky` |
 | Hedgehog | P3 | ☐ | Q | — | spine texture |
 | Porcupine | P3 | ☐ | Q | — | quill texture; hedgehog cousin |
 | Raccoon | P2 | ☐ | Q | — | mask + ringed tail |
@@ -186,7 +216,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken` |
+| Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken` and `examples/chicken_blocky` |
 | Toucan | P3 | ☐ | W | — | oversized colorful bill |
 | Owl | P1 | ☐ | W | brown, snowy (white) | |
 | Parrot | P1 | ☐ | W | red, green, blue, yellow morphs | color morphs are cheap variants |
@@ -234,7 +264,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Butterfly | P1 | ✅ | W | color morphs, moth | `examples/butterfly` |
+| Butterfly | P1 | ✅ | W | color morphs, moth | `examples/butterfly` — rounded; `examples/butterfly_blocky` — nine boxes with pixel-patterned wing slabs; both use `wingFlap` |
 | Bee | P1 | ☐ | W | — | iconic; reuses `wingFlap` |
 | Ladybug | P2 | ☐ | C/W | — | |
 | Dragonfly | P2 | ☐ | W | — | four wings |
@@ -348,6 +378,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Shipped (19):** piglet, sheep, dog, cat, butterfly, player, bearfolk,
   lionfolk, cow, chicken, horse, goat, rabbit, wolf, fox, bear, lion, tiger,
   and elephant.
+- **Retained box-only A/Bs (5):** elephant, tiger, rabbit, chicken, and
+  butterfly.
 - **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W).
 - **Macros to build:** `swim` (S), `slither` (SL), `hop` (H — rabbit currently approximates it), N-leg crawl (C).
 - **Biggest single unlock:** the `swim` macro — gates the entire marine family.
