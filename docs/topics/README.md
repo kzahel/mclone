@@ -134,8 +134,8 @@ series implements the same concern, normally reuse the document slug in its
   accepted shared Rust actor/mailbox direction across native threads and
   browser Workers while preserving direct native execution and domain-blind
   TypeScript. Completed Tactical 201 removed the accidental managed-lobby
-  installer; the post-cleanup audit found no immediate coarse-operation actor
-  tactical to add.
+  installer; its fresh post-cleanup ownership review is the next work, with no
+  coarse-operation actor tactical pre-authorized.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted

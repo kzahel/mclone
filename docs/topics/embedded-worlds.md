@@ -821,7 +821,9 @@ Ship independently valuable increments while keeping the one-world path direct:
 content-boundary cleanup: the lobby, preview, activation, and return behavior
 remain on a transient authored primary plus ordinary catalog/app-private
 destinations, with no managed installer or provisioning-shaped source locks.
-Its post-cleanup audit found no need for a replacement coarse-operation actor.
+Its post-completion handoff requires a fresh review of remaining semantic
+TypeScript and duplicated native/web sequencing before any replacement actor
+tactical is proposed.
 
 Tactical 178 closed browser parity without a second scenario implementation;
 Tactical 201 then removed its managed provision operation while retaining the

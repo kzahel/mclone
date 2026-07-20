@@ -449,14 +449,6 @@ Platform and ownership closeout:
   accounting violations. It is a clean feature-off control, not a valid
   cross-host comparison to the earlier M4 medians.
 
-The post-completion audit found no next actor tactical to authorize. Existing
-integrated-server, job, persistence, render, and socket actors already own
-their semantics. Catalog, web scene-session lifecycle, and lobby runtime starts
-already use Rust-owned continuations or operation ledgers. TypeScript is left
-with browser machinery. A future tactical must start from a concrete remaining
-duplicated sequence or new product operation, not from the deleted installer's
-shape.
-
 ## Validation Requirements
 
 At minimum:
@@ -499,27 +491,30 @@ Stop for review if:
 Routine refactoring, test replacement, inert legacy app-private records, and
 platform-specific physical source resolution are not stop conditions.
 
-## Completed Post-Completion Reassessment
+## Post-Completion Reassessment
 
-The required fresh review read this execution record together with
+Tactical 201 ends before this reassessment. Start a fresh review from the
+smaller production system using this handoff:
+
+> Review completed Tactical 201 and the current cross-platform operation
+> topic. Inventory remaining production TypeScript that understands engine
+> semantics and any native/web sequencing still duplicated. Recommend the
+> smallest next tactical based on the surviving code. Do not assume a
+> replacement for managed provisioning is needed.
+
+The review should read this completed execution record together with
 [`cross-platform-operation-execution.md`](../topics/cross-platform-operation-execution.md)
-and inspected the surviving code. Its result is intentionally no successor
-tactical:
+and inspect the current code rather than carrying forward the pre-cleanup
+inventory. It should classify each remaining concern as one of:
 
-1. Integrated server, worldgen, lighting, persistence, render compilation, and
-   remote sockets already have Rust actors/mailboxes.
-2. Catalog operations, web scene-session lifecycle, and lobby runtime starts
-   already have bounded Rust continuations or operation ledgers. They do not
-   contain a duplicated native/web semantic workflow.
-3. Production TypeScript owns browser API mechanics. The strengthened Worker
-   gate reports scenario role, authored content, validation, fingerprint,
-   repair, and semantic-result debt at zero.
-4. No surviving operation has both a second policy implementation and enough
-   mutable sequencing to justify a new shared actor.
+1. no further work because an existing actor/mailbox already owns the policy;
+2. bounded TypeScript ownership cleanup behind an existing Rust owner; or
+3. a real surviving operation that justifies a new shared Rust actor and
+   numbered tactical.
 
-Create a later tactical only after a concrete consumer, state owner, duplicated
-semantic sequence, and measurable acceptance boundary exist. The absence of a
-follow-up abstraction is part of Tactical 201's result, not unfinished work.
+Create the next tactical only after that classification identifies a concrete
+consumer, state owner, duplicated semantic sequence, and measurable acceptance
+boundary. Absence of a successor is a valid outcome.
 
 ## Deliberate Non-Goals
 

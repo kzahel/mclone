@@ -2,12 +2,11 @@
 
 Topic: `cross-platform-operation-execution`
 
-Status: high-level actor/mailbox direction accepted and post-cleanup ownership
-audit completed 2026-07-20. Tactical
+Status: high-level actor/mailbox direction accepted 2026-07-20. Tactical
 [`201`](../tactical/201-lobby-content-simplification.md) removed the accidental
-managed installer and its TypeScript policy surface. The smaller system does
-not currently justify a successor coarse-operation actor tactical; the model
-remains the rule for real asynchronous subsystem owners as they arise.
+managed installer and its TypeScript policy surface. Its required fresh
+post-cleanup ownership review is the next work; no successor tactical is
+pre-authorized.
 
 ## Top-Level Frame
 
@@ -524,13 +523,12 @@ layer's state from a timeout alone.
    runtime schema upgrades or destructive migration.
 10. Tactical 201 landed without a new provisioning actor or generic
     administrative IndexedDB executor.
-11. The post-cleanup TypeScript and coarse-operation inventory found no current
-    consumer that justifies another shared actor. New actors remain justified
-    individually.
+11. The post-cleanup TypeScript and coarse-operation inventory happens as a
+    fresh review. New actors remain justified individually.
 12. A production cut removes superseded code rather than maintaining parallel
     old/new paths.
 
-## Post-Cleanup Audit Findings
+## Tactical 201 Implementation Answers
 
 The Tactical 201 questions now have concrete answers:
 
@@ -552,23 +550,13 @@ The Tactical 201 questions now have concrete answers:
    readiness, A-to-B-to-A activation, persistence, and direct-path isolation
    without naming installer phases or payloads.
 
-The production ownership classification is now:
-
-- integrated server, worldgen, lighting, persistence, render compilation, and
-  remote sockets already have Rust actors/mailboxes;
-- catalog, web scene-session lifecycle, and lobby runtime starts already use
-  bounded Rust continuations or operation ledgers; and
-- TypeScript owns Worker, timer, message/SAB, IndexedDB, WebSocket, DOM/input,
-  and presentation mechanics. The Worker ownership gate reports every
-  registered domain-policy debt at zero.
-
-No new tactical follows from this audit. Creating a coarse actor now would
-manufacture an abstraction without a semantic state owner. Re-open the question
-only when current code contains a concrete duplicated sequence or a new product
-operation with mutable policy, lifecycle, and measurable acceptance behavior.
-A future durable-lobby, downloadable-content, or destructive-migration
-requirement still requires renewed product review rather than implicit
-restoration of the deleted installer.
+These answers close the implementation questions, not the separate ownership
+review. That fresh review must inventory all surviving production TypeScript
+and native/web sequencing before deciding whether an existing actor is already
+sufficient, a bounded cleanup is warranted, or a new shared actor has a real
+consumer. A future durable-lobby, downloadable-content, or destructive-
+migration requirement still requires renewed product review rather than
+implicit restoration of the deleted installer.
 
 ## Alternatives Rejected
 
@@ -634,10 +622,9 @@ sequence:
 5. delete the managed Rust/TypeScript provisioning paths atomically; and
 6. validate lifecycle, persistence, performance, pixels, and platform lanes.
 
-The required post-completion inventory is recorded above. It authorizes no
-immediate successor tactical. Apply the shared actor model to a next consumer
-only when it owns real mutable state or sequencing that must remain consistent
-across native and web.
+The post-completion inventory is intentionally outside Tactical 201. Apply the
+shared actor model to a next consumer only when the fresh review finds real
+mutable state or sequencing that must remain consistent across native and web.
 
 ## Validation Expectations
 
@@ -731,11 +718,12 @@ Vanilla reference:
 - Preserve native direct execution and use the vanilla
   `IOWorker`/`ProcessorMailbox` ownership lesson without copying Java's runtime
   shape.
+- Run the fresh production TypeScript and duplicated-sequencing review before
+  authorizing another tactical.
 - Start another tactical only from a named remaining semantic owner or a
-  concrete new operation, not from a desire to make the topology look more
-  uniform.
+  concrete operation, not from a desire to make the topology look uniform.
 
 The important result is that subtraction worked. The lobby now runs on a
-transient authored store plus ordinary persistent destinations, and the
-remaining cross-platform operation surface already fits the actor/mailbox
-model closely enough that no follow-up abstraction is currently warranted.
+transient authored store plus ordinary persistent destinations. The fresh
+review begins from that smaller surface and may legitimately conclude that no
+follow-up abstraction is warranted.
