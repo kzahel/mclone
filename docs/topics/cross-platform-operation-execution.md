@@ -2,362 +2,325 @@
 
 Topic: `cross-platform-operation-execution`
 
-Status: reviewed and direction accepted 2026-07-20. The review verified the
-current-state claims against the code, resolved most open questions in place
-(see Questions For Review), and selected the sharing shape: a shared pure
-decision core with narrow Rust platform strategies beneath one operation
-port. This remains a directional architecture record, not an authorized
-tactical. Managed-scenario provisioning is the motivating first consumer.
+Status: high-level actor/mailbox direction accepted 2026-07-20. The topic was
+reframed after review to make the logical execution topology, rather than
+managed-storage mechanics, the governing architecture. Managed-scenario
+provisioning remains the motivating first consumer and a directional example,
+not an authorized tactical. Its validation and recovery policy still requires
+an explicit implementation review.
+
+## Top-Level Frame
+
+> What is Mclone's shared logical concurrency model, and how do native threads
+> and browser Workers realize that model without duplicating engine policy,
+> forcing browser transport costs onto native, or letting TypeScript become a
+> second engine?
+
+The answer is an actor/mailbox model whose semantic owner is shared Rust:
+
+```text
+caller
+  |
+  v
+typed mailbox
+  owned requests, completions, identity, backpressure, and shutdown
+        |
+        v
+platform driver
+  native: channel + OS thread
+  web: Worker + message/SAB + browser callbacks
+        |
+        v
+shared Rust actor
+  owns subsystem state, sequencing, policy, and lifecycle
+        |
+        v
+optional effect port -> platform Rust effect adapter
+  native: direct SQLite / filesystem / socket calls
+  web: lower high-level effects into generic browser actions
+        |
+        v
+      TypeScript browser-API executor
+        IndexedDB / WebSocket mechanics only
+```
+
+The actor is the semantic owner. The driver and platform Rust effect adapter
+are platform implementations; TypeScript is only the final browser-API
+executor. Native and web should have the same logical owners and
+request/completion semantics even when they use different thread counts,
+memory layouts, byte transports, or asynchronous APIs.
+
+This is not a proposal for one universal Worker ABI, one shared database
+service, or one trait that erases every workload difference. It is a common
+ownership topology that specialized mailboxes and transports implement
+faithfully.
+
+Managed-scenario provisioning exposed the gap because its browser path still
+places a domain state machine in TypeScript. The solution is not merely to move
+those branches into web-specific Rust. Provisioning should become another
+shared Rust actor whose native driver executes filesystem/SQLite effects
+directly and whose browser driver suspends around a Worker-resident Rust effect
+adapter plus domain-blind TypeScript IndexedDB execution.
+
+## Vocabulary
+
+| Term | Meaning |
+|---|---|
+| **Actor** | The single Rust owner of a subsystem's mutable domain state, sequencing, decisions, and lifecycle. |
+| **Mailbox** | The typed, owned request/completion boundary around an actor. It defines semantic identity, admission, backpressure, and closure, not a universal byte encoding. |
+| **Driver** | The platform mechanism that gives the actor execution turns and transports mailbox values: native thread/channel, browser Worker/message/SAB, or an inline test fallback. |
+| **Effect port** | The narrow actions an actor may request from platform resources without learning paths, browser objects, promises, or physical schema names. |
+| **Effect adapter** | Platform Rust that implements a high-level effect: direct native calls, or browser-specific lowering into generic browser actions. |
+| **Browser-API executor** | Domain-blind TypeScript that executes the lowered IndexedDB, WebSocket, Worker, promise, or other browser mechanics. |
+| **Assembly** | Platform code that binds one actor and mailbox to an appropriate driver, effect adapter, and browser-API executor where required. |
+
+An actor may call a synchronous effect adapter while running on a native worker
+thread. The same actor may emit an owned effect request and resume later in a
+browser Worker. That physical difference must not create two semantic actors.
+
+“Opaque TypeScript” means semantically opaque, not unable to inspect any
+mechanical envelope. TypeScript may see a request ID, stable storage namespace,
+buffer length, transaction mode, or SAB status word. It must not decide what a
+scenario, chunk, validation result, retry, revision, or engine completion
+means.
+
+## Logical And Physical Topologies
+
+### Shared logical roles
+
+Mclone's important asynchronous roles are:
+
+```text
+client / scene / renderer authority
+  |
+  +-- integrated-server actor
+  |     +-- worldgen job actor(s)
+  |     +-- lighting job actor(s)
+  |     `-- persistence actor
+  |
+  +-- render-compiler actor
+  |
+  +-- remote-socket actor
+  |
+  `-- coarse platform-operation actors
+        catalog, managed provisioning, session start, future bounded work
+```
+
+These roles describe state ownership and communication. They do not require a
+dedicated physical thread for every box. Assembly may co-locate an actor with
+an adapter when doing so preserves nonblocking behavior and ownership.
+
+### Current native topology
+
+The production native shape is approximately:
+
+```text
+client/render thread
+  |
+  +-- render compiler worker thread(s)
+  |
+  `-- commands / updates
+        |
+        v
+      integrated-server runner thread
+        |
+        +-- worldgen worker(s)
+        +-- lighting worker(s)
+        `-- persistence mailbox
+              |
+              v
+            mclone-persistence thread
+              `-- owns SQLite connection + world writer lease
+```
+
+`ThreadedPersistenceActor` moves the `WorldStore`, including the SQLite
+connection and writer lease, into one named thread. The server sends typed
+`WorldStoreRequest` values and polls typed completions. Arbitrary compute
+workers do not open the writable database.
+
+Native managed provisioning is currently another coarse thread-backed
+operation. It stages a complete scenario directory, creates per-world SQLite
+stores, and publishes the directory through atomic rename. That direct typed
+execution is a strength to preserve.
+
+### Current browser topology
+
+The production browser shape is approximately:
+
+```text
+browser main thread
+  TypeScript browser mechanics
+  main Rust scene/client/render
+  WebGPU presentation
+  |
+  +-- message/SAB <-> render Worker
+  |                    `-- Rust render actor in a private Wasm heap
+  |
+  `-- message/SAB <-> integrated-server Worker
+                       TypeScript timer/browser shell
+                       Rust server actor in a private Wasm heap
+                       |
+                       +-- message/SAB <-> worldgen/light Workers
+                       |                    `-- Rust job actors
+                       |
+                       `-- Rust record requests
+                              |
+                              v
+                            TypeScript IndexedDB executor
+                            in the same Worker realm
+                              `-- IndexedDB
+```
+
+The lobby may retain two integrated-server Workers, one for each live world,
+while one render-compiler Worker multiplexes qualified world identities.
+
+The browser persistence adapter does not round-trip records through the main
+browser thread. Worker-resident Rust emits generic record requests; adjacent
+TypeScript executes IndexedDB transactions and returns completions to that
+same Rust actor. The external `SharedArrayBuffer` mailboxes used by compute and
+runner lanes are shared byte lockers between private Wasm heaps, not a shared
+Rust object heap.
+
+### Topology equivalence
+
+| Logical role | Native realization | Browser realization |
+|---|---|---|
+| client/scene | app/render thread | browser main Rust plus rAF/WebGPU adapter |
+| integrated authority | server runner OS thread | integrated-server Web Worker |
+| worldgen/light jobs | Rust worker threads | Rust actors in job Web Workers |
+| persistence owner | Rust persistence thread with direct SQLite | server-Worker Rust actor plus adjacent TypeScript IndexedDB executor |
+| render compiler | Rust worker thread/pool | Rust actor in render Web Worker |
+| coarse operation | Rust worker thread | Rust actor in a suitable Web Worker |
+
+The persistence row is physically asymmetric but logically equivalent. Native
+can block its dedicated storage thread while SQLite completes. Browser Rust
+must return to the event loop while IndexedDB completes, then resume. Both
+retain one Rust policy owner and one request/completion boundary.
+
+## Vanilla Reference Shape
+
+Minecraft Java 1.17.1 provides an instructive ownership model even though
+Mclone should not copy its Java futures or executor classes literally.
+
+`IOWorker` owns one `RegionFileStorage`, its pending-write map, coalescing,
+foreground/background/shutdown priorities, flush, and close. Callers submit
+work through a `ProcessorMailbox` and receive `CompletableFuture` results; they
+do not all access the region files directly.
+
+`ProcessorMailbox` owns a serialized queue independently of the `Executor`
+that schedules it. The same logical mailbox can therefore be driven by a pool
+without moving subsystem state or policy into the scheduler.
+
+`ThreadedLevelLightEngine` follows the same principle for light work: it queues
+pre- and post-update tasks through mailboxes and rejects direct execution of
+methods that belong on the threaded path.
+
+Relevant source:
+
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/storage/IOWorker.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/util/thread/ProcessorMailbox.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java`
+
+The lesson for Mclone is “mailbox-owned subsystem state,” not “use Java's
+executor implementation.” Shared Rust defines each logical actor and mailbox;
+platform assembly chooses the execution substrate.
 
 ## Scope
 
-Mclone needs one clear engine-facing model for bounded operations that may run:
-
-- synchronously or on an ordinary Rust background thread on native hosts;
-- through a Rust actor in an isolated browser Web Worker;
-- around an asynchronous browser API such as IndexedDB or WebSocket; or
-- through a later transport implementation without changing engine policy.
-
-The shared engine should submit a typed, owned request and later receive a
-typed, owned completion. It should not know whether the implementation used a
-thread, channel, Worker, JavaScript promise, `postMessage`, transferable buffer,
-external `SharedArrayBuffer`, or direct platform call.
-
-Managed-scenario provisioning exposes the current gap most clearly. Shared
-Rust already owns the scenario recipe, payload construction, validation, launch
-policy, operation identity, and stale-completion rules. Native Rust provisions
-through a background thread. The browser nevertheless lets TypeScript
-orchestrate validation outcomes, record families, repair/publication behavior,
-and concurrent-publication recovery. The desired result is not to make
-managed provisioning part of the live `WorldStore` API. It is to give the
-distinct managed-provisioning policy one shared Rust implementation driven by
-platform executors beneath one target-neutral operation port.
-
-This topic also records how that operation port relates to the existing
-high-throughput render, worldgen, lighting, server, and remote-socket Worker
-paths. It does not require one universal physical Worker protocol for every
-kind of work.
-
-## Motivation
-
-### Keep the engine simple
-
-The authoritative scene and application policy should say:
-
-```text
-submit ProvisionManagedScenarioWorld
-receive Result<ProvisionedManagedScenarioWorld, Error>
-```
-
-It should not contain a browser-shaped continuation, await an IndexedDB
-promise, inspect a SAB control word, or reproduce platform-specific teardown
-rules. Nor should it contain parallel native and browser versions of the
-provisioning decision tree.
-
-One operation boundary makes request identity, cancellation epochs, stale and
-duplicate completion rejection, error restoration, and shutdown behavior
-ordinary shared Rust policy rather than conventions repeated by every host.
-
-### Prevent TypeScript from becoming another engine
-
-TypeScript is the correct owner for browser mechanics:
-
-- creating and terminating Workers;
-- loading Wasm modules;
-- calling IndexedDB and WebSocket browser APIs;
-- starting promises and browser transactions;
-- constructing typed views over external SAB mailboxes;
-- posting/transferring buffers; and
-- forwarding browser errors and lifecycle events.
-
-Those requirements do not imply that TypeScript should know what a chunk
-means, distinguish managed primary and destination policy, decide whether a
-stored world is valid or repairable, choose publication precedence, or
-manufacture an engine completion. Keeping those decisions in TypeScript
-creates a second policy surface whose behavior can drift from native.
-
-The target is domain-blind TypeScript, not zero TypeScript. A browser database
-adapter may know that stable physical namespace `2` maps to the existing
-IndexedDB object store named `dimensionChunks`, just as the SQLite adapter may
-know its table name and key columns. It must not decode the record, decide why
-or when to write it, or branch on its gameplay meaning.
-
-### Preserve native strengths
-
-Cross-platform convergence must not mean forcing native through a browser
-lowest common denominator. Native execution should retain:
-
-- direct typed Rust calls inside a background thread;
-- ordinary ownership moves and `Arc` sharing rather than serialization;
-- direct SQLite/filesystem access without JavaScript or SAB intermediaries;
-- no per-record hop through the simulation thread;
-- no promise-shaped engine API; and
-- platform-specific database optimizations behind the shared semantic port.
-
-The shared abstraction is an owned operation/completion contract. Shared
-memory is one implementation property of native threads, not part of that
-contract. A native channel can move a `Vec` allocation into a worker without
-copying its contents; a browser with isolated Wasm heaps may need an encoded
-frame or external buffer. The engine should not be distorted by either fact.
-
-### Make browser costs explicit and local
-
-The accepted browser architecture currently uses private Wasm heaps per
-Worker. A browser operation may therefore pay for an opaque control frame and
-for bytes crossing the Wasm/JavaScript boundary required by IndexedDB. That
-cost should stay inside the Worker that performs the operation.
-
-For managed provisioning, worker Rust can materialize and validate the world,
-the adjacent browser executor can write it, and only a small success/failure
-completion needs to return to the main engine. Moving all materialized records
-through the main Wasm instance would add cost without adding authority.
-
-### Leave room for future transports
-
-A completion port does not commit Mclone to today's implementation. A native
-thread pool, an isolated Web Worker actor, a future shared-Wasm-heap worker, a
-direct `web_sys` IndexedDB adapter, or another backend can implement the same
-engine-facing contract. Transport experiments should not require rewriting
-scene policy.
-
-## Current State
-
-### Shared operation vocabulary already exists
-
-`mclone-app-runtime::platform_operation` already defines:
-
-- `PlatformOperation<K>` with a target-neutral token and typed request;
-- `PlatformOperationCompletion<T, E>` with an owned result;
-- `PlatformOperationExecutor<K, T, E>` with `submit` and
-  `try_recv_completion`;
-- `PlatformOperationService` around a boxed executor;
-- a deferred executor/handle for adapters that complete later; and
-- `PlatformOperationLedger`, which owns epochs, monotonically increasing
-  request IDs, pending requests, failure restoration, and stale, duplicate,
-  or unknown completion classification.
-
-No `JsValue`, promise, Worker, socket, path, or database handle enters that
-ledger. This is close to the desired outer boundary.
-
-Managed launch policy in `mclone-scene::warm_world` uses the same operation and
-completion types, but currently owns a separate ledger and pending queues
-instead of consistently entering through `PlatformOperationService`.
-
-### Shared managed-content policy already exists
-
-`mclone-app-runtime::scenario_content` owns storage-neutral:
-
-- `ProvisionManagedScenarioWorld`;
-- `ProvisionedManagedScenarioWorld`;
-- scenario manifests, roles, and managed world keys;
-- authored fixture materialization;
-- expected payload fingerprints and metadata;
-- validation of missing, partial, incompatible, corrupt, and valid stored
-  worlds; and
-- native and browser-neutral launch identities.
-
-The policy is not fundamentally missing. Its browser execution is split at
-the wrong layer, and its stored-state outcomes have already diverged between
-hosts (see below).
-
-### Native execution has the intended coarse shape
-
-Native currently has two related execution shapes.
-
-`NativeManagedScenarioContentOperationService` already wraps a real
-`PlatformOperationService`. Its `BackgroundManagedScenarioExecutor` implements
-`PlatformOperationExecutor<ScenarioLaunchIntent, NativeManagedScenarioContent,
-String>`, starts a named Rust thread, and returns a typed completion through an
-MPSC channel. This is concrete evidence that the target-neutral operation port
-fits native background execution.
-
-The live scene path instead uses `NativeManagedScenarioProvisionAdapter`. It
-accepts a typed `PlatformOperation<ProvisionManagedScenarioWorld>`, starts a
-named Rust thread, resolves the native content service, selects the requested
-world role, and returns a typed completion. Its public `submit`/`poll` shape is
-structurally the executor contract, but it does not implement the trait and the
-scene treats it as a special adapter.
-
-The physical native workflow also differs usefully from the browser workflow.
-Native stages and atomically renames one versioned scenario directory
-containing both worlds, manifest files, and per-world SQLite databases. The
-browser publishes one managed world at a time into IndexedDB object stores.
-The current live per-role adapter may therefore cause two concurrently issued
-role operations to race through the whole-scenario native resolver, whose
-atomic directory publication makes that safe. Convergence should clarify this
-whole-scenario versus per-world mismatch rather than erase it accidentally.
-
-Filesystem paths remain native and are resolved only when native assembly
-starts an integrated server. Thread-per-operation versus a shared pool is an
-executor tuning question, not a reason to copy policy into another platform.
-`mclone-scene::session` also currently holds this adapter behind a
-`#[cfg(not(target_arch = "wasm32"))]` field — a platform branch inside
-shared scene code that injecting the executor through the operation port
-removes.
-
-### Browser execution still leaks the workflow
-
-The browser scene host exposes loose reports for pending managed operations.
-`mclone-web-app.ts` switches on `provision` versus `start`, reconstructs a
-provision request containing scenario and role strings, creates an
-`AbortController`, launches a one-shot Worker, interprets its result, and calls
-back into Rust with a world ID or error string.
-
-The one-shot provisioning Worker loads Wasm and calls TypeScript helpers in
-`mclone-web-world-catalog.ts`. Those helpers:
-
-- request a materialized payload from Rust;
-- read managed metadata, chunk, and entity-chunk stores;
-- ask Rust to classify the stored payload;
-- decide whether to reuse, repair, publish, or reject it;
-- clear and republish record families;
-- implement conditional first publication;
-- recover a concurrent publication race through revalidation; and
-- construct the completion statistics consumed by the app.
-
-Rust owns the individual materialization and validation functions, but
-TypeScript owns the state machine connecting their results. This is the
-remaining competing policy owner. The movable policy surface is small —
-roughly 130–160 lines of decision logic and completion construction — while
-the remaining several hundred lines of that module are IndexedDB mechanics
-that stay in TypeScript regardless.
-
-### Stored-state policy already diverges between hosts
-
-Review surfaced a live behavioral divergence, not merely a structural one.
-Native never repairs: when the published scenario directory exists but fails
-validation, `ensure_current_lobby_preview` returns an error until the
-directory is removed, and `validate_published_scenario` inspects only the
-scenario manifest and SQLite headers. The browser classifies stored records
-through the full shared validator, repairs `partial` and `incompatible`
-worlds by clearing and republishing, and refuses only `corrupt`. The
-browser's publication-conflict recovery is also a line-for-line TypeScript
-analog of the native rename-race recovery — the dual-authoring drift this
-topic predicts has already happened once. Convergence is therefore not a
-pure refactor: the shared decision core must pick one behavior per
-stored-state class and one validation depth, deliberately, rather than
-inherit whichever platform is ported first.
-
-### The lower storage seam is close but not complete for administration
-
-Tactical 199 introduced `PersistenceRecordRequest` and
-`PersistenceRecordResponse`, with stable namespaces, owned keys, opaque bytes,
-atomic put/delete batches, probes, flush, close, and typed failures. Memory,
-null, SQLite, and browser IndexedDB executors implement that opened-world
-contract.
-
-Managed provisioning needs additional administrative capabilities not needed
-by the first opened-world cut:
-
-- bounded scans or index reads for all records in a managed world;
-- conditional insertion with explicit conflict reporting;
-- bounded range or namespace deletion for repair; and
-- an atomic transaction spanning managed metadata and the relevant record
-  stores.
-
-The persistence topic deliberately deferred these until a demonstrated
-consumer existed. Managed provisioning is that consumer. Review found that
-all four capabilities already exist in a second Rust-owned vocabulary: the
-catalog storage-plan executor in
-`mclone-web-client/src/web_catalog_execution.rs` defines `GetAll`,
-conditional `AddCatalogRecord`, `DeleteIndexRange`, `Clear`, and multi-store
-atomic `StorageTransaction` actions, driven by the Rust
-`CatalogExecutionCore` state machine through a domain-blind TypeScript
-runner. The browser therefore already has three storage vocabularies: the
-opened-world record executor, the catalog storage-plan executor, and the
-TypeScript provisioning machine. The accepted direction is to generalize the
-catalog transaction-plan executor for the browser driver rather than extend
-`PersistenceRecordExecutor` or stand up a fourth vocabulary, and to fold the
-TypeScript provisioning machine into it. The fixed requirement is unchanged:
-record meaning and workflow policy stay in Rust.
-
-### Adjacent Worker convergence is already proven
-
-The web Worker campaign established the middle-ground architecture this topic
-builds on:
-
-- worker-resident Rust actors own render, server-job, integrated-authority,
-  and remote-WebSocket policy;
-- main Rust owns operation identity, admission, stale-result handling, and
-  typed failure;
-- TypeScript owns browser construction, callbacks, timers, SAB mechanics, and
-  opaque action execution; and
-- independent Wasm heaps and failure containment remain intact.
-
-The managed path should follow that ownership direction without assuming that
-its storage-driven task has the same physical mailbox as a render compiler.
-
-## Problem Statement
-
-The system has most of the correct pieces at both ends:
-
-```text
-shared typed operation + ledger
-shared scenario policy
-native background execution
-generic persistence records
-browser Rust actor precedent
-browser IndexedDB transaction mechanics
-```
-
-The missing middle is one shared Rust operation-policy/driver boundary that
-lets native run directly in a background thread while browser Rust pauses
-around asynchronous platform actions. Review weighed a fully shared
-resumable task against native whole-directory publication versus browser
-per-world record publication and selected a shared pure decision core with
-Rust platform strategies (see Physical-representation variation). Without
-some shared policy owner at this boundary, browser glue becomes the
-continuation and accumulates domain meaning.
-
-The goal is therefore semantic convergence with transport specialization:
-
-1. one shared typed request and completion at the engine boundary;
-2. one shared Rust owner for the operation's decision structure;
-3. platform drivers that execute effects efficiently for their host; and
-4. no requirement that native serialize, use SAB, or emulate promises.
-
-## Proposed Architecture
-
-```text
-shared scene / application policy
-       |
-       | PlatformOperation<Request>
-       v
-shared operation service and ledger
-       |
-       | one shared Rust task/coordinator
-       v
-operation effects: storage reads, scans, atomic commits, cancellation
-       |
-       +------------------------------+
-       |                              |
-       v                              v
-native driver                    browser Worker driver
-background Rust thread           worker-resident Rust actor
-direct Rust executor calls       generic browser actions
-SQLite / filesystem              tiny TypeScript executor -> IndexedDB
-       |                              |
-       +------------------------------+
-       |
-       | PlatformOperationCompletion<Result>
-       v
-shared service / scene policy
-```
-
-### Layer ownership
-
-| Layer | Shared responsibility | Platform responsibility |
-|---|---|---|
-| scene/application policy | when to request work; how success or failure affects the experience | none |
-| operation service | tokens, epochs, pending work, stale/duplicate rejection, failure restoration | completion delivery mechanism |
-| operation task | materialization, validation, reuse/repair/reject decisions, transaction intent | none |
-| task driver | advance the task and return its typed completion | thread/channel versus Worker/event-loop integration |
-| record/transaction executor | stable actions, opaque records, atomicity and typed outcomes | SQLite/filesystem/IndexedDB mechanics |
-| physical transport | no engine meaning | channels, direct calls, promises, `postMessage`, transfer or SAB |
-
-## Engine-Facing Operation Contract
-
-The existing contract is the default starting point:
+This topic governs bounded and resident asynchronous subsystem execution where
+native and browser hosts need the same semantic owner:
+
+- integrated server and server-job actors;
+- persistence actors and physical record executors;
+- render compilation;
+- browser socket actors;
+- world catalog operations;
+- managed-scenario provisioning; and
+- future coarse platform operations.
+
+Managed provisioning is the first unresolved worked example. The topic does
+not require existing proven actors to adopt `PlatformOperationExecutor`
+literally. Persistence, compute, rendering, sockets, and coarse operations may
+retain specialized mailbox types and transports while satisfying the same
+ownership model.
+
+Out of scope:
+
+- one universal physical Worker, broker, mailbox ABI, or scheduling policy;
+- shared Wasm linear memory as a prerequisite for semantic convergence;
+- forcing native through encoded browser frames or SAB-shaped mechanics;
+- allowing arbitrary compute workers to access writable world storage;
+- folding catalog, managed provisioning, and opened-world policy into one
+  catch-all API; and
+- runtime storage-schema migration or upgrade semantics. The first cut keeps
+  existing physical schemas unchanged; any future migration campaign requires
+  separate pre-admission/offline review.
+
+## Directional Invariants
+
+1. Every asynchronous engine subsystem has one Rust owner for domain state,
+   sequencing, decisions, and lifecycle.
+2. Callers communicate with that owner through typed, owned requests and
+   completions.
+3. Native threads and browser Workers are drivers of the mailbox, not alternate
+   policy owners.
+4. Platform adapters may specialize transport, batching, copies, memory
+   placement, and physical API mechanics.
+5. TypeScript may execute browser mechanics but must not interpret engine
+   meaning or advance a domain state machine.
+6. Storage belongs to an owning world session or bounded administrative actor,
+   not to arbitrary compute workers.
+7. Native remains free to move typed values, share immutable Rust allocations,
+   and call SQLite/filesystem code directly on a worker thread.
+8. The browser main thread never blocks or spins, and no mutable Rust borrow or
+   JavaScript view crosses an `await`.
+9. Private Wasm heaps and failure containment may remain even when external
+   SAB mailboxes carry bytes between them.
+10. Request identity, epochs, stale/duplicate rejection, typed errors, and
+    shutdown semantics remain Rust-owned.
+11. Ordinary user worlds and managed scenario worlds retain separate catalog,
+    deletion, and authority domains.
+12. A production cut deletes the superseded policy path instead of keeping
+    indefinite native/web or Rust/TypeScript dual implementations.
+
+## Common Actor And Mailbox Semantics
+
+The actor/mailbox family should converge on these observable properties where
+the workload needs them:
+
+- owned request and completion values;
+- stable request identity;
+- nonblocking submission from latency-sensitive callers;
+- bounded queues and explicit backpressure;
+- deterministic ordering where requests affect the same state;
+- stale, duplicate, cancelled, and unknown completion handling;
+- typed failure plus backend diagnostics;
+- explicit flush/close or quiescence barriers;
+- actor-owned retries, revisions, supersession, and result acceptance; and
+- metrics for queue depth, bytes, latency, retained state, and failure.
+
+Not every mailbox needs every feature. A render compiler and a storage actor do
+not need identical durability or buffer semantics. Shared lifecycle vocabulary
+is useful only where it describes the same observable contract honestly.
+
+### Workload-specific transports
+
+| Work profile | Shared semantic shape | Native driver | Browser driver |
+|---|---|---|---|
+| integrated authority | commands, updates, cadence, readiness, shutdown | server thread/channel | Worker actor plus message/SAB transport |
+| worldgen/lighting | queued jobs, resident state, bounded results | worker threads/pool | job Workers plus transfer/SAB |
+| render compilation | qualified jobs, revision acceptance, resident compiler state | thread/pool | render Worker plus external SAB |
+| opened-world persistence | ordered records, revisions, barriers, one world owner | persistence thread with direct SQLite | server-Worker Rust plus IndexedDB callbacks |
+| managed provisioning/catalog | coarse request, read-dependent state machine, final completion | worker thread with direct effects | Worker Rust actor plus browser actions |
+| remote socket | commands, events, backpressure, close | native socket runtime | Worker Rust actor plus WebSocket callbacks |
+
+The shared model is a family of actors and mailboxes, not a lowest-common-
+denominator byte broker.
+
+## Existing Engine-Facing Operation Port
+
+`mclone-app-runtime::platform_operation` already provides a suitable outer
+mailbox for coarse platform operations:
 
 ```rust
 pub trait PlatformOperationExecutor<K, T, E> {
@@ -368,694 +331,603 @@ pub trait PlatformOperationExecutor<K, T, E> {
 }
 ```
 
-The exact trait shape may evolve, but its semantic properties should remain:
+It also provides:
 
-- requests and completions are typed and owned;
-- request identity is unique for the host lifetime;
-- scene teardown changes an epoch and rejects late work;
-- duplicate and unknown completions are observable rather than silently
-  applied;
-- failure carries target-neutral restoration state;
-- `submit` never makes the simulation thread wait on storage or browser work;
-- polling is nonblocking; and
-- platform resources remain behind the executor.
+- target-neutral tokens;
+- `PlatformOperationService`;
+- deferred executors/handles for platform adapters;
+- epochs and monotonically increasing request IDs;
+- pending-request ownership and failure restoration; and
+- stale, duplicate, or unknown completion classification.
 
-Cancellation and shutdown need an explicit review. Epoch invalidation already
-defines the authoritative semantic result: late completion cannot affect the
-new scene. A platform executor may additionally abort an IndexedDB transaction,
-terminate a Worker, cancel queued native work, or let already-running coarse
-work finish. The common contract should not promise immediate physical
-cancellation unless every required backend can provide it.
+No `JsValue`, promise, Worker, socket, path, or database handle enters this
+ledger. Shared scene policy should submit one typed request and later receive
+one typed completion. It must not drive internal storage steps.
 
-Likewise, the contract need not expose shared memory. Native may use shared
-address-space ownership internally; browser implementations may use transferred
-frames or external SABs. Those are executor capabilities and metrics, not
-request semantics.
+This outer port is one concrete mailbox in the larger topology. It should not
+replace the specialized persistence, compute, render, or socket actor contracts
+where those carry different performance and lifecycle requirements.
 
-## Shared Resumable Task
+## Managed Provisioning As The First Worked Actor
 
-Managed provisioning is read-dependent: the correct write or completion
-depends on stored state. A one-time write plan cannot express the whole
-workflow without either moving policy into the executor or reading everything
-up front through another special API.
+### Current shared policy
 
-The proposed shared owner is therefore an owned resumable task or coordinator.
-Conceptually:
+`mclone-app-runtime::scenario_content` already owns storage-neutral:
 
-```text
-start(ProvisionManagedScenarioWorld)
-    -> Need(storage action batch)
+- `ProvisionManagedScenarioWorld` and its typed result;
+- scenario recipes, manifests, roles, and managed-world keys;
+- authored fixture materialization;
+- expected payload fingerprints and metadata;
+- stored-world classification; and
+- path-free launch identities.
 
-resume(storage completion batch)
-    -> Need(next action batch)
-    -> ...
-    -> Ready(Result<ProvisionedManagedScenarioWorld, Error>)
-```
+`mclone-scene::warm_world` already owns operation identity, admission, launch
+ordering, destination deferral, and stale-completion behavior. The remaining
+gap is the inner provisioning workflow.
 
-Review resolved the representation question. Under the selected sharing
-shape (below), the shared owner is a pure decision core rather than one
-normalized effect-emitting task. The web Rust strategy that suspends around
-IndexedDB transactions should be an explicit enum phase machine, and the
-native strategy runs to completion on its worker thread. Managed
-provisioning needs at most a handful of suspensions — inspect, decide,
-publish, and one re-inspect/re-decide round on conflict — so an internally
-driven future adds machinery without value. Whichever Rust owner hosts the
-workflow must satisfy these properties:
+### Current divergence
 
-- the task contains no path, database handle, `JsValue`, promise, Worker, or
-  socket;
-- all inputs and intermediate completions are owned across suspension;
-- no mutable Wasm borrow or JavaScript view crosses an `await`;
-- every transition is deterministic from request, stored results, and shared
-  policy;
-- native and browser drivers cannot substitute their own validation or
-  repair decisions;
-- bounded action batches avoid one main-thread or cross-Worker message per
-  record;
-- suspension points align with whole storage transactions: an IndexedDB
-  transaction auto-commits once control returns to the event loop, so the
-  workflow may decide between transactions but never mid-transaction; and
-- trace tests can compare exact transitions independently of a physical
-  backend.
+Native currently runs a coarse Rust workflow on a background thread. It stages
+and atomically renames one versioned scenario directory containing both worlds,
+manifests, and per-world SQLite databases. Existing invalid content is refused;
+validation checks manifests, markers, and SQLite headers.
 
-The engine does not drive these internal steps. The task lives inside the
-platform executor's background context. The main scene still sees one request
-and one final completion.
+Browser provisioning runs in a one-shot Worker but TypeScript currently:
 
-### Physical-representation variation
+- requests payload materialization from Rust;
+- reads managed metadata and record stores;
+- asks Rust to classify the result;
+- decides reuse, repair, publication, or refusal;
+- clears and republishes record families;
+- implements conditional first publication and conflict recovery; and
+- constructs the rich loose success report retained by main-thread TypeScript.
 
-It may be unnatural for one low-level action enum to describe both an atomic
-native directory rename and an IndexedDB multi-store transaction. The review
-should not preserve a literally identical action trace by reducing native to a
-record-by-record browser model.
+Rust owns the individual facts while TypeScript owns the state machine that
+connects them. Native and browser behavior has consequently diverged: browser
+repairs `partial` and `incompatible` worlds and refuses `corrupt`; native does
+not repair and validates less deeply. The rich browser outcome never reaches
+Rust: main TypeScript forwards only `worldId` plus an empty error string on
+success through `completeManagedScenarioProvision`.
 
-Three degrees of sharing are plausible:
+The shared five-way `Missing`/`Valid`/`Partial`/`Incompatible`/`Corrupt`
+classifier also has only a browser production caller today. Native does not
+call `validate_managed_scenario_stored_world`; it independently validates
+manifests, markers, and the 16-byte SQLite header. Convergence therefore needs
+one actor-owned classification contract as well as one actor-owned response to
+each classification.
 
-1. **One normalized task and storage-state model.** Both backends inspect their
-   physical representation into shared stored-state observations; one task
-   chooses reuse, publication, refusal, and conflict recovery. Drivers compile
-   its abstract effects into directory or record transactions. This provides
-   the strongest semantic lock if the abstract effects remain honest.
-2. **One shared policy coordinator with Rust storage strategies.** Shared Rust
-   owns recipes, acceptable outcomes, identity, validation requirements, and
-   completion semantics. Native Rust owns staged-directory mechanics; web Rust
-   owns the IndexedDB-oriented continuation. Both are exercised by one policy
-   conformance suite, and TypeScript owns neither. This is acceptable if a
-   single task would otherwise become a lowest-common-denominator storage DSL.
-3. **Only the outer operation port is shared.** Native and web Rust each own
-   their entire workflow. This still removes TypeScript policy and cleans the
-   engine boundary, but it leaves the largest Rust divergence surface. It
-   should be selected only with evidence that the stronger two shapes are
-   materially more complex or harm native behavior.
+### Target actor
 
-Review resolved this choice. At the altitude that preserves native's atomic
-staged-directory design, shapes 1 and 2 converge: a normalized task could
-only emit high-level effects such as inspect and conditionally-publish, at
-which point it is shape 2 with the sequencing inlined. The accepted form is
-shape 2 built around a shared pure decision core: a small shared function
-set mapping stored-state classification to the required action (valid reuse,
-missing exclusive publication, partial or incompatible repair, corrupt
-refusal) plus the conflict rule (on publication conflict, revalidate and
-accept only a shared-valid winner). Native and web Rust strategies own
-sequencing against their physical shapes and are held to the decision core
-by a shared conformance suite. No normalized storage-effect language should
-be built; the backends overlap only at the classification layer, which is
-already shared Rust. The fixed requirement is unchanged: one engine
-contract, shared policy facts and outcomes, no TypeScript decision owner,
-and traceable equivalence where the physical representations overlap.
-
-## Native Driver
-
-The native executor should move the request into a background worker and
-drive the native strategy, constrained by the shared decision core, to
-completion there:
+One shared Rust provisioning actor should own this semantic phase sequence:
 
 ```text
-receive typed operation once
-loop task locally against direct record/filesystem executor
-send typed completion once
+Start
+  -> resolve recipe and materialize expected content
+  -> request stored-state inspection
+  -> classify according to shared validation policy
+  -> decide reuse / exclusive publish / authorized replacement / refusal
+  -> request one physical publication effect when needed
+  -> on conflict, re-inspect once and evaluate the winner
+       accept a valid winner or fail; never issue a second replacement
+  -> produce one typed completion
 ```
 
-Within that worker, task actions can call a generic, monomorphized Rust
-executor directly. No record needs to round-trip through the game thread. A
-`Vec<u8>` can move without copying its allocation; immutable materialized data
-may use `Arc` where sharing is useful. SQLite transactions, filesystem staging,
-WAL/checkpoint behavior, and native error detail remain native implementation
-choices.
+The actor, not a native or web strategy, owns phase ordering, maximum conflict
+reinspection, validation requirements, repair authority, result construction,
+and final failure semantics.
 
-### Native performance contract
+The actor contains no path, SQLite connection, `JsValue`, promise, Worker,
+socket, or IndexedDB object. Every input and suspended intermediate value is
+owned. Trace tests can advance it with in-memory observations and effect
+results.
 
-An implementation is unacceptable if convergence causes native to:
+### Platform effect adapters
 
-- encode or decode browser actor frames;
-- copy every chunk through a generic byte mailbox;
-- use atomics or SAB-shaped control words for ordinary thread work;
-- perform synchronous storage on the simulation thread;
-- dispatch each record through a separate cross-thread operation; or
-- lose current atomic publication or filesystem/SQLite optimization.
+The actor requests high-level effects rather than one normalized database
+language:
 
-One outer dynamic dispatch on submission and completion is insignificant for a
-coarse storage operation. If measurement contradicts that expectation, the
-service can be generic over its executor or use a platform enum without
-changing the request/completion contract. The project should not complicate
-the shared workflow speculatively to remove an unmeasured pair of virtual
-calls.
+```text
+InspectManagedWorld
+PublishManagedWorldExclusively
+ReplaceManagedWorldAtomically   // only when shared policy authorizes it
+OpenOrResolveProvisionedWorld
+```
 
-The current thread-per-provision implementation is acceptable as a first
-behavioral control because scenarios issue only bounded primary/destination
-work. A later pool is an executor optimization, not part of the shared
-semantic design.
+Exact names may differ. The important split is that the actor decides which
+effect is allowed and the adapter decides how to perform it.
 
-## Browser Driver
+Native effects may:
 
-The browser implementation should host the same Rust task in the one-shot
-managed provisioning Worker or another explicitly chosen Worker lifetime.
-Worker Rust should:
+- inspect filesystem manifests and SQLite content directly;
+- build both roles in one staging directory;
+- publish both through one atomic rename even though the outer operation is
+  per-world;
+- report `committed`, `conflict`, or physical failure for that rename attempt
+  without revalidating or accepting a competing publisher internally;
+- use owned Rust values and `Arc` without serialization; and
+- return the requested role's logical identity while retaining native path
+  resolution in platform assembly.
 
-1. decode one opaque Rust-authored request frame;
-2. construct and advance the web phase machine against the shared decision
-   core;
-3. emit generic browser storage actions when IndexedDB work is required;
-4. accept owned action completions after browser promises settle;
-5. continue until success or typed failure; and
-6. return one opaque completion frame to main Rust.
+Browser effects are lowered by Worker-resident Rust. That lowering may:
 
-TypeScript should:
+- compile one actor-requested high-level effect into a transaction plan;
+- inspect the required IndexedDB records;
+- conditionally add the managed metadata commit marker;
+- atomically replace the authorized record families;
+- report commit, constraint conflict, abort, or storage failure; and
+- keep materialized bytes inside the provisioning Worker.
 
-- load the Worker Wasm instance;
-- open the existing IndexedDB database;
-- execute stable storage actions and transactions;
-- pass opaque values or byte records without decoding them;
-- translate browser API failures into stable storage-level error categories;
-- honor abort/transaction/Worker lifetime mechanics; and
-- post or transfer the final opaque frame.
+The lowering necessarily knows which record families, keys, metadata envelope,
+and transaction grouping implement one managed-world effect. That is
+platform-specific domain knowledge and therefore remains Rust-owned.
+TypeScript receives only the resulting generic, store-addressed actions and
+executes their IndexedDB mechanics.
 
-TypeScript should not receive or switch on scenario IDs, managed roles,
-validation status, record family meaning, repair mode, publication outcome, or
-engine completion variants. Ideally the main browser app launches a Worker
-from a Rust-authored opaque frame and forwards its final opaque frame back to
-the host; it need not reconstruct `ProvisionedManagedScenarioWorld` from loose
-strings.
+Native whole-scenario publication and browser per-world publication are honest
+physical differences. They do not justify separate semantic phase machines.
+The current native `ensure_current_lobby_preview` resolves a rename loser by
+revalidating the winner internally; actor adoption must split that behavior so
+`PublishManagedWorldExclusively` reports the conflict and the shared actor
+requests the one allowed re-inspection.
 
-The browser main thread must never block or spin. Rust must not hold an
-exported mutable borrow across a promise. A storage callback returns an owned
-completion to the worker-resident task and then lets it advance synchronously
-until the next browser action or final completion. Storage actions are whole
-transactions: TypeScript executes each transaction atomically without
-yielding decisions back to Rust mid-transaction, because an IndexedDB
-transaction auto-commits once control returns to the event loop. The
-existing catalog runner already obeys this rule by enqueuing read-dependent
-writes synchronously inside request callbacks.
+### Native driving
 
-## Storage And Transaction Boundary
+The native driver moves the typed request into a background worker and advances
+the shared actor to completion against direct Rust effects:
 
-The operation port and record executor are distinct abstractions:
+```text
+receive PlatformOperation once
+advance shared actor
+call native effects directly when requested
+send PlatformOperationCompletion once
+```
 
-- the operation port isolates the engine from where and how work runs;
-- the operation task owns managed-provisioning meaning; and
-- the record/transaction port isolates that task from physical storage.
+The native driver must not turn a publication conflict into success on its own.
+It returns the conflict observation to the actor, which owns the re-inspection
+and final acceptance decision just as it does on web.
 
-Managed provisioning should not be forced into the live `WorldStore` API.
-`WorldStore` owns simulation persistence, revisions, cache-versus-durable
-scheduling, flush, and close. Managed provisioning is an administrative
-installation workflow with validation, conditional publication, repair, and
-reuse. They may share a lower record executor without sharing their upper
-policy API.
+Convergence is unacceptable if native must encode browser frames, copy every
+record through a generic byte mailbox, use SAB-shaped atomics, perform storage
+on the simulation thread, or lose staged-directory atomicity.
 
-### Acceptable physical knowledge
+### Browser driving
 
-The IndexedDB adapter must manage the frozen browser schema. It may therefore
-map stable numeric store/namespace/index identifiers to:
+The browser provisioning Worker hosts the same actor in its private Wasm heap:
 
-- object-store names;
-- key paths;
-- index names;
-- transaction modes; and
-- structured-clone value envelopes.
+```text
+decode opaque operation frame
+advance shared Rust actor until it requests an effect
+lower that effect into generic actions in Worker-resident Rust
+return the generic actions to TypeScript
+await the whole IndexedDB transaction
+return the mechanical transaction result to Worker Rust
+translate it into an owned effect result and resume the actor
+repeat until the actor produces its typed completion
+post one opaque completion frame
+```
 
-That is backend knowledge, analogous to a SQLite adapter knowing its tables.
-The mapping should be isolated and mechanically testable. It should not imply
-that TypeScript knows how an engine chunk is encoded or why a managed repair
-deletes it.
+An explicit enum phase representation is appropriate because provisioning has
+only a few transaction-aligned suspension points. That enum belongs to the
+shared actor, not to a web-only workflow. Native may hide it behind a
+`run_to_completion` driver.
 
-A later refinement could let web Rust provide a versioned IndexedDB schema
-descriptor that a fully generic TypeScript upgrader executes. That would
-remove hard-coded store vocabulary from TypeScript, but it also creates a
-schema/migration description language. It is optional and should be justified
-separately from removing actual policy divergence.
+IndexedDB transactions auto-commit when control returns to the event loop, so
+an actor suspension aligns with a whole transaction. Read-dependent actions
+that must remain in one transaction are emitted synchronously from Rust inside
+the relevant success callback, as the existing catalog continuation already
+demonstrates.
 
-### Candidate lower-port shapes
+## Storage Access And Resolution
 
-The review compared these variants and selected the third:
+The operation mailbox and record/transaction executor are distinct:
 
-1. **Extend `PersistenceRecordExecutor`.** Add only demonstrated bounded scan,
-   conditional-add/conflict, and range-delete operations, plus whatever stable
-   physical namespace is needed for managed metadata. This maximizes lower
-   reuse but must not contaminate live `WorldStore` policy.
-2. **Add an administrative record companion.** Keep opened-world persistence
-   minimal while exposing scan/publish/replace operations to catalog and
-   managed coordinators. This preserves policy separation but risks two
-   overlapping executor vocabularies.
-3. **Compile both through a generic browser transaction plan.** Rust domain
-   coordinators emit transaction actions to one IndexedDB executor. Native may
-   still use a direct record executor. This can shrink TypeScript substantially
-   but the shared cross-platform task must not become browser-plan-shaped.
-   Review selected this shape: it already exists in embryo as the catalog
-   storage-plan executor, and generalizing it avoids a fourth vocabulary.
-4. **Use direct `web_sys` IndexedDB calls in web Rust.** The same outer
-   operation contract still applies. This removes more TypeScript but moves
-   browser API and async-lifetime complexity into web-specific Rust. It is a
-   viable later adapter choice, not required by the ownership direction.
+- the operation mailbox isolates callers from where and how the actor runs;
+- the actor owns managed-provisioning meaning and sequencing; and
+- the record/transaction executor isolates physical storage mechanics.
 
-These lower-port choices apply most directly to the browser record workflow.
-They do not require the native staged-directory publisher to pretend its
-physical representation is a set of browser namespaces. A shared normalized
-task may instead emit a higher-level conditional-publish or inspect effect
-which native and browser Rust drivers implement through different lower
-primitives.
+Writable storage is not a global service that every worker may access. It
+belongs to an owning actor/session:
 
-The first implementation should preserve IndexedDB version 6, store names,
-keys, record bytes, current managed metadata compatibility, transaction
-atomicity, and ordinary/managed deletion isolation. A schema change is not
-justified merely to make the seam prettier.
+- a live world persistence actor owns its writer-capable store for the world
+  lifetime;
+- worldgen, lighting, and render workers return compute results and do not
+  independently persist them;
+- a managed provisioning actor owns a bounded administrative storage context
+  before handing the world to a live session; and
+- read-only inspection is an explicitly non-writing capability.
 
-## Managed Provisioning Walkthrough
+SQLite and IndexedDB may physically serialize concurrent transactions, but
+that does not establish game-level ordering, revision precedence, or one
+authoritative writer. Those remain actor/session policy.
 
-The intended shared sequence is approximately:
+### Logical world identity
 
-1. Shared scene policy issues a typed primary or destination provisioning
-   request with an epoch-qualified token.
-2. The platform executor places it in a native worker or browser Worker.
-3. Shared Rust resolves the scenario manifest and materializes the expected
-   storage-neutral payload in that background context.
-4. The provisioning workflow requests the bounded stored state needed for
-   validation.
-5. Shared Rust classifies that state:
-   - valid: reuse it;
-   - missing: conditionally publish it;
-   - partial or incompatible: atomically repair it according to shared policy;
-   - corrupt: return the shared refusal; or
-   - publication conflict: reread and accept only a shared-valid winner.
-6. The physical executor performs the required transaction without decoding
-   payload meaning.
-7. The provisioning workflow returns a typed provisioned-world identity or
-   typed failure.
-8. The operation ledger accepts, rejects as stale/duplicate, or restores the
-   launch state using the same policy on every host.
+Shared scene policy already carries a discriminated, path-free
+`ScenarioWorldStorageSource`:
 
-Only steps 2 and 6 differ physically between native and browser.
+```text
+Managed(ManagedWorldKey)
+Catalog(LocalWorldId)
+```
 
-The per-class actions shown for step 5 follow the browser's current
-behavior; question 13 records that native currently refuses instead of
-repairing, and the decision core must fix the unified answer.
+Shared code chooses the logical source but never maps it to a filesystem path,
+IndexedDB object, or SQLite connection. Platform world-start/session assembly
+consumes the discriminated source and resolves an appropriate physical storage
+session. The managed-versus-catalog domain must remain visible until that final
+adapter because their catalog, deletion, and authority rules differ.
 
-## Relationship To Compute Workers
+The native provision adapter's current `ManagedWorldKey -> PathBuf` map may
+remain an implementation cache, but should not become the cross-platform
+contract. The browser may use the logical key as a physical record prefix, but
+that is likewise an adapter mapping rather than shared policy.
 
-Mclone should converge on one operation model, not necessarily one universal
-physical Worker implementation.
+### Live store versus administrative provisioning
 
-| Work profile | Shared semantic shape | Likely optimized transport |
-|---|---|---|
-| managed provisioning, catalog, session start | coarse request, token, completion, cancellation epoch | native thread/channel; browser actor plus promise/API actions |
-| opened-world persistence | typed mailbox requests, completions, flush/close barriers | native storage thread; browser actor plus IndexedDB executor |
-| worldgen, lighting, render compilation | queued compute jobs, resident state, high-throughput byte results | native worker pool/shared heap; browser isolated actor with transfer or external SAB |
-| remote socket session | commands, updates, backpressure and lifecycle | native socket runtime; browser Rust actor plus `WebSocket` callbacks |
+Managed provisioning should not be added to the live `WorldStore` policy API.
+`WorldStore` owns opened-world records, revisions, pending-write visibility,
+flush, and close. Provisioning owns inspection, conditional publication,
+authorized replacement, reuse, and conflict recovery. They may reuse a lower
+record/transaction executor while retaining different actors and lifetimes.
 
-These profiles can share:
+## Browser TypeScript Boundary
 
-- owned request and completion identity;
-- nonblocking submission/polling;
-- explicit cancellation and shutdown;
-- bounded queues/backpressure;
-- typed failures and metrics; and
-- Rust ownership of domain state.
+### TypeScript may own
 
-They need not share the same bulk-buffer ABI, Worker lifetime, scheduling
-policy, or transaction vocabulary. Requiring a WebSocket, database operation,
-and render compile to use one lowest-common-denominator mailbox would create
-complexity rather than remove it.
+- Worker construction, module loading, timers, yields, and termination;
+- `postMessage`, transfer lists, SAB typed views, atomics, and wakeups;
+- IndexedDB open, object-store/index mapping, requests, cursors, transactions,
+  promises, aborts, and structured-clone envelopes;
+- WebSocket construction and browser callbacks;
+- stable mechanical action tags, namespace identifiers, request IDs, byte
+  buffers, and generic browser error forwarding; and
+- physical schema names and key paths required by the unchanged IndexedDB
+  adapter.
 
-The operation port is therefore a semantic family resemblance across these
-systems. It is not permission to replace their proven specialized transports
-with a single universal broker.
+### TypeScript must not own
+
+- scenario IDs, roles, recipes, validation states, or recovery authority;
+- chunk, entity, dimension, gameplay, or render-job interpretation;
+- actor phase sequencing, retries, conflict acceptance, or completion policy;
+- request admission, active/standby priority, revisions, supersession, or stale
+  result handling;
+- construction of engine success/failure variants; or
+- independent mirrors of Rust domain state.
+
+A practical acceptance test is:
+
+- adding a scenario, content version, validation rule, or recovery decision
+  requires no TypeScript change;
+- changing an IndexedDB store/index/key path may require TypeScript adapter
+  work; and
+- adding a genuinely new generic physical transaction primitive may require a
+  mechanical change on both sides.
+
+### Generic IndexedDB transaction executor
+
+The existing catalog runner is the correct browser precedent. Rust owns the
+catalog continuation and emits storage actions. TypeScript maps stable store
+and index identifiers, executes transactions, returns reads, and reports
+completion.
+
+Managed provisioning should generalize that transaction-plan executor rather
+than extend the opened-world `PersistenceRecordExecutor` indiscriminately or
+create a fourth browser storage vocabulary. The generalized physical actions
+should preserve the seven demonstrated mechanical kinds: `get-all`, `get`,
+`add`, `put`, `delete-key`, `delete-index-range`, and `clear`, generalized over
+opaque values rather than managed- or catalog-specific TypeScript helpers.
+
+The tactical must also choose one stable addressing scheme for this generalized
+executor. The catalog plan currently names stores and indexes with string
+labels, while the opened-world record executor uses numeric namespaces plus
+typed key parts. Reusing mechanics does not justify exposing two overlapping
+address vocabularies indefinitely or casually treating one as the other.
+
+The first cut keeps IndexedDB version 6, existing store/index names, key paths,
+record bytes, and transaction atomicity. Physical schema migration and a
+Rust-authored schema-upgrade language are out of scope.
+
+## Managed Validation And Recovery Policy
+
+Convergence cannot simply copy either current backend.
+
+The browser currently reads and decodes every managed chunk and entity-chunk
+record. That is bounded for a small authored fixture but not for the mutable
+generated destination, whose initial payload has no authored records and whose
+stored world may grow indefinitely. “Deep validation” therefore cannot mean a
+full-world scan on every launch.
+
+The shared recipe should distinguish two policy dimensions:
+
+```text
+ValidationDepth
+  BoundedAuthoredFootprint
+  IdentityAndLazyRecords
+
+RecoveryAuthority
+  Reconstructible
+  PreserveRuntimeState
+```
+
+- `BoundedAuthoredFootprint` deeply validates the finite content the recipe is
+  required to provide.
+- `IdentityAndLazyRecords` validates compatible publication identity and
+  physical availability, while ordinary record loads validate record codecs
+  lazily.
+- `Reconstructible` permits atomic replacement after an invalid observation.
+- `PreserveRuntimeState` refuses destructive repair until a separately
+  authorized recovery/reset action exists.
+
+Recovery authority must be explicit recipe/storage policy, not inferred from a
+gameplay behavior profile. A protected world and a mutable world may have
+different likely defaults, but gameplay edit rules do not by themselves grant
+permission to erase persisted state.
+
+The shared actor's logical decision is then a function of stored-state class,
+validation depth, and recovery authority:
+
+| Observation | Shared action |
+|---|---|
+| missing | publish conditionally |
+| valid | reuse |
+| partial/incompatible/corrupt + reconstructible | atomically replace if the reviewed recipe permits it |
+| partial/incompatible/corrupt + preserve runtime state | refuse without deleting |
+| publication conflict | re-inspect once; accept a state valid under the same policy or fail, with no second replacement attempt |
+
+The implementing tactical must explicitly classify the current primary and
+destination recipes and decide whether `corrupt` is ever automatically
+replaceable. The safe default is preservation/refusal unless a recipe opts
+into reconstruction. Existing content keys are versioned, so incompatible
+content at the current key is abnormal rather than the ordinary upgrade path.
 
 ## Lifecycle And Failure Semantics
 
-A tactical derived from this topic should make these cases explicit:
+The shared actor/mailbox contract owns semantic lifecycle; the driver owns
+best-effort physical cancellation.
+
+Epoch invalidation is authoritative: a late completion cannot affect a
+replacement scene. A native worker may finish already-running work; a browser
+adapter may abort an IndexedDB transaction or terminate a Worker. The shared
+contract should not promise immediate physical cancellation where a backend
+cannot provide it.
+
+A tactical must cover:
 
 - submission failure before work begins;
-- Worker/thread construction failure;
-- storage open or lease failure;
-- cancellation before and during a transaction;
-- completion after the scene epoch was replaced;
-- duplicate or malformed completion;
-- platform executor panic, Worker error, or forced termination;
-- failure after an atomic transaction commits but before acknowledgement;
+- thread/Worker construction failure;
+- storage open or authority failure;
+- cancellation before, during, and after a physical transaction;
+- completion after the scene epoch changed;
+- duplicate, unknown, or malformed completion;
+- actor panic, Worker error, or forced termination;
+- commit followed by lost acknowledgement;
 - concurrent first publication;
 - orderly shutdown with pending work; and
-- retry after a failed operation without wedging the executor.
+- retry without wedging the actor or applying stale state.
 
-The operation ledger owns whether a completion may affect current shared
-state. The task owns whether stored state is semantically acceptable. The
-physical executor owns whether a transaction committed and how its backend
-error is classified. None of those owners should infer another layer's result
+The operation ledger decides whether a completion may affect current scene
+state. The actor decides whether an observed world is acceptable. The physical
+adapter reports what its transaction did. None may infer another layer's state
 from a timeout alone.
 
-At-most-once physical execution is not always provable across a lost browser
-acknowledgement. Therefore operations which may be retried must be idempotent
-or validate committed state before republishing. Managed provisioning already
-has a content-addressed/validated shape suitable for this; the shared
-decision core should own that property.
+At-most-once physical execution is not always provable after a lost browser
+acknowledgement. Retried effects must therefore be idempotent or followed by
+actor-owned reinspection. Managed content's versioned identity and conditional
+publication are suitable for that contract.
 
-## Advantages
+## Current Assets To Reuse
 
-- **One policy owner.** A shared task or shared coordinator/conformance contract
-  prevents native and web from independently defining validation, repair,
-  conflict, or completion behavior.
-- **Clean engine call sites.** Scene code submits typed work and polls typed
-  completions without platform branches.
-- **Thin browser glue.** TypeScript performs browser APIs but does not become a
-  scenario-content or persistence coordinator.
-- **No meaningful native tax.** Native retains direct Rust execution inside a
-  background thread and moves owned values rather than browser frames.
-- **Testable semantics.** An in-memory executor can trace every workflow
-  transition and inject deterministic failures without a browser or disk.
-- **Replaceable transports.** Worker, direct `web_sys`, shared-Wasm, thread
-  pool, and storage-backend experiments remain below a stable port.
-- **Explicit lifecycle.** Tokens, epochs, cancellation and stale completion
-  behavior become reusable contracts instead of adapter conventions.
-- **Better performance placement.** Materialization and storage stay together
-  in the background context, avoiding main-thread and main-Wasm payload hops.
-- **Honest platform specialization.** Native and browser use their strongest
-  mechanics without copying engine decisions.
-- **Smaller divergence surface.** Source locks can reject domain vocabulary in
-  TypeScript while Rust trace tests prove platform-independent policy.
+The architecture should converge existing components rather than introduce a
+parallel framework:
 
-## Costs And Risks
+- `PlatformOperationService` and `PlatformOperationLedger` for coarse operation
+  identity and lifecycle;
+- `PersistenceMailbox`, `PersistenceActor`, and
+  `ThreadedPersistenceActor` for mailbox-owned world storage;
+- native and Wasm server-job mailboxes for worldgen/light actors;
+- `WebRenderWorkerCoordinator` and `WebRenderWorkerActor` for render ownership;
+- `WebIntegratedServerActor` for browser authority/session ownership;
+- `WebRemoteSocketWorkerActor` for socket protocol ownership;
+- `WebCatalogExecution` for a Rust continuation over browser transactions; and
+- the generic browser Worker transport and opaque frame conventions.
 
-### Explicit continuation complexity
+These implementations prove the actor/mailbox direction. They need not be
+collapsed into one type hierarchy.
 
-A resumable task can be more verbose than a synchronous function. Poorly
-designed phase enums may expose incidental sequencing throughout the engine.
-The task must be encapsulated behind the coarse operation port, with native
-`run_to_completion` and browser actor drivers hiding its internal phases.
+## Decisions Accepted By Review
 
-### Over-generalizing storage
+1. The top-level architecture is shared Rust actors plus typed mailboxes,
+   platform drivers, platform Rust effect adapters, and domain-blind
+   browser-API executors where required.
+2. Logical topology converges across native and web; physical thread counts,
+   transports, private heaps, and API mechanics may differ.
+3. Managed provisioning uses one shared Rust actor/state machine. Platform
+   Rust effect adapters execute/lower effects and do not own phase sequencing;
+   TypeScript executes only the resulting browser mechanics.
+4. `ManagedScenarioLaunchState` should adopt `PlatformOperationService` for its
+   provision and start operations rather than keep two specialized
+   `PlatformOperationLedger`s and two pending `VecDeque`s.
+5. `NativeManagedScenarioProvisionAdapter` can implement the existing
+   `PlatformOperationExecutor` trait; its native storage resolution remains an
+   adapter detail.
+6. The outer managed operation remains per-world, matching shared launch
+   demand. Native whole-scenario staging remains one physical effect whose
+   atomic rename makes concurrent per-role requests safe.
+7. The browser actor uses an explicit shared enum phase machine with suspension
+   at whole-transaction boundaries; native drives it to completion directly.
+8. Administrative browser actions come from generalizing the catalog
+   transaction-plan executor, not from a fourth storage vocabulary.
+9. TypeScript retains physical IndexedDB mapping and API mechanics but no
+   managed-world decision state.
+10. Reuse `PersistenceErrorKind` for stable storage failure categories and
+    return a typed provisioning success outcome. Managed completions currently
+    carry `String`, so this is a real operation type and call-site change, not
+    merely improved error formatting.
+11. No normalized low-level storage language or universal Worker ABI is
+    required.
+12. Native must retain direct typed execution without material serialization,
+    copy, scheduling, or latency regression.
 
-Trying to anticipate SQL, IndexedDB, cloud sync, catalog, migration, and every
-future administrative query could create an accidental database language. Add
-only operations demonstrated by current consumers and keep exact transaction
-traces under test.
+## Questions For The Implementing Tactical
 
-### False universal-Worker abstraction
+1. Which current managed recipes are explicitly reconstructible, which preserve
+   runtime state, and which validation depth does each require?
+2. Is `corrupt` ever automatically replaceable, or always a refusal requiring
+   an explicit recovery action?
+3. What is the smallest high-level effect vocabulary that lets the shared actor
+   express inspection, exclusive publication, authorized replacement, and
+   resolution without becoming a storage DSL?
+4. Which one stable addressing scheme should the generalized browser
+   transaction executor expose: string store/index labels, numeric namespaces
+   with typed key parts, or a deliberately defined replacement for both?
+5. What platform assembly contract resolves a discriminated logical world
+   source into the native or browser storage session without leaking paths or
+   browser handles into shared scene code?
+6. Should the one-shot provisioning Worker remain one-shot for isolation, or
+   should a resident actor amortize Wasm initialization after measurement?
+7. Is thread-per-provision still appropriate on native, or should later
+   measurement justify a bounded pool?
+8. Which lifecycle terms genuinely apply across persistence, compute, render,
+   socket, and coarse-operation mailboxes without forcing one physical
+   executor?
 
-Forcing high-throughput compute, sockets, and browser storage into one physical
-mailbox could lose specialized batching, backpressure, failure containment, or
-native efficiency. Share lifecycle semantics and domain ownership; specialize
-transport profiles where measured requirements differ.
+These are implementation-shape and product-policy questions under the accepted
+actor/mailbox frame. They are not reasons to move sequencing into a platform
+adapter.
 
-### Cancellation mismatch
+## Alternatives Rejected
 
-Native threads, browser Workers, and IndexedDB transactions have different
-physical cancellation capabilities. The shared contract should promise epoch
-invalidation and no stale state application. Best-effort resource cancellation
-belongs below it and must be measured for leaks or shutdown delay.
+### Shared decision helpers with platform-owned sequencing
 
-### Large task state
+This was the earlier selected shape. It removes TypeScript policy but still
+permits native and web Rust strategies to decide when to inspect, retry,
+complete, or accept a conflict. A conformance suite can detect some drift but
+does not create one policy owner. The revised direction keeps physical effects
+platform-specific while moving semantic phases into one shared actor.
 
-Materialized records held while storage actions await can increase Worker heap
-high-water. The task should batch deliberately, release buffers after
-publication, and report retained bytes. It should not bounce bulk records
-through the main engine merely to reduce the task object's local lifetime.
+### One universal physical Worker or mailbox ABI
 
-### Double abstraction
+Persistence, render compilation, compute jobs, and sockets have materially
+different batching, backpressure, buffer, lifetime, and failure needs. One
+lowest-common-denominator broker would add complexity and can harm native
+performance. Share actor ownership and mailbox semantics; specialize
+transports.
 
-The project already has `PlatformOperationExecutor`, persistence mailboxes,
-record executors, and Worker actors. A new layer must converge those existing
-shapes rather than sit beside them permanently. The first tactical should
-identify which current adapter and ledger paths are deleted by adoption.
+### Let every worker access the database directly
 
-### Error flattening
-
-Returning only strings would preserve today's loose browser callback but lose
-the typed error work from unified persistence. Today the browser completion
-is a world-ID string whose empty error string means success, and the rich
-provision outcome (reused versus published versus repaired, record counts,
-timings) never reaches Rust at all. Shared failures should reuse the stable
-`PersistenceErrorKind` categories from unified persistence rather than a new
-taxonomy, and the typed success completion should carry the provisioning
-outcome so hosts and smokes stop reading it from TypeScript state.
-
-## Alternatives Considered
+SQLite or IndexedDB transaction serialization protects physical database
+consistency, not engine revision ordering, pending-write visibility, actor
+authority, or lifecycle barriers. Writable storage remains owned by a world
+session or bounded administrative actor.
 
 ### Keep TypeScript as the browser workflow coordinator
 
-This is operational today and keeps asynchronous IndexedDB code familiar, but
-it leaves validation/result policy split between Rust and TypeScript. Every new
-managed-content behavior increases the divergence and source-lock surface. It
-does not meet the ownership goal.
+This leaves a second policy surface. The existing native/browser validation and
+repair divergence demonstrates the cost. TypeScript remains the right owner
+for browser APIs, not scenario or persistence decisions.
 
-### Make all engine storage and platform traits `async`
+### Make all engine storage and operation traits async
 
-An async trait or future could express browser suspension naturally. Making
-simulation and native call sites promise-shaped would spread scheduling,
-borrowing, runtime, cancellation, and executor choices through the engine.
-Native still needs background dispatch to avoid blocking. The existing
-completion port fits the tick/poll host and keeps async mechanics behind the
-executor.
+Browser suspension does not require promise-shaped engine call sites. Native
+still needs background dispatch, and shared simulation should not inherit a
+particular async runtime or borrowing model. Actor drivers contain async
+mechanics below a nonblocking request/completion boundary.
 
-An internal future inside a browser or native driver remains a possible
-implementation of a platform strategy; the objection is to making the
-engine-facing contract await a platform future directly.
+### Run native through browser frames
 
-### Share only request/result types and keep separate algorithms
+Transport-byte equality is not semantic equality. Encoding typed native values
+would add copies and indirection without reducing policy divergence.
 
-This makes the outer API look uniform while retaining two provisioners. It
-cannot prevent semantic drift and gives weak value over the current state.
-The decision structure, not merely the DTOs, must have one Rust owner.
+### Require one shared Wasm heap across Workers
 
-### Share policy and conformance, but retain Rust platform strategies
+A shared heap may later reduce selected copies but introduces allocator,
+lifetime, lock, crash-recovery, and termination coupling. Private Rust actors
+plus semantically opaque transport already remove the competing TypeScript
+engine.
 
-This is the selected direction. Native atomic directory publication and
-browser per-world IndexedDB publication are physically different. A shared
-coordinator defines recipes, validation requirements, acceptable conflict
-outcomes, and typed completion semantics while delegating publication
-mechanics to native and web Rust strategies.
+### Move all IndexedDB mechanics into Rust immediately
 
-Sequencing drift in platform Rust is the residual risk, but the workflow has
-only a handful of steps and the conformance suite pins their outcomes; this
-was judged cleaner than a universal storage-effect language. Conformance
-fixtures and exact outcome traces must make the allowed physical variation
-explicit, and TypeScript must remain a mechanics-only executor.
+Direct `web_sys` access remains a possible effect-adapter replacement. It does
+not change the actor/mailbox architecture and is not required to remove domain
+policy from TypeScript.
 
-### Generate a complete write plan before touching storage
+## Possible Tactical Sequence
 
-This works only when the operation does not depend on current stored state.
-Managed reuse, corruption refusal, repair and conflict recovery are
-read-dependent. A plan may describe each individual transaction, but a Rust
-continuation still needs to choose subsequent plans from results.
+No tactical is authorized by this topic. A bounded implementation sequence is:
 
-### Run the native backend through encoded actor frames too
-
-That would make transport artifacts superficially identical at the cost of
-unnecessary encoding, copying and indirection on native. Shared semantics do
-not require shared bytes. Native should move typed Rust values and call its
-executor directly.
-
-### Put all browser Workers in one shared Wasm heap
-
-A shared heap could reduce selected copies, but it does not remove IndexedDB's
-asynchronous browser API or provide the operation policy automatically. It adds
-allocator, lifetime, lock, termination and crash-recovery risk. The isolated
-actor design solves the ownership problem first and leaves shared heap as an
-independent measured option.
-
-### Move all IndexedDB mechanics into web-specific Rust immediately
-
-This can make TypeScript smaller and may ultimately be attractive. It does not
-change the necessary engine-facing operation port or shared provision task.
-Using the existing generic TypeScript executor first is lower-risk and keeps
-the direct-`web_sys` choice replaceable beneath the same contract.
-
-## Directional Invariants
-
-Any reviewed variant should preserve these requirements:
-
-1. Shared scene/application code sees one typed request and one typed
-   completion, never platform storage actions.
-2. One shared Rust owner decides materialization, validation, reuse, repair,
-   corruption refusal, conflict acceptance, and final result, or one shared
-   policy coordinator constrains Rust platform strategies to demonstrably
-   equivalent outcomes where their physical representations differ.
-3. Native does not encode browser frames, copy each record across threads, or
-   use browser synchronization mechanics.
-4. The browser main thread never blocks or spins.
-5. No mutable Rust borrow or JavaScript view lives across a browser `await`.
-6. TypeScript executes browser mechanics without interpreting managed-world or
-   engine-record meaning.
-7. Physical IndexedDB schema knowledge is isolated from domain policy.
-8. Ordinary user worlds and managed scenario worlds retain separate catalog,
-   deletion, and authority domains.
-9. The first cut preserves existing SQLite/filesystem and IndexedDB data,
-   schema versions, keys, record bytes, and transaction atomicity.
-10. Stale, duplicate, cancelled and unknown completions cannot mutate current
-    scene state.
-11. Large payloads stay in the background execution context rather than
-    transiting the main engine unnecessarily.
-12. A production cut deletes the old browser policy path rather than retaining
-    an indefinite dual implementation.
-
-## Questions For Review
-
-The 2026-07-20 review resolved most of these; resolutions are recorded
-below. The remainder stay open for the implementing tactical.
-
-Resolved:
-
-1. `WarmWorldLaunch` should adopt `PlatformOperationService` directly. Its
-   specialized ledgers and pending queues exist only because the web side
-   pulls requests, which is exactly what `DeferredPlatformOperationHandle`
-   provides. Adoption deletes duplicate queue plumbing and is a good first
-   slice.
-2. `NativeManagedScenarioProvisionAdapter` should implement the existing
-   `PlatformOperationExecutor` trait as-is. Its `submit`/`poll` already
-   match, and `world_dir` remains an adapter-specific accessor; no trait
-   changes are needed first.
-3. An explicit enum phase machine is clearer. The workflow has at most a
-   handful of transaction-aligned suspensions, so an internally driven
-   future adds machinery without value; native runs to completion on its
-   worker thread.
-4. Administrative operations come from generalizing the catalog
-   transaction-plan executor (`web_catalog_execution.rs`), which already
-   provides scan, conditional add, range delete, clear, and multi-store
-   atomic transactions, rather than extending `PersistenceRecordExecutor`
-   or standing up a fourth vocabulary.
-5. Largely already solved: TypeScript treats the `managedWorlds` metadata
-   envelope as an opaque value today and passes it verbatim; only Rust
-   decodes it. Preserve that property through the cutover.
-9. Reuse `PersistenceErrorKind` across the outer port rather than a second
-   taxonomy, and make the success completion typed so it carries the
-   provisioning outcome.
-11. The engine operation stays per-world, matching shared launch demand and
-    the scene's conditional destination sequencing. Whole-scenario staging
-    remains a native execution detail whose idempotent atomic rename makes
-    concurrent per-role requests safe.
-12. No. The backends overlap only at the classification layer, which is
-    already shared Rust; the shared owner is the decision core plus
-    conformance, not a normalized storage language.
-
-Open for the implementing tactical:
-
-6. Should the one-shot provisioning Worker remain one-shot for isolation, or
-   should a resident service amortize Wasm initialization after measurement?
-7. Is thread-per-operation still appropriate on native, or should adoption
-   immediately use an existing bounded worker pool?
-8. Should physical IndexedDB schema descriptors stay in the TypeScript adapter
-   or become Rust-authored data executed by a generic upgrader?
-10. Which common lifecycle vocabulary is useful to compute Workers and socket
-    actors without forcing them behind the same physical executor?
-
-New decision surfaced by review:
-
-13. Native and browser stored-state policy already diverge (see Current
-    State). The shared decision core forces one answer per stored-state
-    class and one validation depth; the implementing tactical must choose
-    them deliberately — including whether native gains deep record
-    validation and repair — rather than inherit whichever platform is
-    ported first.
-
-These resolutions may change the exact implementation. They do not change
-the motivation: one clean engine operation, one Rust policy owner, thin
-platform glue, and no material native regression.
-
-## Possible Future Tactical Sequence
-
-No tactical is authorized by this document. A likely bounded sequence after
-review is:
-
-1. **Baseline and contract convergence.** Record native/browser transaction
-   traces, timings, allocation/copy facts, TypeScript ownership, and current
-   failure semantics. Route native provision submission/polling through the
-   accepted operation executor shape without changing behavior.
-2. **Shared decision-core laboratory.** Implement the shared decision core
-   and conformance suite against in-memory fake strategies, resolving the
-   repair-versus-refusal and validation-depth divergence explicitly. Prove
-   valid reuse, missing publication, partial and incompatible repair, corrupt
-   refusal, conditional conflict recovery, cancellation epochs, and exact
-   outcome traces.
-3. **Native driver proof.** Drive the native strategy under the shared
-   decision core in the native background adapter using direct Rust storage.
-   Preserve existing
-   staged-directory/filesystem layout and compare latency, allocation, thread
-   count and record copies.
-4. **Generic browser action proof.** Add only the lower storage actions required
-   by the shared traces. Prove current IndexedDB v6 records and transaction
-   atomicity without touching production provisioning.
-5. **Browser Rust actor cutover.** Put the constrained web Rust strategy in
-   the provisioning Worker, reduce main and Worker TypeScript to
-   opaque action/completion forwarding, and delete the old TypeScript state
-   machine atomically.
+1. **Topology and behavior baseline.** Record current native/web actor,
+   mailbox, Worker/thread, copy, transaction, validation, and failure traces.
+   Route the existing outer native provision adapter through
+   `PlatformOperationExecutor` without changing behavior.
+2. **Shared actor laboratory.** Implement the platform-free provisioning phase
+   machine and exact trace tests over in-memory effect observations. Resolve
+   validation depth and recovery authority explicitly.
+3. **Native effect proof.** Drive the actor to completion on a native worker
+   while preserving whole-scenario staging, atomic rename, logical identities,
+   and direct typed execution.
+4. **Browser transaction proof.** Generalize only the catalog transaction
+   actions demonstrated by the actor traces while preserving IndexedDB v6 and
+   existing records.
+5. **Browser actor cutover.** Host the shared actor in the provisioning Worker,
+   reduce TypeScript to generic effect execution and opaque completion
+   forwarding, and delete the old TypeScript workflow atomically.
 6. **Lifecycle and performance hardening.** Exercise cancellation, concurrent
    publication, hidden/resume, Worker failure, quota/error classification,
-   repeated launches, and background memory release.
-7. **Closeout and reassessment.** Update source locks, line/ownership/copy
-   ledgers, current architecture docs, and decide whether session-start or
-   another coarse operation should adopt the pattern next.
+   repeated launches, memory release, and native overhead.
+7. **Closeout.** Update topology diagrams, ownership/source locks, copy and
+   allocation ledgers, validation evidence, and the recommendation for the
+   next operation family.
 
-The task-versus-strategy sharing degree and lower storage-port variation
-were chosen in the 2026-07-20 review. Further human review should occur
-before resolving the repair-versus-refusal divergence, and again if
-implementation would require a physical schema migration, a new
-shared-Wasm-memory topology, weaker atomicity, or measurable native
-overhead.
+Human review is required before destructive recovery policy is selected, and
+again if implementation would weaken atomicity, change physical schemas,
+introduce a shared Wasm heap, or measurably regress native execution.
 
 ## Validation Expectations
 
-### Shared Rust
+### Shared Rust actor
 
-- exact transition traces for every validation/publication outcome;
-- deterministic memory-executor fault injection at every action boundary;
-- stale, duplicate, unknown and cancelled completion tests;
-- idempotent conflict/lost-ack recovery;
+- exact phase traces for every observation, effect result, and conflict path;
+- deterministic fault injection at every effect boundary;
+- stale, duplicate, unknown, and cancelled completion tests;
+- idempotent lost-acknowledgement recovery;
+- validation-depth and recovery-authority fixtures;
 - bounded batch and retained-byte assertions; and
-- no platform types in task or operation contracts.
+- no platform types in the actor or outer operation contract.
 
 ### Native
 
-- unchanged managed primary/destination world identity and contents;
-- reopen and corruption behavior;
-- failure and retry without simulation-thread blocking;
-- request/completion counts and thread lifecycle;
-- bytes copied or serialized across the operation boundary;
+- unchanged managed primary/destination identities and contents;
+- preserved staged-directory atomic publication;
+- reopen, invalid-content, conflict, failure, and retry behavior;
+- no simulation-thread storage;
+- request/completion and worker-lifecycle metrics;
+- bytes copied or serialized across operation boundaries;
 - wall time and allocation compared with the current adapter; and
-- desktop plus affected Android/Quest packaging and lifecycle gates if shared
-  native provisioning or storage code changes.
+- desktop plus affected Android/Quest gates when shared native code changes.
 
 ### Browser
 
-- current managed storage reuse, cancellation, concurrent publication, repair,
-  corrupt refusal, and ordinary-world isolation smoke;
-- lobby primary/destination launch, preview and activation behavior;
+- managed reuse, cancellation, concurrent publication, reviewed recovery,
+  corrupt refusal/replacement policy, and ordinary-world isolation;
+- primary/destination launch, preview, activation, and return;
 - hidden/resume and forced Worker failure containment;
-- quota, unavailable storage, transaction abort and malformed completion;
-- no domain vocabulary in production TypeScript;
-- Worker/Wasm initialization, request/completion, bytes and retained-memory
-  metrics;
+- quota, unavailable storage, transaction abort, and malformed completion;
+- no managed-domain vocabulary or state machine in production TypeScript;
+- Worker initialization, transaction, bytes, and retained-memory metrics;
 - maximum frame gap and main-thread work during provisioning; and
 - rendered output captured under `/tmp` and inspected at the first drawable
   cutover milestone.
 
 ### Cross-platform equivalence
 
-The same logical fixtures should yield the same normalized policy outcome and
-typed completion on native and browser simulated executors. Review selected
-Rust platform strategies over one normalized task, so a shared conformance
-trace should record the allowed physical differences while validation,
-conflict, repair, failure and epoch semantics remain identical.
+The same logical observations must produce the same actor decisions and typed
+completion on native and browser fake adapters. Physical traces may record
+allowed differences such as native whole-scenario rename versus browser
+per-world transactions. Validation, recovery authority, conflict acceptance,
+failure, epoch, and result semantics must remain identical.
 
 ## Code And Documentation Map
 
-Shared operation and scenario policy:
+Shared coarse operations and scenario policy:
 
 - `native/crates/mclone-app-runtime/src/platform_operation.rs`
 - `native/crates/mclone-app-runtime/src/scenario_content.rs`
@@ -1063,50 +935,67 @@ Shared operation and scenario policy:
 - `native/crates/mclone-scene/src/warm_world.rs`
 - `native/crates/mclone-scene/src/session.rs`
 
-Current browser path:
+Shared actor/mailbox precedents:
 
-- `native/apps/mclone-web-client/src/web_scene_host.rs`
-- `native/apps/mclone-web-client/src/web_canvas.rs`
-- `native/apps/mclone-web-client/www/mclone-web-app.ts`
-- `native/apps/mclone-web-client/www/mclone-managed-scenario-provision-worker.ts`
-- `native/apps/mclone-web-client/www/mclone-web-world-catalog.ts`
-- `native/apps/mclone-web-client/www/mclone-web-persistence-executor.ts`
-- `native/apps/mclone-web-client/src/web_catalog_execution.rs`
-
-Lower persistence and Worker context:
-
+- `native/crates/mclone-server/src/persistence.rs`
 - `native/crates/mclone-server/src/persistence/record_executor.rs`
-- `native/crates/mclone-server/src/persistence.rs` (`PersistenceErrorKind`)
+- `native/crates/mclone-server/src/worldgen_mailbox.rs`
+- `native/crates/mclone-server/src/light_mailbox.rs`
+- `native/crates/mclone-server/src/job_codec.rs`
+
+Browser actors and drivers:
+
+- `native/apps/mclone-web-client/src/web_server_worker.rs`
+- `native/apps/mclone-web-client/src/web_render_worker_actor.rs`
+- `native/apps/mclone-web-client/src/web_catalog_execution.rs`
+- `native/apps/mclone-web-client/src/web_scene_host.rs`
+- `native/apps/mclone-web-client/www/mclone-integrated-server-worker.ts`
+- `native/apps/mclone-web-client/www/mclone-server-job-worker.ts`
+- `native/apps/mclone-web-client/www/mclone-render-compiler-worker.ts`
+- `native/apps/mclone-web-client/www/mclone-web-persistence-executor.ts`
+- `native/apps/mclone-web-client/www/mclone-web-world-catalog.ts`
+- `native/apps/mclone-web-client/www/mclone-managed-scenario-provision-worker.ts`
+
+Architecture and execution records:
+
 - [`unified-persistence-interface.md`](unified-persistence-interface.md)
 - [`web-worker-runtime-ownership.md`](web-worker-runtime-ownership.md)
 - [`web-scene-host-adoption.md`](web-scene-host-adoption.md)
+- [`../tactical/062-shared-threading-topology.md`](../tactical/062-shared-threading-topology.md)
+- [`../tactical/067-shared-render-worker-architecture.md`](../tactical/067-shared-render-worker-architecture.md)
 - [`../tactical/197-domain-blind-web-worker-broker.md`](../tactical/197-domain-blind-web-worker-broker.md)
 - [`../tactical/198-opaque-websocket-and-indexeddb-adapters.md`](../tactical/198-opaque-websocket-and-indexeddb-adapters.md)
 - [`../tactical/199-unified-persistence-interface.md`](../tactical/199-unified-persistence-interface.md)
 
+Vanilla reference:
+
+- `reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/storage/IOWorker.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/util/thread/ProcessorMailbox.java`
+- `reference/minecraft-1.17.1/src/net/minecraft/server/level/ThreadedLevelLightEngine.java`
+
 ## Recommended Direction
 
-Accepted by the 2026-07-20 review:
+- Treat the shared Rust actor and typed mailbox as the logical concurrency
+  model.
+- Map that model onto native threads/direct calls and browser Workers/browser
+  callbacks without requiring transport equality.
+- Keep domain sequencing, identity, retries, revisions, validation, result
+  acceptance, and lifecycle in Rust.
+- Lower browser high-level effects into generic storage actions in
+  Worker-resident Rust.
+- Keep TypeScript responsible for browser mechanics and generic physical
+  actions only.
+- Give writable storage one owning world session or bounded administrative
+  actor; compute workers return results rather than persisting independently.
+- Implement managed provisioning as one shared actor with platform-specific
+  effects, not shared decision helpers wrapped by two platform workflows.
+- Require native and browser publication adapters to report conflicts to that
+  actor; neither adapter may revalidate and accept a winner on its own.
+- Preserve native direct execution and physical publication strengths.
+- Use the vanilla `IOWorker`/`ProcessorMailbox` ownership lesson as a topology
+  guide without copying its Java runtime shape.
 
-- retain `PlatformOperation` request/completion semantics as the engine-facing
-  model, with per-world operations at the port;
-- converge native and web managed provisioning on one shared pure decision
-  core — stored-state classification to action, plus the conflict rule —
-  with narrow Rust platform strategies held to it by a conformance suite;
-- drive the native strategy directly in a background thread and the web
-  strategy as an explicit enum phase machine in a browser Rust actor whose
-  suspensions align with whole IndexedDB transactions;
-- generalize the catalog transaction-plan executor as the browser's
-  domain-blind storage executor instead of adding a fourth vocabulary;
-- reuse `PersistenceErrorKind` and make the success completion carry the
-  typed provisioning outcome;
-- resolve the native/browser repair-versus-refusal and validation-depth
-  divergence as an explicit decision in the decision-core laboratory;
-- keep TypeScript responsible only for browser API mechanics; and
-- prove that native retains direct typed execution with no material
-  serialization, copy, scheduling, or latency penalty.
-
-Do not begin by merely moving the current TypeScript branches line-for-line
-into web-specific Rust. First establish the shared operation and decision
-core boundary so the browser cut removes a competing policy implementation
-rather than only changing its language.
+Do not begin by moving the current TypeScript provisioning branches into
+web-specific Rust. Establish the shared actor and effect boundary first so the
+browser cut removes the competing workflow rather than merely changing its
+language.
