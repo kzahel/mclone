@@ -1,7 +1,7 @@
 # Tactical 202: Web Scene Async Boundary Cleanup
 
-Status: active 2026-07-20. Fresh post-Tactical-201 ownership review and the
-first three implementation slices are complete.
+Status: complete 2026-07-20. Fresh post-Tactical-201 ownership review,
+implementation, and available-lane validation are complete.
 
 Topic: `cross-platform-operation-execution`
 
@@ -252,6 +252,8 @@ Evidence:
 
 ## Slice 5: Validation And Closeout
 
+Status: complete 2026-07-20.
+
 - focused shared session/lobby/catalog/persistence tests;
 - web Rust unit/source locks, Wasm check, generated-bindgen TypeScript check,
   TypeScript typecheck, and Worker-ownership self-test;
@@ -267,6 +269,42 @@ Evidence:
 Close when production TypeScript no longer selects session runtime meaning,
 sees lobby start semantics, or recomputes readiness/completion policy, and no
 replacement actor or generalized browser transaction language was added.
+
+Evidence:
+
+- all `mclone-web-client` tests passed, including 45 unit tests and the realm,
+  remote, render/runner ABI, scenario, catalog, async-boundary, and worldgen
+  ownership suites;
+- all `mclone-app-runtime` and `mclone-scene` package tests and their contract
+  suites passed, with only the pre-existing opt-in GPU characterization test
+  ignored; `mclone-native-client` also passed its desktop compile control;
+- the Wasm check, generated-bindgen build, TypeScript typecheck, scene-host
+  adoption gate, and Worker-ownership self-test passed at 5,275 authored
+  TypeScript lines across 16 modules, five Worker entries, one construction
+  site, 56 zero-debt entries, and seven explicit copy facts;
+- the two-runtime lobby probe passed outright with independent active and
+  standby identities, two integrated-server Workers, one render-compiler
+  Worker, and no page errors;
+- ordinary local, IndexedDB reopen, remote WebSocket, and catalog CRUD probes
+  passed every semantic assertion before their unchanged final pixel gates
+  observed fully transparent canvases;
+- the lobby lifecycle probe passed its cancellation, relaunch, destination
+  failure, activation/persistence, hidden/resume, and Quit stages before the
+  already-recorded invalid WebGPU device rejected the independent
+  render-resource rebuild's 96-byte mapped buffer;
+- the mobile probe exercised startup, movement, look, jump, break/place, and
+  native Rust UI state. Its combined acceptance failed because the internal
+  native-UI canvas pixel check saw the same transparent output; the bootstrap
+  DOM capture remained visible while inspected WebGPU canvases were black; and
+- no Android or Quest lane was rerun because every implementation change is
+  confined to the web app crate, its TypeScript adapters, tests, and ownership
+  checker. No shared or native runtime code changed.
+
+Closeout: no new actor, executor, Worker, mailbox ABI, schema, migration, or
+native indirection was added. Production TypeScript no longer chooses active
+session runtime meaning, receives a clear lobby-start operation, mirrors the
+shared session lifecycle, reconstructs streaming/initial-presentation policy,
+or rewrites the integrated-server ready envelope.
 
 ## Stop Conditions
 

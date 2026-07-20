@@ -625,13 +625,25 @@ sequence:
 5. delete the managed Rust/TypeScript provisioning paths atomically; and
 6. validate lifecycle, persistence, performance, pixels, and platform lanes.
 
-The post-completion inventory is intentionally outside Tactical 201. Apply the
-shared actor model to a next consumer only when the fresh review finds real
+[`Tactical 202`](../tactical/202-web-scene-async-boundary-cleanup.md) then
+completed the fresh production ownership review and its bounded follow-up. The
+review found no missing general actor. It reused the shared session and lobby
+coordinators plus existing Worker-resident Rust owners to:
+
+1. delete the redundant browser session-lifecycle mirror;
+2. move active local/IndexedDB/remote start selection into browser Rust;
+3. lower queued lobby starts directly into opaque Rust tickets;
+4. move complete streaming and initial-presentation readiness into Rust; and
+5. post the Rust-authored integrated-server ready envelope unchanged.
+
+This is the intended application of the actor frame: first find the real state
+owner, then remove duplicate platform sequencing without inventing another
+framework. Apply it to another consumer only when a fresh review finds real
 mutable state or sequencing that must remain consistent across native and web.
 
 ## Validation Expectations
 
-### Tactical 201 boundary proof
+### Tactical 201 and 202 boundary proof
 
 - the lobby primary starts without filesystem or IndexedDB publication;
 - two launches start from the same immutable authored source;
@@ -653,6 +665,14 @@ transparent WebGPU screenshots for lobby and unrelated control probes despite
 nonzero Rust draw receipts; headed Xvfb and both installed Chromium channels
 reproduced it. That host capture defect is recorded in Tactical 201 rather than
 weakening pixel assertions or treating transparent images as product evidence.
+
+Tactical 202 additionally passed the complete web, shared scene, and shared app
+runtime test suites, a desktop compile control, generated bindings/typecheck,
+and the 56-entry Worker ownership gate. Browser local, IndexedDB, remote,
+catalog, lobby, lifecycle, and mobile semantic paths passed to the extent
+available on this host. Their only failures were the same recorded transparent
+capture and invalid-device resource-rebuild limitations. The two-runtime lobby
+probe passed outright.
 
 ### Continuing actor boundary
 
@@ -697,6 +717,7 @@ Related records:
 - [`../tactical/198-opaque-websocket-and-indexeddb-adapters.md`](../tactical/198-opaque-websocket-and-indexeddb-adapters.md)
 - [`../tactical/199-unified-persistence-interface.md`](../tactical/199-unified-persistence-interface.md)
 - [`../tactical/201-lobby-content-simplification.md`](../tactical/201-lobby-content-simplification.md)
+- [`../tactical/202-web-scene-async-boundary-cleanup.md`](../tactical/202-web-scene-async-boundary-cleanup.md)
 
 Vanilla reference:
 
@@ -721,12 +742,14 @@ Vanilla reference:
 - Preserve native direct execution and use the vanilla
   `IOWorker`/`ProcessorMailbox` ownership lesson without copying Java's runtime
   shape.
-- Run the fresh production TypeScript and duplicated-sequencing review before
-  authorizing another tactical.
+- Treat Tactical 202's completed inventory as the current baseline: 5,275
+  authored TypeScript lines, one generic Worker-construction site, and no
+  identified need for another actor abstraction.
 - Start another tactical only from a named remaining semantic owner or a
   concrete operation, not from a desire to make the topology look uniform.
 
 The important result is that subtraction worked. The lobby now runs on a
-transient authored store plus ordinary persistent destinations. The fresh
-review begins from that smaller surface and may legitimately conclude that no
-follow-up abstraction is warranted.
+transient authored store plus ordinary persistent destinations, and the fresh
+review did conclude that no follow-up abstraction was warranted. The bounded
+cleanup made the existing ownership lines faithful without changing the native
+topology or building a replacement framework.

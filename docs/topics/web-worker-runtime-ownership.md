@@ -604,6 +604,33 @@ coordination policy with private Wasm heaps, owned completion values, and
 small platform executors. It introduced no shared Rust heap, mailbox inside
 Wasm linear memory, new Worker, or additional SAB copy site.
 
+## Subsequent Scene Boundary Cleanup
+
+Tactical 202 completed a fresh production inventory after the managed lobby
+installer was removed. It found no missing general actor and changed no Worker,
+private-heap, or SAB topology. Instead it exposed the existing owners more
+faithfully:
+
+- browser Rust consumes the shared pending session and selects local transient,
+  local IndexedDB, or remote construction;
+- queued lobby starts lower directly into opaque Rust runtime tickets without
+  a clear TypeScript operation or request-id map;
+- `WebSceneHost` owns the complete streaming and initial-presentation facts;
+  and
+- the integrated-server Worker posts the Rust actor's ready envelope unchanged.
+
+The redundant browser session-lifecycle mirror was deleted. TypeScript retains
+Worker construction, Wasm loading, promises, animation-frame scheduling,
+WebSocket/Web Lock/IndexedDB mechanics, opaque-message transport, diagnostics,
+and a generic continuation circuit breaker. It does not regain session,
+lobby, persistence, or readiness policy.
+
+The closeout inventory is 5,275 authored TypeScript lines across 16 modules,
+five Worker entries, one generic construction site, 56 zero-debt ownership
+entries, and the unchanged seven-copy ledger. See
+[`Tactical 202`](../tactical/202-web-scene-async-boundary-cleanup.md) for the
+source locks and available-lane browser evidence.
+
 ## Validation And Evidence
 
 Worker-convergence slices must preserve:
@@ -654,6 +681,8 @@ ownership checks and unchanged behavior/performance evidence are load-bearing.
   completed implementation and closeout record.
 - [`../tactical/199-unified-persistence-interface.md`](../tactical/199-unified-persistence-interface.md):
   generic persistence executor and browser world-lease campaign.
+- [`../tactical/202-web-scene-async-boundary-cleanup.md`](../tactical/202-web-scene-async-boundary-cleanup.md):
+  completed session/lobby/readiness adapter cleanup.
 
 Primary implementation surfaces:
 

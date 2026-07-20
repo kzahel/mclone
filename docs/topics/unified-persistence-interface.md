@@ -763,6 +763,14 @@ cut, and lifecycle/lease/quota/platform evidence passed. Further catalog or
 installed-content reuse is a new cost/benefit decision rather than unfinished
 work in this campaign.
 
+Tactical 202 later reviewed the surviving Worker continuation without changing
+this contract. It kept the generic TypeScript request-service loop and named
+its 60,000-step limit as a browser-mechanical circuit breaker; Rust still emits
+every request and decides whether another continuation exists. The separate
+startup ready report contains no persistence continuation, so the Worker now
+posts that complete Rust-authored envelope directly instead of passing it
+through the executor and rewriting its kind, request id, and empty update list.
+
 ## Related Documents And Code
 
 - [`persistence-architecture.md`](../persistence-architecture.md): durable

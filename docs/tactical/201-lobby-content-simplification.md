@@ -520,7 +520,7 @@ The fresh review completed on 2026-07-20. It found no replacement managed-
 provisioning consumer and no need for a new shared actor. It did find a bounded
 existing-owner cleanup around browser scene-session dispatch, the redundant
 web-only lifecycle mirror, clear lobby runtime-start descriptors, and
-TypeScript readiness reconstruction. That work is now Tactical
+TypeScript readiness reconstruction. That completed work is Tactical
 [`202`](202-web-scene-async-boundary-cleanup.md).
 
 ## Deliberate Non-Goals
