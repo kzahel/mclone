@@ -1,7 +1,7 @@
 # 200: Box-Only Figure Authoring
 
 Status: active 2026-07-20. The authoring-policy, canonical Chicken, and first
-quadruped re-authoring slices are implemented and test-green; three content
+two quadruped re-authoring slices are implemented and test-green; two content
 waves and final compatibility cleanup follow. The final native offscreen pixel
 rerun remains pending because the current host's Metal review process stalled
 before producing its receipt.
@@ -128,6 +128,26 @@ Implemented evidence:
 Use a consistent small-canid vocabulary without collapsing their proportions:
 dog breadth and floppy ears, fox narrow muzzle/large ears/tail tip, and wolf
 longer legs/chest/tail. Keep ordinary quadruped locomotion contracts.
+
+Implemented evidence:
+
+- Dog is 17 boxes rather than 18 mixed parts. Its broad short barrel, hanging
+  ears, collar, wide paws, and raised tail deliberately read as domestic.
+- Fox is 18 boxes rather than 32 mixed parts. The vanilla-derived low narrow
+  torso, oversized ears, texture-painted black stockings, and large attached
+  two-box white-tipped tail keep it distinct from the other canids.
+- Wolf is 16 boxes rather than 30 mixed parts. A separate vanilla-derived
+  shoulder mass, tall legs, upright ears, narrow head, and heavy straight tail
+  make it visibly larger and more angular than the dog.
+- All three keep their archived trot duration, cycle distance, stance, body
+  and head motion, and secondary ear/tail tracks.
+- Canonical and rounded clean sheets plus six three-cycle movies were rendered
+  under `/tmp/mclone-asset-lab` and inspected. Sampled cycles remain grounded,
+  every attachment remains connected, and the three silhouettes separate at
+  thumbnail scale.
+- The three canonical sources total 51 boxes versus 80 mixed legacy parts.
+  Exact Three.js preview topology is 612 triangles versus 4,748, a 7.8x
+  reduction; canonical part count is 36% lower.
 
 ### Slice 4: Piglet, Sheep, and Horse
 

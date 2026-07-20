@@ -70,7 +70,7 @@ used body-plan coverage and likely rig reuse to choose each wave.
 |---|---|---|
 | Canonical now | Elephant, Tiger, Rabbit, Butterfly, Chicken | Approved box-only sources promoted to their ordinary names; rounded comparisons archived explicitly |
 | Completed Wave 1 | Cat, Cow, Goat | Re-authored as 62 boxes total; pixel markings replace whiskers, hide patches, socks, nostrils, and cloven-toe geometry |
-| Wave 2 | Dog, Fox, Wolf | Shared canid anatomy with distinct proportions and textures |
+| Completed Wave 2 | Dog, Fox, Wolf | Re-authored as 51 boxes with visibly distinct domestic, low fox, and tall wolf proportions |
 | Wave 3 | Piglet, Sheep, Horse | Farm silhouettes spanning compact, woolly, and long-legged rigs |
 | Wave 4 | Bear, Lion, Bearfolk, Lionfolk | Heavy quadrupeds plus the two player-derived anthropomorphic rigs |
 
@@ -117,7 +117,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Dog | P0 | 🔨 | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | Rounded source retained at `legacy-examples/dog_rounded`; canonical box-only re-authoring is Wave 2 |
+| Dog | P0 | ✅ | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | `examples/dog` — canonical 17-box broad dog with floppy ears, collar, wide paws, and raised tail; rounded A/B retained at `legacy-examples/dog_rounded` |
 | Cat | P0 | ✅ | Q | tabby, black, white, calico, orange, siamese; kitten | `examples/cat` — canonical 16-box tabby with pixel face/stripes and an attached two-piece cuboid tail; rounded A/B retained at `legacy-examples/cat_rounded` |
 | Hamster / Guinea pig | P3 | ☐ | Q | — | tiny, rounded |
 | Parrot (pet) | P2 | ☐ | W | see Birds | |
@@ -126,8 +126,8 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Wolf | P0 | 🔨 | Q | gray, black, arctic (white), pup | Rounded source retained at `legacy-examples/wolf_rounded`; canonical box-only re-authoring is Wave 2 |
-| Fox | P1 | 🔨 | Q | red, arctic (white), fennec (huge ears), kit | Rounded source retained at `legacy-examples/fox_rounded`; canonical box-only re-authoring is Wave 2 |
+| Wolf | P0 | ✅ | Q | gray, black, arctic (white), pup | `examples/wolf` — canonical 16-box tall wolf with a vanilla-derived shoulder mass, upright ears, long legs, and heavy tail; rounded A/B retained at `legacy-examples/wolf_rounded` |
+| Fox | P1 | ✅ | Q | red, arctic (white), fennec (huge ears), kit | `examples/fox` — canonical 18-box low fox with oversized ears, black-stocking texture, and attached white-tipped tail; rounded A/B retained at `legacy-examples/fox_rounded` |
 | Coyote | P3 | ☐ | Q | — | between wolf and fox |
 | Hyena | P3 | ☐ | Q | spotted, striped | not a canid, but a dog-like rig fits |
 

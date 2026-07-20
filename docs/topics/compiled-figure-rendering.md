@@ -152,7 +152,12 @@ native cuboid approximations, and will change as source figures are revised.
 |---|---:|---:|---:|
 | player | 12 | 288 | 144 |
 | piglet_rounded (legacy) | 14 | 809 | 1,052 |
+| dog | 17 | 408 | 204 |
 | dog_rounded (legacy) | 18 | 991 | 1,268 |
+| fox | 18 | 432 | 216 |
+| fox_rounded (legacy) | 32 | 1,565 | 1,900 |
+| wolf | 16 | 384 | 192 |
+| wolf_rounded (legacy) | 30 | 1,365 | 1,580 |
 | cat | 16 | 384 | 192 |
 | cat_rounded (legacy) | 20 | 1,103 | 1,340 |
 | chicken | 14 | 336 | 168 |
@@ -177,8 +182,8 @@ make CPU world-space rebaking a prerequisite for later, richer figure assets.
 
 ### Box-only animal style A/B
 
-The elephant, tiger, rabbit, chicken, butterfly, cat, cow, and goat now have
-retained authoring pairs for direct style review:
+The elephant, tiger, rabbit, chicken, butterfly, cat, cow, goat, dog, fox, and
+wolf now have retained authoring pairs for direct style review:
 
 - `examples/elephant` uses 40 boxes exclusively, including its stepped
   articulated trunk, tusks, ears, eyes, feet, and secondary details, while
@@ -252,8 +257,19 @@ a 7.4x authoring-preview reduction, plus a 31% part-count reduction relevant
 to the current prepared cuboid path. Clean canonical/legacy sheets and all six
 three-cycle movies were rendered under `/tmp/mclone-asset-lab` and inspected;
 the sampled motion remains grounded and the sparse versions preserve the cat
-tail, cow horn/udder, and goat horn/beard signatures. Dog, Fox, and Wolf are
-the next anatomy-sharing wave.
+tail, cow horn/udder, and goat horn/beard signatures. The anatomy-sharing Dog,
+Fox, and Wolf wave followed.
+
+The canid wave retains every archived trot duration, cycle distance, stance,
+body/head motion, and secondary track while reducing 80 mixed parts to 51
+boxes. Dog drops from 1,268 to 204 exact preview triangles, Fox from 1,900 to
+216, and Wolf from 1,580 to 192. Together that is 4,748 versus 612 triangles,
+a 7.8x authoring-preview reduction, plus a 36% part-count reduction relevant
+to the prepared cuboid path. The shared anatomy remains intentionally varied:
+the dog is broad, short-backed, floppy-eared, and collared; the fox is low and
+narrow with oversized ears and a large white-tipped tail; and the wolf is tall
+with a separate shoulder mass and heavy straight tail. Clean A/B sheets and
+all six three-cycle movies were inspected. Piglet, Sheep, and Horse are next.
 
 These topology ratios do not by themselves prove an end-to-end frame-time
 improvement. Material ranges, atlas residency, draw batching, animation
@@ -276,23 +292,23 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 28 |
-| total parts | 732 |
-| boxes | 527 |
+| figures | 31 |
+| total parts | 783 |
+| boxes | 578 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 55 |
-| parts with any texture reference | 72 |
-| individual texture applications | 117 |
+| ASCII textures | 64 |
+| parts with any texture reference | 87 |
+| individual texture applications | 145 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 10 | 190 | 190 | 0 / 0 / 0 |
+| canonical `examples/` | 13 | 241 | 241 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
-All 117 applications target an explicit face of a box. They range from single
+All 145 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
