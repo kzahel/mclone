@@ -206,11 +206,11 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Kangaroo | P2 | ✅ | H | adult, joey-in-pouch | `examples/kangaroo` — approved 24-box red kangaroo with synchronized hop, long feet, and two-stage balancing tail |
-| Koala | P3 | ☐ | Q | adult, joey | clinging/climb idle; mostly ST |
+| Koala | P3 | ✅ | Q | adult, joey | `examples/koala` — approved 21-box upright adult with oversized stepped ears, broad dark nose, pale belly, folded long arms, planted feet, and cling idle |
 | Wallaby | P3 | ☐ | H | — | smaller kangaroo rig |
-| Wombat | P3 | ☐ | Q | — | stocky; raccoon-class rig |
+| Wombat | P3 | ✅ | Q | — | `examples/wombat` — approved 17-box common wombat with broad head, low barrel, tiny ears, short powerful legs, wide clawed paws, and slow walk |
 | Opossum | P3 | ☐ | Q | — | prehensile tail; hangs |
-| Tasmanian devil | P3 | ☐ | Q | — | |
+| Tasmanian devil | P3 | ✅ | Q | — | `examples/tasmanian_devil` — approved 23-box black adult with red inner ears, white chest and shoulder marks, oversized jaw, short strong legs, and thick tail |
 | Platypus | P3 | ✅ | Q/S | — | `examples/platypus` — approved 15-box low swimmer with broad slate bill, four webbed feet, two-stage paddle tail, and alternating paddle cycle |
 | Echidna | P3 | ✅ | Q | — | `examples/echidna` — approved 18-box short-beaked adult with domed spine coat, elongated snout, broad clawed feet, and compact digging walk |
 

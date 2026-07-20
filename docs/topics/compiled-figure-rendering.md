@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 83 |
-| total parts | 1,811 |
-| boxes | 1,606 |
+| figures | 86 |
+| total parts | 1,872 |
+| boxes | 1,667 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 245 |
-| parts with any texture reference | 370 |
-| individual texture applications | 598 |
+| ASCII textures | 257 |
+| parts with any texture reference | 392 |
+| individual texture applications | 622 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 65 | 1,269 | 1,269 | 0 / 0 / 0 |
+| canonical `examples/` | 68 | 1,330 | 1,330 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -532,7 +532,22 @@ inspected for identity, grounding, attachment continuity, gait cadence, rigid
 shell or quill behavior, tail follow-through, and loop continuity, and approved
 by the user on 2026-07-20.
 
-All 598 applications target an explicit face of a box. They range from single
+The sixteenth post-migration content batch adds Koala, Wombat, and Tasmanian
+Devil as approved canonical box-only rigs. Koala is a
+21-part upright adult with oversized stepped ears, broad projecting nose,
+pale belly, inward-folded long arms, planted hind feet, and a non-locomoting
+cling idle; Wombat is a 17-part low brown quadruped with a broad head, compact
+barrel, tiny ears, short powerful legs, wide clawed paws, and a slow walk; and
+Tasmanian Devil is a 23-part black quadruped with red inner ears, white chest
+and shoulder marks, oversized muzzle and lower jaw, strong short legs, and a
+thick tapered tail. All 61 parts are canonical boxes and use 12 combined pixel
+textures. Clean multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-16` and
+inspected for identity, grounding, attachment continuity, idle or gait cadence,
+secondary motion, marking visibility, and loop continuity, and approved by the
+user on 2026-07-20.
+
+All 622 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1360,11 +1375,11 @@ Crocodile/Sea Turtle/King Cobra, Penguin/Flamingo/Peacock,
 Raccoon/Red Squirrel/River Otter, and
 Chimpanzee/Orangutan/Ring-tailed Lemur, Polar Bear/Cheetah/Jaguar, and
 Moose/American Bison/Gemsbok Oryx, Donkey/Mallard Duck/Wild Turkey,
-Red Panda/Meerkat/Hedgehog, Beaver/Capybara/Platypus, and
-Porcupine/Echidna/Armadillo content batches extend the canonical authoring
-roster to 65 without changing the promoted runtime set. Instancing is now the
-strongest independent performance candidate; box-part LOD and a measured
-sampled/GPU pose path remain separate follow-ups.
+Red Panda/Meerkat/Hedgehog, Beaver/Capybara/Platypus,
+Porcupine/Echidna/Armadillo, and Koala/Wombat/Tasmanian Devil content batches
+extend the canonical authoring roster to 68 without changing the promoted
+runtime set. Instancing is now the strongest independent performance candidate;
+box-part LOD and a measured sampled/GPU pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
