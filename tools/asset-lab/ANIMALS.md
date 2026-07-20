@@ -124,7 +124,7 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Deer | P1 | ☐ | Q | doe, buck (antlers), fawn (spots) | antlers = signature variant |
 | Moose / Elk | P2 | ☐ | Q | moose, elk | huge antlers |
-| Elephant | P1 | ☐ | Q | African (big ears), Asian, calf; tusks | trunk is the challenge — capsule chain |
+| Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — African; articulated three-segment trunk, hinged ears, tusks, broad feet; `quadrupedWalk` |
 | Giraffe | P2 | ☐ | Q | adult, calf | extreme neck proportions |
 | Zebra | P2 | ☐ | Q | adult, foal | horse rig + stripes |
 | Rhino | P2 | ☐ | Q | one-horn, two-horn | |
@@ -345,7 +345,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Shipped (13):** piglet, sheep, dog, cat, butterfly, player, bearfolk, lionfolk, **cow, chicken, horse, goat, rabbit** (farmyard wave).
+- **Shipped (19):** piglet, sheep, dog, cat, butterfly, player, bearfolk,
+  lionfolk, cow, chicken, horse, goat, rabbit, wolf, fox, bear, lion, tiger,
+  and elephant.
 - **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W).
 - **Macros to build:** `swim` (S), `slither` (SL), `hop` (H — rabbit currently approximates it), N-leg crawl (C).
 - **Biggest single unlock:** the `swim` macro — gates the entire marine family.

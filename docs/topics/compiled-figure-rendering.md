@@ -98,8 +98,8 @@ was an orphaned, directly edited JSON asset; it now has a DSL source, with its
 geometry and explicit animation keys preserved and only obsolete locomotion
 metadata normalized. `asset-lab:figures:check` covers all three promoted
 figures, rejects stale output, and rejects any promoted figure JSON without a
-declared source. All 19 current Asset Lab examples also pass a discovered
-source-to-canonical-JSON round-trip test; the other 16 are authoring examples,
+declared source. All 20 current Asset Lab examples also pass a discovered
+source-to-canonical-JSON round-trip test; the other 17 are authoring examples,
 not checked runtime assets, so they have no second file to drift against.
 
 Three.js still uses `BoxGeometry`, `SphereGeometry`, `CapsuleGeometry`, and
@@ -135,10 +135,10 @@ the authored player preview is twelve boxes and 288 Three.js vertices, but its
 
 ## Current Asset-Lab Geometry Evidence
 
-The following representative counts were taken on 2026-07-16 using the same
-Three.js geometry constructors and default segment counts as Asset Lab. They
-describe intended preview geometry, not current native cuboid approximations,
-and will change as source figures are revised.
+The following representative counts were most recently refreshed on
+2026-07-20 using the same Three.js geometry constructors and default segment
+counts as Asset Lab. They describe intended preview geometry, not current
+native cuboid approximations, and will change as source figures are revised.
 
 | Figure | Parts | Vertices | Triangles |
 |---|---:|---:|---:|
@@ -148,6 +148,7 @@ and will change as source figures are revised.
 | chicken | 21 | 2,209 | 3,108 |
 | cow | 38 | 1,946 | 2,208 |
 | rabbit | 25 | 3,050 | 4,640 |
+| elephant | 38 | 2,894 | 3,756 |
 | tiger | 86 | 3,648 | 3,856 |
 
 These are not extremely large meshes, but most rounded animals are already
@@ -158,14 +159,14 @@ make CPU world-space rebaking a prerequisite for later, richer figure assets.
 ## Current Texture And UV Evidence
 
 The current authored figures do not describe generally unwrapped characters.
-An inventory taken on 2026-07-16 from the loaded semantic assets found:
+An inventory taken on 2026-07-20 from the loaded semantic assets found:
 
 | Fact | Count |
 |---|---:|
-| figures | 19 |
-| total parts | 531 |
-| boxes | 348 |
-| spheres / capsules / cylinders | 73 / 89 / 21 |
+| figures | 20 |
+| total parts | 569 |
+| boxes | 364 |
+| spheres / capsules / cylinders | 80 / 98 / 27 |
 | ASCII textures | 30 |
 | parts with any texture reference | 30 |
 | individual texture applications | 34 |
@@ -174,7 +175,7 @@ An inventory taken on 2026-07-16 from the loaded semantic assets found:
 All 34 applications target an explicit face of a box. Most are a single
 front/north face for eyes or a muzzle. The only broader uses are the top and
 bottom faces of the two butterfly wings and the east, west, and top faces of
-the tiger body. No part uses a whole-primitive texture, and all 183 curved
+the tiger body. No part uses a whole-primitive texture, and all 205 curved
 primitives currently use solid materials.
 
 This distinction matters: GPU geometry may carry deterministic UV attributes
