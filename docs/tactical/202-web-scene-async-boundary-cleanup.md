@@ -89,8 +89,7 @@ framework here.
 
 ## Slice 0: Baseline And Ownership Locks
 
-Status: in progress 2026-07-20. The code-grounded inventory is complete;
-baseline locks and focused controls are next.
+Status: complete 2026-07-20.
 
 - record this fresh review and its three-way classification;
 - freeze the current authored TypeScript/Worker/copy inventory;
@@ -100,6 +99,19 @@ baseline locks and focused controls are next.
 
 Exit: the successor is justified by current code rather than the deleted
 managed installer, and its boundary can be checked mechanically.
+
+Evidence:
+
+- `web_scene_async_boundary_lock` pins the six clear TypeScript session/lobby
+  dispatch sites, the redundant web lifecycle, the streaming-settle
+  reconstruction, the ready-envelope rewrite, and the single accepted legacy
+  migration exception;
+- the focused lock passed three tests;
+- the Wasm staging/generated-bindgen TypeScript build and authored TypeScript
+  typecheck passed; and
+- the Worker ownership self-test passed at 5,374 lines, 16 modules, five Worker
+  entries, one generic construction site, 44 zero-debt entries, and the
+  unchanged seven-copy ledger.
 
 ## Slice 1: Delete The Redundant Web Session Lifecycle
 
