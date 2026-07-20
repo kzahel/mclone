@@ -601,7 +601,14 @@ async function runIndexedDbCatalogSmoke(module) {
   const constraintWorldId = `${worldId}-constraint`;
   const nonResurrectionWorldId = `${worldId}-non-resurrection`;
   const db = await openWorldDb();
+  /** @type {Record<string, number>} */
   const operationTimingsMs = {};
+  /**
+   * @param {string} label
+   * @param {string} operation
+   * @param {Record<string, unknown>} [options]
+   * @param {string} [activeWorldId]
+   */
   const timedCatalogOperation = async (
     label,
     operation,

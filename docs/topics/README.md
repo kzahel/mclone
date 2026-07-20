@@ -120,11 +120,12 @@ series implements the same concern, normally reuse the document slug in its
   shared-linear-memory revisit gates. Tactical
   [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the approved
   autonomous high-value continuation and final long-tail review stop.
-- [`unified-persistence-interface.md`](unified-persistence-interface.md): draft
-  proposal for one typed completion-based Rust persistence port, a shared
-  coordinator, and interchangeable SQLite, IndexedDB, filesystem, and
-  memory/null record executors, including current-state research, feasibility,
-  migration gates, and tradeoffs.
+- [`unified-persistence-interface.md`](unified-persistence-interface.md):
+  accepted active direction for one typed completion-based Rust persistence
+  port, a shared coordinator, and interchangeable SQLite, IndexedDB,
+  filesystem, and memory/null record executors, including current-state
+  research, feasibility, migration gates, and tradeoffs. Tactical
+  [`199`](../tactical/199-unified-persistence-interface.md) owns implementation.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted

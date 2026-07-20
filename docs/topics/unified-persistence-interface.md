@@ -2,9 +2,10 @@
 
 Topic: `unified-persistence-interface`
 
-Status: draft for architectural review, 2026-07-20. This document records a
-proposed direction and implementation feasibility study. It does not authorize
-an implementation campaign or supersede the durable architecture in
+Status: accepted and active, 2026-07-20. Tactical
+[`199`](../tactical/199-unified-persistence-interface.md) owns the explicitly
+authorized autonomous implementation campaign. This topic does not supersede
+the durable architecture in
 [`persistence-architecture.md`](../persistence-architecture.md).
 
 ## Scope
