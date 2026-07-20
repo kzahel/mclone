@@ -340,23 +340,32 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 38 |
-| total parts | 909 |
-| boxes | 704 |
+| figures | 41 |
+| total parts | 973 |
+| boxes | 768 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 80 |
-| parts with any texture reference | 115 |
-| individual texture applications | 186 |
+| ASCII textures | 92 |
+| parts with any texture reference | 131 |
+| individual texture applications | 218 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 20 | 367 | 367 | 0 / 0 / 0 |
+| canonical `examples/` | 23 | 431 | 431 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
-All 186 applications target an explicit face of a box. They range from single
+The first post-migration content batch adds three approved canonical box-only
+examples without changing the promoted runtime set: Deer is a 25-part
+white-tailed buck with a connected six-box antler assembly, Zebra is a 22-part
+horse-derived rig with six pixel textures, and Panda is a 17-part bear-derived
+rig with three pixel textures. Clean multi-angle sheets and four-cycle walk
+videos were rendered under `/tmp/mclone-asset-lab/batch-1`, inspected for
+identity, grounding, attachment continuity, and motion, and approved by the
+user on 2026-07-20.
+
+All 218 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1175,10 +1184,12 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: all
-20 canonical Asset Lab figures are sparse cuboid rigs, all 18 rounded sources
-are isolated in the deprecated compatibility lane, and promoted Chicken is
-re-baselined. Instancing is now the strongest independent performance
+Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: its
+20-figure migration baseline is entirely sparse cuboid rigs, all 18 rounded
+sources are isolated in the deprecated compatibility lane, and promoted
+Chicken is re-baselined. The approved Deer, Zebra, and Panda content batch
+extends the canonical authoring roster to 23 without changing the promoted
+runtime set. Instancing is now the strongest independent performance
 candidate; box-part LOD and a measured sampled/GPU pose path remain separate
 follow-ups.
 

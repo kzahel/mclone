@@ -82,12 +82,12 @@ Humanoid figures are outside this animal conversion queue. `player` and
 ## Recommended next build order
 
 The original farmyard and iconic-wild-animal goals are now represented in the
-20-figure canonical box-only roster. Continue by maximizing reuse of those
+23-figure canonical box-only roster. Continue by maximizing reuse of those
 reviewed rigs and then filling macro gaps.
 
-1. **Low-cost rig variants (P1–P2, Q).** Deer and zebra can reuse the horse;
-   panda and polar bear can reuse the bear; leopard and cheetah can reuse the
-   feline rigs; donkey and mule can reuse the horse.
+1. **Low-cost rig variants (P1–P2, Q).** Polar bear can reuse the bear;
+   leopard and cheetah can reuse the feline rigs; donkey and mule can reuse
+   the horse. Deer, zebra, and panda shipped in the first post-migration batch.
 2. **Birds (P1, W).** Owl, parrot, and eagle can exercise and
    harden `wingFlap`.
 3. **First swim wave (P1, S) — build the `swim` macro, then** fish, dolphin,
@@ -145,18 +145,18 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Bear | P1 | ✅ | Q | brown/grizzly, black, polar (Arctic), cub | `examples/bear` — canonical 17-box brown bear with vanilla-derived two-mass torso, shoulder hump, broad feet, and tiny tail; rounded A/B retained at `legacy-examples/bear_rounded` |
-| Panda | P2 | ☐ | Q | adult, cub | bear rig + iconic black/white texture |
+| Panda | P2 | ✅ | Q | adult, cub | `examples/panda` — approved 17-box giant panda; bear-derived mass with black shoulder band, limbs, ears, and eye patches |
 | Polar bear | P2 | ☐ | Q | adult, cub | also lives in Polar/Arctic set |
 
 ## Hoofed & large herbivores
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Deer | P1 | ☐ | Q | doe, buck (antlers), fawn (spots) | antlers = signature variant |
+| Deer | P1 | ✅ | Q | doe, buck (antlers), fawn (spots) | `examples/deer` — approved 25-box white-tailed buck with a connected sparse antler rig, large ears, pale belly, and white tail flag |
 | Moose / Elk | P2 | ☐ | Q | moose, elk | huge antlers |
 | Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — canonical box-only African elephant; `legacy-examples/elephant_rounded` retains the rounded A/B and matching articulated trunk walk |
 | Giraffe | P2 | ☐ | Q | adult, calf | extreme neck proportions |
-| Zebra | P2 | ☐ | Q | adult, foal | horse rig + stripes |
+| Zebra | P2 | ✅ | Q | adult, foal | `examples/zebra` — approved 22-box plains zebra; horse-derived proportions with stripes carried by pixel face textures |
 | Rhino | P2 | ☐ | Q | one-horn, two-horn | |
 | Hippo | P2 | ☐ | Q | adult, calf | also semi-aquatic |
 | Camel | P2 | ☐ | Q | one hump (dromedary), two hump (bactrian) | |
