@@ -175,9 +175,9 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Monkey | P2 | ☐ | B/Q | generic, with baby | long tail; knuckle/upright ambiguity |
 | Gorilla | P2 | ✅ | B/Q | silverback, female, juvenile | `examples/gorilla` — approved 28-box silverback with gray saddle, long articulated arms, and grounded knuckle-walk |
-| Chimpanzee | P3 | ☐ | B/Q | — | |
-| Orangutan | P3 | ☐ | B/Q | — | long arms; orange shag |
-| Lemur | P3 | ☐ | Q/B | ring-tailed | banded tail signature |
+| Chimpanzee | P3 | ✅ | B/Q | — | `examples/chimpanzee` — approved 24-box agile knuckle-walker with pale ears, muzzle, and lighter proportions than the gorilla |
+| Orangutan | P3 | ✅ | B/Q | — | `examples/orangutan` — approved 27-box adult male with rust-orange shag, dark cheek flanges, and exceptionally long forelimbs |
+| Lemur | P3 | ✅ | Q/B | ring-tailed | `examples/ring_tailed_lemur` — approved 22-box slender quadruped with amber-eyed mask and seven-section banded tail |
 
 ## Small & exotic mammals
 
