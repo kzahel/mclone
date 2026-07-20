@@ -22,38 +22,66 @@
     },
     "foot": {
       "color": "#d98c25"
-    },
-    "eye": {
-      "color": "#1c1712"
     }
   },
-  "textures": {},
+  "textures": {
+    "face": {
+      "palette": {
+        ".": "#f3ede2",
+        "e": "#1c1712",
+        "r": "#cf3a32"
+      },
+      "pixels": [
+        "..rr..",
+        "......",
+        ".e..e.",
+        ".e..e.",
+        "......",
+        "......"
+      ]
+    },
+    "wing_feathers": {
+      "palette": {
+        ".": "#d9cfbd",
+        "f": "#f3ede2",
+        "s": "#bfb5a4"
+      },
+      "pixels": [
+        "ffffff",
+        "f....f",
+        "fssss.",
+        "f....f",
+        ".ssss.",
+        "......"
+      ]
+    },
+    "foot_face": {
+      "palette": {
+        ".": "#d98c25",
+        "t": "#f2a531"
+      },
+      "pixels": [
+        "......",
+        "t.tt.t"
+      ]
+    }
+  },
   "parts": [
     {
       "name": "body",
       "at": [
         0,
-        0.74,
+        0.75,
         0.05
       ],
       "material": "feather",
       "primitive": {
-        "kind": "sphere",
-        "radius": 0.33
-      }
-    },
-    {
-      "name": "rump",
-      "parent": "body",
-      "at": [
-        0,
-        0.02,
-        0.27
-      ],
-      "material": "feather",
-      "primitive": {
-        "kind": "sphere",
-        "radius": 0.27
+        "kind": "box",
+        "size": [
+          0.6,
+          0.62,
+          0.72
+        ]
       }
     },
     {
@@ -61,131 +89,58 @@
       "parent": "body",
       "at": [
         0,
-        -0.08,
-        -0.22
-      ],
-      "material": "feather",
-      "primitive": {
-        "kind": "sphere",
-        "radius": 0.24
-      }
-    },
-    {
-      "name": "belly",
-      "parent": "body",
-      "at": [
-        0,
-        -0.16,
-        0.04
+        -0.06,
+        -0.4
       ],
       "material": "feather_shade",
       "primitive": {
-        "kind": "sphere",
-        "radius": 0.26
-      }
-    },
-    {
-      "name": "neck",
-      "parent": "body",
-      "at": [
-        0,
-        0.34,
-        -0.26
-      ],
-      "rot": [
-        -22,
-        0,
-        0
-      ],
-      "material": "feather",
-      "primitive": {
-        "kind": "capsule",
-        "radius": 0.13,
-        "length": 0.22
+        "kind": "box",
+        "size": [
+          0.5,
+          0.48,
+          0.22
+        ]
       }
     },
     {
       "name": "head",
-      "parent": "neck",
+      "parent": "body",
       "at": [
         0,
-        0.24,
-        -0.06
+        0.36,
+        -0.39
       ],
       "material": "feather",
       "primitive": {
-        "kind": "sphere",
-        "radius": 0.18
+        "kind": "box",
+        "size": [
+          0.4,
+          0.48,
+          0.36
+        ],
+        "faces": {
+          "north": {
+            "texture": "face"
+          }
+        }
       }
     },
     {
-      "name": "eye_l",
-      "parent": "head",
-      "at": [
-        -0.13,
-        0.05,
-        -0.09
-      ],
-      "material": "eye",
-      "primitive": {
-        "kind": "sphere",
-        "radius": 0.03
-      }
-    },
-    {
-      "name": "eye_r",
-      "parent": "head",
-      "at": [
-        0.13,
-        0.05,
-        -0.09
-      ],
-      "material": "eye",
-      "primitive": {
-        "kind": "sphere",
-        "radius": 0.03
-      }
-    },
-    {
-      "name": "comb_mid",
+      "name": "comb",
       "parent": "head",
       "at": [
         0,
-        0.18,
+        0.31,
         -0.02
       ],
       "material": "comb",
       "primitive": {
-        "kind": "sphere",
-        "radius": 0.075
-      }
-    },
-    {
-      "name": "comb_front",
-      "parent": "head",
-      "at": [
-        0,
-        0.15,
-        -0.12
-      ],
-      "material": "comb",
-      "primitive": {
-        "kind": "sphere",
-        "radius": 0.06
-      }
-    },
-    {
-      "name": "comb_back",
-      "parent": "head",
-      "at": [
-        0,
-        0.15,
-        0.09
-      ],
-      "material": "comb",
-      "primitive": {
-        "kind": "sphere",
-        "radius": 0.06
+        "kind": "box",
+        "size": [
+          0.12,
+          0.18,
+          0.28
+        ]
       }
     },
     {
@@ -194,20 +149,16 @@
       "at": [
         0,
         -0.02,
-        -0.2
-      ],
-      "rot": [
-        -90,
-        0,
-        0
+        -0.28
       ],
       "material": "beak",
       "primitive": {
-        "kind": "cylinder",
-        "radiusTop": 0.005,
-        "radiusBottom": 0.075,
-        "length": 0.14,
-        "radialSegments": 8
+        "kind": "box",
+        "size": [
+          0.28,
+          0.14,
+          0.2
+        ]
       }
     },
     {
@@ -215,29 +166,33 @@
       "parent": "head",
       "at": [
         0,
-        -0.16,
-        -0.13
+        -0.25,
+        -0.19
       ],
       "material": "wattle",
       "primitive": {
-        "kind": "sphere",
-        "radius": 0.055
+        "kind": "box",
+        "size": [
+          0.14,
+          0.18,
+          0.12
+        ]
       }
     },
     {
       "name": "wing_l",
       "parent": "body",
       "at": [
-        -0.31,
-        0.06,
+        -0.34,
+        0.02,
         0
       ],
       "material": "feather_shade",
       "joint": {
         "pivot": [
-          0,
-          0.12,
-          -0.18
+          0.04,
+          0.14,
+          -0.2
         ],
         "axis": [
           0,
@@ -248,26 +203,31 @@
       "primitive": {
         "kind": "box",
         "size": [
-          0.07,
-          0.3,
-          0.46
-        ]
+          0.08,
+          0.36,
+          0.54
+        ],
+        "faces": {
+          "west": {
+            "texture": "wing_feathers"
+          }
+        }
       }
     },
     {
       "name": "wing_r",
       "parent": "body",
       "at": [
-        0.31,
-        0.06,
+        0.34,
+        0.02,
         0
       ],
       "material": "feather_shade",
       "joint": {
         "pivot": [
-          0,
-          0.12,
-          -0.18
+          -0.04,
+          0.14,
+          -0.2
         ],
         "axis": [
           0,
@@ -278,10 +238,15 @@
       "primitive": {
         "kind": "box",
         "size": [
-          0.07,
-          0.3,
-          0.46
-        ]
+          0.08,
+          0.36,
+          0.54
+        ],
+        "faces": {
+          "east": {
+            "texture": "wing_feathers"
+          }
+        }
       }
     },
     {
@@ -289,8 +254,8 @@
       "parent": "body",
       "at": [
         0,
-        0.22,
-        0.46
+        0.19,
+        0.45
       ],
       "rot": [
         38,
@@ -301,7 +266,7 @@
       "joint": {
         "pivot": [
           0,
-          -0.23,
+          -0.21,
           0
         ],
         "axis": [
@@ -314,7 +279,7 @@
         "kind": "box",
         "size": [
           0.38,
-          0.46,
+          0.42,
           0.09
         ]
       }
@@ -324,7 +289,7 @@
       "parent": "tail",
       "at": [
         0,
-        0.2,
+        0.19,
         0.04
       ],
       "rot": [
@@ -337,7 +302,7 @@
         "kind": "box",
         "size": [
           0.26,
-          0.32,
+          0.3,
           0.07
         ]
       }
@@ -346,15 +311,15 @@
       "name": "leg_l",
       "parent": "body",
       "at": [
-        -0.13,
-        -0.43,
+        -0.14,
+        -0.48,
         0.06
       ],
       "material": "leg",
       "joint": {
         "pivot": [
           0,
-          0.25,
+          0.2,
           0
         ],
         "axis": [
@@ -364,24 +329,27 @@
         ]
       },
       "primitive": {
-        "kind": "capsule",
-        "radius": 0.045,
-        "length": 0.5
+        "kind": "box",
+        "size": [
+          0.09,
+          0.4,
+          0.1
+        ]
       }
     },
     {
       "name": "leg_r",
       "parent": "body",
       "at": [
-        0.13,
-        -0.43,
+        0.14,
+        -0.48,
         0.06
       ],
       "material": "leg",
       "joint": {
         "pivot": [
           0,
-          0.25,
+          0.2,
           0
         ],
         "axis": [
@@ -391,9 +359,12 @@
         ]
       },
       "primitive": {
-        "kind": "capsule",
-        "radius": 0.045,
-        "length": 0.5
+        "kind": "box",
+        "size": [
+          0.09,
+          0.4,
+          0.1
+        ]
       }
     },
     {
@@ -401,17 +372,22 @@
       "parent": "leg_l",
       "at": [
         0,
-        -0.28,
-        -0.04
+        -0.22,
+        -0.05
       ],
       "material": "foot",
       "primitive": {
         "kind": "box",
         "size": [
-          0.13,
-          0.05,
-          0.22
-        ]
+          0.18,
+          0.06,
+          0.28
+        ],
+        "faces": {
+          "north": {
+            "texture": "foot_face"
+          }
+        }
       }
     },
     {
@@ -419,17 +395,22 @@
       "parent": "leg_r",
       "at": [
         0,
-        -0.28,
-        -0.04
+        -0.22,
+        -0.05
       ],
       "material": "foot",
       "primitive": {
         "kind": "box",
         "size": [
-          0.13,
-          0.05,
-          0.22
-        ]
+          0.18,
+          0.06,
+          0.28
+        ],
+        "faces": {
+          "north": {
+            "texture": "foot_face"
+          }
+        }
       }
     }
   ],

@@ -29,7 +29,7 @@ if (!video) {
 
 try {
   const params = new URLSearchParams(window.location.search);
-  const figurePath = params.get("figure") ?? "/examples/piglet/figure.ts";
+  const figurePath = params.get("figure") ?? "/examples/chicken/figure.ts";
   const clipName = params.get("clip") ?? "walk";
   const debug = params.get("debug") !== "0";
   const asset = await loadBrowserFigure(figurePath);

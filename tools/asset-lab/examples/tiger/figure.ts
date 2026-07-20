@@ -1,18 +1,23 @@
 import { figure } from "../../src/dsl";
 
-export default figure("tiger", ({ mat, asciiTexture, part, box, capsule, sphere, cylinder, quadrupedWalk, followThrough }) => {
+// A box-only tiger built from the sparse Minecraft feline grammar. Stripes and
+// facial detail live primarily in pixel textures instead of extra geometry.
+export default figure("tiger", ({
+  mat,
+  asciiTexture,
+  part,
+  box,
+  quadrupedWalk,
+  swing,
+  followThrough,
+}) => {
   mat("coat", "#e8751a");
   mat("coat_light", "#f09a36");
   mat("coat_shadow", "#b84d13");
   mat("stripe", "#15110e");
   mat("white", "#fff3dc");
-  mat("cream", "#f4d8a7");
   mat("ear_inner", "#d37a5f");
-  mat("eye", "#f0c44d");
-  mat("nose", "#16100d");
   mat("paw", "#3a2215");
-  mat("claw", "#f7ead4");
-  mat("whisker", "#f8f0de");
 
   asciiTexture("face", {
     palette: {
@@ -84,8 +89,56 @@ export default figure("tiger", ({ mat, asciiTexture, part, box, capsule, sphere,
     ],
   });
 
+  asciiTexture("leg_stripes", {
+    palette: {
+      ".": "#e8751a",
+      "s": "#15110e",
+      "o": "#b84d13",
+    },
+    pixels: [
+      "s..s",
+      ".ss.",
+      "....",
+      "s..s",
+      ".ss.",
+      "....",
+      "oooo",
+      "oooo",
+    ],
+  });
+
+  asciiTexture("tail_rings", {
+    palette: {
+      ".": "#e8751a",
+      "s": "#15110e",
+    },
+    pixels: [
+      "ssss",
+      "ssss",
+      "....",
+      "....",
+      "ssss",
+      "ssss",
+      "....",
+      "ssss",
+    ],
+  });
+
+  asciiTexture("paw_face", {
+    palette: {
+      "p": "#3a2215",
+      "c": "#f7ead4",
+    },
+    pixels: [
+      "pppppp",
+      "pppppp",
+      "pcpccp",
+    ],
+  });
+
   part("body", box({
-    size: [1.06, 0.56, 1.7],
+    at: [0, 1, 0.04],
+    size: [1.08, 0.66, 1.72],
     material: "coat",
     faces: {
       east: { texture: "body_side" },
@@ -93,137 +146,138 @@ export default figure("tiger", ({ mat, asciiTexture, part, box, capsule, sphere,
       up: { texture: "body_top" },
     },
   }));
-  part("back", box({ parent: "body", at: [0, 0.23, 0.06], size: [0.96, 0.12, 1.18], material: "coat_light" }));
-  part("chest", box({ parent: "body", at: [0, -0.02, -0.67], size: [0.82, 0.48, 0.36], material: "white" }));
-  part("belly", box({ parent: "body", at: [0, -0.3, -0.02], size: [0.74, 0.12, 1.1], material: "white" }));
-  part("haunch_l", box({ parent: "body", at: [-0.43, -0.02, 0.48], size: [0.22, 0.42, 0.46], material: "coat_shadow" }));
-  part("haunch_r", box({ parent: "body", at: [0.43, -0.02, 0.48], size: [0.22, 0.42, 0.46], material: "coat_shadow" }));
-  part("shoulder_l", box({ parent: "body", at: [-0.43, -0.02, -0.5], size: [0.24, 0.46, 0.42], material: "coat_shadow" }));
-  part("shoulder_r", box({ parent: "body", at: [0.43, -0.02, -0.5], size: [0.24, 0.46, 0.42], material: "coat_shadow" }));
-
-  part("stripe_back_1", box({ parent: "body", at: [0, 0.31, -0.48], size: [0.92, 0.035, 0.055], material: "stripe" }));
-  part("stripe_back_2", box({ parent: "body", at: [0, 0.31, -0.1], size: [0.86, 0.035, 0.06], material: "stripe" }));
-  part("stripe_back_3", box({ parent: "body", at: [0, 0.31, 0.3], size: [0.92, 0.035, 0.055], material: "stripe" }));
-  part("stripe_back_4", box({ parent: "body", at: [0, 0.29, 0.66], size: [0.76, 0.035, 0.055], material: "stripe" }));
-
-  part("stripe_l_1", box({ parent: "body", at: [-0.55, 0.07, -0.6], rot: [16, 0, 0], size: [0.035, 0.42, 0.08], material: "stripe" }));
-  part("stripe_l_2", box({ parent: "body", at: [-0.55, 0.09, -0.26], rot: [-10, 0, 0], size: [0.035, 0.38, 0.08], material: "stripe" }));
-  part("stripe_l_3", box({ parent: "body", at: [-0.55, 0.08, 0.12], rot: [14, 0, 0], size: [0.035, 0.42, 0.08], material: "stripe" }));
-  part("stripe_l_4", box({ parent: "body", at: [-0.55, 0.06, 0.46], rot: [-12, 0, 0], size: [0.035, 0.36, 0.08], material: "stripe" }));
-  part("stripe_r_1", box({ parent: "body", at: [0.55, 0.07, -0.6], rot: [-16, 0, 0], size: [0.035, 0.42, 0.08], material: "stripe" }));
-  part("stripe_r_2", box({ parent: "body", at: [0.55, 0.09, -0.26], rot: [10, 0, 0], size: [0.035, 0.38, 0.08], material: "stripe" }));
-  part("stripe_r_3", box({ parent: "body", at: [0.55, 0.08, 0.12], rot: [-14, 0, 0], size: [0.035, 0.42, 0.08], material: "stripe" }));
-  part("stripe_r_4", box({ parent: "body", at: [0.55, 0.06, 0.46], rot: [12, 0, 0], size: [0.035, 0.36, 0.08], material: "stripe" }));
-
-  part("neck", box({
+  part("chest", box({
     parent: "body",
-    at: [0, 0.2, -0.9],
-    rot: [-13, 0, 0],
-    size: [0.62, 0.46, 0.46],
-    material: "coat",
-    joint: { pivot: [0, -0.22, 0.16], axis: [1, 0, 0] },
+    at: [0, -0.2, -0.77],
+    size: [0.72, 0.44, 0.24],
+    material: "white",
   }));
-  part("throat", box({ parent: "neck", at: [0, -0.18, -0.12], size: [0.48, 0.24, 0.3], material: "white" }));
-  part("neck_stripe_l", box({ parent: "neck", at: [-0.32, 0.08, -0.04], rot: [14, 0, 0], size: [0.035, 0.32, 0.08], material: "stripe" }));
-  part("neck_stripe_r", box({ parent: "neck", at: [0.32, 0.08, -0.04], rot: [-14, 0, 0], size: [0.035, 0.32, 0.08], material: "stripe" }));
+  part("belly", box({
+    parent: "body",
+    at: [0, -0.35, -0.02],
+    size: [0.7, 0.1, 1.16],
+    material: "white",
+  }));
 
+  // A broad low head, projecting muzzle, and tiny square ears carry the feline
+  // silhouette without the rounded version's neck, cheek, and brow clusters.
   part("head", box({
-    parent: "neck",
-    at: [0, 0.14, -0.42],
-    rot: [8, 0, 0],
-    size: [0.6, 0.46, 0.5],
-    material: "coat",
+    parent: "body",
+    at: [0, 0.06, -1.04],
+    size: [0.74, 0.58, 0.62],
+    material: "coat_light",
     faces: {
       north: { texture: "face" },
     },
+    joint: { pivot: [0, 0, 0.26], axis: [1, 0, 0] },
   }));
-  part("head_top_stripe", box({ parent: "head", at: [0, 0.25, -0.08], size: [0.12, 0.035, 0.34], material: "stripe" }));
-  part("brow_l", box({ parent: "head", at: [-0.18, 0.1, -0.24], rot: [0, 0, -10], size: [0.22, 0.08, 0.12], material: "stripe" }));
-  part("brow_r", box({ parent: "head", at: [0.18, 0.1, -0.24], rot: [0, 0, 10], size: [0.22, 0.08, 0.12], material: "stripe" }));
-  part("cheek_l", box({ parent: "head", at: [-0.24, -0.08, -0.22], size: [0.16, 0.2, 0.18], material: "white" }));
-  part("cheek_r", box({ parent: "head", at: [0.24, -0.08, -0.22], size: [0.16, 0.2, 0.18], material: "white" }));
   part("muzzle", box({
     parent: "head",
-    at: [0, -0.1, -0.4],
-    size: [0.44, 0.22, 0.3],
+    at: [0, -0.13, -0.42],
+    size: [0.5, 0.25, 0.26],
     material: "white",
     faces: {
       north: { texture: "snout_face" },
     },
   }));
-  part("nose", sphere({ parent: "muzzle", at: [0, 0.02, -0.17], radius: 0.052, material: "nose" }));
-
-  part("ear_l", sphere({ parent: "head", at: [-0.28, 0.25, -0.02], radius: 0.11, material: "stripe" }));
-  part("ear_r", sphere({ parent: "head", at: [0.28, 0.25, -0.02], radius: 0.11, material: "stripe" }));
-  part("ear_l_inner", box({ parent: "ear_l", at: [0, -0.02, -0.08], size: [0.1, 0.08, 0.03], material: "ear_inner" }));
-  part("ear_r_inner", box({ parent: "ear_r", at: [0, -0.02, -0.08], size: [0.1, 0.08, 0.03], material: "ear_inner" }));
-
-  part("whisker_l1", cylinder({ parent: "muzzle", at: [-0.26, 0.04, -0.08], rot: [0, 0, 82], radius: 0.008, length: 0.38, radialSegments: 6, material: "whisker" }));
-  part("whisker_l2", cylinder({ parent: "muzzle", at: [-0.26, -0.02, -0.08], rot: [0, 0, 96], radius: 0.008, length: 0.34, radialSegments: 6, material: "whisker" }));
-  part("whisker_r1", cylinder({ parent: "muzzle", at: [0.26, 0.04, -0.08], rot: [0, 0, -82], radius: 0.008, length: 0.38, radialSegments: 6, material: "whisker" }));
-  part("whisker_r2", cylinder({ parent: "muzzle", at: [0.26, -0.02, -0.08], rot: [0, 0, -96], radius: 0.008, length: 0.34, radialSegments: 6, material: "whisker" }));
-
-  part("leg_fl", capsule({ parent: "body", at: [-0.34, -0.43, -0.5], radius: 0.095, length: 0.56, material: "coat", joint: { pivot: [0, 0.28, 0], axis: [1, 0, 0] } }));
-  part("leg_fr", capsule({ parent: "body", at: [0.34, -0.43, -0.5], radius: 0.095, length: 0.56, material: "coat", joint: { pivot: [0, 0.28, 0], axis: [1, 0, 0] } }));
-  part("leg_bl", capsule({ parent: "body", at: [-0.36, -0.42, 0.5], radius: 0.11, length: 0.58, material: "coat_shadow", joint: { pivot: [0, 0.29, 0], axis: [1, 0, 0] } }));
-  part("leg_br", capsule({ parent: "body", at: [0.36, -0.42, 0.5], radius: 0.11, length: 0.58, material: "coat_shadow", joint: { pivot: [0, 0.29, 0], axis: [1, 0, 0] } }));
-
-  part("leg_fl_stripe_1", box({ parent: "leg_fl", at: [0, 0.08, -0.08], rot: [18, 0, 0], size: [0.22, 0.055, 0.08], material: "stripe" }));
-  part("leg_fl_stripe_2", box({ parent: "leg_fl", at: [0, -0.1, 0.07], rot: [-18, 0, 0], size: [0.22, 0.055, 0.08], material: "stripe" }));
-  part("leg_fr_stripe_1", box({ parent: "leg_fr", at: [0, 0.08, -0.08], rot: [-18, 0, 0], size: [0.22, 0.055, 0.08], material: "stripe" }));
-  part("leg_fr_stripe_2", box({ parent: "leg_fr", at: [0, -0.1, 0.07], rot: [18, 0, 0], size: [0.22, 0.055, 0.08], material: "stripe" }));
-  part("leg_bl_stripe_1", box({ parent: "leg_bl", at: [0, 0.08, -0.08], rot: [18, 0, 0], size: [0.24, 0.055, 0.08], material: "stripe" }));
-  part("leg_bl_stripe_2", box({ parent: "leg_bl", at: [0, -0.1, 0.07], rot: [-18, 0, 0], size: [0.24, 0.055, 0.08], material: "stripe" }));
-  part("leg_br_stripe_1", box({ parent: "leg_br", at: [0, 0.08, -0.08], rot: [-18, 0, 0], size: [0.24, 0.055, 0.08], material: "stripe" }));
-  part("leg_br_stripe_2", box({ parent: "leg_br", at: [0, -0.1, 0.07], rot: [18, 0, 0], size: [0.24, 0.055, 0.08], material: "stripe" }));
-
-  part("paw_fl", box({ parent: "leg_fl", at: [0, -0.35, -0.07], size: [0.27, 0.095, 0.33], material: "paw" }));
-  part("paw_fr", box({ parent: "leg_fr", at: [0, -0.35, -0.07], size: [0.27, 0.095, 0.33], material: "paw" }));
-  part("paw_bl", box({ parent: "leg_bl", at: [0, -0.36, 0.02], size: [0.29, 0.1, 0.35], material: "paw" }));
-  part("paw_br", box({ parent: "leg_br", at: [0, -0.36, 0.02], size: [0.29, 0.1, 0.35], material: "paw" }));
-
-  part("toe_fl_l", box({ parent: "paw_fl", at: [-0.09, 0.03, -0.13], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_fl_m", box({ parent: "paw_fl", at: [0, 0.03, -0.14], size: [0.045, 0.025, 0.11], material: "coat_shadow" }));
-  part("toe_fl_r", box({ parent: "paw_fl", at: [0.09, 0.03, -0.13], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_fr_l", box({ parent: "paw_fr", at: [-0.09, 0.03, -0.13], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_fr_m", box({ parent: "paw_fr", at: [0, 0.03, -0.14], size: [0.045, 0.025, 0.11], material: "coat_shadow" }));
-  part("toe_fr_r", box({ parent: "paw_fr", at: [0.09, 0.03, -0.13], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_bl_l", box({ parent: "paw_bl", at: [-0.1, 0.03, -0.14], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_bl_m", box({ parent: "paw_bl", at: [0, 0.03, -0.15], size: [0.045, 0.025, 0.11], material: "coat_shadow" }));
-  part("toe_bl_r", box({ parent: "paw_bl", at: [0.1, 0.03, -0.14], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_br_l", box({ parent: "paw_br", at: [-0.1, 0.03, -0.14], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-  part("toe_br_m", box({ parent: "paw_br", at: [0, 0.03, -0.15], size: [0.045, 0.025, 0.11], material: "coat_shadow" }));
-  part("toe_br_r", box({ parent: "paw_br", at: [0.1, 0.03, -0.14], size: [0.045, 0.025, 0.1], material: "coat_shadow" }));
-
-  part("claw_fl_l", box({ parent: "paw_fl", at: [-0.09, -0.01, -0.19], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_fl_m", box({ parent: "paw_fl", at: [0, -0.01, -0.2], size: [0.048, 0.032, 0.1], material: "claw" }));
-  part("claw_fl_r", box({ parent: "paw_fl", at: [0.09, -0.01, -0.19], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_fr_l", box({ parent: "paw_fr", at: [-0.09, -0.01, -0.19], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_fr_m", box({ parent: "paw_fr", at: [0, -0.01, -0.2], size: [0.048, 0.032, 0.1], material: "claw" }));
-  part("claw_fr_r", box({ parent: "paw_fr", at: [0.09, -0.01, -0.19], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_bl_l", box({ parent: "paw_bl", at: [-0.1, -0.01, -0.2], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_bl_m", box({ parent: "paw_bl", at: [0, -0.01, -0.21], size: [0.048, 0.032, 0.1], material: "claw" }));
-  part("claw_bl_r", box({ parent: "paw_bl", at: [0.1, -0.01, -0.2], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_br_l", box({ parent: "paw_br", at: [-0.1, -0.01, -0.2], size: [0.048, 0.032, 0.09], material: "claw" }));
-  part("claw_br_m", box({ parent: "paw_br", at: [0, -0.01, -0.21], size: [0.048, 0.032, 0.1], material: "claw" }));
-  part("claw_br_r", box({ parent: "paw_br", at: [0.1, -0.01, -0.2], size: [0.048, 0.032, 0.09], material: "claw" }));
-
-  part("tail", capsule({
-    parent: "body",
-    at: [0, 0.08, 0.9],
-    rot: [44, 0, 0],
-    radius: 0.065,
-    length: 1.02,
-    capSegments: 5,
-    radialSegments: 14,
-    material: "coat",
-    joint: { pivot: [0, 0.51, 0], axis: [0, 0, 1] },
+  part("ear_l", box({
+    parent: "head",
+    at: [-0.25, 0.35, -0.02],
+    rot: [0, 0, -5],
+    size: [0.18, 0.2, 0.13],
+    material: "stripe",
+    joint: { pivot: [0, -0.08, 0], axis: [1, 0, 0] },
   }));
-  part("tail_ring_1", capsule({ parent: "tail", at: [0, 0.22, 0.02], radius: 0.068, length: 0.07, radialSegments: 14, material: "stripe" }));
-  part("tail_ring_2", capsule({ parent: "tail", at: [0, 0.02, 0.03], radius: 0.069, length: 0.075, radialSegments: 14, material: "stripe" }));
-  part("tail_ring_3", capsule({ parent: "tail", at: [0, -0.2, 0.04], radius: 0.071, length: 0.08, radialSegments: 14, material: "stripe" }));
-  part("tail_ring_4", capsule({ parent: "tail", at: [0, -0.42, 0.05], radius: 0.073, length: 0.085, radialSegments: 14, material: "stripe" }));
-  part("tail_tip", sphere({ parent: "tail", at: [0, -0.55, 0.06], radius: 0.08, material: "stripe" }));
+  part("ear_r", box({
+    parent: "head",
+    at: [0.25, 0.35, -0.02],
+    rot: [0, 0, 5],
+    size: [0.18, 0.2, 0.13],
+    material: "stripe",
+    joint: { pivot: [0, -0.08, 0], axis: [1, 0, 0] },
+  }));
+  part("ear_inner_l", box({
+    parent: "ear_l",
+    at: [0, -0.01, -0.08],
+    size: [0.1, 0.11, 0.035],
+    material: "ear_inner",
+  }));
+  part("ear_inner_r", box({
+    parent: "ear_r",
+    at: [0, -0.01, -0.08],
+    size: [0.1, 0.11, 0.035],
+    material: "ear_inner",
+  }));
+
+  for (const [suffix, x, z, shadow] of [
+    ["fl", -0.36, -0.53, false],
+    ["fr", 0.36, -0.53, false],
+    ["bl", -0.37, 0.52, true],
+    ["br", 0.37, 0.52, true],
+  ] as const) {
+    part(`leg_${suffix}`, box({
+      parent: "body",
+      at: [x, -0.58, z],
+      size: [0.22, 0.64, 0.23],
+      material: shadow ? "coat_shadow" : "coat",
+      faces: {
+        north: { texture: "leg_stripes" },
+        south: { texture: "leg_stripes" },
+        east: { texture: "leg_stripes" },
+        west: { texture: "leg_stripes" },
+      },
+      joint: { pivot: [0, 0.32, 0], axis: [1, 0, 0] },
+    }));
+    part(`paw_${suffix}`, box({
+      parent: `leg_${suffix}`,
+      at: [0, -0.36, -0.055],
+      size: [0.31, 0.12, 0.35],
+      material: "paw",
+      faces: {
+        north: { texture: "paw_face" },
+      },
+    }));
+  }
+
+  // Two long cuboids echo the vanilla ocelot tail rig. Pixel rings carry the
+  // tiger marking while the second segment supplies an independent trailing arc.
+  part("tail_1", box({
+    parent: "body",
+    // The bottom pivot is embedded just inside the body's rear face, so the
+    // raised tail has no daylight between its root and the rump.
+    at: [0, 0.48, 0.84],
+    rot: [55, 0, 0],
+    size: [0.13, 0.76, 0.13],
+    material: "coat",
+    faces: {
+      north: { texture: "tail_rings" },
+      south: { texture: "tail_rings" },
+      east: { texture: "tail_rings" },
+      west: { texture: "tail_rings" },
+    },
+    joint: { pivot: [0, -0.38, 0], axis: [0, 0, 1] },
+  }));
+  part("tail_2", box({
+    parent: "tail_1",
+    // Attach the second segment's bottom pivot to tail_1's top endpoint.
+    at: [0, 0.67, 0],
+    rot: [25, 0, 0],
+    size: [0.12, 0.58, 0.12],
+    material: "coat",
+    faces: {
+      north: { texture: "tail_rings" },
+      south: { texture: "tail_rings" },
+      east: { texture: "tail_rings" },
+      west: { texture: "tail_rings" },
+    },
+    joint: { pivot: [0, -0.29, 0], axis: [0, 0, 1] },
+  }));
+  part("tail_tip", box({
+    parent: "tail_2",
+    at: [0, 0.38, 0],
+    size: [0.16, 0.18, 0.16],
+    material: "stripe",
+  }));
 
   quadrupedWalk("walk", {
     fps: 12,
@@ -251,13 +305,14 @@ export default figure("tiger", ({ mat, asciiTexture, part, box, capsule, sphere,
     },
     stanceRatio: 0.66,
     swingDegrees: 19,
-    tail: "tail",
+    tail: "tail_1",
     tailSwingDegrees: 11,
     tracks: [
-      followThrough("neck", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 5, overshoot: 0.5, lag: 0.14 }),
-      followThrough("ear_l", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 5, overshoot: 0.45, lag: 0.12 }),
-      followThrough("ear_r", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 5, overshoot: 0.45, lag: 0.12 }),
-      followThrough("tail", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 9, overshoot: 0.75, lag: 0.2 }),
+      swing("head", { axis: "x", degrees: 1.8, phase: 0.5 }),
+      followThrough("ear_l", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 4, overshoot: 0.4, lag: 0.12 }),
+      followThrough("ear_r", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 4, overshoot: 0.4, lag: 0.12 }),
+      followThrough("tail_1", { source: "body", sourceChannel: "pos", sourceAxis: "y", axis: "x", degrees: 7, overshoot: 0.65, lag: 0.18 }),
+      followThrough("tail_2", { source: "tail_1", sourceChannel: "rot", sourceAxis: "z", axis: "z", degrees: 15, overshoot: 0.8, lag: 0.18 }),
     ],
   });
 });

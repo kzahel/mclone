@@ -3,7 +3,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import type { FigureAsset } from "../src/dsl";
+import {
+  assertBoxOnlyFigure,
+  figure,
+  legacyFigure,
+  type FigureAsset,
+} from "../src/dsl";
 import {
   parseFigureAssetJson,
   roundTripFigureAsset,
@@ -58,22 +63,39 @@ test("TypeScript source and checked player JSON resolve identically", async () =
   assert.equal(source.json, checked.json);
 });
 
-test("every Asset Lab example crosses the canonical JSON boundary", async () => {
-  const examplesDir = path.join(assetLabRoot, "examples");
-  const entries = await fs.readdir(examplesDir, { withFileTypes: true });
-  const sources = entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(examplesDir, entry.name, "figure.ts"))
-    .sort();
-  assert.ok(sources.length > 0);
+test("canonical figure rejects deprecated curved primitives", () => {
+  assert.throws(
+    () =>
+      figure("curved", ({ part }) => {
+        part("orb", { primitive: { kind: "sphere", radius: 1 } });
+      }),
+    /canonical figures may use only box primitives/,
+  );
+
+  const legacy = legacyFigure("curved_legacy", ({ part, sphere }) => {
+    part("orb", sphere({ radius: 1 }));
+  });
+  assert.equal(legacy.parts[0]?.primitive.kind, "sphere");
+});
+
+test("canonical and legacy examples cross the canonical JSON boundary", async () => {
+  const canonicalSources = await discoverFigureSources("examples");
+  const legacySources = await discoverFigureSources("legacy-examples");
+  assert.ok(canonicalSources.length > 0);
+  assert.ok(legacySources.length > 0);
 
   const names = new Set<string>();
-  for (const sourcePath of sources) {
+  for (const sourcePath of [...canonicalSources, ...legacySources]) {
     const document = await loadFigureJsonDocument(sourcePath);
     assert.equal(serializeFigureAsset(document.asset), document.json);
     assert.equal(parseFigureAssetJson(document.json, sourcePath).name, document.asset.name);
     assert.equal(names.has(document.asset.name), false, `duplicate figure name '${document.asset.name}'`);
     names.add(document.asset.name);
+  }
+
+  for (const sourcePath of canonicalSources) {
+    const document = await loadFigureJsonDocument(sourcePath);
+    assert.doesNotThrow(() => assertBoxOnlyFigure(document.asset), sourcePath);
   }
 });
 
@@ -102,4 +124,13 @@ function tinyFigure(): FigureAsset {
     ],
     clips: {},
   };
+}
+
+async function discoverFigureSources(directory: string): Promise<string[]> {
+  const root = path.join(assetLabRoot, directory);
+  const entries = await fs.readdir(root, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(root, entry.name, "figure.ts"))
+    .sort();
 }

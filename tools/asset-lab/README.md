@@ -1,6 +1,8 @@
 # Mclone Asset Lab
 
-Disposable TypeScript/Three.js lab for AI-authored primitive figures.
+Disposable TypeScript/Three.js lab for AI-authored box-only figures. Rounded
+primitive sources are retained only under `legacy-examples/` for explicit A/B
+and schema-compatibility review.
 
 Install once:
 
@@ -30,14 +32,16 @@ three-quarter, side animation, and three-quarter animation captures. Sheets use
 the clip locomotion metadata to scroll the floor at sampled frames.
 The video command captures deterministic Playwright frames and uses `ffmpeg` to
 write a multi-cycle MP4 animation review at
-`/tmp/mclone-asset-lab/piglet-walk.mp4`. Walk clips keep the figure centered and
+`/tmp/mclone-asset-lab/chicken-walk.mp4`. Walk clips keep the figure centered and
 move the floor backward by the authored cycle distance so foot sliding is easy
 to see.
 
 The batch command discovers `examples/*/figure.ts`, exports each asset, renders
 each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. New example
 directories are included automatically; [`ANIMALS.md`](ANIMALS.md) is the
-current animal catalog and conversion queue.
+current animal catalog and conversion queue. The deprecated rounded sources in
+`legacy-examples/` are deliberately excluded unless passed to a command by
+their explicit path.
 
 The compare command renders the same canonical semantic JSON through Three.js
 and the shared native startup-prepared renderer. It writes corresponding raw
@@ -51,6 +55,11 @@ upload counts; they are review output, not a persisted asset format.
 Asset files use the DSL from `src/dsl.ts`. A `figure.ts` file is the only
 human- or AI-authored source for a promoted figure. Its schema-v1 JSON is a
 generated semantic snapshot and must not be edited directly.
+
+Canonical sources use `figure()` and boxes exclusively. `legacyFigure()` plus
+its sphere, capsule, and cylinder helpers exist only so retained rounded A/B
+sources and schema-v1 compatibility fixtures remain executable. The
+first-party drift gate rejects any promoted source containing a non-box part.
 
 Every Asset Lab display path crosses that snapshot boundary. When previewing a
 `figure.ts`, the tool executes the DSL, serializes canonical JSON, reparses and
@@ -88,15 +97,14 @@ part("head", box({
 ```
 
 Animated parts can rotate around an explicit local pivot. The pivot is measured
-from the part's unrotated local center, so a vertical capsule leg with
-`length: 0.42` uses `pivot: [0, 0.21, 0]` to swing from its top.
+from the part's unrotated local center, so a vertical box leg with height
+`0.42` uses `pivot: [0, 0.21, 0]` to swing from its top.
 
 ```ts
-part("leg_fl", capsule({
+part("leg_fl", box({
   parent: "body",
   at: [-0.42, -0.53, -0.26],
-  radius: 0.09,
-  length: 0.42,
+  size: [0.18, 0.42, 0.18],
   joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] },
   material: "skin",
 }));
@@ -195,8 +203,8 @@ walkCycle("walk", {
 The video command accepts the same figure path plus timing options:
 
 ```sh
-pnpm --dir tools/asset-lab exec tsx src/video.ts examples/piglet/figure.ts \
-  --out /tmp/mclone-asset-lab/piglet-walk.mp4 \
+pnpm --dir tools/asset-lab exec tsx src/video.ts examples/chicken/figure.ts \
+  --out /tmp/mclone-asset-lab/chicken-walk.mp4 \
   --clip walk \
   --fps 24 \
   --cycles 4

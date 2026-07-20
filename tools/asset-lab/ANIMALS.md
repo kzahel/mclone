@@ -50,16 +50,16 @@ These unlock whole families, so they should be prioritized as their own slices:
 
 ## Figure style direction
 
-Use a **box-first Minecraft-style vocabulary** for new and re-authored animal
-studies. Start with a sparse cuboid rig and pixel face textures. A sphere,
-capsule, or cylinder should earn its cost through an obvious silhouette or
-motion improvement that survives sheet and in-world review; do not spend
-curved geometry on whiskers or other tiny surface details that a pixel texture
-can express—or that can simply be omitted.
+Use a **box-only Minecraft-style vocabulary** for every canonical and promoted
+figure. Start with a sparse cuboid rig and pixel face textures. Spheres,
+capsules, and cylinders are deprecated authoring inputs; do not spend curved
+geometry on whiskers or other tiny surface details that a pixel texture can
+express—or that can simply be omitted.
 
-Retain rounded and box-only sources where an A/B pair exists. Box-first is the
-authoring default, not an absolute schema restriction, while additional body
-plans and production rendering costs are measured.
+Canonical sources live under `examples/` and use `figure()`. Retained rounded
+A/B sources live under `legacy-examples/` and use the explicitly deprecated
+`legacyFigure()` compatibility API. Schema-v1 still parses those historical
+primitive kinds, but the first-party drift gate rejects them from promotion.
 
 ### Blocky conversion queue
 
@@ -68,10 +68,11 @@ used body-plan coverage and likely rig reuse to choose each wave.
 
 | Wave | Animals | Why |
 |---|---|---|
-| Retained A/Bs | Elephant, Tiger | Established the style direction; Tiger also proved texture-driven detail can replace tiny whisker and stripe geometry |
-| Completed now | Rabbit, Butterfly, Chicken | The three most curve-heavy animals at 80%, 76%, and 71%; together cover hopping quadruped, flying insect, and walking bird rigs |
-| Next | Cat, Cow, Goat | Best mix of remaining curved-part cleanup, recognizable silhouettes, and reusable quadruped anatomy |
-| Later | Sheep, Piglet, Dog, Fox, Horse, Wolf, Lion, Bear | Already increasingly box-dominant; convert after the higher-signal comparisons |
+| Canonical now | Elephant, Tiger, Rabbit, Butterfly, Chicken | Approved box-only sources promoted to their ordinary names; rounded comparisons archived explicitly |
+| Wave 1 | Cat, Cow, Goat | Best mix of remaining curved-part cleanup, recognizable silhouettes, and reusable quadruped anatomy |
+| Wave 2 | Dog, Fox, Wolf | Shared canid anatomy with distinct proportions and textures |
+| Wave 3 | Piglet, Sheep, Horse | Farm silhouettes spanning compact, woolly, and long-legged rigs |
+| Wave 4 | Bear, Lion, Bearfolk, Lionfolk | Heavy quadrupeds plus the two player-derived anthropomorphic rigs |
 
 Humanoid figures are outside this animal conversion queue. `player` and
 `upright_bear` are already box-only.
@@ -100,13 +101,13 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Pig | P0 | ✅ | Q | piglet ✅, adult pink, spotted, boar (tusks) | `examples/piglet` is the baby; adult is a quick scale-up |
-| Sheep | P0 | ✅ | Q | white ✅, black, brown, shorn (no wool), lamb, dyed (MC nod) | wool vs shorn is a fun material swap |
-| Cow | P0 | ✅ | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | `examples/cow` — Holstein; horns, ears, muzzle, udder, tufted tail; `quadrupedWalk` |
-| Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — rounded hen; `examples/chicken_blocky` — 14-part box-only hen; both retain the comb, wattle, beak, tail fan, and `bipedWalk` wing/head motion |
-| Horse | P0 | ✅ | Q | brown, black, white, palomino, foal; pony | `examples/horse` — bay; mane, long tail, blaze, hooves; `quadrupedWalk` |
-| Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — billy; swept horns, beard, cloven hooves; `quadrupedWalk` |
-| Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — rounded white rabbit; `examples/rabbit_blocky` — 18-part box-only variant; both use synchronized `contactSwing` legs + phased body `bob` pending a `hop` macro |
+| Pig | P0 | 🔨 | Q | piglet, adult pink, spotted, boar (tusks) | Rounded source retained at `legacy-examples/piglet_rounded`; canonical box-only re-authoring is Wave 3 |
+| Sheep | P0 | 🔨 | Q | white, black, brown, shorn (no wool), lamb, dyed (MC nod) | Rounded source retained at `legacy-examples/sheep_rounded`; canonical box-only re-authoring is Wave 3 |
+| Cow | P0 | 🔨 | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | Rounded source retained at `legacy-examples/cow_rounded`; canonical box-only re-authoring is Wave 1 |
+| Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — canonical 14-box hen; `legacy-examples/chicken_rounded` retains the rounded A/B; both preserve `bipedWalk` wing/head motion |
+| Horse | P0 | 🔨 | Q | brown, black, white, palomino, foal; pony | Rounded source retained at `legacy-examples/horse_rounded`; canonical box-only re-authoring is Wave 3 |
+| Goat | P1 | 🔨 | Q | white, brown, kid, billy (horns + beard) | Rounded source retained at `legacy-examples/goat_rounded`; canonical box-only re-authoring is Wave 1 |
+| Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — canonical 18-box rabbit; `legacy-examples/rabbit_rounded` retains the rounded A/B and matching synchronized hop |
 | Donkey / Mule | P2 | ☐ | Q | donkey, mule | horse variant; big ears |
 | Duck | P2 | ☐ | W/S | mallard drake, hen, duckling | walks + paddles; pairs with swim work |
 | Turkey | P2 | ☐ | W | tom (fanned tail), hen | |
@@ -116,8 +117,8 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Dog | P0 | ✅ | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | `examples/dog` is the base; breeds = proportion + material swaps |
-| Cat | P0 | ✅ | Q | tabby, black, white, calico, orange, siamese; kitten | `examples/cat` is the base |
+| Dog | P0 | 🔨 | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | Rounded source retained at `legacy-examples/dog_rounded`; canonical box-only re-authoring is Wave 2 |
+| Cat | P0 | 🔨 | Q | tabby, black, white, calico, orange, siamese; kitten | Rounded source retained at `legacy-examples/cat_rounded`; canonical box-only re-authoring is Wave 1 |
 | Hamster / Guinea pig | P3 | ☐ | Q | — | tiny, rounded |
 | Parrot (pet) | P2 | ☐ | W | see Birds | |
 
@@ -125,8 +126,8 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Wolf | P0 | ✅ | Q | gray, black, arctic (white), pup | `examples/wolf` — gray wolf; lean dog-class rig, pale chest, long muzzle, bushy tail; `quadrupedWalk` |
-| Fox | P1 | ✅ | Q | red, arctic (white), fennec (huge ears), kit | `examples/fox` — red fox; white chest/muzzle/tail tip, black stockings, large ears, bushy tail; `quadrupedWalk` |
+| Wolf | P0 | 🔨 | Q | gray, black, arctic (white), pup | Rounded source retained at `legacy-examples/wolf_rounded`; canonical box-only re-authoring is Wave 2 |
+| Fox | P1 | 🔨 | Q | red, arctic (white), fennec (huge ears), kit | Rounded source retained at `legacy-examples/fox_rounded`; canonical box-only re-authoring is Wave 2 |
 | Coyote | P3 | ☐ | Q | — | between wolf and fox |
 | Hyena | P3 | ☐ | Q | spotted, striped | not a canid, but a dog-like rig fits |
 
@@ -134,8 +135,8 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Lion | P1 | ✅ | Q | male (mane), lioness, cub | `examples/lion` — male quadruped; tawny body, dark mane, broad muzzle, strong paws/claws, tufted tail; `quadrupedWalk` |
-| Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — rounded; `examples/tiger_blocky` — 20-part box-only style study with pixel-textured stripes; both use `quadrupedWalk` |
+| Lion | P1 | 🔨 | Q | male (mane), lioness, cub | Rounded source retained at `legacy-examples/lion_rounded`; canonical box-only re-authoring is Wave 4 |
+| Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — canonical 20-box tiger with pixel-textured stripes; `legacy-examples/tiger_rounded` retains the rounded A/B |
 | Leopard / Jaguar | P2 | ☐ | Q | spotted, melanistic (black panther) | spot rosette texture |
 | Cheetah | P2 | ☐ | Q | — | slender; tear-mark face |
 | Lynx / Bobcat | P3 | ☐ | Q | ear tufts | scaled-up cat rig |
@@ -144,7 +145,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Bear | P1 | ✅ | Q | brown/grizzly, black, polar (Arctic), cub | `examples/bear` — brown/grizzly quadruped; bulky body, shoulder hump, short rounded ears, large paws/claws; `quadrupedWalk` |
+| Bear | P1 | 🔨 | Q | brown/grizzly, black, polar (Arctic), cub | Rounded source retained at `legacy-examples/bear_rounded`; canonical box-only re-authoring is Wave 4 |
 | Panda | P2 | ☐ | Q | adult, cub | bear rig + iconic black/white texture |
 | Polar bear | P2 | ☐ | Q | adult, cub | also lives in Polar/Arctic set |
 
@@ -154,7 +155,7 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Deer | P1 | ☐ | Q | doe, buck (antlers), fawn (spots) | antlers = signature variant |
 | Moose / Elk | P2 | ☐ | Q | moose, elk | huge antlers |
-| Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — rounded African; `examples/elephant_blocky` — box-only style study; both use an articulated three-segment trunk and `quadrupedWalk` |
+| Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — canonical box-only African elephant; `legacy-examples/elephant_rounded` retains the rounded A/B and matching articulated trunk walk |
 | Giraffe | P2 | ☐ | Q | adult, calf | extreme neck proportions |
 | Zebra | P2 | ☐ | Q | adult, foal | horse rig + stripes |
 | Rhino | P2 | ☐ | Q | one-horn, two-horn | |
@@ -183,7 +184,7 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Mouse / Rat | P2 | ☐ | Q | — | tiny; long tail |
 | Squirrel | P2 | ☐ | Q/H | gray, red; flying squirrel | huge tail |
-| Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit` and `examples/rabbit_blocky` |
+| Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit`; rounded A/B in `legacy-examples/rabbit_rounded` |
 | Hedgehog | P3 | ☐ | Q | — | spine texture |
 | Porcupine | P3 | ☐ | Q | — | quill texture; hedgehog cousin |
 | Raccoon | P2 | ☐ | Q | — | mask + ringed tail |
@@ -216,7 +217,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken` and `examples/chicken_blocky` |
+| Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken`; rounded A/B in `legacy-examples/chicken_rounded` |
 | Toucan | P3 | ☐ | W | — | oversized colorful bill |
 | Owl | P1 | ☐ | W | brown, snowy (white) | |
 | Parrot | P1 | ☐ | W | red, green, blue, yellow morphs | color morphs are cheap variants |
@@ -264,7 +265,7 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Butterfly | P1 | ✅ | W | color morphs, moth | `examples/butterfly` — rounded; `examples/butterfly_blocky` — nine boxes with pixel-patterned wing slabs; both use `wingFlap` |
+| Butterfly | P1 | ✅ | W | color morphs, moth | `examples/butterfly` — canonical nine-box figure with pixel-patterned wing slabs; rounded A/B in `legacy-examples/butterfly_rounded` |
 | Bee | P1 | ☐ | W | — | iconic; reuses `wingFlap` |
 | Ladybug | P2 | ☐ | C/W | — | |
 | Dragonfly | P2 | ☐ | W | — | four wings |
@@ -308,8 +309,8 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Figure | Pri | Status | Notes |
 |---|---|---|---|
 | Player (humanoid base) | — | ✅ | `examples/player`; not an animal, the rig reference |
-| Bearfolk | — | ✅ | `examples/bearfolk` — anthro bear |
-| Lionfolk | — | ✅ | `examples/lionfolk` — anthro lion |
+| Bearfolk | — | 🔨 | Rounded source at `legacy-examples/bearfolk_rounded`; canonical box-only re-authoring is Wave 4 |
+| Lionfolk | — | 🔨 | Rounded source at `legacy-examples/lionfolk_rounded`; canonical box-only re-authoring is Wave 4 |
 | Wolffolk / Foxfolk | P3 | ☐ | obvious next anthro canids |
 | Dragon | P3 | ☐ | flagship mythic; W + Q hybrid, likely new tooling |
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
@@ -375,11 +376,12 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Shipped (19):** piglet, sheep, dog, cat, butterfly, player, bearfolk,
-  lionfolk, cow, chicken, horse, goat, rabbit, wolf, fox, bear, lion, tiger,
-  and elephant.
-- **Retained box-only A/Bs (5):** elephant, tiger, rabbit, chicken, and
-  butterfly.
+- **Canonical box-only figures (7):** butterfly, chicken, elephant, player,
+  rabbit, tiger, and upright bear.
+- **Rounded-to-box migration in progress (13):** piglet, sheep, dog, cat,
+  bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
+- **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
+  under `legacy-examples/` and remain schema-round-trip tested.
 - **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W).
 - **Macros to build:** `swim` (S), `slither` (SL), `hop` (H — rabbit currently approximates it), N-leg crawl (C).
 - **Biggest single unlock:** the `swim` macro — gates the entire marine family.

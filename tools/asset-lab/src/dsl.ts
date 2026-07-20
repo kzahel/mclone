@@ -70,12 +70,14 @@ export interface BoxOptions extends PartOptions {
   faces?: BoxFaceMap;
 }
 
+/** @deprecated Legacy rounded-comparison input only. Use `box`. */
 export interface SphereOptions extends PartOptions {
   radius: number;
   widthSegments?: number;
   heightSegments?: number;
 }
 
+/** @deprecated Legacy rounded-comparison input only. Use `box`. */
 export interface CapsuleOptions extends PartOptions {
   radius: number;
   length: number;
@@ -83,6 +85,7 @@ export interface CapsuleOptions extends PartOptions {
   radialSegments?: number;
 }
 
+/** @deprecated Legacy rounded-comparison input only. Use `box`. */
 export interface CylinderOptions extends PartOptions {
   radiusTop?: number;
   radiusBottom?: number;
@@ -266,12 +269,44 @@ export interface FigureApi {
   bob(part: string, options: BobOptions): CycleTrack;
   followThrough(part: string, options: FollowThroughOptions): CycleTrack;
   box(options: BoxOptions): PartDraft;
+}
+
+/**
+ * Compatibility API for retained rounded A/B sources.
+ *
+ * @deprecated Canonical and promoted figures must use `figure()` and boxes.
+ */
+export interface LegacyFigureApi extends FigureApi {
+  /** @deprecated Legacy rounded-comparison input only. Use `box`. */
   sphere(options: SphereOptions): PartDraft;
+  /** @deprecated Legacy rounded-comparison input only. Use `box`. */
   capsule(options: CapsuleOptions): PartDraft;
+  /** @deprecated Legacy rounded-comparison input only. Use `box`. */
   cylinder(options: CylinderOptions): PartDraft;
 }
 
 export function figure(name: string, build: (api: FigureApi) => void): FigureAsset {
+  const asset = buildFigureAsset(name, build);
+  assertBoxOnlyFigure(asset);
+  return asset;
+}
+
+/**
+ * Builds a retained rounded comparison source without making it canonical.
+ *
+ * @deprecated Canonical and promoted figures must use `figure()` and boxes.
+ */
+export function legacyFigure(
+  name: string,
+  build: (api: LegacyFigureApi) => void,
+): FigureAsset {
+  return buildFigureAsset(name, build);
+}
+
+function buildFigureAsset(
+  name: string,
+  build: (api: LegacyFigureApi) => void,
+): FigureAsset {
   const builder = new FigureBuilder(name);
   build(builder.api);
   const asset = builder.finish();
@@ -284,6 +319,24 @@ export function assertValidFigure(asset: FigureAsset): void {
   if (errors.length > 0) {
     throw new Error(`Invalid figure '${asset.name}':\n${errors.map((error) => `- ${error}`).join("\n")}`);
   }
+}
+
+export function assertBoxOnlyFigure(asset: FigureAsset): void {
+  const errors = validateBoxOnlyFigure(asset);
+  if (errors.length > 0) {
+    throw new Error(
+      `Invalid canonical figure '${asset.name}':\n${errors.map((error) => `- ${error}`).join("\n")}`,
+    );
+  }
+}
+
+export function validateBoxOnlyFigure(asset: FigureAsset): string[] {
+  return asset.parts
+    .filter((part) => part.primitive.kind !== "box")
+    .map(
+      (part) =>
+        `part '${part.name}' uses deprecated '${part.primitive.kind}'; canonical figures may use only box primitives`,
+    );
 }
 
 export function validateFigure(asset: FigureAsset): string[] {
@@ -372,7 +425,7 @@ class FigureBuilder {
   private readonly textures: Record<string, AsciiTextureSpec> = {};
   private readonly parts: PartSpec[] = [];
   private readonly clips: Record<string, ClipSpec> = {};
-  readonly api: FigureApi;
+  readonly api: LegacyFigureApi;
 
   constructor(private readonly name: string) {
     this.api = {

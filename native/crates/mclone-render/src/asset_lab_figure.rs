@@ -1085,12 +1085,13 @@ mod tests {
     }
 
     #[test]
-    fn compiles_chicken_figure_asset_with_non_box_primitives() {
+    fn compiles_box_only_chicken_figure_asset() {
         let asset: FigureAsset = serde_json::from_str(CHICKEN_FIGURE_JSON).unwrap();
         let figure = compile_figure_asset(&asset).unwrap();
 
-        assert!(figure.cuboids.len() > 20);
-        assert_eq!(figure.overlay_cuboids.len(), 0);
+        assert_eq!(figure.cuboids.len(), 14);
+        assert!(!figure.overlay_cuboids.is_empty());
+        assert!(asset.parts.iter().all(|part| part.primitive.kind == "box"));
         assert_eq!(figure.parts.len(), asset.parts.len());
         assert!(figure.clips.contains_key("walk"));
         assert!(figure.inv_height > 0.0);

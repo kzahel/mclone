@@ -2166,18 +2166,18 @@ mod tests {
     }
 
     #[test]
-    fn promoted_animals_prepare_deterministically_with_proxy_accounting() {
+    fn promoted_animals_prepare_deterministically_as_boxes() {
         let chicken: FigureAsset = serde_json::from_str(CHICKEN_FIGURE_JSON).unwrap();
         let first = prepare_figure_asset(&chicken).unwrap();
         let second = prepare_figure_asset(&chicken).unwrap();
         assert_eq!(first, second);
-        assert_eq!(first.parts.len(), 21);
-        assert_eq!(first.vertices.len(), 21 * 24);
-        assert_eq!(first.indices.len(), 21 * 36);
-        assert_eq!(first.diagnostics.box_primitive_count, 6);
-        assert_eq!(first.diagnostics.sphere_cuboid_proxy_count, 11);
-        assert_eq!(first.diagnostics.capsule_cuboid_proxy_count, 3);
-        assert_eq!(first.diagnostics.cylinder_cuboid_proxy_count, 1);
+        assert_eq!(first.parts.len(), 14);
+        assert_eq!(first.vertices.len(), 14 * 24);
+        assert_eq!(first.indices.len(), 14 * 36);
+        assert_eq!(first.diagnostics.box_primitive_count, 14);
+        assert_eq!(first.diagnostics.sphere_cuboid_proxy_count, 0);
+        assert_eq!(first.diagnostics.capsule_cuboid_proxy_count, 0);
+        assert_eq!(first.diagnostics.cylinder_cuboid_proxy_count, 0);
         assert!(first.clips.contains_key("walk"));
 
         let bear: FigureAsset = serde_json::from_str(UPRIGHT_BEAR_FIGURE_JSON).unwrap();
