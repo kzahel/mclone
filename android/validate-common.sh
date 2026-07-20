@@ -640,14 +640,14 @@ mclone_run_session_smoke() {
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer"
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 48 * scale)) "new-world Create World"
             ;;
         persist-restart)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer"
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 30 * scale)) "new-world Create World"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 48 * scale)) "new-world Create World"
             sleep "${MCLONE_ANDROID_PERSIST_CREATE_SETTLE_SECONDS:-6}"
             mclone_android_tap_pixel "$serial" $(((width / scale - 117) * scale)) $(((height / scale - 193) * scale)) "touch Use/place block"
             sleep "${MCLONE_ANDROID_PERSIST_AFTER_PLACE_SECONDS:-2}"
