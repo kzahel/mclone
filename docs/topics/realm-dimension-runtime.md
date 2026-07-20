@@ -78,6 +78,12 @@ client realm session
 - **Observer** means a non-player bounded publication/interest consumer. It is
   not a vanilla Spectator player and must not allocate or save player state.
 
+Dimension-local persistence is a logical contract, not a requirement that all
+dimensions share one physical database or that each dimension own an
+independent writer. The accepted native dimension-sharding and consolidated
+browser direction lives in
+[`world-dimension-storage-layout.md`](world-dimension-storage-layout.md).
+
 ## Vanilla 1.17.1 Receipt
 
 The relevant vanilla architecture is deliberately unified:

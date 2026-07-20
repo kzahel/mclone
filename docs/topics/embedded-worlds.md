@@ -19,6 +19,15 @@ promotes that connection to one ordinary player, demotes and saves the source
 player to an observer, waits for authoritative safe arrival, and then exchanges
 the retained slots. The same exchange runs in reverse for A-to-B-to-A.
 
+Next direction accepted 2026-07-20: the embedded-world proof and product remain,
+but the persistent managed-content installer is accidental complexity rather
+than a durable engine boundary. Tactical
+[`201`](../tactical/201-lobby-content-simplification.md) replaces the primary
+with a transient Rust-authored lobby, routes the empty-catalog fallback through
+ordinary app-private persistence, and then deletes native/browser provisioning
+machinery. The implemented-state record below remains accurate until that
+tactical lands; its installer shape is not the target architecture.
+
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, completed shared Web/WASM lobby
@@ -819,6 +828,13 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
+First implement
+[`Tactical 201`](../tactical/201-lobby-content-simplification.md): retain the
+landed lobby, preview, activation, and return behavior while replacing the
+managed installer with a transient authored primary and an ordinary app-private
+persistent fallback. Do not preserve provisioning-shaped source locks merely
+because the completed tacticals below used them to prove the product.
+
 Tactical 178 closed browser parity without a second scenario implementation.
 The web host consumes the same shared managed provision/start operations as
 native and keeps the protected lobby plus mutable island alive in two
@@ -856,15 +872,16 @@ bounded simultaneous-geometry plan lives in
 3. Keep Tactical 177's completed shared title launch, protected lobby,
    asynchronous fixed island, lifecycle, and no-scenario performance gates
    green.
-4. Keep Tactical 178's shared web provisioning, dual-runtime compiler
-   identity, activation/persistence lifecycle, and feature-off performance
-   gates green.
+4. Keep Tactical 178's dual-runtime compiler identity,
+   activation/persistence lifecycle, and feature-off performance gates green
+   while removing its managed web provisioning path through Tactical 201.
 5. Keep Tactical 179's completed terrain normalization, half-space proof,
    per-world actor ownership, and live creature/player diorama green through
    one shared native and web path.
 6. Keep Tactical 180's configurable 2x2/4x4 preview bounds, most-recent
    compatible catalog selection, read-only warmup, recency-on-activation,
-   managed full-overworld fallback, and supported-arrival receipts green.
+   ordinary app-private Overworld fallback, and supported-arrival receipts
+   green.
 7. Prove the same bounded preview and activation behavior with a remote
    hosted source. Keep the dual-host/root-isolation smokes and materialized
    multiview contract green.

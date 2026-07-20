@@ -341,6 +341,12 @@ platform documents what its strongest committed state can actually guarantee;
 it must not pretend that an IndexedDB transaction completion is literally the
 same hardware guarantee as a particular SQLite/fsync sequence.
 
+The implemented native executor still uses one SQLite file per world. The
+accepted direction for a realm-global database plus native dimension shards,
+while retaining consolidated browser IndexedDB, is tracked separately in
+[`world-dimension-storage-layout.md`](world-dimension-storage-layout.md). That
+physical change must remain beneath the interface documented here.
+
 ## Implemented State
 
 ### Shared and native Rust
@@ -505,17 +511,19 @@ Tactical 199 completed the approved sequence:
 6. **Prove lifecycle and exclusive admission.** Validate Android background
    flush and browser page lifecycle, then reject a second independent writer
    consistently on native and web before calling the backend complete.
-7. **Reassess catalog and managed storage.** Reuse the lower executor where it
-   simplifies code, while retaining `WorldCatalog`, managed-provisioning, and
-   opened-`WorldStore` policy as distinct Rust layers. This should be a later
-   review decision rather than a prerequisite for the world-store cutover.
+7. **Reassess catalog and app-private storage.** Reuse the lower executor only
+   where a surviving consumer simplifies. `WorldCatalog`, app-private source
+   resolution, and opened-`WorldStore` policy remain distinct Rust layers. The
+   managed-provisioning layer is instead scheduled for deletion by Tactical
+   201.
 8. **Add filesystem/region strategies only from a real consumer.** The
    interface should permit them; the first campaign need not implement every
    possible backend.
 
-Steps 1-6 are complete. Step 7 remains a deliberate later cost/benefit
-decision, and step 8 remains consumer-driven. No long-lived old/new browser
-fallback was retained.
+Steps 1-6 are complete. Step 7's managed-storage reuse direction was superseded
+by the lobby simplification decision; its remaining reuse choices stay
+consumer-driven. Step 8 also remains consumer-driven. No long-lived old/new
+browser fallback was retained.
 
 ## Acceptance Contract And Evidence
 
@@ -607,7 +615,8 @@ Run one behavioral suite against every backend that claims the capability:
 - Measure copied bytes, operation latency, bounded batch sizes, backlog, and
   maximum frame/tick gaps. Ownership cleanup alone does not prove a performance
   improvement.
-- Keep managed scenario data isolated from ordinary local-world deletion.
+- Keep legacy managed scenario data inert and isolated from ordinary
+  local-world deletion until an independently reviewed reset removes it.
 
 ## Tradeoffs And Risks
 
@@ -659,9 +668,9 @@ Run one behavioral suite against every backend that claims the capability:
   the intended middle ground.
 - Generic errors can hide useful backend details. Stable error categories
   should retain a diagnostic source, backend label, and relevant metrics.
-- Collapsing world catalog, managed provisioning, and opened-world storage into
-  one policy object would create a new catch-all. They may share the executor
-  while keeping different lifetimes and authority rules.
+- Collapsing world catalog, app-private source resolution, and opened-world
+  storage into one policy object would create a new catch-all. They may share
+  physical executors while keeping different lifetimes and authority rules.
 
 ## Alternatives Considered
 

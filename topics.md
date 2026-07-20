@@ -69,6 +69,10 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   port with shared coordination and interchangeable SQLite, IndexedDB,
   filesystem, and memory/null record executors
 - `cross-platform-operation-execution` — one typed operation/completion port
-  over native background threads and browser Rust actors; managed-scenario
-  provisioning converges on a shared decision core with Rust platform
-  strategies and a domain-blind storage executor
+  over native background threads and browser Rust actors; shared Rust owns
+  semantics while platform adapters and domain-blind TypeScript own mechanics.
+  Tactical 201 removes the accidental managed-lobby installer before another
+  coarse-operation actor is selected
+- `world-dimension-storage-layout` — realm-global native SQLite metadata plus
+  dimension-local SQLite shards beneath one world persistence owner, while
+  browser IndexedDB remains physically consolidated

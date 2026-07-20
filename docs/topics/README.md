@@ -121,17 +121,20 @@ series implements the same concern, normally reuse the document slug in its
   [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the approved
   autonomous high-value continuation and final long-tail review stop.
 - [`unified-persistence-interface.md`](unified-persistence-interface.md):
-  accepted active direction for one typed completion-based Rust persistence
-  port, a shared coordinator, and interchangeable SQLite, IndexedDB,
-  filesystem, and memory/null record executors, including current-state
-  research, feasibility, migration gates, and tradeoffs. Tactical
-  [`199`](../tactical/199-unified-persistence-interface.md) owns implementation.
+  implemented typed completion-based Rust persistence port, shared
+  coordinator, interchangeable SQLite, IndexedDB, and memory/null record
+  executors, and world-scoped writer admission. Tactical
+  [`199`](../tactical/199-unified-persistence-interface.md) records the
+  implementation.
+- [`world-dimension-storage-layout.md`](world-dimension-storage-layout.md):
+  accepted physical-layout direction for a realm-global native database plus
+  dimension SQLite shards, retained logical dimension keys and world-level
+  ownership, and deliberately consolidated browser IndexedDB.
 - [`cross-platform-operation-execution.md`](cross-platform-operation-execution.md):
-  accepted direction for one typed operation/completion model across native
-  background threads and browser Rust actors, using managed-world provisioning
-  as the first convergence case while preserving direct native execution and
-  domain-blind TypeScript. The 2026-07-20 review selected a shared decision
-  core with Rust platform strategies and recorded per-question resolutions.
+  accepted shared Rust actor/mailbox direction across native threads and
+  browser Workers while preserving direct native execution and domain-blind
+  TypeScript. Tactical 201 first removes the accidental managed-lobby installer
+  before any new coarse-operation actor is derived from the remaining system.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted
@@ -169,11 +172,11 @@ series implements the same concern, normally reuse the document slug in its
   network "palantir" window, warm world switching, walkable seams, and
   shrink-and-fall nesting. Records geometry-first XR composition, the
   baked→live-local→remote-spectator→joined-warm fidelity ladder, N-world budget,
-  runtime/authority/render seams, and the protected single-world fast path. A
-  first non-rendering app-runtime smoke retains two isolated integrated hosts;
-  composition and product switching remain unbuilt. Tactical
-  [`174`](../tactical/174-warm-world-hot-swap.md) owns the bounded opaque-gate
-  hot-swap milestone.
+  runtime/authority/render seams, retained previews, A-to-B-to-A switching, and
+  the protected single-world fast path. Tactical
+  [`201`](../tactical/201-lobby-content-simplification.md) owns the accepted
+  simplification from managed installed content to a transient authored lobby
+  and ordinary persistent destinations.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
   focus/capture, virtual-keyboard text entry, input contexts, render staging,
