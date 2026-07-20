@@ -20,8 +20,7 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
 };
 use mclone_app_runtime::world_catalog::{
-    LocalWorldCreateOptions, LocalWorldId, WorldCatalogError, WorldCatalogErrorKind,
-    WorldCatalogRequest,
+    LocalWorldId, WorldCatalogError, WorldCatalogErrorKind, WorldCatalogRequest,
 };
 use mclone_assets::{
     MemoryAssetSource, PackedAssetSource, default_player_figure_path, load_prepared_figure,
@@ -1222,84 +1221,38 @@ impl WebSceneHost {
         )
     }
 
-    #[wasm_bindgen(js_name = startLocalWorld)]
-    pub async fn start_local_world(
+    /// Start the one shared-policy pending session using browser resources.
+    ///
+    /// TypeScript supplies only platform URLs. Rust retains the classified
+    /// local/remote request, local storage identity, scene configuration, and
+    /// completion/failure semantics.
+    #[wasm_bindgen(js_name = startPendingSession)]
+    pub async fn start_pending_session(
         &mut self,
-        seed: i64,
         worker_url: String,
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
     ) -> Result<JsValue, JsValue> {
-        if !self.has_pending_session_start() {
-            self.host_mut()?
-                .request_external_session_start(SessionStartRequest::new_seed_local_world(seed))
-                .map_err(js_error)?;
-        }
         let pending = self.take_pending_session_start()?;
-        let world_generation_profile = pending.scene.world_generation_profile;
-        let world_topology = pending.scene.world_topology;
-        self.start_worker_runtime(
-            pending,
-            WebIntegratedServerRunnerConfig::new(
-                seed,
-                worker_url,
-                job_worker_url,
-                bindgen_js_url,
-                bindgen_wasm_url,
-            )
-            .with_world_generation_profile(world_generation_profile)
-            .with_world_topology(world_topology),
-        )
-        .await
-    }
-
-    #[wasm_bindgen(js_name = startIndexedDbLocalWorld)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn start_indexed_db_local_world(
-        &mut self,
-        seed: i64,
-        world_id: String,
-        display_name: String,
-        request_kind: String,
-        worker_url: String,
-        job_worker_url: String,
-        bindgen_js_url: String,
-        bindgen_wasm_url: String,
-    ) -> Result<JsValue, JsValue> {
-        let world_id_value =
-            LocalWorldId::new(world_id.clone()).map_err(|error| JsValue::from(error.message))?;
-        if !self.has_pending_session_start() {
-            let request = if request_kind == "createLocalWorld" {
-                SessionStartRequest::create_local_world(
-                    LocalWorldCreateOptions::new(display_name, seed)
-                        .map_err(|error| JsValue::from(error.message))?
-                        .with_requested_id(world_id_value),
-                )
-            } else {
-                SessionStartRequest::open_local_world(world_id_value)
-            };
-            self.host_mut()?
-                .request_external_session_start(request)
-                .map_err(js_error)?;
+        match pending.descriptor.clone() {
+            ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
+                let mut config = WebIntegratedServerRunnerConfig::new(
+                    seed,
+                    worker_url,
+                    job_worker_url,
+                    bindgen_js_url,
+                    bindgen_wasm_url,
+                );
+                if let Some(id) = id {
+                    config = config.with_indexed_db_world(id.as_str(), false);
+                }
+                self.start_worker_runtime(pending, config).await
+            }
+            ActiveSessionDescriptor::Remote { endpoint } => {
+                self.start_remote_runtime(pending, endpoint.address).await
+            }
         }
-        let pending = self.take_pending_session_start()?;
-        let world_generation_profile = pending.scene.world_generation_profile;
-        let world_topology = pending.scene.world_topology;
-        self.start_worker_runtime(
-            pending,
-            WebIntegratedServerRunnerConfig::new(
-                seed,
-                worker_url,
-                job_worker_url,
-                bindgen_js_url,
-                bindgen_wasm_url,
-            )
-            .with_indexed_db_world(world_id, false)
-            .with_world_generation_profile(world_generation_profile)
-            .with_world_topology(world_topology),
-        )
-        .await
     }
 
     #[wasm_bindgen(js_name = beginLobbySmoke)]
@@ -1460,31 +1413,6 @@ impl WebSceneHost {
                 self.ui_report(false, None).map_err(JsValue::from)
             }
         }
-    }
-
-    #[wasm_bindgen(js_name = joinRemoteWebSocket)]
-    pub async fn join_remote_websocket(&mut self, url: String) -> Result<JsValue, JsValue> {
-        if !self.has_pending_session_start() {
-            self.host_mut()?
-                .request_external_session_start(SessionStartRequest::JoinRemote {
-                    endpoint: RemoteSessionEndpoint::new(url.clone()),
-                })
-                .map_err(js_error)?;
-        }
-        let pending = self.take_pending_session_start()?;
-        let center = pending.scene.center();
-        let render_distance = pending.scene.render_distance;
-        let mut runtime = crate::WebRuntime::websocket_remote_at(url, center)
-            .await
-            .map_err(JsValue::from)?;
-        runtime
-            .request_chunk_view_deferred(
-                center,
-                render_distance,
-                chunk_tracking_radius_for_render_distance(render_distance),
-            )
-            .map_err(JsValue::from)?;
-        self.complete_started_runtime(pending, runtime)
     }
 
     #[wasm_bindgen(js_name = takeWorldCatalogExecution)]
@@ -2014,13 +1942,6 @@ impl WebSceneHost {
             .ok_or_else(|| JsValue::from_str("scene host is shut down"))
     }
 
-    fn has_pending_session_start(&self) -> bool {
-        matches!(
-            self.host.as_ref().map(McloneSceneHost::session_state),
-            Some(mclone_app_runtime::session::GameSessionState::Starting { .. })
-        )
-    }
-
     fn take_pending_session_start(&mut self) -> Result<ExternalSceneSessionStart, JsValue> {
         self.host_mut()?
             .take_external_session_start()
@@ -2040,17 +1961,46 @@ impl WebSceneHost {
         config.freeze_scheduled_fluid_ticks = pending.scene.freeze_scheduled_fluid_ticks;
         config.debug_passive_showcase = pending.scene.debug_passive_showcase;
         config.debug_auxiliary_player_script = pending.scene.debug_auxiliary_player_script;
-        match crate::WebRuntime::web_worker_integrated_at(config, center).await {
-            Ok(mut runtime) => {
-                runtime
-                    .request_chunk_view_deferred(
-                        center,
-                        render_distance,
-                        chunk_tracking_radius_for_render_distance(render_distance),
-                    )
-                    .map_err(JsValue::from)?;
-                self.complete_started_runtime(pending, runtime)
-            }
+        let outcome = match crate::WebRuntime::web_worker_integrated_at(config, center).await {
+            Ok(mut runtime) => runtime
+                .request_chunk_view_deferred(
+                    center,
+                    render_distance,
+                    chunk_tracking_radius_for_render_distance(render_distance),
+                )
+                .map(|_| runtime),
+            Err(error) => Err(error),
+        };
+        self.complete_runtime_start_outcome(pending, outcome)
+    }
+
+    async fn start_remote_runtime(
+        &mut self,
+        pending: ExternalSceneSessionStart,
+        url: String,
+    ) -> Result<JsValue, JsValue> {
+        let center = pending.scene.center();
+        let render_distance = pending.scene.render_distance;
+        let outcome = match crate::WebRuntime::websocket_remote_at(url, center).await {
+            Ok(mut runtime) => runtime
+                .request_chunk_view_deferred(
+                    center,
+                    render_distance,
+                    chunk_tracking_radius_for_render_distance(render_distance),
+                )
+                .map(|_| runtime),
+            Err(error) => Err(error),
+        };
+        self.complete_runtime_start_outcome(pending, outcome)
+    }
+
+    fn complete_runtime_start_outcome(
+        &mut self,
+        pending: ExternalSceneSessionStart,
+        outcome: Result<crate::WebRuntime, String>,
+    ) -> Result<JsValue, JsValue> {
+        match outcome {
+            Ok(runtime) => self.complete_started_runtime(pending, runtime),
             Err(error) => {
                 web_sys::console::error_1(&JsValue::from_str(&format!(
                     "browser scene session start failed: {error}"
@@ -3328,10 +3278,11 @@ impl WebSceneHost {
                 self.touch_settings_available,
             )?;
             write_session_state(&object, host.session_state())?;
-            if let Some(pending) = host.external_session_start_snapshot() {
-                report_set_bool(&object, "sessionStartPending", true)?;
-                write_external_session_start(&object, &pending)?;
-            }
+            report_set_bool(
+                &object,
+                "sessionStartPending",
+                host.external_session_start_snapshot().is_some(),
+            )?;
             let effective_status = if self.status_overlay.visible {
                 self.status_overlay.clone()
             } else {
@@ -3802,49 +3753,6 @@ fn write_block_target(
     report_set_number(object, "hitX", hit.location.x)?;
     report_set_number(object, "hitY", hit.location.y)?;
     report_set_number(object, "hitZ", hit.location.z)
-}
-
-fn write_external_session_start(
-    object: &js_sys::Object,
-    pending: &ExternalSceneSessionStart,
-) -> Result<(), String> {
-    match &pending.descriptor {
-        ActiveSessionDescriptor::LocalWorld {
-            seed,
-            id,
-            display_name,
-        } => {
-            report_set_string(object, "sessionOperationKind", "localWorld")?;
-            report_set_number(object, "sessionSeed", *seed as f64)?;
-            report_set_string(object, "sessionSeedText", &seed.to_string())?;
-            if let Some(id) = id {
-                report_set_string(object, "sessionWorldId", id.as_str())?;
-                report_set_bool(object, "catalogSessionStart", true)?;
-                report_set_string(object, "catalogWorldId", id.as_str())?;
-                report_set_string(
-                    object,
-                    "catalogWorldDisplayName",
-                    display_name.as_deref().unwrap_or(id.as_str()),
-                )?;
-                report_set_number(object, "catalogWorldSeed", *seed as f64)?;
-                report_set_string(object, "catalogWorldSeedText", &seed.to_string())?;
-                report_set_string(
-                    object,
-                    "catalogSessionRequest",
-                    match pending.request {
-                        SessionStartRequest::CreateLocalWorld { .. } => "createLocalWorld",
-                        _ => "openLocalWorld",
-                    },
-                )?;
-            }
-        }
-        ActiveSessionDescriptor::Remote { endpoint } => {
-            report_set_string(object, "sessionOperationKind", "remote")?;
-            report_set_string(object, "sessionRemoteEndpoint", &endpoint.address)?;
-            report_set_string(object, "remoteEndpoint", &endpoint.address)?;
-        }
-    }
-    Ok(())
 }
 
 fn write_session_state(object: &js_sys::Object, state: &GameSessionState) -> Result<(), String> {

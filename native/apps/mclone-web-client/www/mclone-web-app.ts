@@ -494,12 +494,10 @@ class WebFrameDriver {
       "handleUiPointerMove",
       "handleUiPointerDown",
       "handleUiPointerUp",
-      "startLocalWorld",
-      "startIndexedDbLocalWorld",
+      "startPendingSession",
       "takeWorldCatalogExecution",
       "applyWorldCatalogExecution",
       "applyWorldCatalogError",
-      "joinRemoteWebSocket",
       "setDebugOverlayVisible",
       "setStatusOverlay",
       "setTouchLookSensitivity",
@@ -1637,57 +1635,15 @@ class WebFrameDriver {
     if (report.sessionStartPending !== true) {
       return;
     }
-    const operationKind = String(report.sessionOperationKind ?? "");
-    if (operationKind === "remote") {
-      const endpoint = String(report.remoteEndpoint ?? report.sessionRemoteEndpoint ?? "").trim();
-      if (endpoint.length > 0) {
-        void this.completeSceneSessionStart(
-          "remote",
-          (session) => session.joinRemoteWebSocket(endpoint),
-          options,
-        );
-      }
-      return;
-    }
-    if (operationKind === "localWorld") {
-      const seed = parseSeedBigInt(
-        report.catalogWorldSeedText
-          ?? report.sessionSeedText
-          ?? report.catalogWorldSeed
-          ?? report.sessionSeed,
-      );
-      const worldId = String(report.catalogWorldId ?? "").trim();
-      const displayName = String(report.catalogWorldDisplayName ?? worldId).trim();
-      const requestKind = String(report.catalogSessionRequest ?? "openLocalWorld");
-      if (seed !== null && worldId.length > 0) {
-        void this.completeSceneSessionStart(
-          "localWorld",
-          (session) => session.startIndexedDbLocalWorld(
-            seed,
-            worldId,
-            displayName,
-            requestKind,
-            SERVER_WORKER_URL.href,
-            SERVER_JOB_WORKER_URL.href,
-            BINDGEN_JS_URL.href,
-            BINDGEN_WASM_URL.href,
-          ),
-          options,
-        );
-      } else if (seed !== null) {
-        void this.completeSceneSessionStart(
-          "localWorld",
-          (session) => session.startLocalWorld(
-            seed,
-            SERVER_WORKER_URL.href,
-            SERVER_JOB_WORKER_URL.href,
-            BINDGEN_JS_URL.href,
-            BINDGEN_WASM_URL.href,
-          ),
-          options,
-        );
-      }
-    }
+    void this.completeSceneSessionStart(
+      (session) => session.startPendingSession(
+        SERVER_WORKER_URL.href,
+        SERVER_JOB_WORKER_URL.href,
+        BINDGEN_JS_URL.href,
+        BINDGEN_WASM_URL.href,
+      ),
+      options,
+    );
   }
 
   dispatchWorldCatalogOperation(
@@ -1794,7 +1750,6 @@ class WebFrameDriver {
   }
 
   async completeSceneSessionStart(
-    requestedKind: "localWorld" | "remote",
     start: (session: WebSceneHost) => Promise<WasmReport>,
     options: { fromPointer?: boolean, pointerType?: string } = {},
   ): Promise<void> {
@@ -1857,7 +1812,7 @@ class WebFrameDriver {
       publishRuntimeState(runtime.state);
       return;
     }
-    runtime.state.status = requestedKind === "remote" ? "remote session ready" : "world ready";
+    runtime.state.status = "session ready";
     this.setNativeStatusOverlay("ready", true, false);
     publishRuntimeState(runtime.state);
   }
@@ -2086,24 +2041,6 @@ class WebFrameDriver {
 
 function defaultDebugOverlayVisible(): boolean {
   return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
-}
-
-function parseSeedBigInt(value: unknown): bigint | null {
-  if (typeof value === "bigint") {
-    return value;
-  }
-  if (typeof value === "string") {
-    const trimmed = value.trim();
-    if (/^-?\d+$/.test(trimmed)) {
-      return BigInt(trimmed);
-    }
-    return null;
-  }
-  const numberValue = Number(value);
-  if (Number.isSafeInteger(numberValue)) {
-    return BigInt(numberValue);
-  }
-  return null;
 }
 
 function startupOptionsFromLocation(

@@ -1,7 +1,7 @@
 # Tactical 202: Web Scene Async Boundary Cleanup
 
-Status: active 2026-07-20. Fresh post-Tactical-201 ownership review is
-complete; implementation has not started.
+Status: active 2026-07-20. Fresh post-Tactical-201 ownership review and the
+first three implementation slices are complete.
 
 Topic: `cross-platform-operation-execution`
 
@@ -143,6 +143,8 @@ Evidence:
 
 ## Slice 2: Rust-Owned Active Session Start Dispatch
 
+Status: complete 2026-07-20.
+
 - expose one browser-Rust entry that consumes the already classified pending
   `ExternalSceneSessionStart`;
 - match local transient, local IndexedDB, and remote runtime construction in
@@ -155,6 +157,22 @@ Evidence:
 
 Exit: changing `SessionStartRequest` variants or source policy requires Rust
 changes only; TypeScript invokes one mechanical start operation.
+
+Evidence:
+
+- `WebSceneHost::start_pending_session` now consumes the shared pending
+  `ExternalSceneSessionStart`, selects local transient, local IndexedDB, or
+  remote construction in Rust, and folds both construction and initial
+  chunk-view failure through the shared session failure path;
+- the scene report exposes only a pending bit, while TypeScript passes browser
+  resource URLs to one start method and no longer reads session kind, seed,
+  world identity, display name, request kind, or remote endpoint;
+- the focused source locks, Wasm package check, generated-bindgen TypeScript
+  build, authored TypeScript typecheck, and Worker-ownership self-test passed;
+  the latter now reports 5,311 lines and 47 zero-debt entries; and
+- the catalog browser probe passed its CRUD, IndexedDB cleanup, reopen, and
+  healthy-app assertions before the unchanged final pixel gate observed the
+  known all-transparent Linux Chromium capture. The gate was not weakened.
 
 ## Slice 3: Opaque Lobby Runtime Tickets
 

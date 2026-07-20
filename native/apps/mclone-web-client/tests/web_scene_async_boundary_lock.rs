@@ -25,11 +25,18 @@ const WORLD_CATALOG: &str = include_str!(concat!(
 ));
 
 #[test]
-fn baseline_pins_clear_typescript_session_and_lobby_dispatch() {
-    assert!(WEB_APP.contains("operationKind === \"remote\""));
-    assert!(WEB_APP.contains("operationKind === \"localWorld\""));
-    assert!(WEB_APP.contains("session.startIndexedDbLocalWorld("));
-    assert!(WEB_APP.contains("session.joinRemoteWebSocket("));
+fn active_session_dispatch_is_rust_owned() {
+    assert!(!WEB_APP.contains("operationKind === \"remote\""));
+    assert!(!WEB_APP.contains("operationKind === \"localWorld\""));
+    assert!(!WEB_APP.contains("session.startIndexedDbLocalWorld("));
+    assert!(!WEB_APP.contains("session.joinRemoteWebSocket("));
+    assert!(WEB_APP.contains("session.startPendingSession("));
+    assert!(WEB_SCENE_HOST.contains("pub async fn start_pending_session"));
+    assert!(!WEB_SCENE_HOST.contains("fn write_external_session_start"));
+}
+
+#[test]
+fn baseline_pins_clear_typescript_lobby_dispatch() {
     assert!(WEB_APP.contains("operation.kind === \"start\""));
     assert!(WEB_APP.contains("session.prepareLobbyWorldStart("));
 

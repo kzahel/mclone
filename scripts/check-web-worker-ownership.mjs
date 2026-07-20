@@ -395,6 +395,27 @@ const domainDebt = [
     destination: "typed Rust catalog request",
   },
   {
+    id: "app-session-operation-kind",
+    file: "mclone-web-app.ts",
+    needle: "sessionOperationKind",
+    maximum: 0,
+    destination: "Rust-owned pending scene-session start",
+  },
+  {
+    id: "app-session-indexeddb-dispatch",
+    file: "mclone-web-app.ts",
+    needle: "startIndexedDbLocalWorld",
+    maximum: 0,
+    destination: "browser Rust scene-session adapter",
+  },
+  {
+    id: "app-session-remote-dispatch",
+    file: "mclone-web-app.ts",
+    needle: "joinRemoteWebSocket",
+    maximum: 0,
+    destination: "browser Rust scene-session adapter",
+  },
+  {
     id: "catalog-operation-helper",
     file: "mclone-web-world-catalog.ts",
     needle: "createIndexedDbCatalogWorld",
