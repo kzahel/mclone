@@ -71,7 +71,7 @@ used body-plan coverage and likely rig reuse to choose each wave.
 | Canonical now | Elephant, Tiger, Rabbit, Butterfly, Chicken | Approved box-only sources promoted to their ordinary names; rounded comparisons archived explicitly |
 | Completed Wave 1 | Cat, Cow, Goat | Re-authored as 62 boxes total; pixel markings replace whiskers, hide patches, socks, nostrils, and cloven-toe geometry |
 | Completed Wave 2 | Dog, Fox, Wolf | Re-authored as 51 boxes with visibly distinct domestic, low fox, and tall wolf proportions |
-| Wave 3 | Piglet, Sheep, Horse | Farm silhouettes spanning compact, woolly, and long-legged rigs |
+| Completed Wave 3 | Piglet, Sheep, Horse | Re-authored as 51 boxes spanning compact, wool-mass, and long-legged farm silhouettes |
 | Wave 4 | Bear, Lion, Bearfolk, Lionfolk | Heavy quadrupeds plus the two player-derived anthropomorphic rigs |
 
 Humanoid figures are outside this animal conversion queue. `player` and
@@ -101,11 +101,11 @@ gaps in the current eight figures.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Pig | P0 | 🔨 | Q | piglet, adult pink, spotted, boar (tusks) | Rounded source retained at `legacy-examples/piglet_rounded`; canonical box-only re-authoring is Wave 3 |
-| Sheep | P0 | 🔨 | Q | white, black, brown, shorn (no wool), lamb, dyed (MC nod) | Rounded source retained at `legacy-examples/sheep_rounded`; canonical box-only re-authoring is Wave 3 |
+| Pig | P0 | ✅ | Q | piglet, adult pink, spotted, boar (tusks) | `examples/piglet` — canonical 14-box piglet with vanilla-style square head, projecting snout, floppy ears, and raised tail; rounded A/B retained at `legacy-examples/piglet_rounded` |
+| Sheep | P0 | ✅ | Q | white, black, brown, shorn (no wool), lamb, dyed (MC nod) | `examples/sheep` — canonical 15-box sheep with one oversized texture-edged wool mass, forelock, dark face, and short tail; rounded A/B retained at `legacy-examples/sheep_rounded` |
 | Cow | P0 | ✅ | Q | Holstein (black/white), brown (Jersey), calf, bull (horns) | `examples/cow` — canonical 22-box Holstein with stepped horns, udder, texture-painted hide and socks; rounded A/B retained at `legacy-examples/cow_rounded` |
 | Chicken | P0 | ✅ | W | hen, rooster (comb/wattle/long tail), chick | `examples/chicken` — canonical 14-box hen; `legacy-examples/chicken_rounded` retains the rounded A/B; both preserve `bipedWalk` wing/head motion |
-| Horse | P0 | 🔨 | Q | brown, black, white, palomino, foal; pony | Rounded source retained at `legacy-examples/horse_rounded`; canonical box-only re-authoring is Wave 3 |
+| Horse | P0 | ✅ | Q | brown, black, white, palomino, foal; pony | `examples/horse` — canonical 22-box bay horse with long barrel/legs, angled neck, blaze, animated mane ridge, and hanging tail; rounded A/B retained at `legacy-examples/horse_rounded` |
 | Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — canonical 24-box billy with stepped swept horns, beard, cloven-hoof texture, and upturned tail; rounded A/B retained at `legacy-examples/goat_rounded` |
 | Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — canonical 18-box rabbit; `legacy-examples/rabbit_rounded` retains the rounded A/B and matching synchronized hop |
 | Donkey / Mule | P2 | ☐ | Q | donkey, mule | horse variant; big ears |

@@ -1,8 +1,8 @@
 # 200: Box-Only Figure Authoring
 
 Status: active 2026-07-20. The authoring-policy, canonical Chicken, and first
-two quadruped re-authoring slices are implemented and test-green; two content
-waves and final compatibility cleanup follow. The final native offscreen pixel
+three quadruped re-authoring slices are implemented and test-green; one content
+wave and final compatibility cleanup follow. The final native offscreen pixel
 rerun remains pending because the current host's Metal review process stalled
 before producing its receipt.
 
@@ -153,6 +153,26 @@ Implemented evidence:
 
 Retain the piglet snout, sheep wool mass, and horse long-leg/mane silhouette
 with box-only rigs. Favor stepped cuboids and textures over decorative parts.
+
+Implemented evidence:
+
+- Piglet remains 14 parts but all are boxes. Its vanilla-style large head,
+  projecting textured snout, compact body, floppy ears, and raised block tail
+  retain the juvenile pig silhouette without a round tail or capsule legs.
+- Sheep is 15 boxes rather than 17 mixed parts. One oversized fleece box plus
+  a texture-painted irregular lower edge replaces ornamental side spheres;
+  the dark face, wool forelock, short legs, and tail remain explicit.
+- Horse is 22 boxes rather than 30 mixed parts. The vanilla-proportioned long
+  barrel, angled neck, narrow head and muzzle, tall legs, four-part animated
+  mane ridge, and hanging two-box tail keep its distinctive posture.
+- All three keep their archived walk duration, cycle distance, stance, body
+  and head motion, and secondary ear/mane/tail tracks.
+- Canonical and rounded clean sheets plus six three-cycle movies were rendered
+  under `/tmp/mclone-asset-lab` and inspected. Sampled cycles remain grounded
+  and every snout, ear, neck, mane, hoof, and tail attachment stays connected.
+- The three canonical sources total 51 boxes versus 61 mixed legacy parts.
+  Exact Three.js preview topology is 612 triangles versus 4,144, a 6.8x
+  reduction; canonical part count is 16% lower.
 
 ### Slice 5: Bear, Lion, Bearfolk, and Lionfolk
 

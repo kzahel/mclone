@@ -151,6 +151,7 @@ native cuboid approximations, and will change as source figures are revised.
 | Figure | Parts | Vertices | Triangles |
 |---|---:|---:|---:|
 | player | 12 | 288 | 144 |
+| piglet | 14 | 336 | 168 |
 | piglet_rounded (legacy) | 14 | 809 | 1,052 |
 | dog | 17 | 408 | 204 |
 | dog_rounded (legacy) | 18 | 991 | 1,268 |
@@ -158,6 +159,10 @@ native cuboid approximations, and will change as source figures are revised.
 | fox_rounded (legacy) | 32 | 1,565 | 1,900 |
 | wolf | 16 | 384 | 192 |
 | wolf_rounded (legacy) | 30 | 1,365 | 1,580 |
+| sheep | 15 | 360 | 180 |
+| sheep_rounded (legacy) | 17 | 1,139 | 1,512 |
+| horse | 22 | 528 | 264 |
+| horse_rounded (legacy) | 30 | 1,365 | 1,580 |
 | cat | 16 | 384 | 192 |
 | cat_rounded (legacy) | 20 | 1,103 | 1,340 |
 | chicken | 14 | 336 | 168 |
@@ -182,8 +187,9 @@ make CPU world-space rebaking a prerequisite for later, richer figure assets.
 
 ### Box-only animal style A/B
 
-The elephant, tiger, rabbit, chicken, butterfly, cat, cow, goat, dog, fox, and
-wolf now have retained authoring pairs for direct style review:
+The elephant, tiger, rabbit, chicken, butterfly, cat, cow, goat, dog, fox,
+wolf, piglet, sheep, and horse now have retained authoring pairs for direct
+style review:
 
 - `examples/elephant` uses 40 boxes exclusively, including its stepped
   articulated trunk, tusks, ears, eyes, feet, and secondary details, while
@@ -269,7 +275,19 @@ to the prepared cuboid path. The shared anatomy remains intentionally varied:
 the dog is broad, short-backed, floppy-eared, and collared; the fox is low and
 narrow with oversized ears and a large white-tipped tail; and the wolf is tall
 with a separate shoulder mass and heavy straight tail. Clean A/B sheets and
-all six three-cycle movies were inspected. Piglet, Sheep, and Horse are next.
+all six three-cycle movies were inspected. The Piglet, Sheep, and Horse farm
+wave followed.
+
+The farm wave retains every archived walk duration, cycle distance, stance,
+body/head motion, and secondary track while reducing 61 mixed parts to 51
+boxes. Piglet drops from 1,052 to 168 exact preview triangles, Sheep from 1,512
+to 180, and Horse from 1,580 to 264. Together that is 4,144 versus 612
+triangles, a 6.8x authoring-preview reduction, plus a 16% part-count reduction
+relevant to the prepared cuboid path. The canonical piglet emphasizes its
+square head and snout, the sheep replaces simulated round tufts with one
+texture-edged wool mass, and the horse preserves its long-legged angled-neck
+posture and animated mane. Clean A/B sheets and all six three-cycle movies
+were inspected. Bear, Lion, Bearfolk, and Lionfolk are the final content wave.
 
 These topology ratios do not by themselves prove an end-to-end frame-time
 improvement. Material ranges, atlas residency, draw batching, animation
@@ -292,23 +310,23 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 31 |
-| total parts | 783 |
-| boxes | 578 |
+| figures | 34 |
+| total parts | 834 |
+| boxes | 629 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 64 |
-| parts with any texture reference | 87 |
-| individual texture applications | 145 |
+| ASCII textures | 71 |
+| parts with any texture reference | 97 |
+| individual texture applications | 168 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 13 | 241 | 241 | 0 / 0 / 0 |
+| canonical `examples/` | 16 | 292 | 292 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
-All 145 applications target an explicit face of a box. They range from single
+All 168 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
