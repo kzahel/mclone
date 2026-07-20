@@ -68,3 +68,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `unified-persistence-interface` — one typed completion-based Rust persistence
   port with shared coordination and interchangeable SQLite, IndexedDB,
   filesystem, and memory/null record executors
+- `cross-platform-operation-execution` — one typed operation/completion port
+  over native background threads and browser Rust actors; managed-scenario
+  provisioning converges on a shared decision core with Rust platform
+  strategies and a domain-blind storage executor

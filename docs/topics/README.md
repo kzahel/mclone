@@ -126,6 +126,12 @@ series implements the same concern, normally reuse the document slug in its
   filesystem, and memory/null record executors, including current-state
   research, feasibility, migration gates, and tradeoffs. Tactical
   [`199`](../tactical/199-unified-persistence-interface.md) owns implementation.
+- [`cross-platform-operation-execution.md`](cross-platform-operation-execution.md):
+  accepted direction for one typed operation/completion model across native
+  background threads and browser Rust actors, using managed-world provisioning
+  as the first convergence case while preserving direct native execution and
+  domain-blind TypeScript. The 2026-07-20 review selected a shared decision
+  core with Rust platform strategies and recorded per-question resolutions.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted
