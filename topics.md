@@ -65,3 +65,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   domain-blind TypeScript browser brokers, explicit SAB mailbox ownership, and
   measurement-gated shared-Wasm-linear-memory reconsideration; Tacticals 197
   and 198
+- `unified-persistence-interface` — one typed completion-based Rust persistence
+  port with shared coordination and interchangeable SQLite, IndexedDB,
+  filesystem, and memory/null record executors
