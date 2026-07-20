@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 68 |
-| total parts | 1,501 |
-| boxes | 1,296 |
+| figures | 71 |
+| total parts | 1,582 |
+| boxes | 1,377 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 185 |
-| parts with any texture reference | 269 |
-| individual texture applications | 436 |
+| ASCII textures | 196 |
+| parts with any texture reference | 286 |
+| individual texture applications | 468 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 50 | 959 | 959 | 0 / 0 / 0 |
+| canonical `examples/` | 53 | 1,040 | 1,040 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -467,7 +467,20 @@ Clean multi-angle sheets and four-cycle videos were rendered under
 continuity, gait cadence, tail follow-through, and loop continuity, and
 approved by the user on 2026-07-20.
 
-All 436 applications target an explicit face of a box. They range from single
+The eleventh post-migration content batch adds Moose, American Bison, and
+Gemsbok Oryx as approved canonical box-only rigs. Moose is a
+30-part tall bull with a long muzzle, throat bell, high shoulders, and a broad
+ten-box palmate antler rack; American Bison is a 27-part front-heavy bull with
+a layered hump, compact rear, low shaggy head, short horns, and beard; and
+Gemsbok Oryx is a 24-part slender desert antelope with a black-white facial
+mask, flank stripe, leg stockings, and twin two-stage spear horns. All 81 parts
+are canonical boxes and use 11 combined pixel textures. Clean multi-angle
+sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-11`, inspected for identity, grounding, attachment
+continuity, gait cadence, secondary motion, and loop continuity, and approved
+by the user on 2026-07-20.
+
+All 468 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1293,11 +1306,11 @@ Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle,
 Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, Camel/Gorilla/Kangaroo,
 Crocodile/Sea Turtle/King Cobra, Penguin/Flamingo/Peacock,
 Raccoon/Red Squirrel/River Otter, and
-Chimpanzee/Orangutan/Ring-tailed Lemur plus Polar Bear/Cheetah/Jaguar content
-batches extend the canonical authoring roster to 50 without changing the
-promoted runtime set. Instancing is now the strongest independent performance
-candidate; box-part LOD and a measured sampled/GPU pose path remain separate
-follow-ups.
+Chimpanzee/Orangutan/Ring-tailed Lemur, Polar Bear/Cheetah/Jaguar, and
+Moose/American Bison/Gemsbok Oryx content batches extend the canonical
+authoring roster to 53 without changing the promoted runtime set. Instancing
+is now the strongest independent performance candidate; box-part LOD and a
+measured sampled/GPU pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd

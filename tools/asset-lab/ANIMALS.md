@@ -155,15 +155,15 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Deer | P1 | ✅ | Q | doe, buck (antlers), fawn (spots) | `examples/deer` — approved 25-box white-tailed buck with a connected sparse antler rig, large ears, pale belly, and white tail flag |
-| Moose / Elk | P2 | ☐ | Q | moose, elk | huge antlers |
+| Moose / Elk | P2 | ✅ | Q | moose, elk | `examples/moose` — approved 30-box bull with tall legs, long muzzle, throat bell, high shoulders, and broad palmate antler rack |
 | Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — canonical box-only African elephant; `legacy-examples/elephant_rounded` retains the rounded A/B and matching articulated trunk walk |
 | Giraffe | P2 | ✅ | Q | adult, calf | `examples/giraffe` — approved 22-box adult with extreme spotted neck proportions, mane, large ears, and stepped ossicones |
 | Zebra | P2 | ✅ | Q | adult, foal | `examples/zebra` — approved 22-box plains zebra; horse-derived proportions with stripes carried by pixel face textures |
 | Rhino | P2 | ✅ | Q | one-horn, two-horn | `examples/rhinoceros` — approved 25-box two-horn adult with plated shoulders, low head, and broad feet |
 | Hippo | P2 | ✅ | Q | adult, calf | `examples/hippopotamus` — approved 31-box adult with barrel body, high-set eyes, broad feet, and oversized muzzle; also semi-aquatic |
 | Camel | P2 | ✅ | Q | one hump (dromedary), two hump (bactrian) | `examples/camel` — approved 26-box dromedary with stepped hump, long articulated neck, and broad desert feet |
-| Bison / Buffalo | P3 | ☐ | Q | — | hump + shaggy head |
-| Antelope / Gazelle / Impala | P2 | ☐ | Q | horns; springbok, oryx | deer/horse-class rig |
+| Bison / Buffalo | P3 | ✅ | Q | — | `examples/american_bison` — approved 27-box bull with layered hump, compact rear, low shaggy head, short horns, and beard |
+| Antelope / Gazelle / Impala | P2 | ✅ | Q | horns; springbok, oryx | `examples/gemsbok_oryx` — approved 24-box gemsbok with black-white mask, flank stripe, leg stockings, and twin two-stage spear horns |
 | Wildebeest / Gnu | P3 | ☐ | Q | — | safari staple |
 | Tapir | P3 | ☐ | Q | — | short trunk; baby is striped |
 | Okapi | P3 | ☐ | Q | — | giraffe cousin, zebra legs |
