@@ -79,21 +79,20 @@ Humanoid figures are outside this animal conversion queue. `player` and
 
 ---
 
-## Recommended build order
+## Recommended next build order
 
-Ordered to maximize reuse of the macros that already exist and to fill obvious
-gaps in the current eight figures.
+The original farmyard and iconic-wild-animal goals are now represented in the
+20-figure canonical box-only roster. Continue by maximizing reuse of those
+reviewed rigs and then filling macro gaps.
 
-1. **Finish the farmyard (P0, all Q/B — no new tooling).** Cow, chicken, horse,
-   goat, rabbit. We already have pig(let), sheep, dog, cat — this rounds out the
-   single most recognizable animal set in the game.
-2. **Iconic wild quadrupeds (P0–P1, Q).** Wolf, fox, bear, lion, tiger,
-   elephant, deer. All ride `quadrupedWalk`.
-3. **Birds (P1, W).** Chicken (also farm), owl, parrot, eagle — exercise and
+1. **Low-cost rig variants (P1–P2, Q).** Deer and zebra can reuse the horse;
+   panda and polar bear can reuse the bear; leopard and cheetah can reuse the
+   feline rigs; donkey and mule can reuse the horse.
+2. **Birds (P1, W).** Owl, parrot, and eagle can exercise and
    harden `wingFlap`.
-4. **First swim wave (P1, S) — build the `swim` macro, then** fish, dolphin,
+3. **First swim wave (P1, S) — build the `swim` macro, then** fish, dolphin,
    shark. One tooling investment, large payoff.
-5. **Everything else** by recognizability and by which tooling gap it shares.
+4. **Everything else** by recognizability and by which tooling gap it shares.
 
 ---
 
@@ -239,7 +238,7 @@ gaps in the current eight figures.
 | Shark | P1 | ☐ | S | great white, hammerhead | |
 | Dolphin | P1 | ☐ | S | — | |
 | Whale | P2 | ☐ | S | orca, humpback, blue | scale challenge |
-| Octopus | P2 | ☐ | S | — | 8 tentacles (capsule chains) |
+| Octopus | P2 | ☐ | S | — | 8 articulated cuboid tentacles |
 | Crab | P2 | ☐ | C | — | sideways multi-leg |
 | Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
 | Seahorse | P3 | ☐ | S | — | |

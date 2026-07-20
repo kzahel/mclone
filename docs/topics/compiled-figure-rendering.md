@@ -20,11 +20,20 @@ explicit cuboid proxies for current solid-color non-box primitives, placeable
 chicken and passive-goal mannequin fixtures, stable presentation identity,
 continuous travel phase, prepared/legacy actor coexistence, browser WebGPU,
 persistence, and the non-instanced thousand-chicken baseline. Exact rounded
-tessellation is now closed by Tactical
+tessellation is now closed by completed Tactical
 [`200`](../tactical/200-box-only-figure-authoring.md), which makes boxes the
 only canonical/promotable vocabulary and migrates the current catalog while
 retaining explicit schema-v1 legacy compatibility. Instancing, box-part LOD,
 GPU pose evaluation, and a disk cache remain deferred.
+
+All source, generated-asset, pack, shared-workspace, thin-adapter, and WASM
+build gates passed at Tactical 200 closeout. Canonical/legacy Asset Lab sheets
+and movies were inspected throughout the migration. Fresh native and browser
+GPU receipts could not be produced because the current Mac's Metal processes
+entered kernel wait before producing review receipts. A final native retry
+reached queue submission, then timed out waiting for the last successful
+submission to complete. No output from those attempts is presented as visual
+evidence.
 
 ## Scope
 
@@ -104,10 +113,10 @@ was an orphaned, directly edited JSON asset; it now has a DSL source, with its
 geometry and explicit animation keys preserved and only obsolete locomotion
 metadata normalized. `asset-lab:figures:check` covers all three promoted
 figures, rejects stale output, rejects any promoted figure JSON without a
-declared source, and rejects non-box promoted parts. All seven canonical and
-18 legacy Asset Lab examples also pass a discovered source-to-canonical-JSON
-round-trip test; the other 22 are authoring or comparison examples, not checked
-runtime assets, so they have no second file to drift against.
+declared source, and rejects non-box promoted parts. All 20 canonical and 18
+legacy Asset Lab examples also pass a discovered source-to-canonical-JSON
+round-trip test; the other 17 canonical figures are authoring examples, not
+checked runtime assets, so they have no second file to drift against.
 
 Three.js uses `BoxGeometry` for canonical sources. Explicit legacy sources
 still use `SphereGeometry`, `CapsuleGeometry`, and `CylinderGeometry`, including
@@ -135,8 +144,9 @@ bridge, while Tactical
 [`118`](../tactical/118-entity-runtime-and-passive-mob-bringup.md#slice-5---chicken-asset-and-species-state)
 explicitly calls true non-box rendering follow-up work.
 
-The approximation distorts mesh size in both directions. Curved animals are
-currently much simpler in-engine than in Asset Lab, while a textured box can
+The approximation historically distorted mesh size in both directions.
+Legacy curved animals are much simpler in-engine than in Asset Lab, while a
+textured box can
 become much more expensive because texture cells become geometry. For example,
 the authored player preview is twelve boxes and 288 Three.js vertices, but its
 8x8 face texture adds 64 runtime overlay cuboids in the current bridge.
@@ -294,7 +304,7 @@ relevant to the prepared cuboid path. The canonical piglet emphasizes its
 square head and snout, the sheep replaces simulated round tufts with one
 texture-edged wool mass, and the horse preserves its long-legged angled-neck
 posture and animated mane. Clean A/B sheets and all six three-cycle movies
-were inspected. Bear, Lion, Bearfolk, and Lionfolk are the final content wave.
+were inspected. The Bear, Lion, Bearfolk, and Lionfolk wave followed.
 
 The final content wave retains every archived clip duration, cycle distance,
 stance, body/head motion, and secondary track while reducing 124 mixed parts
@@ -513,10 +523,10 @@ optimization, not a prerequisite.
 - automatic planar `0..1` coordinates for each explicitly textured box face,
   remapped mechanically into its atlas region;
 - nearest-filtered sampling where authored;
-- Three.js-compatible default UV attributes retained mechanically for curved
-  primitives, even though current curved materials do not sample them;
-- a clear compile error for authored sphere, capsule, or cylinder textures
-  until a concrete curved-surface texture contract is selected;
+- ordinary box coordinates on cuboid proxies for legacy curved primitives,
+  whose current solid materials do not sample them;
+- a clear compile error for authored sphere, capsule, or cylinder textures;
+  curved-surface texture authoring is closed with the production policy;
 - a deliberately supported material subset; and
 - stable material slots shared across LOD variants.
 
@@ -526,11 +536,10 @@ material may ignore UVs entirely or sample a compiler-generated solid atlas
 swatch; that encoding choice does not become authoring work.
 
 If later figures need broad fur variation, mottling, or noise, prefer
-figure/object-space procedural mapping, generated vertex color, or a bounded
-triplanar material over manually unwrapping every primitive. A small curved
-decal patch is another possible focused extension. General curved-surface UV
-authoring is justified only by a real asset that cannot be expressed by these
-simpler choices.
+figure/object-space procedural mapping, generated vertex color, or additional
+box-face textures over manually unwrapping every part. Curved-surface UV
+authoring is not a production figure direction; changing that would require a
+new policy and a concrete asset need.
 
 Asset Lab currently previews roughness and metalness through Three.js while
 the native actor path uses simpler baked face colors. The prepared contract
@@ -844,8 +853,8 @@ actor shapes to coexist without merging mutable caches across drawable worlds.
 This is the current staged direction. Each phase should become a bounded
 tactical only when its contract and evidence are clear. After Phase 1,
 animation and an explicit non-box proxy are the bounded bridge to an
-interactive production proof. Exact curved parity becomes an optional quality
-tier rather than a blocker. Neither changes the persistence decision.
+interactive production proof. Exact curved parity is closed rather than an
+optional quality tier. Neither choice changes the persistence decision.
 
 ### Semantic source/output prerequisite (complete)
 
@@ -1087,8 +1096,9 @@ Closed 2026-07-16 during the pre-landing design review.
    per-figure instancing and material/LOD buckets?
 7. **LOD generation.** Fixed compiler tiers, authored overrides, screen-error
    targets, or a combination? Which variants stay resident?
-8. **Legacy actors.** When do cow/debug/item shapes join prepared figures, and
-   how long does the CPU-baked fallback remain supported?
+8. **Legacy actors.** When do remaining debug/item shapes and newly promoted
+   canonical figures join the prepared path, and how long does the CPU-baked
+   fallback remain supported?
 9. **Animation curves.** Are linear key tracks plus quaternion interpolation
    sufficient, or do authored tangents/interpolation modes become necessary
    to bound smooth-motion error?
@@ -1102,8 +1112,7 @@ drawable milestone. The eventual campaign should include:
 
 - compiler determinism and malformed/budget-exceeding asset tests;
 - exact prepared counts, bounds, part indices, winding, and normals, plus UV
-  tests for explicitly textured box faces and compiler-preserved default
-  curved attributes;
+  tests for explicitly textured box faces and diagnosed legacy cuboid proxies;
 - Asset Lab semantic baseline sheets and native prepared-output captures;
 - labeled side-by-side Three.js/engine sheets using the same review camera,
   projection, dimensions, grounding, and pose time;
@@ -1164,15 +1173,14 @@ drawable milestone. The eventual campaign should include:
 
 ## Recommended Next Work
 
-Complete Tactical
-[`200`](../tactical/200-box-only-figure-authoring.md): finish every canonical
-Asset Lab figure as a sparse cuboid rig, retain rounded sources only through
-the deprecated compatibility lane, and re-baseline the promoted Chicken in the
-production high-count fixture. After that migration, instancing remains the
-strongest independent performance candidate; box-part LOD and a measured
-sampled/GPU pose path remain separate follow-ups.
+Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: all
+20 canonical Asset Lab figures are sparse cuboid rigs, all 18 rounded sources
+are isolated in the deprecated compatibility lane, and promoted Chicken is
+re-baselined. Instancing is now the strongest independent performance
+candidate; box-part LOD and a measured sampled/GPU pose path remain separate
+follow-ups.
 
-Do not add a persisted compiled format or exact curved tessellation during the
-campaign. The existing actor-record boundary keeps later instancing, LOD, and
-GPU crowd evaluation additive, while the real high-count fixture should
-establish their crossover.
+Do not add a persisted compiled format or revive exact curved tessellation.
+The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
+evaluation additive, while the real high-count fixture should establish their
+crossover.

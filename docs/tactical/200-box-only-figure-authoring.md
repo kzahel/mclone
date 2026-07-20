@@ -1,10 +1,11 @@
 # 200: Box-Only Figure Authoring
 
-Status: active 2026-07-20. The authoring-policy, canonical Chicken, and all four
-content re-authoring waves are implemented and test-green; final compatibility
-cleanup and broad validation follow. The final native offscreen pixel rerun
-remains pending because the current host's Metal review process stalled before
-producing its receipt.
+Status: complete 2026-07-20. The authoring policy, canonical Chicken, four
+content re-authoring waves, compatibility cleanup, and broad non-GPU validation
+are implemented and test-green. Canonical and legacy Asset Lab pixels were
+inspected throughout the campaign. Fresh native and browser GPU receipts remain
+host-blocked because every final Metal process stalled in the macOS kernel
+before producing a frame.
 
 Topic: `compiled-figure-rendering`
 
@@ -75,9 +76,9 @@ Implemented evidence:
 
 - `figure()` exposes only `box` and rejects handcrafted non-box drafts at
   runtime; deprecated `legacyFigure()` owns the three historical helpers.
-- The canonical root currently contains seven figures, 128 parts, and 128
-  boxes with zero curved primitives. The legacy root contains 18 figures and
-  all 205 retained curved parts.
+- At the end of Slice 1, the canonical root contained seven figures, 128
+  parts, and 128 boxes with zero curved primitives. The legacy root contained
+  18 figures and all 205 retained curved parts.
 - Elephant, Tiger, Rabbit, Chicken, and Butterfly now own their ordinary
   canonical names. Their rounded sources have `_rounded` identities in the
   legacy root, so cross-root round-trip tests reject duplicate identities.
@@ -221,6 +222,51 @@ Gate: every canonical source is box-only, every retained rounded source is
 explicitly legacy, all promoted assets and packs are current, screenshots and
 movies have been inspected, and the working tree contains a coherent commit
 series under `Topic: compiled-figure-rendering`.
+
+Implemented inventory evidence:
+
+- The final canonical root contains 20 figures, 367 parts, and 367 boxes with
+  zero spheres, capsules, or cylinders. The legacy root remains 18 figures,
+  542 parts, 337 boxes, and 205 curved parts.
+- Each of the 18 legacy identities has an ordinary canonical counterpart.
+  Across those pairs, canonical sources use 340 boxes, 8,160 exact preview
+  vertices, and 4,080 triangles versus 542 mixed parts, 32,959 vertices, and
+  41,512 triangles. That is 37% fewer rigid parts and 10.2x fewer preview
+  triangles.
+- The combined source inventory has 38 figures, 909 parts, 80 ASCII textures,
+  and 186 explicit box-face texture applications. No curved primitive carries
+  a texture reference.
+
+Implemented validation evidence:
+
+- `pnpm asset-lab:typecheck` and `pnpm asset-lab:test` pass. The latter includes
+  semantic source round trips, animation checks, generated first-party drift,
+  and the promoted box-only gate.
+- `cargo fmt --all --manifest-path native/Cargo.toml --check` and the full
+  `cargo test --manifest-path native/Cargo.toml` workspace pass.
+- `pnpm assets:pack:check`, `pnpm assets:pack:first-party:test`, a clean
+  `pnpm assets:pack:first-party` rebuild, and strict
+  `pnpm --silent assets:validate:first-party` provenance validation pass. The
+  prepared inventory resolves all three promoted actor figures from the
+  authored first-party pack and remains proprietary-free.
+- `pnpm native:thin-adapters:purity` and `pnpm native:web:build` pass, proving
+  that the shared ownership and browser/WASM compile boundaries remain intact.
+- Canonical/legacy clean sheets and three-cycle movies for every content wave
+  were rendered under `/tmp/mclone-asset-lab` and inspected incrementally. All
+  sampled poses remain grounded, connected, legible, and animated.
+- `pnpm native:web:asset-pack-smoke` and
+  `pnpm native:desktop-offscreen:smoke` both rebuilt successfully, then stalled
+  in their Metal GPU processes before producing review receipts. A final native
+  retry reached queue submission, then wgpu reported that it timed out waiting
+  for the last successful submission to complete. The two earlier native
+  figure-review attempts failed at the same host boundary. No fresh native or
+  browser screenshot is claimed; the responsive wrappers were stopped, while
+  macOS retains the exited kernel entries until it can reap them. This was not
+  a permissions error, so elevation is not a remedy. An explicit
+  `WGPU_BACKEND=vulkan` desktop retry failed cleanly because no Vulkan
+  portability adapter is installed. Retry Metal after the exited entries clear;
+  logging out or restarting the host is only a last-resort driver reset if they
+  persist.
 
 ## Deferred
 
