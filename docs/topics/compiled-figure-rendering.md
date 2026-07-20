@@ -28,12 +28,14 @@ GPU pose evaluation, and a disk cache remain deferred.
 
 All source, generated-asset, pack, shared-workspace, thin-adapter, and WASM
 build gates passed at Tactical 200 closeout. Canonical/legacy Asset Lab sheets
-and movies were inspected throughout the migration. Fresh native and browser
-GPU receipts could not be produced because the current Mac's Metal processes
-entered kernel wait before producing review receipts. A final native retry
-reached queue submission, then timed out waiting for the last successful
-submission to complete. No output from those attempts is presented as visual
-evidence.
+and movies were inspected throughout the migration. The 2026-07-20 Linux
+follow-up regenerated and approved the complete canonical/rounded review set,
+both Chicken semantic/prepared comparisons, and the native desktop offscreen
+receipt. That evidence supersedes the earlier Mac Metal queue timeout. Browser
+selection and provenance behavior also pass after serializing competing host
+promises, but Chrome 147/150 on this displayless host yields only transparent
+or monochrome presentation captures; the hardened smoke rejects those pixels,
+so this follow-up does not claim a fresh browser screenshot.
 
 ## Scope
 
@@ -929,7 +931,7 @@ optional quality tier. Neither choice changes the persistence decision.
 - retain `ActorMeshCache` as an explicit fallback for unsupported figure,
   debug, and item actors.
 
-### Box-only canonical migration (active)
+### Box-only canonical migration (complete)
 
 - enforce boxes through canonical `figure()` and the first-party drift gate;
 - retain deprecated rounded sources under `legacy-examples/` with explicit

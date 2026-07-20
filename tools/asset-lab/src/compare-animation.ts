@@ -13,7 +13,9 @@ import { assetLabRoot } from "./vite-figure-path";
 const execFileAsync = promisify(execFile);
 const repoRoot = path.resolve(assetLabRoot, "../..");
 const args = parseArgs(process.argv.slice(2));
-const input = path.resolve(args.input);
+const input = path.isAbsolute(args.input)
+  ? args.input
+  : path.resolve(repoRoot, args.input);
 const relativeAssetPath = path.relative(repoRoot, input).split(path.sep).join("/");
 if (relativeAssetPath.startsWith("../") || !relativeAssetPath.endsWith(".json")) {
   throw new Error(
@@ -78,7 +80,10 @@ const threeReceipt = JSON.parse(
 const engineReceipt = JSON.parse(
   await fs.readFile(path.join(args.outDir, "animation-receipt.json"), "utf8"),
 ) as EngineAnimationReceipt;
-const animation = validateReceipts(threeReceipt, engineReceipt);
+const preparedReceipt = JSON.parse(
+  await fs.readFile(path.join(args.outDir, "engine-receipt.json"), "utf8"),
+) as EngineFigureReceipt;
+const animation = validateReceipts(threeReceipt, engineReceipt, preparedReceipt);
 const document = await loadFigureJsonDocument(input);
 const keyTimes = (document.asset.clips[args.clip]?.keys ?? []).map((key) => key[1]);
 
@@ -109,6 +114,7 @@ const receipt = {
   captureFrameCount: animation.captureFrameCount,
   captureCadenceOnly: true,
   engine: {
+    partCount: preparedReceipt.partCount,
     immutableUploadCount: engineReceipt.immutableUploadCount,
     paletteWriteCount: engineReceipt.paletteWriteCount,
     paletteWrittenBytes: engineReceipt.paletteWrittenBytes,
@@ -173,6 +179,12 @@ interface EngineAnimationReceipt {
   }>;
 }
 
+interface EngineFigureReceipt {
+  schemaVersion: number;
+  figure: string;
+  partCount: number;
+}
+
 function parseArgs(argv: string[]): CompareArgs {
   let input = path.join(repoRoot, "assets/mclone/figures/player.figure.json");
   let outDir = "/tmp/mclone-prepared-animation/player-comparison";
@@ -232,15 +244,23 @@ function parseArgs(argv: string[]): CompareArgs {
 function validateReceipts(
   three: ThreeReceipt,
   engine: EngineAnimationReceipt,
+  prepared: EngineFigureReceipt,
 ): FigureAnimationReviewContract {
   const animation = three.contract.animation;
-  if (three.schemaVersion !== 1 || engine.schemaVersion !== 2 || !animation) {
+  if (three.schemaVersion !== 1
+    || engine.schemaVersion !== 2
+    || prepared.schemaVersion !== 1
+    || !animation) {
     throw new Error("Animation comparison receipt schema mismatch");
   }
   if (three.figure !== engine.figure
+    || engine.figure !== prepared.figure
     || animation.clip !== engine.clip
     || animation.view !== engine.view) {
     throw new Error("Animation comparison figure or clip identity mismatch");
+  }
+  if (!Number.isInteger(prepared.partCount) || prepared.partCount <= 0) {
+    throw new Error("Prepared figure receipt has an invalid part count");
   }
   if (!close(animation.durationSeconds, engine.durationSeconds)
     || !close(animation.captureFramesPerSecond, engine.captureFramesPerSecond)
@@ -258,8 +278,9 @@ function validateReceipts(
     }
   }
   const totalFrames = animation.sampleTimesSeconds.length + animation.captureFrameCount;
+  const paletteBytesPerWrite = prepared.partCount * 16 * 4;
   if (engine.immutableUploadCount !== 4
-    || engine.paletteBytesPerWrite !== 12 * 16 * 4
+    || engine.paletteBytesPerWrite !== paletteBytesPerWrite
     || engine.paletteWriteCount !== totalFrames
     || engine.paletteWrittenBytes !== engine.paletteBytesPerWrite * totalFrames
     || engine.viewUniformWriteCount !== totalFrames) {

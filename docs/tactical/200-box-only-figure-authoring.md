@@ -3,9 +3,11 @@
 Status: complete 2026-07-20. The authoring policy, canonical Chicken, four
 content re-authoring waves, compatibility cleanup, and broad non-GPU validation
 are implemented and test-green. Canonical and legacy Asset Lab pixels were
-inspected throughout the campaign. Fresh native and browser GPU receipts remain
-host-blocked because every final Metal process stalled in the macOS kernel
-before producing a frame.
+inspected throughout the campaign. A fresh Linux follow-up approved the native
+prepared Chicken comparisons and desktop offscreen receipt, replacing the old
+Metal blocker. Browser asset-pack selection also passes at the shared-host and
+provenance boundary, but Chrome 147/150 on this displayless host presents only
+transparent or monochrome capture pixels, so no browser screenshot is accepted.
 
 Topic: `compiled-figure-rendering`
 
@@ -92,11 +94,10 @@ Implemented evidence:
   tests, all 158 non-ignored `mclone-render` tests, Rust formatting, the normal
   asset lock, standalone first-party pack rebuild, and strict provenance audit
   pass.
-- The semantic side of the shared comparison wrote all three views. Two Metal
-  review attempts then stalled inside the host GPU process before an engine
-  receipt or actionable adapter error; no comparison pixel was accepted from
-  those attempts. Retry the native review before final closeout rather than
-  treating the host stall as a figure defect.
+- The 2026-07-20 Linux follow-up rendered and inspected all three semantic and
+  native prepared views. Chicken has matching textures, silhouette, framing,
+  phase, and grounding; its three-cycle animation comparison also remains
+  synchronized across exact, interpolated, and wrapped samples.
 
 ### Slice 2: Cat, Cow, and Goat
 
@@ -254,19 +255,31 @@ Implemented validation evidence:
 - Canonical/legacy clean sheets and three-cycle movies for every content wave
   were rendered under `/tmp/mclone-asset-lab` and inspected incrementally. All
   sampled poses remain grounded, connected, legible, and animated.
-- `pnpm native:web:asset-pack-smoke` and
-  `pnpm native:desktop-offscreen:smoke` both rebuilt successfully, then stalled
-  in their Metal GPU processes before producing review receipts. A final native
-  retry reached queue submission, then wgpu reported that it timed out waiting
-  for the last successful submission to complete. The two earlier native
-  figure-review attempts failed at the same host boundary. No fresh native or
-  browser screenshot is claimed; the responsive wrappers were stopped, while
-  macOS retains the exited kernel entries until it can reap them. This was not
-  a permissions error, so elevation is not a remedy. An explicit
-  `WGPU_BACKEND=vulkan` desktop retry failed cleanly because no Vulkan
-  portability adapter is installed. Retry Metal after the exited entries clear;
-  logging out or restarting the host is only a last-resort driver reset if they
-  persist.
+- The 2026-07-20 review regenerated all 20 canonical sheets and movies plus
+  explicit canonical/rounded sheets and three-cycle movies for all 18 paired
+  identities. Every important PNG and temporal contact sheet was inspected.
+  The sparse rigs remain recognizable, grounded, connected, and more charming;
+  no skating, clipping, floating attachment, or detached Tiger tail was found.
+- Both Chicken prepared comparisons pass. The static receipt reports 336
+  vertices and 504 indices, and the animated receipt derives 896 palette bytes
+  per write from Chicken's 14 prepared parts rather than assuming Player's 12.
+- `pnpm native:desktop-offscreen:smoke` produced and passed a fresh 2560x1600
+  full-frame receipt with 11 drawn terrain sections and both authored actors.
+  The inspected Cow and Chicken have correct textures, silhouettes, framing,
+  and terrain contact. The previous Metal queue timeout is therefore not a
+  figure-renderer defect.
+- `pnpm native:web:asset-pack-smoke` completes the authored selection at epoch
+  1, retains the local-world session, restores `mclone-authored`, resolves 265
+  authored-plus-fallback files, and reports zero Minecraft-reference or unknown
+  provenance. The review exposed and fixed a browser promise race that could
+  reborrow `WebSceneHost` while asset replacement owned it.
+- Chrome 147 and 150 on this displayless Linux host still return a one-color
+  transparent or white WebGPU presentation capture. Headless, headed Xvfb,
+  explicit Vulkan, bundled Chromium, and SwiftShader runs agree; direct X11
+  capture shows only the bootstrap presentation. The smoke now rejects these
+  false-positive receipts after six forced overview submissions. This is a
+  browser presentation/compositor limitation on this host, not an adapter
+  discovery failure, and no browser PNG is claimed as visual evidence.
 
 ## Deferred
 

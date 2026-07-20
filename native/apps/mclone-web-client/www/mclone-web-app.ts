@@ -1827,6 +1827,11 @@ class WebFrameDriver {
     let execution: WebCatalogExecution | null = null;
     try {
       db = await openWorldDb();
+      // Asset replacement and session startup keep wasm-bindgen's mutable host
+      // borrow alive across their promises. A catalog request can be queued by
+      // the same UI report, so wait until those operations release the host
+      // before taking its synchronous catalog execution ticket.
+      await this.waitForSessionIdle();
       execution = session.takeWorldCatalogExecution(requestId);
       await execution.awaitWriterRetirements();
       await executeIndexedDbCatalogExecution(db, execution);

@@ -8,6 +8,16 @@ Status: implementation complete 2026-07-11. Tactical
 transactional replacement, platform adoption, persistence, strict provenance,
 reload measurement, and attached Quest asset discovery are executable.
 
+Post-closeout correction (2026-07-20): the browser driver now waits for any
+async asset/session operation to release wasm-bindgen's mutable host borrow
+before taking a queued IndexedDB catalog execution. This prevents an Asset
+Packs Apply report from racing a catalog completion and recursively borrowing
+`WebSceneHost`. The production UI probe completes authored selection and reload
+restoration with zero reference/unknown provenance. Its screenshot gate now
+forces overview submissions and rejects transparent or monochrome captures;
+Chrome 147/150 on the current displayless Linux host remains blocked at that
+presentation/readback boundary despite green shared-host receipts.
+
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
 behind “Minecraft reference assets are disabled” and the continuing path from

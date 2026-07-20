@@ -304,6 +304,9 @@ async function run() {
       args: [
         "--enable-unsafe-webgpu",
         ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+        ...(process.env.MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS
+          ?.split(/\s+/)
+          .filter(Boolean) ?? []),
       ],
     });
     const context = await browser.newContext(mobileViewport
@@ -1191,13 +1194,38 @@ async function run() {
       if (assetPackUiProbe) {
         const assetPackUiProbeResult = await runAssetPackUiProbe(page, canvas);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
-        const pageScreenshotCaptured = await page.screenshot({
-          path: screenshotPath,
-          fullPage: false,
-          timeout: 60_000,
-        }).then(() => true, () => false);
-        const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
-        const canvasPixels = analyzePng(canvasPng);
+        await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+          undefined,
+          { timeout: 10_000 },
+        );
+        let pageCaptureError = null;
+        try {
+          await captureValidOverviewFrame(
+            page,
+            page,
+            screenshotPath,
+            "asset-pack page",
+          );
+        } catch (error) {
+          pageCaptureError = error instanceof Error ? error.message : String(error);
+        }
+        const pageScreenshotCaptured = existsSync(screenshotPath);
+        let canvasPixels;
+        let canvasCaptureError = null;
+        try {
+          const canvasCapture = await captureValidOverviewFrame(
+            page,
+            canvas,
+            canvasScreenshotPath,
+            "asset-pack canvas",
+          );
+          canvasPixels = canvasCapture.pixels;
+        } catch (error) {
+          canvasCaptureError = error instanceof Error ? error.message : String(error);
+          canvasPixels = analyzePng(await readFile(canvasScreenshotPath));
+        }
         const report = {
           url: appUrl,
           screenshotPath,
@@ -1206,6 +1234,8 @@ async function run() {
           assetPackUiProbeReportPath,
           appLoop,
           assetPackUiProbe,
+          pageCaptureError,
+          canvasCaptureError,
           canvasPixels,
           assetPackUiProbeResult,
           result,
@@ -1214,6 +1244,8 @@ async function run() {
         if (
           !assetPackUiProbeResult?.ok
           || pageErrors.length > 0
+          || pageCaptureError !== null
+          || canvasCaptureError !== null
           || canvasPixels.nonClearInteriorPixelCount <= 128
         ) {
           throw new Error(`asset-pack UI probe failed:\n${JSON.stringify(report, null, 2)}`);
@@ -4723,21 +4755,26 @@ async function runFarLodMovementProbe(page) {
 
 /**
  * WebGPU presentation readback can occasionally capture an incomplete frame.
- * Render the same production overview again until the canvas is visibly valid.
+ * Render the same production overview again until the capture is visibly valid.
  *
  * @param {Page} page
- * @param {Locator} canvas
+ * @param {Page | Locator} captureTarget
  * @param {string} path
  * @param {string} label
  */
-async function captureValidOverviewFrame(page, canvas, path, label) {
+async function captureValidOverviewFrame(page, captureTarget, path, label) {
   let png = null;
   let pixels = null;
   for (let attempt = 1; attempt <= 6; attempt += 1) {
     await page.evaluate(() => globalThis.__mcloneWebApp?.renderOverviewFrame?.());
-    png = await canvas.screenshot({ path, timeout: 60_000 });
+    png = await captureTarget.screenshot({ path, timeout: 60_000 });
     pixels = analyzePng(png);
-    if (pixels.nearBlackInteriorPixelCount < pixels.width * pixels.height * 0.15) {
+    const interiorPixelCount = Math.max(1, (pixels.width - 16) * (pixels.height - 16));
+    if (
+      pixels.distinctInteriorColorCount > 8
+      && pixels.nearBlackInteriorPixelCount < interiorPixelCount * 0.15
+      && pixels.transparentInteriorPixelCount < interiorPixelCount * 0.15
+    ) {
       return { png, pixels, attemptCount: attempt };
     }
   }
