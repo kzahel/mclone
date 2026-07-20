@@ -14,11 +14,12 @@ use serde::{Deserialize, Serialize};
 use crate::ChunkStoreError;
 use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::persistence::SqliteWorldStore;
 use crate::persistence::{
     ChunkRecord, EntityChunkRecord, EntityPersistentId, EntitySavePayload, EntitySaveRecord,
 };
-#[cfg(not(target_arch = "wasm32"))]
-use crate::persistence::{SqliteWorldStore, WorldStore};
+use crate::persistence::{MemoryWorldStore, WorldStore};
 use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, ChunkStoreResult, WorldGenerationProfile,
 };
@@ -235,7 +236,6 @@ pub fn authored_world_fixture_records(
     Ok((manifest, records, entity_records))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn write_authored_world_fixture_to_store(
     store: &mut dyn WorldStore,
     kind: AuthoredWorldFixtureKind,
@@ -249,6 +249,21 @@ pub fn write_authored_world_fixture_to_store(
     }
     store.flush()?;
     Ok(manifest)
+}
+
+/// Build one fresh session-local authored world through the ordinary
+/// `WorldStore` contract.
+///
+/// The returned store has no path or durable identity. Callers hand it to the
+/// normal persistence mailbox/actor just like any other store; native and
+/// browser startup use the same authored records without routing them through
+/// platform glue.
+pub fn authored_world_fixture_memory_store(
+    kind: AuthoredWorldFixtureKind,
+) -> ChunkStoreResult<(AuthoredWorldFixtureManifest, MemoryWorldStore)> {
+    let mut store = MemoryWorldStore::new();
+    let manifest = write_authored_world_fixture_to_store(&mut store, kind)?;
+    Ok((manifest, store))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -652,6 +667,89 @@ mod tests {
     }
 
     #[test]
+    fn memory_bootstrap_is_exact_and_fresh_for_every_session() {
+        let kind = AuthoredWorldFixtureKind::LobbyTableV2;
+        let (expected_manifest, expected_chunks, expected_entities) =
+            authored_world_fixture_records(kind).unwrap();
+        let (first_manifest, mut first) = authored_world_fixture_memory_store(kind).unwrap();
+        let (second_manifest, mut second) = authored_world_fixture_memory_store(kind).unwrap();
+
+        assert_eq!(first_manifest, expected_manifest);
+        assert_eq!(second_manifest, expected_manifest);
+        for expected in &expected_chunks {
+            assert_eq!(
+                first
+                    .load_chunk(&mclone_protocol::DimensionKey::overworld(), expected.pos())
+                    .unwrap()
+                    .as_ref(),
+                Some(expected)
+            );
+            assert_eq!(
+                second
+                    .load_chunk(&mclone_protocol::DimensionKey::overworld(), expected.pos())
+                    .unwrap()
+                    .as_ref(),
+                Some(expected)
+            );
+        }
+        assert!(expected_entities.is_empty());
+
+        let (_, island_chunks, _) =
+            authored_world_fixture_records(AuthoredWorldFixtureKind::LobbyIslandV2).unwrap();
+        let replacement = island_chunks
+            .into_iter()
+            .find(|record| record.pos() == AUTHORED_WORLD_FIXTURE_CENTER)
+            .unwrap();
+        first
+            .save_chunk(&mclone_protocol::DimensionKey::overworld(), &replacement)
+            .unwrap();
+
+        let expected_center = expected_chunks
+            .iter()
+            .find(|record| record.pos() == AUTHORED_WORLD_FIXTURE_CENTER)
+            .unwrap();
+        assert_ne!(
+            first
+                .load_chunk(
+                    &mclone_protocol::DimensionKey::overworld(),
+                    AUTHORED_WORLD_FIXTURE_CENTER,
+                )
+                .unwrap()
+                .as_ref(),
+            Some(expected_center)
+        );
+        assert_eq!(
+            second
+                .load_chunk(
+                    &mclone_protocol::DimensionKey::overworld(),
+                    AUTHORED_WORLD_FIXTURE_CENTER,
+                )
+                .unwrap()
+                .as_ref(),
+            Some(expected_center)
+        );
+    }
+
+    #[test]
+    fn memory_bootstrap_preserves_authored_entity_records() {
+        let kind = AuthoredWorldFixtureKind::LobbyIslandV2;
+        let (_, _, expected_entities) = authored_world_fixture_records(kind).unwrap();
+        let (_, mut store) = authored_world_fixture_memory_store(kind).unwrap();
+
+        assert_eq!(expected_entities.len(), 1);
+        assert_eq!(
+            store
+                .load_entity_chunk(
+                    &mclone_protocol::DimensionKey::overworld(),
+                    AUTHORED_WORLD_FIXTURE_CENTER,
+                )
+                .unwrap()
+                .as_ref(),
+            expected_entities.first()
+        );
+    }
+
+    #[test]
     fn fixture_directory_is_idempotent_and_refuses_unrelated_roots() {
         let root = unique_test_root("root-safety");
         fs::create_dir_all(&root).unwrap();
@@ -680,6 +778,33 @@ mod tests {
                 .contains(AuthoredWorldFixtureKind::Table.fixture_id())
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn memory_bootstrap_starts_a_normal_realm_without_worldgen() {
+        let (manifest, store) =
+            authored_world_fixture_memory_store(AuthoredWorldFixtureKind::LobbyTableV2).unwrap();
+        let mut definition =
+            crate::DimensionDefinition::overworld(manifest.seed, manifest.world_generation_profile);
+        definition.topology = mclone_core::HorizontalTopology::UNBOUNDED;
+        let mut server =
+            LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+                definition,
+                Box::new(store),
+            );
+        server.set_world_behavior_profile(crate::WorldBehaviorProfile::ProtectedLobby);
+        server.initialize_world_metadata_blocking().unwrap();
+
+        let updates = load_view_until_idle(&mut server, AUTHORED_WORLD_FIXTURE_CENTER);
+        let expected = manifest.expected_spawn;
+        assert!(updates.iter().any(|update| matches!(
+            update,
+            ServerUpdate::PlayerPosition(position)
+                if position.position == Vec3d::new(expected[0], expected[1], expected[2])
+        )));
+        assert_eq!(server.scheduler().job_count(), 0);
+        assert_eq!(server.scheduler().worldgen_mailbox_pending_count(), 0);
+        server.shutdown_persistence().unwrap();
     }
 
     #[test]

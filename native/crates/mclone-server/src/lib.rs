@@ -56,13 +56,11 @@ pub use authored_fixture::{
     AUTHORED_LOBBY_CHICKEN_PERSISTENT_ID, AUTHORED_LOBBY_COW_PERSISTENT_ID,
     AUTHORED_WORLD_FIXTURE_CENTER, AUTHORED_WORLD_FIXTURE_MARKER_FILE,
     AUTHORED_WORLD_FIXTURE_SCHEMA_VERSION, AUTHORED_WORLD_FIXTURE_VOID_PADDING_RADIUS,
-    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, authored_world_fixture_records,
+    AuthoredWorldFixtureKind, AuthoredWorldFixtureManifest, authored_world_fixture_memory_store,
+    authored_world_fixture_records, write_authored_world_fixture_to_store,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use authored_fixture::{
-    authored_world_fixture_marker_path, write_authored_world_fixture_dir,
-    write_authored_world_fixture_to_store,
-};
+pub use authored_fixture::{authored_world_fixture_marker_path, write_authored_world_fixture_dir};
 pub use cadence::{
     DEFAULT_GAMEPLAY_RATE_HZ, DEFAULT_HOST_RATE_HZ, DEFAULT_MAX_CATCH_UP_HOST_FRAMES,
     DEFAULT_PHYSICS_RATE_HZ, SimulationCadence, SimulationCadenceAdvance, SimulationCadenceConfig,

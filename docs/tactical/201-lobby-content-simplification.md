@@ -1,7 +1,7 @@
 # Tactical 201: Lobby Content Simplification
 
-Status: active 2026-07-20 — direction accepted; Slice 0 baseline complete and
-Slice 1 in progress.
+Status: active 2026-07-20 — direction accepted; Slices 0-1 complete and Slice 2
+in progress.
 
 Topic: `embedded-worlds`
 
@@ -247,6 +247,15 @@ set.
 
 Exit: the fixture starts one normal `RealmServer` entirely from shared Rust in
 tests, with no filesystem or IndexedDB requirement.
+
+Completed 2026-07-20. `authored_world_fixture_memory_store` now materializes
+the canonical authored chunk and entity records into the ordinary
+`MemoryWorldStore` through the `WorldStore` trait on every target. Tests prove
+exact record identity, entity preservation, independent fresh stores after one
+copy is mutated, protected-lobby metadata initialization, expected spawn, and
+zero world-generation jobs in a normal `LocalRealmSession`. The focused native
+tests pass, and the `mclone-server` Wasm library check confirms the bootstrap is
+browser-available.
 
 ### Slice 2: production primary cutover
 
