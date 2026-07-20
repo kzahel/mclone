@@ -98,8 +98,8 @@ was an orphaned, directly edited JSON asset; it now has a DSL source, with its
 geometry and explicit animation keys preserved and only obsolete locomotion
 metadata normalized. `asset-lab:figures:check` covers all three promoted
 figures, rejects stale output, and rejects any promoted figure JSON without a
-declared source. All 20 current Asset Lab examples also pass a discovered
-source-to-canonical-JSON round-trip test; the other 17 are authoring examples,
+declared source. All 21 current Asset Lab examples also pass a discovered
+source-to-canonical-JSON round-trip test; the other 18 are authoring examples,
 not checked runtime assets, so they have no second file to drift against.
 
 Three.js still uses `BoxGeometry`, `SphereGeometry`, `CapsuleGeometry`, and
@@ -149,12 +149,36 @@ native cuboid approximations, and will change as source figures are revised.
 | cow | 38 | 1,946 | 2,208 |
 | rabbit | 25 | 3,050 | 4,640 |
 | elephant | 38 | 2,894 | 3,756 |
+| elephant_blocky | 40 | 960 | 480 |
 | tiger | 86 | 3,648 | 3,856 |
 
 These are not extremely large meshes, but most rounded animals are already
 well above vanilla cuboid-mob geometry. The cost also multiplies by visible
 actor count and animation cadence. More importantly, the pipeline should not
 make CPU world-space rebaking a prerequisite for later, richer figure assets.
+
+### Box-only animal style A/B
+
+The elephant now has two retained authoring examples for direct style review:
+
+- `examples/elephant` uses spheres, capsules, cylinders, and boxes for a
+  rounded interpretation; and
+- `examples/elephant_blocky` starts from the sparse Minecraft quadruped
+  grammar and uses 40 boxes exclusively, including its stepped articulated
+  trunk, tusks, ears, eyes, feet, and secondary details.
+
+Both variants use the same `1.6`-second, `0.9`-unit `quadrupedWalk` timing and
+matching independent trunk, ear, head, and tail motion. Clean multi-angle
+sheets and three-cycle movies were rendered under `/tmp`, inspected
+individually, and combined into direct side-by-side reviews. Human review
+preferred the box-only version for its charm and stronger fit with the voxel
+world's visual language.
+
+Keep both sources available as an A/B pair. Box-only is the preferred direction
+for the next animal style study and a likely direction for later re-authoring,
+but this result is not yet a blanket primitive restriction or permission to
+delete the rounded figures. Test the direction across additional body plans
+before selecting a repository-wide conversion policy.
 
 ## Current Texture And UV Evidence
 
@@ -163,9 +187,9 @@ An inventory taken on 2026-07-20 from the loaded semantic assets found:
 
 | Fact | Count |
 |---|---:|
-| figures | 20 |
-| total parts | 569 |
-| boxes | 364 |
+| figures | 21 |
+| total parts | 609 |
+| boxes | 404 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
 | ASCII textures | 30 |
 | parts with any texture reference | 30 |

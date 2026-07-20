@@ -124,7 +124,7 @@ gaps in the current eight figures.
 |---|---|---|---|---|---|
 | Deer | P1 | ☐ | Q | doe, buck (antlers), fawn (spots) | antlers = signature variant |
 | Moose / Elk | P2 | ☐ | Q | moose, elk | huge antlers |
-| Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — African; articulated three-segment trunk, hinged ears, tusks, broad feet; `quadrupedWalk` |
+| Elephant | P1 | ✅ | Q | African (big ears), Asian, calf; tusks | `examples/elephant` — rounded African; `examples/elephant_blocky` — box-only style study; both use an articulated three-segment trunk and `quadrupedWalk` |
 | Giraffe | P2 | ☐ | Q | adult, calf | extreme neck proportions |
 | Zebra | P2 | ☐ | Q | adult, foal | horse rig + stripes |
 | Rhino | P2 | ☐ | Q | one-horn, two-horn | |
