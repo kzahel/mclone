@@ -2902,7 +2902,7 @@ impl PersistenceMailbox {
     }
 
     pub fn transient() -> Self {
-        Self::new(Box::<NullWorldStore>::default())
+        Self::new(Box::new(RecordExecutorWorldStore::null()))
     }
 
     pub fn load_world_metadata(&mut self) -> PersistenceRequestId {
@@ -2922,7 +2922,7 @@ impl PersistenceMailbox {
     }
 
     pub fn memory() -> Self {
-        Self::new(Box::<MemoryWorldStore>::default())
+        Self::new(Box::new(RecordExecutorWorldStore::memory()))
     }
 
     pub fn entity_chunks_supported(&self) -> bool {

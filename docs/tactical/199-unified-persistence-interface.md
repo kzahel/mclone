@@ -1,7 +1,7 @@
 # Tactical 199: Unified Persistence Interface
 
-Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-1
-are complete and Slice 2 is next.
+Status: active 2026-07-20; full autonomous campaign authorized. Slices 0-2
+are complete and Slice 3 is next.
 
 Topic: `unified-persistence-interface`
 
@@ -244,7 +244,7 @@ Evidence and decisions:
 
 ## Slice 2: Coordinator And Record-Executor Seam
 
-Status: planned.
+Status: complete 2026-07-20.
 
 Separate shared persistence semantics from physical calls under the existing
 typed mailbox:
@@ -259,6 +259,21 @@ typed mailbox:
 
 Exit: memory/null conformance is green and the synchronous compatibility path
 is no longer the only way to serve the coordinator.
+
+Evidence:
+
+- The existing `PersistenceActor` remains the single owner of pending-write
+  visibility, cache/durable ordering, coalescing, flush, close, and typed
+  engine completions. `RecordExecutorWorldStore` supplies physical record
+  reads/commits beneath that actor; the owned request/response vocabulary is
+  the nonblocking completion path for browser execution.
+- `PersistenceMailbox::memory()` and `PersistenceMailbox::transient()` now run
+  through memory/null record executors, respectively. The legacy public
+  `MemoryWorldStore` and `NullWorldStore` remain compatibility types for test
+  fixtures and callers not yet routed through the mailbox constructor.
+- All 39 focused persistence actor/codec/SQLite tests passed after the live
+  memory/null constructor cutover, including pending reads, durability lanes,
+  close behavior, threaded behavior, and SQLite controls.
 
 ## Slice 3: SQLite Control And Native Writer Lease
 
