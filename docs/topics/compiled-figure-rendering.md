@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 44 |
-| total parts | 1,018 |
-| boxes | 813 |
+| figures | 47 |
+| total parts | 1,057 |
+| boxes | 852 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 103 |
-| parts with any texture reference | 148 |
-| individual texture applications | 248 |
+| ASCII textures | 113 |
+| parts with any texture reference | 159 |
+| individual texture applications | 267 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 26 | 476 | 476 | 0 / 0 / 0 |
+| canonical `examples/` | 29 | 515 | 515 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -374,7 +374,18 @@ under `/tmp/mclone-asset-lab/batch-2`, inspected for identity, attachment
 continuity, cadence, and full upstroke/downstroke motion, and approved by the
 user on 2026-07-20.
 
-All 248 applications target an explicit face of a box. They range from single
+The third post-migration content batch ships a shared `swim` authoring macro
+that emits ordinary schema-v1 keys and locomotion metadata for body
+counter-sway, primary and delayed tail motion, mirrored pectoral fins, and
+optional vertical drift. Fish is a 10-part lateral-tail rig, Dolphin is a
+13-part vertical-tail rig with horizontal flukes, and Shark is a 16-part
+lateral-tail rig with a two-lobe caudal fin; all are canonical boxes and use
+10 combined pixel textures. Clean multi-angle sheets and four-cycle swim
+videos were rendered under `/tmp/mclone-asset-lab/batch-3`, inspected for axis
+correctness, identity, attachment continuity, and complete tail/fin motion,
+and approved by the user on 2026-07-20.
+
+All 267 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1196,11 +1207,11 @@ drawable milestone. The eventual campaign should include:
 Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: its
 20-figure migration baseline is entirely sparse cuboid rigs, all 18 rounded
 sources are isolated in the deprecated compatibility lane, and promoted
-Chicken is re-baselined. The approved Deer/Zebra/Panda and Owl/Parrot/Eagle
-content batches extend the canonical authoring roster to 26 without changing
-the promoted runtime set. Instancing is now the strongest independent
-performance candidate; box-part LOD and a measured sampled/GPU pose path
-remain separate follow-ups.
+Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle, and
+Fish/Dolphin/Shark content batches extend the canonical authoring roster to 29
+without changing the promoted runtime set. Instancing is now the strongest
+independent performance candidate; box-part LOD and a measured sampled/GPU
+pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd

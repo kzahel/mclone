@@ -30,7 +30,7 @@ sex). A short fantasy/anthro stretch section at the end continues the existing
 | **Q** | Quadruped walk (4 legs) | ✅ `quadrupedWalk` exists |
 | **B** | Biped walk (2 legs, 2 arms) | ✅ `bipedWalk` exists |
 | **W** | Winged flight | ✅ `wingFlap` exists |
-| **S** | Swim (body/fin/tail undulation) | ❌ **needs a `swim` macro** |
+| **S** | Swim (body/fin/tail undulation) | ✅ `swim` exists with configurable lateral or vertical tail motion |
 | **SL** | Slither (serpentine, legless) | ❌ **needs a `slither` macro** |
 | **H** | Hop (rabbit/frog, synchronized hind legs) | ⚠️ approximate with `contactSwing`; a `hop` macro would be cleaner |
 | **C** | Crawl, many legs (insects/arachnids) | ⚠️ hand-author or generalize `quadrupedWalk` to N legs |
@@ -40,7 +40,7 @@ sex). A short fantasy/anthro stretch section at the end continues the existing
 
 These unlock whole families, so they should be prioritized as their own slices:
 
-- [ ] **`swim` macro** → unlocks all marine life (fish, shark, dolphin, whale, octopus…). High leverage.
+- [x] **`swim` macro** → shipped with Batch 3: body counter-sway, primary/delayed tail motion, mirrored fins, vertical drift, and configurable lateral or vertical tail axes.
 - [ ] **`slither` macro** → unlocks snakes, eels, worms.
 - [ ] **`hop` macro** → rabbit, frog, kangaroo, grasshopper (cleaner than faking with contactSwing). *Rabbit currently ships a hand-authored approximation (`examples/rabbit`: synchronized `contactSwing` legs + phased body `bob`); this macro would replace it.*
 - [ ] **N-leg crawl** (generalize `quadrupedWalk`) → spiders (8), insects (6), crabs.
@@ -82,7 +82,7 @@ Humanoid figures are outside this animal conversion queue. `player` and
 ## Recommended next build order
 
 The original farmyard and iconic-wild-animal goals are now represented in the
-26-figure canonical box-only roster. Continue by maximizing reuse of those
+29-figure canonical box-only roster. Continue by maximizing reuse of those
 reviewed rigs and then filling macro gaps.
 
 1. **Low-cost rig variants (P1–P2, Q).** Polar bear can reuse the bear;
@@ -91,8 +91,9 @@ reviewed rigs and then filling macro gaps.
 2. **Birds (P1, W).** Owl, parrot, and eagle shipped in the second
    post-migration batch and established the reusable flying-bird vocabulary.
    Duck, turkey, penguin, and smaller birds remain open.
-3. **First swim wave (P1, S) — build the `swim` macro, then** fish, dolphin,
-   shark. One tooling investment, large payoff.
+3. **First swim wave (P1, S).** The `swim` macro plus fish, dolphin, and shark
+   shipped in the third post-migration batch. Whale, turtle, and other aquatic
+   figures can now reuse the reviewed lateral/vertical tail vocabulary.
 4. **Everything else** by recognizability and by which tooling gap it shares.
 
 ---
@@ -231,13 +232,13 @@ reviewed rigs and then filling macro gaps.
 | Peacock | P3 | ☐ | W | — | tail fan showpiece |
 | Ostrich / Emu | P3 | ☐ | B | — | flightless runner |
 
-## Marine & aquatic — *blocked on `swim` macro*
+## Marine & aquatic
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Fish (generic) | P1 | ☐ | S | clownfish, tropical morphs, cod, salmon, pufferfish | base rig for the whole family |
-| Shark | P1 | ☐ | S | great white, hammerhead | |
-| Dolphin | P1 | ☐ | S | — | |
+| Fish (generic) | P1 | ✅ | S | clownfish, tropical morphs, cod, salmon, pufferfish | `examples/fish` — approved 10-box blue/yellow tropical fish with a lateral two-stage tail |
+| Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
+| Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ☐ | S | orca, humpback, blue | scale challenge |
 | Octopus | P2 | ☐ | S | — | 8 articulated cuboid tentacles |
 | Crab | P2 | ☐ | C | — | sideways multi-leg |

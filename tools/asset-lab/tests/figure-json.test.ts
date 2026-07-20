@@ -78,6 +78,47 @@ test("canonical figure rejects deprecated curved primitives", () => {
   assert.equal(legacy.parts[0]?.primitive.kind, "sphere");
 });
 
+test("swim macro exports ordinary body tail fin keys and locomotion", () => {
+  const asset = figure("swimmer", ({ mat, part, box, swim }) => {
+    mat("skin", "#447799");
+    part("body", box({ size: [1, 1, 1], material: "skin" }));
+    part("tail", box({ parent: "body", size: [0.2, 0.6, 0.6], material: "skin" }));
+    part("tail_tip", box({ parent: "tail", size: [0.1, 0.8, 0.5], material: "skin" }));
+    part("fin_l", box({ parent: "body", size: [0.4, 0.1, 0.3], material: "skin" }));
+    part("fin_r", box({ parent: "body", size: [0.4, 0.1, 0.3], material: "skin" }));
+    swim("swim", {
+      duration: 1,
+      samples: 5,
+      body: "body",
+      bodyBob: 0.02,
+      bodySwayDegrees: 3,
+      cycleDistance: 1.4,
+      leftFin: "fin_l",
+      rightFin: "fin_r",
+      tail: "tail",
+      tailTip: "tail_tip",
+    });
+  });
+
+  const clip = asset.clips.swim;
+  assert.ok(clip);
+  assert.equal(clip.locomotion?.kind, "swim");
+  assert.equal(clip.locomotion?.cycleDistance, 1.4);
+  assert.deepEqual(clip.locomotion?.direction, [0, 0, -1]);
+  assert.equal(clip.locomotion?.contacts, undefined);
+  assert.deepEqual(
+    new Set(clip.keys.map(([part]) => part)),
+    new Set(["body", "tail", "tail_tip", "fin_l", "fin_r"]),
+  );
+
+  const finKeys = clip.keys.filter(([, time]) => time === 0.25);
+  const leftFin = finKeys.find(([part]) => part === "fin_l")?.[2].rot;
+  const rightFin = finKeys.find(([part]) => part === "fin_r")?.[2].rot;
+  assert.ok(leftFin);
+  assert.ok(rightFin);
+  assert.equal(leftFin[2], -rightFin[2]);
+});
+
 test("canonical and legacy examples cross the canonical JSON boundary", async () => {
   const canonicalSources = await discoverFigureSources("examples");
   const legacySources = await discoverFigureSources("legacy-examples");

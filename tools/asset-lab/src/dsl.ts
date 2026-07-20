@@ -104,7 +104,7 @@ export interface TransformKey {
 
 export type ClipKey = readonly [part: string, time: number, transform: TransformKey];
 
-export type LocomotionKind = "biped-walk" | "quadruped-walk" | "wing-flap";
+export type LocomotionKind = "biped-walk" | "quadruped-walk" | "swim" | "wing-flap";
 
 export interface LocomotionContactSpec {
   part: string;
@@ -255,6 +255,29 @@ export interface WingFlapSpec extends CycleTimingSpec {
   tracks?: CycleTrack[];
 }
 
+export interface SwimSpec extends CycleTimingSpec {
+  body?: string;
+  bodyBob?: number;
+  bodyBobCenter?: number;
+  bodyBobPhase?: number;
+  bodySwayDegrees?: number;
+  cycleDistance?: number;
+  direction?: Vec3;
+  finAxis?: AxisName;
+  finPhase?: number;
+  finSwingDegrees?: number;
+  frequency?: number;
+  leftFin?: string;
+  rightFin?: string;
+  tail: string;
+  tailAxis?: AxisName;
+  tailSwingDegrees?: number;
+  tailTip?: string;
+  tailTipPhase?: number;
+  tailTipSwingDegrees?: number;
+  tracks?: CycleTrack[];
+}
+
 export interface FigureApi {
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
@@ -263,6 +286,7 @@ export interface FigureApi {
   walkCycle(name: string, spec: WalkCycleSpec): void;
   bipedWalk(name: string, spec: BipedWalkSpec): void;
   quadrupedWalk(name: string, spec: QuadrupedWalkSpec): void;
+  swim(name: string, spec: SwimSpec): void;
   wingFlap(name: string, spec: WingFlapSpec): void;
   swing(part: string, options: SwingOptions): CycleTrack;
   contactSwing(part: string, options: ContactSwingOptions): CycleTrack;
@@ -436,6 +460,7 @@ class FigureBuilder {
       walkCycle: (name, spec) => this.clip(name, buildWalkCycleClip(spec)),
       bipedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildBipedWalkCycle(spec))),
       quadrupedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildQuadrupedWalkCycle(spec))),
+      swim: (name, spec) => this.clip(name, buildWalkCycleClip(buildSwimCycle(spec))),
       wingFlap: (name, spec) => this.clip(name, buildWalkCycleClip(buildWingFlapCycle(spec))),
       swing,
       contactSwing,
@@ -791,6 +816,76 @@ function buildWingFlapCycle(spec: WingFlapSpec): WalkCycleSpec {
   return cycleSpecFromTiming(spec, tracks, locomotion);
 }
 
+function buildSwimCycle(spec: SwimSpec): WalkCycleSpec {
+  const frequency = spec.frequency ?? 1;
+  const tailAxis = spec.tailAxis ?? "y";
+  const tailSwingDegrees = spec.tailSwingDegrees ?? 18;
+  const tracks: CycleTrack[] = [];
+
+  if (spec.body && spec.bodySwayDegrees !== 0) {
+    tracks.push(swing(spec.body, {
+      axis: tailAxis,
+      degrees: spec.bodySwayDegrees ?? 3,
+      frequency,
+      phase: 0.5,
+    }));
+  }
+  tracks.push(swing(spec.tail, {
+    axis: tailAxis,
+    degrees: tailSwingDegrees,
+    frequency,
+  }));
+  if (spec.tailTip) {
+    tracks.push(swing(spec.tailTip, {
+      axis: tailAxis,
+      degrees: spec.tailTipSwingDegrees ?? tailSwingDegrees * 1.4,
+      frequency,
+      phase: spec.tailTipPhase ?? 0.12,
+    }));
+  }
+
+  const finAxis = spec.finAxis ?? "z";
+  const finSwingDegrees = spec.finSwingDegrees ?? 8;
+  const finPhase = spec.finPhase ?? 0.25;
+  if (spec.leftFin) {
+    tracks.push(swing(spec.leftFin, {
+      axis: finAxis,
+      degrees: finSwingDegrees,
+      frequency,
+      phase: finPhase,
+    }));
+  }
+  if (spec.rightFin) {
+    tracks.push(swing(spec.rightFin, {
+      axis: finAxis,
+      degrees: -finSwingDegrees,
+      frequency,
+      phase: finPhase,
+    }));
+  }
+  if (spec.body && spec.bodyBob !== 0) {
+    tracks.push(bob(spec.body, {
+      axis: "y",
+      amount: spec.bodyBob ?? 0.02,
+      center: spec.bodyBobCenter ?? 0,
+      frequency,
+      phase: spec.bodyBobPhase ?? 0.25,
+    }));
+  }
+  tracks.push(...(spec.tracks ?? []));
+
+  const locomotion = spec.cycleDistance === undefined
+    ? undefined
+    : {
+      kind: "swim" as const,
+      cycleDistance: spec.cycleDistance,
+      direction: spec.direction ?? [0, 0, -1] as const,
+      units: "figure" as const,
+    };
+
+  return cycleSpecFromTiming(spec, tracks, locomotion);
+}
+
 function cycleSpecFromTiming(
   timing: CycleTimingSpec,
   tracks: CycleTrack[],
@@ -982,7 +1077,7 @@ function validateLocomotion(
   partNames: Set<string>,
   errors: string[],
 ): void {
-  if (!["biped-walk", "quadruped-walk", "wing-flap"].includes(locomotion.kind)) {
+  if (!["biped-walk", "quadruped-walk", "swim", "wing-flap"].includes(locomotion.kind)) {
     errors.push(`clip '${clipName}' locomotion kind '${locomotion.kind}' is invalid`);
   }
   if (!Number.isFinite(locomotion.cycleDistance) || locomotion.cycleDistance <= 0) {

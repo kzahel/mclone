@@ -180,6 +180,27 @@ wingFlap("fly", {
 });
 ```
 
+Aquatic figures use `swim` to generate coordinated body counter-sway, a
+primary tail stroke, an optional delayed child-tail stroke, mirrored pectoral
+fin motion, and optional vertical body drift. Like the other macros, it emits
+ordinary clip keyframes plus locomotion metadata rather than requiring runtime
+procedural animation.
+
+```ts
+swim("swim", {
+  body: "body",
+  tail: "tail",
+  tailTip: "tail_tip",
+  leftFin: "fin_l",
+  rightFin: "fin_r",
+  bodySwayDegrees: 3,
+  tailSwingDegrees: 18,
+  tailTipSwingDegrees: 25,
+  finSwingDegrees: 8,
+  cycleDistance: 1.4,
+});
+```
+
 Use `contactSwing` when you need a lower-level planted/recovery leg curve
 without the full gait macro. `phase` is the contact-start phase; `stanceRatio`
 is the fraction of the cycle spent in planted motion.
