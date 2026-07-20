@@ -1740,21 +1740,26 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
   await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
   try {
     await page.waitForFunction(
-      () => {
+      (expected) => {
         const state = globalThis.__mcloneWebApp?.state;
         return state?.embeddedPreviewPhase === "visible"
           && Number(state?.embeddedPreviewActorEntityCount) >= 2
           && Number(state?.embeddedPreviewActorObservationCount) >= 2
           && Number(state?.embeddedPreviewActorRemotePlayerCount) === 1
           && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 0
-          && state?.embeddedPreviewFirstActorEntityId === "1"
-          && state?.embeddedPreviewFirstActorKind === "cow"
-          && state?.embeddedPreviewSecondActorEntityId === "2"
-          && state?.embeddedPreviewSecondActorKind === "chicken"
+          && state?.embeddedPreviewFirstActorEntityId === expected.firstId
+          && state?.embeddedPreviewFirstActorKind === expected.firstKind
+          && state?.embeddedPreviewSecondActorEntityId === expected.secondId
+          && state?.embeddedPreviewSecondActorKind === expected.secondKind
           && Number(state?.embeddedPreviewSubmittedActorCount) >= 4
           && Number(state?.embeddedPreviewDrawnActorCount) >= 1;
       },
-      undefined,
+      {
+        firstId: firstLaunch.after.embeddedPreviewFirstActorEntityId,
+        firstKind: firstLaunch.after.embeddedPreviewFirstActorKind,
+        secondId: firstLaunch.after.embeddedPreviewSecondActorEntityId,
+        secondKind: firstLaunch.after.embeddedPreviewSecondActorKind,
+      },
       { timeout: 45_000 },
     );
   } catch (error) {
@@ -1855,10 +1860,14 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     && Number(relaunched.after.embeddedPreviewDrawnActorCount) >= 1
     && relaunched.after.embeddedPreviewFirstRemotePlayerId === "1"
     && relaunched.after.embeddedPreviewFirstRemotePlayerModel === "uprightBear"
-    && relaunched.after.embeddedPreviewFirstActorEntityId === "1"
-    && relaunched.after.embeddedPreviewFirstActorKind === "cow"
-    && relaunched.after.embeddedPreviewSecondActorEntityId === "2"
-    && relaunched.after.embeddedPreviewSecondActorKind === "chicken"
+    && relaunched.after.embeddedPreviewFirstActorEntityId
+      === firstLaunch.after.embeddedPreviewFirstActorEntityId
+    && relaunched.after.embeddedPreviewFirstActorKind
+      === firstLaunch.after.embeddedPreviewFirstActorKind
+    && relaunched.after.embeddedPreviewSecondActorEntityId
+      === firstLaunch.after.embeddedPreviewSecondActorEntityId
+    && relaunched.after.embeddedPreviewSecondActorKind
+      === firstLaunch.after.embeddedPreviewSecondActorKind
     && Number(relaunched.after.embeddedPreviewActorMotionSequence)
       > Number(relaunched.actorMotion.initialSequence)
     && Number(relaunched.after.embeddedPreviewActorMotionToAgeTicks)

@@ -2451,7 +2451,10 @@ fn begin_lobby_scenario_for_smoke(
 pub(crate) fn run_lobby_scenario_smoke(
     options: &LobbyScenarioSmokeOptions,
 ) -> Result<LobbyScenarioSmokeReport> {
-    const FRAME_COUNT: usize = 320;
+    // A complete smoke includes A-to-B-to-A plus a fresh lobby relaunch. The
+    // ordinary generated fallback may need more than the old managed-payload
+    // deadline to warm its second preview on slower validation hosts.
+    const FRAME_COUNT: usize = 480;
     if !options.scene.debug_auxiliary_player_script {
         bail!("lobby scenario smoke requires the shared auxiliary-player script");
     }
