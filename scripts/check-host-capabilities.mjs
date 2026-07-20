@@ -107,8 +107,10 @@ function createSuggestedWaylandBrowserEnv(waylandDisplay) {
   }
   return {
     CI: "1",
+    HEADED: "1",
     WAYLAND_DISPLAY: waylandDisplay,
     XDG_SESSION_TYPE: "wayland",
+    MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS: "--ozone-platform=wayland",
   };
 }
 
@@ -304,11 +306,13 @@ async function probeBrowserWebGpu() {
 
 function createBrowserProbeLaunchCandidates() {
   const args = createBrowserWebGpuLaunchArgs();
+  const headless = process.env.HEADED === "1" ? false : true;
   const candidates = [
     {
       launchLabel: "chrome-channel",
       launchOptions: {
         channel: "chrome",
+        headless,
         args,
         timeout: 15_000,
       },
@@ -319,6 +323,7 @@ function createBrowserProbeLaunchCandidates() {
     candidates.push({
       launchLabel: "bundled-chromium-angle-metal",
       launchOptions: {
+        headless,
         args,
         timeout: 15_000,
       },
@@ -328,7 +333,8 @@ function createBrowserProbeLaunchCandidates() {
   candidates.push({
     launchLabel: "bundled-chromium",
     launchOptions: {
-      args: ["--enable-unsafe-webgpu"],
+      headless,
+      args,
       timeout: 15_000,
     },
   });
@@ -340,6 +346,9 @@ function createBrowserWebGpuLaunchArgs() {
   return [
     "--enable-unsafe-webgpu",
     ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
+    ...(process.env.MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS
+      ?.split(/\s+/u)
+      .filter(Boolean) ?? []),
   ];
 }
 
@@ -725,7 +734,14 @@ function printReport(checks) {
   if (host.platform === "darwin") {
     console.log("  macOS browser screenshots: use Chrome channel with --enable-unsafe-webgpu and --use-angle=metal; bundled headless Chromium can present WebGPU canvases as black without ANGLE Metal");
   }
-  console.log("  verify Chrome WebGPU canvas capture now: pnpm host:check -- --probe-browser-webgpu");
+  const probeCommand = "pnpm host:check -- --probe-browser-webgpu";
+  console.log(
+    `  verify Chrome WebGPU canvas capture now: ${
+      host.suggestedWaylandBrowserEnv
+        ? formatEnvCommand(host.suggestedWaylandBrowserEnv, probeCommand)
+        : probeCommand
+    }`,
+  );
 }
 
 function printCommandLine(label, result) {
