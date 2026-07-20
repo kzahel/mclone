@@ -74,10 +74,8 @@ const halfSpaceTerrainProbe = process.argv.includes("--half-space-terrain-probe"
   || process.env.MCLONE_NATIVE_WEB_HALF_SPACE_TERRAIN_PROBE === "1";
 const actorCompositionProbe = process.argv.includes("--actor-composition-probe")
   || process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE === "1";
-const managedScenarioStorageProbe = process.argv.includes("--managed-scenario-storage-probe")
-  || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE === "1";
-const managedScenarioRuntimeProbe = process.argv.includes("--managed-scenario-runtime-probe")
-  || process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE === "1";
+const lobbyRuntimeProbe = process.argv.includes("--lobby-runtime-probe")
+  || process.env.MCLONE_NATIVE_WEB_LOBBY_RUNTIME_PROBE === "1";
 const lobbyScenarioLifecycleProbe = process.argv.includes("--lobby-scenario-lifecycle-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_LIFECYCLE_PROBE === "1";
 const lobbyScenarioBoundsProbe = process.argv.includes("--lobby-scenario-bounds-probe")
@@ -121,8 +119,7 @@ const appLoop = movementPerf
   || preparedFigureProbe
   || halfSpaceTerrainProbe
   || actorCompositionProbe
-  || managedScenarioStorageProbe
-  || managedScenarioRuntimeProbe
+  || lobbyRuntimeProbe
   || lobbyScenarioProbe
   || farLodProbe
   || remoteWebSocket
@@ -153,8 +150,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-half-space-terrain-probe.png"
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe.png"
-    : managedScenarioRuntimeProbe
-    ? "/tmp/mclone-native-web-managed-scenario-runtime-probe.png"
+    : lobbyRuntimeProbe
+    ? "/tmp/mclone-native-web-lobby-runtime-probe.png"
     : lobbyScenarioProbe
     ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}.png`
     : farLodProbe
@@ -181,8 +178,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-half-space-terrain-probe-canvas.png"
     : actorCompositionProbe
     ? "/tmp/mclone-native-web-actor-composition-probe-canvas.png"
-    : managedScenarioRuntimeProbe
-    ? "/tmp/mclone-native-web-managed-scenario-runtime-probe-canvas.png"
+    : lobbyRuntimeProbe
+    ? "/tmp/mclone-native-web-lobby-runtime-probe-canvas.png"
     : lobbyScenarioProbe
     ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-preview.png`
     : farLodProbe
@@ -220,12 +217,9 @@ const halfSpaceTerrainProbeReportPath = process.env.MCLONE_NATIVE_WEB_HALF_SPACE
   ?? "/tmp/mclone-native-web-half-space-terrain-probe.json";
 const actorCompositionProbeReportPath = process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE_REPORT
   ?? "/tmp/mclone-native-web-actor-composition-probe.json";
-const managedScenarioStorageProbeReportPath =
-  process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_STORAGE_PROBE_REPORT
-  ?? "/tmp/mclone-native-web-managed-scenario-storage-probe.json";
-const managedScenarioRuntimeProbeReportPath =
-  process.env.MCLONE_NATIVE_WEB_MANAGED_SCENARIO_RUNTIME_PROBE_REPORT
-  ?? "/tmp/mclone-native-web-managed-scenario-runtime-probe.json";
+const lobbyRuntimeProbeReportPath =
+  process.env.MCLONE_NATIVE_WEB_LOBBY_RUNTIME_PROBE_REPORT
+  ?? "/tmp/mclone-native-web-lobby-runtime-probe.json";
 const lobbyScenarioProbeReportPath = process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE_REPORT
   ?? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}.json`;
 const lobbyScenarioTitleScreenshotPath =
@@ -339,7 +333,7 @@ async function run() {
       });
     }
     if (
-      managedScenarioRuntimeProbe
+      lobbyRuntimeProbe
       || lobbyScenarioProbe
       || preparedFigureProbe
       || halfSpaceTerrainProbe
@@ -950,28 +944,6 @@ async function run() {
         console.log(JSON.stringify(report, null, 2));
         return;
       }
-      if (managedScenarioStorageProbe) {
-        const managedScenarioStorageProbeResult = await runManagedScenarioStorageProbe(page);
-        const result = await compactNativeUiState(page);
-        const report = {
-          url: appUrl,
-          managedScenarioStorageProbeReportPath,
-          managedScenarioStorageProbe,
-          managedScenarioStorageProbeResult,
-          result,
-        };
-        await writeFile(
-          managedScenarioStorageProbeReportPath,
-          `${JSON.stringify(report, null, 2)}\n`,
-        );
-        if (!managedScenarioStorageProbeResult?.ok || pageErrors.length > 0) {
-          throw new Error(
-            `managed scenario storage probe failed:\n${JSON.stringify(report, null, 2)}`,
-          );
-        }
-        console.log(JSON.stringify(report, null, 2));
-        return;
-      }
       if (lobbyScenarioProbe) {
         const catalogAcceptance = lobbyScenarioCatalogProbe
           ? await prepareBrowserCatalogScenarioAcceptance(page)
@@ -1027,7 +999,6 @@ async function run() {
           || shutdownResult?.shutdownComplete !== true
           || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
           || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
-          || Number(workerStatsAfterShutdown?.active?.["mclone-managed-content"]) !== 0
           || pageErrors.length > 0
         ) {
           throw new Error(
@@ -1037,8 +1008,8 @@ async function run() {
         console.log(JSON.stringify(report, null, 2));
         return;
       }
-      if (managedScenarioRuntimeProbe) {
-        const managedScenarioRuntimeProbeResult = await runManagedScenarioRuntimeProbe(page);
+      if (lobbyRuntimeProbe) {
+        const lobbyRuntimeProbeResult = await runLobbyRuntimeProbe(page);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         const pageScreenshotCaptured = await page.screenshot({
           path: screenshotPath,
@@ -1061,8 +1032,8 @@ async function run() {
           screenshotPath,
           pageScreenshotCaptured,
           canvasScreenshotPath,
-          managedScenarioRuntimeProbeReportPath,
-          managedScenarioRuntimeProbeResult,
+          lobbyRuntimeProbeReportPath,
+          lobbyRuntimeProbeResult,
           shutdownResult,
           workerStatsAfterShutdown,
           canvasPixels,
@@ -1070,11 +1041,11 @@ async function run() {
           pageErrors,
         };
         await writeFile(
-          managedScenarioRuntimeProbeReportPath,
+          lobbyRuntimeProbeReportPath,
           `${JSON.stringify(report, null, 2)}\n`,
         );
         if (
-          !managedScenarioRuntimeProbeResult.ok
+          !lobbyRuntimeProbeResult.ok
           || shutdownResult?.shutdownComplete !== true
           || Number(workerStatsAfterShutdown?.active?.["mclone-integrated-server"]) !== 0
           || Number(workerStatsAfterShutdown?.active?.["mclone-render-compiler-app"]) !== 0
@@ -1082,7 +1053,7 @@ async function run() {
           || canvasPixels.nonClearInteriorPixelCount <= 128
         ) {
           throw new Error(
-            `managed scenario runtime probe failed:\n${JSON.stringify(report, null, 2)}`,
+            `lobby runtime probe failed:\n${JSON.stringify(report, null, 2)}`,
           );
         }
         console.log(JSON.stringify(report, null, 2));
@@ -1664,47 +1635,45 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
   const initial = await page.evaluate(() => ({
     activeWorldInstanceId: globalThis.__mcloneWebApp.state.activeWorldInstanceId,
     activeWorldSeedText: globalThis.__mcloneWebApp.state.activeWorldSeedText,
-    managedRuntimeStartCount:
-      Number(globalThis.__mcloneWebApp.state.managedRuntimeStartCount) || 0,
+    lobbyRuntimeStartCount:
+      Number(globalThis.__mcloneWebApp.state.lobbyRuntimeStartCount) || 0,
   }));
 
   await page.evaluate(() => {
     const root = /** @type {any} */ (globalThis);
-    // Destination provisioning is lazy after catalog selection. Cancellation
-    // at Preparing Lobby therefore holds only the primary provision request;
-    // leaving a second hold armed would stall the next launch.
-    root.__mcloneWorkerControl.holdNext("mclone-managed-content", 1);
+    // Hold the transient primary's opaque runtime start so Back exercises the
+    // shared launch epoch while TypeScript knows nothing about lobby content.
+    root.__mcloneWorkerControl.holdNext("mclone-integrated-server", 1);
   });
   await clickNativeMenuButton(canvas, "title", 0);
   await waitForNativeUiScreen(page, "preparingLobby");
   const repeatedLaunch = await page.evaluate(
-    () => globalThis.__mcloneWebApp?.beginManagedScenarioSmoke?.() ?? null,
+    () => globalThis.__mcloneWebApp?.beginLobbySmoke?.() ?? null,
   );
   await clickNativeMenuButton(canvas, "preparingLobby", 0);
   await waitForNativeUiScreen(page, "title");
   await page.evaluate(() => {
     const root = /** @type {any} */ (globalThis);
-    root.__mcloneWorkerControl.release("mclone-managed-content");
+    root.__mcloneWorkerControl.release("mclone-integrated-server");
   });
   await page.waitForFunction(
     () => {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp?.state;
-      return state?.managedScenarioLaunchActive === false
-        && Number(state?.managedProvisionWorkerCount) === 0
-        && Number(root.__mcloneWorkerStats?.active?.["mclone-managed-content"]) === 0;
+      return state?.lobbyLaunchActive === false
+        && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
     },
     undefined,
     { timeout: 20_000 },
   );
-  const cancelledProvisioning = await page.evaluate(() => {
+  const cancelledPrimaryStart = await page.evaluate(() => {
     const root = /** @type {any} */ (globalThis);
     const state = root.__mcloneWebApp.state;
     return {
       activeWorldInstanceId: state.activeWorldInstanceId,
       activeWorldSeedText: state.activeWorldSeedText,
-      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
-      managedRuntimeStartCount: Number(state.managedRuntimeStartCount) || 0,
+      lobbyLaunchActive: state.lobbyLaunchActive,
+      lobbyRuntimeStartCount: Number(state.lobbyRuntimeStartCount) || 0,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -1722,7 +1691,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       () => {
         const state = globalThis.__mcloneWebApp?.state;
         return state?.activeWorldBehaviorProfile === "protected-lobby"
-          && String(state?.managedScenarioDestinationFailure ?? "").length > 0;
+          && String(state?.lobbyDestinationFailure ?? "").length > 0;
       },
       undefined,
       { timeout: 45_000 },
@@ -1746,7 +1715,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     return {
       activeWorldInstanceId: state.activeWorldInstanceId,
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
-      failure: state.managedScenarioDestinationFailure,
+      failure: state.lobbyDestinationFailure,
       standbyWorldPresent: state.standbyWorldPresent,
       workers: root.__mcloneWorkerStats,
     };
@@ -1911,16 +1880,16 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       activeWorldInstanceId: state.activeWorldInstanceId,
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
       embeddedActivationSequence: state.embeddedActivationSequence,
-      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       catalogEntryCount: state.worldCatalogEntryCount,
       workers: root.__mcloneWorkerStats,
     };
   });
 
   return {
-    ok: cancelledProvisioning.activeWorldInstanceId === initial.activeWorldInstanceId
-      && cancelledProvisioning.activeWorldSeedText === initial.activeWorldSeedText
-      && cancelledProvisioning.managedRuntimeStartCount === initial.managedRuntimeStartCount
+    ok: cancelledPrimaryStart.activeWorldInstanceId === initial.activeWorldInstanceId
+      && cancelledPrimaryStart.activeWorldSeedText === initial.activeWorldSeedText
+      && cancelledPrimaryStart.lobbyRuntimeStartCount === initial.lobbyRuntimeStartCount
       && repeatedLaunch?.ok === true
       && destinationFailure.activeWorldBehaviorProfile === "protected-lobby"
       && String(destinationFailure.failure).length > 0
@@ -1964,7 +1933,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && Number(final.workers?.active?.["mclone-integrated-server"]) === 0,
     initial,
     repeatedLaunch,
-    cancelledProvisioning,
+    cancelledPrimaryStart,
     destinationFailureOrdinal,
     destinationFailure,
     firstLaunch,
@@ -2000,7 +1969,7 @@ async function quitBrowserScenarioToTitle(page, canvas) {
     () => {
       const root = /** @type {any} */ (globalThis);
       return Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 0
-        && root.__mcloneWebApp?.state?.managedScenarioLaunchActive === false;
+        && root.__mcloneWebApp?.state?.lobbyLaunchActive === false;
     },
     undefined,
     { timeout: 30_000 },
@@ -2025,7 +1994,7 @@ async function startBrowserScenarioWithHeldDestination(page, canvas) {
     return {
       destinationOrdinal,
       staleCompletionCount:
-        Number(root.__mcloneWebApp?.state?.staleManagedStartCompletionCount) || 0,
+        Number(root.__mcloneWebApp?.state?.staleLobbyStartCompletionCount) || 0,
     };
   });
   await clickNativeMenuButton(canvas, "title", 0);
@@ -2034,7 +2003,7 @@ async function startBrowserScenarioWithHeldDestination(page, canvas) {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp?.state;
       return state?.activeWorldBehaviorProfile === "protected-lobby"
-        && state?.managedScenarioLaunchActive === true
+        && state?.lobbyLaunchActive === true
         && state?.standbyWorldPresent !== true
         && Number(root.__mcloneWorkerStats?.created?.["mclone-integrated-server"])
           >= destinationOrdinal
@@ -2074,7 +2043,7 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
   await clickNativeMenuButton(canvas, "pause", 2);
   await waitForNativeUiScreen(page, "title");
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.managedScenarioLaunchActive === false,
+    () => globalThis.__mcloneWebApp?.state?.lobbyLaunchActive === false,
     undefined,
     { timeout: 10_000 },
   );
@@ -2082,7 +2051,7 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
   await page.waitForFunction(
     (staleCompletionCount) => {
       const root = /** @type {any} */ (globalThis);
-      return Number(root.__mcloneWebApp?.state?.staleManagedStartCompletionCount)
+      return Number(root.__mcloneWebApp?.state?.staleLobbyStartCompletionCount)
           > staleCompletionCount
         && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 0;
     },
@@ -2094,8 +2063,8 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
     const state = root.__mcloneWebApp.state;
     return {
       screen: state.nativeUiScreen,
-      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
-      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      lobbyLaunchActive: state.lobbyLaunchActive,
+      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -2103,8 +2072,8 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
     ok: setup.playable.activeWorldBehaviorProfile === "protected-lobby"
       && setup.playable.standbyWorldPresent !== true
       && after.screen === "title"
-      && after.managedScenarioLaunchActive === false
-      && Number(after.staleManagedStartCompletionCount) > setup.staleCompletionCount
+      && after.lobbyLaunchActive === false
+      && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 0,
     setup,
     after,
@@ -2144,7 +2113,7 @@ async function applyBrowserAssetSelectionWithoutReload(page) {
       return Number(state?.assetPackCompletionCount) > completionCount
         && Number(report?.activeAssetEpoch) === epoch
         && report?.assetReplacementState === "active"
-        && state?.managedScenarioLaunchActive === false
+        && state?.lobbyLaunchActive === false
         && state?.sessionBusy === false;
     },
     { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
@@ -2160,7 +2129,7 @@ async function applyBrowserAssetSelectionWithoutReload(page) {
         assetReplacementState: state.lastReport?.assetReplacementState,
         activeAuthored: state.lastReport?.assetPackActiveAuthored,
         activeReference: state.lastReport?.assetPackActiveReference,
-        managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+        lobbyLaunchActive: state.lobbyLaunchActive,
       };
     }),
   };
@@ -2175,8 +2144,8 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
     (staleCompletionCount) => {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp?.state;
-      return Number(state?.staleManagedStartCompletionCount) > staleCompletionCount
-        && state?.managedScenarioLaunchActive === false
+      return Number(state?.staleLobbyStartCompletionCount) > staleCompletionCount
+        && state?.lobbyLaunchActive === false
         && state?.standbyWorldPresent !== true
         && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
     },
@@ -2194,9 +2163,9 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
     const state = root.__mcloneWebApp.state;
     return {
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
-      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      lobbyLaunchActive: state.lobbyLaunchActive,
       standbyWorldPresent: state.standbyWorldPresent,
-      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -2207,9 +2176,9 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
       && replacement.after.activeAuthored === true
       && replacement.after.activeReference === false
       && after.activeWorldBehaviorProfile === "protected-lobby"
-      && after.managedScenarioLaunchActive === false
+      && after.lobbyLaunchActive === false
       && after.standbyWorldPresent !== true
-      && Number(after.staleManagedStartCompletionCount) > setup.staleCompletionCount
+      && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 1
       && pixels.nonClearInteriorPixelCount > 128,
     setup,
@@ -2236,9 +2205,9 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
     ({ staleCompletionCount, beforeGeneration }) => {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp?.state;
-      return Number(state?.staleManagedStartCompletionCount) > staleCompletionCount
+      return Number(state?.staleLobbyStartCompletionCount) > staleCompletionCount
         && Number(state?.renderResourceGeneration) === beforeGeneration + 1
-        && state?.managedScenarioLaunchActive === false
+        && state?.lobbyLaunchActive === false
         && state?.standbyWorldPresent !== true
         && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
     },
@@ -2257,9 +2226,9 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
     return {
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
       renderResourceGeneration: state.renderResourceGeneration,
-      managedScenarioLaunchActive: state.managedScenarioLaunchActive,
+      lobbyLaunchActive: state.lobbyLaunchActive,
       standbyWorldPresent: state.standbyWorldPresent,
-      staleManagedStartCompletionCount: state.staleManagedStartCompletionCount,
+      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -2268,9 +2237,9 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
     ok: rebuildReport?.ok === true
       && Number(after.renderResourceGeneration) === beforeGeneration + 1
       && after.activeWorldBehaviorProfile === "protected-lobby"
-      && after.managedScenarioLaunchActive === false
+      && after.lobbyLaunchActive === false
       && after.standbyWorldPresent !== true
-      && Number(after.staleManagedStartCompletionCount) > setup.staleCompletionCount
+      && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 1
       && pixels.nonClearInteriorPixelCount > 128,
     setup,
@@ -2579,8 +2548,8 @@ async function completeLobbyScenarioProductAcceptance(
     if (
       Number(selected?.lastPlayedUnixMillis) !== catalog.selectedBeforeWarm
       || Number(other?.lastPlayedUnixMillis) !== catalog.otherBeforeWarm
-      || preview.after.lastManagedRuntimeStart?.storageSourceKind !== "catalog"
-      || preview.after.lastManagedRuntimeStart?.worldId !== catalog.selectedId
+      || preview.after.lastLobbyRuntimeStart?.storageSourceKind !== "catalog"
+      || preview.after.lastLobbyRuntimeStart?.worldId !== catalog.selectedId
       || Number(preview.after.standbyWorldSeedText) !== catalog.selectedSeed
     ) {
       throw new Error(
@@ -2704,7 +2673,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
   const clickReport = chunkSpan === null
     ? await clickNativeMenuButton(canvas, "title", 0)
     : await page.evaluate(
-      (span) => globalThis.__mcloneWebApp?.beginManagedScenarioSmoke?.(span) ?? null,
+      (span) => globalThis.__mcloneWebApp?.beginLobbySmoke?.(span) ?? null,
       chunkSpan,
     );
   await page.waitForFunction(
@@ -3121,7 +3090,7 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
         p95Ms: percentile(0.95),
       },
       workers: root.__mcloneWorkerStats,
-      lastManagedRuntimeStart: state.lastManagedRuntimeStart ?? null,
+      lastLobbyRuntimeStart: state.lastLobbyRuntimeStart ?? null,
       worldCatalogEntryCount: Number(state.worldCatalogEntryCount) || 0,
       compiler: state.lastCompileReport
         ? {
@@ -3310,7 +3279,6 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       && Number(after.compiler?.workerAssetLoadCount) === 1
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 2
       && Number(after.workers?.active?.["mclone-render-compiler-app"]) === 1
-      && Number(after.workers?.active?.["mclone-managed-content"]) === 0
       && after.frameGaps.maxMs < maxAllowedFrameGapMs,
     mobile,
     before,
@@ -3390,18 +3358,18 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
 }
 
 /** @param {Page} page */
-async function runManagedScenarioRuntimeProbe(page) {
+async function runLobbyRuntimeProbe(page) {
   const launch = await page.evaluate(
-    () => globalThis.__mcloneWebApp.beginManagedScenarioSmoke?.() ?? null,
+    () => globalThis.__mcloneWebApp.beginLobbySmoke?.() ?? null,
   );
   if (!launch?.ok) {
-    throw new Error(`managed scenario launch was rejected: ${JSON.stringify(launch)}`);
+    throw new Error(`lobby launch was rejected: ${JSON.stringify(launch)}`);
   }
   try {
     await page.waitForFunction(
       () => {
         const state = globalThis.__mcloneWebApp?.state;
-        return state?.managedRuntimeStartCount >= 2
+        return state?.lobbyRuntimeStartCount >= 2
           && state?.activeWorldBehaviorProfile === "protected-lobby"
           && state?.standbyWorldPresent === true
           && Number(state?.standbyLoadedChunkCount) > 0
@@ -3417,7 +3385,7 @@ async function runManagedScenarioRuntimeProbe(page) {
   } catch (error) {
     const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
     throw new Error(
-      `managed scenario runtimes did not become independent: ${String(error)}\n`
+      `lobby runtimes did not become independent: ${String(error)}\n`
       + JSON.stringify(state, null, 2),
     );
   }
@@ -3434,10 +3402,8 @@ async function runManagedScenarioRuntimeProbe(page) {
       standbyCameraReconciled: state.standbyCameraReconciled,
       standbyWorldSeedText: state.standbyWorldSeedText,
       startupReady: state.startupReady,
-      managedRuntimeStartCount: state.managedRuntimeStartCount,
-      managedProvisionWorkerCount: state.managedProvisionWorkerCount,
-      lastManagedRuntimeStart: state.lastManagedRuntimeStart,
-      lastManagedProvision: state.lastManagedProvision,
+      lobbyRuntimeStartCount: state.lobbyRuntimeStartCount,
+      lastLobbyRuntimeStart: state.lastLobbyRuntimeStart,
       renderCompiler: state.lastCompileReport
         ? {
             workerInitCount: state.lastCompileReport.workerInitCount,
@@ -3454,7 +3420,7 @@ async function runManagedScenarioRuntimeProbe(page) {
     };
   });
   return {
-    ok: snapshot.managedRuntimeStartCount === 2
+    ok: snapshot.lobbyRuntimeStartCount === 2
       && snapshot.activeWorldBehaviorProfile === "protected-lobby"
       && snapshot.activeWorldInstanceId !== snapshot.standbyWorldInstanceId
       && snapshot.activeWorldSeedText !== snapshot.standbyWorldSeedText
@@ -5924,380 +5890,6 @@ async function captureNativeUiProbe(page, canvas) {
     canvasScreenshotPath: nativeUiCanvasScreenshotPath,
     canvasPixels,
   };
-}
-
-/**
- * Transitional Slice 0 receipt: the shared title row is present but disabled,
- * so clicking it cannot emit an action or replace the active session.
- * @param {Page} page
- * @param {Locator} canvas
- */
-/** @param {Page} page */
-async function runManagedScenarioStorageProbe(page) {
-  return page.evaluate(async () => {
-    const catalog = await import(new URL("./mclone-web-world-catalog.js", location.href).href);
-    const scenarioId = "lobbyPreview";
-    const workerUrl = new URL(
-      "./mclone-managed-scenario-provision-worker.js",
-      location.href,
-    ).href;
-    const bindgenJsUrl = new URL("./pkg/mclone_web_client.js", location.href).href;
-    const bindgenWasmUrl = new URL("./pkg/mclone_web_client_bg.wasm", location.href).href;
-    /** @type {number[]} */
-    const workerSubmitSamples = [];
-    /**
-     * @param {string} operationToken
-     * @param {string} role
-     * @param {AbortSignal} [signal]
-     */
-    const provision = (operationToken, role, signal) => {
-      const startedAt = performance.now();
-      const pending = catalog.provisionIndexedDbManagedScenarioWorldInWorker({
-        workerUrl,
-        bindgenJsUrl,
-        bindgenWasmUrl,
-        operationToken,
-        scenarioId,
-        role,
-      }, signal);
-      workerSubmitSamples.push(performance.now() - startedAt);
-      return pending;
-    };
-    /** @type {string[]} */
-    const roles = ["primary", "destination"];
-    let db = await catalog.openWorldDb();
-
-    /** @param {IDBRequest<any>} handle */
-    const request = (handle) => new Promise((resolve, reject) => {
-      handle.onsuccess = () => resolve(handle.result);
-      handle.onerror = () => reject(handle.error ?? new Error("IndexedDB request failed"));
-    });
-    /** @param {IDBTransaction} transaction */
-    const done = (transaction) => new Promise((resolve, reject) => {
-      transaction.oncomplete = () => resolve(undefined);
-      transaction.onerror = () => reject(
-        transaction.error ?? new Error("IndexedDB transaction failed"),
-      );
-      transaction.onabort = () => reject(
-        transaction.error ?? new Error("IndexedDB transaction aborted"),
-      );
-    });
-    /**
-     * @param {IDBTransaction} transaction
-     * @param {string} storeName
-     * @param {string} worldId
-     */
-    const clearStoreWorld = (transaction, storeName, worldId) => new Promise((resolve, reject) => {
-      const store = transaction.objectStore(storeName);
-      const cursor = store.index(catalog.WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));
-      cursor.onsuccess = () => {
-        if (!cursor.result) {
-          resolve(undefined);
-          return;
-        }
-        store.delete(cursor.result.primaryKey);
-        cursor.result.continue();
-      };
-      cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed"));
-    });
-    /** @param {string} worldId */
-    const clearManagedWorld = async (worldId) => {
-      const transaction = db.transaction(
-        [
-          catalog.MANAGED_WORLD_METADATA_STORE,
-          catalog.WORLD_CHUNK_STORE,
-          catalog.WORLD_ENTITY_CHUNK_STORE,
-        ],
-        "readwrite",
-      );
-      transaction.objectStore(catalog.MANAGED_WORLD_METADATA_STORE).delete(worldId);
-      await Promise.all([
-        clearStoreWorld(transaction, catalog.WORLD_CHUNK_STORE, worldId),
-        clearStoreWorld(transaction, catalog.WORLD_ENTITY_CHUNK_STORE, worldId),
-      ]);
-      await done(transaction);
-    };
-    /**
-     * @param {string} worldId
-     * @param {(metadata: Record<string, any>) => Record<string, any>} mutate
-     */
-    const updateMetadata = async (worldId, mutate) => {
-      const transaction = db.transaction(catalog.MANAGED_WORLD_METADATA_STORE, "readwrite");
-      const store = transaction.objectStore(catalog.MANAGED_WORLD_METADATA_STORE);
-      const metadata = await request(store.get(worldId));
-      store.put(mutate({ ...metadata }));
-      await done(transaction);
-    };
-    /** @param {string} worldId */
-    const deleteFirstChunk = async (worldId) => {
-      const transaction = db.transaction(catalog.WORLD_CHUNK_STORE, "readwrite");
-      const store = transaction.objectStore(catalog.WORLD_CHUNK_STORE);
-      const cursor = store.index(catalog.WORLD_ID_INDEX).openKeyCursor(IDBKeyRange.only(worldId));
-      await new Promise((resolve, reject) => {
-        cursor.onsuccess = () => {
-          if (cursor.result) store.delete(cursor.result.primaryKey);
-          resolve(undefined);
-        };
-        cursor.onerror = () => reject(cursor.error ?? new Error("IndexedDB cursor failed"));
-      });
-      await done(transaction);
-    };
-    /** @param {string} worldId */
-    const corruptFirstChunk = async (worldId) => {
-      const transaction = db.transaction(catalog.WORLD_CHUNK_STORE, "readwrite");
-      const store = transaction.objectStore(catalog.WORLD_CHUNK_STORE);
-      const records = await request(
-        store.index(catalog.WORLD_ID_INDEX).getAll(IDBKeyRange.only(worldId)),
-      );
-      const first = records[0];
-      store.put({ ...first, record: new Uint8Array([0]) });
-      await done(transaction);
-    };
-    /** @param {string} worldId */
-    const chunkDigest = async (worldId) => {
-      const transaction = db.transaction(catalog.WORLD_CHUNK_STORE, "readonly");
-      const records = await request(
-        transaction.objectStore(catalog.WORLD_CHUNK_STORE)
-          .index(catalog.WORLD_ID_INDEX)
-          .getAll(IDBKeyRange.only(worldId)),
-      );
-      await done(transaction);
-      let hash = 0x811c9dc5;
-      let bytes = 0;
-      for (const record of records) {
-        const view = record.record instanceof Uint8Array
-          ? record.record
-          : new Uint8Array(record.record ?? []);
-        bytes += view.byteLength;
-        for (const byte of view) {
-          hash = Math.imul(hash ^ byte, 0x01000193) >>> 0;
-        }
-      }
-      return { count: records.length, bytes, hash };
-    };
-    const managedIdentities = async () => {
-      const transaction = db.transaction(
-        [
-          catalog.MANAGED_WORLD_METADATA_STORE,
-          catalog.WORLD_CHUNK_STORE,
-          catalog.WORLD_ENTITY_CHUNK_STORE,
-        ],
-        "readonly",
-      );
-      const metadataKeysPromise = request(
-        transaction.objectStore(catalog.MANAGED_WORLD_METADATA_STORE).getAllKeys(),
-      );
-      const chunkKeysPromise = request(
-        transaction.objectStore(catalog.WORLD_CHUNK_STORE).getAllKeys(),
-      );
-      const entityKeysPromise = request(
-        transaction.objectStore(catalog.WORLD_ENTITY_CHUNK_STORE).getAllKeys(),
-      );
-      const [metadataKeys, chunkKeys, entityKeys] = await Promise.all([
-        metadataKeysPromise,
-        chunkKeysPromise,
-        entityKeysPromise,
-      ]);
-      await done(transaction);
-      return {
-        metadata: metadataKeys.map(String).sort(),
-        chunks: [...new Set(chunkKeys.map((/** @type {any} */ key) => String(key[0])))].sort(),
-        entityChunks: [
-          ...new Set(entityKeys.map((/** @type {any} */ key) => String(key[0]))),
-        ].sort(),
-      };
-    };
-    const ordinaryCatalogRows = async () => {
-      const transaction = db.transaction(catalog.WORLD_CATALOG_STORE, "readonly");
-      const rows = await request(
-        transaction.objectStore(catalog.WORLD_CATALOG_STORE).getAll(),
-      );
-      await done(transaction);
-      return rows;
-    };
-
-    /** @type {Record<string, any>} */
-    const discovered = {};
-    for (const role of roles) {
-      discovered[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
-      await clearManagedWorld(discovered[role].worldId);
-    }
-    const catalogBefore = await ordinaryCatalogRows();
-    /** @type {Record<string, any>} */
-    const before = {};
-    for (const role of roles) {
-      before[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
-    }
-
-    const controller = new AbortController();
-    const cancelledProvision = provision("cancelled-primary", "primary", controller.signal);
-    setTimeout(() => controller.abort("probe cancellation"), 0);
-    let cancelled = false;
-    try {
-      await cancelledProvision;
-    } catch {
-      cancelled = true;
-    }
-    const afterCancellation = await catalog.inspectIndexedDbManagedScenarioWorld(
-      db,
-      scenarioId,
-      "primary",
-    );
-
-    const primaryConcurrent = await Promise.all([
-      provision("primary-a", "primary"),
-      provision("primary-b", "primary"),
-    ]);
-    const destinationFirst = await provision("destination-a", "destination");
-    /** @type {Record<string, any>} */
-    const valid = {};
-    for (const role of roles) {
-      valid[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
-    }
-
-    const destinationId = valid.destination.worldId;
-    const repairProbeId = valid.primary.worldId;
-    const digestBeforeReuse = await chunkDigest(destinationId);
-    const destinationReuse = await provision("destination-reuse", "destination");
-    const digestAfterReuse = await chunkDigest(destinationId);
-
-    // The v3 generated-overworld destination intentionally has no authored
-    // payload records. Exercise partial/corrupt repair against the authored
-    // lobby while separately proving that the empty destination is reusable.
-    await deleteFirstChunk(repairProbeId);
-    const partial = await catalog.inspectIndexedDbManagedScenarioWorld(
-      db,
-      scenarioId,
-      "primary",
-    );
-    const repairedPartial = await provision("primary-partial", "primary");
-
-    await updateMetadata(repairProbeId, (metadata) => ({
-      ...metadata,
-      contentVersion: Number(metadata.contentVersion) + 1,
-    }));
-    const incompatible = await catalog.inspectIndexedDbManagedScenarioWorld(
-      db,
-      scenarioId,
-      "primary",
-    );
-    const repairedIncompatible = await provision("primary-incompatible", "primary");
-
-    await corruptFirstChunk(repairProbeId);
-    const corrupt = await catalog.inspectIndexedDbManagedScenarioWorld(
-      db,
-      scenarioId,
-      "primary",
-    );
-    let corruptionRefused = false;
-    try {
-      await provision("primary-corrupt", "primary");
-    } catch {
-      corruptionRefused = true;
-    }
-    const corruptAfterRefusal = await catalog.inspectIndexedDbManagedScenarioWorld(
-      db,
-      scenarioId,
-      "primary",
-    );
-
-    // Mark the fixture incompatible so the same generic migration path can
-    // transactionally restore the deliberately corrupted probe record.
-    await updateMetadata(repairProbeId, (metadata) => ({
-      ...metadata,
-      contentVersion: Number(metadata.contentVersion) + 1,
-    }));
-    await provision("primary-cleanup", "primary");
-
-    const identities = await managedIdentities();
-    const catalogAfter = await ordinaryCatalogRows();
-    db.close();
-    db = await catalog.openWorldDb();
-    /** @type {Record<string, any>} */
-    const reopened = {};
-    for (const role of roles) {
-      reopened[role] = await catalog.inspectIndexedDbManagedScenarioWorld(db, scenarioId, role);
-    }
-    db.close();
-
-    const expectedIds = roles.map((role) => valid[role].worldId).sort();
-    const materializeSamples = [
-      ...primaryConcurrent.map((result) => result.materializeMs),
-      destinationFirst.materializeMs,
-      destinationReuse.materializeMs,
-      repairedPartial.materializeMs,
-      repairedIncompatible.materializeMs,
-    ];
-    return {
-      ok: (
-        before.primary.status === "missing"
-        && before.destination.status === "missing"
-        && cancelled
-        && afterCancellation.status === "missing"
-        && primaryConcurrent.every((result) => result.chunkCount === 49)
-        && primaryConcurrent.every((result) => result.entityChunkCount === 0)
-        && primaryConcurrent.some((result) => result.status === "provisioned")
-        && destinationFirst.status === "provisioned"
-        && destinationFirst.chunkCount === 0
-        && destinationFirst.entityChunkCount === 0
-        && valid.primary.status === "valid"
-        && valid.destination.status === "valid"
-        && valid.primary.entityChunkCount === 0
-        && valid.destination.chunkCount === 0
-        && valid.destination.entityChunkCount === 0
-        && destinationReuse.status === "reused"
-        && JSON.stringify(digestBeforeReuse) === JSON.stringify(digestAfterReuse)
-        && partial.status === "partial"
-        && repairedPartial.priorStatus === "partial"
-        && incompatible.status === "incompatible"
-        && repairedIncompatible.priorStatus === "incompatible"
-        && corrupt.status === "corrupt"
-        && corruptionRefused
-        && corruptAfterRefusal.status === "corrupt"
-        && reopened.primary.status === "valid"
-        && reopened.destination.status === "valid"
-        && reopened.primary.entityChunkCount === 0
-        && reopened.destination.chunkCount === 0
-        && reopened.destination.entityChunkCount === 0
-        && catalogBefore.length === catalogAfter.length
-        && identities.metadata.length === 2
-        && JSON.stringify(identities.metadata) === JSON.stringify(expectedIds)
-        && identities.chunks.length === 1
-        && identities.chunks[0] === valid.primary.worldId
-        && identities.chunks.every((id) => expectedIds.includes(id))
-        && identities.entityChunks.length === 0
-        && identities.entityChunks.every((id) => expectedIds.includes(id))
-      ),
-      before,
-      cancelled,
-      afterCancellation,
-      primaryConcurrent,
-      destinationFirst,
-      valid,
-      destinationReuse,
-      digestBeforeReuse,
-      digestAfterReuse,
-      partial,
-      repairedPartial,
-      incompatible,
-      repairedIncompatible,
-      corrupt,
-      corruptionRefused,
-      corruptAfterRefusal,
-      reopened,
-      identities,
-      catalogCountBefore: catalogBefore.length,
-      catalogCountAfter: catalogAfter.length,
-      maxMaterializeMs: Math.max(...materializeSamples),
-      maxWriteMs: Math.max(
-        ...primaryConcurrent.map((result) => result.writeMs),
-        destinationFirst.writeMs,
-        repairedPartial.writeMs,
-        repairedIncompatible.writeMs,
-      ),
-      maxMainThreadSubmitMs: Math.max(...workerSubmitSamples),
-    };
-  });
 }
 
 /**

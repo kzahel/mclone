@@ -270,15 +270,14 @@ pub fn factory_reset_native_local_preferences(
             }
         }
     }
-    let scenario_root =
-        crate::scenario_content::native_managed_scenario_root_from_world_root(world_root);
+    let scenario_root = world_root.parent().unwrap_or(world_root).join("scenarios");
     match std::fs::remove_dir_all(&scenario_root) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
             return Err(error).with_context(|| {
                 format!(
-                    "delete managed scenario content {}",
+                    "delete legacy app-private world content {}",
                     scenario_root.display()
                 )
             });
@@ -463,7 +462,7 @@ mod tests {
             "preference",
         )
         .unwrap();
-        std::fs::write(scenario_root.join("managed.bin"), "managed").unwrap();
+        std::fs::write(scenario_root.join("private.bin"), "private").unwrap();
         std::fs::write(&unrelated, "preserve").unwrap();
 
         let original = load_or_create_native_local_player_profile(Some(&world_root)).unwrap();

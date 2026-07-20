@@ -12,8 +12,7 @@ use mclone_app_runtime::scenario::{
     BuiltInScenarioId, ScenarioLaunchIntent, ScenarioPreviewBounds,
 };
 use mclone_app_runtime::scenario_content::{
-    ManagedScenarioManifest, ManagedScenarioWorldRole, ManagedWorldKey,
-    ProvisionManagedScenarioWorld, ProvisionedManagedScenarioWorld, ScenarioWorldStorageSource,
+    LobbyScenarioContent, LobbyWorldRole, LobbyWorldSource,
 };
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
 use mclone_app_runtime::session::ActiveSessionDescriptor;
@@ -87,7 +86,7 @@ pub struct WarmWorldStandbyRequest {
     pub seed: i64,
     pub entry_center: ChunkPos,
     pub standby_cadence: Option<SimulationCadenceConfig>,
-    pub storage_source: Option<ScenarioWorldStorageSource>,
+    pub storage_source: Option<LobbyWorldSource>,
     pub descriptor: Option<ActiveSessionDescriptor>,
     pub world_behavior_profile: WorldBehaviorProfile,
     pub world_generation_profile: WorldGenerationProfile,
@@ -119,19 +118,9 @@ impl WarmWorldStandbyRequest {
         self
     }
 
-    pub fn with_managed_world_key(
-        mut self,
-        managed_world_key: ManagedWorldKey,
-        world_generation_profile: WorldGenerationProfile,
-    ) -> Self {
-        self.storage_source = Some(ScenarioWorldStorageSource::Managed(managed_world_key));
-        self.world_generation_profile = world_generation_profile;
-        self
-    }
-
     pub fn with_storage_source(
         mut self,
-        storage_source: ScenarioWorldStorageSource,
+        storage_source: LobbyWorldSource,
         world_generation_profile: WorldGenerationProfile,
     ) -> Self {
         self.storage_source = Some(storage_source);
@@ -244,7 +233,7 @@ pub struct PreparedEmbeddedWorldScenario {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ManagedScenarioLaunchPhase {
+pub(crate) enum LobbyLaunchPhase {
     ResolvingContent,
     StartingPrimary,
     PrimaryPlayable,
@@ -253,53 +242,41 @@ pub(crate) enum ManagedScenarioLaunchPhase {
     DestinationFailed,
 }
 
-/// One storage-neutral start accepted by the shared managed-scenario state
-/// machine. Platform adapters resolve `managed_world_key` into their own
-/// storage and return a neutral runtime; neither paths nor JS handles cross
-/// this boundary.
+/// One storage-neutral start accepted by the shared lobby launch state
+/// machine. Neither filesystem paths nor JavaScript handles cross this
+/// boundary.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ManagedScenarioWorldStart {
+pub struct LobbyWorldStart {
     pub instance_id: WorldInstanceId,
-    pub role: ManagedScenarioWorldRole,
-    pub storage_source: ScenarioWorldStorageSource,
+    pub role: LobbyWorldRole,
+    pub storage_source: LobbyWorldSource,
     pub scene: McloneSceneHostOptions,
     pub descriptor: ActiveSessionDescriptor,
     pub destination: Option<PreparedEmbeddedWorldScenario>,
 }
 
 #[derive(Debug)]
-pub(crate) struct ManagedScenarioLaunchState {
+pub(crate) struct LobbyLaunchState {
     pub(crate) intent: ScenarioLaunchIntent,
-    pub(crate) manifest: ManagedScenarioManifest,
-    pub(crate) phase: ManagedScenarioLaunchPhase,
-    provision_operations:
-        PlatformOperationLedger<ProvisionManagedScenarioWorld, ScenarioLaunchIntent>,
-    pending_provision_requests: VecDeque<PlatformOperation<ProvisionManagedScenarioWorld>>,
-    start_operations: PlatformOperationLedger<ManagedScenarioWorldStart, ScenarioLaunchIntent>,
-    pending_start_requests: VecDeque<PlatformOperation<ManagedScenarioWorldStart>>,
-    pub(crate) primary_provisioned: Option<ProvisionedManagedScenarioWorld>,
-    pub(crate) destination_provisioned: Option<ProvisionedManagedScenarioWorld>,
-    destination_provision_requested: bool,
+    pub(crate) content: LobbyScenarioContent,
+    pub(crate) phase: LobbyLaunchPhase,
+    start_operations: PlatformOperationLedger<LobbyWorldStart, ScenarioLaunchIntent>,
+    pending_start_requests: VecDeque<PlatformOperation<LobbyWorldStart>>,
     pub(crate) primary_start_token: Option<PlatformOperationToken>,
     pub(crate) destination_start_token: Option<PlatformOperationToken>,
     pub(crate) destination: Option<PreparedEmbeddedWorldScenario>,
     pub(crate) destination_failure: Option<String>,
 }
 
-impl ManagedScenarioLaunchState {
+impl LobbyLaunchState {
     pub(crate) fn new(intent: ScenarioLaunchIntent) -> Self {
-        let manifest = ManagedScenarioManifest::for_intent(intent);
+        let content = LobbyScenarioContent::for_intent(intent);
         Self {
             intent,
-            manifest,
-            phase: ManagedScenarioLaunchPhase::ResolvingContent,
-            provision_operations: PlatformOperationLedger::new(),
-            pending_provision_requests: VecDeque::new(),
+            content,
+            phase: LobbyLaunchPhase::ResolvingContent,
             start_operations: PlatformOperationLedger::new(),
             pending_start_requests: VecDeque::new(),
-            primary_provisioned: None,
-            destination_provisioned: None,
-            destination_provision_requested: false,
             primary_start_token: None,
             destination_start_token: None,
             destination: None,
@@ -307,67 +284,28 @@ impl ManagedScenarioLaunchState {
         }
     }
 
-    pub(crate) fn take_provision_request(
-        &mut self,
-    ) -> Option<PlatformOperation<ProvisionManagedScenarioWorld>> {
-        self.pending_provision_requests.pop_front()
-    }
-
-    pub(crate) fn issue_destination_provision(&mut self) {
-        if self.destination_provision_requested {
-            return;
-        }
-        self.destination_provision_requested = true;
-        self.pending_provision_requests
-            .push_back(self.provision_operations.issue(
-                ProvisionManagedScenarioWorld {
-                    intent: self.intent,
-                    role: ManagedScenarioWorldRole::Destination,
-                },
-                self.intent,
-            ));
-    }
-
-    pub(crate) fn complete_provision(
-        &mut self,
-        completion: PlatformOperationCompletion<ProvisionedManagedScenarioWorld, String>,
-    ) -> PlatformOperationResolution<
-        ProvisionManagedScenarioWorld,
-        ScenarioLaunchIntent,
-        ProvisionedManagedScenarioWorld,
-        String,
-    > {
-        self.provision_operations.complete(completion)
-    }
-
-    pub(crate) fn issue_start(
-        &mut self,
-        start: ManagedScenarioWorldStart,
-    ) -> PlatformOperationToken {
+    pub(crate) fn issue_start(&mut self, start: LobbyWorldStart) -> PlatformOperationToken {
         let operation = self.start_operations.issue(start, self.intent);
         let token = operation.token;
         self.pending_start_requests.push_back(operation);
         token
     }
 
-    pub(crate) fn take_start_request(
-        &mut self,
-    ) -> Option<PlatformOperation<ManagedScenarioWorldStart>> {
+    pub(crate) fn take_start_request(&mut self) -> Option<PlatformOperation<LobbyWorldStart>> {
         self.pending_start_requests.pop_front()
     }
 
     pub(crate) fn complete_start(
         &mut self,
         completion: PlatformOperationCompletion<(), String>,
-    ) -> PlatformOperationResolution<ManagedScenarioWorldStart, ScenarioLaunchIntent, (), String>
-    {
+    ) -> PlatformOperationResolution<LobbyWorldStart, ScenarioLaunchIntent, (), String> {
         self.start_operations.complete(completion)
     }
 
     pub(crate) fn owns_start(
         &self,
         token: PlatformOperationToken,
-        role: ManagedScenarioWorldRole,
+        role: LobbyWorldRole,
         instance_id: WorldInstanceId,
     ) -> bool {
         self.start_operations
@@ -376,10 +314,8 @@ impl ManagedScenarioLaunchState {
     }
 
     pub(crate) fn cancel(&mut self) -> usize {
-        let count = self.provision_operations.pending_len() + self.start_operations.pending_len();
-        self.pending_provision_requests.clear();
+        let count = self.start_operations.pending_len();
         self.pending_start_requests.clear();
-        let _ = self.provision_operations.teardown();
         let _ = self.start_operations.teardown();
         count
     }
@@ -1938,22 +1874,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn managed_launch_has_no_content_provision_operations() {
+    fn fresh_lobby_launch_has_no_pending_platform_start() {
         let intent = ScenarioLaunchIntent::lobby_preview();
-        let mut launch = ManagedScenarioLaunchState::new(intent);
-        assert!(launch.take_provision_request().is_none());
+        let mut launch = LobbyLaunchState::new(intent);
+        assert!(launch.take_start_request().is_none());
         assert_eq!(launch.cancel(), 0);
     }
 
     #[test]
-    fn managed_start_identity_is_not_derived_from_role_or_slot() {
+    fn lobby_start_identity_is_not_derived_from_role_or_slot() {
         let intent = ScenarioLaunchIntent::lobby_preview();
-        let mut launch = ManagedScenarioLaunchState::new(intent);
+        let mut launch = LobbyLaunchState::new(intent);
         let scene = McloneSceneHostOptions::default();
-        let start = ManagedScenarioWorldStart {
+        let start = LobbyWorldStart {
             instance_id: WorldInstanceId::new(41),
-            role: ManagedScenarioWorldRole::Primary,
-            storage_source: ScenarioWorldStorageSource::TransientAuthored(
+            role: LobbyWorldRole::Primary,
+            storage_source: LobbyWorldSource::TransientAuthored(
                 mclone_server::AuthoredWorldFixtureKind::LobbyTableV2,
             ),
             descriptor: ActiveSessionDescriptor::new_seed_local_world(scene.seed),
@@ -1964,23 +1900,11 @@ mod tests {
         let operation = launch.take_start_request().unwrap();
         assert_eq!(operation.token, token);
         assert_eq!(operation.kind.instance_id, WorldInstanceId::new(41));
-        assert_eq!(operation.kind.role, ManagedScenarioWorldRole::Primary);
-        assert!(launch.owns_start(
-            token,
-            ManagedScenarioWorldRole::Primary,
-            WorldInstanceId::new(41),
-        ));
-        assert!(!launch.owns_start(
-            token,
-            ManagedScenarioWorldRole::Destination,
-            WorldInstanceId::new(41),
-        ));
+        assert_eq!(operation.kind.role, LobbyWorldRole::Primary);
+        assert!(launch.owns_start(token, LobbyWorldRole::Primary, WorldInstanceId::new(41),));
+        assert!(!launch.owns_start(token, LobbyWorldRole::Destination, WorldInstanceId::new(41),));
         assert_eq!(launch.cancel(), 1);
-        assert!(!launch.owns_start(
-            token,
-            ManagedScenarioWorldRole::Primary,
-            WorldInstanceId::new(41),
-        ));
+        assert!(!launch.owns_start(token, LobbyWorldRole::Primary, WorldInstanceId::new(41),));
     }
 
     fn flat_pose() -> WorldEntryPose {

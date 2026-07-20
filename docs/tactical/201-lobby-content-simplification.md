@@ -1,8 +1,7 @@
 # Tactical 201: Lobby Content Simplification
 
-Status: active 2026-07-20 — direction accepted; Slices 0-1 and 3 complete,
-Slice 2 implementation complete with final rendered-output validation pending,
-and Slice 4 in progress.
+Status: active 2026-07-20 — Slices 0-4 complete except final rendered-output
+validation for Slice 2; Slice 5 is in progress.
 
 Topic: `embedded-worlds`
 
@@ -334,6 +333,35 @@ validation limitations recorded under Slice 2.
 
 Exit: there is one production lobby path and no managed provisioning workflow
 in native Rust, browser Rust bindings, or TypeScript.
+
+Completed 2026-07-20. The managed manifest, payload, metadata, validation,
+repair, staging, native adapter/cache, browser Wasm payload exports, one-shot
+Worker, and TypeScript provisioning controller were deleted. The surviving
+shared types are now a small `LobbyScenarioContent` recipe plus
+`LobbyWorldSource::{TransientAuthored, AppPrivate, Catalog}`. The launch state
+owns only opaque runtime-start operations; native and browser adapters report
+those starts through the same token/epoch boundary.
+
+The browser starts with its final supported profile immediately. TypeScript
+constructs Workers from Rust-owned tickets and completes them, but receives no
+scenario id, world role, authored records, validation state, content version,
+fingerprint, or repair instruction. The Worker ownership gate now locks those
+terms at zero. IndexedDB remains version 6 and retains the inert legacy
+`managedWorlds` object store; the stable fallback world id is intentionally
+unchanged.
+
+Deletion validation:
+
+- `cargo test -p mclone-app-runtime -p mclone-scene -p mclone-web-client
+  --lib --tests`: app-runtime and scene unit suites plus focused integration
+  suites passed after updating old-path source locks;
+- `cargo test -p mclone-native-client cli_`: 106 focused CLI tests passed;
+- `cargo check -p mclone-android-platform`: passed;
+- `pnpm native:web:typecheck`: Wasm build, bindgen staging, and TypeScript
+  typecheck passed; and
+- `pnpm native:web:worker-ownership`: passed with five production Worker
+  entries, one generic TypeScript construction site, and every registered
+  domain-policy debt at zero.
 
 ### Slice 5: lifecycle, platform, and documentation closeout
 

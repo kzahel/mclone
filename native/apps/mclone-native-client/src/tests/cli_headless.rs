@@ -128,7 +128,7 @@ fn cli_parses_live_diorama_smoke_options() {
 }
 
 #[test]
-fn cli_lobby_scenario_smoke_uses_an_isolated_managed_root() {
+fn cli_lobby_scenario_smoke_uses_an_isolated_app_private_root() {
     let cli = Cli::parse([
         "--lobby-scenario-smoke".to_owned(),
         "/tmp/lobby-product".to_owned(),
@@ -176,7 +176,7 @@ fn cli_lobby_scenario_catalog_smoke_uses_a_four_chunk_catalog_destination() {
 }
 
 #[test]
-fn cli_lobby_scenario_stereo_smoke_uses_an_isolated_managed_root() {
+fn cli_lobby_scenario_stereo_smoke_uses_an_isolated_app_private_root() {
     let cli = Cli::parse([
         "--lobby-scenario-stereo-smoke".to_owned(),
         "/tmp/lobby-stereo".to_owned(),

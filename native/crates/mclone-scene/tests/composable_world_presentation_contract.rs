@@ -476,20 +476,6 @@ fn complete_slot_exchange_carries_actor_state_and_replacement_drops_stale_topolo
 }
 
 #[test]
-fn managed_scenario_payload_carries_shared_entity_codec_records() {
-    let scenario = read("../mclone-app-runtime/src/scenario_content.rs");
-    let payload = braced_item(&scenario, "pub struct ManagedScenarioWorldPayload {");
-    assert!(payload.contains("chunk_records: Vec<ManagedScenarioChunkRecord>"));
-    assert!(payload.contains("entity_chunk_records: Vec<ManagedScenarioChunkRecord>"));
-
-    let web = read("../../apps/mclone-web-client/src/web_canvas.rs");
-    let encode = braced_item(&web, "fn encode_web_managed_scenario_payload(");
-    assert!(encode.contains("&JsValue::from_str(\"entityChunks\")"));
-    assert!(encode.contains("for record in &payload.entity_chunk_records"));
-    assert!(encode.contains("js_sys::Uint8Array::from(record.bytes.as_slice())"));
-}
-
-#[test]
 fn integrated_remote_player_tracking_pairs_local_and_dedicated_symmetrically() {
     let server = read("../mclone-server/src/integrated.rs");
     let observer = braced_item(&server, "fn reconcile_remote_players_for_target_observer(");

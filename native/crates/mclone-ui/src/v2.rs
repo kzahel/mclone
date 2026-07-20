@@ -946,7 +946,7 @@ impl UiSurface {
         );
         self.font.draw_centered_atlas(
             draw,
-            "Provisioning managed scenario content...",
+            "Starting the authored lobby...",
             self.scale.width * 0.5,
             self.scale.height * 0.5,
             Color::rgba(185, 212, 198, 255),

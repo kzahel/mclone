@@ -22,8 +22,6 @@ import type { TouchOverlayState } from "./mclone-web-touch.js";
 import {
   executeIndexedDbCatalogExecution,
   openWorldDb,
-  provisionIndexedDbManagedScenarioWorldInWorker,
-  setIndexedDbCatalogPolicy,
 } from "./mclone-web-world-catalog.js";
 import type { WebCatalogExecution, WebSceneHost } from "mclone-web-client-wasm";
 
@@ -100,7 +98,7 @@ interface AppRuntime {
   setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
   setNativeTouchControlsMode?: (mode: TouchControlsMode, persist?: boolean) => WasmReport | null;
   touchControlState?: () => any;
-  beginManagedScenarioSmoke?: (chunkSpan?: number) => WasmReport | null;
+  beginLobbySmoke?: (chunkSpan?: number) => WasmReport | null;
   backgroundSaveForSmoke?: () => WasmReport | null;
   shutdownForSmoke?: () => Promise<WasmReport | null>;
 }
@@ -117,9 +115,6 @@ const BINDGEN_WASM_URL = versionedUrl("./pkg/mclone_web_client_bg.wasm");
 const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker.js");
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
-const MANAGED_SCENARIO_PROVISION_WORKER_URL = versionedUrl(
-  "./mclone-managed-scenario-provision-worker.js",
-);
 const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
 const AUTHORED_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-authored.pbp");
 const FALLBACK_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-generated-fallback.pbp");
@@ -301,8 +296,8 @@ async function boot(): Promise<WasmReport> {
     app.setNativeTouchControlsMode(mode, persist)
   );
   runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.beginManagedScenarioSmoke = (chunkSpan = 2) =>
-    app.beginManagedScenarioSmoke(chunkSpan);
+  runtime.beginLobbySmoke = (chunkSpan = 2) =>
+    app.beginLobbySmoke(chunkSpan);
   runtime.backgroundSaveForSmoke = () => app.backgroundSaveForSmoke();
   runtime.shutdownForSmoke = () => app.shutdownForSmoke();
   try {
@@ -353,11 +348,10 @@ class WebFrameDriver {
   lastFrameTime: number;
   tickFrameBusy: boolean;
   sessionBusy: boolean;
-  managedProvisionControllers: Map<string, AbortController>;
-  pendingManagedRuntimeStarts: Set<Promise<void>>;
-  managedScenarioLaunchObservedActive: boolean;
-  managedOperationDrainActive: boolean;
-  managedRuntimeStartCount: number;
+  pendingLobbyRuntimeStarts: Set<Promise<void>>;
+  lobbyLaunchObservedActive: boolean;
+  lobbyOperationDrainActive: boolean;
+  lobbyRuntimeStartCount: number;
   worldCatalogOperationTail: Promise<void>;
 
   constructor() {
@@ -392,11 +386,10 @@ class WebFrameDriver {
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
     this.sessionBusy = false;
-    this.managedProvisionControllers = new Map();
-    this.pendingManagedRuntimeStarts = new Set();
-    this.managedScenarioLaunchObservedActive = false;
-    this.managedOperationDrainActive = false;
-    this.managedRuntimeStartCount = 0;
+    this.pendingLobbyRuntimeStarts = new Set();
+    this.lobbyLaunchObservedActive = false;
+    this.lobbyOperationDrainActive = false;
+    this.lobbyRuntimeStartCount = 0;
     this.worldCatalogOperationTail = Promise.resolve();
   }
 
@@ -411,14 +404,11 @@ class WebFrameDriver {
     publishRuntimeState(runtime.state);
     const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
-    setIndexedDbCatalogPolicy(module);
     this.module = module;
     const requiredExports = [
       "mclone_web_startup_options_from_query",
       "mclone_web_create_worker_scene_host_with_startup",
       "mclone_web_create_remote_scene_host_with_startup",
-      "mclone_web_managed_scenario_prepare_world",
-      "mclone_web_managed_scenario_validate_world",
     ];
     for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {
@@ -516,13 +506,11 @@ class WebFrameDriver {
       "setTouchControlsMode",
       "setTouchControlsOverlay",
       "setHidden",
-      "beginManagedScenarioSmoke",
-      "takeManagedScenarioOperation",
-      "completeManagedScenarioProvision",
-      "prepareManagedScenarioWorldStart",
-      "completeManagedScenarioWorldStart",
-      "discardManagedScenarioOperations",
-      "installManagedScenarioServices",
+      "beginLobbySmoke",
+      "takeLobbyOperation",
+      "prepareLobbyWorldStart",
+      "completeLobbyWorldStart",
+      "discardLobbyOperations",
       "renderHalfSpaceTerrainProof",
       "renderPreparedFigureProof",
       "renderActorCompositionProof",
@@ -537,7 +525,6 @@ class WebFrameDriver {
         "cross-origin isolation (SharedArrayBuffer/Atomics) is required for the streaming render loop",
       );
     }
-    this.applyNativeUiReport(this.session.installManagedScenarioServices());
     this.setNativeDebugOverlay(defaultDebugOverlayVisible());
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     document.addEventListener("visibilitychange", () => {
@@ -674,29 +661,24 @@ class WebFrameDriver {
     return report;
   }
 
-  beginManagedScenarioSmoke(chunkSpan = 2): WasmReport | null {
+  beginLobbySmoke(chunkSpan = 2): WasmReport | null {
     if (!this.session || this.sessionBusy) {
       return null;
     }
-    const report = this.session.beginManagedScenarioSmokeWithChunkSpan(chunkSpan);
+    const report = this.session.beginLobbySmokeWithChunkSpan(chunkSpan);
     this.applyNativeUiReport(report);
-    this.drainManagedScenarioOperations();
+    this.drainLobbyOperations();
     return report;
   }
 
   async shutdownForSmoke(): Promise<WasmReport | null> {
     this.pauseRendering();
-    for (const controller of this.managedProvisionControllers.values()) {
-      controller.abort("managed scenario smoke shutdown");
-    }
-    this.managedProvisionControllers.clear();
-    runtime.state.managedProvisionWorkerCount = 0;
     while (this.tickFrameBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     await this.waitForSessionIdle();
     await this.worldCatalogOperationTail;
-    await Promise.allSettled([...this.pendingManagedRuntimeStarts]);
+    await Promise.allSettled([...this.pendingLobbyRuntimeStarts]);
     const report = this.session?.shutdown() ?? null;
     if (report?.ok) {
       runtime.state.shutdownComplete = Boolean(report.shutdownComplete);
@@ -717,23 +699,21 @@ class WebFrameDriver {
     return report;
   }
 
-  drainManagedScenarioOperations(): void {
-    if (!this.session || this.sessionBusy || this.managedOperationDrainActive) {
+  drainLobbyOperations(): void {
+    if (!this.session || this.sessionBusy || this.lobbyOperationDrainActive) {
       return;
     }
-    this.managedOperationDrainActive = true;
+    this.lobbyOperationDrainActive = true;
     try {
       for (;;) {
-        const operation = this.session.takeManagedScenarioOperation() as WasmReport | null;
+        const operation = this.session.takeLobbyOperation() as WasmReport | null;
         if (!operation || typeof operation !== "object") {
           break;
         }
-        if (operation.kind === "provision") {
-          this.launchManagedScenarioProvision(operation);
-        } else if (operation.kind === "start") {
-          this.launchManagedScenarioRuntime(operation);
+        if (operation.kind === "start") {
+          this.launchLobbyRuntime(operation);
         } else {
-          throw new Error(`unknown managed scenario operation ${String(operation.kind)}`);
+          throw new Error(`unknown lobby operation ${String(operation.kind)}`);
         }
       }
     } catch (error) {
@@ -742,72 +722,31 @@ class WebFrameDriver {
       console.error(error);
       publishRuntimeState(runtime.state);
     } finally {
-      this.managedOperationDrainActive = false;
+      this.lobbyOperationDrainActive = false;
     }
   }
 
-  launchManagedScenarioProvision(operation: WasmReport): void {
-    const requestId = String(operation.requestId ?? "");
-    const controller = new AbortController();
-    this.managedProvisionControllers.set(requestId, controller);
-    runtime.state.managedProvisionWorkerCount = this.managedProvisionControllers.size;
-    void provisionIndexedDbManagedScenarioWorldInWorker({
-      workerUrl: MANAGED_SCENARIO_PROVISION_WORKER_URL.href,
-      bindgenJsUrl: BINDGEN_JS_URL.href,
-      bindgenWasmUrl: BINDGEN_WASM_URL.href,
-      operationToken: requestId,
-      scenarioId: String(operation.scenarioId ?? ""),
-      role: String(operation.role ?? ""),
-    }, controller.signal).then(async (result) => {
-      await this.waitForSessionIdle();
-      if (!this.session) return;
-      const report = this.session.completeManagedScenarioProvision(
-        requestId,
-        result.worldId,
-        "",
-      );
-      runtime.state.lastManagedProvision = result;
-      this.applyNativeUiReport(report);
-      this.drainManagedScenarioOperations();
-    }).catch(async (error: unknown) => {
-      if (!this.session || controller.signal.aborted) return;
-      await this.waitForSessionIdle();
-      if (!this.session || controller.signal.aborted) return;
-      const report = this.session.completeManagedScenarioProvision(
-        requestId,
-        "",
-        stringifyError(error),
-      );
-      this.applyNativeUiReport(report);
-      this.drainManagedScenarioOperations();
-    }).finally(() => {
-      this.managedProvisionControllers.delete(requestId);
-      runtime.state.managedProvisionWorkerCount = this.managedProvisionControllers.size;
-      publishRuntimeState(runtime.state);
-    });
-  }
-
-  launchManagedScenarioRuntime(operation: WasmReport): void {
+  launchLobbyRuntime(operation: WasmReport): void {
     if (!this.session) return;
     const requestId = String(operation.requestId ?? "");
-    const start = this.session.prepareManagedScenarioWorldStart(
+    const start = this.session.prepareLobbyWorldStart(
       requestId,
       SERVER_WORKER_URL.href,
       SERVER_JOB_WORKER_URL.href,
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
     );
-    this.managedRuntimeStartCount += 1;
-    runtime.state.managedRuntimeStartCount = this.managedRuntimeStartCount;
-    runtime.state.lastManagedRuntimeStart = operation;
+    this.lobbyRuntimeStartCount += 1;
+    runtime.state.lobbyRuntimeStartCount = this.lobbyRuntimeStartCount;
+    runtime.state.lastLobbyRuntimeStart = operation;
     const task = (async () => {
       try {
         await start.start();
         await this.waitForSessionIdle();
         if (!this.session) return;
-        const report = this.session.completeManagedScenarioWorldStart(start);
+        const report = this.session.completeLobbyWorldStart(start);
         this.applyNativeUiReport(report);
-        this.drainManagedScenarioOperations();
+        this.drainLobbyOperations();
       } catch (error) {
         runtime.state.ok = false;
         runtime.state.status = stringifyError(error);
@@ -817,30 +756,25 @@ class WebFrameDriver {
         start.free();
       }
     })();
-    this.pendingManagedRuntimeStarts.add(task);
-    void task.finally(() => this.pendingManagedRuntimeStarts.delete(task));
+    this.pendingLobbyRuntimeStarts.add(task);
+    void task.finally(() => this.pendingLobbyRuntimeStarts.delete(task));
   }
 
-  cancelManagedScenarioAdapterOperations(reason: string): void {
-    for (const controller of this.managedProvisionControllers.values()) {
-      controller.abort(reason);
-    }
-    this.managedProvisionControllers.clear();
-    runtime.state.managedProvisionWorkerCount = 0;
-    this.session?.discardManagedScenarioOperations();
+  cancelLobbyAdapterOperations(): void {
+    this.session?.discardLobbyOperations();
   }
 
-  applyManagedScenarioLifecycleReport(report: WasmReport): void {
-    if (typeof report.managedScenarioLaunchActive === "undefined") {
+  applyLobbyLifecycleReport(report: WasmReport): void {
+    if (typeof report.lobbyLaunchActive === "undefined") {
       return;
     }
-    const active = Boolean(report.managedScenarioLaunchActive);
-    runtime.state.managedScenarioLaunchActive = active;
+    const active = Boolean(report.lobbyLaunchActive);
+    runtime.state.lobbyLaunchActive = active;
     if (active) {
-      this.managedScenarioLaunchObservedActive = true;
-    } else if (this.managedScenarioLaunchObservedActive) {
-      this.managedScenarioLaunchObservedActive = false;
-      this.cancelManagedScenarioAdapterOperations("shared managed scenario epoch cancelled");
+      this.lobbyLaunchObservedActive = true;
+    } else if (this.lobbyLaunchObservedActive) {
+      this.lobbyLaunchObservedActive = false;
+      this.cancelLobbyAdapterOperations();
     }
   }
 
@@ -1018,7 +952,7 @@ class WebFrameDriver {
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(frame);
     if (!this.sessionBusy) {
-      this.drainManagedScenarioOperations();
+      this.drainLobbyOperations();
     }
   }
 
@@ -1105,7 +1039,7 @@ class WebFrameDriver {
     runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.uiOptionsParent ?? null;
     applySessionReport(report, runtime.state);
-    this.applyManagedScenarioLifecycleReport(report);
+    this.applyLobbyLifecycleReport(report);
     for (const key of ["backgroundSaveCount", "firstAfterResume"]) {
       if (typeof report[key] !== "undefined") {
         runtime.state[key] = report[key];
@@ -1132,9 +1066,9 @@ class WebFrameDriver {
       "standbyActorStateAllocatedBytes",
       "standbySwitchable",
       "standbyWorldSeedText",
-      "managedScenarioLaunchActive",
-      "managedScenarioDestinationFailure",
-      "staleManagedStartCompletionCount",
+      "lobbyLaunchActive",
+      "lobbyDestinationFailure",
+      "staleLobbyStartCompletionCount",
       "renderResourceGeneration",
       "embeddedPreviewWorldInstanceId",
       "embeddedPreviewPhase",
@@ -1629,7 +1563,7 @@ class WebFrameDriver {
     runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
     runtime.state.nativeUiOptionsParent = report.optionsParent ?? report.uiOptionsParent ?? null;
     applySessionReport(report, runtime.state);
-    this.applyManagedScenarioLifecycleReport(report);
+    this.applyLobbyLifecycleReport(report);
     for (const key of ["backgroundSaveCount", "firstAfterResume"]) {
       if (typeof report[key] !== "undefined") {
         runtime.state[key] = report[key];
@@ -1692,7 +1626,7 @@ class WebFrameDriver {
     this.dispatchWorldCatalogOperation(report, options);
     this.dispatchAssetPackOperation(report);
     if (!this.sessionBusy) {
-      this.drainManagedScenarioOperations();
+      this.drainLobbyOperations();
     }
   }
 

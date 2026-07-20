@@ -562,20 +562,6 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
 /// `PROFILE_UNSUPPORTED` on the feature axis), enforced by
 /// `web_feature_divergences_match_audited_ledger`.
 pub fn web_client_experience_profile() -> ClientExperienceProfile {
-    web_client_experience_profile_with_managed_scenarios(true)
-}
-
-/// Browser profile used while the platform adapter is still assembling the
-/// managed-world provisioning and runtime services. The production adapter
-/// promotes to [`web_client_experience_profile`] only after every operation in
-/// that boundary is installed.
-pub fn web_client_experience_profile_without_managed_scenarios() -> ClientExperienceProfile {
-    web_client_experience_profile_with_managed_scenarios(false)
-}
-
-fn web_client_experience_profile_with_managed_scenarios(
-    managed_scenarios_available: bool,
-) -> ClientExperienceProfile {
     let mut settings = native_client_experience_baseline();
     settings.travel_assist =
         ClientExperienceCapabilityStatus::Unsupported(WEB_TRAVEL_ASSIST_REASON);
@@ -589,11 +575,8 @@ fn web_client_experience_profile_with_managed_scenarios(
         ClientExperienceCapabilityStatus::Unsupported(WEB_DEBUG_DIAGNOSTICS_REASON);
     settings.server_simulation_cadence =
         ClientExperienceCapabilityStatus::Unsupported(WEB_SERVER_SIMULATION_CADENCE_REASON);
-    ClientExperienceProfile::new(settings).with_lobby_scenario(if managed_scenarios_available {
-        ClientExperienceCapabilityStatus::Supported
-    } else {
-        ClientExperienceCapabilityStatus::Pending(WEB_LOBBY_SCENARIO_INITIALIZING_REASON)
-    })
+    ClientExperienceProfile::new(settings)
+        .with_lobby_scenario(ClientExperienceCapabilityStatus::Supported)
 }
 
 const WEB_TRAVEL_ASSIST_REASON: &str =
@@ -604,9 +587,6 @@ const WEB_DEBUG_DIAGNOSTICS_REASON: &str =
     "Debug diagnostics needs browser presenter wiring and panel proof";
 const WEB_SERVER_SIMULATION_CADENCE_REASON: &str =
     "Server simulation cadence needs browser runtime control and diagnostic proof";
-pub const WEB_LOBBY_SCENARIO_INITIALIZING_REASON: &str =
-    "Lobby scenario services are still initializing";
-
 /// Audited browser feature gaps. Each entry names a concrete follow-up and must
 /// exactly match a reason-bearing capability in [`web_client_experience_profile`].
 pub const WEB_FEATURE_PARITY_EXCEPTIONS: &[(ClientExperienceFeatureCapability, &'static str)] = &[
@@ -2040,11 +2020,12 @@ mod tests {
     }
 
     #[test]
-    fn lobby_scenario_is_a_shared_effect_and_requires_complete_web_services() {
+    fn lobby_scenario_is_a_shared_effect_on_every_client() {
         for profile in [
             desktop_native_client_experience_profile(),
             xr_native_client_experience_profile(),
             android_flat_native_client_experience_profile(),
+            web_client_experience_profile(),
         ] {
             assert_eq!(
                 profile.lobby_scenario,
@@ -2063,49 +2044,6 @@ mod tests {
             );
             assert!(effects.projection.is_empty());
         }
-
-        let incomplete_profile = web_client_experience_profile_without_managed_scenarios();
-        assert_eq!(
-            incomplete_profile.lobby_scenario,
-            ClientExperienceCapabilityStatus::Pending(WEB_LOBBY_SCENARIO_INITIALIZING_REASON)
-        );
-        let mut controller = ClientExperienceController::new(incomplete_profile);
-        let effects = controller.apply_ui_action(
-            GameUiAction::EnterScenario(GameScenarioId::LobbyPreview),
-            context(),
-        );
-        assert!(effects.scenario.is_empty());
-        assert_eq!(
-            effects.settings.capability_projection.first_unavailable(),
-            Some(ClientExperienceActionAvailability {
-                kind: ClientExperienceActionKind::EnterScenario,
-                status: ClientExperienceCapabilityStatus::Pending(
-                    WEB_LOBBY_SCENARIO_INITIALIZING_REASON,
-                ),
-            })
-        );
-        assert_eq!(
-            effects.projection,
-            vec![ClientExperienceProjectionEffect::SuppressUiAction]
-        );
-
-        let profile = web_client_experience_profile();
-        assert_eq!(
-            profile.lobby_scenario,
-            ClientExperienceCapabilityStatus::Supported
-        );
-        let mut controller = ClientExperienceController::new(profile);
-        let effects = controller.apply_ui_action(
-            GameUiAction::EnterScenario(GameScenarioId::LobbyPreview),
-            context(),
-        );
-        assert_eq!(
-            effects.scenario,
-            vec![ClientExperienceScenarioEffect::Launch(
-                ScenarioLaunchIntent::lobby_preview()
-            )]
-        );
-        assert!(effects.projection.is_empty());
     }
 
     #[test]
@@ -2216,7 +2154,7 @@ mod tests {
         assert_eq!(
             factory.catalog.catalog_requests[0].request,
             WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content: true,
+                include_app_private_content: true,
             }
         );
 

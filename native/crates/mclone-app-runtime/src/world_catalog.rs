@@ -315,7 +315,7 @@ pub enum WorldCatalogRequest {
     OpenWorld { id: LocalWorldId },
     RecordWorldPlayed { id: LocalWorldId },
     DeleteWorld { id: LocalWorldId },
-    DeleteAllLocalWorlds { include_managed_content: bool },
+    DeleteAllLocalWorlds { include_app_private_content: bool },
 }
 
 impl WorldCatalogRequest {
@@ -537,7 +537,7 @@ impl NativeWorldCatalog {
                 Ok(WorldCatalogResponse::WorldDeleted { id })
             }
             WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content,
+                include_app_private_content,
             } => {
                 if active_world.is_some() {
                     return Err(WorldCatalogError::new(
@@ -550,14 +550,15 @@ impl NativeWorldCatalog {
                 for world in worlds {
                     self.delete_world(&world.id, None)?;
                 }
-                if include_managed_content {
-                    let managed_root = self.root.parent().unwrap_or(&self.root).join("scenarios");
-                    match fs::remove_dir_all(&managed_root) {
+                if include_app_private_content {
+                    let app_private_root =
+                        self.root.parent().unwrap_or(&self.root).join("scenarios");
+                    match fs::remove_dir_all(&app_private_root) {
                         Ok(()) => {}
                         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                         Err(error) => {
                             return Err(storage_error(
-                                "failed to delete managed scenario content",
+                                "failed to delete app-private world content",
                                 error,
                             ));
                         }
@@ -1419,13 +1420,13 @@ mod tests {
         fs::create_dir_all(&scenarios).unwrap();
         fs::write(unrecognized.join("keep"), "keep").unwrap();
         fs::write(preferences.join("keep"), "keep").unwrap();
-        fs::write(scenarios.join("managed"), "managed").unwrap();
+        fs::write(scenarios.join("private"), "private").unwrap();
 
         assert_eq!(
             catalog
                 .handle_request(
                     WorldCatalogRequest::DeleteAllLocalWorlds {
-                        include_managed_content: false,
+                        include_app_private_content: false,
                     },
                     None,
                 )
@@ -1444,7 +1445,7 @@ mod tests {
             catalog
                 .handle_request(
                     WorldCatalogRequest::DeleteAllLocalWorlds {
-                        include_managed_content: true,
+                        include_app_private_content: true,
                     },
                     None,
                 )

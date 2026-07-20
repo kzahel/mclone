@@ -166,7 +166,7 @@ enum CatalogFlow {
         cleared: bool,
     },
     DeleteMany {
-        include_managed_content: bool,
+        include_app_private_content: bool,
         world_ids: Option<Vec<LocalWorldId>>,
         deleted_count: usize,
         index: usize,
@@ -278,13 +278,13 @@ impl CatalogExecutionCore {
                 cleared: false,
             },
             WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content,
+                include_app_private_content,
             } => {
                 if active_world.is_some() {
                     return Err("Quit to title before deleting all local worlds".to_owned());
                 }
                 CatalogFlow::DeleteMany {
-                    include_managed_content,
+                    include_app_private_content,
                     world_ids: None,
                     deleted_count: 0,
                     index: 0,
@@ -406,7 +406,7 @@ impl CatalogExecutionCore {
                 }
             },
             CatalogFlow::DeleteMany {
-                include_managed_content,
+                include_app_private_content,
                 world_ids,
                 deleted_count,
                 index,
@@ -416,7 +416,7 @@ impl CatalogExecutionCore {
                     return self.read_all_step(StorageMode::ReadOnly, ReadPurpose::DeleteManyList);
                 };
                 let Some(id) = world_ids.get(index).cloned() else {
-                    if include_managed_content {
+                    if include_app_private_content {
                         let actions = FACTORY_RESET_STORES
                             .iter()
                             .copied()
@@ -1033,10 +1033,10 @@ mod wasm {
             "recordWorldPlayed" => WorldCatalogRequest::RecordWorldPlayed { id: id()? },
             "deleteWorld" => WorldCatalogRequest::DeleteWorld { id: id()? },
             "deleteAllLocalWorlds" => WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content: false,
+                include_app_private_content: false,
             },
             "factoryResetLocalData" => WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content: true,
+                include_app_private_content: true,
             },
             _ => {
                 return Err(JsValue::from_str(&format!(
@@ -1402,7 +1402,7 @@ mod tests {
     fn delete_all_repeats_per_world_and_factory_reset_is_one_final_clear() {
         let mut execution = CatalogExecutionCore::new(
             WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content: true,
+                include_app_private_content: true,
             },
             None,
         )
@@ -1451,7 +1451,7 @@ mod tests {
         assert!(
             CatalogExecutionCore::new(
                 WorldCatalogRequest::DeleteAllLocalWorlds {
-                    include_managed_content: false,
+                    include_app_private_content: false,
                 },
                 Some(id("active")),
             )

@@ -32,10 +32,6 @@ const WEB_WORLD_CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-web-world-catalog.ts"
 ));
-const WEB_MANAGED_PROVISION_WORKER: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/www/mclone-managed-scenario-provision-worker.ts"
-));
 const WEB_RENDER_COMPILER_SHARED: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-render-compiler-shared.ts"
@@ -71,32 +67,28 @@ const INTEGRATED_SERVER_WORKER: &str = include_str!(concat!(
 ));
 
 use mclone_app_runtime::scenario_content::{
-    ManagedScenarioManifest, ManagedScenarioWorldRole, managed_scenario_payload_fingerprint,
-    managed_scenario_world_payload,
+    AppPrivateWorldKey, LobbyScenarioContent, LobbyWorldSource,
 };
 
 #[test]
-fn web_adapter_consumes_the_shared_manifest_and_fixture_receipts() {
-    let manifest = ManagedScenarioManifest::current_lobby_preview();
-    manifest.validate().unwrap();
-    let primary =
-        managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Primary).unwrap();
-    let destination =
-        managed_scenario_world_payload(&manifest, ManagedScenarioWorldRole::Destination).unwrap();
-    assert!(primary.entity_chunk_records.is_empty());
-    assert!(destination.chunk_records.is_empty());
-    assert!(destination.entity_chunk_records.is_empty());
-    assert_ne!(
-        managed_scenario_payload_fingerprint(&primary),
-        managed_scenario_payload_fingerprint(&destination)
+fn shared_lobby_recipe_selects_storage_without_materializing_payloads() {
+    let content = LobbyScenarioContent::current();
+    assert_eq!(
+        LobbyWorldSource::TransientAuthored(content.primary.kind).kind_label(),
+        "transient-authored"
+    );
+    assert_eq!(
+        LobbyWorldSource::AppPrivate(AppPrivateWorldKey::LobbyFallback).kind_label(),
+        "app-private"
     );
 }
 
 #[test]
-fn browser_runtime_honors_the_shared_managed_actor_policy() {
-    assert!(SCENE_SESSION.contains(
-        "scene.debug_passive_showcase = self.debug_managed_scenario_auxiliary_player_script;"
-    ));
+fn browser_runtime_honors_the_shared_lobby_actor_policy() {
+    assert!(
+        SCENE_SESSION
+            .contains("scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script;")
+    );
     assert!(
         WEB_SCENE_HOST
             .contains(".with_debug_passive_showcase(pending.scene.debug_passive_showcase)")
@@ -188,21 +180,19 @@ fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
         "#[cfg(not(target_arch = \"wasm32\"))]\n\
          pub mod scenario_content;"
     ));
-    assert!(CLIENT_EXPERIENCE.contains("web_client_experience_profile_with_managed_scenarios"));
-    assert!(CLIENT_EXPERIENCE.contains("web_client_experience_profile_without_managed_scenarios"));
+    assert!(!CLIENT_EXPERIENCE.contains("web_client_experience_profile_without"));
     assert!(CLIENT_EXPERIENCE.contains("ClientExperienceCapabilityStatus::Supported"));
-    assert!(WEB_SCENE_HOST.contains("installManagedScenarioServices"));
-    assert!(WEB_APP.contains("this.session.installManagedScenarioServices()"));
-    assert!(SCENE_SESSION.contains("pub(crate) fn apply_managed_scenario_effect("));
+    assert!(!WEB_SCENE_HOST.contains("installManagedScenarioServices"));
+    assert!(!WEB_APP.contains("installManagedScenarioServices"));
+    assert!(SCENE_SESSION.contains("pub(crate) fn apply_lobby_effect("));
     let effect = SCENE_SESSION
-        .split("pub(crate) fn apply_managed_scenario_effect(")
+        .split("pub(crate) fn apply_lobby_effect(")
         .nth(1)
         .expect("shared scenario effect exists")
-        .split("fn begin_managed_scenario_launch(")
+        .split("pub fn begin_lobby_launch(")
         .next()
         .unwrap();
     assert!(!effect.contains("Ok(false)"));
-    assert!(!effect.contains("WEB_LOBBY_SCENARIO_INITIALIZING_REASON"));
     let request = WARM_WORLD
         .split("pub struct WarmWorldStandbyRequest {")
         .nth(1)
@@ -211,9 +201,9 @@ fn shared_scenario_start_boundary_has_no_native_policy_stub_or_path() {
         .next()
         .unwrap();
     assert!(!request.contains("PathBuf"));
-    assert!(request.contains("pub storage_source: Option<ScenarioWorldStorageSource>"));
-    assert!(WARM_WORLD.contains("PlatformOperationLedger<ProvisionManagedScenarioWorld"));
-    assert!(!WARM_WORLD.contains("NativeManagedScenarioContentOperationService"));
+    assert!(request.contains("pub storage_source: Option<LobbyWorldSource>"));
+    assert!(!WARM_WORLD.contains("ProvisionManagedScenarioWorld"));
+    assert!(!WARM_WORLD.contains("ManagedScenarioContentOperationService"));
 }
 
 #[test]
@@ -228,15 +218,13 @@ fn live_identity_moves_with_the_complete_world_slot() {
 }
 
 #[test]
-fn primary_and_destination_provisioning_are_independent() {
-    assert!(WARM_WORLD.contains("ManagedScenarioWorldRole::Primary,"));
-    assert!(WARM_WORLD.contains("ManagedScenarioWorldRole::Destination,"));
-    assert!(WARM_WORLD.contains("provision_operations.issue("));
-    assert!(SCENE_SESSION.contains("take_managed_scenario_provision_request"));
-    assert!(SCENE_SESSION.contains("complete_managed_scenario_provision"));
-    assert!(SCENE_SESSION.contains("take_managed_scenario_world_start"));
+fn primary_and_destination_start_operations_are_independent() {
+    assert!(WARM_WORLD.contains("LobbyWorldRole::Primary,"));
+    assert!(WARM_WORLD.contains("LobbyWorldRole::Destination,"));
+    assert!(WARM_WORLD.contains("start_operations.issue("));
+    assert!(!SCENE_SESSION.contains("provision_request"));
+    assert!(SCENE_SESSION.contains("take_lobby_world_start"));
     assert!(SCENE_SESSION.contains("complete_external_session_start"));
-    assert!(!SCENE_SESSION.contains("CombinedScenarioContentCompletion"));
 }
 
 #[test]
@@ -261,11 +249,11 @@ fn stale_browser_starts_are_rejected_before_slot_installation() {
     assert!(guard < standby_install);
 
     assert!(WEB_SCENE_HOST.contains("external_scene_start_is_current(&pending)"));
-    assert!(WEB_SCENE_HOST.contains("stale_managed_start_completion_count"));
-    assert!(WEB_SCENE_HOST.contains("discardManagedScenarioOperations"));
-    assert!(WEB_APP.contains("this.session?.discardManagedScenarioOperations()"));
-    assert!(WEB_APP.contains("pendingManagedRuntimeStarts"));
-    assert!(WEB_APP.contains("else if (this.managedScenarioLaunchObservedActive)"));
+    assert!(WEB_SCENE_HOST.contains("stale_lobby_start_completion_count"));
+    assert!(WEB_SCENE_HOST.contains("discardLobbyOperations"));
+    assert!(WEB_APP.contains("this.session?.discardLobbyOperations()"));
+    assert!(WEB_APP.contains("pendingLobbyRuntimeStarts"));
+    assert!(WEB_APP.contains("else if (this.lobbyLaunchObservedActive)"));
 }
 
 #[test]
@@ -342,18 +330,14 @@ fn typescript_does_not_own_lobby_policy_or_authored_content() {
             !WEB_WORLD_CATALOG.contains(forbidden),
             "IndexedDB adapter must not own shared scenario term {forbidden}"
         );
-        assert!(
-            !WEB_MANAGED_PROVISION_WORKER.contains(forbidden),
-            "provision Worker must not own shared scenario term {forbidden}"
-        );
     }
     assert!(WEB_WORLD_CATALOG.contains("MANAGED_WORLD_METADATA_STORE"));
-    assert!(WEB_WORLD_CATALOG.contains("mclone_web_managed_scenario_prepare_world("));
-    assert!(WEB_WORLD_CATALOG.contains("mclone_web_managed_scenario_validate_world("));
+    assert!(!WEB_WORLD_CATALOG.contains("prepareManagedWorldPayload"));
+    assert!(!WEB_WORLD_CATALOG.contains("validateManagedWorldPayload"));
     assert!(!WEB_WORLD_CATALOG.contains("ChunkRecord::"));
     assert!(!WEB_WORLD_CATALOG.contains("ProtectedLobby"));
-    assert!(WEB_WORLD_CATALOG.contains("MANAGED_WORLD_METADATA_STORE"));
-    assert!(WEB_WORLD_CATALOG.contains("provisionIndexedDbManagedScenarioWorldInWorker"));
-    assert!(WEB_MANAGED_PROVISION_WORKER.contains("provisionIndexedDbManagedScenarioWorld("));
-    assert!(!WEB_MANAGED_PROVISION_WORKER.contains("authored"));
+    assert!(!WEB_WORLD_CATALOG.contains("provisionIndexedDbManagedScenarioWorld"));
+    assert!(!WEB_APP.contains("scenarioId"));
+    assert!(!WEB_APP.contains("contentVersion"));
+    assert!(!WEB_APP.contains("fingerprint"));
 }

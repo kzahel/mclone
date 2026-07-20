@@ -1183,7 +1183,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
             )?;
             if !host
                 .scene_host()
-                .debug_managed_scenario_auxiliary_player_script_enabled()
+                .debug_lobby_auxiliary_player_script_enabled()
             {
                 bail!("scene host lost the lobby auxiliary-player validation option");
             }
@@ -2415,7 +2415,7 @@ fn begin_lobby_scenario_for_smoke(
         let bounds = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(
             options.preview_chunk_span,
         )?;
-        host.scene_host_mut().begin_managed_scenario_launch(
+        host.scene_host_mut().begin_lobby_launch(
             mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview()
                 .with_preview_bounds(bounds)?,
         )?;
@@ -3033,10 +3033,10 @@ pub(crate) fn run_lobby_scenario_smoke(
         "switchCount": switch_count,
         "cancelledLaunchCount": 1,
         "relaunchCount": 1,
-        "managedRoot": options.scene.world_root.as_ref().map(|root| root.parent().unwrap_or(root).join("scenarios")),
+        "appPrivateRoot": options.scene.world_root.as_ref().map(|root| root.parent().unwrap_or(root).join("scenarios")),
         "lobbyBehavior": "protectedLobby",
         "destinationBehavior": "mutable",
-        "destinationSource": if options.catalog_destination { "catalog-recent-world" } else { "managed-overworld-fallback" },
+        "destinationSource": if options.catalog_destination { "catalog-recent-world" } else { "app-private-overworld-fallback" },
         "previewBounds": {
             "minChunk": [preview_region.min_chunk().x, preview_region.min_chunk().z],
             "maxChunk": [preview_region.max_chunk().x, preview_region.max_chunk().z],

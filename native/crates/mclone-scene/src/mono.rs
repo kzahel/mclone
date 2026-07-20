@@ -929,7 +929,7 @@ impl McloneSceneHost {
         if matches!(action, GameUiAction::BackToTitle)
             && self.ui.screen() == Some(GameScreen::PreparingLobby)
         {
-            self.cancel_warm_world_standby("managed scenario title cancellation");
+            self.cancel_warm_world_standby("lobby title cancellation");
         }
         if self.active_world.local_startup.is_some() && !matches!(action, GameUiAction::Quit) {
             return Ok(MonoUiActionOutcome::default());
@@ -1025,7 +1025,7 @@ impl McloneSceneHost {
             self.apply_mono_session_effects(effects.session, device, queue, host)?;
         let mut scenario_scene_replaced = false;
         for effect in effects.scenario {
-            scenario_scene_replaced |= self.apply_managed_scenario_effect(effect, device, queue)?;
+            scenario_scene_replaced |= self.apply_lobby_effect(effect, device, queue)?;
         }
         self.apply_asset_pack_effects(effects.asset_packs);
         for effect in effects.local_data {

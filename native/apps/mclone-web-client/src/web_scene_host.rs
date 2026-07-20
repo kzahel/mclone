@@ -10,9 +10,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use glam::Vec3;
 use mclone_app_runtime::chunk_tracking_radius_for_render_distance;
-use mclone_app_runtime::client_experience::{
-    web_client_experience_profile, web_client_experience_profile_without_managed_scenarios,
-};
+use mclone_app_runtime::client_experience::web_client_experience_profile;
 use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, PlatformOperationToken};
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
@@ -176,31 +174,31 @@ struct LastFrameStats {
 /// `WebSceneHost`, so an independently warming destination cannot pause the
 /// active world's animation-frame pump.
 #[wasm_bindgen]
-pub struct WebManagedScenarioRuntimeStart {
+pub struct WebLobbyRuntimeStart {
     pending: Option<ExternalSceneSessionStart>,
     config: Option<WebIntegratedServerRunnerConfig>,
     outcome: Option<Result<crate::WebRuntime, String>>,
 }
 
 #[wasm_bindgen]
-impl WebManagedScenarioRuntimeStart {
+impl WebLobbyRuntimeStart {
     #[wasm_bindgen(js_name = start)]
     pub async fn start(&mut self) -> Result<JsValue, JsValue> {
         if self.outcome.is_some() {
             return Err(JsValue::from_str(
-                "managed runtime start ticket was already started",
+                "lobby runtime start ticket was already started",
             ));
         }
         let pending = self
             .pending
             .as_ref()
-            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was consumed"))?;
+            .ok_or_else(|| JsValue::from_str("lobby runtime start ticket was consumed"))?;
         let center = pending.scene.center();
         let render_distance = pending.scene.render_distance;
         let config = self
             .config
             .take()
-            .ok_or_else(|| JsValue::from_str("managed runtime start config was consumed"))?;
+            .ok_or_else(|| JsValue::from_str("lobby runtime start config was consumed"))?;
         self.outcome = Some(
             match crate::WebRuntime::web_worker_integrated_at(config, center).await {
                 Ok(mut runtime) => match runtime.request_chunk_view_deferred(
@@ -266,15 +264,8 @@ pub struct WebSceneHost {
     interaction_count: usize,
     mesh_build_count: usize,
     catalog_operations: HashMap<String, PendingWebCatalogOperation>,
-    managed_provision_tokens: HashMap<
-        String,
-        (
-            PlatformOperationToken,
-            mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
-        ),
-    >,
-    managed_world_starts: HashMap<String, ExternalSceneSessionStart>,
-    stale_managed_start_completion_count: usize,
+    lobby_world_starts: HashMap<String, ExternalSceneSessionStart>,
+    stale_lobby_start_completion_count: usize,
     render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
@@ -289,15 +280,6 @@ struct PendingWebCatalogOperation {
 
 #[wasm_bindgen]
 impl WebSceneHost {
-    /// Promote the lobby capability only after the browser adapter has verified
-    /// the complete managed provision/start/completion operation boundary.
-    #[wasm_bindgen(js_name = installManagedScenarioServices)]
-    pub fn install_managed_scenario_services(&mut self) -> Result<JsValue, JsValue> {
-        self.host_mut()?
-            .set_client_experience_profile(web_client_experience_profile());
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
-
     /// Deterministic device/resource-generation recovery hook. Production
     /// device recreation can call the same prepared-asset entry after replacing
     /// `WebCanvasContext`; the smoke uses the current device to verify retained
@@ -1324,20 +1306,20 @@ impl WebSceneHost {
         .await
     }
 
-    #[wasm_bindgen(js_name = beginManagedScenarioSmoke)]
-    pub fn begin_managed_scenario_smoke(&mut self) -> Result<JsValue, JsValue> {
-        self.begin_managed_scenario_smoke_with_chunk_span(2)
+    #[wasm_bindgen(js_name = beginLobbySmoke)]
+    pub fn begin_lobby_smoke(&mut self) -> Result<JsValue, JsValue> {
+        self.begin_lobby_smoke_with_chunk_span(2)
     }
 
-    #[wasm_bindgen(js_name = beginManagedScenarioSmokeWithChunkSpan)]
-    pub fn begin_managed_scenario_smoke_with_chunk_span(
+    #[wasm_bindgen(js_name = beginLobbySmokeWithChunkSpan)]
+    pub fn begin_lobby_smoke_with_chunk_span(
         &mut self,
         chunk_span: u32,
     ) -> Result<JsValue, JsValue> {
         let bounds = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(chunk_span)
             .map_err(js_error)?;
         self.host_mut()?
-            .begin_managed_scenario_launch(
+            .begin_lobby_launch(
                 mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview()
                     .with_preview_bounds(bounds)
                     .map_err(js_error)?,
@@ -1346,32 +1328,17 @@ impl WebSceneHost {
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
-    /// Take one shared-policy managed-world adapter operation. JavaScript only
-    /// executes storage/Worker mechanics; it never chooses scenario content or
-    /// startup policy.
-    #[wasm_bindgen(js_name = takeManagedScenarioOperation)]
-    pub fn take_managed_scenario_operation(&mut self) -> Result<JsValue, JsValue> {
-        if let Some(operation) = self.host_mut()?.take_managed_scenario_provision_request() {
-            let request_id = platform_operation_key("provision", operation.token);
-            let role = operation.kind.role;
-            self.managed_provision_tokens
-                .insert(request_id.clone(), (operation.token, role));
-            let object = js_sys::Object::new();
-            report_set_string(&object, "kind", "provision").map_err(JsValue::from)?;
-            report_set_string(&object, "requestId", &request_id).map_err(JsValue::from)?;
-            report_set_string(&object, "scenarioId", "lobbyPreview").map_err(JsValue::from)?;
-            report_set_string(&object, "role", managed_world_role_label(role))
-                .map_err(JsValue::from)?;
-            return Ok(object.into());
-        }
-        if let Some(start) = self.host_mut()?.take_managed_scenario_world_start() {
-            let (token, role) = match &start.target {
-                mclone_scene::ExternalSceneStartTarget::ManagedScenario { token, role } => {
-                    (*token, *role)
-                }
+    /// Take one shared-policy lobby start. JavaScript starts the Worker from
+    /// this opaque Rust-owned ticket and never chooses content or storage
+    /// policy.
+    #[wasm_bindgen(js_name = takeLobbyOperation)]
+    pub fn take_lobby_operation(&mut self) -> Result<JsValue, JsValue> {
+        if let Some(start) = self.host_mut()?.take_lobby_world_start() {
+            let token = match &start.target {
+                mclone_scene::ExternalSceneStartTarget::Lobby { token, .. } => *token,
                 mclone_scene::ExternalSceneStartTarget::ActiveSession => {
                     return Err(JsValue::from_str(
-                        "managed scenario queue produced an active-session start",
+                        "lobby queue produced an active-session start",
                     ));
                 }
             };
@@ -1383,8 +1350,6 @@ impl WebSceneHost {
             let object = js_sys::Object::new();
             report_set_string(&object, "kind", "start").map_err(JsValue::from)?;
             report_set_string(&object, "requestId", &request_id).map_err(JsValue::from)?;
-            report_set_string(&object, "role", managed_world_role_label(role))
-                .map_err(JsValue::from)?;
             report_set_string(&object, "worldId", &world_id).map_err(JsValue::from)?;
             report_set_string(&object, "storageSourceKind", storage_source.kind_label())
                 .map_err(JsValue::from)?;
@@ -1402,7 +1367,7 @@ impl WebSceneHost {
                 start.scene.world_behavior_profile.label(),
             )
             .map_err(JsValue::from)?;
-            self.managed_world_starts.insert(request_id, start);
+            self.lobby_world_starts.insert(request_id, start);
             return Ok(object.into());
         }
         Ok(JsValue::NULL)
@@ -1412,56 +1377,25 @@ impl WebSceneHost {
     /// policy has cancelled the scenario operation epoch. In-flight Workers
     /// may still finish, but their opaque start tickets are rejected by
     /// `external_scene_start_is_current` before any slot installation.
-    #[wasm_bindgen(js_name = discardManagedScenarioOperations)]
-    pub fn discard_managed_scenario_operations(&mut self) -> Result<JsValue, JsValue> {
-        self.managed_provision_tokens.clear();
-        self.managed_world_starts.clear();
+    #[wasm_bindgen(js_name = discardLobbyOperations)]
+    pub fn discard_lobby_operations(&mut self) -> Result<JsValue, JsValue> {
+        self.lobby_world_starts.clear();
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = completeManagedScenarioProvision)]
-    pub fn complete_managed_scenario_provision_request(
-        &mut self,
-        request_id: String,
-        world_id: String,
-        error: String,
-    ) -> Result<JsValue, JsValue> {
-        let Some((token, role)) = self.managed_provision_tokens.remove(&request_id) else {
-            return Err(JsValue::from_str("unknown managed provision request"));
-        };
-        let result = if error.is_empty() {
-            let key = mclone_app_runtime::scenario_content::ManagedWorldKey::new(world_id)
-                .map_err(|error| JsValue::from_str(&error.to_string()))?;
-            Ok(mclone_app_runtime::scenario_content::ProvisionedManagedScenarioWorld { role, key })
-        } else {
-            Err(error)
-        };
-        let (device, queue) = (&self.context.device, &self.context.queue);
-        self.host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
-            .complete_managed_scenario_provision(
-                device,
-                queue,
-                PlatformOperationCompletion { token, result },
-            )
-            .map_err(js_error)?;
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = prepareManagedScenarioWorldStart)]
-    pub fn prepare_managed_scenario_world_start(
+    #[wasm_bindgen(js_name = prepareLobbyWorldStart)]
+    pub fn prepare_lobby_world_start(
         &mut self,
         request_id: String,
         worker_url: String,
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
-    ) -> Result<WebManagedScenarioRuntimeStart, JsValue> {
+    ) -> Result<WebLobbyRuntimeStart, JsValue> {
         let pending = self
-            .managed_world_starts
+            .lobby_world_starts
             .remove(&request_id)
-            .ok_or_else(|| JsValue::from_str("unknown managed world start request"))?;
+            .ok_or_else(|| JsValue::from_str("unknown lobby world start request"))?;
         let seed = pending.scene.seed;
         let storage_source = pending
             .storage_source
@@ -1469,8 +1403,8 @@ impl WebSceneHost {
             .ok_or_else(|| JsValue::from_str("scenario world start omitted its storage source"))?;
         let observer_only = matches!(
             &pending.target,
-            mclone_scene::ExternalSceneStartTarget::ManagedScenario {
-                role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+            mclone_scene::ExternalSceneStartTarget::Lobby {
+                role: mclone_app_runtime::scenario_content::LobbyWorldRole::Destination,
                 ..
             }
         );
@@ -1489,38 +1423,37 @@ impl WebSceneHost {
         .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
         .with_observer_only(observer_only);
         config = match storage_source {
-            mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::TransientAuthored(
-                fixture,
-            ) => config.with_transient_authored_fixture(*fixture),
-            mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::AppPrivate(_)
-            | mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Managed(_)
-            | mclone_app_runtime::scenario_content::ScenarioWorldStorageSource::Catalog(_) => {
+            mclone_app_runtime::scenario_content::LobbyWorldSource::TransientAuthored(fixture) => {
+                config.with_transient_authored_fixture(*fixture)
+            }
+            mclone_app_runtime::scenario_content::LobbyWorldSource::AppPrivate(_)
+            | mclone_app_runtime::scenario_content::LobbyWorldSource::Catalog(_) => {
                 config.with_indexed_db_world(storage_source.world_id(), false)
             }
         };
-        Ok(WebManagedScenarioRuntimeStart {
+        Ok(WebLobbyRuntimeStart {
             pending: Some(pending),
             config: Some(config),
             outcome: None,
         })
     }
 
-    #[wasm_bindgen(js_name = completeManagedScenarioWorldStart)]
-    pub fn complete_managed_scenario_world_start(
+    #[wasm_bindgen(js_name = completeLobbyWorldStart)]
+    pub fn complete_lobby_world_start(
         &mut self,
-        start: &mut WebManagedScenarioRuntimeStart,
+        start: &mut WebLobbyRuntimeStart,
     ) -> Result<JsValue, JsValue> {
         let pending = start
             .pending
             .take()
-            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was consumed"))?;
+            .ok_or_else(|| JsValue::from_str("lobby runtime start ticket was consumed"))?;
         let outcome = start
             .outcome
             .take()
-            .ok_or_else(|| JsValue::from_str("managed runtime start ticket was not started"))?;
+            .ok_or_else(|| JsValue::from_str("lobby runtime start ticket was not started"))?;
         if !self.host_ref()?.external_scene_start_is_current(&pending) {
-            self.stale_managed_start_completion_count =
-                self.stale_managed_start_completion_count.saturating_add(1);
+            self.stale_lobby_start_completion_count =
+                self.stale_lobby_start_completion_count.saturating_add(1);
             drop(outcome);
             return self.ui_report(false, None).map_err(JsValue::from);
         }
@@ -2033,7 +1966,7 @@ async fn create_scene_host(
         runtime,
         render_options,
         active_assets,
-        web_client_experience_profile_without_managed_scenarios(),
+        web_client_experience_profile(),
         Some(catalog_operations),
         None,
     )
@@ -2094,9 +2027,8 @@ async fn create_scene_host(
         interaction_count: 0,
         mesh_build_count: 0,
         catalog_operations: HashMap::new(),
-        managed_provision_tokens: HashMap::new(),
-        managed_world_starts: HashMap::new(),
-        stale_managed_start_completion_count: 0,
+        lobby_world_starts: HashMap::new(),
+        stale_lobby_start_completion_count: 0,
         render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
@@ -2193,13 +2125,12 @@ impl WebSceneHost {
             pending.instance_id.get(),
             match &pending.target {
                 mclone_scene::ExternalSceneStartTarget::ActiveSession
-                | mclone_scene::ExternalSceneStartTarget::ManagedScenario {
-                    role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary,
+                | mclone_scene::ExternalSceneStartTarget::Lobby {
+                    role: mclone_app_runtime::scenario_content::LobbyWorldRole::Primary,
                     ..
                 } => RuntimeRenderPriority::Active,
-                mclone_scene::ExternalSceneStartTarget::ManagedScenario {
-                    role:
-                        mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination,
+                mclone_scene::ExternalSceneStartTarget::Lobby {
+                    role: mclone_app_runtime::scenario_content::LobbyWorldRole::Destination,
                     ..
                 } => RuntimeRenderPriority::Standby,
             },
@@ -2507,15 +2438,11 @@ impl WebSceneHost {
         self.write_common_counts(&object)?;
 
         if let Some(host) = self.host.as_ref() {
-            report_set_bool(
-                &object,
-                "managedScenarioLaunchActive",
-                host.managed_scenario_launch_active(),
-            )?;
+            report_set_bool(&object, "lobbyLaunchActive", host.lobby_launch_active())?;
             report_set_number(
                 &object,
-                "staleManagedStartCompletionCount",
-                self.stale_managed_start_completion_count as f64,
+                "staleLobbyStartCompletionCount",
+                self.stale_lobby_start_completion_count as f64,
             )?;
             report_set_number(
                 &object,
@@ -2524,8 +2451,8 @@ impl WebSceneHost {
             )?;
             report_set_string(
                 &object,
-                "managedScenarioDestinationFailure",
-                host.managed_scenario_destination_failure().unwrap_or(""),
+                "lobbyDestinationFailure",
+                host.lobby_destination_failure().unwrap_or(""),
             )?;
             let camera = host.camera_frame_state();
             report_set_number(&object, "cameraX", camera.camera.eye.x)?;
@@ -3912,17 +3839,6 @@ fn direction_label(direction: Direction) -> &'static str {
         Direction::South => "south",
         Direction::West => "west",
         Direction::East => "east",
-    }
-}
-
-fn managed_world_role_label(
-    role: mclone_app_runtime::scenario_content::ManagedScenarioWorldRole,
-) -> &'static str {
-    match role {
-        mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Primary => "primary",
-        mclone_app_runtime::scenario_content::ManagedScenarioWorldRole::Destination => {
-            "destination"
-        }
     }
 }
 

@@ -359,7 +359,7 @@ impl ClientCatalogController {
 
     fn request_delete_all_local_worlds(
         &mut self,
-        include_managed_content: bool,
+        include_app_private_content: bool,
     ) -> ClientCatalogEffects {
         if self.active_world.is_some() {
             self.ui.status =
@@ -372,7 +372,7 @@ impl ClientCatalogController {
         }
         self.queue_catalog_request(
             WorldCatalogRequest::DeleteAllLocalWorlds {
-                include_managed_content,
+                include_app_private_content,
             },
             PendingCatalogRequest::DeleteAll,
         )
@@ -1052,7 +1052,7 @@ mod tests {
             summary("alpha-base", "Alpha Base", 11),
             summary("beta-mine", "Beta Mine", 22),
         ];
-        for (action, include_managed_content) in [
+        for (action, include_app_private_content) in [
             (GameStorageAction::DeleteAllLocalWorlds, false),
             (GameStorageAction::FactoryReset, true),
         ] {
@@ -1064,7 +1064,7 @@ mod tests {
             assert_eq!(
                 request.request,
                 WorldCatalogRequest::DeleteAllLocalWorlds {
-                    include_managed_content,
+                    include_app_private_content,
                 }
             );
 
