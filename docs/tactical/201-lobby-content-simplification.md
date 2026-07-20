@@ -1,7 +1,7 @@
 # Tactical 201: Lobby Content Simplification
 
-Status: proposed and ready for implementation review — direction accepted
-2026-07-20; implementation has not started.
+Status: active 2026-07-20 — direction accepted; Slice 0 baseline complete and
+Slice 1 in progress.
 
 Topic: `embedded-worlds`
 
@@ -200,6 +200,40 @@ fallback explicit before cutover.
 
 Exit: deletion targets and preserved behavioral outcomes are exact; no source-
 shape lock is mistaken for a product requirement.
+
+Completed 2026-07-20. The production dependency inventory confirms that the
+installer is confined to `scenario_content`, the scene launch ledgers, native
+scenario staging/path resolution, browser Wasm preparation/validation exports,
+the one-shot provision Worker, main-app operation draining, and their source-
+shape tests. Ordinary catalog creation and opened-world persistence are
+separate consumers and already provide the replacement fallback path.
+
+The shared authored fixture builder already produces canonical chunk and
+entity-chunk records, while both native and browser integrated-server assembly
+already accept injected `WorldStore` implementations. The first implementation
+seam is therefore a memory-backed authored bootstrap selected in opaque Rust
+startup configuration; it requires no authored record transport through
+TypeScript.
+
+Baseline validation:
+
+- `cargo test -p mclone-app-runtime scenario_content --lib`: 18 passed;
+- `cargo test -p mclone-scene --test one_world_ownership_contract --test
+  composable_world_presentation_contract`: 27 passed and one GPU
+  characterization ignored; and
+- two warm native `pnpm native:lobby-scenario:smoke` attempts reached a visible,
+  switchable preview and respectively the outbound and return activation, but
+  missed the existing fixed 320-frame completion deadline. This pre-change
+  timing failure is retained for comparison rather than attributed to the
+  implementation.
+
+Current browser topology is one render Worker plus one active and optionally
+one standby integrated-server Worker, with server-job Workers beneath each as
+needed. Managed startup temporarily adds one one-shot provisioning Worker.
+The direct path has no managed Worker or second integrated-server runtime.
+Legacy native scenario directories and IndexedDB `managedWorlds` records are
+app-private and can remain inert; no ordinary catalog data is in the deletion
+set.
 
 ### Slice 1: shared transient authored bootstrap
 
