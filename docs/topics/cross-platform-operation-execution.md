@@ -2,13 +2,12 @@
 
 Topic: `cross-platform-operation-execution`
 
-Status: high-level actor/mailbox direction accepted 2026-07-20. The earlier
-proposal to make managed-scenario provisioning its first worked actor is
-superseded by
-[`Tactical 201`](../tactical/201-lobby-content-simplification.md). That tactical
-first removes the accidental installer and its TypeScript policy surface. New
-coarse-operation actors should be derived only from real needs that remain
-after the cleanup.
+Status: high-level actor/mailbox direction accepted and post-cleanup ownership
+audit completed 2026-07-20. Tactical
+[`201`](../tactical/201-lobby-content-simplification.md) removed the accidental
+managed installer and its TypeScript policy surface. The smaller system does
+not currently justify a successor coarse-operation actor tactical; the model
+remains the rule for real asynchronous subsystem owners as they arise.
 
 ## Top-Level Frame
 
@@ -139,10 +138,11 @@ connection and writer lease, into one named thread. The server sends typed
 `WorldStoreRequest` values and polls typed completions. Arbitrary compute
 workers do not open the writable database.
 
-The current managed lobby path also starts native provisioning work on a
-background thread, stages scenario directories, creates SQLite stores, and
-publishes through rename. Tactical 201 treats this as deletion inventory, not
-as a native strength that the target architecture must preserve.
+The former managed lobby path also started native provisioning work on a
+background thread, staged scenario directories, created SQLite stores, and
+published through rename. Tactical 201 deleted that parallel installer. Native
+lobby startup now uses a transient authored memory store plus an ordinary
+catalog or app-private SQLite destination.
 
 ### Current browser topology
 
@@ -181,10 +181,10 @@ TypeScript executes IndexedDB transactions and returns completions to that same
 Rust actor. External `SharedArrayBuffer` mailboxes are shared byte transports
 between private Wasm heaps, not a shared Rust object heap.
 
-The current one-shot managed-scenario Worker is separate from this ordinary
-opened-world path. Its TypeScript code interprets scenarios, validation,
-publication, repair, and conflict recovery. Tactical 201 removes that workflow
-rather than turning it into another permanent Worker role.
+The former one-shot managed-scenario Worker was separate from this ordinary
+opened-world path. Tactical 201 deleted it and its TypeScript validation,
+publication, repair, and conflict workflow rather than turning it into another
+permanent Worker role.
 
 ### Topology equivalence
 
@@ -247,10 +247,10 @@ It does not require existing proven actors to adopt
 sockets, and coarse operations may retain specialized mailbox types and
 transports while satisfying the same ownership model.
 
-Managed-scenario provisioning is no longer a target actor. Tactical 201 is the
-authorized next work: remove that special subsystem, retain the embedded-world
-behavior on ordinary primitives, and then inventory what cross-platform
-operation problems actually remain.
+Managed-scenario provisioning is not a target actor. Tactical 201 removed that
+special subsystem and retained the embedded-world behavior on ordinary
+primitives. The completed post-cleanup inventory found no replacement
+provisioning operation to standardize.
 
 Out of scope:
 
@@ -349,9 +349,10 @@ coarse operation benefits from it. Do not route persistence, compute, render,
 or sockets through it solely for structural uniformity, and do not preserve the
 managed lobby operation just to create a consumer.
 
-## Lobby Provisioning Is A Boundary Correction
+## Lobby Simplification Confirms The Boundary
 
-The current implementation has two layers that should not be conflated:
+The pre-Tactical-201 implementation had two layers that should not be
+conflated:
 
 1. The embedded-world product and engine proof: two `RealmServer`s, observer
    warmup, retained preview, supported promotion, complete-slot exchange, and
@@ -360,7 +361,7 @@ The current implementation has two layers that should not be conflated:
    classification, repair policy, native staging/publication, a one-shot web
    Worker, and a TypeScript provisioning workflow.
 
-Only the first layer is a durable requirement. The accepted replacement is:
+Only the first layer was a durable requirement. The landed replacement is:
 
 ```text
 shared Rust lobby launch coordinator
@@ -391,7 +392,7 @@ readiness, preview, and slot installation. That coordinator may use an actor or
 operation mailbox where asynchronous startup requires one. It is not a
 storage-installer actor.
 
-The complete implementation and deletion sequence lives in
+The completed implementation and deletion sequence lives in
 [`Tactical 201`](../tactical/201-lobby-content-simplification.md).
 
 ## Storage Access And Resolution
@@ -521,29 +522,53 @@ layer's state from a timeout alone.
    destination becomes a stable app-private ordinary persistent world.
 9. Existing legacy managed records may remain inert; this work does not add
    runtime schema upgrades or destructive migration.
-10. Tactical 201 lands before any new provisioning-actor or generic
-    administrative IndexedDB executor work.
-11. After the cleanup, remaining TypeScript semantic code and coarse-operation
-    consumers are inventoried again. New actors are justified individually.
+10. Tactical 201 landed without a new provisioning actor or generic
+    administrative IndexedDB executor.
+11. The post-cleanup TypeScript and coarse-operation inventory found no current
+    consumer that justifies another shared actor. New actors remain justified
+    individually.
 12. A production cut removes superseded code rather than maintaining parallel
     old/new paths.
 
-## Questions For Tactical 201
+## Post-Cleanup Audit Findings
 
-1. What is the smallest path-free transient bootstrap type that can populate
-   the ordinary in-memory store before `RealmServer` startup?
-2. What stable app-private key preserves the useful fallback identity without
-   carrying managed-content semantics?
-3. Can native legacy scenario directories remain inert, or should only the
-   already reviewed explicit factory-reset path remove them?
-4. Which `PlatformOperationService` pieces have another production consumer
-   after managed provisioning is deleted?
-5. Which behavior locks protect the embedded-world product outcomes without
-   locking in installer source shape?
+The Tactical 201 questions now have concrete answers:
 
-These are bounded implementation questions. A new durable-lobby, downloadable-
-content, or destructive-migration requirement is a stop condition for renewed
-product review, not permission to restore the installer implicitly.
+1. `LobbyWorldSource::TransientAuthored(AuthoredWorldFixtureKind)` is sufficient.
+   Server assembly creates a fresh ordinary `MemoryWorldStore` directly from
+   shared Rust fixture records before startup.
+2. `AppPrivateWorldKey::LobbyFallback` preserves a path-free logical identity.
+   Platform Rust resolves it to the existing native directory or stable
+   IndexedDB world id without exposing that physical choice to scene policy.
+3. Legacy native scenario directories and IndexedDB `managedWorlds` records
+   remain inert. No live migration, schema upgrade, scan, or destructive reset
+   was required.
+4. `PlatformOperationService` still has a real production catalog consumer in
+   `WorldCatalogExecutor`. The smaller `PlatformOperationLedger` also usefully
+   owns web scene-session and lobby runtime-start identities. There is no
+   surviving managed-administration consumer.
+5. Product locks now assert transient fresh reset, protected authority,
+   catalog/app-private selection, cancellation and stale completion, preview
+   readiness, A-to-B-to-A activation, persistence, and direct-path isolation
+   without naming installer phases or payloads.
+
+The production ownership classification is now:
+
+- integrated server, worldgen, lighting, persistence, render compilation, and
+  remote sockets already have Rust actors/mailboxes;
+- catalog, web scene-session lifecycle, and lobby runtime starts already use
+  bounded Rust continuations or operation ledgers; and
+- TypeScript owns Worker, timer, message/SAB, IndexedDB, WebSocket, DOM/input,
+  and presentation mechanics. The Worker ownership gate reports every
+  registered domain-policy debt at zero.
+
+No new tactical follows from this audit. Creating a coarse actor now would
+manufacture an abstraction without a semantic state owner. Re-open the question
+only when current code contains a concrete duplicated sequence or a new product
+operation with mutable policy, lifecycle, and measurable acceptance behavior.
+A future durable-lobby, downloadable-content, or destructive-migration
+requirement still requires renewed product review rather than implicit
+restoration of the deleted installer.
 
 ## Alternatives Rejected
 
@@ -597,10 +622,10 @@ Direct `web_sys` access remains a possible adapter replacement. It does not
 change the actor/mailbox architecture and is not required to remove domain
 policy from TypeScript.
 
-## Authorized Tactical Sequence
+## Completed Tactical Sequence
 
-[`Tactical 201`](../tactical/201-lobby-content-simplification.md) is the next
-implementation slice:
+[`Tactical 201`](../tactical/201-lobby-content-simplification.md) completed this
+sequence:
 
 1. baseline the current dependencies and preserved product behavior;
 2. add the shared transient authored bootstrap;
@@ -609,9 +634,9 @@ implementation slice:
 5. delete the managed Rust/TypeScript provisioning paths atomically; and
 6. validate lifecycle, persistence, performance, pixels, and platform lanes.
 
-After Tactical 201, inventory the production TypeScript boundary and remaining
-coarse operations again. Apply the shared actor model to a next consumer only
-when it owns real mutable state or sequencing that must remain consistent
+The required post-completion inventory is recorded above. It authorizes no
+immediate successor tactical. Apply the shared actor model to a next consumer
+only when it owns real mutable state or sequencing that must remain consistent
 across native and web.
 
 ## Validation Expectations
@@ -630,6 +655,15 @@ across native and web.
 - the direct one-world path retains its thread/Worker, memory, and frame-time
   envelope.
 
+These checks passed in shared tests, native flat/stereo and catalog smokes,
+browser semantic desktop/mobile, catalog, persistence and lifecycle probes,
+Worker/type ownership gates, and flat Android plus Quest/OpenXR APK builds.
+Native captures were inspected. On this Linux host, Chromium returned fully
+transparent WebGPU screenshots for lobby and unrelated control probes despite
+nonzero Rust draw receipts; headed Xvfb and both installed Chromium channels
+reproduced it. That host capture defect is recorded in Tactical 201 rather than
+weakening pixel assertions or treating transparent images as product evidence.
+
 ### Continuing actor boundary
 
 - platform types do not enter shared actor or operation contracts;
@@ -642,16 +676,14 @@ across native and web.
 
 ## Code And Documentation Map
 
-Core operation and lobby cleanup targets:
+Current operation and lobby owners:
 
 - `native/crates/mclone-app-runtime/src/platform_operation.rs`
 - `native/crates/mclone-app-runtime/src/scenario_content.rs`
-- `native/crates/mclone-app-runtime/src/scenario_content/native.rs`
 - `native/crates/mclone-scene/src/warm_world.rs`
 - `native/crates/mclone-scene/src/session.rs`
 - `native/apps/mclone-web-client/src/web_scene_host.rs`
 - `native/apps/mclone-web-client/www/mclone-web-world-catalog.ts`
-- `native/apps/mclone-web-client/www/mclone-managed-scenario-provision-worker.ts`
 - `native/apps/mclone-web-client/www/mclone-web-app.ts`
 
 Shared actor/mailbox precedents:
@@ -684,10 +716,9 @@ Vanilla reference:
 
 ## Recommended Direction
 
-- Run Tactical 201 before building any new managed-provisioning actor or
-  generalized administrative IndexedDB executor.
-- Preserve the embedded-world product proof while deleting its accidental
-  installer.
+- Treat Tactical 201 as the completed subtraction proof; do not rebuild its
+  deleted installer as a managed-provisioning actor or generalized
+  administrative IndexedDB executor.
 - Treat shared Rust actors and typed mailboxes as the logical concurrency
   model for the core systems that remain.
 - Map that model onto native threads/direct calls and browser Workers/callbacks
@@ -700,8 +731,11 @@ Vanilla reference:
 - Preserve native direct execution and use the vanilla
   `IOWorker`/`ProcessorMailbox` ownership lesson without copying Java's runtime
   shape.
+- Start another tactical only from a named remaining semantic owner or a
+  concrete new operation, not from a desire to make the topology look more
+  uniform.
 
-The important first move is subtraction. Once the lobby runs on a transient
-authored store plus ordinary persistent destinations, re-evaluate the remaining
-cross-platform operation surface from the smaller system rather than porting
-the deleted machinery into a cleaner abstraction.
+The important result is that subtraction worked. The lobby now runs on a
+transient authored store plus ordinary persistent destinations, and the
+remaining cross-platform operation surface already fits the actor/mailbox
+model closely enough that no follow-up abstraction is currently warranted.

@@ -19,26 +19,25 @@ promotes that connection to one ordinary player, demotes and saves the source
 player to an observer, waits for authoritative safe arrival, and then exchanges
 the retained slots. The same exchange runs in reverse for A-to-B-to-A.
 
-Next direction accepted 2026-07-20: the embedded-world proof and product remain,
-but the persistent managed-content installer is accidental complexity rather
-than a durable engine boundary. Tactical
-[`201`](../tactical/201-lobby-content-simplification.md) replaces the primary
-with a transient Rust-authored lobby, routes the empty-catalog fallback through
-ordinary app-private persistence, and then deletes native/browser provisioning
-machinery. The implemented-state record below remains accurate until that
-tactical lands; its installer shape is not the target architecture.
+Tactical [`201`](../tactical/201-lobby-content-simplification.md) completed on
+2026-07-20. The embedded-world proof and product remain, but the persistent
+managed-content installer, native staging/publication, browser provisioning
+Worker, and TypeScript workflow are gone. The primary is a fresh transient
+Rust-authored lobby; the destination is the most recent compatible catalog
+world or a stable ordinary app-private persistent fallback.
 
 Status: **a closed, measured scene-owned warm-world milestone, a live-diorama
 tactical through completed local Slice 6, a completed native menu-launched
 protected lobby productization milestone, completed shared Web/WASM lobby
 parity, and a completed composable-world-presentation and live-preview actor
 milestone through Slice 7, completed Tactical 185 observer adoption, plus
-completed configurable catalog-world
-destinations and supported-arrival acceptance. Portable scenario content,
+completed configurable catalog-world destinations, supported-arrival
+acceptance, and completed lobby-content simplification. Transient authored
+lobby bootstrap,
 shared immutable second-slot terrain and actor resources, per-world actor
 presentation/cache state, slot-targeted startup/readiness/activation/swap policy,
-catalog-excluded IndexedDB provisioning, one compiler broker, dual browser
-runtime ownership, production desktop/mobile preview and activation,
+ordinary catalog/app-private destination persistence, one compiler broker,
+dual browser runtime ownership, production desktop/mobile preview and activation,
 persistence, adversarial lifecycle rejection, and final performance/platform
 closeout are landed.**
 `McloneSceneHost` now submits a bounded region of its retained persistent local
@@ -67,36 +66,26 @@ and stereo A-to-B-to-A receipts prove that the first uncovered frame already
 draws the destination with no boundary compile, upload, runtime creation, or
 renderer materialization. There is still no N-world registry or remote
 preview, but simultaneous shared-depth terrain composition and local activation
-are now concrete. The first product surface is also live: shared native
-profiles expose `Enter Lobby`, versioned managed authored content resolves
-outside the user catalog, and separate tokened primary/destination operations
-make the protected lobby playable before the fixed island is ready. The
-destination renderer shell is prepared under startup cover, then the island
-appears through the existing exact readiness gate. The same flat and
-synthetic-stereo menu path completes A-to-B-to-A activation. Flat lifecycle
-proof also cancels a pending launch, quits, reuses the same managed content,
-and reaches a second live preview. Shared Rust now issues independent tokened,
-storage-neutral provisioning and role-aware slot-start operations, and owns
-external-runtime readiness and complete-slot activation without WASM policy
-stubs. The production browser now exposes the same title action only after its
-complete managed-service boundary is installed. It makes the protected lobby
-playable while the destination warms, then submits the bounded island at 1:8
-scale through the shared full-frame composition path on desktop and mobile.
-Managed storage reuses the existing chunk/entity stores, adds one metadata
-store, and delegates all fixture generation and validation to shared Rust in a
-short-lived provisioning Worker after a direct 22-40 ms main-thread
-measurement rejected inline work. One host compiler Worker serves both live
-world sessions, and both draw stores share the compatible atlas/pipeline owner.
-A server-owned behavior profile travels with each slot: the managed lobby
-authoritatively denies player break/place while the island remains mutable,
-including after complete-slot exchanges. Production mouse and touch input now
-drive the same scene-owned activation in both directions. Browser IndexedDB
-preserves an island edit across complete two-runtime shutdown and relaunch.
-Shared operation-token, role, and world-identity checks reject a late runtime
-before either slot can be installed; deterministic receipts cover Back during
-provisioning, Quit during destination startup, destination-only failure, asset
-replacement during warmup, renderer-resource rebuild, and visibility
-suspension/resume. No TypeScript scenario state machine was added.
+are now concrete. The first product surface is also live: shared native and web
+profiles expose `Enter Lobby`, and separate tokened primary/destination starts
+make a fresh transient protected lobby playable before its persistent
+destination is ready. Shared Rust constructs the authored lobby in an ordinary
+memory store, selects a recent compatible catalog world or an app-private
+fallback, and owns external-runtime readiness plus complete-slot activation.
+The destination renderer shell is prepared under startup cover and appears
+through the existing exact readiness gate. Flat, synthetic-stereo, desktop
+browser, and mobile browser lanes complete A-to-B-to-A activation. One host
+compiler Worker serves both browser world sessions, while both draw stores
+share the compatible atlas/pipeline owner. A server-owned behavior profile
+travels with each slot: the lobby authoritatively denies player break/place
+while the destination remains mutable, including after complete-slot
+exchanges. Browser IndexedDB preserves destination edits across complete
+two-runtime shutdown and relaunch. Shared operation tokens and world identity
+reject late starts; deterministic receipts cover Back during primary startup,
+Quit during destination startup, destination-only failure, asset replacement,
+renderer-resource rebuild, and visibility suspension/resume. TypeScript starts
+Workers and executes storage/transport mechanics from Rust-owned tickets; it
+contains no lobby content or sequencing state machine.
 Separately,
 `mclone-app-runtime/tests/dual_integrated_hosts.rs` retains two native
 integrated-server runners, connection adapters, and client replicas at once.
@@ -165,15 +154,14 @@ shared depth and zero source-local preview players. The direct actor path
 remains byte-identical and within its measured noise envelope, while preview
 diagnostics separately
 expose selection, rejection, cache, GPU-capacity, and placed-pipeline costs.
-Versioned v2 managed content now carries shared Rust-authored entity codec
-records without reinterpreting v1 storage. Its stable cow and chicken load,
-tick, publish, persist, and move through ordinary authority and AI. Native and
-production browser desktop/mobile receipts observe the same chicken id and
-source/composed displacement, publish it to a visible frame in one frame, and
-show changed tabletop pixels. A-to-B-to-A and full reopen retain both entity
-ids without duplication, while TypeScript remains only a storage/Worker
-adapter. The native and browser direct paths remain within their measured
-noise envelopes. Tactical 179 Slice 7 closed the joined-player receipt at that
+Persistent destination entity records load, tick, publish, persist, and move
+through ordinary authority and AI. Native and production browser
+desktop/mobile receipts observe stable world-qualified actor identity and
+source/composed displacement, then publish movement to a visible frame in one
+frame. A-to-B-to-A and full reopen retain destination actors without
+duplication, while TypeScript remains only a storage/Worker adapter. The native
+and browser direct paths remain within their measured noise envelopes.
+Tactical 179 Slice 7 closed the joined-player receipt at that
 historical checkpoint: shared integrated-server tracking pairs local and
 dedicated players symmetrically,
 and a shared Rust-authored destination script drives one
@@ -216,8 +204,9 @@ that relocation is gone. A later catalog acceptance lane also found renderer
 shell preparation could race primary-lobby replacement, so shared scene policy
 now prepares the shell at post-lobby destination start. Neither correction
 forks gameplay or rendering by platform. Native flat/stereo and production
-browser WebGPU desktop/mobile lanes prove 2x2/4x4 managed and catalog journeys,
-recency semantics, A-to-B-to-A, persistence, and stable supported landing.
+browser WebGPU desktop/mobile lanes prove 2x2/4x4 app-private and catalog
+journeys, recency semantics, A-to-B-to-A, persistence, and stable supported
+landing.
 Direct single-world pixels remain byte-identical and native/browser controls
 remain within the accepted performance envelope.
 
@@ -227,10 +216,10 @@ and one-active-authority handoff remain separate later split-world work.
 Tactical 174's available-lane lifecycle closeout now flushes both retained
 worlds, drops a standby before asset-epoch or device-resource replacement, and
 proves both persistent roots survive independent edits. Capable-device
-multiview execution remains a named receipt gap. Last reconciled: 2026-07-15
-(Tactical 178 Slices 0-8, Tactical 179 Slices 0-7, and Tactical 180 Slices 0-5
-complete; the current Metal adapter did not expose `MULTIVIEW`, and no headset
-was attached for a new real-device scenario receipt).
+multiview execution remains a named receipt gap. Last reconciled: 2026-07-20
+(Tacticals 178, 179, 180, 185, and 201 complete; the current Metal adapter did
+not expose `MULTIVIEW`, and no headset was attached for a new real-device
+scenario receipt).
 
 ## Motivation
 
@@ -828,26 +817,25 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
-First implement
-[`Tactical 201`](../tactical/201-lobby-content-simplification.md): retain the
-landed lobby, preview, activation, and return behavior while replacing the
-managed installer with a transient authored primary and an ordinary app-private
-persistent fallback. Do not preserve provisioning-shaped source locks merely
-because the completed tacticals below used them to prove the product.
+[`Tactical 201`](../tactical/201-lobby-content-simplification.md) completed the
+content-boundary cleanup: the lobby, preview, activation, and return behavior
+remain on a transient authored primary plus ordinary catalog/app-private
+destinations, with no managed installer or provisioning-shaped source locks.
+Its post-cleanup audit found no need for a replacement coarse-operation actor.
 
-Tactical 178 closed browser parity without a second scenario implementation.
-The web host consumes the same shared managed provision/start operations as
-native and keeps the protected lobby plus mutable island alive in two
-independent integrated-server Workers. One compiler Worker qualifies local
-request ids by stable world instance, prioritizes active work, and owns
-per-world snapshot mirrors forked from one immutable parsed asset template.
-The production desktop/mobile title reaches a playable protected lobby, shows
-the shared-depth island preview, activates through mouse and touch in both
-directions, persists an island edit, and rejects late completion across Quit,
-asset replacement, and resource rebuild. Standby cadence travels through the
-typed runtime operation. Shutdown leaves zero server, compiler, or
-provisioning Workers. Feature-off native/browser comparisons and scenario-on
-CPU/frame/memory/Worker receipts are recorded in the tactical.
+Tactical 178 closed browser parity without a second scenario implementation;
+Tactical 201 then removed its managed provision operation while retaining the
+shared runtime-start boundary. The web host keeps the protected lobby plus
+mutable destination alive in two independent integrated-server Workers. One
+compiler Worker qualifies local request ids by stable world instance,
+prioritizes active work, and owns per-world snapshot mirrors forked from one
+immutable parsed asset template. The production desktop/mobile title reaches a
+playable protected lobby, shows the shared-depth destination preview, activates
+through mouse and touch in both directions, persists destination edits, and
+rejects late completion across Quit, asset replacement, and resource rebuild.
+Standby cadence travels through the typed runtime operation. Shutdown leaves
+zero server or compiler Workers. Feature-off native/browser comparisons and
+scenario-on CPU/frame/memory/Worker receipts are recorded in the tacticals.
 
 Tactical 179 completed the bounded composition campaign. It kept that shared
 runtime/platform foundation, extracted one terrain-led placement/bounds/clip
@@ -874,7 +862,7 @@ bounded simultaneous-geometry plan lives in
    green.
 4. Keep Tactical 178's dual-runtime compiler identity,
    activation/persistence lifecycle, and feature-off performance gates green
-   while removing its managed web provisioning path through Tactical 201.
+   with Tactical 201's managed web provisioning path permanently absent.
 5. Keep Tactical 179's completed terrain normalization, half-space proof,
    per-world actor ownership, and live creature/player diorama green through
    one shared native and web path.

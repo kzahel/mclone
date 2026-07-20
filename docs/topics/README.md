@@ -133,8 +133,9 @@ series implements the same concern, normally reuse the document slug in its
 - [`cross-platform-operation-execution.md`](cross-platform-operation-execution.md):
   accepted shared Rust actor/mailbox direction across native threads and
   browser Workers while preserving direct native execution and domain-blind
-  TypeScript. Tactical 201 first removes the accidental managed-lobby installer
-  before any new coarse-operation actor is derived from the remaining system.
+  TypeScript. Completed Tactical 201 removed the accidental managed-lobby
+  installer; the post-cleanup audit found no immediate coarse-operation actor
+  tactical to add.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted
@@ -174,7 +175,7 @@ series implements the same concern, normally reuse the document slug in its
   baked→live-local→remote-spectator→joined-warm fidelity ladder, N-world budget,
   runtime/authority/render seams, retained previews, A-to-B-to-A switching, and
   the protected single-world fast path. Tactical
-  [`201`](../tactical/201-lobby-content-simplification.md) owns the accepted
+  [`201`](../tactical/201-lobby-content-simplification.md) records the completed
   simplification from managed installed content to a transient authored lobby
   and ordinary persistent destinations.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture

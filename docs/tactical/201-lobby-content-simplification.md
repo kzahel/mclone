@@ -1,7 +1,10 @@
 # Tactical 201: Lobby Content Simplification
 
-Status: active 2026-07-20 — Slices 0-4 complete except final rendered-output
-validation for Slice 2; Slice 5 is in progress.
+Status: completed 2026-07-20. All implementation slices are closed. Native
+flat/stereo pixels were inspected; the current Linux Chromium/WebGPU capture
+environment returned transparent images for lobby and unrelated controls, so
+the browser pixel limitation is recorded explicitly rather than hidden by a
+weakened gate.
 
 Topic: `embedded-worlds`
 
@@ -284,10 +287,11 @@ library compilation, and browser TypeScript build/typecheck pass. The native
 lobby smoke reached lobby, preview, outbound activation, and return before the
 known fixed 320-frame relaunch deadline. The browser probe made the protected
 lobby playable in 731 ms, denied break/place, produced a switchable preview,
-and completed A-to-B-to-A with no page errors. Its headless screenshots were
-fully transparent despite nonzero drawn-section and actor receipts, so the
-rendered-output portion of this slice remains pending rather than being
-recorded as a pass.
+and completed A-to-B-to-A with no page errors. Final closeout subsequently
+passed and inspected native flat/stereo output. Browser screenshots remained
+fully transparent despite nonzero drawn-section and actor receipts, including
+in unrelated WebGPU controls; Slice 5 records the environment limitation and
+keeps the pixel gate intact.
 
 ### Slice 3: ordinary app-private fallback
 
@@ -315,9 +319,10 @@ The browser product probe created only integrated-server and render-compiler
 Workers: the managed-content Worker was absent, the destination reported
 `storageSourceKind=app-private`, the catalog remained empty, and A-to-B-to-A
 completed with no page errors. Native likewise reached preview, outbound
-activation, return, and a second fresh lobby launch. The existing fixed native
-relaunch deadline and transparent headless browser capture remain the same
-validation limitations recorded under Slice 2.
+activation, return, and a second fresh lobby launch. Slice 5 increased only the
+native smoke allowance and now passes the ordinary-world relaunch. The
+transparent browser capture remains the host-specific limitation recorded
+under Slice 2.
 
 ### Slice 4: atomic old-path deletion
 
@@ -383,6 +388,75 @@ Deletion validation:
 Exit: the embedded-world proof and product remain live, while the accidental
 installer and its TypeScript policy surface are absent.
 
+Completed 2026-07-20. Native fallback, catalog, and synthetic-stereo product
+smokes all pass after replacing the old 320-frame managed-payload deadline
+with a 480-frame allowance for a second ordinary generated-world warmup. The
+flat lane records one cancelled launch, one relaunch, two complete-slot
+switches, protected lobby authority, mutable app-private persistence, supported
+arrival, and no switch-boundary compile/upload/materialization. Its current
+scenario-on receipt records 49 destination chunks, 63 GPU sections, 9,574,992
+estimated terrain bytes, 1,534,376 startup-seed bytes, one shared 8,388,608-byte
+atlas, zero duplicated atlas bytes, and two terrain resource owners. The
+catalog lane selects `recent-lobby-world`, leaves both entries' recency
+unchanged during warmup, updates only the selected row on activation, and also
+completes A-to-B-to-A plus relaunch. The stereo capture has 217,019 differing
+eye pixels and two switches. A flat four-stage contact sheet and the final
+stereo image were inspected directly.
+
+Browser semantic receipts remain strong despite the host capture failure:
+
+- desktop and mobile fallback probes make the transient authored lobby
+  playable, reject break/place, open an app-private destination, draw the
+  bounded preview, and complete A-to-B-to-A with supported first-uncovered
+  frames and zero boundary work;
+- the IndexedDB reload probe reports `ok`, persists a block mutation, rejects
+  a second writer, admits a different world, classifies quota failure, and
+  passes the generic record-executor transaction probe;
+- the catalog UI probe reports `ok` across create, list, open, recency, and
+  delete; and
+- the lifecycle probe passes cancelled primary start, repeated launch,
+  destination-only Worker failure, A-to-B-to-A, actor identity continuity,
+  mutation/reopen persistence, hidden/resume, Quit during destination startup,
+  and asset replacement before the independent render-resource-rebuild step
+  hits the broken WebGPU device.
+
+The browser limitation is reproducible outside the lobby. Google Chrome 150,
+Playwright Chromium, headed Xvfb, the ordinary IndexedDB reload probe, catalog
+UI, and the half-space terrain control all produce a one-color transparent or
+clear canvas while Rust reports real sections, indices, actors, and accepted
+compiler work. The lifecycle resource-rebuild control eventually receives
+zero/invalid WebGPU limits and rejects even a 96-byte mapped buffer. The
+catalog-lobby probe similarly cannot uncover its activation after the device
+stops producing covered frames. No production alpha-mode change fixed the
+host, and that experiment was reverted. Pixel thresholds remain unchanged.
+
+Platform and ownership closeout:
+
+- `pnpm native:android:apk` built the flat Android debug APK through the
+  repository NDK/Gradle script;
+- `pnpm native:android-xr:apk` built the Quest/OpenXR release APK through its
+  repository script;
+- the earlier combined Rust suites, native CLI tests, Android platform check,
+  Wasm/typecheck, Worker ownership gate, and formatting checks remain green;
+- the Worker gate finds five production Worker entries, one generic
+  TypeScript construction site, and zero registered domain-policy debt; and
+- the direct path still constructs no lobby, standby runtime, placed world, or
+  app-private fallback. Its accepted no-scenario control remains the current
+  2.470/4.262 ms average/P95 median versus the 2.492/4.338 ms control; this
+  tactical changed only explicit lobby launch paths. A fresh release
+  frame-budget control on this different Linux host measured 2.840/4.578 ms
+  average/P95 across 240 frames with zero over-budget frames and zero
+  accounting violations. It is a clean feature-off control, not a valid
+  cross-host comparison to the earlier M4 medians.
+
+The post-completion audit found no next actor tactical to authorize. Existing
+integrated-server, job, persistence, render, and socket actors already own
+their semantics. Catalog, web scene-session lifecycle, and lobby runtime starts
+already use Rust-owned continuations or operation ledgers. TypeScript is left
+with browser machinery. A future tactical must start from a concrete remaining
+duplicated sequence or new product operation, not from the deleted installer's
+shape.
+
 ## Validation Requirements
 
 At minimum:
@@ -425,31 +499,27 @@ Stop for review if:
 Routine refactoring, test replacement, inert legacy app-private records, and
 platform-specific physical source resolution are not stop conditions.
 
-## Post-Completion Reassessment
+## Completed Post-Completion Reassessment
 
-Do not pre-authorize a successor tactical while the managed provisioning
-machinery still exists. After every slice above is complete, start a fresh
-review from the smaller production system using this handoff:
-
-> Review completed Tactical 201 and the current cross-platform operation
-> topic. Inventory remaining production TypeScript that understands engine
-> semantics and any native/web sequencing still duplicated. Recommend the
-> smallest next tactical based on the surviving code. Do not assume a
-> replacement for managed provisioning is needed.
-
-The review should read this completed execution record together with
+The required fresh review read this execution record together with
 [`cross-platform-operation-execution.md`](../topics/cross-platform-operation-execution.md)
-and inspect the current code rather than carrying forward the pre-cleanup
-inventory. It should classify each remaining concern as one of:
+and inspected the surviving code. Its result is intentionally no successor
+tactical:
 
-1. no further work because an existing actor/mailbox already owns the policy;
-2. bounded TypeScript ownership cleanup behind an existing Rust owner; or
-3. a real surviving operation that justifies a new shared Rust actor and
-   numbered tactical.
+1. Integrated server, worldgen, lighting, persistence, render compilation, and
+   remote sockets already have Rust actors/mailboxes.
+2. Catalog operations, web scene-session lifecycle, and lobby runtime starts
+   already have bounded Rust continuations or operation ledgers. They do not
+   contain a duplicated native/web semantic workflow.
+3. Production TypeScript owns browser API mechanics. The strengthened Worker
+   gate reports scenario role, authored content, validation, fingerprint,
+   repair, and semantic-result debt at zero.
+4. No surviving operation has both a second policy implementation and enough
+   mutable sequencing to justify a new shared actor.
 
-Create the next tactical only after that classification identifies a concrete
-consumer, state owner, duplicated semantic sequence, and measurable acceptance
-boundary. Absence of a successor is a valid outcome.
+Create a later tactical only after a concrete consumer, state owner, duplicated
+semantic sequence, and measurable acceptance boundary exist. The absence of a
+follow-up abstraction is part of Tactical 201's result, not unfinished work.
 
 ## Deliberate Non-Goals
 

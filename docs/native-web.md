@@ -23,19 +23,22 @@ that one host.
 The web settings-feature profile remains intentionally honest: travel assist,
 frame-pipeline overlay, debug diagnostics, and server simulation cadence are
 its exact remaining reason-bearing gaps in `mclone-app-runtime`. `Enter Lobby`
-is supported. The browser provisions the same Rust-authored protected lobby and
-mutable island into catalog-excluded IndexedDB records, starts two independent
-integrated-server Workers, multiplexes both stable world identities through one
-compiler Worker, and submits the live island through the shared scene/render
-path. The two draw stores share compatible immutable atlas/pipeline resources.
+is supported. Worker-resident Rust instantiates a fresh transient authored
+protected lobby in memory, then opens the most recent compatible catalog world
+or a stable catalog-excluded app-private IndexedDB world as its mutable
+destination. The browser starts two independent integrated-server Workers,
+multiplexes both stable world identities through one compiler Worker, and
+submits the destination through the shared scene/render path. The two draw
+stores share compatible immutable atlas/pipeline resources.
 At the scene and product-policy boundary, TypeScript owns only IndexedDB,
 Promise, Worker, input, and presentation mechanics; it does not choose or
 author scenario content, decide readiness, place geometry, or activate worlds.
-The temporary profile used while those services are installed reports a
-pending initialization state and is promoted atomically before the title is
-presented. Tactical
+Tactical
+[`201-lobby-content-simplification.md`](tactical/201-lobby-content-simplification.md)
+records the deletion of the former managed provisioning Worker and TypeScript
+workflow. Tactical
 [`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
-records the completed parity refactor and feature-off/scenario-on performance
+records the underlying parity refactor and feature-off/scenario-on performance
 evidence. Far LOD is supported through the production shared resident
 compiler/cache/render path.
 

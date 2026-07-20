@@ -180,17 +180,19 @@ audio, or physical-camera authority.
 
 Built-in product scenarios sit above the single-world session leaf. A
 path-free `ScenarioLaunchIntent` is reduced by shared client-experience policy;
-native managed-content execution resolves versioned app-private roots, and
 `McloneSceneHost` owns primary startup plus retained destination attachment.
-The first `LobbyPreview` scenario starts an authored, server-protected lobby
-without waiting for its separately tokened island operation. It prepares the
-duplicate renderer shell under startup cover, then attaches the mutable island
-through the same bounded diorama seam when ready. Cancellation, asset
-replacement, render-resource rebuild, active teardown, and app drop all reuse
-retained-slot ownership. Ordinary startup constructs only a `None` scenario
-operation and retains the direct one-world path. Web shares the intent and UI
-policy but advertises a reason-bearing gap until it has an IndexedDB
-managed-content executor.
+The `LobbyPreview` scenario starts a fresh transient authored,
+server-protected lobby from an ordinary memory store without waiting for its
+separately tokened destination start. Shared policy selects the most recent
+compatible catalog world or a stable catalog-excluded app-private fallback.
+Platform Rust resolves that path-free source to ordinary native SQLite or
+browser IndexedDB session assembly. It prepares the duplicate renderer shell
+under startup cover, then attaches the mutable destination through the same
+bounded diorama seam when ready. Cancellation, asset replacement,
+render-resource rebuild, active teardown, and app drop all reuse retained-slot
+ownership. Ordinary startup constructs no lobby operation and retains the
+direct one-world path. Browser TypeScript constructs Workers and executes
+IndexedDB mechanics from Rust-owned tickets; it owns no scenario workflow.
 
 Atomic gate selection reconciles and maps the destination camera/interest,
 restores runtime cadence, then exchanges the two complete slot values at a

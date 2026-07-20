@@ -28,9 +28,11 @@ platform to choose an appropriate physical storage strategy:
 
 The proposal is deliberately narrower than all world lifecycle work. It covers
 the boundary between authoritative persistence policy and physical record IO.
-World-catalog policy, managed-content provisioning, migration UX, cloud saves,
-and server administration remain separate higher-level concerns even when they
-eventually reuse the same low-level storage machinery.
+World-catalog policy, future installed-content workflows, migration UX, cloud
+saves, and server administration remain separate higher-level concerns even
+when they eventually reuse the same low-level storage machinery. The former
+managed lobby provisioner was deleted by Tactical 201 rather than folded into
+this interface.
 
 ## Implemented Direction
 
@@ -514,16 +516,16 @@ Tactical 199 completed the approved sequence:
 7. **Reassess catalog and app-private storage.** Reuse the lower executor only
    where a surviving consumer simplifies. `WorldCatalog`, app-private source
    resolution, and opened-`WorldStore` policy remain distinct Rust layers. The
-   managed-provisioning layer is instead scheduled for deletion by Tactical
-   201.
+   managed-provisioning layer was deleted by Tactical 201.
 8. **Add filesystem/region strategies only from a real consumer.** The
    interface should permit them; the first campaign need not implement every
    possible backend.
 
-Steps 1-6 are complete. Step 7's managed-storage reuse direction was superseded
-by the lobby simplification decision; its remaining reuse choices stay
-consumer-driven. Step 8 also remains consumer-driven. No long-lived old/new
-browser fallback was retained.
+Steps 1-7 are complete. The lobby simplification removed managed storage rather
+than adding a second executor consumer; catalog and app-private source
+resolution remain deliberately distinct from opened-world persistence policy.
+Step 8 remains consumer-driven. No long-lived old/new browser fallback was
+retained.
 
 ## Acceptance Contract And Evidence
 
@@ -758,7 +760,7 @@ The architecture and full Tactical 199 cutover are accepted. Engine call sites,
 SQLite schema/bytes, IndexedDB version/stores/keys, and private Wasm-memory
 topology were preserved. The old browser bridge was deleted in the production
 cut, and lifecycle/lease/quota/platform evidence passed. Further catalog or
-managed-storage reuse is a new cost/benefit decision rather than unfinished
+installed-content reuse is a new cost/benefit decision rather than unfinished
 work in this campaign.
 
 ## Related Documents And Code

@@ -48,12 +48,14 @@ Capable-device multiview execution remains the same named gap.
 The first shared product scenario is available from every supported title menu
 as `Enter Lobby`. Desktop flat/XR, Android flat/XR, and Web/WASM profiles route
 the same path-free action into `McloneSceneHost`, which launches a protected
-managed lobby and asynchronously warms its live island diorama. Native uses
-app-private SQLite worlds and threads; web uses catalog-excluded IndexedDB
-records and Workers behind the same shared policy. The browser owns two server
-Workers and one namespaced compiler broker while both draw stores reuse one
-immutable terrain resource owner. Flat, synthetic-stereo, production-browser,
-and Android package/AVD gates pass. No TypeScript scenario selection,
+transient Rust-authored lobby and asynchronously warms its destination diorama.
+The destination is the most recent compatible catalog world or a stable
+catalog-excluded app-private ordinary world. Native instantiates the lobby in
+memory and opens destination SQLite normally; web does the same in two server
+Workers with IndexedDB only for the persistent destination. One namespaced
+compiler broker serves both draw stores, which reuse one immutable terrain
+resource owner. Flat, synthetic-stereo, production-browser, and Android
+package/AVD gates pass. No TypeScript scenario selection,
 authorship, readiness, placement, or activation policy exists. Tactical
 [`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
 records the completed parity refactor and performance receipts. A new
