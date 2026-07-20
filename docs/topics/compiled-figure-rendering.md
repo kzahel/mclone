@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 71 |
-| total parts | 1,582 |
-| boxes | 1,377 |
+| figures | 74 |
+| total parts | 1,640 |
+| boxes | 1,435 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 196 |
-| parts with any texture reference | 286 |
-| individual texture applications | 468 |
+| ASCII textures | 209 |
+| parts with any texture reference | 311 |
+| individual texture applications | 514 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 53 | 1,040 | 1,040 | 0 / 0 / 0 |
+| canonical `examples/` | 56 | 1,098 | 1,098 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -480,7 +480,20 @@ sheets and four-cycle videos were rendered under
 continuity, gait cadence, secondary motion, and loop continuity, and approved
 by the user on 2026-07-20.
 
-All 468 applications target an explicit face of a box. They range from single
+The twelfth post-migration content batch adds Donkey, Mallard Duck, and Wild
+Turkey as approved canonical box-only rigs. Donkey is a
+23-part compact gray equid with large four-box ears, upright mane, dorsal
+stripe, pale muzzle, and tasseled tail; Mallard Duck is a 14-part low-bodied
+drake with green head, white neck ring, chestnut breast, blue wing speculum,
+yellow bill, and webbed-foot waddle; and Wild Turkey is a 21-part strutting tom
+with layered bronze wings, bare blue-red neck, snood, wattle, and a parented
+seven-feather display fan. All 58 parts are canonical boxes and use 13 combined
+pixel textures. Clean multi-angle sheets and four-cycle videos were rendered
+under `/tmp/mclone-asset-lab/batch-12`, inspected for identity, grounding,
+attachment continuity, gait cadence, secondary motion, and loop continuity,
+and approved by the user on 2026-07-20.
+
+All 514 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1307,10 +1320,11 @@ Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, Camel/Gorilla/Kangaroo,
 Crocodile/Sea Turtle/King Cobra, Penguin/Flamingo/Peacock,
 Raccoon/Red Squirrel/River Otter, and
 Chimpanzee/Orangutan/Ring-tailed Lemur, Polar Bear/Cheetah/Jaguar, and
-Moose/American Bison/Gemsbok Oryx content batches extend the canonical
-authoring roster to 53 without changing the promoted runtime set. Instancing
-is now the strongest independent performance candidate; box-part LOD and a
-measured sampled/GPU pose path remain separate follow-ups.
+Moose/American Bison/Gemsbok Oryx, and Donkey/Mallard Duck/Wild Turkey content
+batches extend the canonical authoring roster to 56 without changing the
+promoted runtime set. Instancing is now the strongest independent performance
+candidate; box-part LOD and a measured sampled/GPU pose path remain separate
+follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd

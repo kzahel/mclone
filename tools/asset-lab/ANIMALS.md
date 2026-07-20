@@ -109,9 +109,9 @@ reviewed rigs and then filling macro gaps.
 | Horse | P0 | ✅ | Q | brown, black, white, palomino, foal; pony | `examples/horse` — canonical 22-box bay horse with long barrel/legs, angled neck, blaze, animated mane ridge, and hanging tail; rounded A/B retained at `legacy-examples/horse_rounded` |
 | Goat | P1 | ✅ | Q | white, brown, kid, billy (horns + beard) | `examples/goat` — canonical 24-box billy with stepped swept horns, beard, cloven-hoof texture, and upturned tail; rounded A/B retained at `legacy-examples/goat_rounded` |
 | Rabbit | P1 | ✅ | H | brown, white, gray, black, lop-ear, kit | `examples/rabbit` — canonical 18-box rabbit; `legacy-examples/rabbit_rounded` retains the rounded A/B and matching synchronized hop |
-| Donkey / Mule | P2 | ☐ | Q | donkey, mule | horse variant; big ears |
-| Duck | P2 | ☐ | W/S | mallard drake, hen, duckling | walks + paddles; pairs with swim work |
-| Turkey | P2 | ☐ | W | tom (fanned tail), hen | |
+| Donkey / Mule | P2 | ✅ | Q | donkey, mule | `examples/donkey` — approved 23-box adult with compact gray body, large four-box ears, upright mane, dorsal stripe, pale muzzle, and tasseled tail |
+| Duck | P2 | ✅ | W/S | mallard drake, hen, duckling | `examples/mallard_duck` — approved 14-box drake with low gray body, green head, white neck ring, blue wing speculum, yellow bill, and webbed-foot waddle |
+| Turkey | P2 | ✅ | W | tom (fanned tail), hen | `examples/wild_turkey` — approved 21-box strutting tom with bronze wings, bare blue-red neck, snood, wattle, and seven-feather display fan |
 | Llama / Alpaca | P2 | ☐ | Q | white, brown, gray | tall neck |
 
 ## Domestic pets
@@ -224,7 +224,7 @@ reviewed rigs and then filling macro gaps.
 | Parrot | P1 | ✅ | W | red, green, blue, yellow morphs | `examples/parrot` — approved 15-box scarlet macaw with hooked beak, saturated wing bands, and long tail |
 | Eagle / Hawk | P2 | ✅ | W | bald eagle (white head), hawk | `examples/eagle` — approved 15-box bald eagle with broad wings, white head/tail, hooked beak, and talons |
 | Penguin | P2 | ✅ | B | emperor, chick | `examples/penguin` — approved 12-box emperor penguin with hanging flippers, broad webbed feet, and lateral body waddle |
-| Duck | P2 | ☐ | W/S | (see Farm) | |
+| Duck | P2 | ✅ | W/S | (see Farm) | `examples/mallard_duck`; approved drake in Farm section |
 | Pigeon / Dove | P3 | ☐ | W | — | |
 | Crow / Raven | P3 | ☐ | W | — | |
 | Flamingo | P3 | ✅ | W | — | `examples/flamingo` — approved 17-box greater flamingo with angular S-neck, two-stage stilt legs, and slow planted walk |
