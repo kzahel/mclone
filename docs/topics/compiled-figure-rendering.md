@@ -340,20 +340,20 @@ An inventory taken on 2026-07-20 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 50 |
-| total parts | 1,135 |
-| boxes | 930 |
+| figures | 53 |
+| total parts | 1,213 |
+| boxes | 1,008 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 121 |
-| parts with any texture reference | 171 |
-| individual texture applications | 287 |
+| ASCII textures | 130 |
+| parts with any texture reference | 181 |
+| individual texture applications | 298 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 32 | 593 | 593 | 0 / 0 / 0 |
+| canonical `examples/` | 35 | 671 | 671 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -396,7 +396,18 @@ four-cycle walk videos were rendered under `/tmp/mclone-asset-lab/batch-4`,
 inspected for identity, grounding, attachment continuity, gait cadence, and
 loop continuity, and approved by the user on 2026-07-20.
 
-All 287 applications target an explicit face of a box. They range from single
+The fifth post-migration content batch adds Camel, Gorilla, and Kangaroo as
+approved canonical box-only rigs. Camel is a 26-part dromedary with a stepped
+hump, long articulated neck, and broad feet; Gorilla is a 28-part silverback
+with a gray back saddle, long two-stage arms, and knuckle contacts; and
+Kangaroo is a 24-part upright red kangaroo with synchronized hind legs, long
+feet, and a two-stage balancing tail. All 78 parts are canonical boxes and use
+nine combined pixel textures. Clean multi-angle sheets and four-cycle videos
+were rendered under `/tmp/mclone-asset-lab/batch-5`, inspected for identity,
+grounding, attachment continuity, gait or hop cadence, and loop continuity,
+and approved by the user on 2026-07-20.
+
+All 298 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1219,10 +1230,11 @@ Tactical [`200`](../tactical/200-box-only-figure-authoring.md) is complete: its
 20-figure migration baseline is entirely sparse cuboid rigs, all 18 rounded
 sources are isolated in the deprecated compatibility lane, and promoted
 Chicken is re-baselined. The approved Deer/Zebra/Panda, Owl/Parrot/Eagle,
-Fish/Dolphin/Shark, and Giraffe/Rhinoceros/Hippopotamus content batches extend
-the canonical authoring roster to 32 without changing the promoted runtime
-set. Instancing is now the strongest independent performance candidate;
-box-part LOD and a measured sampled/GPU pose path remain separate follow-ups.
+Fish/Dolphin/Shark, Giraffe/Rhinoceros/Hippopotamus, and
+Camel/Gorilla/Kangaroo content batches extend the canonical authoring roster
+to 35 without changing the promoted runtime set. Instancing is now the
+strongest independent performance candidate; box-part LOD and a measured
+sampled/GPU pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd

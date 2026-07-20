@@ -161,7 +161,7 @@ reviewed rigs and then filling macro gaps.
 | Zebra | P2 | ✅ | Q | adult, foal | `examples/zebra` — approved 22-box plains zebra; horse-derived proportions with stripes carried by pixel face textures |
 | Rhino | P2 | ✅ | Q | one-horn, two-horn | `examples/rhinoceros` — approved 25-box two-horn adult with plated shoulders, low head, and broad feet |
 | Hippo | P2 | ✅ | Q | adult, calf | `examples/hippopotamus` — approved 31-box adult with barrel body, high-set eyes, broad feet, and oversized muzzle; also semi-aquatic |
-| Camel | P2 | ☐ | Q | one hump (dromedary), two hump (bactrian) | |
+| Camel | P2 | ✅ | Q | one hump (dromedary), two hump (bactrian) | `examples/camel` — approved 26-box dromedary with stepped hump, long articulated neck, and broad desert feet |
 | Bison / Buffalo | P3 | ☐ | Q | — | hump + shaggy head |
 | Antelope / Gazelle / Impala | P2 | ☐ | Q | horns; springbok, oryx | deer/horse-class rig |
 | Wildebeest / Gnu | P3 | ☐ | Q | — | safari staple |
@@ -174,7 +174,7 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Monkey | P2 | ☐ | B/Q | generic, with baby | long tail; knuckle/upright ambiguity |
-| Gorilla | P2 | ☐ | B/Q | silverback, female, juvenile | knuckle-walk |
+| Gorilla | P2 | ✅ | B/Q | silverback, female, juvenile | `examples/gorilla` — approved 28-box silverback with gray saddle, long articulated arms, and grounded knuckle-walk |
 | Chimpanzee | P3 | ☐ | B/Q | — | |
 | Orangutan | P3 | ☐ | B/Q | — | long arms; orange shag |
 | Lemur | P3 | ☐ | Q/B | ring-tailed | banded tail signature |
@@ -205,7 +205,7 @@ reviewed rigs and then filling macro gaps.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Kangaroo | P2 | ☐ | H | adult, joey-in-pouch | wants `hop`; big tail for balance |
+| Kangaroo | P2 | ✅ | H | adult, joey-in-pouch | `examples/kangaroo` — approved 24-box red kangaroo with synchronized hop, long feet, and two-stage balancing tail |
 | Koala | P3 | ☐ | Q | adult, joey | clinging/climb idle; mostly ST |
 | Wallaby | P3 | ☐ | H | — | smaller kangaroo rig |
 | Wombat | P3 | ☐ | Q | — | stocky; raccoon-class rig |
