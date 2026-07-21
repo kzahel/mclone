@@ -63,40 +63,9 @@ interface AppRuntimeState extends Record<string, any> {
 interface AppRuntime {
   ready: boolean;
   state: AppRuntimeState;
-  adjustCameraSpeed?: (amount: number) => WasmReport | null;
-  previewBlockTarget?: () => WasmReport | null;
-  blockStateAt?: (x: number, y: number, z: number) => WasmReport | null;
-  interactBlock?: (action: string) => Promise<WasmReport | null>;
-  frameEmbeddedPreview?: () => WasmReport | null;
-  frameInteractionSurface?: () => WasmReport | null;
-  renderOneFrameForSmoke?: () => Promise<WasmReport | null>;
-  renderHalfSpaceTerrainProof?: () => Promise<WasmReport | null>;
-  renderPreparedFigureProof?: () => Promise<WasmReport | null>;
-  renderActorCompositionProof?: () => Promise<WasmReport | null>;
-  rebuildRenderResourcesForSmoke?: () => WasmReport | null;
-  openNativeTitleUi?: () => WasmReport | null;
-  openNativePauseUi?: () => WasmReport | null;
-  pauseRendering?: () => void;
-  resumeRendering?: () => void;
-  renderOverviewFrame?: () => WasmReport | null;
-  setDebugOverlay?: (visible: boolean) => WasmReport | null;
-  openNativeHelpUi?: () => WasmReport | null;
-  closeNativeUi?: () => WasmReport | null;
-  handleNativeUiKey?: (key: string) => WasmReport | null;
-  handleNativeUiPointerMove?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
-  handleNativeUiPointerDown?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
-  handleNativeUiPointerUp?: (clientX: number, clientY: number, pointerType?: string) => WasmReport | null;
-  setNativeTouchLookSensitivity?: (value: number, available?: boolean, persist?: boolean) => WasmReport | null;
-  setNativeTouchControlsMode?: (mode: TouchControlsMode, persist?: boolean) => WasmReport | null;
-  touchControlState?: () => any;
-  beginLobbySmoke?: (chunkSpan?: number) => WasmReport | null;
-  backgroundSaveForSmoke?: () => WasmReport | null;
-  shutdownForSmoke?: () => Promise<WasmReport | null>;
 }
 
 declare global {
-  var __mcloneWebApp: AppRuntime;
-  var __mcloneNativeAppReady: Promise<WasmReport>;
   var __MCLONE_NATIVE_WEB_ASSET_VERSION__: string | undefined;
 }
 
@@ -240,51 +209,11 @@ const runtime: AppRuntime = {
   },
 };
 
-globalThis.__mcloneWebApp = runtime;
 installFirstTouchFullscreen(runtime.state);
 
 async function boot(): Promise<WasmReport> {
   const app = new WebFrameDriver();
-  runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
-  runtime.previewBlockTarget = () => runtime.state.currentTarget;
-  runtime.blockStateAt = (x: number, y: number, z: number) => app.blockStateAt(x, y, z);
-  runtime.interactBlock = (action: string) => app.interactBlock(action);
-  runtime.frameEmbeddedPreview = () => app.frameEmbeddedPreview();
-  runtime.frameInteractionSurface = () => app.frameInteractionSurface();
-  runtime.renderOneFrameForSmoke = () => app.renderOneFrameForSmoke();
-  runtime.renderHalfSpaceTerrainProof = () => app.renderHalfSpaceTerrainProof();
-  runtime.renderPreparedFigureProof = () => app.renderPreparedFigureProof();
-  runtime.renderActorCompositionProof = () => app.renderActorCompositionProof();
-  runtime.rebuildRenderResourcesForSmoke = () => app.rebuildRenderResourcesForSmoke();
-  runtime.openNativeTitleUi = () => app.openNativeTitleUi();
-  runtime.openNativePauseUi = () => app.openNativePauseUi();
-  runtime.pauseRendering = () => app.pauseRendering();
-  runtime.resumeRendering = () => app.resumeRendering();
-  runtime.renderOverviewFrame = () => app.renderOverviewFrame();
-  runtime.setDebugOverlay = (visible: boolean) => app.setNativeDebugOverlay(visible);
-  runtime.openNativeHelpUi = () => app.openNativeHelpUi();
-  runtime.closeNativeUi = () => app.closeNativeUi();
-  runtime.handleNativeUiKey = (key: string) => app.handleNativeUiKey(key);
-  runtime.handleNativeUiPointerMove = (clientX: number, clientY: number, pointerType?: string) => (
-    app.handleNativeUiPointerMove(clientX, clientY, pointerType)
-  );
-  runtime.handleNativeUiPointerDown = (clientX: number, clientY: number, pointerType?: string) => (
-    app.handleNativeUiPointerDown(clientX, clientY, pointerType)
-  );
-  runtime.handleNativeUiPointerUp = (clientX: number, clientY: number, pointerType?: string) => (
-    app.handleNativeUiPointerUp(clientX, clientY, pointerType)
-  );
-  runtime.setNativeTouchLookSensitivity = (value: number, available?: boolean, persist?: boolean) => (
-    app.setNativeTouchLookSensitivity(value, available, persist)
-  );
-  runtime.setNativeTouchControlsMode = (mode: TouchControlsMode, persist?: boolean) => (
-    app.setNativeTouchControlsMode(mode, persist)
-  );
-  runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
-  runtime.beginLobbySmoke = (chunkSpan = 2) =>
-    app.beginLobbySmoke(chunkSpan);
-  runtime.backgroundSaveForSmoke = () => app.backgroundSaveForSmoke();
-  runtime.shutdownForSmoke = () => app.shutdownForSmoke();
+  await installSmokeObserverIfRequested(app);
   try {
     await app.init();
     runtime.ready = true;
@@ -304,6 +233,15 @@ async function boot(): Promise<WasmReport> {
     publishRuntimeState(runtime.state);
     return snapshotState();
   }
+}
+
+async function installSmokeObserverIfRequested(app: WebFrameDriver): Promise<void> {
+  const parameters = new URLSearchParams(globalThis.location.search);
+  if (parameters.get("smokeObserver") !== "1") {
+    return;
+  }
+  const observer = await import("./mclone-web-smoke-observer.js");
+  observer.installWebSmokeObserver(runtime, app);
 }
 
 class WebFrameDriver {
@@ -2161,4 +2099,4 @@ function stringifyError(error: unknown): string {
   return String(error);
 }
 
-globalThis.__mcloneNativeAppReady = boot();
+void boot();

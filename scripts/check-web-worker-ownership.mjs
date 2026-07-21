@@ -118,6 +118,16 @@ const moduleRegistry = {
     workerConstruction: false,
     responsibilities: ["browser settings persistence mechanics"],
   },
+  "mclone-web-smoke-observer.ts": {
+    family: "threading-smoke",
+    baselineLines: 0,
+    workerEntry: false,
+    workerConstruction: false,
+    responsibilities: [
+      "query-gated test-client diagnostic exposure",
+      "smoke-only semantic command registry",
+    ],
+  },
   "mclone-web-touch.ts": {
     family: "input-touch",
     baselineLines: 503,

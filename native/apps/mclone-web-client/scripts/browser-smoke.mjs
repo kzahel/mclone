@@ -508,6 +508,7 @@ async function run() {
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
         : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || farLodQuery || lobbyScenarioQuery}`;
       const startupParameters = new URLSearchParams();
+      startupParameters.set("smokeObserver", "1");
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
       const appUrl = startupParameters.size > 0
@@ -612,7 +613,7 @@ async function run() {
           }
           return Array.from(record);
         }, deathUiWorldId);
-        const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(deathUiWorldId)}`;
+        const reloadUrl = `${baseUrl}/app.html?smokeObserver=1&worldStorage=indexeddb&worldId=${encodeURIComponent(deathUiWorldId)}`;
         await page.goto(reloadUrl, { waitUntil: "load" });
         await page.waitForFunction(
           () => globalThis.__mcloneWebApp?.ready === true
@@ -1112,7 +1113,7 @@ async function run() {
         const canvasPixels = analyzePng(canvasPng);
         const report = {
           url: appUrl,
-          reloadUrl: `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(indexedDbReloadWorldId)}`,
+          reloadUrl: `${baseUrl}/app.html?smokeObserver=1&worldStorage=indexeddb&worldId=${encodeURIComponent(indexedDbReloadWorldId)}`,
           screenshotPath,
           pageScreenshotCaptured,
           canvasScreenshotPath,
@@ -1591,7 +1592,7 @@ async function run() {
  * @param {{ websocketUrl: string, stop: () => Promise<void> } | null} remoteServer
  */
 async function serveUntilStopped(baseUrl, remoteServer) {
-  const appUrl = `${baseUrl}/app.html`;
+  const appUrl = `${baseUrl}/app.html?smokeObserver=1`;
   const smokeUrl = remoteServer
     ? `${baseUrl}/?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
     : baseUrl;
@@ -3749,6 +3750,7 @@ async function runIndexedDbReloadProbe(
       generationProfile,
     });
     if (worldTopology) reloadParameters.set("worldTopology", worldTopology);
+    reloadParameters.set("smokeObserver", "1");
     const reloadUrl = `${baseUrl}/app.html?${reloadParameters}`;
     await page.goto(reloadUrl, { waitUntil: "load" });
     await waitForWebAppReady(page);
@@ -3884,7 +3886,7 @@ async function runIndexedDbReloadProbe(
   );
   const quotaProbe = await probeBrowserQuotaFailure(page, baseUrl);
 
-  const reloadUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
+  const reloadUrl = `${baseUrl}/app.html?smokeObserver=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
   await page.goto(reloadUrl, { waitUntil: "load" });
   await waitForWebAppReady(page);
   await installIndexedDbCountHelper(page);
@@ -4095,7 +4097,7 @@ async function probeWorldWriterSessionAdmission(page, baseUrl, worldId) {
   const contender = await page.context().newPage();
   const differentWorldId = `writer-positive-control-${Date.now()}-${Math.trunc(Math.random() * 1_000_000)}`;
   try {
-    const sameWorldUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
+    const sameWorldUrl = `${baseUrl}/app.html?smokeObserver=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}`;
     await contender.goto(sameWorldUrl, { waitUntil: "load" });
     await contender.waitForFunction(
       () => globalThis.__mcloneWebApp?.state?.failed === true,
@@ -4108,7 +4110,7 @@ async function probeWorldWriterSessionAdmission(page, baseUrl, worldId) {
       status: String(globalThis.__mcloneWebApp?.state?.status ?? ""),
     }));
 
-    const differentWorldUrl = `${baseUrl}/app.html?worldStorage=indexeddb&worldId=${encodeURIComponent(differentWorldId)}&generationProfile=flat-grass-v1`;
+    const differentWorldUrl = `${baseUrl}/app.html?smokeObserver=1&worldStorage=indexeddb&worldId=${encodeURIComponent(differentWorldId)}&generationProfile=flat-grass-v1`;
     await contender.goto(differentWorldUrl, { waitUntil: "load" });
     await contender.waitForFunction(
       () => globalThis.__mcloneWebApp?.ready === true
