@@ -1,8 +1,9 @@
 # Tactical 205: Browser Diagnostic Observer Isolation
 
-Status: active 2026-07-21. Tactical 204 removed gameplay meaning from the
-ordinary browser input path. This tactical starts from the remaining
-production report mirror and smoke-only global command registry.
+Status: complete 2026-07-21. The semantic report mirror and smoke command
+registry now live in an explicit query-gated observer, ordinary browser pages
+do not install `__mcloneWebApp`, and the production adapter retains only the
+operational projection needed to execute browser mechanics.
 
 Topic: `platform-host-boundary`
 
@@ -163,12 +164,73 @@ makes a test API look like a product contract.
 
 ## Expected Follow-Up
 
-Tactical 206 should move browser preference identity, defaults, clamping, and
-application into shared Rust; reduce TypeScript to generic preference storage;
-and consolidate initial session/asset bootstrap policy behind a Rust-authored
-plan while preserving autonomous browser setup. It must start from the actual
-production fields left after this tactical rather than from the old mixed
-report surface.
+[`206-browser-preferences-and-bootstrap-policy.md`](206-browser-preferences-and-bootstrap-policy.md)
+moves browser preference identity, defaults, clamping, and application into
+Rust; reduces TypeScript to generic preference storage; and consolidates
+initial session/asset bootstrap policy behind a Rust-authored plan while
+preserving autonomous browser setup. It starts from the actual production
+fields left by this tactical rather than from the old mixed report surface.
+
+## Landed Outcome
+
+`mclone-web-smoke-observer.ts` is now the only installer of
+`__mcloneWebApp`. It is loaded dynamically only when the URL explicitly asks
+for `smokeObserver=1`; an ordinary product page never imports the module or
+defines the global. Browser smoke launchers add that query parameter
+deliberately.
+
+The observer consumes Rust-authored report objects and owns the test-only
+aliases, receipts, and semantic commands needed by Playwright. It is allowed
+to understand the game because it is an explicit test client. Production
+`mclone-web-app.ts` no longer copies camera, movement, world, hotbar,
+statistics, actor, compiler, embedded-world, or UI-screen state, and it no
+longer installs direct semantic smoke methods.
+
+Nine unneeded direct `WebSceneHost` diagnostic exports and one dead camera
+aim helper were deleted. Retained diagnostic commands are reached only through
+the observer facade. The host-boundary source lock now rejects the old
+production registry, broad report/action mirrors, deleted semantic exports,
+and representative game diagnostic fields in the product module.
+
+`mclone-web-app.ts` fell from the tactical's 2,263-line starting inventory to
+1,261 lines. The separately inventoried observer is 391 lines, making the
+ownership visible instead of disguising a test API as product behavior. The
+full authored browser inventory is now 4,090 lines across 17 modules, with all
+56 registered Worker/scene ownership debts still at zero.
+
+The remaining product report reads are operational dispositions and the exact
+preference/bootstrap seams assigned to Tactical 206. In particular, product
+TypeScript still stores look sensitivity and touch-control mode, mirrors a
+small set of startup/render settings, chooses the initial local/remote
+constructor, and assigns the three initial asset-pack roles. None of that was
+silently folded into this diagnostic slice.
+
+## Execution Record
+
+Commits:
+
+- `dadbd70e` (`Gate browser smoke diagnostics explicitly`)
+- `fd0ecc6d` (`Isolate browser semantic diagnostics`)
+- `5528416c` (`Preserve Rust touch availability diagnostics`)
+
+Validation completed on 2026-07-21:
+
+- `pnpm native:web:typecheck`;
+- `cargo check -p mclone-web-client --target wasm32-unknown-unknown`;
+- `cargo test -p mclone-web-client --test platform_host_boundary_lock`;
+- `pnpm native:web:worker-ownership`;
+- `pnpm native:web:scene-host-adoption`;
+- headed Wayland desktop application smoke, including an ordinary-page probe
+  proving `__mcloneWebApp` is absent without opt-in; and
+- headed mobile application smoke through the world, joystick, pause-menu,
+  and options-panel milestones.
+
+The headed desktop and mobile captures were inspected. The desktop world,
+debug/HUD presentation, mobile world and controls, pause menu, and touch-look
+option all rendered correctly. The mobile run caught one real boundary bug:
+product state initialized the observer-only touch-capability field to false
+and overwrote Rust's true report. Removing that product default made the Rust
+observation authoritative.
 
 ## Stop Conditions
 
