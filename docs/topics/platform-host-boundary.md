@@ -2,8 +2,11 @@
 
 Topic: `platform-host-boundary`
 
-Status: direction accepted and current-state audit recorded 2026-07-21. No
-implementation tactical has started. The existing shared scene, input,
+Status: direction accepted and current-state audit recorded 2026-07-21.
+Active Tactical
+[`203`](../tactical/203-shared-interactive-router-native-adoption.md) is
+establishing the shared synchronous interactive router on desktop and flat
+Android before the browser ABI changes. The existing shared scene, input,
 actor/mailbox, rendering, and platform-operation contracts are the foundation;
 the remaining work is to converge the interactive host rim and isolate browser
 diagnostics without replacing those systems with a new universal framework.
