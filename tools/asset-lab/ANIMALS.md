@@ -237,6 +237,7 @@ reviewed rigs and then filling macro gaps.
 | Peacock | P3 | ✅ | W | — | `examples/peacock` — approved 22-box Indian peacock with crest, patterned wings, and parented seven-feather tail fan |
 | Ostrich / Emu | P3 | ✅ | B | — | `examples/ostrich` — approved 21-box male ostrich with tiny white-edged wings, long bare neck, two-stage legs, broad feet, and fast run |
 | Cassowary | P3 | ✅ | B | southern, northern | `examples/cassowary` — approved 23-box southern cassowary with black plumage, cobalt neck, red wattles, tall casque, forest run, and separate defensive kick action |
+| Kiwi | P3 | ✅ | W | brown kiwi, little spotted kiwi | `examples/kiwi` — approved 14-box brown kiwi with a low rounded body, tiny wings, long two-stage bill, planted feet, forage walk, and separate beak-probe action |
 
 ## Marine & aquatic
 
@@ -261,6 +262,7 @@ reviewed rigs and then filling macro gaps.
 | Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |
 | Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
 | Walrus | P2 | ✅ | S/Q | Atlantic, Pacific | `examples/walrus` — review candidate Atlantic walrus with massive wrinkled body, paired whisker pads and tusks, broad foreflippers, and split hind flippers |
+| Anglerfish | P3 | ✅ | S | deep-sea anglerfish | `examples/anglerfish` — approved 25-box deep-sea anglerfish with oversized toothed jaw, paired fins, articulated lure, tail hover, and separate jaw-snap action |
 
 ## Reptiles & amphibians
 
@@ -274,6 +276,7 @@ reviewed rigs and then filling macro gaps.
 | Frog | P2 | ✅ | H | green, tree-frog morphs, toad; tadpole | `examples/frog` — approved 19-box green frog with raised amber eyes, broad head, folded hind legs, toe pads, looping hop, and separate one-shot jump action |
 | Salamander / Newt | P3 | ✅ | Q | — | `examples/salamander` — review candidate fire salamander with glossy warning-patterned body, broad low head, sprawled feet, and four-stage tail crawl |
 | Axolotl | P3 | ✅ | Q/S | leucistic, wild, golden | `examples/axolotl` — approved leucistic axolotl with a broad smiling head, six branched external gills, tiny paddle feet, and a tall four-stage swimming tail |
+| Frilled-neck lizard | P3 | ✅ | Q | — | `examples/frilled_neck_lizard` — approved 30-box Australian frilled-neck lizard with long banded tail, sprawled limbs, low sand scuttle, and separate expanding frill-display action |
 
 ## Insects & arthropods
 
