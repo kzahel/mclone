@@ -171,7 +171,8 @@ export function structure(
     ...(spec.family === undefined ? {} : { family: { ...spec.family } }),
     id: spec.id,
     label: spec.label.trim(),
-    markers: markers.sort(compareMarkers),
+    // Marker insertion order is semantic because runtime receipts preserve it.
+    markers: [...markers],
     palette: paletteEntries,
     schemaVersion: 1,
     size: [...spec.size] as Int3,
@@ -350,10 +351,6 @@ function isCanonicalBlockState(value: string): boolean {
 
 function compareBlocks(left: CanonicalStructureBlock, right: CanonicalStructureBlock): number {
   return comparePositions(left.pos, right.pos);
-}
-
-function compareMarkers(left: StructureMarker, right: StructureMarker): number {
-  return comparePositions(left.pos, right.pos) || left.kind.localeCompare(right.kind);
 }
 
 function comparePositions(left: Int3, right: Int3): number {

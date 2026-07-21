@@ -1370,19 +1370,19 @@
   "label": "Warm Oak Cottage",
   "markers": [
     {
-      "kind": "attachment:west-yard",
-      "pos": [
-        1,
-        2,
-        7
-      ]
-    },
-    {
       "kind": "entrance:south",
       "pos": [
         9,
         2,
         16
+      ]
+    },
+    {
+      "kind": "attachment:west-yard",
+      "pos": [
+        1,
+        2,
+        7
       ]
     }
   ],
@@ -1551,6 +1551,6 @@
     "compilerId": "mclone-structure-dsl-v1",
     "sourcePath": "tools/structure-lab/examples/cottage_standard/structure.ts",
     "sourceSha256": "25e610c976c3ab749fbaff0eaf3944974e2cee61b19ca13013055ae28e9f331c",
-    "semanticSha256": "5eace771396e1acbe5da8f17051a2b048376801fe7a2b4eb4095218cd73f44c5"
+    "semanticSha256": "ea974ed0c8c4f3264673a77bb96d0862fe33e05078a1e1664d1183048400366f"
   }
 }

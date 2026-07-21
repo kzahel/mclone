@@ -1369,6 +1369,12 @@ fn remove_existing_lab_database(root: &Path) -> ChunkStoreResult<()> {
 mod tests {
     use super::*;
     use mclone_core::{BlockStateId, chunk_section_index};
+    use mclone_worldgen::structure_json::load_canonical_structure_json;
+
+    const CANONICAL_COTTAGE_JSON: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../assets/mclone/structures/farmstead-cottage-a-v2.structure.json"
+    ));
 
     fn block_at(records: &[ChunkRecord], pos: BlockPos) -> BlockStateId {
         let record = records
@@ -1403,6 +1409,33 @@ mod tests {
         assert_eq!(barn.markers().len(), 3);
         assert_eq!(lean_to.size(), [7, 8, 13]);
         assert_eq!(lean_to.markers().len(), 2);
+    }
+
+    #[test]
+    fn canonical_cottage_matches_the_accepted_rust_canary() {
+        let canonical = load_canonical_structure_json(CANONICAL_COTTAGE_JSON).unwrap();
+        let accepted = cottage_template().unwrap();
+
+        assert_eq!(canonical.template.id(), accepted.id());
+        assert_eq!(canonical.template.size(), accepted.size());
+        assert_eq!(canonical.template.markers(), accepted.markers());
+        assert_eq!(canonical.template.blocks().len(), accepted.blocks().len());
+        if let Some((index, (canonical_block, accepted_block))) = canonical
+            .template
+            .blocks()
+            .iter()
+            .zip(accepted.blocks())
+            .enumerate()
+            .find(|(_, (canonical_block, accepted_block))| canonical_block != accepted_block)
+        {
+            panic!(
+                "canonical cottage first differs at block {index}: canonical {canonical_block:?}, accepted {accepted_block:?}"
+            );
+        }
+        assert_eq!(canonical.default_theme(), Some(&cottage_theme()));
+        assert_eq!(canonical.blocks.len(), canonical.template.blocks().len());
+        assert_eq!(canonical.sockets.len(), 1);
+        assert_eq!(canonical.components.len(), 7);
     }
 
     #[test]

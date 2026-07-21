@@ -29,7 +29,7 @@ test("the standard cottage is the first promoted structure", async () => {
   assert.ok(document.asset.blocks.length > 1_000);
   assert.deepEqual(
     document.asset.markers.map((marker) => marker.kind),
-    ["attachment:west-yard", "entrance:south"],
+    ["entrance:south", "attachment:west-yard"],
   );
   assert.match(document.asset.provenance.sourceSha256, /^[a-f0-9]{64}$/u);
   assert.match(document.asset.provenance.semanticSha256, /^[a-f0-9]{64}$/u);
