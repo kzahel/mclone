@@ -2,12 +2,13 @@
 
 Topic: `local-couch-multiplayer`
 
-Status: accepted product and architecture direction; implementation pending as
-of 2026-07-21. Mclone should retain a credible path from one local participant
-to 1-4 local participants, including console-style split screen, useful
-single-player auxiliary panes, helper/builder participation, and a mixed
-XR-plus-flat session. The first bounded implementation tactical has not been
-opened.
+Status: accepted product and architecture direction; preliminary foundation in
+progress as of 2026-07-21 through
+[`Tactical 215`](../tactical/215-preliminary-couch-readiness.md). Mclone should
+retain a credible path from one local participant to 1-4 local participants,
+including console-style split screen, useful single-player auxiliary panes,
+helper/builder participation, and a mixed XR-plus-flat session. Tactical 215
+stops before product local participants and physical gamepad collection.
 
 This topic owns local participant cardinality, participant-to-input assignment,
 participant-versus-view separation, shared split-screen presentation policy,

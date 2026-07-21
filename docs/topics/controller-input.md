@@ -10,6 +10,9 @@ flat Android, desktop XR, Android XR, offscreen/test hosts, Steam Deck, and a
 future native Steam Input integration. Tactical
 [`098`](../tactical/098-flat-input-capability-convergence.md) remains the
 bounded execution record for the existing flat-input slices.
+[`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
+bounded session-local source identity and scripted 1-4-source assignment proof;
+it deliberately does not add a physical gamepad collector.
 
 ## Top-Level Decision
 
