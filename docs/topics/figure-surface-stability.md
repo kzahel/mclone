@@ -45,6 +45,19 @@ whole loop. The user confirmed on 2026-07-21 that the z-fighting was gone.
 Typechecking, the Asset Lab tests, the box-only boundary, first-party drift
 check, and repository diff check pass.
 
+## Follow-up Content Evidence
+
+Batch 24 applied the contract manually while adding Ladybug, Dragonfly, and
+Spider. The ladybug uses separated stepped wing cases rather than overlapping
+shell panels, the dragonfly keeps all four thin wings on distinct roots and
+separated fore/rear planes, and the spider steps its abdomen, cephalothorax,
+and head surfaces while allowing ordinary volume overlap at their joints.
+Clean multi-angle sheets and four-cycle videos under
+`/tmp/mclone-asset-lab/batch-24` showed no visible surface interference and
+were approved by the user on 2026-07-21. This is evidence that the manual
+authoring contract is workable; it is not a substitute for the deferred
+catalog-wide checker.
+
 ## Current Rendering Facts
 
 Asset Lab face textures do not create a second decal plane. Each texture is

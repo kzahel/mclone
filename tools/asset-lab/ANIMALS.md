@@ -268,9 +268,9 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Butterfly | P1 | ✅ | W | color morphs, moth | `examples/butterfly` — canonical nine-box figure with pixel-patterned wing slabs; rounded A/B in `legacy-examples/butterfly_rounded` |
 | Bee | P1 | ✅ | W | — | `examples/bee` — approved 17-box worker bee with striped abdomen, fuzzy thorax, paired cell-patterned wings, six legs, and rapid hover |
-| Ladybug | P2 | ☐ | C/W | — | |
-| Dragonfly | P2 | ☐ | W | — | four wings |
-| Spider | P2 | ☐ | C | small, large, color morphs | 8 legs → needs N-leg crawl |
+| Ladybug | P2 | ✅ | C/W | — | `examples/ladybug` — approved 13-box seven-spotted adult with stepped wing cases, patterned pronotum, six legs, and alternating tripod crawl |
+| Dragonfly | P2 | ✅ | W | — | `examples/dragonfly` — approved 18-box blue dasher with huge eyes, four-stage abdomen, four independent wings, and darting flight |
+| Spider | P2 | ✅ | C | small, large, color morphs | `examples/spider` — approved 23-box garden spider with patterned abdomen, eight eyes, fangs, spinnerets, eight two-stage legs, and wave crawl |
 | Ant | P3 | ☐ | C | worker, soldier | 6 legs |
 | Beetle | P3 | ☐ | C | rhino/stag beetle | |
 | Grasshopper / Cricket | P3 | ☐ | H | — | |

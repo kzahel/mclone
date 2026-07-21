@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 107 |
-| total parts | 2,296 |
-| boxes | 2,091 |
+| figures | 110 |
+| total parts | 2,350 |
+| boxes | 2,145 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 344 |
-| parts with any texture reference | 555 |
-| individual texture applications | 887 |
+| ASCII textures | 354 |
+| parts with any texture reference | 571 |
+| individual texture applications | 921 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 89 | 1,754 | 1,754 | 0 / 0 / 0 |
+| canonical `examples/` | 92 | 1,808 | 1,808 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -655,7 +655,25 @@ removed by narrowing its neck and the nearby neck/breast depth margin was
 increased. The evidence and deferred prevention proposal live in
 [`figure-surface-stability.md`](figure-surface-stability.md).
 
-All 887 applications target an explicit face of a box. They range from single
+The twenty-fourth post-migration content batch adds Ladybug, Dragonfly, and
+Spider as approved canonical box-only rigs. Ladybug is a
+13-part alternating-tripod crawler with separated stepped red wing cases,
+pixel spots, a patterned pronotum, short antennae, and six legs; Dragonfly is
+an 18-part darting flier with huge compound eyes, a four-stage striped abdomen,
+six tucked legs, and four independently rooted cell-pattern wings; and Spider
+is a 23-part wave crawler with a patterned abdomen, eight-eye face, paired
+fangs and spinnerets, and eight two-stage legs. All 54 parts are canonical
+boxes and use 10 combined pixel textures across 16 textured parts and 34
+explicit box-face applications. Typechecking, the Asset Lab test suite, the
+first-party figure drift check, and the repository diff check pass. Clean
+multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-24` and inspected for identity, grounding or
+flight posture, attachment continuity, six- or eight-leg cadence, independent
+four-wing motion, deliberate shell and body surface steps, and loop
+continuity, and approved by the user on 2026-07-21. No shared gait macro or
+surface checker changed.
+
+All 921 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
