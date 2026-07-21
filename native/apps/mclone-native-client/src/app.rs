@@ -6,13 +6,13 @@ use anyhow::{Context, Result};
 use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnostics};
 use mclone_assets::AssetSource;
 use mclone_input::{
-    FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
-    InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, PointerButton,
+    InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, KeyboardKey,
+    MouseWheelDirection, PointerButton,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::DEFAULT_RENDER_SCALE;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
-use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiScale, Point};
+use mclone_ui::{GameUiAction, GuiScale, Point};
 use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
 use winit::event::{
@@ -29,9 +29,9 @@ use crate::frame_pacing::{
 };
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowRuntimeStats, WindowSceneAssets};
-use crate::winit_frame_driver::WinitFrameDriver;
+use crate::winit_frame_driver::{WinitFrameDriver, WinitHostEffectOutcome, WinitInputOutcome};
 use mclone_audio::{AudioEngine, AudioSettings};
-use mclone_scene::{MonoBlinkCommitStatus, MonoUiContext, MonoWorldActionStatus};
+use mclone_scene::{MonoBlinkCommitStatus, MonoUiContext};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const DESKTOP_BLINK_DEBUG_KEY: KeyCode = KeyCode::KeyT;
@@ -98,25 +98,15 @@ fn next_desktop_render_scale(current: f32) -> f32 {
     DESKTOP_RENDER_SCALE_PRESETS[(index + 1) % DESKTOP_RENDER_SCALE_PRESETS.len()]
 }
 
-fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
-    match key_code {
-        KeyCode::Escape => Some(GuiKey::Escape),
-        KeyCode::F1 => Some(GuiKey::F1),
-        _ => None,
-    }
-}
-
 #[derive(Clone, Debug)]
 struct DesktopFlatInputAdapter {
     capability_state: InputCapabilityState,
-    keyboard_mouse: KeyboardMouseInputAdapter,
 }
 
 impl Default for DesktopFlatInputAdapter {
     fn default() -> Self {
         Self {
             capability_state: InputCapabilityState::new(InputCapabilities::NONE),
-            keyboard_mouse: KeyboardMouseInputAdapter::new(),
         }
     }
 }
@@ -124,10 +114,6 @@ impl Default for DesktopFlatInputAdapter {
 impl DesktopFlatInputAdapter {
     fn new() -> Self {
         Self::default()
-    }
-
-    fn clear_held(&mut self) {
-        self.keyboard_mouse.clear_held();
     }
 
     fn note_keyboard_activity(&mut self) {
@@ -143,38 +129,43 @@ impl DesktopFlatInputAdapter {
         self.capability_state.note_activity(InputDeviceKind::Touch);
     }
 
-    fn handle_keyboard_input(
+    fn normalize_keyboard_input(
         &mut self,
         key_code: KeyCode,
         state: ElementState,
         repeat: bool,
-    ) -> Option<FlatInputFrame> {
+    ) -> Option<(KeyboardKey, bool, bool)> {
         self.note_keyboard_activity();
         let key = desktop_keyboard_key_from_key_code(key_code)?;
-        self.keyboard_mouse
-            .handle_key(key, state == ElementState::Pressed, repeat)
-            .frame
+        Some((key, state == ElementState::Pressed, repeat))
     }
 
-    fn handle_mouse_button(
+    fn normalize_mouse_button(
         &mut self,
         button: MouseButton,
         state: ElementState,
-    ) -> Option<FlatInputFrame> {
+    ) -> Option<(PointerButton, bool)> {
         self.note_mouse_activity();
         let button = desktop_pointer_button_from_mouse_button(button)?;
-        self.keyboard_mouse
-            .handle_mouse_button(button, state == ElementState::Pressed)
-            .frame
+        Some((button, state == ElementState::Pressed))
     }
 
-    fn mouse_look_frame(&mut self, delta_x: f32, delta_y: f32) -> Option<FlatInputFrame> {
+    fn normalize_mouse_motion(&mut self, delta_x: f32, delta_y: f32) -> (f32, f32) {
         self.note_mouse_activity();
-        self.keyboard_mouse.mouse_motion_frame(delta_x, delta_y)
+        (delta_x, delta_y)
     }
 
-    fn held_frame(&self) -> FlatInputFrame {
-        self.keyboard_mouse.held_frame().unwrap_or_default()
+    fn normalize_mouse_wheel(&mut self, delta: MouseScrollDelta) -> MouseWheelDirection {
+        self.note_mouse_activity();
+        let amount = match delta {
+            MouseScrollDelta::LineDelta(_, y) => y,
+            MouseScrollDelta::PixelDelta(position) => position.y as f32,
+        };
+        if amount >= 0.0 {
+            MouseWheelDirection::Up
+        } else {
+            MouseWheelDirection::Down
+        }
     }
 }
 
@@ -678,8 +669,7 @@ impl ChunkApp {
         let Some(driver) = self.scene_driver.as_mut() else {
             return Ok(());
         };
-        let frame = self.flat_input.held_frame();
-        driver.advance_input_frame(frame, f64::from(movement_dt))?;
+        driver.advance_held_input(f64::from(movement_dt))?;
         if !driver.ui_is_active() {
             driver.update_blink_debug();
         }
@@ -687,94 +677,109 @@ impl ChunkApp {
     }
 
     fn clear_flat_gameplay_input(&mut self) {
-        self.flat_input.clear_held();
         if let Some(driver) = &mut self.scene_driver {
-            driver.clear_camera_input();
+            driver.clear_interactive_input();
             driver.clear_blink_debug();
         }
     }
 
-    fn apply_flat_keyboard_frame(
+    fn route_key_input(
         &mut self,
-        frame: FlatInputFrame,
+        key: KeyboardKey,
+        pressed: bool,
+        repeat: bool,
         event_loop: &ActiveEventLoop,
     ) -> bool {
-        if frame.open_menu {
-            self.mouse_lock_requested = false;
-            if let Some(driver) = &mut self.scene_driver {
-                driver.open_pause_menu();
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_key(key, pressed, repeat, &surface.device, &surface.queue)
             }
-            self.clear_flat_gameplay_input();
-            self.last_cursor = None;
-            self.sync_mouse_lock();
-            self.schedule_next_redraw(event_loop);
-            return true;
-        }
-        if frame.open_block_palette {
-            self.mouse_lock_requested = false;
-            if let Some(driver) = &mut self.scene_driver {
-                driver.open_block_palette();
+            _ => return false,
+        };
+        self.apply_input_outcome("keyboard input", result, event_loop)
+    }
+
+    fn route_pointer_button_input(
+        &mut self,
+        button: PointerButton,
+        pressed: bool,
+        point: Option<Point>,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_pointer_button(button, pressed, point, &surface.device, &surface.queue)
             }
-            self.clear_flat_gameplay_input();
-            self.last_cursor = None;
-            self.sync_mouse_lock();
-            self.schedule_next_redraw(event_loop);
-            return true;
-        }
-        if frame.open_help {
-            self.mouse_lock_requested = false;
-            self.apply_ui_action(
-                GameUiAction::OpenHelp(GameHelpParent::Game),
-                event_loop,
-                false,
-            );
-            self.clear_flat_gameplay_input();
-            self.last_cursor = None;
-            self.sync_mouse_lock();
-            self.schedule_next_redraw(event_loop);
-            return true;
-        }
-        if frame.toggle_camera_view {
-            let Some(driver) = &mut self.scene_driver else {
-                return false;
-            };
-            let view_mode = driver.toggle_camera_view();
-            log::info!("camera view mode {}", view_mode.label());
-            self.schedule_next_redraw(event_loop);
-            return true;
-        }
-        if let Some(slot) = frame.selected_hotbar_slot {
-            if self
+            _ => return false,
+        };
+        self.apply_input_outcome("pointer button input", result, event_loop)
+    }
+
+    fn route_pointer_move_input(&mut self, point: Point, event_loop: &ActiveEventLoop) -> bool {
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_pointer_move(point, &surface.device, &surface.queue)
+            }
+            _ => return false,
+        };
+        self.apply_input_outcome("pointer move input", result, event_loop)
+    }
+
+    fn route_mouse_motion_input(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_mouse_motion(delta_x, delta_y, &surface.device, &surface.queue)
+            }
+            _ => return false,
+        };
+        let handled = self.apply_input_outcome("mouse motion input", result, event_loop);
+        if handled
+            && self
                 .scene_driver
                 .as_mut()
-                .is_some_and(|driver| driver.select_hotbar_slot(slot))
-            {
-                log::info!("selected hotbar slot {}", slot + 1);
+                .is_some_and(WinitFrameDriver::update_blink_debug)
+        {
+            self.schedule_next_redraw(event_loop);
+        }
+        handled
+    }
+
+    fn route_mouse_wheel_input(
+        &mut self,
+        direction: MouseWheelDirection,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_wheel(direction, &surface.device, &surface.queue)
             }
-            self.schedule_next_redraw(event_loop);
-            return true;
-        }
-        false
+            _ => return false,
+        };
+        self.apply_input_outcome("mouse wheel input", result, event_loop)
     }
 
-    fn apply_flat_world_action_frame(&mut self, frame: FlatInputFrame) -> Result<()> {
-        if frame.attack {
-            self.handle_world_flat_action(FlatInputAction::Attack)?;
-        }
-        if frame.use_item {
-            self.handle_world_flat_action(FlatInputAction::Use)?;
-        }
-        Ok(())
-    }
-
-    fn apply_flat_look_frame(&mut self, frame: FlatInputFrame, event_loop: &ActiveEventLoop) {
-        let changed = self
-            .scene_driver
-            .as_mut()
-            .is_some_and(|driver| driver.apply_look_frame(frame) | driver.update_blink_debug());
-        if changed {
-            self.schedule_next_redraw(event_loop);
-        }
+    fn apply_input_outcome(
+        &mut self,
+        context: &str,
+        result: Result<WinitInputOutcome>,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match result {
+            Ok(result) => result,
+            Err(error) => {
+                log::error!("failed to route desktop {context}: {error:#}");
+                event_loop.exit();
+                return true;
+            }
+        };
+        let handled = result.scene.handled;
+        self.apply_host_effect_outcome(result.host, result.scene.clear_transient_input, event_loop);
+        handled
     }
 
     fn gui_scale(&self) -> Option<GuiScale> {
@@ -895,32 +900,42 @@ impl ChunkApp {
             }
         };
 
-        if result.host.exit {
+        self.apply_host_effect_outcome(result.host, result.scene.clear_gameplay_input, event_loop);
+    }
+
+    fn apply_host_effect_outcome(
+        &mut self,
+        outcome: WinitHostEffectOutcome,
+        clear_transient_input: bool,
+        event_loop: &ActiveEventLoop,
+    ) {
+        if outcome.exit {
             event_loop.exit();
             return;
         }
-        if result.host.quit_to_title {
+        if outcome.quit_to_title {
             self.mouse_lock_requested = false;
         }
-        if result.host.cycle_frame_pacing {
+        if outcome.cycle_frame_pacing {
             self.frame_pacing.cycle_mode();
             self.next_redraw_at = None;
             if let Some(surface) = &mut self.surface {
                 self.frame_pacing.apply_to_surface(surface);
             }
         }
-        if result.host.cycle_fps_cap {
+        if outcome.cycle_fps_cap {
             self.frame_pacing.cycle_fps_cap();
             self.next_redraw_at = None;
         }
-        if let Some(mode) = result.host.touch_controls_mode {
+        if let Some(mode) = outcome.touch_controls_mode {
             self.input_preferences.touch_controls = mode;
         }
-        if let Some(mouse_lock_requested) = result.host.mouse_lock_requested {
+        if let Some(mouse_lock_requested) = outcome.mouse_lock_requested {
             self.mouse_lock_requested = mouse_lock_requested;
         }
-        if result.scene.clear_gameplay_input {
+        if clear_transient_input {
             self.clear_flat_gameplay_input();
+            self.last_cursor = None;
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
@@ -1038,34 +1053,6 @@ impl ChunkApp {
             self.mouse_locked = false;
             self.last_cursor = None;
         }
-    }
-
-    fn handle_world_flat_action(&mut self, action: FlatInputAction) -> Result<()> {
-        let Some(driver) = self.scene_driver.as_mut() else {
-            return Ok(());
-        };
-        match driver.handle_world_action(action)? {
-            MonoWorldActionStatus::Submitted { target } => {
-                log::info!(
-                    "gameplay interaction {:?} submitted at ({}, {}, {}) face={:?}",
-                    action,
-                    target.hit.block_pos.x,
-                    target.hit.block_pos.y,
-                    target.hit.block_pos.z,
-                    target.hit.direction
-                );
-            }
-            MonoWorldActionStatus::EmbeddedWorldActivationRequested => {
-                log::info!("embedded-world activation requested through {action:?}");
-            }
-            MonoWorldActionStatus::NoRuntime
-            | MonoWorldActionStatus::NoTarget
-            | MonoWorldActionStatus::NoCommand => {}
-            MonoWorldActionStatus::DeniedByWorldBehavior => {
-                log::info!("gameplay interaction denied by active world behavior");
-            }
-        }
-        Ok(())
     }
 }
 
@@ -1222,28 +1209,6 @@ impl ApplicationHandler for ChunkApp {
                         );
                         return;
                     }
-                    if event.state == ElementState::Pressed
-                        && self
-                            .scene_driver
-                            .as_ref()
-                            .is_some_and(WinitFrameDriver::ui_is_active)
-                    {
-                        if !event.repeat
-                            && let Some(gui_key) = gui_key_from_key_code(key_code)
-                        {
-                            let (handled, action) = self
-                                .scene_driver
-                                .as_mut()
-                                .expect("active scene driver")
-                                .ui_key_pressed(gui_key);
-                            if let Some(action) = action {
-                                self.apply_ui_action(action, event_loop, false);
-                            } else if handled {
-                                self.schedule_next_redraw(event_loop);
-                            }
-                        }
-                        return;
-                    }
                     if key_code == DESKTOP_BLINK_DEBUG_KEY && !event.repeat {
                         let status = match event.state {
                             ElementState::Pressed => {
@@ -1323,10 +1288,11 @@ impl ApplicationHandler for ChunkApp {
                         self.schedule_next_redraw(event_loop);
                         return;
                     }
-                    if let Some(frame) =
-                        self.flat_input
-                            .handle_keyboard_input(key_code, event.state, event.repeat)
-                        && self.apply_flat_keyboard_frame(frame, event_loop)
+                    if let Some((key, pressed, repeat)) = self.flat_input.normalize_keyboard_input(
+                        key_code,
+                        event.state,
+                        event.repeat,
+                    ) && self.route_key_input(key, pressed, repeat, event_loop)
                     {
                         return;
                     }
@@ -1334,38 +1300,24 @@ impl ApplicationHandler for ChunkApp {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let input_frame = self.flat_input.handle_mouse_button(button, state);
+                let Some((button, pressed)) = self.flat_input.normalize_mouse_button(button, state)
+                else {
+                    return;
+                };
                 if self
                     .scene_driver
                     .as_ref()
                     .is_some_and(WinitFrameDriver::ui_is_active)
                 {
-                    if button == MouseButton::Left {
-                        if let Some((x, y)) = self.last_cursor
-                            && let Some(point) = self.gui_point(x, y)
-                        {
-                            match state {
-                                ElementState::Pressed => {
-                                    if let Some(driver) = &mut self.scene_driver {
-                                        driver.ui_pointer_down(point);
-                                    }
-                                    self.log_ui_v2_pointer_debug("down", (x, y), point, None);
-                                }
-                                ElementState::Released => {
-                                    let (_handled, action) = self
-                                        .scene_driver
-                                        .as_mut()
-                                        .expect("active scene driver")
-                                        .ui_pointer_up(point);
-                                    self.log_ui_v2_pointer_debug("up", (x, y), point, action);
-                                    if let Some(action) = action {
-                                        self.apply_ui_action(action, event_loop, true);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                        self.schedule_next_redraw(event_loop);
+                    let point = self.last_cursor.and_then(|(x, y)| self.gui_point(x, y));
+                    self.route_pointer_button_input(button, pressed, point, event_loop);
+                    if let (Some(raw), Some(point)) = (self.last_cursor, point) {
+                        self.log_ui_v2_pointer_debug(
+                            if pressed { "down" } else { "up" },
+                            raw,
+                            point,
+                            None,
+                        );
                     }
                     return;
                 }
@@ -1379,20 +1331,19 @@ impl ApplicationHandler for ChunkApp {
                     self.schedule_next_redraw(event_loop);
                     return;
                 }
-                if state == ElementState::Pressed {
+                if pressed {
                     let was_locked = self.mouse_locked;
                     self.mouse_lock_requested = true;
                     self.last_cursor = None;
                     self.sync_mouse_lock();
-                    if was_locked && let Some(frame) = input_frame {
-                        if let Err(err) = self.apply_flat_world_action_frame(frame) {
-                            log::error!("failed to handle world mouse input: {err:#}");
-                            event_loop.exit();
-                            return;
-                        }
+                    if was_locked {
+                        self.route_pointer_button_input(button, true, None, event_loop);
                     }
                     self.schedule_next_redraw(event_loop);
-                } else if button == MouseButton::Left || button == MouseButton::Right {
+                } else {
+                    if self.mouse_locked {
+                        self.route_pointer_button_input(button, false, None, event_loop);
+                    }
                     self.last_cursor = None;
                 }
             }
@@ -1406,54 +1357,24 @@ impl ApplicationHandler for ChunkApp {
                 {
                     self.last_cursor = Some(cursor);
                     if let Some(point) = self.gui_point(cursor.0, cursor.1) {
-                        let (_handled, action) = self
-                            .scene_driver
-                            .as_mut()
-                            .expect("active scene driver")
-                            .ui_pointer_move(point);
-                        self.log_ui_v2_pointer_debug("move", cursor, point, action);
-                        if let Some(action) = action {
-                            self.apply_ui_action(action, event_loop, true);
-                            return;
-                        }
+                        self.route_pointer_move_input(point, event_loop);
+                        self.log_ui_v2_pointer_debug("move", cursor, point, None);
                     }
-                    self.schedule_next_redraw(event_loop);
                     return;
                 }
                 if self.mouse_lock_requested && !self.mouse_locked {
                     if let Some(previous) = self.last_cursor {
                         let dx = (cursor.0 - previous.0) as f32;
                         let dy = (cursor.1 - previous.1) as f32;
-                        if let Some(frame) = self.flat_input.mouse_look_frame(dx, dy) {
-                            self.apply_flat_look_frame(frame, event_loop);
-                        }
+                        let (dx, dy) = self.flat_input.normalize_mouse_motion(dx, dy);
+                        self.route_mouse_motion_input(dx, dy, event_loop);
                     }
                 }
                 self.last_cursor = Some(cursor);
             }
             WindowEvent::MouseWheel { delta, .. } => {
-                self.flat_input.note_mouse_activity();
-                if self
-                    .scene_driver
-                    .as_ref()
-                    .is_some_and(WinitFrameDriver::ui_is_active)
-                {
-                    return;
-                }
-                let amount = match delta {
-                    MouseScrollDelta::LineDelta(_, y) => y * 0.12,
-                    MouseScrollDelta::PixelDelta(position) => position.y as f32 * 0.001,
-                };
-                if let Some(driver) = &mut self.scene_driver {
-                    driver.adjust_camera_speed(f64::from(amount));
-                }
-                log::info!(
-                    "no-clip speed {:.1} blocks/s",
-                    self.scene_driver
-                        .as_ref()
-                        .map_or(0.0, WinitFrameDriver::camera_speed_blocks_per_second)
-                );
-                self.schedule_next_redraw(event_loop);
+                let direction = self.flat_input.normalize_mouse_wheel(delta);
+                self.route_mouse_wheel_input(direction, event_loop);
             }
             WindowEvent::Touch(_touch) => {
                 self.flat_input.note_touch_activity();
@@ -1601,9 +1522,8 @@ impl ApplicationHandler for ChunkApp {
         if let DeviceEvent::MouseMotion { delta } = event {
             let dx = delta.0 as f32;
             let dy = delta.1 as f32;
-            if let Some(frame) = self.flat_input.mouse_look_frame(dx, dy) {
-                self.apply_flat_look_frame(frame, event_loop);
-            }
+            let (dx, dy) = self.flat_input.normalize_mouse_motion(dx, dy);
+            self.route_mouse_motion_input(dx, dy, event_loop);
         }
     }
 

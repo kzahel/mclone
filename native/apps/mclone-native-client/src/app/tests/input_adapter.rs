@@ -96,89 +96,52 @@ fn native_key_codes_map_to_shared_flat_input_controls() {
 }
 
 #[test]
-fn desktop_adapter_builds_shared_frame_from_held_keys() {
+fn desktop_adapter_normalizes_keyboard_facts_without_assigning_actions() {
     let mut input = DesktopFlatInputAdapter::new();
 
     assert_eq!(
-        input.handle_keyboard_input(KeyCode::KeyW, ElementState::Pressed, false),
-        None
+        input.normalize_keyboard_input(KeyCode::KeyW, ElementState::Pressed, false),
+        Some((KeyboardKey::KeyW, true, false))
     );
     assert_eq!(
-        input.handle_keyboard_input(KeyCode::KeyS, ElementState::Pressed, false),
-        None
+        input.normalize_keyboard_input(KeyCode::Escape, ElementState::Pressed, false),
+        Some((KeyboardKey::Escape, true, false))
     );
     assert_eq!(
-        input.handle_keyboard_input(KeyCode::Space, ElementState::Pressed, false),
-        None
+        input.normalize_keyboard_input(KeyCode::Digit5, ElementState::Pressed, true),
+        Some((KeyboardKey::Digit5, true, true))
     );
     assert_eq!(
-        input.handle_keyboard_input(KeyCode::ShiftLeft, ElementState::Pressed, false),
-        None
+        input.normalize_keyboard_input(KeyCode::KeyW, ElementState::Released, false),
+        Some((KeyboardKey::KeyW, false, false))
     );
-    assert_eq!(
-        input.handle_keyboard_input(KeyCode::ArrowLeft, ElementState::Pressed, false),
-        None
-    );
-
-    let frame = input.held_frame();
-    assert!(frame.forward);
-    assert!(frame.backward);
-    assert!(!frame.left);
-    assert!(!frame.right);
-    assert_eq!(frame.keyboard_turn, 1.0);
-    assert_eq!(frame.movement.forward, 0.0);
-    assert!(frame.jump);
-    assert!(frame.sneak);
     assert!(input.capability_state.capabilities.keyboard);
-
-    input.handle_keyboard_input(KeyCode::KeyW, ElementState::Released, false);
-    let frame = input.held_frame();
-    assert!(!frame.forward);
-    assert!(frame.backward);
 }
 
 #[test]
-fn desktop_adapter_emits_menu_and_hotbar_one_shots_without_repeat() {
+fn desktop_adapter_normalizes_pointer_motion_and_wheel_facts() {
     let mut input = DesktopFlatInputAdapter::new();
-
-    let escape = input
-        .handle_keyboard_input(KeyCode::Escape, ElementState::Pressed, false)
-        .expect("escape should emit open-menu frame");
-    assert!(escape.open_menu);
-
-    let slot = input
-        .handle_keyboard_input(KeyCode::Digit5, ElementState::Pressed, false)
-        .expect("digit should emit hotbar frame");
-    assert_eq!(slot.selected_hotbar_slot, Some(4));
 
     assert_eq!(
-        input.handle_keyboard_input(KeyCode::Digit5, ElementState::Pressed, true),
-        None
+        input.normalize_mouse_button(MouseButton::Left, ElementState::Pressed),
+        Some((PointerButton::Primary, true))
     );
-}
-
-#[test]
-fn desktop_adapter_emits_mouse_action_and_look_frames() {
-    let mut input = DesktopFlatInputAdapter::new();
-
-    let attack = input
-        .handle_mouse_button(MouseButton::Left, ElementState::Pressed)
-        .expect("left click should emit attack frame");
-    assert!(attack.attack);
-    assert!(!attack.use_item);
-
-    let use_item = input
-        .handle_mouse_button(MouseButton::Right, ElementState::Pressed)
-        .expect("right click should emit use frame");
-    assert!(use_item.use_item);
+    assert_eq!(
+        input.normalize_mouse_button(MouseButton::Right, ElementState::Released),
+        Some((PointerButton::Secondary, false))
+    );
+    assert_eq!(input.normalize_mouse_motion(4.0, -2.0), (4.0, -2.0));
+    assert_eq!(
+        input.normalize_mouse_wheel(MouseScrollDelta::LineDelta(0.0, 1.0)),
+        MouseWheelDirection::Up
+    );
+    assert_eq!(
+        input.normalize_mouse_wheel(MouseScrollDelta::PixelDelta(
+            winit::dpi::PhysicalPosition::new(0.0, -4.0)
+        )),
+        MouseWheelDirection::Down
+    );
     assert!(input.capability_state.capabilities.mouse);
-
-    let look = input
-        .mouse_look_frame(4.0, -2.0)
-        .expect("finite mouse delta should emit look frame");
-    assert_eq!(look.look_delta.x, 4.0);
-    assert_eq!(look.look_delta.y, -2.0);
-    assert!(input.mouse_look_frame(0.0, 0.0).is_none());
 }
 
 #[test]

@@ -6,17 +6,17 @@ use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::frame_render::{FlatScalePresentation, scaled_frame_size};
 use mclone_audio::AudioEngine;
 use mclone_diagnostics::FrameHostKind;
-use mclone_input::{FlatInputAction, FlatInputFrame, TouchControlsMode};
+use mclone_input::{KeyboardKey, MouseWheelDirection, PointerButton, TouchControlsMode};
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::target::RenderFrameContext;
-use mclone_render_session::{EngineCameraMovementMode, EngineCameraViewMode};
+use mclone_render_session::EngineCameraMovementMode;
 use mclone_scene::{
-    HostEffects, MonoBlinkCommitStatus, MonoSceneFrameSummary, MonoUiActionOutcome, MonoUiContext,
-    MonoUiPresentation, MonoWorldActionStatus, record_mono_frame_pipeline,
-    xr_frame_pipeline_accounting_config,
+    HostEffects, MonoBlinkCommitStatus, MonoInputDisposition, MonoInteractiveInputRouter,
+    MonoSceneFrameSummary, MonoUiActionOutcome, MonoUiContext, MonoUiPresentation,
+    record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
-use mclone_ui::{GameUiAction, GameUiHost, GuiKey, GuiScale, Point, UiDebugSnapshot};
+use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point, UiDebugSnapshot};
 
 use crate::cli::{SceneOptions, WindowStartIntent};
 use crate::desktop_scene_host::{DesktopSceneHost, create_desktop_scene_host};
@@ -35,6 +35,12 @@ pub(crate) struct WinitHostEffectOutcome {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct WinitUiActionOutcome {
     pub(crate) scene: MonoUiActionOutcome,
+    pub(crate) host: WinitHostEffectOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct WinitInputOutcome {
+    pub(crate) scene: MonoInputDisposition,
     pub(crate) host: WinitHostEffectOutcome,
 }
 
@@ -77,6 +83,7 @@ impl HostEffects for WinitHostEffects {
 
 pub(crate) struct WinitFrameDriver {
     host: DesktopSceneHost,
+    interactive_input: MonoInteractiveInputRouter,
     depth: ChunkDepthTarget,
     target_size: [u32; 2],
     adaptive_render_admission_budget: bool,
@@ -137,6 +144,7 @@ impl WinitFrameDriver {
         let target_size = [target_size[0].max(1), target_size[1].max(1)];
         Ok(Self {
             host,
+            interactive_input: MonoInteractiveInputRouter::new(),
             depth: ChunkDepthTarget::new(device, target_size[0], target_size[1]),
             target_size,
             adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
@@ -360,6 +368,131 @@ impl WinitFrameDriver {
         self.deferred_mouse_lock_request.take()
     }
 
+    pub(crate) fn route_key(
+        &mut self,
+        key: KeyboardKey,
+        pressed: bool,
+        repeat: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_key(
+            &mut self.host,
+            key,
+            pressed,
+            repeat,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
+    pub(crate) fn route_pointer_button(
+        &mut self,
+        button: PointerButton,
+        pressed: bool,
+        point: Option<Point>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_pointer_button(
+            &mut self.host,
+            button,
+            pressed,
+            point,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
+    pub(crate) fn route_pointer_move(
+        &mut self,
+        point: Point,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_pointer_move(
+            &mut self.host,
+            point,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
+    pub(crate) fn route_mouse_motion(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_mouse_motion(
+            &mut self.host,
+            delta_x,
+            delta_y,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
+    pub(crate) fn route_wheel(
+        &mut self,
+        direction: MouseWheelDirection,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_wheel(
+            &mut self.host,
+            direction,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
+    pub(crate) fn advance_held_input(&mut self, dt_seconds: f64) -> Result<bool> {
+        Ok(self
+            .interactive_input
+            .advance_held_frame(&mut self.host, None, dt_seconds)?
+            .changed())
+    }
+
+    pub(crate) fn clear_interactive_input(&mut self) {
+        self.interactive_input.clear_transient_input();
+        self.host.clear_mono_camera_input();
+    }
+
+    fn finish_input_outcome(
+        &mut self,
+        scene: MonoInputDisposition,
+        mut effects: WinitHostEffects,
+    ) -> WinitInputOutcome {
+        if scene.request_pointer_capture_when_ready {
+            if self.host.has_runtime() && self.host.local_startup_complete() {
+                effects.outcome.mouse_lock_requested = Some(true);
+            } else {
+                self.arm_mouse_lock_after_start = true;
+            }
+        }
+        WinitInputOutcome {
+            scene,
+            host: effects.outcome,
+        }
+    }
+
     pub(crate) fn record_frame_pipeline(
         &mut self,
         frame_wall_ms: f64,
@@ -393,22 +526,6 @@ impl WinitFrameDriver {
         self.host.mono_ui_is_active()
     }
 
-    pub(crate) fn ui_key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
-        self.host.mono_ui_key_pressed(key)
-    }
-
-    pub(crate) fn ui_pointer_down(&mut self, point: Point) -> bool {
-        self.host.mono_ui_pointer_down(point)
-    }
-
-    pub(crate) fn ui_pointer_up(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
-        self.host.mono_ui_pointer_up(point)
-    }
-
-    pub(crate) fn ui_pointer_move(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
-        self.host.mono_ui_pointer_move(point)
-    }
-
     pub(crate) fn clear_ui_input(&mut self) {
         self.host.clear_mono_ui_input();
     }
@@ -419,33 +536,6 @@ impl WinitFrameDriver {
 
     pub(crate) fn ui_v2_debug_snapshot(&mut self) -> Option<UiDebugSnapshot> {
         self.host.mono_ui_debug_snapshot()
-    }
-
-    pub(crate) fn open_pause_menu(&mut self) {
-        self.host.open_mono_pause_menu();
-    }
-
-    pub(crate) fn open_block_palette(&mut self) {
-        self.host.open_mono_block_palette();
-    }
-
-    pub(crate) fn advance_input_frame(
-        &mut self,
-        frame: FlatInputFrame,
-        dt_seconds: f64,
-    ) -> Result<bool> {
-        Ok(self
-            .host
-            .advance_mono_input_frame(frame, dt_seconds)?
-            .changed())
-    }
-
-    pub(crate) fn apply_look_frame(&mut self, frame: FlatInputFrame) -> bool {
-        self.host.apply_mono_look_frame(frame)
-    }
-
-    pub(crate) fn clear_camera_input(&mut self) {
-        self.host.clear_mono_camera_input();
     }
 
     pub(crate) fn begin_blink_debug(&mut self) -> bool {
@@ -464,31 +554,8 @@ impl WinitFrameDriver {
         self.host.commit_mono_blink_debug()
     }
 
-    pub(crate) fn toggle_camera_view(&mut self) -> EngineCameraViewMode {
-        self.host.toggle_mono_camera_view()
-    }
-
     pub(crate) fn toggle_movement_mode(&mut self) -> EngineCameraMovementMode {
         self.host.toggle_mono_movement_mode()
-    }
-
-    pub(crate) fn adjust_camera_speed(&mut self, amount: f64) {
-        self.host.adjust_mono_camera_speed(amount);
-    }
-
-    pub(crate) fn camera_speed_blocks_per_second(&self) -> f64 {
-        self.host.mono_camera_speed_blocks_per_second()
-    }
-
-    pub(crate) fn select_hotbar_slot(&mut self, slot: u8) -> bool {
-        self.host.select_mono_hotbar_slot(slot)
-    }
-
-    pub(crate) fn handle_world_action(
-        &mut self,
-        action: FlatInputAction,
-    ) -> Result<MonoWorldActionStatus> {
-        self.host.handle_mono_world_action(action)
     }
 
     pub(crate) fn shoot_debug_physics_cube(&mut self) -> Result<bool> {
