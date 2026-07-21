@@ -8,6 +8,29 @@ const INPUT_PREFERENCES: &str =
     include_str!("../../../crates/mclone-app-runtime/src/input_preferences.rs");
 const FLAT_ANDROID: &str = include_str!("../../mclone-android-client/src/surface_driver.rs");
 
+fn braced_item<'a>(source: &'a str, marker: &str) -> &'a str {
+    let start = source.find(marker).expect("item marker present");
+    let body = &source[start..];
+    let mut depth = 0usize;
+    let mut opened = false;
+    for (index, byte) in body.bytes().enumerate() {
+        match byte {
+            b'{' => {
+                opened = true;
+                depth += 1;
+            }
+            b'}' if opened => {
+                depth -= 1;
+                if depth == 0 {
+                    return &body[..=index];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated braced item for {marker}")
+}
+
 #[test]
 fn browser_scene_host_owns_the_shared_raw_input_route() {
     for required in [
@@ -260,6 +283,7 @@ fn browser_capability_and_post_wasm_status_policy_stay_in_rust() {
         "Loading assets",
         "Preparing renderer",
         "Generating world",
+        "session ready",
     ] {
         assert!(
             !WEB_APP.contains(forbidden),
@@ -268,4 +292,50 @@ fn browser_capability_and_post_wasm_status_policy_stay_in_rust() {
     }
     assert!(WEB_APP.contains("new module.WebHostCapabilities("));
     assert!(WEB_APP.contains(": \"Starting mclone…\""));
+}
+
+#[test]
+fn ordinary_browser_results_are_operational_not_diagnostic() {
+    let render_frame = braced_item(WEB_SCENE_HOST, "pub fn render_frame(");
+    assert!(render_frame.contains("operational_report("));
+    assert!(!render_frame.contains("diagnostic_report("));
+
+    let operational = braced_item(WEB_SCENE_HOST, "fn operational_report(");
+    for required in [
+        "initialPresentationReady",
+        "renderWorkerPendingRequestCount",
+        "sessionStartPending",
+        "sessionActive",
+        "assetPackRequest",
+    ] {
+        assert!(
+            operational.contains(required),
+            "operational browser result lost {required}"
+        );
+    }
+    for forbidden in [
+        "cameraX",
+        "movementMode",
+        "selectedHotbarSlot",
+        "playerJumpStatistic",
+        "compileTimings",
+        "runnerKind",
+        "renderColorProfile",
+        "touchLookSensitivity",
+        "worldCatalogEntryCount",
+    ] {
+        assert!(
+            !operational.contains(forbidden),
+            "operational browser result regained semantic diagnostic {forbidden}"
+        );
+        assert!(
+            !WEB_APP.contains(forbidden),
+            "production TypeScript regained diagnostic interpretation through {forbidden}"
+        );
+    }
+
+    assert!(WEB_SCENE_HOST.contains("js_name = diagnosticSnapshot"));
+    assert!(WEB_APP.contains("this.dispatchAssetPackOperation(frame);"));
+    assert!(WEB_SMOKE_OBSERVER.contains("app.observerSnapshot(report)"));
+    assert!(WEB_SMOKE_OBSERVER.contains("latestReport()"));
 }

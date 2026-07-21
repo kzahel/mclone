@@ -4835,22 +4835,27 @@ async function runAssetPackUiProbe(page, canvas) {
   );
   await page.reload({ waitUntil: "load" });
   await waitForWebAppReady(page);
-  await page.waitForFunction(
-    () => {
-      const state = globalThis.__mcloneWebApp?.state;
-      const report = state?.lastReport;
-      return report?.assetReplacementState === "active"
-        && Number(report?.activeAssetEpoch) === 1
-        && report?.assetPackActiveAuthored === true
-        && report?.assetPackActiveReference === false
-        && report?.assetPackPreferredIds === "mclone-authored"
-        && !report?.assetPackPreferenceError
-        && state?.streamingSettled === true
-        && state?.sessionBusy === false;
-    },
-    undefined,
-    { timeout: 120_000 },
-  );
+  try {
+    await page.waitForFunction(
+      () => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const report = state?.lastReport;
+        return report?.assetReplacementState === "active"
+          && Number(report?.activeAssetEpoch) === 1
+          && report?.assetPackActiveAuthored === true
+          && report?.assetPackActiveReference === false
+          && report?.assetPackPreferredIds === "mclone-authored"
+          && !report?.assetPackPreferenceError
+          && state?.streamingSettled === true
+          && state?.sessionBusy === false;
+      },
+      undefined,
+      { timeout: 120_000 },
+    );
+  } catch (error) {
+    const restoredState = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(`timed out waiting for restored asset-pack preference: ${String(error)}\n${JSON.stringify({ persistedJson, restoredState }, null, 2)}`);
+  }
   const restored = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp?.state ?? {};
     return {

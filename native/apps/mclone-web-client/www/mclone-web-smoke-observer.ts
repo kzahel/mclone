@@ -65,6 +65,7 @@ interface SmokeRuntime {
 
 interface SmokeBridge {
   sceneHostForObserver(): WebSceneHost | null;
+  observerSnapshot(report: WasmReport | null | undefined): WasmReport | null;
   waitForObserverIdle(pauseFrames?: boolean): Promise<void>;
   renderSingleObserverFrame(): Promise<WasmReport | null>;
   applyObserverReport(
@@ -86,6 +87,7 @@ interface SmokeBridge {
 export interface WebSmokeObserver {
   observePlatformState(runtime: { ready: boolean; state: Record<string, any> }): void;
   observeReport(report: WasmReport | null | undefined): void;
+  latestReport(): WasmReport | null;
   observeTarget(target: WasmReport | null | undefined): void;
   resetForSessionRestart(): void;
   observeLobbyRuntimeStart(result: WasmReport): void;
@@ -100,6 +102,7 @@ declare global {
 export function installWebSmokeObserver(
   app: SmokeBridge,
 ): WebSmokeObserver {
+  let latestObservedReport: WasmReport | null = null;
   const runtime: SmokeRuntime = {
     ready: false,
     state: {
@@ -137,6 +140,11 @@ export function installWebSmokeObserver(
       if (!report?.ok) {
         return;
       }
+      report = app.observerSnapshot(report);
+      if (!report?.ok) {
+        return;
+      }
+      latestObservedReport = report;
       const wasStartupReady = runtime.state.startupReady === true;
       const previouslyRenderedSky = runtime.state.skyRendered === true;
       Object.assign(runtime.state, report);
@@ -202,6 +210,9 @@ export function installWebSmokeObserver(
         }
       }
     },
+    latestReport(): WasmReport | null {
+      return latestObservedReport;
+    },
     observeTarget(target): void {
       if (target?.ok) {
         runtime.state.currentTarget = target;
@@ -253,7 +264,7 @@ export function installWebSmokeObserver(
     }
     const report = operation(session);
     app.applyObserverReport(report, options);
-    return report;
+    return observer.latestReport() ?? report;
   };
   runtime.adjustCameraSpeed = (amount) => apply((session) => session.adjustCameraSpeed(amount));
   runtime.previewBlockTarget = () => runtime.state.currentTarget ?? null;

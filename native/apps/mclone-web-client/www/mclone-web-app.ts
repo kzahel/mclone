@@ -247,6 +247,7 @@ class WebFrameDriver {
           this.tickFrameBusy = false;
           runtime.state.tickFrameBusy = false;
           runtime.state.tickPhase = "idle";
+          publishRuntimeState(runtime.state);
         });
       }
       this.animationFrame = requestAnimationFrame(frame);
@@ -269,6 +270,16 @@ class WebFrameDriver {
     return this.sessionBusy ? null : this.session;
   }
 
+  observerSnapshot(
+    operation: WasmReport | null | undefined,
+  ): WasmReport | null {
+    if (!this.session || this.sessionBusy) {
+      return operation ?? null;
+    }
+    const snapshot = this.session.diagnosticSnapshot() as WasmReport;
+    return snapshot?.ok ? { ...snapshot, ...(operation ?? {}) } : operation ?? null;
+  }
+
   async waitForObserverIdle(pauseFrames = false): Promise<void> {
     if (pauseFrames) {
       this.pauseRendering();
@@ -285,7 +296,7 @@ class WebFrameDriver {
     try {
       const report = await this.renderHostFrame(performance.now());
       this.handleSceneFrame(report);
-      return report;
+      return this.observerSnapshot(report);
     } finally {
       this.tickFrameBusy = false;
       runtime.state.tickFrameBusy = false;
@@ -460,6 +471,7 @@ class WebFrameDriver {
     }
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(frame);
+    this.dispatchAssetPackOperation(frame);
     if (!this.sessionBusy) {
       this.drainLobbyOperations();
     }
@@ -673,7 +685,7 @@ class WebFrameDriver {
     }
 
     this.applyNativeUiReport(startReport);
-    if (startReport.sessionState !== "active") {
+    if (startReport.sessionActive !== true) {
       publishRuntimeState(runtime.state);
       return;
     }
@@ -692,7 +704,7 @@ class WebFrameDriver {
       publishRuntimeState(runtime.state);
       return;
     }
-    runtime.state.status = "session ready";
+    runtime.state.status = "ready";
     publishRuntimeState(runtime.state);
   }
 

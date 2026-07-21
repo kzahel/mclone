@@ -197,6 +197,8 @@ struct LastFrameStats {
     deferred_drop_backlog: usize,
     far_lod_region_draw_count: usize,
     far_lod_uploaded_bytes: usize,
+    accepted_compile_section_count: usize,
+    poll_updates: usize,
 }
 
 /// Opaque browser start ticket. Worker construction runs without borrowing
@@ -713,7 +715,9 @@ impl WebSceneHost {
             first_after_resume,
         } = admission
         else {
-            return self.report(None, false, 0.0, false).map_err(JsValue::from);
+            return self
+                .operational_report(false, 0.0, false)
+                .map_err(JsValue::from);
         };
 
         if let Some(previous) = self.last_visible_frame_millis {
@@ -728,7 +732,7 @@ impl WebSceneHost {
         let Some(host) = self.host.as_mut() else {
             self.frame_policy.shutdown();
             return self
-                .report(None, false, delta_seconds, first_after_resume)
+                .operational_report(false, delta_seconds, first_after_resume)
                 .map_err(JsValue::from);
         };
         let supplemental = self.touch_input.held_frame();
@@ -741,10 +745,12 @@ impl WebSceneHost {
         let surface_texture = match self.context.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(error) => {
-                self.frame_policy
-                    .require_restart(format!("WebGPU surface acquisition failed: {error}"));
+                let reason = format!("WebGPU surface acquisition failed: {error}");
+                self.frame_policy.require_restart(reason.clone());
+                self.startup_status_visible = false;
+                self.status_overlay = StatusOverlay::new(reason, false);
                 return self
-                    .report(None, false, delta_seconds, first_after_resume)
+                    .operational_report(false, delta_seconds, first_after_resume)
                     .map_err(JsValue::from);
             }
         };
@@ -791,6 +797,8 @@ impl WebSceneHost {
             deferred_drop_backlog: summary.upload.poll_client_deferred_chunk_drop_backlog_items,
             far_lod_region_draw_count: summary.render.far_lod_region_draw_count,
             far_lod_uploaded_bytes: summary.render.far_lod_uploaded_bytes,
+            accepted_compile_section_count: summary.upload.completed_compile_section_count,
+            poll_updates: summary.upload.poll_updates,
         };
         if host.mono_ui_screen() == Some(GameScreen::Pause) && summary.render.gui_command_count > 0
         {
@@ -828,7 +836,7 @@ impl WebSceneHost {
             self.startup_status_visible = false;
             self.status_overlay = StatusOverlay::hidden();
         }
-        self.report(Some(&summary), true, delta_seconds, first_after_resume)
+        self.operational_report(true, delta_seconds, first_after_resume)
             .map_err(JsValue::from)
     }
 
@@ -1173,13 +1181,25 @@ impl WebSceneHost {
 
     #[wasm_bindgen(js_name = cameraFrameState)]
     pub fn camera_frame_state(&self) -> Result<JsValue, JsValue> {
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
+    }
+
+    /// Rich semantic state for the explicit smoke/support observer.
+    ///
+    /// Ordinary browser cadence and input paths consume only the compact
+    /// operational results returned by their own calls.
+    #[wasm_bindgen(js_name = diagnosticSnapshot)]
+    pub fn diagnostic_snapshot(&self) -> Result<JsValue, JsValue> {
+        self.diagnostic_report(None, self.rendered_frame_count > 0, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = adjustCameraSpeed)]
     pub fn adjust_camera_speed(&mut self, amount: f64) -> Result<JsValue, JsValue> {
         self.host_mut()?.adjust_mono_camera_speed(amount);
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = previewBlockTarget)]
@@ -1201,7 +1221,8 @@ impl WebSceneHost {
         let anchor = preview.placement.composition_anchor();
         let target = Vec3::new(anchor.x as f32, anchor.y as f32 + 0.25, anchor.z as f32);
         set_host_camera_look_at(host, target + Vec3::new(-4.0, 2.25, -6.0), target);
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     /// Aim at a loaded nearby surface for browser interaction receipts without
@@ -1212,7 +1233,8 @@ impl WebSceneHost {
         if let Some(target) = target {
             aim_player_host_at_block(self.host_mut()?, target);
         }
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = interactBlock)]
@@ -1327,7 +1349,8 @@ impl WebSceneHost {
             self.last_visible_frame_millis = None;
             self.resume_frames_remaining = RESUME_OBSERVATION_FRAMES;
         }
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.operational_report(false, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = resizeCanvas)]
@@ -1340,7 +1363,8 @@ impl WebSceneHost {
             );
             self.resized = true;
         }
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.operational_report(false, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = setDebugOverlayVisible)]
@@ -1477,7 +1501,8 @@ impl WebSceneHost {
         );
         self.host_mut()?
             .set_mono_capture_camera(eye, 0.55, -0.45, 4.3);
-        self.render_frame(browser_now_millis())
+        self.render_frame(browser_now_millis())?;
+        self.diagnostic_snapshot()
     }
 
     /// Start the one shared-policy pending session using browser resources.
@@ -1709,7 +1734,8 @@ impl WebSceneHost {
         }
         self.render_worker.terminate();
         self.frame_policy.shutdown();
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = shutdownAsync)]
@@ -2418,58 +2444,11 @@ impl WebSceneHost {
     fn ui_report(
         &mut self,
         handled: bool,
-        action: Option<GameUiAction>,
+        _action: Option<GameUiAction>,
     ) -> Result<JsValue, String> {
-        let value = self.report(None, false, 0.0, false)?;
+        let value = self.operational_report(false, 0.0, false)?;
         let object: js_sys::Object = value.unchecked_into();
         report_set_bool(&object, "handled", handled)?;
-        if let Some(action) = action {
-            report_set_string(&object, "action", ui_action_label(action))?;
-            match action {
-                GameUiAction::CreateWorld(seed) => {
-                    report_set_number(&object, "worldSeed", seed as f64)?;
-                    report_set_string(&object, "worldSeedText", &seed.to_string())?;
-                }
-                GameUiAction::JoinRemote => {
-                    if let Some(ActiveSessionDescriptor::Remote { endpoint }) = self
-                        .host
-                        .as_ref()
-                        .and_then(|host| match host.session_state() {
-                            mclone_app_runtime::session::GameSessionState::Active { session } => {
-                                Some(session.clone())
-                            }
-                            _ => None,
-                        })
-                    {
-                        report_set_string(&object, "remoteEndpoint", &endpoint.address)?;
-                    }
-                }
-                GameUiAction::SetRenderDistance(distance) => {
-                    report_set_number(&object, "renderDistance", f64::from(distance))?;
-                }
-                GameUiAction::SetTouchLookSensitivity(value) => {
-                    report_set_number(&object, "touchLookSensitivity", f64::from(value))?;
-                }
-                GameUiAction::SetTouchControlsMode(mode) => {
-                    report_set_string(
-                        &object,
-                        "touchControlsMode",
-                        touch_controls_mode_label(mode),
-                    )?;
-                }
-                GameUiAction::SelectWorld(id) | GameUiAction::OpenWorld(id) => {
-                    report_set_number(&object, "catalogWorldUiId", id.0 as f64)?;
-                    if let Some(world_id) = self
-                        .host
-                        .as_ref()
-                        .and_then(|host| host.mono_local_world_id_for_ui_id(id))
-                    {
-                        report_set_string(&object, "catalogWorldId", world_id.as_str())?;
-                    }
-                }
-                _ => {}
-            }
-        }
         if let Some(operation) = self.platform.take_catalog_operation() {
             let request_id = operation.kind.request.id.0.to_string();
             self.catalog_operations.insert(
@@ -2484,6 +2463,53 @@ impl WebSceneHost {
             report_set_string(&object, "catalogRequestId", &request_id)?;
         }
         Ok(object.into())
+    }
+
+    fn write_last_action_receipt(&self, object: &js_sys::Object) -> Result<(), String> {
+        let Some(action) = self.last_action else {
+            return Ok(());
+        };
+        report_set_string(object, "action", ui_action_label(action))?;
+        match action {
+            GameUiAction::CreateWorld(seed) => {
+                report_set_number(object, "worldSeed", seed as f64)?;
+                report_set_string(object, "worldSeedText", &seed.to_string())
+            }
+            GameUiAction::JoinRemote => {
+                if let Some(ActiveSessionDescriptor::Remote { endpoint }) = self
+                    .host
+                    .as_ref()
+                    .and_then(|host| match host.session_state() {
+                        GameSessionState::Active { session } => Some(session.clone()),
+                        _ => None,
+                    })
+                {
+                    report_set_string(object, "remoteEndpoint", &endpoint.address)?;
+                }
+                Ok(())
+            }
+            GameUiAction::SetRenderDistance(distance) => {
+                report_set_number(object, "renderDistance", f64::from(distance))
+            }
+            GameUiAction::SetTouchLookSensitivity(value) => {
+                report_set_number(object, "touchLookSensitivity", f64::from(value))
+            }
+            GameUiAction::SetTouchControlsMode(mode) => {
+                report_set_string(object, "touchControlsMode", touch_controls_mode_label(mode))
+            }
+            GameUiAction::SelectWorld(id) | GameUiAction::OpenWorld(id) => {
+                report_set_number(object, "catalogWorldUiId", id.0 as f64)?;
+                if let Some(world_id) = self
+                    .host
+                    .as_ref()
+                    .and_then(|host| host.mono_local_world_id_for_ui_id(id))
+                {
+                    report_set_string(object, "catalogWorldId", world_id.as_str())?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
     }
 
     fn block_target_report(&self) -> Result<JsValue, String> {
@@ -2578,7 +2604,57 @@ impl WebSceneHost {
         }
     }
 
-    fn report(
+    fn operational_report(
+        &self,
+        rendered: bool,
+        delta_seconds: f64,
+        first_after_resume: bool,
+    ) -> Result<JsValue, String> {
+        let object = js_sys::Object::new();
+        report_set_bool(&object, "ok", true)?;
+        report_set_string(&object, "state", self.frame_policy.state().label())?;
+        if let WebSceneFrameState::RestartRequired { reason } = self.frame_policy.state() {
+            report_set_string(&object, "restartReason", reason)?;
+        }
+        report_set_bool(&object, "rendered", rendered)?;
+        report_set_number(&object, "deltaSeconds", delta_seconds)?;
+        report_set_bool(&object, "firstAfterResume", first_after_resume)?;
+        report_set_number(&object, "width", self.context.width as f64)?;
+        report_set_number(&object, "height", self.context.height as f64)?;
+        report_set_bool(
+            &object,
+            "initialPresentationReady",
+            self.initial_presentation_stable_frames >= INITIAL_PRESENTATION_STABLE_FRAMES,
+        )?;
+        report_set_number(
+            &object,
+            "renderWorkerPendingRequestCount",
+            self.render_worker.pending_request_count() as f64,
+        )?;
+        report_set_bool(&object, "shutdownComplete", self.shutdown_complete)?;
+        if let Some(host) = self.host.as_ref() {
+            let ui_active = host.mono_ui_is_active();
+            report_set_bool(&object, "active", ui_active)?;
+            report_set_bool(&object, "uiActive", ui_active)?;
+            report_set_bool(
+                &object,
+                "sessionStartPending",
+                host.external_session_start_snapshot().is_some(),
+            )?;
+            report_set_bool(
+                &object,
+                "sessionActive",
+                matches!(host.session_state(), GameSessionState::Active { .. }),
+            )?;
+            if let Some(pending) = host.pending_external_asset_pack_selection() {
+                report_set_bool(&object, "assetPackRequest", true)?;
+                report_set_number(&object, "assetPackRequestEpoch", pending.epoch as f64)?;
+            }
+        }
+        Ok(object.into())
+    }
+
+    fn diagnostic_report(
         &self,
         summary: Option<&MonoSceneFrameSummary>,
         rendered: bool,
@@ -2593,7 +2669,11 @@ impl WebSceneHost {
             report_set_string(&object, "restartReason", reason)?;
         }
         report_set_bool(&object, "rendered", rendered)?;
-        report_set_bool(&object, "hostOwnedFrameAssembly", summary.is_some())?;
+        report_set_bool(
+            &object,
+            "hostOwnedFrameAssembly",
+            summary.is_some() || self.rendered_frame_count > 0,
+        )?;
         report_set_bool(&object, "audioCapabilityAbsent", true)?;
         report_set_bool(&object, "teleportCapabilityAbsent", true)?;
         report_set_number(&object, "frameCount", self.frame_count as f64)?;
@@ -3937,6 +4017,13 @@ impl WebSceneHost {
         )?;
         report_set_number(
             &object,
+            "acceptedCompileSectionCount",
+            self.last_frame.accepted_compile_section_count as f64,
+        )?;
+        report_set_number(&object, "pollUpdates", self.last_frame.poll_updates as f64)?;
+        report_set_bool(&object, "playable", self.last_frame.drawn_section_count > 0)?;
+        report_set_number(
+            &object,
             "farLodRegionDrawCount",
             self.last_frame.far_lod_region_draw_count as f64,
         )?;
@@ -3949,10 +4036,11 @@ impl WebSceneHost {
         self.render_worker.write_report(
             &object,
             self.command_count,
-            summary.map_or(0, |summary| summary.upload.accepted_compile_result_count),
+            self.last_frame.accepted_compile_section_count,
             self.mesh_build_count,
             self.pending_chunk_render_compile_job_count(),
         )?;
+        self.write_last_action_receipt(&object)?;
         Ok(object.into())
     }
 }
