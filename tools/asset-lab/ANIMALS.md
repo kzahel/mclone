@@ -129,7 +129,7 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Wolf | P0 | ✅ | Q | gray, black, arctic (white), pup | `examples/wolf` — canonical 16-box tall wolf with a vanilla-derived shoulder mass, upright ears, long legs, and heavy tail; rounded A/B retained at `legacy-examples/wolf_rounded` |
 | Fox | P1 | ✅ | Q | red, arctic (white), fennec (huge ears), kit | `examples/fox` — canonical 18-box low fox with oversized ears, black-stocking texture, and attached white-tipped tail; rounded A/B retained at `legacy-examples/fox_rounded` |
-| Coyote | P3 | ☐ | Q | — | between wolf and fox |
+| Coyote | P3 | ✅ | Q | — | `examples/coyote` — approved desert coyote with a lean gray-saddled frame, oversized ears, narrow muzzle, long legs, and low black-tipped brush tail |
 | Hyena | P3 | ✅ | Q | spotted, striped | `examples/spotted_hyena` — approved 21-box spotted hyena with tall heavy shoulders, lower rear, blunt dark muzzle, raised mane, and short brush tail |
 
 ## Felids (big cats)
@@ -241,6 +241,7 @@ reviewed rigs and then filling macro gaps.
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
 | Octopus | P2 | ✅ | S | — | `examples/octopus` — approved 32-box common octopus with mottled mantle, raised eyes, visible sucker rows, eight three-stage tentacles, and coordinated jet swim |
+| Cuttlefish | P3 | ✅ | S | common, flamboyant | `examples/cuttlefish` — approved common cuttlefish with a patterned broad mantle, traveling lateral-fin wave, large W-pupil eyes, eight arms, and a separate paired feeding-tentacle strike |
 | Crab | P2 | ✅ | C | — | `examples/crab` — approved 31-box red rock crab with patterned broad carapace, raised eyes, articulated chelae, eight two-stage legs, and explicit sideways scuttle |
 | Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
 | Seahorse | P3 | ✅ | S | — | `examples/seahorse` — approved 21-box common seahorse with long snout, raised coronet, plated trunk, fluttering fins, and five-stage curled tail |
@@ -263,6 +264,7 @@ reviewed rigs and then filling macro gaps.
 | Komodo dragon | P3 | ✅ | Q | — | `examples/komodo_dragon` — approved 31-box adult monitor with scaled torso, muscular neck, forked tongue, four stout clawed limbs, and four-stage tail |
 | Frog | P2 | ✅ | H | green, tree-frog morphs, toad; tadpole | `examples/frog` — approved 19-box green frog with raised amber eyes, broad head, folded hind legs, toe pads, looping hop, and separate one-shot jump action |
 | Salamander / Newt | P3 | ✅ | Q | — | `examples/salamander` — review candidate fire salamander with glossy warning-patterned body, broad low head, sprawled feet, and four-stage tail crawl |
+| Axolotl | P3 | ✅ | Q/S | leucistic, wild, golden | `examples/axolotl` — approved leucistic axolotl with a broad smiling head, six branched external gills, tiny paddle feet, and a tall four-stage swimming tail |
 
 ## Insects & arthropods
 
