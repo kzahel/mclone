@@ -1,5 +1,6 @@
 use glam::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
+use std::{collections::BTreeMap, num::NonZeroU64, time::Duration};
 
 pub const FLAT_HOTBAR_SLOT_COUNT: u8 = 9;
 /// Mouse-delta units per second for held keyboard turning; intentionally slower than mouselook.
@@ -1859,6 +1860,532 @@ pub enum GamepadControl {
     StartButton,
 }
 
+/// Maximum number of independently assigned humans/roles on one host.
+///
+/// This is a product bound, not a two-pane layout assumption. Presentation
+/// may admit fewer or more views than assigned participants.
+pub const MAX_LOCAL_PARTICIPANTS: usize = 4;
+
+/// Default time during which a disconnected source keeps its participant
+/// reservation. Hosts supply a session-monotonic timestamp, keeping platform
+/// clocks and device handles out of shared assignment policy.
+pub const DEFAULT_INPUT_RECONNECT_GRACE: Duration = Duration::from_secs(5);
+
+/// Opaque identity allocated for one input-host session.
+///
+/// This type deliberately has no serialization implementation or constructor
+/// from a backend number. Browser indices, GilRs IDs, Android device IDs, and
+/// platform handles must remain in the collector that maps them to these IDs.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct InputSourceId(NonZeroU64);
+
+/// Allocates monotonically ordered, process-local source identities.
+#[derive(Clone, Debug)]
+pub struct InputSourceIdAllocator {
+    next: Option<NonZeroU64>,
+}
+
+impl Default for InputSourceIdAllocator {
+    fn default() -> Self {
+        Self {
+            next: NonZeroU64::new(1),
+        }
+    }
+}
+
+impl InputSourceIdAllocator {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Returns `None` only after exhausting every nonzero `u64` in a session.
+    pub fn allocate(&mut self) -> Option<InputSourceId> {
+        let id = self.next?;
+        self.next = id.get().checked_add(1).and_then(NonZeroU64::new);
+        Some(InputSourceId(id))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InputSourceClass {
+    KeyboardMouse,
+    Touch,
+    Gamepad,
+    TrackedController,
+    SteamInput,
+    ScriptedTest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ControllerLayoutFamily {
+    XboxLike,
+    PlayStationLike,
+    NintendoLike,
+    SteamDeckLike,
+    Generic,
+    Unknown,
+}
+
+/// Neutral source capabilities used by shared policy and presentation.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct InputSourceCapabilities {
+    pub standard_gamepad_axes: bool,
+    pub standard_gamepad_buttons: bool,
+    pub analog_button_values: bool,
+    pub touch_surface_count: u8,
+    pub motion_sensor_count: u8,
+    pub haptic_channel_count: u8,
+    pub action_origins: bool,
+}
+
+impl InputSourceCapabilities {
+    pub const STANDARD_GAMEPAD: Self = Self {
+        standard_gamepad_axes: true,
+        standard_gamepad_buttons: true,
+        analog_button_values: true,
+        touch_surface_count: 0,
+        motion_sensor_count: 0,
+        haptic_channel_count: 0,
+        action_origins: false,
+    };
+}
+
+/// Shared source facts. The display label is session-only and must not become
+/// a profile key or durable device identity.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InputSourceDescriptor {
+    pub source_class: InputSourceClass,
+    pub controller_layout: ControllerLayoutFamily,
+    pub capabilities: InputSourceCapabilities,
+    pub connected: bool,
+    pub display_label: Option<String>,
+}
+
+impl InputSourceDescriptor {
+    pub fn standard_gamepad(
+        controller_layout: ControllerLayoutFamily,
+        display_label: Option<String>,
+    ) -> Self {
+        Self {
+            source_class: InputSourceClass::Gamepad,
+            controller_layout,
+            capabilities: InputSourceCapabilities::STANDARD_GAMEPAD,
+            connected: true,
+            display_label,
+        }
+    }
+
+    pub fn scripted_gamepad(display_label: impl Into<String>) -> Self {
+        Self {
+            source_class: InputSourceClass::ScriptedTest,
+            controller_layout: ControllerLayoutFamily::Generic,
+            capabilities: InputSourceCapabilities::STANDARD_GAMEPAD,
+            connected: true,
+            display_label: Some(display_label.into()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StandardGamepadButtonState {
+    pub value: f32,
+    pub pressed: bool,
+}
+
+impl StandardGamepadButtonState {
+    pub const RELEASED: Self = Self {
+        value: 0.0,
+        pressed: false,
+    };
+
+    pub const fn pressed() -> Self {
+        Self {
+            value: 1.0,
+            pressed: true,
+        }
+    }
+
+    fn normalized(self) -> Self {
+        Self {
+            value: if self.value.is_finite() {
+                self.value.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            pressed: self.pressed,
+        }
+    }
+}
+
+/// W3C-style standard gamepad buttons, named by position rather than vendor
+/// glyph. Triggers retain both normalized analog values and pressed state.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StandardGamepadButtons {
+    pub south: StandardGamepadButtonState,
+    pub east: StandardGamepadButtonState,
+    pub west: StandardGamepadButtonState,
+    pub north: StandardGamepadButtonState,
+    pub left_shoulder: StandardGamepadButtonState,
+    pub right_shoulder: StandardGamepadButtonState,
+    pub left_trigger: StandardGamepadButtonState,
+    pub right_trigger: StandardGamepadButtonState,
+    pub select: StandardGamepadButtonState,
+    pub start: StandardGamepadButtonState,
+    pub left_stick: StandardGamepadButtonState,
+    pub right_stick: StandardGamepadButtonState,
+    pub dpad_up: StandardGamepadButtonState,
+    pub dpad_down: StandardGamepadButtonState,
+    pub dpad_left: StandardGamepadButtonState,
+    pub dpad_right: StandardGamepadButtonState,
+    pub guide: StandardGamepadButtonState,
+}
+
+impl StandardGamepadButtons {
+    fn normalized(self) -> Self {
+        Self {
+            south: self.south.normalized(),
+            east: self.east.normalized(),
+            west: self.west.normalized(),
+            north: self.north.normalized(),
+            left_shoulder: self.left_shoulder.normalized(),
+            right_shoulder: self.right_shoulder.normalized(),
+            left_trigger: self.left_trigger.normalized(),
+            right_trigger: self.right_trigger.normalized(),
+            select: self.select.normalized(),
+            start: self.start.normalized(),
+            left_stick: self.left_stick.normalized(),
+            right_stick: self.right_stick.normalized(),
+            dpad_up: self.dpad_up.normalized(),
+            dpad_down: self.dpad_down.normalized(),
+            dpad_left: self.dpad_left.normalized(),
+            dpad_right: self.dpad_right.normalized(),
+            guide: self.guide.normalized(),
+        }
+    }
+
+    fn mapped_controls(self) -> [(GamepadControl, bool); 11] {
+        [
+            (GamepadControl::SouthButton, self.south.pressed),
+            (GamepadControl::EastButton, self.east.pressed),
+            (GamepadControl::WestButton, self.west.pressed),
+            (GamepadControl::NorthButton, self.north.pressed),
+            (GamepadControl::LeftShoulder, self.left_shoulder.pressed),
+            (GamepadControl::RightShoulder, self.right_shoulder.pressed),
+            (GamepadControl::DPadLeft, self.dpad_left.pressed),
+            (GamepadControl::DPadRight, self.dpad_right.pressed),
+            (GamepadControl::DPadUp, self.dpad_up.pressed),
+            (GamepadControl::DPadDown, self.dpad_down.pressed),
+            (GamepadControl::StartButton, self.start.pressed),
+        ]
+    }
+}
+
+/// One normalized ordinary-gamepad sample at the shared input boundary.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StandardGamepadSnapshot {
+    pub left_stick: Vec2,
+    pub right_stick: Vec2,
+    pub buttons: StandardGamepadButtons,
+}
+
+impl StandardGamepadSnapshot {
+    pub fn normalized(self) -> Self {
+        Self {
+            left_stick: normalize_standard_stick(self.left_stick),
+            right_stick: normalize_standard_stick(self.right_stick),
+            buttons: self.buttons.normalized(),
+        }
+    }
+
+    /// A deliberate Start or position-neutral confirm edge may request a seat.
+    pub fn join_held(self) -> bool {
+        self.buttons.start.pressed || self.buttons.south.pressed
+    }
+
+    pub fn has_held_state(self) -> bool {
+        self.left_stick != Vec2::ZERO
+            || self.right_stick != Vec2::ZERO
+            || self
+                .buttons
+                .mapped_controls()
+                .into_iter()
+                .any(|(_, pressed)| pressed)
+            || self.buttons.left_trigger.pressed
+            || self.buttons.right_trigger.pressed
+            || self.buttons.select.pressed
+            || self.buttons.left_stick.pressed
+            || self.buttons.right_stick.pressed
+            || self.buttons.guide.pressed
+    }
+}
+
+fn normalize_standard_stick(value: Vec2) -> Vec2 {
+    Vec2::new(finite_axis(value.x), finite_axis(value.y)).clamp_length_max(1.0)
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct LocalParticipantSlot(u8);
+
+impl LocalParticipantSlot {
+    pub fn from_index(index: usize) -> Option<Self> {
+        (index < MAX_LOCAL_PARTICIPANTS).then_some(Self(index as u8))
+    }
+
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceConnectOutcome {
+    Connected,
+    Reconnected { slot: Option<LocalParticipantSlot> },
+    AlreadyConnected,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceJoinOutcome {
+    None,
+    Assigned(LocalParticipantSlot),
+    AlreadyAssigned(LocalParticipantSlot),
+    Full,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GamepadSourceSampleReceipt {
+    pub source_id: InputSourceId,
+    pub join_edge: bool,
+    pub join_outcome: SourceJoinOutcome,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceDisconnectReceipt {
+    pub source_id: InputSourceId,
+    pub reserved_slot: Option<LocalParticipantSlot>,
+    pub held_state_cleared: bool,
+    pub reconnect_until: Duration,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceReservationExpiry {
+    pub source_id: InputSourceId,
+    pub released_slot: Option<LocalParticipantSlot>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LocalInputAssignmentError {
+    UnknownSource(InputSourceId),
+    DisconnectedSource(InputSourceId),
+    DuplicateSample(InputSourceId),
+}
+
+#[derive(Clone, Debug)]
+struct LocalGamepadSourceState {
+    descriptor: InputSourceDescriptor,
+    snapshot: StandardGamepadSnapshot,
+    reconnect_until: Option<Duration>,
+}
+
+/// Bounded, deterministic source-to-seat reducer used by scripted tests now
+/// and by future physical collectors without moving join policy into a host.
+#[derive(Clone, Debug)]
+pub struct LocalGamepadAssignmentReducer {
+    reconnect_grace: Duration,
+    sources: BTreeMap<InputSourceId, LocalGamepadSourceState>,
+    assignments: [Option<InputSourceId>; MAX_LOCAL_PARTICIPANTS],
+}
+
+impl Default for LocalGamepadAssignmentReducer {
+    fn default() -> Self {
+        Self::new(DEFAULT_INPUT_RECONNECT_GRACE)
+    }
+}
+
+impl LocalGamepadAssignmentReducer {
+    pub fn new(reconnect_grace: Duration) -> Self {
+        Self {
+            reconnect_grace,
+            sources: BTreeMap::new(),
+            assignments: [None; MAX_LOCAL_PARTICIPANTS],
+        }
+    }
+
+    pub fn connect_source(
+        &mut self,
+        source_id: InputSourceId,
+        mut descriptor: InputSourceDescriptor,
+        now: Duration,
+    ) -> SourceConnectOutcome {
+        self.expire_reconnect_grace(now);
+        descriptor.connected = true;
+        if self.sources.contains_key(&source_id) {
+            let slot = self.slot_for_source(source_id);
+            let source = self
+                .sources
+                .get_mut(&source_id)
+                .expect("source presence was checked");
+            if source.descriptor.connected {
+                source.descriptor = descriptor;
+                return SourceConnectOutcome::AlreadyConnected;
+            }
+            source.descriptor = descriptor;
+            source.snapshot = StandardGamepadSnapshot::default();
+            source.reconnect_until = None;
+            return SourceConnectOutcome::Reconnected { slot };
+        }
+        self.sources.insert(
+            source_id,
+            LocalGamepadSourceState {
+                descriptor,
+                snapshot: StandardGamepadSnapshot::default(),
+                reconnect_until: None,
+            },
+        );
+        SourceConnectOutcome::Connected
+    }
+
+    /// Applies one logical sample boundary. Sorting by session-local source ID
+    /// makes simultaneous joins deterministic even if a backend enumerates its
+    /// devices in a different order on the next frame.
+    pub fn sample_frame(
+        &mut self,
+        samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
+    ) -> Result<Vec<GamepadSourceSampleReceipt>, LocalInputAssignmentError> {
+        let mut samples = samples
+            .into_iter()
+            .map(|(source_id, snapshot)| (source_id, snapshot.normalized()))
+            .collect::<Vec<_>>();
+        samples.sort_by_key(|(source_id, _)| *source_id);
+
+        for pair in samples.windows(2) {
+            if pair[0].0 == pair[1].0 {
+                return Err(LocalInputAssignmentError::DuplicateSample(pair[0].0));
+            }
+        }
+        for (source_id, _) in &samples {
+            let Some(source) = self.sources.get(source_id) else {
+                return Err(LocalInputAssignmentError::UnknownSource(*source_id));
+            };
+            if !source.descriptor.connected {
+                return Err(LocalInputAssignmentError::DisconnectedSource(*source_id));
+            }
+        }
+
+        let mut receipts = Vec::with_capacity(samples.len());
+        for (source_id, snapshot) in samples {
+            let source = self
+                .sources
+                .get_mut(&source_id)
+                .expect("sample sources were validated");
+            let join_edge = snapshot.join_held() && !source.snapshot.join_held();
+            source.snapshot = snapshot;
+            let join_outcome = if join_edge {
+                self.assign_next_available(source_id)
+            } else {
+                SourceJoinOutcome::None
+            };
+            receipts.push(GamepadSourceSampleReceipt {
+                source_id,
+                join_edge,
+                join_outcome,
+            });
+        }
+        Ok(receipts)
+    }
+
+    pub fn disconnect_source(
+        &mut self,
+        source_id: InputSourceId,
+        now: Duration,
+    ) -> Result<SourceDisconnectReceipt, LocalInputAssignmentError> {
+        let reserved_slot = self.slot_for_source(source_id);
+        let Some(source) = self.sources.get_mut(&source_id) else {
+            return Err(LocalInputAssignmentError::UnknownSource(source_id));
+        };
+        let held_state_cleared = source.snapshot.has_held_state();
+        source.snapshot = StandardGamepadSnapshot::default();
+        source.descriptor.connected = false;
+        let reconnect_until = now.saturating_add(self.reconnect_grace);
+        source.reconnect_until = Some(reconnect_until);
+        Ok(SourceDisconnectReceipt {
+            source_id,
+            reserved_slot,
+            held_state_cleared,
+            reconnect_until,
+        })
+    }
+
+    pub fn expire_reconnect_grace(&mut self, now: Duration) -> Vec<SourceReservationExpiry> {
+        let expired = self
+            .sources
+            .iter()
+            .filter_map(|(source_id, source)| {
+                (!source.descriptor.connected
+                    && source.reconnect_until.is_some_and(|until| now >= until))
+                .then_some(*source_id)
+            })
+            .collect::<Vec<_>>();
+        expired
+            .into_iter()
+            .map(|source_id| SourceReservationExpiry {
+                source_id,
+                released_slot: self.remove_source(source_id),
+            })
+            .collect()
+    }
+
+    pub fn forget_source(&mut self, source_id: InputSourceId) -> Option<LocalParticipantSlot> {
+        self.remove_source(source_id)
+    }
+
+    pub fn source_descriptor(&self, source_id: InputSourceId) -> Option<&InputSourceDescriptor> {
+        self.sources
+            .get(&source_id)
+            .map(|source| &source.descriptor)
+    }
+
+    pub fn source_snapshot(&self, source_id: InputSourceId) -> Option<StandardGamepadSnapshot> {
+        self.sources.get(&source_id).map(|source| source.snapshot)
+    }
+
+    pub fn source_for_slot(&self, slot: LocalParticipantSlot) -> Option<InputSourceId> {
+        self.assignments[slot.index()]
+    }
+
+    pub fn slot_for_source(&self, source_id: InputSourceId) -> Option<LocalParticipantSlot> {
+        self.assignments
+            .iter()
+            .position(|assigned| *assigned == Some(source_id))
+            .and_then(LocalParticipantSlot::from_index)
+    }
+
+    pub fn assigned_count(&self) -> usize {
+        self.assignments.iter().flatten().count()
+    }
+
+    fn assign_next_available(&mut self, source_id: InputSourceId) -> SourceJoinOutcome {
+        if let Some(slot) = self.slot_for_source(source_id) {
+            return SourceJoinOutcome::AlreadyAssigned(slot);
+        }
+        let Some(index) = self.assignments.iter().position(Option::is_none) else {
+            return SourceJoinOutcome::Full;
+        };
+        self.assignments[index] = Some(source_id);
+        SourceJoinOutcome::Assigned(
+            LocalParticipantSlot::from_index(index).expect("assignment array is product-bounded"),
+        )
+    }
+
+    fn remove_source(&mut self, source_id: InputSourceId) -> Option<LocalParticipantSlot> {
+        let slot = self.slot_for_source(source_id);
+        if let Some(slot) = slot {
+            self.assignments[slot.index()] = None;
+        }
+        self.sources.remove(&source_id);
+        slot
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum InputBindingAction {
@@ -1979,6 +2506,30 @@ impl GamepadInputAdapter {
     pub fn clear_held(&mut self) {
         self.sticks = GamepadStickState::default();
         self.pressed = GamepadPressedControls::default();
+    }
+
+    /// Feeds the canonical snapshot through the existing shared bindings.
+    /// Collectors should call this rather than translating gameplay actions.
+    pub fn apply_standard_snapshot(
+        &mut self,
+        snapshot: StandardGamepadSnapshot,
+    ) -> GamepadInputEvent {
+        let snapshot = snapshot.normalized();
+        self.set_left_stick(snapshot.left_stick.x, snapshot.left_stick.y);
+        self.set_right_stick(snapshot.right_stick.x, snapshot.right_stick.y);
+        let mut frame = FlatInputFrame::default();
+        let mut emitted = false;
+        for (control, pressed) in snapshot.buttons.mapped_controls() {
+            if let Some(button_frame) = self.handle_button(control, pressed).frame {
+                frame.merge_from(button_frame);
+                emitted = true;
+            }
+        }
+        if emitted {
+            GamepadInputEvent::frame(frame)
+        } else {
+            GamepadInputEvent::handled()
+        }
     }
 
     pub fn set_left_stick(&mut self, x: f32, y: f32) -> GamepadInputEvent {
@@ -2939,6 +3490,225 @@ mod tests {
                 forward: 0.0
             })
         );
+    }
+
+    #[test]
+    fn standard_gamepad_snapshot_normalizes_and_feeds_shared_bindings() {
+        let mut adapter = GamepadInputAdapter::with_settings(GamepadInputSettings {
+            movement_deadzone: 0.0,
+            look_deadzone: 0.0,
+            look_sensitivity: 8.0,
+        });
+        let snapshot = StandardGamepadSnapshot {
+            left_stick: Vec2::new(3.0, 4.0),
+            right_stick: Vec2::new(f32::NAN, -0.5),
+            buttons: StandardGamepadButtons {
+                west: StandardGamepadButtonState::pressed(),
+                left_trigger: StandardGamepadButtonState {
+                    value: 2.0,
+                    pressed: true,
+                },
+                ..StandardGamepadButtons::default()
+            },
+        };
+
+        let normalized = snapshot.normalized();
+        assert_eq!(normalized.left_stick, Vec2::new(0.6, 0.8));
+        assert_eq!(normalized.right_stick, Vec2::new(0.0, -0.5));
+        assert_eq!(normalized.buttons.left_trigger.value, 1.0);
+        assert!(normalized.buttons.left_trigger.pressed);
+
+        let event = adapter.apply_standard_snapshot(snapshot);
+        assert!(event.frame.expect("west press should emit").attack);
+        let held = adapter.held_frame().expect("sticks should remain held");
+        assert_eq!(
+            held.analog_movement,
+            Some(MovementImpulse {
+                left: -0.6,
+                forward: 0.8,
+            })
+        );
+        assert_eq!(held.look_delta, LookDelta { x: 0.0, y: 4.0 });
+    }
+
+    #[test]
+    fn four_scripted_sources_assign_stably_without_backend_indices() {
+        let mut allocator = InputSourceIdAllocator::new();
+        let ids = std::array::from_fn::<_, 5, _>(|_| allocator.allocate().expect("test source ID"));
+        let mut reducer = LocalGamepadAssignmentReducer::default();
+        for (source_id, label) in ids.into_iter().zip([
+            "backend-index-9",
+            "backend-index-2",
+            "backend-index-41",
+            "backend-index-0",
+            "backend-index-7",
+        ]) {
+            assert_eq!(
+                reducer.connect_source(
+                    source_id,
+                    InputSourceDescriptor::scripted_gamepad(label),
+                    Duration::ZERO,
+                ),
+                SourceConnectOutcome::Connected
+            );
+        }
+
+        let join = StandardGamepadSnapshot {
+            buttons: StandardGamepadButtons {
+                start: StandardGamepadButtonState::pressed(),
+                ..StandardGamepadButtons::default()
+            },
+            ..StandardGamepadSnapshot::default()
+        };
+        let receipts = reducer
+            .sample_frame([
+                (ids[3], join),
+                (ids[1], join),
+                (ids[2], join),
+                (ids[0], join),
+            ])
+            .expect("four joins");
+        assert_eq!(
+            receipts
+                .iter()
+                .map(|receipt| receipt.source_id)
+                .collect::<Vec<_>>(),
+            ids[..4]
+        );
+        for (index, source_id) in ids[..4].iter().copied().enumerate() {
+            let slot = LocalParticipantSlot::from_index(index).expect("bounded slot");
+            assert_eq!(reducer.source_for_slot(slot), Some(source_id));
+            assert_eq!(reducer.slot_for_source(source_id), Some(slot));
+        }
+        assert_eq!(reducer.assigned_count(), MAX_LOCAL_PARTICIPANTS);
+
+        let full = reducer
+            .sample_frame([(ids[4], join)])
+            .expect("fifth sample");
+        assert_eq!(full[0].join_outcome, SourceJoinOutcome::Full);
+
+        let release = StandardGamepadSnapshot::default();
+        reducer
+            .sample_frame([
+                (ids[3], release),
+                (ids[0], release),
+                (ids[2], release),
+                (ids[1], release),
+                (ids[4], release),
+            ])
+            .expect("reordered releases");
+        let repeated = reducer
+            .sample_frame([
+                (ids[2], join),
+                (ids[0], join),
+                (ids[3], join),
+                (ids[1], join),
+            ])
+            .expect("reordered existing joins");
+        assert!(
+            repeated.iter().all(|receipt| matches!(
+                receipt.join_outcome,
+                SourceJoinOutcome::AlreadyAssigned(_)
+            ))
+        );
+        assert_eq!(reducer.assigned_count(), MAX_LOCAL_PARTICIPANTS);
+        for (index, source_id) in ids[..4].iter().copied().enumerate() {
+            assert_eq!(
+                reducer.source_for_slot(LocalParticipantSlot::from_index(index).unwrap()),
+                Some(source_id)
+            );
+        }
+
+        assert_eq!(
+            reducer.sample_frame([(ids[0], release), (ids[0], join)]),
+            Err(LocalInputAssignmentError::DuplicateSample(ids[0]))
+        );
+    }
+
+    #[test]
+    fn disconnect_clears_held_state_and_reconnect_reserves_only_until_grace() {
+        let mut allocator = InputSourceIdAllocator::new();
+        let reserved = allocator.allocate().unwrap();
+        let waiting = allocator.allocate().unwrap();
+        let mut reducer = LocalGamepadAssignmentReducer::new(Duration::from_secs(5));
+        for source_id in [reserved, waiting] {
+            reducer.connect_source(
+                source_id,
+                InputSourceDescriptor::scripted_gamepad("scripted pad"),
+                Duration::ZERO,
+            );
+        }
+        let held_join = StandardGamepadSnapshot {
+            left_stick: Vec2::new(0.75, 0.0),
+            buttons: StandardGamepadButtons {
+                south: StandardGamepadButtonState::pressed(),
+                ..StandardGamepadButtons::default()
+            },
+            ..StandardGamepadSnapshot::default()
+        };
+        reducer
+            .sample_frame([(reserved, held_join)])
+            .expect("initial join");
+        let slot_zero = LocalParticipantSlot::from_index(0).unwrap();
+        assert_eq!(reducer.source_for_slot(slot_zero), Some(reserved));
+
+        let disconnected = reducer
+            .disconnect_source(reserved, Duration::from_secs(10))
+            .expect("disconnect");
+        assert!(disconnected.held_state_cleared);
+        assert_eq!(disconnected.reserved_slot, Some(slot_zero));
+        assert_eq!(
+            reducer.source_snapshot(reserved),
+            Some(StandardGamepadSnapshot::default())
+        );
+        assert!(!reducer.source_descriptor(reserved).unwrap().connected);
+
+        assert_eq!(
+            reducer.connect_source(
+                reserved,
+                InputSourceDescriptor::scripted_gamepad("same session source"),
+                Duration::from_secs(14),
+            ),
+            SourceConnectOutcome::Reconnected {
+                slot: Some(slot_zero)
+            }
+        );
+        assert_eq!(reducer.source_for_slot(slot_zero), Some(reserved));
+
+        reducer
+            .sample_frame([(reserved, held_join)])
+            .expect("held state after reconnect starts from clear");
+        reducer
+            .disconnect_source(reserved, Duration::from_secs(20))
+            .expect("second disconnect");
+        let expired = reducer.expire_reconnect_grace(Duration::from_secs(25));
+        assert_eq!(
+            expired,
+            vec![SourceReservationExpiry {
+                source_id: reserved,
+                released_slot: Some(slot_zero),
+            }]
+        );
+        assert_eq!(reducer.source_for_slot(slot_zero), None);
+
+        reducer
+            .sample_frame([(waiting, StandardGamepadSnapshot::default())])
+            .unwrap();
+        let waiting_join = reducer.sample_frame([(waiting, held_join)]).unwrap();
+        assert_eq!(
+            waiting_join[0].join_outcome,
+            SourceJoinOutcome::Assigned(slot_zero)
+        );
+        assert_eq!(
+            reducer.connect_source(
+                reserved,
+                InputSourceDescriptor::scripted_gamepad("late source"),
+                Duration::from_secs(26),
+            ),
+            SourceConnectOutcome::Connected
+        );
+        assert_eq!(reducer.slot_for_source(reserved), None);
+        assert_eq!(reducer.source_for_slot(slot_zero), Some(waiting));
     }
 
     #[test]

@@ -2,9 +2,10 @@
 
 Topic: `controller-input`
 
-Status: accepted design; implementation pending as of 2026-07-21. The existing
-shared capability, binding, prompt, and first-pass gamepad adapter foundation
-is retained, but no product target currently polls a real gamepad. This topic
+Status: accepted design; shared source/assignment foundation partially
+implemented as of 2026-07-21. The existing capability, binding, prompt, and
+first-pass gamepad adapter foundation is retained, but no product target
+currently polls a real gamepad. This topic
 owns the durable all-target controller direction across desktop flat, web,
 flat Android, desktop XR, Android XR, offscreen/test hosts, Steam Deck, and a
 future native Steam Input integration. Tactical
@@ -84,19 +85,25 @@ UI navigation, prompt selection, or game behavior.
 
 ## Current State And Gaps
 
-The current code has the right initial owner but not yet the complete
-contract:
+The current code has the right shared owner and the preliminary couch-safe
+source seam, but not yet the complete semantic or physical-input contract:
 
 - `mclone-input` owns `InputDeviceKind`, capability and last-active-device
   state, preferences, prompt resolution, `GamepadBindings`, radial dead zones,
   and `GamepadInputAdapter`.
+- `mclone-input` now also owns session-local `InputSourceId`, neutral source
+  descriptors, the full normalized `StandardGamepadSnapshot`, and a bounded
+  scripted 1-4-seat assignment/reconnect reducer. Snapshot controls feed the
+  existing shared bindings. This preliminary reducer deliberately stops before
+  durable participants, profiles, or product joining.
 - No desktop, browser, or Android product adapter currently advertises a real
   gamepad or feeds that adapter. The repository explicitly records this in
   [`platforms.md`](../platforms.md) and Tactical 098.
-- The current gamepad adapter is one anonymous controller with event-fed stick
-  and button state. It has no source identifier, connection lifecycle,
-  controller descriptor, triggers, stick clicks, Select/Guide buttons,
-  analog-button values, or multiple-device policy.
+- The current gameplay adapter is still one controller at a time. Source
+  identity, descriptor, connection lifecycle, triggers, stick clicks,
+  Select/Guide, analog-button values, and deterministic seat assignment exist
+  at the canonical snapshot boundary, but semantic per-source action state,
+  mixed-device arbitration, and participant-scoped routing remain pending.
 - Right-stick input is currently converted to `FlatInputFrame.look_delta` once
   per frame. A stick is a rate control, not a motion delta; the current shape
   can therefore make rotation depend on presentation frequency.

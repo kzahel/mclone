@@ -240,6 +240,28 @@ source drops only its now-unreferenced ticket while the other centers survive,
 and removing all four returns the aggregate and scheduler ticket counts to
 zero. The focused server test passes without rendering or couch-only authority.
 
+### Slice 4b — session-local input-source assignment
+
+Implemented on 2026-07-21. `mclone-input` now owns opaque, allocator-issued
+`InputSourceId` values with no serialization or backend-index constructor,
+neutral source/layout/capability descriptors, and a normalized standard
+gamepad snapshot containing four stick axes and seventeen positional buttons.
+Canonical snapshots feed the existing shared gamepad binding adapter; no host
+collector or product capability was enabled.
+
+`LocalGamepadAssignmentReducer` admits four seats, sorts simultaneous join
+edges by session-local source identity, rejects duplicate frame samples, and
+never assigns one source twice. Disconnect immediately clears snapshot-held
+state while reserving the source's existing seat for a session-monotonic
+five-second reconnect grace. Reconnect within that window preserves the seat;
+expiry releases it, and a late source cannot steal a newly occupied seat.
+
+The focused suite passes with five scripted sources whose display labels and
+sample order deliberately disagree with allocation order. Four sources retain
+stable assignments through reordered release/join samples, the fifth receives
+the explicit full result, disconnect clearing is observed, and reconnect both
+inside and outside the grace window is deterministic.
+
 ## Explicit Deferrals
 
 - Native, web, Android, OpenXR, or Steam Input gamepad collectors.
