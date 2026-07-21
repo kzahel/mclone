@@ -32,6 +32,14 @@ pub const MIN_FLAT_RENDER_SCALE: f32 = 0.25;
 pub const MAX_FLAT_RENDER_SCALE: f32 = 2.0;
 const SCALE_EPSILON: f32 = 0.000_1;
 
+/// Whether one view owns actor-input preparation or reuses input prepared by
+/// an earlier view in the same shared frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FrameActorPreparation {
+    Refresh,
+    ReusePrepared,
+}
+
 fn composition_timing_start(
     clock: Option<&MonotonicClockHandle>,
     enabled: bool,
@@ -1642,6 +1650,69 @@ where
     )
 }
 
+/// Multi-presentation flat-view entry. Runtime/update work and render-record
+/// preparation are owned by the scene caller; this function performs only the
+/// independent cull/draw work for one admitted view.
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_records: &PreparedTexturedSectionRecords,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+    actor_preparation: FrameActorPreparation,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner_with_actor_preparation(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        far_lod,
+        far_lod_mesh,
+        Some(prepared_records),
+        None,
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        None,
+        None,
+        actor_preparation,
+        render_stats,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn render_full_frame_for_view_with_prepared_stereo_draw_in_slot<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
@@ -2133,9 +2204,77 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+    opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
+    timing_clock: Option<&MonotonicClockHandle>,
+    timing: Option<&mut FullFrameRenderTiming>,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let actor_preparation =
+        if reuses_stereo_actor_preparation(prepared_stereo_draw.is_some(), view_slot) {
+            FrameActorPreparation::ReusePrepared
+        } else {
+            FrameActorPreparation::Refresh
+        };
+    render_full_frame_for_view_inner_with_actor_preparation(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        far_lod,
+        far_lod_mesh,
+        prepared_records,
+        prepared_stereo_draw,
+        opaque_world_insertion,
+        timing_clock,
+        timing,
+        actor_preparation,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_full_frame_for_view_inner_with_actor_preparation<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    view_slot: PerViewSlot,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    prepared_records: Option<&PreparedTexturedSectionRecords>,
+    prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
     timing_clock: Option<&MonotonicClockHandle>,
     mut timing: Option<&mut FullFrameRenderTiming>,
+    actor_preparation: FrameActorPreparation,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary>
 where
@@ -2337,30 +2476,29 @@ where
             let actor_start = composition_timing_start(timing_clock, timing.is_some());
             let actors =
                 actors.context("actor instances requested without actor draw resources")?;
-            actor_stats =
-                if reuses_stereo_actor_preparation(prepared_stereo_draw.is_some(), view_slot) {
-                    actors.render_reusing_prepared_in_slot(
-                        frame.device,
-                        frame.queue,
-                        frame.encoder,
-                        frame.target.with_depth(&depth.view),
-                        render_view,
-                        render_options,
-                        actor_instances,
-                        view_slot,
-                    )?
-                } else {
-                    actors.render_in_slot(
-                        frame.device,
-                        frame.queue,
-                        frame.encoder,
-                        frame.target.with_depth(&depth.view),
-                        render_view,
-                        render_options,
-                        actor_instances,
-                        view_slot,
-                    )?
-                };
+            actor_stats = if actor_preparation == FrameActorPreparation::ReusePrepared {
+                actors.render_reusing_prepared_in_slot(
+                    frame.device,
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.with_depth(&depth.view),
+                    render_view,
+                    render_options,
+                    actor_instances,
+                    view_slot,
+                )?
+            } else {
+                actors.render_in_slot(
+                    frame.device,
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.with_depth(&depth.view),
+                    render_view,
+                    render_options,
+                    actor_instances,
+                    view_slot,
+                )?
+            };
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
                 timing.actor_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
@@ -2371,32 +2509,31 @@ where
             && !placed.instances.is_empty()
         {
             let actor_start = composition_timing_start(timing_clock, timing.is_some());
-            placed_actor_stats =
-                if reuses_stereo_actor_preparation(prepared_stereo_draw.is_some(), view_slot) {
-                    placed.draw.render_composed_reusing_prepared_in_slot(
-                        frame.device,
-                        frame.queue,
-                        frame.encoder,
-                        frame.target.with_depth(&depth.view),
-                        render_view,
-                        placed.render_options,
-                        placed.instances,
-                        placed.context,
-                        view_slot,
-                    )?
-                } else {
-                    placed.draw.render_composed_in_slot(
-                        frame.device,
-                        frame.queue,
-                        frame.encoder,
-                        frame.target.with_depth(&depth.view),
-                        render_view,
-                        placed.render_options,
-                        placed.instances,
-                        placed.context,
-                        view_slot,
-                    )?
-                };
+            placed_actor_stats = if actor_preparation == FrameActorPreparation::ReusePrepared {
+                placed.draw.render_composed_reusing_prepared_in_slot(
+                    frame.device,
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.with_depth(&depth.view),
+                    render_view,
+                    placed.render_options,
+                    placed.instances,
+                    placed.context,
+                    view_slot,
+                )?
+            } else {
+                placed.draw.render_composed_in_slot(
+                    frame.device,
+                    frame.queue,
+                    frame.encoder,
+                    frame.target.with_depth(&depth.view),
+                    render_view,
+                    placed.render_options,
+                    placed.instances,
+                    placed.context,
+                    view_slot,
+                )?
+            };
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
                 timing.placed_actor_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }

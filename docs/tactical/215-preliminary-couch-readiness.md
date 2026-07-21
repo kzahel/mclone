@@ -185,6 +185,28 @@ constant. The focused Rust suites passed, and the ignored GPU canary rendered
 red, green, blue, and yellow from four distinct uniform slots in one
 submission.
 
+### Slice 2 — prepare once, render many
+
+Implemented on 2026-07-21. `FlatPresentationView` supplies independent flat
+targets, depth attachments, render views, and UI policies. The shared scene
+entry admits one through four views, delegates cardinality one to the unchanged
+mono inner path, and otherwise polls assets, advances startup, drains/uploads,
+syncs lifecycle UI, prepares render records, and prepares Far LOD exactly once.
+Each admitted view then owns its uniform slot, culling, target/depth, projection,
+underwater effect, world overlays, and optional flat UI.
+
+`FlatPresentationFrameSummary` reports one shared preparation and ordered
+per-view render receipts. Explicit actor preparation refresh/reuse replaces a
+slot-number convention. Source locks prove the multi-view path contains one
+shared update sequence, does not use XR view/eye types, and leaves participant
+or layout policy out of the desktop driver. Focused scene and app-runtime tests
+pass for 1/2/4 admission, invalid cardinality, and explicit stereo actor reuse.
+
+The multi-flat entry currently rejects a visible retained embedded-world
+preview rather than silently drawing it incorrectly. Extending composition to
+prepared multi-flat records is follow-up work; the direct mono and existing
+stereo/multiview composition paths are unchanged.
+
 ## Explicit Deferrals
 
 - Native, web, Android, OpenXR, or Steam Input gamepad collectors.
@@ -193,6 +215,8 @@ submission.
 - Product split-screen viewport layout, safe areas, reduced HUD/menu/inventory,
   pause ownership, or audio listener policy.
 - Shared-cache optimization across multiple client replicas.
+- Simultaneous retained embedded-world preview composition in a multi-flat
+  frame; direct mono, stereo, and multiview composition remain supported.
 - Helper authority, build-plan editing, mixed XR-plus-flat surface hosting, and
   four-player product performance tuning.
 - Bedrock black-box measurement, which remains valuable hardware research but

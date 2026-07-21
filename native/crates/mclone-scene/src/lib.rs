@@ -42,10 +42,12 @@ use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
 use mclone_app_runtime::frame_render::{
-    FullFrameGui, FullFrameRenderSummary, PlacedActorFrame, PlacedTerrainFrame,
-    PlacedTerrainPrepared, RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
-    TerrainTranslucentSubmission, render_full_frame_for_view_with_far_lod_and_opaque_gate,
+    FrameActorPreparation, FullFrameGui, FullFrameRenderSummary, PlacedActorFrame,
+    PlacedTerrainFrame, PlacedTerrainPrepared, RenderStreamStats, TerrainCompositionFrame,
+    TerrainCompositionSource, TerrainTranslucentSubmission,
+    render_full_frame_for_view_with_far_lod_and_opaque_gate,
     render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
+    render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot,
@@ -141,8 +143,8 @@ use mclone_render::sky::overworld_clear_color;
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::{
-    LEFT_EYE_VIEW_SLOT, PER_VIEW_UNIFORM_FRAME_COUNT, PerViewSlot, RIGHT_EYE_VIEW_SLOT,
-    SINGLE_VIEW_SLOT,
+    LEFT_EYE_VIEW_SLOT, MAX_PRESENTATION_VIEW_COUNT, PER_VIEW_UNIFORM_FRAME_COUNT, PerViewSlot,
+    PresentationViewIndex, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
 };
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,

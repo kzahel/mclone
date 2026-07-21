@@ -85,6 +85,72 @@ pub struct MonoSceneFrameSummary {
     pub upload: XrTerrainUploadSummary,
 }
 
+/// One independently posed flat presentation view. The target and depth
+/// attachment remain platform-owned; camera, culling, effects, and UI policy
+/// are view-local scene inputs.
+#[derive(Clone, Copy)]
+pub struct FlatPresentationView<'a> {
+    pub target: RenderFrameTarget<'a>,
+    pub depth: &'a ChunkDepthTarget,
+    pub render_view: ChunkRenderView,
+    pub ui: MonoUiPresentation,
+}
+
+impl<'a> FlatPresentationView<'a> {
+    pub const fn new(
+        target: RenderFrameTarget<'a>,
+        depth: &'a ChunkDepthTarget,
+        render_view: ChunkRenderView,
+        ui: MonoUiPresentation,
+    ) -> Self {
+        Self {
+            target,
+            depth,
+            render_view,
+            ui,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FlatPresentationViewSummary {
+    pub view: PresentationViewIndex,
+    pub render: FullFrameRenderSummary,
+}
+
+/// Receipt for one flat frame that may contain one through four presentation
+/// views. Runtime/update/upload preparation is reported once for the frame;
+/// render summaries remain separate per view.
+#[derive(Clone, Debug)]
+pub struct FlatPresentationFrameSummary {
+    pub shared_preparation_count: u32,
+    pub rendered_view_count: u32,
+    pub views: Vec<FlatPresentationViewSummary>,
+    pub timing: XrTerrainFrameTiming,
+    pub upload: XrTerrainUploadSummary,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FlatPresentationAdmission {
+    shared_preparation_count: u32,
+    rendered_view_count: u32,
+}
+
+fn admit_flat_presentation_views(view_count: usize) -> Result<FlatPresentationAdmission> {
+    if view_count == 0 {
+        bail!("flat presentation frame requires at least one view");
+    }
+    if view_count > MAX_PRESENTATION_VIEW_COUNT as usize {
+        bail!(
+            "flat presentation frame requested {view_count} views; maximum is {MAX_PRESENTATION_VIEW_COUNT}"
+        );
+    }
+    Ok(FlatPresentationAdmission {
+        shared_preparation_count: 1,
+        rendered_view_count: view_count as u32,
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum MonoWorldActionStatus {
     NoRuntime,
@@ -1271,6 +1337,298 @@ impl McloneSceneHost {
         )
     }
 
+    /// Render one through four independently posed flat views while advancing
+    /// shared scene/runtime work exactly once. Cardinality one delegates to the
+    /// existing mono fast path without materializing multi-view preparation.
+    pub fn render_flat_presentation_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        views: &[FlatPresentationView<'_>],
+    ) -> Result<FlatPresentationFrameSummary> {
+        self.render_flat_presentation_frame_inner(
+            device,
+            queue,
+            encoder,
+            views,
+            XrTerrainRuntimeUpdateMode::Live,
+        )
+    }
+
+    /// Frozen-runtime counterpart used by deterministic auxiliary-view
+    /// captures after the primary view has finished streaming.
+    pub fn render_flat_presentation_frame_frozen(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        views: &[FlatPresentationView<'_>],
+    ) -> Result<FlatPresentationFrameSummary> {
+        self.render_flat_presentation_frame_inner(
+            device,
+            queue,
+            encoder,
+            views,
+            XrTerrainRuntimeUpdateMode::Frozen,
+        )
+    }
+
+    fn render_flat_presentation_frame_inner(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        views: &[FlatPresentationView<'_>],
+        runtime_mode: XrTerrainRuntimeUpdateMode,
+    ) -> Result<FlatPresentationFrameSummary> {
+        let admission = admit_flat_presentation_views(views.len())?;
+        if let [view] = views {
+            let mono = self.render_mono_frame_inner(
+                RenderFrameContext::new(device, queue, encoder, view.target),
+                view.depth,
+                view.render_view,
+                view.ui,
+                runtime_mode,
+            )?;
+            return Ok(FlatPresentationFrameSummary {
+                shared_preparation_count: admission.shared_preparation_count,
+                rendered_view_count: admission.rendered_view_count,
+                views: vec![FlatPresentationViewSummary {
+                    view: PresentationViewIndex::PRIMARY,
+                    render: mono.render,
+                }],
+                timing: mono.timing,
+                upload: mono.upload,
+            });
+        }
+
+        if self
+            .embedded_world_preview
+            .as_ref()
+            .is_some_and(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+        {
+            bail!("multi-view flat presentation does not yet compose an embedded-world preview");
+        }
+
+        self.poll_asset_replacement(device, queue)?;
+        if matches!(runtime_mode, XrTerrainRuntimeUpdateMode::Live) {
+            self.advance_local_startup(device, queue)?;
+        }
+
+        // The primary view owns ordinary player interest. Auxiliary views may
+        // inspect already resident facts but do not manufacture authority or a
+        // second interest source.
+        let center_position = views[0].render_view.camera_position;
+        let frame_deadline = self.render_compile_frame_deadline();
+        let mut timing = XrTerrainFrameTiming::default();
+        let upload = self.live_upload_for_frame(
+            device,
+            center_position,
+            runtime_mode,
+            frame_deadline,
+            &mut timing,
+        )?;
+        self.sync_player_lifecycle_ui();
+
+        let sky_clear_color = self.sky_clear_color();
+        let time_of_day = self.time_of_day();
+        let sun_angle = self.sun_angle();
+        let actor_instances = self.current_actor_instances();
+        let prepared_records = self.active_world.draw.prepare_render_records();
+        let far_lod_config = self.active_world.scene.far_lod;
+        let far_lod_seed = self.active_world.scene.seed;
+        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
+        let lod_grant = self.active_world.render_admission_policy.lod_grant();
+        let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
+            runtime
+                .prepare_far_lod_frame(
+                    far_lod_config,
+                    far_lod_seed,
+                    far_lod_center,
+                    center_position,
+                    lod_grant.build_tiles,
+                    lod_grant.upload_tiles,
+                )?
+                .cloned()
+        } else {
+            None
+        };
+        let uniform_frame = self.next_per_view_uniform_frame();
+        let render_start = self.services.clock.now();
+        let mut view_summaries = Vec::with_capacity(views.len());
+        let mut primary_render_stats = None;
+        for (index, view) in views.iter().enumerate() {
+            let view_index = PresentationViewIndex::new(index as u32);
+            let view_slot = PerViewSlot::for_view(view_index).in_uniform_frame(uniform_frame);
+            let render_options = self.effective_render_options(view.render_view.camera_position);
+            let underwater_overlay = self.mono_underwater_overlay(view.render_view);
+            let gui_scale = GuiScale::from_pixels(view.target.size[0], view.target.size[1]);
+            let (full_frame_gui, gui_draw, hud_cache) = self.mono_gui_frame(gui_scale, view.ui);
+            if matches!(view.ui, MonoUiPresentation::ScreenSpaceHud) {
+                self.ensure_mono_gui(device, queue)?;
+            }
+            let world_gui =
+                FullFrameGui::new(false, full_frame_gui.covers_world, full_frame_gui.scale);
+            let mut render_stats = self.active_world.render_stats;
+            let actor_preparation = if index == 0 {
+                FrameActorPreparation::Refresh
+            } else {
+                FrameActorPreparation::ReusePrepared
+            };
+            let far_lod = far_lod_mesh
+                .as_ref()
+                .map(|_| &mut self.active_world.far_lod);
+            #[cfg(not(target_arch = "wasm32"))]
+            let opaque_world_gate = self
+                .opaque_world_gate_renderer
+                .as_ref()
+                .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
+            #[cfg(target_arch = "wasm32")]
+            let opaque_world_gate = None;
+            let mut summary = render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot(
+                RenderFrameContext::new(device, queue, encoder, view.target),
+                view.depth,
+                &self.sky,
+                &mut self.active_world.draw,
+                &prepared_records,
+                far_lod,
+                far_lod_mesh.as_ref(),
+                opaque_world_gate,
+                Some(
+                    self.active_world
+                        .actors
+                        .as_mut()
+                        .expect("active world owns actor draw state"),
+                ),
+                Some(&mut self.screen_effects),
+                None,
+                view.render_view,
+                &actor_instances,
+                underwater_overlay,
+                sky_clear_color,
+                time_of_day,
+                sun_angle,
+                render_options,
+                world_gui,
+                |_| GuiDrawList::new(),
+                &mut render_stats,
+                view_slot,
+                actor_preparation,
+            )
+            .with_context(|| format!("render flat presentation view {index}"))?;
+
+            if !full_frame_gui.covers_world {
+                let selection_view =
+                    render_view_with_underwater_effect(view.render_view, underwater_overlay);
+                let selection = self
+                    .current_mono_block_target()
+                    .map(|target| SelectionOutline::new(target.outline_boxes));
+                self.selection_outline.render_in_slot(
+                    device,
+                    queue,
+                    encoder,
+                    view.target,
+                    view.depth,
+                    selection_view,
+                    selection.as_ref(),
+                    view_slot,
+                );
+                let mut world_lines = engine_debug_world_lines(
+                    &self.active_world.camera,
+                    EngineDebugVisualOptions::new(self.player_collision_box_visible),
+                );
+                if self.diagnostic_panel.debug_diagnostics_visible() {
+                    world_lines.extend(topology_debug_world_lines(
+                        self.active_world
+                            .runtime
+                            .as_ref()
+                            .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                                runtime.client().topology()
+                            }),
+                        selection_view.camera_position,
+                    ));
+                }
+                if let Some(preview) = self.mono_blink_debug.preview.as_ref() {
+                    world_lines.extend(mono_blink_lines(preview));
+                }
+                if !world_lines.is_empty() {
+                    self.world_gui_renderer
+                        .render_lines_in_slot(
+                            device,
+                            queue,
+                            encoder,
+                            view.target,
+                            selection_view,
+                            &world_lines,
+                            view_slot,
+                        )
+                        .with_context(|| {
+                            format!("render flat presentation debug lines for view {index}")
+                        })?;
+                }
+            }
+
+            summary.gui_command_count = gui_draw.commands().len();
+            summary.flat_hud_retained_cache = hud_cache;
+            if full_frame_gui.active {
+                self.mono_gui
+                    .as_mut()
+                    .expect("Mono GUI renderer initialized for active UI")
+                    .render(
+                        device,
+                        queue,
+                        encoder,
+                        view.target,
+                        full_frame_gui.scale,
+                        &gui_draw,
+                        if full_frame_gui.covers_world {
+                            GuiRenderOptions::clear(mclone_render::default_clear_color())
+                        } else {
+                            GuiRenderOptions::overlay()
+                        },
+                    )
+                    .with_context(|| format!("render flat presentation UI for view {index}"))?;
+            }
+            if !matches!(view.ui, MonoUiPresentation::None)
+                && let Some(overlay) = self.embedded_world_activation_fade_overlay()
+            {
+                self.screen_effects.render_fade_in_slot(
+                    device,
+                    queue,
+                    encoder,
+                    view.target,
+                    overlay,
+                    view_slot,
+                );
+            }
+
+            if index == 0 {
+                primary_render_stats = Some(render_stats);
+            }
+            view_summaries.push(FlatPresentationViewSummary {
+                view: view_index,
+                render: summary,
+            });
+        }
+        timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_start));
+
+        if let Some(stats) = primary_render_stats {
+            self.active_world.render_stats = stats;
+        }
+        self.rendered_frames = self.rendered_frames.wrapping_add(1);
+        let primary_drawn_sections = view_summaries[0].render.drawn_section_count;
+        self.record_warm_world_first_destination_frame(primary_drawn_sections, upload);
+        self.record_embedded_world_activation_frame(primary_drawn_sections, upload, views.len());
+        Ok(FlatPresentationFrameSummary {
+            shared_preparation_count: admission.shared_preparation_count,
+            rendered_view_count: admission.rendered_view_count,
+            views: view_summaries,
+            timing,
+            upload,
+        })
+    }
+
     /// Whether the local-world startup pump has finished promoting into a live
     /// runtime. Non-blocking; drivers own the drive-to-ready loop (Web posture
     /// rule: blocking convenience loops live in native drivers, not the host).
@@ -2150,5 +2508,34 @@ mod tests {
         assert!(!context.resolved_input.touch_controls_visible);
         assert!(!context.resolved_input.accepts_touch);
         assert_eq!(context.render_scale, 1.0);
+    }
+
+    #[test]
+    fn flat_presentation_admits_one_two_and_four_with_one_shared_preparation() {
+        for count in [1, 2, 4] {
+            assert_eq!(
+                admit_flat_presentation_views(count).unwrap(),
+                FlatPresentationAdmission {
+                    shared_preparation_count: 1,
+                    rendered_view_count: count as u32,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn flat_presentation_rejects_zero_and_more_than_four_views() {
+        assert!(
+            admit_flat_presentation_views(0)
+                .unwrap_err()
+                .to_string()
+                .contains("at least one")
+        );
+        assert!(
+            admit_flat_presentation_views(5)
+                .unwrap_err()
+                .to_string()
+                .contains("maximum is 4")
+        );
     }
 }
