@@ -1,8 +1,9 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: implementation active. Slices 0–2 landed on 2026-07-21; the mandatory
-post-identity decision gate is next. The browser ABI cutover and one
-boundary-operation token family are live. The original proposal framed
+Status: implementation active. Slices 0–2 and the mandatory post-identity
+decision gate landed on 2026-07-21. The browser ABI cutover and one
+boundary-operation token family are live; the current pickup is one
+consolidated opaque browser-operation drain. The original proposal framed
 success as deleting the remaining named TypeScript pumps. The measured
 two-sided audit showed the complexity mass sits on the Rust side, so the plan
 now makes Rust-side consolidation the primary deliverable — one
@@ -277,7 +278,7 @@ also inspected as black even where their commands accepted semantic results.
 Relative to Phase 1, authored TypeScript is 3,686 lines (+1), web-only Rust is
 20,695 (-7), and their combined boundary is 24,381 (-6). Relative to the
 clean baseline the combined boundary remains +47, so later deletion is still
-required. Shared `mclone-scene` is 24,720 lines (+88 in this slice) because it
+required. Shared `mclone-scene` is 24,726 lines (+94 in this slice) because it
 now owns the session and asset ledgers; `mclone-app-runtime` remains 33,877.
 Exports remain 48, async mutable exports remain zero, and cfg counts remain
 71 / 110. Identity/staleness systems are 4 -> 1.
@@ -286,37 +287,40 @@ Exports remain 48, async mutable exports remain zero, and cfg counts remain
 
 `mclone-web-app.ts` currently owns:
 
-- `sessionBusy`, which excludes rAF, raw input, resize, and other host calls
-  while a wasm-bindgen `async &mut WebSceneHost` borrow is alive, and is
-  threaded through ~20 otherwise-ordinary call sites;
-- `pendingLobbyRuntimeStarts`, `lobbyOperationDrainActive`, and
-  `worldCatalogOperationTail`;
+- a generic `pendingSceneOperations` registry used only to let observer
+  shutdown await physical Promise quiescence;
+- `lobbyOperationDrainActive` and `worldCatalogOperationTail`, which serialize
+  two browser pumps outside Rust;
 - separate `dispatchSceneSessionOperation`, `dispatchWorldCatalogOperation`,
   and `dispatchAssetPackOperation` branches;
-- a lobby-specific take/start/complete/free loop; and
+- separate take/start/complete loops over runtime-start, catalog, and asset
+  ticket classes; and
 - a warmup loop that reads `initialPresentationReady` and
   `renderWorkerPendingRequestCount`.
 
-Rust already owns the pending semantic state behind all of those fields. The
-TypeScript state is a consequence of how that state is exposed.
+The remaining coordination band is 259 authored lines. Rust already owns the
+pending semantic state behind it. The TypeScript state is a consequence of
+how that state is exposed, not an independent policy source.
 
 ### Current Rust split
 
-- `GameSessionCoordinator` and `ExternalSceneSessionStart` own session request
-  meaning and pending state, with their own currentness check and a
-  hand-rolled `stale_lobby_start_completion_count`.
-- The lobby launch state and `PlatformOperationLedger` own role, slot, epoch,
-  cancellation, and stale completion rejection.
-- `WorldCatalogExecutor` uses `PlatformOperationService` and a Rust-owned
-  IndexedDB continuation, but each web catalog operation carries a second
-  `String` request identity across the JS boundary.
-- Asset replacement owns a third independent epoch and acceptance state.
+- `GameSessionCoordinator` owns request meaning while active and lobby
+  runtime starts share the same `WebRuntimeStart` effect/completion type and
+  ledger-token acceptance rules.
+- Session, catalog, and asset operations all use the one
+  `PlatformOperationLedger` identity family. Catalog identity stays opaque in
+  `WebCatalogExecution`; asset `content_generation` remains solely a resource
+  compatibility invariant.
 - Browser Rust already computes complete initial-presentation readiness.
-- The web lowering layer (`web_scene_host.rs` 4,295 lines,
-  `web_catalog_execution.rs` 1,496, `web_scene_protocol.rs` 242) exists to
+- The three exported ticket classes contain about 218 lines, and ten
+  operation-specific wasm methods take, start, or complete them. The host
+  lowering for these paths is about 305 more lines outside smoke/shutdown.
+- The web lowering layer (`web_scene_host.rs` 4,399 lines,
+  `web_catalog_execution.rs` 1,518, `web_scene_protocol.rs` 242) exists to
   turn shared operations into JS-drivable tickets; native has no equivalent.
-- `mclone-scene/src/session.rs` is 6,542 lines carrying ~60 wasm-related cfg
-  forks between direct native starts and web ticket lowering.
+- `mclone-scene/src/session.rs` is 6,601 lines carrying 50 explicit non-wasm
+  cfg forks (71 across the crate) between direct native starts and web ticket
+  lowering.
 
 The missing piece is not policy. It is one shared way to issue owned work,
 release the scene borrow, and fold a later platform completion back through a
@@ -563,61 +567,70 @@ completion without learning why the scene requested it.
 
 ### Decision gate after Slice 2
 
-Status: next. No Slice 3 implementation begins until the remaining pumps,
-ticket types, exports, and combined line cost are freshly inventoried below.
+Status: complete 2026-07-21. The clean Phase 2 inventory found:
 
-Re-measure the remaining named TypeScript pumps and the per-operation ticket
-types against the new ABI and identity system. If they have collapsed to
-trivial forwarding, shrink or drop Slices 3–5 accordingly and record that in
-this document. Decide separately whether storage-address lowering still has a
-net-deletion case; it is optional and must not block operation convergence. Do
-not execute the remaining slices merely because they were planned.
+- 259 TypeScript coordination lines across the generic Promise registry,
+  lobby/catalog serialization fields, three named dispatches and completion
+  loops, readiness warmup, and observer shutdown;
+- three ticket classes with about 218 Rust lines, ten operation-specific wasm
+  methods, and about 305 lines of host lowering outside smoke/shutdown;
+- 48 `WebSceneHost` exports, zero async mutable exports, and one operation
+  identity family; and
+- active and lobby starts already sharing `WebRuntimeStart` and
+  `completeRuntimeStart`, so a separate runtime-convergence phase would add
+  ceremony without deleting another semantic state machine.
 
-### Slice 3: Converge runtime startup
+Gate A therefore folds candidate Slices 3–5 into one smaller continuation.
+Specialized session, catalog, asset, render, and persistence owners remain;
+the cut only unifies their browser-facing issue/completion drain. The optional
+storage-address slice is skipped: the stable physical-name mapping is about
+18 TypeScript lines and moving it would increase the combined boundary while
+providing no operation-lifecycle simplification.
 
-- Route active, lobby-primary, and lobby-destination starts through the same
-  shared request lifecycle.
-- Move native direct-start and browser ticket lowering behind platform Rust
-  executors of that lifecycle.
-- Preserve independent standby warmup while the active world continues to
-  render.
-- Delete `WebLobbyRuntimeStart`, `takeLobbyRuntimeStart`,
-  `completeLobbyWorldStart`, and the separate active-session start ABI once
-  the shared completion path is live.
+### Slice 3: One opaque browser-operation drain
 
-Exit: TypeScript can start opaque Worker machinery without knowing lobby or
-active-session identity, and native/web share the acceptance state machine.
+Status: current pickup.
 
-### Slice 4: Adopt catalog and asset operations; one browser drain loop
+- Expose one opaque `WebSceneOperation` wrapper and one host take/complete
+  path over runtime-start, catalog, and asset-preparation work. TypeScript
+  must not inspect the Rust operation variant.
+- Keep capability-specific mechanical execution where browser APIs differ:
+  Worker-backed runtime/asset work can start through the opaque operation;
+  catalog work may hand an opaque `WebCatalogExecution` to the reusable
+  IndexedDB executor.
+- Make Rust admission control catalog serialization and all completion
+  acceptance. Delete `lobbyOperationDrainActive`,
+  `worldCatalogOperationTail`, the named dispatch/completion methods, and the
+  per-operation host exports made redundant by the wrapper.
+- Replace `sessionStartPending`, `catalogRequest`, and `assetPackRequest`
+  report flags with one Rust-authored operation-available disposition.
+- Use Rust's initial-presentation disposition directly. Remove
+  `renderWorkerPendingRequestCount` from TypeScript readiness control.
+- Keep a generic Promise registry only as physical adapter quiescence. Rust
+  teardown cancels every issued ledger; observer shutdown may wait for those
+  already-owned Promises without using the registry as host-call exclusion or
+  semantic admission.
+- Preserve independent standby warmup and opened-world Worker-local
+  persistence.
 
-- Feed the existing Rust catalog continuation through the same outer
-  operation pump while keeping its specialized transaction semantics.
-- Remove `catalogRequest`, `catalogRequestId`, and the product app's catalog
-  promise tail; make the IndexedDB executor own only transaction mechanics.
-- Submit asset preparation through the existing render-actor mailbox and poll
-  its typed completion from Rust; remove `assetPackRequest` and the named
-  TypeScript `completeAssetPackSelection` wakeup.
-- Implement the smallest capability-specific TypeScript executors and one
-  generic drain/wakeup loop; delete `pendingLobbyRuntimeStarts`,
-  `lobbyOperationDrainActive`, and `worldCatalogOperationTail`.
-- Let independent effects run concurrently only when Rust admission permits.
+Exit: product TypeScript has one generic drain, no lobby/catalog/asset
+operation state machine, no reconstruction of readiness from render queue
+counts, and no named operation report flags. The export count and combined
+boundary total fall materially, with no new identity system or universal
+actor.
 
-Exit: catalog and asset changes require no named branch in product
-TypeScript; the five dispatch branches are one generic loop.
+### Former Slices 4–5
 
-### Slice 5: Readiness and shutdown
-
-- Return one Rust-authored frame/readiness disposition and stop reading
-  render queue counts for product control flow.
-- Make shutdown poll one Rust quiescence barrier and let the browser adapter
-  mechanically terminate or release the resources named by final effects.
-- Preserve the integrated-server Worker's adjacent IndexedDB path and its
-  world writer lease.
-
-Exit: product TypeScript contains browser mechanics and operational error
-capture but no mclone scene-operation readiness or quiescence policy.
+Status: folded into revised Slice 3 by Gate A. Their catalog/asset adoption,
+readiness, and quiescence exits are enforced by that slice rather than being
+landed as artificial follow-up phases.
 
 ### Optional Slice 5b: Storage addressing
+
+Status: skipped at Gate A. The retained physical store/index switch is small,
+stable platform mechanics; moving it into browser Rust would grow the
+combined boundary. Reopen only if future schema work supplies a measured
+net-deletion case.
 
 - Reassess the IndexedDB addressing direction after the operation cut has
   landed; stable store/index mapping may be legitimate platform mechanics.
