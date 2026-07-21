@@ -1,7 +1,7 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: reviewed 2026-07-21 and ready for phased implementation; Slice 0 is
-next and no coordinator cutover has landed. The original proposal framed
+Status: implementation active. Slice 0 landed on 2026-07-21; Slice 1 is next
+and no coordinator cutover has landed. The original proposal framed
 success as deleting the remaining named TypeScript pumps. The measured
 two-sided audit showed the complexity mass sits on the Rust side, so the plan
 now makes Rust-side consolidation the primary deliverable — one
@@ -126,6 +126,78 @@ or offline design. New schema work may intentionally reject or reset
 unsupported internal formats.
 
 ## Measured Baseline (2026-07-21)
+
+The clean Tactical 207 baseline is revision `8a3e9b12`. Reproduce the source
+inventory with `scripts/platform-boundary-scoreboard.sh 8a3e9b12` (omit the
+revision to inspect the worktree):
+
+| Metric | Clean baseline |
+|---|---:|
+| authored web TypeScript | 3,757 lines / 14 modules |
+| TypeScript inventory gate | 3,780 lines / 16 modules |
+| web-only Rust | 20,577 lines |
+| combined authored TypeScript + web-only Rust | 24,334 lines |
+| shared `mclone-scene` Rust | 24,632 lines |
+| shared `mclone-app-runtime` Rust | 33,877 lines |
+| `WebSceneHost` exports | 48 |
+| async mutable wasm exports | 4 |
+| non-wasm cfg forks, scene / app-runtime | 71 / 110 |
+
+The worktree may report lower TypeScript totals because unrelated storage
+cleanup was already present when this series started. The immutable revision
+above prevents that work from being silently credited to Tactical 207.
+
+### Slice 0 operation evidence
+
+The query-gated smoke observer now exposes only whether the scene host is
+temporarily unavailable; product execution does not depend on this hook. The
+catalog and asset UI probes inject a neutral unknown-key down/up pair during
+that interval and record frame, render, and raw-input counters:
+
+| Operation | Observed exclusion | Sample / total | Progress while excluded | Progress after release |
+|---|---:|---:|---:|---:|
+| first catalog-created local session | yes | 27.5 / 135.7 ms | frame 0, render 0, input 0 | input +2 |
+| asset-pack preparation/activation | yes | 30.6 / 572.0 ms | frame 0, render 0, input 0 | input +3 |
+| lobby runtime warmup control interval | no | 193.7 ms | frame +7, render +7, input +7 | n/a |
+
+This establishes both sides of the defect: an async mutable scene borrow
+stops ordinary work, while the same main loop advances all three counters
+during independent runtime work that does not retain the scene borrow. The
+existing native lobby scenario also completed with six captures and two
+switches; the inspected title, settled-lobby, and destination images were
+drawn correctly. Native has no global scene-borrow exclusion guard.
+
+`shutdownAsync` is structurally in the debt count but performs no asynchronous
+work internally: it calls synchronous `shutdown()` and returns on the next
+promise turn. It therefore has no legitimate suspension to preserve.
+
+The catalog, asset-pack, and lobby runtime semantic probes passed. Their web
+page/canvas PNGs were fully black/transparent and failed the existing pixel
+gate even though semantic counters and operation reports were healthy. Those
+artifacts were inspected rather than counted as pixel passes. The broader
+lobby lifecycle probe also timed out before preview activation, before the
+new held-operation sample. Both are retained validation issues for the later
+cutover matrix, not evidence that the measured borrow exclusion passed a
+rendered-output gate.
+
+### Identifier and generation classification
+
+| Identifier | Classification and cutover treatment |
+|---|---|
+| `PlatformOperationToken` | Boundary-operation identity; keep as the sole family. |
+| catalog `String request_id` | Duplicate boundary identity carried beside the ledger token; delete in Slice 2. |
+| external-session request/currentness and stale lobby completion counter | Duplicate boundary identity/acceptance diagnostics; re-key to the ledger and delete in Slice 2. |
+| asset replacement/selection epoch used to accept platform completion | Duplicate boundary identity; replace with the ledger token in Slice 2. |
+| asset generation carried by prepared assets, active assets, compiler, and warm-world slots | Durable content-compatibility generation; retain, name explicitly, and never use as boundary completion identity. |
+| render-worker generation | Worker/resource lifecycle generation; retain outside the coarse-operation token family. |
+| render resource generation | Renderer resource-rebuild generation; retain outside the coarse-operation token family. |
+| render compile request ID | Specialized render-actor/mailbox work identity, not a scene boundary-operation identity; retain. |
+| world/realm instance IDs, storage IDs, role and slot IDs | Domain identity; retain and do not substitute for operation tokens. |
+
+`platform_boundary_convergence_debt.rs` pins the current TypeScript
+coordination fields/branches and the targeted Rust async/identity paths to
+non-increasing source ceilings. Every deletion slice must lower the relevant
+ceilings; zero remains the cutover target.
 
 ### Product TypeScript coordination state
 
@@ -316,6 +388,11 @@ addressing after a decision gate re-scopes them against what has already
 evaporated.
 
 ### Slice 0: Exact traces, costs, and deletion ledger
+
+Status: complete 2026-07-21. The reproducible source scoreboard, identifier
+classification, non-increasing debt test, browser borrow/progress traces, and
+native rendered baseline are recorded above. Pixel-capture and full-lifecycle
+failures remain explicitly open for cutover validation.
 
 - Capture one native and browser trace for active local start, remote start,
   lobby primary/destination warmup, catalog create/open/delete, asset

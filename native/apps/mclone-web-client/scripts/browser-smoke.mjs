@@ -2041,8 +2041,27 @@ async function startBrowserScenarioWithHeldDestination(page, canvas) {
     setup.destinationOrdinal,
     { timeout: 45_000 },
   );
+  const progressStart = await sceneProgressSnapshot(page);
+  await dispatchKeyboardEvent(page, "keydown", {
+    code: "McloneDebtProbe",
+    key: "",
+  });
+  await dispatchKeyboardEvent(page, "keyup", {
+    code: "McloneDebtProbe",
+    key: "",
+  });
+  await page.waitForTimeout(100);
+  const progressEnd = await sceneProgressSnapshot(page);
   return {
     ...setup,
+    progress: {
+      start: progressStart,
+      end: progressEnd,
+      frameCountDelta: progressEnd.frameCount - progressStart.frameCount,
+      renderCountDelta: progressEnd.renderCount - progressStart.renderCount,
+      inputFrameCountDelta:
+        progressEnd.domInputFrameCount - progressStart.domInputFrameCount,
+    },
     playable: await page.evaluate(() => {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp.state;
@@ -2100,6 +2119,9 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
   return {
     ok: setup.playable.activeWorldBehaviorProfile === "protected-lobby"
       && setup.playable.standbyWorldPresent !== true
+      && setup.progress.frameCountDelta > 0
+      && setup.progress.renderCountDelta > 0
+      && setup.progress.inputFrameCountDelta >= 2
       && after.screen === "title"
       && after.lobbyLaunchActive === false
       && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
@@ -2201,6 +2223,9 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
   await quitBrowserScenarioToTitle(page, canvas);
   return {
     ok: replacement.after.activeAssetEpoch === replacement.before.activeAssetEpoch + 1
+      && setup.progress.frameCountDelta > 0
+      && setup.progress.renderCountDelta > 0
+      && setup.progress.inputFrameCountDelta >= 2
       && replacement.after.assetReplacementState === "active"
       && replacement.after.activeAuthored === true
       && replacement.after.activeReference === false
@@ -2264,6 +2289,9 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
   await quitBrowserScenarioToTitle(page, canvas);
   return {
     ok: rebuildReport?.ok === true
+      && setup.progress.frameCountDelta > 0
+      && setup.progress.renderCountDelta > 0
+      && setup.progress.inputFrameCountDelta >= 2
       && Number(after.renderResourceGeneration) === beforeGeneration + 1
       && after.activeWorldBehaviorProfile === "protected-lobby"
       && after.lobbyLaunchActive === false
@@ -3394,6 +3422,25 @@ async function runLobbyRuntimeProbe(page) {
   if (!launch?.ok) {
     throw new Error(`lobby launch was rejected: ${JSON.stringify(launch)}`);
   }
+  const progressStart = await sceneProgressSnapshot(page);
+  await dispatchKeyboardEvent(page, "keydown", {
+    code: "McloneDebtProbe",
+    key: "",
+  });
+  await dispatchKeyboardEvent(page, "keyup", {
+    code: "McloneDebtProbe",
+    key: "",
+  });
+  await page.waitForTimeout(100);
+  const progressEnd = await sceneProgressSnapshot(page);
+  const operationProgress = {
+    start: progressStart,
+    end: progressEnd,
+    frameCountDelta: progressEnd.frameCount - progressStart.frameCount,
+    renderCountDelta: progressEnd.renderCount - progressStart.renderCount,
+    inputFrameCountDelta:
+      progressEnd.domInputFrameCount - progressStart.domInputFrameCount,
+  };
   try {
     await page.waitForFunction(
       () => {
@@ -3450,6 +3497,11 @@ async function runLobbyRuntimeProbe(page) {
   });
   return {
     ok: snapshot.lobbyRuntimeStartCount === 2
+      && operationProgress.start.sceneBorrowExcluded === false
+      && operationProgress.end.sceneBorrowExcluded === false
+      && operationProgress.frameCountDelta > 0
+      && operationProgress.renderCountDelta > 0
+      && operationProgress.inputFrameCountDelta >= 2
       && snapshot.activeWorldBehaviorProfile === "protected-lobby"
       && snapshot.activeWorldInstanceId !== snapshot.standbyWorldInstanceId
       && snapshot.activeWorldSeedText !== snapshot.standbyWorldSeedText
@@ -3462,6 +3514,7 @@ async function runLobbyRuntimeProbe(page) {
       && Number(snapshot.workers?.active?.["mclone-integrated-server"]) === 2
       && Number(snapshot.workers?.active?.["mclone-render-compiler-app"]) === 1,
     launch,
+    operationProgress,
     snapshot,
   };
 }
@@ -4335,7 +4388,10 @@ async function runCatalogUiProbe(page, canvas) {
   const openCreateReport = await clickWorldListFooterButton(page, 1);
   await waitForNativeUiScreen(page, "worldCreate", { openCreateReport });
   const firstProfileReport = await clickWorldCreateProfile(page);
-  await clickWorldCreateCreate(page);
+  const firstSessionBorrowTrace = await traceExclusiveSceneBorrow(
+    page,
+    () => clickWorldCreateCreate(page),
+  );
   const firstSession = await waitForSessionWorldId(page, { notWorldId: null });
   const firstWorldId = String(firstSession.sessionWorldId);
   const firstRecords = await browserIndexedDbWorldRecordCounts(page, firstWorldId);
@@ -4396,6 +4452,11 @@ async function runCatalogUiProbe(page, canvas) {
       && firstWorldId.length > 0
       && secondWorldId.length > 0
       && firstWorldId !== secondWorldId
+      && firstSessionBorrowTrace.observedBusy
+      && firstSessionBorrowTrace.busyFrameCountDelta === 0
+      && firstSessionBorrowTrace.busyRenderCountDelta === 0
+      && firstSessionBorrowTrace.busyInputFrameCountDelta === 0
+      && firstSessionBorrowTrace.settledInputFrameCountDelta >= 2
       && firstProfileReport?.action === "cycleWorldGenerationProfile"
       && secondProfileReport?.action === "cycleWorldGenerationProfile"
       && afterFirstCreate.some((/** @type {any} */ world) => (
@@ -4418,6 +4479,7 @@ async function runCatalogUiProbe(page, canvas) {
     firstWorldId,
     secondWorldId,
     firstProfileReport,
+    firstSessionBorrowTrace,
     secondProfileReport,
     firstSession,
     secondSession,
@@ -4799,7 +4861,10 @@ async function runAssetPackUiProbe(page, canvas) {
   await waitForNativeUiScreen(page, "assetPacks");
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
-  const applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
+  let applyReport = null;
+  const exclusiveBorrowTrace = await traceExclusiveSceneBorrow(page, async () => {
+    applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
+  });
   await page.waitForFunction(
     ({ epoch, completionCount }) => {
       const state = globalThis.__mcloneWebApp?.state;
@@ -4903,6 +4968,11 @@ async function runAssetPackUiProbe(page, canvas) {
   return {
     ok: after.activeAssetEpoch === before.activeAssetEpoch + 1
       && after.assetReplacementState === "active"
+      && exclusiveBorrowTrace.observedBusy
+      && exclusiveBorrowTrace.busyFrameCountDelta === 0
+      && exclusiveBorrowTrace.busyRenderCountDelta === 0
+      && exclusiveBorrowTrace.busyInputFrameCountDelta === 0
+      && exclusiveBorrowTrace.settledInputFrameCountDelta >= 2
       && after.completionCount > before.completionCount
       && after.sessionKind === before.sessionKind
       && after.sessionState === "active"
@@ -4930,6 +5000,7 @@ async function runAssetPackUiProbe(page, canvas) {
       && Number(restored.compiler?.assetEpoch) === restored.activeAssetEpoch,
     before,
     applyReport,
+    exclusiveBorrowTrace,
     after,
     persistedJson,
     restored,
@@ -5012,6 +5083,79 @@ async function clickNativeUiPoint(page, point) {
     app.handleNativeUiPointerDown?.(clientX, clientY, "mouse");
     return app.handleNativeUiPointerUp?.(clientX, clientY, "mouse") ?? null;
   }, point);
+}
+
+/** @param {Page} page */
+async function sceneProgressSnapshot(page) {
+  return page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp?.state ?? {};
+    return {
+      nowMs: performance.now(),
+      sceneBorrowExcluded:
+        globalThis.__mcloneWebApp?.sceneBorrowExcluded?.() === true,
+      frameCount: Number(state.frameCount) || 0,
+      renderCount: Number(state.renderCount) || 0,
+      domInputFrameCount: Number(state.lastReport?.domInputFrameCount) || 0,
+    };
+  });
+}
+
+/**
+ * Measure the legacy wasm-bindgen async mutable-borrow exclusion. The unknown
+ * key is a neutral raw-input fact: it increments ingress accounting without
+ * selecting gameplay behavior.
+ *
+ * @param {Page} page
+ * @param {() => Promise<unknown>} trigger
+ */
+async function traceExclusiveSceneBorrow(page, trigger) {
+  const before = await sceneProgressSnapshot(page);
+  await trigger();
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.sceneBorrowExcluded?.() === true,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const busyStart = await sceneProgressSnapshot(page);
+  await dispatchKeyboardEvent(page, "keydown", {
+    code: "McloneDebtProbe",
+    key: "",
+  });
+  await dispatchKeyboardEvent(page, "keyup", {
+    code: "McloneDebtProbe",
+    key: "",
+  });
+  await page.waitForTimeout(25);
+  const busySample = await sceneProgressSnapshot(page);
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.sceneBorrowExcluded?.() !== true,
+    undefined,
+    { timeout: 120_000 },
+  );
+  await page.waitForFunction(
+    (minimum) => Number(
+      globalThis.__mcloneWebApp?.state?.lastReport?.domInputFrameCount,
+    ) >= minimum,
+    busyStart.domInputFrameCount + 2,
+    { timeout: 10_000 },
+  );
+  const settled = await sceneProgressSnapshot(page);
+  return {
+    observedBusy: busyStart.sceneBorrowExcluded,
+    before,
+    busyStart,
+    busySample,
+    settled,
+    sampledBusyMs: busySample.nowMs - busyStart.nowMs,
+    totalBorrowMs: settled.nowMs - busyStart.nowMs,
+    busyFrameCountDelta: busySample.frameCount - busyStart.frameCount,
+    busyRenderCountDelta: busySample.renderCount - busyStart.renderCount,
+    busyInputFrameCountDelta:
+      busySample.domInputFrameCount - busyStart.domInputFrameCount,
+    settledInputFrameCountDelta:
+      settled.domInputFrameCount - busyStart.domInputFrameCount,
+    preBorrowFrameCountDelta: busyStart.frameCount - before.frameCount,
+  };
 }
 
 /** @param {{ width: number, height: number }} geometry */

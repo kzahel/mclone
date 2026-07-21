@@ -1,0 +1,95 @@
+//! Non-increasing source inventory for Tactical 207.
+//!
+//! These ceilings describe the pre-cutover boundary. Implementation slices
+//! lower them as owners disappear; they must never be raised to accommodate a
+//! replacement path. The zero target is enforced by the tactical closeout,
+//! while semantic tests and traces remain the authority for behavior.
+
+const WEB_APP: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-web-app.ts"
+));
+const WEB_SCENE_HOST: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_scene_host.rs"
+));
+const SCENE_SESSION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../crates/mclone-scene/src/session.rs"
+));
+
+fn assert_at_most(label: &str, source: &str, needle: &str, ceiling: usize) {
+    let count = source.matches(needle).count();
+    assert!(
+        count <= ceiling,
+        "{label} debt grew from ceiling {ceiling} to {count}; delete or reuse the existing owner instead of raising the ceiling"
+    );
+}
+
+#[test]
+fn typescript_scene_operation_coordination_debt_only_decreases() {
+    for (label, needle, ceiling) in [
+        ("global scene borrow guard", "sessionBusy", 36),
+        ("scene borrow spin helper", "waitForSessionIdle", 6),
+        ("lobby promise registry", "pendingLobbyRuntimeStarts", 5),
+        ("lobby drain guard", "lobbyOperationDrainActive", 5),
+        ("catalog promise tail", "worldCatalogOperationTail", 5),
+        ("session dispatch branch", "dispatchSceneSessionOperation", 3),
+        ("catalog dispatch branch", "dispatchWorldCatalogOperation", 2),
+        ("asset dispatch branch", "dispatchAssetPackOperation", 3),
+        ("catalog string identity", "catalogRequestId", 1),
+        ("session report wakeup", "sessionStartPending", 1),
+        ("asset report wakeup", "assetPackRequest", 1),
+        (
+            "render-queue readiness reconstruction",
+            "renderWorkerPendingRequestCount",
+            1,
+        ),
+    ] {
+        assert_at_most(label, WEB_APP, needle, ceiling);
+    }
+}
+
+#[test]
+fn rust_boundary_identity_and_async_export_debt_only_decreases() {
+    for (label, source, needle, ceiling) in [
+        (
+            "active-session async mutable borrow",
+            WEB_SCENE_HOST,
+            "pub async fn start_pending_session(",
+            1,
+        ),
+        (
+            "shutdown async mutable borrow",
+            WEB_SCENE_HOST,
+            "pub async fn shutdown_async(",
+            1,
+        ),
+        (
+            "asset async mutable borrow",
+            WEB_SCENE_HOST,
+            "pub async fn complete_asset_pack_selection(",
+            1,
+        ),
+        (
+            "lobby-ticket async mutable borrow",
+            WEB_SCENE_HOST,
+            "pub async fn start(&mut self)",
+            1,
+        ),
+        (
+            "browser-local stale completion counter",
+            WEB_SCENE_HOST,
+            "stale_lobby_start_completion_count",
+            5,
+        ),
+        (
+            "parallel session currentness check",
+            SCENE_SESSION,
+            "external_scene_start_is_current",
+            2,
+        ),
+    ] {
+        assert_at_most(label, source, needle, ceiling);
+    }
+}

@@ -59,6 +59,7 @@ interface SmokeRuntime {
   ) => WasmReport | null;
   touchControlState?: () => WasmReport | null;
   beginLobbySmoke?: (chunkSpan?: number) => WasmReport | null;
+  sceneBorrowExcluded?: () => boolean;
   backgroundSaveForSmoke?: () => WasmReport | null;
   shutdownForSmoke?: () => Promise<WasmReport | null>;
 }
@@ -374,6 +375,7 @@ export function installWebSmokeObserver(
     app.drainLobbyOperations();
     return report;
   };
+  runtime.sceneBorrowExcluded = () => app.sceneHostForObserver() === null;
   runtime.backgroundSaveForSmoke = () => app.backgroundCycleForObserver();
   runtime.shutdownForSmoke = () => app.shutdownForObserver();
   globalThis.__mcloneWebApp = runtime;

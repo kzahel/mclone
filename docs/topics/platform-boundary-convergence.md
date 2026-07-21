@@ -4,8 +4,8 @@ Topic: `platform-boundary-convergence`
 
 Status: open master tracker. No coordinator cutover has landed. Tactical
 [`207`](../tactical/207-shared-scene-operation-coordinator.md) is the active
-implementation workstream; its first pickup is evidence/baseline capture,
-followed by retirement of the async mutable-borrow browser ABI. This parent is
+implementation workstream; Phase 0 evidence is complete and Phase 1 retirement
+of the async mutable-borrow browser ABI is the current pickup. This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
 
@@ -209,8 +209,8 @@ remaining-work note.
 
 | Phase | Status | Purpose | Required exit |
 |---|---|---|---|
-| 0. Evidence and deletion ledger | **next** | Re-capture a clean-revision baseline, trace the native and browser operation lifecycles, measure frame/input exclusion, and pin non-increasing counts for named duplicate paths | Reproducible traces and counters exist for session start, lobby warmup, catalog, asset replacement, readiness, replacement, and shutdown; the debt ceiling can only move toward zero; no product behavior changes |
-| 1. Borrow-free browser ABI | pending on Phase 0 | Replace every exported async mutable borrow with synchronous issue/take and later completion submission over owned values | Zero exported `async fn(&mut self)` methods; `sessionBusy`, idle spin loops, retries, and ordinary frame/input guards are deleted; trace proves the active world continues during independent work |
+| 0. Evidence and deletion ledger | **complete 2026-07-21** | Re-capture a clean-revision baseline, trace the native and browser operation lifecycles, measure frame/input exclusion, and pin non-increasing counts for named duplicate paths | Baseline `8a3e9b12`; repeatable scoreboard and monotonic debt test; measured catalog/asset exclusion and lobby/native controls recorded in Tactical 207. Existing web pixel-capture and lifecycle-smoke failures remain explicit cutover validation issues. |
+| 1. Borrow-free browser ABI | **next** | Replace every exported async mutable borrow with synchronous issue/take and later completion submission over owned values | Zero exported `async fn(&mut self)` methods; `sessionBusy`, idle spin loops, retries, and ordinary frame/input guards are deleted; trace proves the active world continues during independent work |
 | 2. One boundary-operation token family | pending on Phase 1 | Re-key session, lobby, catalog, and asset-preparation completions onto `PlatformOperationService`/`PlatformOperationLedger` and delete parallel request identities | A boundary completion crosses with one operation token; duplicate/unknown/late results have shared tests; content epochs that remain have documented non-identity invariants |
 | Gate A. Fresh inventory and re-scope | mandatory after Phase 2 | Measure what the first two phases already deleted and choose the smallest remaining cut | Tactical 207 is revised before more implementation; unnecessary later phases are dropped or narrowed |
 | 3. Runtime-start convergence | candidate after Gate A | Give active, lobby-primary, and lobby-destination starts one shared logical request/completion lifecycle while preserving target/priority policy in Rust | TypeScript constructs only opaque Worker/runtime machinery; lobby and active-session start exports and acceptance paths no longer differ semantically |
@@ -284,26 +284,19 @@ have changed the live counts since the audit.
 
 ## Immediate Next Workstream
 
-Start Tactical [`207`](../tactical/207-shared-scene-operation-coordinator.md)
-at Phase 0; do not begin by creating the final `SceneOperationCoordinator`
+Continue Tactical [`207`](../tactical/207-shared-scene-operation-coordinator.md)
+at Phase 1; do not begin by creating the final `SceneOperationCoordinator`
 type.
 
-The first implementation work packet is:
+The current implementation work packet is:
 
-1. choose and record the clean baseline revision after the current unrelated
-   worktree changes are resolved;
-2. inventory every operation from Rust admission through platform effect and
-   completion, classifying each identifier as either an operation token or a
-   durable domain/content generation;
-3. add trace evidence for frame and raw-input progress while active-session
-   start, lobby warmup, asset preparation, and catalog work are pending;
-4. add non-increasing inventory locks for `sessionBusy`, its retry/spin
-   helpers, the duplicate request IDs, and the exported async mutable-borrow
-   methods, recording zero as the cutover target without making Phase 0 tests
-   fail on the current baseline; and
-5. use active-session start as the first owned issue/completion vertical proof,
-   then migrate the remaining async exports and delete the global busy policy
-   in the same Phase 1 series.
+1. use active-session start as the first owned issue/completion vertical proof;
+2. migrate the remaining async exports without holding `WebSceneHost` or an
+   exported sibling mutably across an await;
+3. delete the global `sessionBusy` policy, idle waits, and retry guards;
+4. lower every affected source-debt ceiling to zero; and
+5. repeat the Phase 0 traces to prove frame, render, and input progress while
+   independent work remains pending.
 
 Phase 0 should be evidence-only. Reuse existing smoke/lifecycle scenarios and
 capture a small number of composite traces; do not create a new platform test
