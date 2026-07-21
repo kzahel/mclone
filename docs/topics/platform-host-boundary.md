@@ -6,8 +6,10 @@ Status: direction accepted and implementation in progress 2026-07-21.
 Tactical
 [`203`](../tactical/203-shared-interactive-router-native-adoption.md) completed
 the shared synchronous interactive router and adopted it on desktop and flat
-Android. The next bounded slice is browser raw-input adoption from that landed
-API. The existing shared scene, input,
+Android. Active Tactical
+[`204`](../tactical/204-browser-raw-input-adoption.md) is adopting that landed
+API for raw browser keyboard, pointer, wheel, and touch input. The existing
+shared scene, input,
 actor/mailbox, rendering, and platform-operation contracts are the foundation;
 the remaining work is to converge the interactive host rim and isolate browser
 diagnostics without replacing those systems with a new universal framework.
