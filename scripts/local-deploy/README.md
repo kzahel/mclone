@@ -36,9 +36,11 @@ Deploys run from a reusable sibling worktree:
 ```
 
 The worker resets that worktree to the pushed commit, links local ignored inputs
-such as `reference/minecraft-1.17.1` and `node_modules` when present, then runs
-`pnpm run deploy` there. This keeps the active checkout free for immediate follow-up
-editing while preserving an incremental build cache in the deploy worktree.
+such as `reference/minecraft-1.17.1` and the root `node_modules` when present,
+then runs `pnpm run deploy` there. The bundle command hydrates independently
+locked nested packages such as Asset Lab with a frozen lockfile when needed.
+This keeps the active checkout free for immediate follow-up editing while
+preserving an incremental build cache in the deploy worktree.
 
 ## Commands
 

@@ -180,7 +180,12 @@ The hook returns immediately. A background worker waits until the pushed `main` 
 
 Quick successive pushes replace the pending SHA before deployment starts. The worker deploys from a reusable sibling worktree, by default `../mclone-deploy-worktree`, which it resets to the pushed commit before running `pnpm deploy`. The active checkout can be edited immediately after pushing.
 
-Local ignored inputs and caches such as `reference/minecraft-1.17.1` and `node_modules` are linked into that deploy worktree when present.
+Local ignored inputs and caches such as `reference/minecraft-1.17.1` and the
+root `node_modules` are linked into that deploy worktree when present. The
+bundle command installs the separately locked Asset Lab package with
+`--frozen-lockfile` when its local dependencies are absent, so a clean deploy
+worktree can build `/animals/` without depending on nested ignored files from
+the active checkout.
 
 Status is available with:
 

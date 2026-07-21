@@ -93,6 +93,15 @@ ensure_wasm_bindgen() {
     --root "$WASM_BINDGEN_ROOT"
 }
 
+ensure_asset_lab_dependencies() {
+  if [ -x "$PROJECT_DIR/tools/asset-lab/node_modules/.bin/vite" ]; then
+    return
+  fi
+
+  echo "==> Installing Asset Lab web dependencies"
+  pnpm --dir "$PROJECT_DIR/tools/asset-lab" install --frozen-lockfile
+}
+
 echo "==> Building native web assets"
 cd "$PROJECT_DIR"
 pnpm assets:pack
@@ -112,6 +121,7 @@ ensure_wasm_bindgen
 
 echo "==> Bundling native web app"
 node "$WEB_GLUE_BUILD_SCRIPT"
+ensure_asset_lab_dependencies
 pnpm asset-lab:web:build
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/pkg"
