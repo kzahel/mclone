@@ -41,11 +41,13 @@ mod web_canvas;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_catalog_execution;
 #[cfg(target_arch = "wasm32")]
-pub use web_catalog_execution::WebCatalogExecution;
+pub use web_catalog_execution::{WebCatalogExecution, WebCatalogSmokeExecution};
 #[cfg(target_arch = "wasm32")]
 mod web_scene_host;
 #[cfg(target_arch = "wasm32")]
-pub use web_scene_host::{WebSceneHost, mclone_web_create_scene_host_with_startup};
+pub use web_scene_host::{
+    WebSceneHost, WebSceneSmokeHarness, mclone_web_create_scene_host_with_startup,
+};
 #[cfg(target_arch = "wasm32")]
 mod web_compile_timing;
 #[cfg(target_arch = "wasm32")]

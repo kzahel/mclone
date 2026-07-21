@@ -262,6 +262,10 @@ class WebFrameDriver {
     return this.session;
   }
 
+  wasmModuleForObserver(): WasmModule | null {
+    return this.module;
+  }
+
   observerSnapshot(
     operation: WasmReport | null | undefined,
   ): WasmReport | null {

@@ -722,7 +722,7 @@ async function runIndexedDbCatalogSmoke(module) {
     // Pause one create after its read, insert the same id through an
     // independent execution, then resume it. The stale add must abort its
     // transaction, and the next ordinary operation must still succeed.
-    const staleCreate = module.mclone_web_catalog_smoke_execution(
+    const staleCreate = new module.WebCatalogSmokeExecution(
       "createWorld",
       {
         displayName: "Stale Constraint Probe",
@@ -867,7 +867,7 @@ async function runIndexedDbCatalogSmoke(module) {
  * later add can be raced deterministically against another committed create.
  *
  * @param {IDBDatabase} db
- * @param {import("mclone-web-client-wasm").WebCatalogExecution} execution
+ * @param {import("mclone-web-client-wasm").WebCatalogSmokeExecution} execution
  */
 async function advanceCatalogSmokeCreateRead(db, execution) {
   const step = execution.nextStorageStep();
@@ -906,7 +906,7 @@ async function executeCatalogSmoke(
   options = {},
   activeWorldId = "",
 ) {
-  const execution = module.mclone_web_catalog_smoke_execution(
+  const execution = new module.WebCatalogSmokeExecution(
     operation,
     options,
     activeWorldId,

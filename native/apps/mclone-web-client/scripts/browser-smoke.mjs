@@ -806,7 +806,7 @@ async function run() {
         if (
           preparedFigureProbeResult?.ok !== true
           || preparedFigureProbeResult?.backend !== "browser-webgpu"
-          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-box-v0"
+          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-cuboid-proxy-v1"
           || Number(preparedFigureProbeResult?.partCount) !== 12
           || Number(preparedFigureProbeResult?.vertexCount) !== 288
           || Number(preparedFigureProbeResult?.indexCount) !== 432
@@ -5493,7 +5493,7 @@ async function installIndexedDbCatalogHelper(page) {
       ]);
       await wasm.default(new URL("./pkg/mclone_web_client_bg.wasm", location.href));
       const db = await catalog.openWorldDb();
-      const execution = wasm.mclone_web_catalog_smoke_execution("listWorlds", {}, "");
+      const execution = new wasm.WebCatalogSmokeExecution("listWorlds", {}, "");
       try {
         await catalog.executeIndexedDbCatalogExecution(db, execution);
         return execution.responseForSmoke();

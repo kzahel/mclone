@@ -107,6 +107,7 @@ fn flat_android_and_browser_share_touch_control_selection() {
 
 #[test]
 fn semantic_smoke_registry_is_query_gated_outside_the_product_adapter() {
+    let product_host = braced_item(WEB_SCENE_HOST, "#[wasm_bindgen]\nimpl WebSceneHost {");
     assert!(!WEB_APP.contains("globalThis.__mcloneWebApp ="));
     assert!(!WEB_APP.contains("runtime.interactBlock ="));
     assert!(!WEB_APP.contains("runtime.openNativePauseUi ="));
@@ -143,12 +144,18 @@ fn semantic_smoke_registry_is_query_gated_outside_the_product_adapter() {
         "js_name = exerciseBlockInteraction",
         "js_name = frameFirstActor",
         "js_name = simulateSurfaceLoss",
+        "js_name = rebuildRenderResourcesForSmoke",
+        "js_name = renderHalfSpaceTerrainProof",
+        "js_name = renderPreparedFigureProof",
+        "js_name = renderActorCompositionProof",
+        "js_name = beginLobbySmokeWithChunkSpan",
     ] {
         assert!(
-            !WEB_SCENE_HOST.contains(removed_export),
-            "unused direct diagnostic export survived: {removed_export}"
+            !product_host.contains(removed_export),
+            "diagnostic export survived on the product host: {removed_export}"
         );
     }
+    assert!(WEB_SCENE_HOST.contains("pub struct WebSceneSmokeHarness"));
 }
 
 #[test]

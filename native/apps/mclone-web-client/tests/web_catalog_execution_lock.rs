@@ -42,6 +42,10 @@ fn ordinary_catalog_policy_is_rust_owned() {
     assert!(!scene.contains("catalogOperation"));
 
     assert!(execution.contains("CatalogExecutionCore"));
+    assert!(execution.contains("token: PlatformOperationToken"));
+    assert!(!execution.contains("token: Option<PlatformOperationToken>"));
+    assert!(execution.contains("pub struct WebCatalogSmokeExecution"));
+    assert!(!execution.contains("mclone_web_catalog_smoke_execution"));
     assert!(execution.contains("encode_storage_step"));
     assert!(execution.contains("decode_web_local_world_summaries"));
     assert!(!execution.contains("enum DeleteManyStage"));

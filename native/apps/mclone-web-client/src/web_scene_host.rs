@@ -329,7 +329,7 @@ impl WebSceneOperation {
         let Some(WebSceneOperationEffect::IndexedDb(execution)) = self.effect.take() else {
             unreachable!()
         };
-        self.indexed_db_token = Some(execution.token().map_err(JsValue::from)?);
+        self.indexed_db_token = Some(execution.token());
         Ok(Some(execution))
     }
 
@@ -344,7 +344,7 @@ impl WebSceneOperation {
             .indexed_db_token
             .take()
             .ok_or_else(|| JsValue::from_str("scene operation does not use IndexedDB"))?;
-        if execution.token().map_err(JsValue::from)? != token {
+        if execution.token() != token {
             return Err(JsValue::from_str(
                 "IndexedDB execution does not match the scene operation",
             ));
@@ -462,19 +462,16 @@ pub struct WebSceneHost {
     interaction_count: usize,
     mesh_build_count: usize,
     catalog_operation_in_flight: bool,
-    render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
 }
 
-#[wasm_bindgen]
 impl WebSceneHost {
     /// Deterministic device/resource-generation recovery hook. Production
     /// device recreation can call the same prepared-asset entry after replacing
     /// `WebCanvasContext`; the smoke uses the current device to verify retained
     /// world cancellation and stale-start rejection without fabricating a loss.
-    #[wasm_bindgen(js_name = rebuildRenderResourcesForSmoke)]
-    pub fn rebuild_render_resources_for_smoke(&mut self) -> Result<JsValue, JsValue> {
+    fn rebuild_render_resources_for_smoke(&mut self) -> Result<JsValue, JsValue> {
         let assets = self
             .host_ref()?
             .active_asset_snapshot_for_epoch(self.host_ref()?.active_asset_epoch());
@@ -490,14 +487,12 @@ impl WebSceneHost {
                 &assets.screen_effects,
             )
             .map_err(js_error)?;
-        self.render_resource_generation = self.render_resource_generation.saturating_add(1);
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
     /// Present the shared renderer-owned complementary-half-space fixture.
     /// The browser adapter supplies only its WebGPU target and presentation.
-    #[wasm_bindgen(js_name = renderHalfSpaceTerrainProof)]
-    pub fn render_half_space_terrain_proof(&mut self) -> Result<JsValue, JsValue> {
+    fn render_half_space_terrain_proof(&mut self) -> Result<JsValue, JsValue> {
         let fixture = ComplementaryHalfSpaceTerrainFixture::new(
             &self.context.device,
             &self.context.queue,
@@ -594,8 +589,7 @@ impl WebSceneHost {
     /// Present the canonical player through the shared startup-prepared path.
     /// The browser adapter embeds canonical semantic JSON and supplies only
     /// its WebGPU target, review camera, and presentation.
-    #[wasm_bindgen(js_name = renderPreparedFigureProof)]
-    pub fn render_prepared_figure_proof(&mut self) -> Result<JsValue, JsValue> {
+    fn render_prepared_figure_proof(&mut self) -> Result<JsValue, JsValue> {
         let figure_path = default_player_figure_path();
         let mut source = MemoryAssetSource::new();
         source.insert_text(
@@ -695,8 +689,7 @@ impl WebSceneHost {
 
     /// Present the shared renderer-owned placed/clipped actor fixture.
     /// The browser adapter supplies only its WebGPU target and presentation.
-    #[wasm_bindgen(js_name = renderActorCompositionProof)]
-    pub fn render_actor_composition_proof(&mut self) -> Result<JsValue, JsValue> {
+    fn render_actor_composition_proof(&mut self) -> Result<JsValue, JsValue> {
         let mut fixture = ActorCompositionFixture::new(
             &self.context.device,
             &self.context.queue,
@@ -839,7 +832,76 @@ impl WebSceneHost {
         }
         Ok(object.into())
     }
+}
 
+/// Explicit test-client surface, constructed only by browser smoke pages.
+#[wasm_bindgen]
+pub struct WebSceneSmokeHarness {
+    render_resource_generation: u64,
+}
+
+#[wasm_bindgen]
+impl WebSceneSmokeHarness {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            render_resource_generation: 0,
+        }
+    }
+
+    #[wasm_bindgen(js_name = rebuildRenderResourcesForSmoke)]
+    pub fn rebuild_render_resources_for_smoke(
+        &mut self,
+        host: &mut WebSceneHost,
+    ) -> Result<JsValue, JsValue> {
+        let report = host.rebuild_render_resources_for_smoke()?;
+        self.render_resource_generation = self.render_resource_generation.saturating_add(1);
+        let object: js_sys::Object = report.unchecked_into();
+        report_set_number(
+            &object,
+            "renderResourceGeneration",
+            self.render_resource_generation as f64,
+        )
+        .map_err(JsValue::from)?;
+        Ok(object.into())
+    }
+
+    #[wasm_bindgen(js_name = renderHalfSpaceTerrainProof)]
+    pub fn render_half_space_terrain_proof(
+        &mut self,
+        host: &mut WebSceneHost,
+    ) -> Result<JsValue, JsValue> {
+        host.render_half_space_terrain_proof()
+    }
+
+    #[wasm_bindgen(js_name = renderPreparedFigureProof)]
+    pub fn render_prepared_figure_proof(
+        &mut self,
+        host: &mut WebSceneHost,
+    ) -> Result<JsValue, JsValue> {
+        host.render_prepared_figure_proof()
+    }
+
+    #[wasm_bindgen(js_name = renderActorCompositionProof)]
+    pub fn render_actor_composition_proof(
+        &mut self,
+        host: &mut WebSceneHost,
+    ) -> Result<JsValue, JsValue> {
+        host.render_actor_composition_proof()
+    }
+
+    #[wasm_bindgen(js_name = beginLobbySmokeWithChunkSpan)]
+    pub fn begin_lobby_smoke_with_chunk_span(
+        &mut self,
+        host: &mut WebSceneHost,
+        chunk_span: u32,
+    ) -> Result<JsValue, JsValue> {
+        host.begin_lobby_smoke_with_chunk_span(chunk_span)
+    }
+}
+
+#[wasm_bindgen]
+impl WebSceneHost {
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(&mut self, now_millis: f64) -> Result<JsValue, JsValue> {
         self.render_worker
@@ -1777,23 +1839,6 @@ impl WebSceneHost {
         Ok(object.into())
     }
 
-    #[wasm_bindgen(js_name = beginLobbySmokeWithChunkSpan)]
-    pub fn begin_lobby_smoke_with_chunk_span(
-        &mut self,
-        chunk_span: u32,
-    ) -> Result<JsValue, JsValue> {
-        let bounds = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(chunk_span)
-            .map_err(js_error)?;
-        self.host_mut()?
-            .begin_lobby_launch(
-                mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview()
-                    .with_preview_bounds(bounds)
-                    .map_err(js_error)?,
-            )
-            .map_err(js_error)?;
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
-
     #[wasm_bindgen(js_name = shutdown)]
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
         if let Some(kind) = self
@@ -2180,7 +2225,6 @@ async fn create_scene_host(
         interaction_count: 0,
         mesh_build_count: 0,
         catalog_operation_in_flight: false,
-        render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
     };
@@ -2199,6 +2243,19 @@ impl WebSceneHost {
         self.host
             .as_mut()
             .ok_or_else(|| JsValue::from_str("scene host is shut down"))
+    }
+
+    fn begin_lobby_smoke_with_chunk_span(&mut self, chunk_span: u32) -> Result<JsValue, JsValue> {
+        let bounds = mclone_app_runtime::scenario::ScenarioPreviewBounds::square(chunk_span)
+            .map_err(js_error)?;
+        self.host_mut()?
+            .begin_lobby_launch(
+                mclone_app_runtime::scenario::ScenarioLaunchIntent::lobby_preview()
+                    .with_preview_bounds(bounds)
+                    .map_err(js_error)?,
+            )
+            .map_err(js_error)?;
+        self.ui_report(false, None).map_err(JsValue::from)
     }
 
     fn clear_interactive_input(&mut self) {
@@ -2771,11 +2828,6 @@ impl WebSceneHost {
 
         if let Some(host) = self.host.as_ref() {
             report_set_bool(&object, "lobbyLaunchActive", host.lobby_launch_active())?;
-            report_set_number(
-                &object,
-                "renderResourceGeneration",
-                self.render_resource_generation as f64,
-            )?;
             report_set_string(
                 &object,
                 "lobbyDestinationFailure",

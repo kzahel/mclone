@@ -1,6 +1,8 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. Slices 0–3 are complete; Slice 4 is next. This is
+Status: active 2026-07-21. Slices 0–4 are implemented; Slice 5 is next. The
+full lobby lifecycle lane must be rerun after Slice 5 removes the asset-pack
+in-flight guard that currently times out before Slice 4's rebuild subcase. This is
 the implementation charter for the
 remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
@@ -225,7 +227,7 @@ plan-encode/IndexedDB-read/decode continuation through create, open, record,
 and delete. Its inspected final capture was the expected one-row world list
 with no black or transparent pixels.
 
-## Slice 4: Remove test scaffolding from the production ABI and widen the pins
+## Slice 4: Remove test scaffolding from the production ABI and widen the pins — implementation complete 2026-07-21
 
 Motivation: audit F4 and G2.
 
@@ -259,6 +261,26 @@ Work:
 Exit gate: production `WebSceneHost` ABI at ~37 mechanical exports;
 sibling-class pins in place; no `Option` token or dead error branch in
 production catalog execution; all headed smoke lanes green.
+
+Implementation evidence: a separate `WebSceneSmokeHarness`, instantiated only
+by the query-gated smoke observer, now owns the four render/resource probes and
+the direct lobby launch probe. `WebSceneHost` fell from 42 to 37 mechanical
+exports. `WebCatalogSmokeExecution` now owns tokenless smoke construction and
+response encoding; production `WebCatalogExecution` has an always-present token
+and six pinned exports. Exact pins cover `WebSceneOperation` (3),
+`WebCatalogExecution` (6), `WebSceneSmokeHarness` (6), and
+`WebCatalogSmokeExecution` (8). Native tests, wasm check, TypeScript checking,
+adapter/purity locks, and headed catalog, prepared-figure, half-space,
+actor-composition, and lobby-bounds lanes passed. Their captures were inspected
+and contained the expected non-black, non-transparent output. The prepared
+figure lane also exposed and corrected its stale `box-v0` compiler-ID pin to
+the already-current `cuboid-proxy-v1` contract.
+
+The aggregate lobby lifecycle lane was attempted twice. Both runs completed
+the main lifecycle scenarios and then timed out in the asset-pack replacement
+wait, before reaching the resource-rebuild subcase. That guard is the explicit
+target of Slice 5, so Slice 5 must rerun the full lane and append the remaining
+exit evidence; do not treat the focused rebuild check as waived.
 
 ## Slice 5: Collapse rim in-flight guards onto the ledger
 

@@ -9,7 +9,6 @@ export const WORLD_METADATA_STORE = "worldMetadata";
 export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
 export const WORLD_ID_INDEX = "worldId";
 
-import type { WebCatalogExecution } from "mclone-web-client-wasm";
 import { acquireWorldWriterLease } from "./mclone-web-world-lease.js";
 import type { HeldWorldWriterLease } from "./mclone-web-world-lease.js";
 
@@ -42,6 +41,20 @@ interface CatalogStorageAction extends Record<string, unknown> {
   value?: unknown;
 }
 
+/** Mechanical continuation surface shared by product and smoke wasm wrappers. */
+export interface CatalogStorageExecution {
+  requiredWriterLeaseNames(): unknown;
+  isComplete(): boolean;
+  nextStorageStep(): unknown;
+  acceptStorageRead(
+    stepId: number,
+    actionId: number,
+    value: unknown,
+    nowUnixMillis: number,
+  ): unknown;
+  completeStorageStep(stepId: number): void;
+}
+
 export function openWorldDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(WORLD_DB_NAME, WORLD_DB_VERSION);
@@ -63,7 +76,7 @@ export function openWorldDb(): Promise<IDBDatabase> {
 
 export async function executeIndexedDbCatalogExecution(
   db: IDBDatabase,
-  execution: WebCatalogExecution,
+  execution: CatalogStorageExecution,
 ): Promise<void> {
   const leases = new Map<string, HeldWorldWriterLease>();
   try {
@@ -91,7 +104,7 @@ export async function executeIndexedDbCatalogExecution(
 
 function executeCatalogStorageTransaction(
   db: IDBDatabase,
-  execution: WebCatalogExecution,
+  execution: CatalogStorageExecution,
   stepId: number,
   plan: CatalogStorageTransaction,
 ): Promise<void> {
@@ -146,7 +159,7 @@ function executeCatalogStorageTransaction(
 
 function enqueueCatalogStorageAction(
   transaction: IDBTransaction,
-  execution: WebCatalogExecution,
+  execution: CatalogStorageExecution,
   stepId: number,
   action: CatalogStorageAction,
   fail: (error: unknown) => void,
@@ -195,7 +208,7 @@ function enqueueCatalogStorageAction(
 function enqueueCatalogRead<T>(
   request: IDBRequest<T>,
   transaction: IDBTransaction,
-  execution: WebCatalogExecution,
+  execution: CatalogStorageExecution,
   stepId: number,
   action: CatalogStorageAction,
   fail: (error: unknown) => void,

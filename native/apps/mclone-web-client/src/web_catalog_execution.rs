@@ -37,7 +37,7 @@ mod wasm {
 
     #[wasm_bindgen]
     pub struct WebCatalogExecution {
-        token: Option<PlatformOperationToken>,
+        token: PlatformOperationToken,
         core: CatalogExecutionCore,
     }
 
@@ -48,14 +48,13 @@ mod wasm {
             active_world: Option<LocalWorldId>,
         ) -> Result<Self, String> {
             Ok(Self {
-                token: Some(token),
+                token,
                 core: CatalogExecutionCore::new(request, active_world, WEB_WORLD_BACKEND_LABEL)?,
             })
         }
 
-        pub(crate) fn token(&self) -> Result<PlatformOperationToken, String> {
+        pub(crate) fn token(&self) -> PlatformOperationToken {
             self.token
-                .ok_or_else(|| "catalog smoke execution has no platform-operation token".to_owned())
         }
 
         pub(crate) fn response(&self) -> Result<WorldCatalogResponse, String> {
@@ -75,29 +74,17 @@ mod wasm {
     impl WebCatalogExecution {
         #[wasm_bindgen(js_name = requiredWriterLeaseNames)]
         pub fn required_writer_lease_names(&self) -> Array {
-            self.writer_lease_names()
-                .into_iter()
-                .map(JsValue::from)
-                .collect()
+            encode_writer_lease_names(self.writer_lease_names())
         }
 
         #[wasm_bindgen(js_name = awaitWriterRetirements)]
         pub async fn await_writer_retirements(&self) -> Result<(), JsValue> {
-            for lease_name in self.writer_lease_names() {
-                crate::web_server_worker::await_retired_world_writer(&lease_name)
-                    .await
-                    .map_err(JsValue::from)?;
-            }
-            Ok(())
+            await_writer_retirements(self.writer_lease_names()).await
         }
 
         #[wasm_bindgen(js_name = nextStorageStep)]
         pub fn next_storage_step(&mut self) -> Result<JsValue, JsValue> {
-            self.core
-                .next_step()
-                .and_then(|step| step.map(encode_storage_step).transpose())
-                .map(|step| step.unwrap_or(JsValue::UNDEFINED))
-                .map_err(|error| JsValue::from_str(&error))
+            next_storage_step(&mut self.core)
         }
 
         #[wasm_bindgen(js_name = acceptStorageRead)]
@@ -108,54 +95,71 @@ mod wasm {
             value: JsValue,
             now_unix_millis: f64,
         ) -> Result<Array, JsValue> {
-            let step_id = exact_u32(step_id, "catalog storage step id")?;
-            let action_id = exact_u32(action_id, "catalog storage action id")?;
-            let shape = self
-                .core
-                .pending_read_shape(step_id, action_id)
-                .map_err(|error| JsValue::from_str(&error))?;
-            let result = match shape {
-                CatalogReadShape::All => {
-                    CatalogReadResult::All(decode_web_local_world_summaries(&value).map_err(
-                        |error| JsValue::from_str(&format!("decode catalog storage rows: {error}")),
-                    )?)
-                }
-                CatalogReadShape::One => {
-                    let summary = if value.is_null() || value.is_undefined() {
-                        None
-                    } else {
-                        Some(decode_web_local_world_summary(&value).map_err(|error| {
-                            JsValue::from_str(&format!("decode catalog storage row: {error}"))
-                        })?)
-                    };
-                    CatalogReadResult::One(summary)
-                }
-            };
-            let timestamp = self
-                .core
-                .pending_read_needs_timestamp(step_id, action_id)
-                .map_err(|error| JsValue::from_str(&error))?
-                .then(|| parse_web_unix_millis(now_unix_millis, "nowUnixMillis"))
-                .transpose()
-                .map_err(|error| JsValue::from_str(&error))?;
-            let followups = self
-                .core
-                .accept_read_result(step_id, action_id, result, timestamp)
-                .map_err(|error| JsValue::from_str(&error))?;
-            let array = Array::new();
-            for action in followups {
-                array.push(&encode_storage_action(&action).map_err(|error| {
-                    JsValue::from_str(&format!("encode catalog follow-up action: {error}"))
-                })?);
-            }
-            Ok(array)
+            accept_storage_read(&mut self.core, step_id, action_id, value, now_unix_millis)
         }
 
         #[wasm_bindgen(js_name = completeStorageStep)]
         pub fn complete_storage_step(&mut self, step_id: f64) -> Result<(), JsValue> {
-            self.core
-                .complete_step(exact_u32(step_id, "catalog storage step id")?)
-                .map_err(|error| JsValue::from_str(&error))
+            complete_storage_step(&mut self.core, step_id)
+        }
+
+        #[wasm_bindgen(js_name = isComplete)]
+        pub fn is_complete(&self) -> bool {
+            self.core.is_complete()
+        }
+    }
+
+    /// Tokenless catalog continuation exposed only to the browser smoke pages.
+    #[wasm_bindgen]
+    pub struct WebCatalogSmokeExecution {
+        core: CatalogExecutionCore,
+    }
+
+    #[wasm_bindgen]
+    impl WebCatalogSmokeExecution {
+        #[wasm_bindgen(constructor)]
+        pub fn new(
+            operation: String,
+            options: JsValue,
+            active_world_id: String,
+        ) -> Result<WebCatalogSmokeExecution, JsValue> {
+            let (request, active_world) =
+                decode_catalog_smoke_request(operation, options, active_world_id)?;
+            Ok(Self {
+                core: CatalogExecutionCore::new(request, active_world, WEB_WORLD_BACKEND_LABEL)
+                    .map_err(|error| JsValue::from_str(&error))?,
+            })
+        }
+
+        #[wasm_bindgen(js_name = requiredWriterLeaseNames)]
+        pub fn required_writer_lease_names(&self) -> Array {
+            encode_writer_lease_names(writer_lease_names(&self.core))
+        }
+
+        #[wasm_bindgen(js_name = awaitWriterRetirements)]
+        pub async fn await_writer_retirements(&self) -> Result<(), JsValue> {
+            await_writer_retirements(writer_lease_names(&self.core)).await
+        }
+
+        #[wasm_bindgen(js_name = nextStorageStep)]
+        pub fn next_storage_step(&mut self) -> Result<JsValue, JsValue> {
+            next_storage_step(&mut self.core)
+        }
+
+        #[wasm_bindgen(js_name = acceptStorageRead)]
+        pub fn accept_storage_read(
+            &mut self,
+            step_id: f64,
+            action_id: f64,
+            value: JsValue,
+            now_unix_millis: f64,
+        ) -> Result<Array, JsValue> {
+            accept_storage_read(&mut self.core, step_id, action_id, value, now_unix_millis)
+        }
+
+        #[wasm_bindgen(js_name = completeStorageStep)]
+        pub fn complete_storage_step(&mut self, step_id: f64) -> Result<(), JsValue> {
+            complete_storage_step(&mut self.core, step_id)
         }
 
         #[wasm_bindgen(js_name = isComplete)]
@@ -174,12 +178,11 @@ mod wasm {
         }
     }
 
-    #[wasm_bindgen(js_name = mclone_web_catalog_smoke_execution)]
-    pub fn catalog_smoke_execution(
+    fn decode_catalog_smoke_request(
         operation: String,
         options: JsValue,
         active_world_id: String,
-    ) -> Result<WebCatalogExecution, JsValue> {
+    ) -> Result<(WorldCatalogRequest, Option<LocalWorldId>), JsValue> {
         let id = || -> Result<LocalWorldId, JsValue> {
             LocalWorldId::new(required_string(&options, "id")?)
                 .map_err(|error| JsValue::from_str(&error.message))
@@ -213,11 +216,86 @@ mod wasm {
                     .map_err(|error| JsValue::from_str(&error.message))?,
             )
         };
-        Ok(WebCatalogExecution {
-            token: None,
-            core: CatalogExecutionCore::new(request, active_world, WEB_WORLD_BACKEND_LABEL)
-                .map_err(|error| JsValue::from_str(&error))?,
-        })
+        Ok((request, active_world))
+    }
+
+    fn writer_lease_names(core: &CatalogExecutionCore) -> Vec<String> {
+        core.required_writer_world_ids()
+            .into_iter()
+            .map(|id| web_world_writer_lease_name(id.as_str()))
+            .collect()
+    }
+
+    fn encode_writer_lease_names(names: Vec<String>) -> Array {
+        names.into_iter().map(JsValue::from).collect()
+    }
+
+    async fn await_writer_retirements(names: Vec<String>) -> Result<(), JsValue> {
+        for lease_name in names {
+            crate::web_server_worker::await_retired_world_writer(&lease_name)
+                .await
+                .map_err(JsValue::from)?;
+        }
+        Ok(())
+    }
+
+    fn next_storage_step(core: &mut CatalogExecutionCore) -> Result<JsValue, JsValue> {
+        core.next_step()
+            .and_then(|step| step.map(encode_storage_step).transpose())
+            .map(|step| step.unwrap_or(JsValue::UNDEFINED))
+            .map_err(|error| JsValue::from_str(&error))
+    }
+
+    fn accept_storage_read(
+        core: &mut CatalogExecutionCore,
+        step_id: f64,
+        action_id: f64,
+        value: JsValue,
+        now_unix_millis: f64,
+    ) -> Result<Array, JsValue> {
+        let step_id = exact_u32(step_id, "catalog storage step id")?;
+        let action_id = exact_u32(action_id, "catalog storage action id")?;
+        let shape = core
+            .pending_read_shape(step_id, action_id)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let result = match shape {
+            CatalogReadShape::All => {
+                CatalogReadResult::All(decode_web_local_world_summaries(&value).map_err(
+                    |error| JsValue::from_str(&format!("decode catalog storage rows: {error}")),
+                )?)
+            }
+            CatalogReadShape::One => {
+                let summary = if value.is_null() || value.is_undefined() {
+                    None
+                } else {
+                    Some(decode_web_local_world_summary(&value).map_err(|error| {
+                        JsValue::from_str(&format!("decode catalog storage row: {error}"))
+                    })?)
+                };
+                CatalogReadResult::One(summary)
+            }
+        };
+        let timestamp = core
+            .pending_read_needs_timestamp(step_id, action_id)
+            .map_err(|error| JsValue::from_str(&error))?
+            .then(|| parse_web_unix_millis(now_unix_millis, "nowUnixMillis"))
+            .transpose()
+            .map_err(|error| JsValue::from_str(&error))?;
+        let followups = core
+            .accept_read_result(step_id, action_id, result, timestamp)
+            .map_err(|error| JsValue::from_str(&error))?;
+        let array = Array::new();
+        for action in followups {
+            array.push(&encode_storage_action(&action).map_err(|error| {
+                JsValue::from_str(&format!("encode catalog follow-up action: {error}"))
+            })?);
+        }
+        Ok(array)
+    }
+
+    fn complete_storage_step(core: &mut CatalogExecutionCore, step_id: f64) -> Result<(), JsValue> {
+        core.complete_step(exact_u32(step_id, "catalog storage step id")?)
+            .map_err(|error| JsValue::from_str(&error))
     }
 
     fn encode_storage_step(step: StorageStep) -> Result<JsValue, String> {
@@ -346,8 +424,14 @@ mod wasm {
         set_value(object, name, &JsValue::from_bool(value))
     }
 
-    pub use self::WebCatalogExecution as ExportedWebCatalogExecution;
+    pub use self::{
+        WebCatalogExecution as ExportedWebCatalogExecution,
+        WebCatalogSmokeExecution as ExportedWebCatalogSmokeExecution,
+    };
 }
 
 #[cfg(target_arch = "wasm32")]
-pub use wasm::ExportedWebCatalogExecution as WebCatalogExecution;
+pub use wasm::{
+    ExportedWebCatalogExecution as WebCatalogExecution,
+    ExportedWebCatalogSmokeExecution as WebCatalogSmokeExecution,
+};

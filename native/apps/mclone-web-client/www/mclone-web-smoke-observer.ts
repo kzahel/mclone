@@ -3,7 +3,10 @@
 // Game/engine vocabulary is permitted here because this is not a production
 // platform adapter.
 
-import type { WebSceneHost } from "mclone-web-client-wasm";
+import type {
+  WebSceneHost,
+  WebSceneSmokeHarness,
+} from "mclone-web-client-wasm";
 
 type WasmReport = Record<string, any>;
 type TouchControlsMode = "auto" | "on" | "off";
@@ -67,6 +70,10 @@ interface SmokeRuntime {
 
 interface SmokeBridge {
   sceneHostForObserver(): WebSceneHost | null;
+  wasmModuleForObserver(): Pick<
+    typeof import("mclone-web-client-wasm"),
+    "WebSceneSmokeHarness"
+  > | null;
   observerSnapshot(report: WasmReport | null | undefined): WasmReport | null;
   waitForObserverIdle(pauseFrames?: boolean): Promise<void>;
   renderSingleObserverFrame(): Promise<WasmReport | null>;
@@ -299,6 +306,20 @@ export function installWebSmokeObserver(
       });
     },
   };
+  let smokeHarness: WebSceneSmokeHarness | null = null;
+  const applySmoke = (
+    operation: (harness: WebSceneSmokeHarness, session: WebSceneHost) => WasmReport,
+  ): WasmReport | null => {
+    const session = app.sceneHostForObserver();
+    const module = app.wasmModuleForObserver();
+    if (!session || !module) {
+      return null;
+    }
+    smokeHarness ??= new module.WebSceneSmokeHarness();
+    const report = operation(smokeHarness, session);
+    app.applyObserverReport(report);
+    return observer.latestReport() ?? report;
+  };
   const apply = (
     operation: (session: WebSceneHost) => WasmReport,
     options: { fromPointer?: boolean; pointerType?: string } = {},
@@ -337,18 +358,18 @@ export function installWebSmokeObserver(
   runtime.renderOneFrameForSmoke = () => app.renderSingleObserverFrame();
   runtime.renderHalfSpaceTerrainProof = async () => {
     await app.waitForObserverIdle(true);
-    return app.sceneHostForObserver()?.renderHalfSpaceTerrainProof() ?? null;
+    return applySmoke((harness, session) => harness.renderHalfSpaceTerrainProof(session));
   };
   runtime.renderPreparedFigureProof = async () => {
     await app.waitForObserverIdle(true);
-    return app.sceneHostForObserver()?.renderPreparedFigureProof() ?? null;
+    return applySmoke((harness, session) => harness.renderPreparedFigureProof(session));
   };
   runtime.renderActorCompositionProof = async () => {
     await app.waitForObserverIdle(true);
-    return app.sceneHostForObserver()?.renderActorCompositionProof() ?? null;
+    return applySmoke((harness, session) => harness.renderActorCompositionProof(session));
   };
-  runtime.rebuildRenderResourcesForSmoke = () => (
-    apply((session) => session.rebuildRenderResourcesForSmoke())
+  runtime.rebuildRenderResourcesForSmoke = () => applySmoke(
+    (harness, session) => harness.rebuildRenderResourcesForSmoke(session),
   );
   runtime.openNativeTitleUi = () => apply((session) => session.openTitleUi());
   runtime.openNativePauseUi = () => apply((session) => session.openPauseUi());
@@ -413,8 +434,8 @@ export function installWebSmokeObserver(
     activePointerCount: app.touchControls?.snapshot().activePointerCount ?? 0,
   });
   runtime.beginLobbySmoke = (chunkSpan = 2) => {
-    const report = apply(
-      (session) => session.beginLobbySmokeWithChunkSpan(chunkSpan),
+    const report = applySmoke(
+      (harness, session) => harness.beginLobbySmokeWithChunkSpan(session, chunkSpan),
     );
     app.drainSceneOperations();
     return report;

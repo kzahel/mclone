@@ -17,6 +17,10 @@ const WEB_SCENE_HOST: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_scene_host.rs"
 ));
+const WEB_CATALOG_EXECUTION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/web_catalog_execution.rs"
+));
 const SCENE_SESSION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../crates/mclone-scene/src/session.rs"
@@ -32,6 +36,35 @@ fn assert_at_most(label: &str, source: &str, needle: &str, ceiling: usize) {
         count <= ceiling,
         "{label} debt grew from ceiling {ceiling} to {count}; delete or reuse the existing owner instead of raising the ceiling"
     );
+}
+
+fn braced_item<'a>(source: &'a str, marker: &str) -> &'a str {
+    let start = source.find(marker).expect("wasm item marker present");
+    let body = &source[start..];
+    let mut depth = 0usize;
+    let mut opened = false;
+    for (index, byte) in body.bytes().enumerate() {
+        match byte {
+            b'{' => {
+                opened = true;
+                depth += 1;
+            }
+            b'}' if opened => {
+                depth -= 1;
+                if depth == 0 {
+                    return &body[..=index];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated braced item for {marker}")
+}
+
+fn wasm_export_count(source: &str, marker: &str) -> usize {
+    let item = braced_item(source, marker);
+    item.matches("#[wasm_bindgen(js_name").count()
+        + item.matches("#[wasm_bindgen(constructor)]").count()
 }
 
 #[test]
@@ -145,11 +178,36 @@ fn test_only_coarse_operation_is_a_boundary_fixpoint() {
     assert!(WEB_SCENE_HOST.contains("TestOnlyRemote(String)"));
     assert!(!WEB_APP.contains("TestOnlyRemote"));
 
-    let host_exports = WEB_SCENE_HOST
-        .lines()
-        .skip_while(|line| *line != "impl WebSceneHost {")
-        .take_while(|line| *line != "}")
-        .filter(|line| line.contains("#[wasm_bindgen(js_name"))
-        .count();
-    assert_eq!(host_exports, 42);
+    // These exact pins make sibling ABI growth a deliberate review event.
+    // Smoke-only hooks live on explicit smoke types, leaving the product host
+    // with 37 mechanical exports.
+    assert_eq!(
+        wasm_export_count(WEB_SCENE_HOST, "#[wasm_bindgen]\nimpl WebSceneHost {"),
+        37
+    );
+    assert_eq!(
+        wasm_export_count(WEB_SCENE_HOST, "#[wasm_bindgen]\nimpl WebSceneOperation {"),
+        3
+    );
+    assert_eq!(
+        wasm_export_count(
+            WEB_CATALOG_EXECUTION,
+            "#[wasm_bindgen]\n    impl WebCatalogExecution {"
+        ),
+        6
+    );
+    assert_eq!(
+        wasm_export_count(
+            WEB_SCENE_HOST,
+            "#[wasm_bindgen]\nimpl WebSceneSmokeHarness {"
+        ),
+        6
+    );
+    assert_eq!(
+        wasm_export_count(
+            WEB_CATALOG_EXECUTION,
+            "#[wasm_bindgen]\n    impl WebCatalogSmokeExecution {"
+        ),
+        8
+    );
 }
