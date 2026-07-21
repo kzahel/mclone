@@ -53,6 +53,12 @@ the build host, while visitors fetch parsed, validated, hash-checked semantic
 JSON. Deprecated rounded sources under `legacy-examples/` are excluded, and
 catalogue presence does not imply promotion into the runtime asset pack.
 
+The generated manifest derives runtime-promotion status from
+`src/first-party-figures.ts`, the checked mapping that owns promoted semantic
+JSON. The UI shows the promoted count, offers a runtime-status filter, badges
+promoted rows, and displays their runtime figure ID and packed JSON path. React
+does not maintain a second promotion list.
+
 The development preview and catalogue both use `src/viewport.ts` over the same
 `src/scene.ts` semantic renderer. React owns navigation and controls only; it
 does not create geometry or reinterpret animation keys.

@@ -2,8 +2,10 @@
 
 Topic: `animal-catalogue`
 
-Status: complete and live-accepted 2026-07-21. The read-only,
-production-built Asset Lab catalogue is available at
+Status: initial catalogue complete and live-accepted 2026-07-21. Runtime
+promotion metadata and filtering are locally accepted; follow-up production
+publication and live verification remain. The read-only, production-built
+Asset Lab catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
 
@@ -30,6 +32,9 @@ preparation remain owned by
   authored clip, play or pause continuous animation, scrub presentation time,
   adjust playback speed, orbit, pan, zoom, reset framing, and choose standard
   camera views.
+- Visitors can distinguish runtime-promoted figures from Asset Lab-only
+  examples, filter by that status, and inspect the promoted runtime figure ID
+  and packed semantic JSON path.
 - Figure selection and clip selection are shareable through URL query
   parameters without requiring a Worker-side single-page-app fallback.
 - The layout is responsive and keyboard accessible, supports light and dark
@@ -65,6 +70,12 @@ controller. React components must not create figure meshes, reinterpret clip
 keys, calculate semantic pivots, or maintain a parallel animation evaluator.
 Native Rust continues sharing semantic JSON rather than TypeScript or Three.js.
 
+Runtime promotion metadata is not maintained in React. Static generation
+derives it from `src/first-party-figures.ts`, the same checked mapping that
+owns promoted TypeScript sources and generated runtime JSON. The deployed
+manifest carries the result, while the Rust registry remains the runtime
+consumer of those checked files.
+
 ## Static Build Contract
 
 The production build executes canonical TypeScript sources only on the build
@@ -78,12 +89,15 @@ The manifest records at least:
 - semantic SHA-256 and byte length;
 - part, material, texture, and clip counts;
 - clip names, duration, loop state, authored fps, and locomotion kind; and
-- a deterministic default clip and thumbnail URL.
+- a deterministic default clip and thumbnail URL;
+- the total runtime-promoted figure count; and
+- for promoted entries, the runtime figure ID and packed semantic JSON path.
 
 Generation fails on duplicate names, invalid JSON round trips, non-box
-canonical parts, missing clips, or unsafe output names. The source directory is
-the inventory authority. `ANIMALS.md` remains a human roadmap whose cross-listed
-rows and narrative summaries are not parsed as deployed data.
+canonical parts, missing clips, unsafe output names, duplicate promotion IDs or
+paths, unsafe runtime paths, or promotion-summary drift. The source directory
+is the inventory authority. `ANIMALS.md` remains a human roadmap whose
+cross-listed rows and narrative summaries are not parsed as deployed data.
 
 ## Deployment Contract
 
@@ -113,7 +127,8 @@ Required gates are:
 - a production `/animals/` build served from its actual subpath;
 - Playwright coverage for initial load, search and selection, URL restoration,
   play/pause/scrub/speed controls, camera actions, figure replacement, theme,
-  keyboard access, responsive layout, and browser/page errors;
+  runtime-status filtering and details, keyboard access, responsive layout,
+  and browser/page errors;
 - inspected local desktop and mobile screenshots written under `/tmp`;
 - deploy-bundle inspection proving `dist-native-web/animals/index.html`, hashed
   app assets, manifest, figure JSON, and thumbnails are present; and
@@ -137,6 +152,10 @@ occur.
    documentation.
 5. [x] Push `main`, monitor the local deploy worker, and validate `/animals/`
    live.
+6. [x] Derive runtime promotion metadata from the checked first-party registry,
+   validate it in the catalogue contract, and display summary, filter, badge,
+   and inspector states.
+7. [ ] Publish and live-verify the runtime promotion follow-up.
 
 ## Local Acceptance Evidence
 
@@ -170,6 +189,14 @@ The current application JavaScript is about 745 KB minified and 200 KB gzip,
 dominated by the one Three.js viewport plus React. Figure JSON is fetched lazily
 per selection and catalogue thumbnails use native lazy loading. Further code
 splitting is measurement-gated rather than required for first publication.
+
+The runtime-promotion follow-up retains all local gates. Its deterministic
+catalogue test proves the checked Chicken mapping, promoted-count consistency,
+and unsafe runtime-path rejection. Production-subpath Playwright proves the
+three-entry runtime filter, all three promoted names, exclusion by the Asset
+Lab-only filter, row metadata, the Chicken runtime ID and packed path, and the
+existing one-canvas interaction contract. The focused promoted capture at
+`/tmp/mclone-animal-catalogue-runtime-filter.png` was inspected.
 
 ## Live Acceptance Evidence
 
@@ -237,7 +264,8 @@ deploy worktree rather than the active checkout.
 
 ## Recommended Next Work
 
-No acceptance work remains. Reconsider a workspace package only when a
-consumer outside `tools/asset-lab` needs the TypeScript viewer contract. Treat
-further bundle splitting or upload batching as measurement-led deployment
-improvements rather than catalogue correctness work.
+Publish and live-verify the runtime-promotion follow-up. After that, reconsider
+a workspace package only when a consumer outside `tools/asset-lab` needs the
+TypeScript viewer contract. Treat further bundle splitting or upload batching
+as measurement-led deployment improvements rather than catalogue correctness
+work.
