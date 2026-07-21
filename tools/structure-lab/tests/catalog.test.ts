@@ -11,14 +11,20 @@ test("builds a public-safe catalog from checked Rust preview receipts", async ()
   const outRoot = path.join(parent, "catalog");
   try {
     const catalog = await buildWebCatalog({ outRoot, thumbnails: false });
-    assert.equal(catalog.summary.structures, 12);
-    assert.equal(catalog.summary.families, 2);
+    assert.equal(catalog.summary.structures, 13);
+    assert.equal(catalog.summary.families, 3);
     const standard = catalog.structures.find(
       (entry) => entry.structureId === "farmstead-cottage-a-v2",
     );
     assert.ok(standard);
     assert.equal(standard.runtimeStatus, "promoted");
     assert.equal(catalog.summary.runtimePromoted, 12);
+    assert.equal(
+      catalog.structures.find(
+        (entry) => entry.structureId === "farmstead-rosehip-chicken-coop-v1",
+      )?.runtimeStatus,
+      "lab-only",
+    );
     assert.ok(catalog.structures.every((entry) => entry.assetProvenance.minecraftReference === 0));
     assert.ok(catalog.structures.every((entry) => entry.assetProvenance.unknown === 0));
     const deployed = parseStructureCatalog(

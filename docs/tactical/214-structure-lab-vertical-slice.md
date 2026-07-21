@@ -199,3 +199,13 @@ come from canonical default-theme records. The prior Rust builders are excluded
 from production compilation and retained temporarily under `cfg(test)` as
 independent migration oracles. The promoted paths pass the original gallery,
 family-size, placement, lighting, and SQLite-reopen suites unchanged.
+
+### Slice 5 Lab-native outbuilding
+
+`farmstead-rosehip-chicken-coop-v1` was authored directly in the TypeScript DSL
+without a Rust constructor. The 16x11x12 recipe provides a raised red henhouse,
+oak frame and ramp, spruce gable, sunny windows, hay nests and roost, open
+timber run, east-yard socket, and chicken realization marker. Its checked Rust
+preview contains 346 placed blocks, 1,641 faces, 6,564 vertices, and 9,846
+indices. The inspected browser capture shows the complete recipe at 1440x1000
+with the intended `Lab only` status and no diagnostic fallback materials.

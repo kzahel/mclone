@@ -1,0 +1,301 @@
+{
+  "schemaVersion": 1,
+  "compilerId": "mclone-structure-preview-v1",
+  "structureId": "farmstead-rosehip-chicken-coop-v1",
+  "label": "Rosehip Chicken Coop",
+  "description": "A raised red-and-oak henhouse with sunny windows, hay nests, a little ramp, and an open timber run.",
+  "category": "outbuilding",
+  "tags": [
+    "chicken-coop",
+    "farmstead",
+    "livestock",
+    "starter-settlement"
+  ],
+  "family": {
+    "id": "farmstead-coop",
+    "member": "rosehip-raised-run",
+    "label": "Farmstead Coop"
+  },
+  "size": [
+    16,
+    11,
+    12
+  ],
+  "authoredOperationCount": 422,
+  "placedBlockCount": 346,
+  "materialBill": [
+    {
+      "paletteKey": "accent",
+      "count": 12
+    },
+    {
+      "paletteKey": "floor",
+      "count": 54
+    },
+    {
+      "paletteKey": "foundation",
+      "count": 8
+    },
+    {
+      "paletteKey": "glazing",
+      "count": 16
+    },
+    {
+      "paletteKey": "poppy",
+      "count": 1
+    },
+    {
+      "paletteKey": "roofEast",
+      "count": 36
+    },
+    {
+      "paletteKey": "roofSlabBottom",
+      "count": 9
+    },
+    {
+      "paletteKey": "roofWest",
+      "count": 36
+    },
+    {
+      "paletteKey": "timberX",
+      "count": 34
+    },
+    {
+      "paletteKey": "timberY",
+      "count": 34
+    },
+    {
+      "paletteKey": "timberZ",
+      "count": 37
+    },
+    {
+      "paletteKey": "trim",
+      "count": 2
+    },
+    {
+      "paletteKey": "wall",
+      "count": 66
+    },
+    {
+      "paletteKey": "wallTorchSouth",
+      "count": 1
+    }
+  ],
+  "components": [
+    {
+      "id": "details",
+      "label": "Lantern and rose pot",
+      "optional": true,
+      "blockCount": 3
+    },
+    {
+      "id": "frame",
+      "label": "Oak frame and ramp",
+      "optional": false,
+      "blockCount": 30
+    },
+    {
+      "id": "house",
+      "label": "Raised red henhouse",
+      "optional": false,
+      "blockCount": 111
+    },
+    {
+      "id": "nesting",
+      "label": "Hay nests and roost",
+      "optional": true,
+      "blockCount": 13
+    },
+    {
+      "id": "roof",
+      "label": "Steep spruce roof",
+      "optional": false,
+      "blockCount": 101
+    },
+    {
+      "id": "run",
+      "label": "Open timber chicken run",
+      "optional": true,
+      "blockCount": 64
+    },
+    {
+      "id": "windows",
+      "label": "Sunny windows",
+      "optional": false,
+      "blockCount": 24
+    }
+  ],
+  "markers": [
+    {
+      "kind": "entrance:south",
+      "pos": [
+        5,
+        1,
+        11
+      ]
+    },
+    {
+      "kind": "animal:chickens",
+      "pos": [
+        11,
+        1,
+        6
+      ]
+    },
+    {
+      "kind": "attachment:east-yard",
+      "pos": [
+        15,
+        1,
+        6
+      ]
+    }
+  ],
+  "sockets": [
+    {
+      "id": "east-yard",
+      "kind": "attachment:yard",
+      "pos": [
+        15,
+        1,
+        6
+      ],
+      "facing": "east"
+    }
+  ],
+  "defaultTheme": "rosehip-red-and-oak-v1",
+  "geometry": {
+    "vertexCount": 6564,
+    "indexCount": 9846,
+    "faceCount": 1641,
+    "boundsMin": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "boundsMax": [
+      16.0,
+      11.0,
+      11.0
+    ],
+    "solidFaceCount": 648,
+    "cutoutFaceCount": 993,
+    "translucentFaceCount": 0,
+    "componentGroups": [
+      {
+        "id": "details",
+        "faceCount": 12
+      },
+      {
+        "id": "frame",
+        "faceCount": 83
+      },
+      {
+        "id": "house",
+        "faceCount": 201
+      },
+      {
+        "id": "nesting",
+        "faceCount": 22
+      },
+      {
+        "id": "roof",
+        "faceCount": 979
+      },
+      {
+        "id": "run",
+        "faceCount": 244
+      },
+      {
+        "id": "windows",
+        "faceCount": 100
+      }
+    ],
+    "verticalLayers": [
+      {
+        "y": 0,
+        "faceCount": 81
+      },
+      {
+        "y": 1,
+        "faceCount": 104
+      },
+      {
+        "y": 2,
+        "faceCount": 107
+      },
+      {
+        "y": 3,
+        "faceCount": 148
+      },
+      {
+        "y": 4,
+        "faceCount": 85
+      },
+      {
+        "y": 5,
+        "faceCount": 70
+      },
+      {
+        "y": 6,
+        "faceCount": 72
+      },
+      {
+        "y": 7,
+        "faceCount": 244
+      },
+      {
+        "y": 8,
+        "faceCount": 236
+      },
+      {
+        "y": 9,
+        "faceCount": 226
+      },
+      {
+        "y": 10,
+        "faceCount": 268
+      }
+    ]
+  },
+  "artifacts": {
+    "meshPath": "meshes/farmstead-rosehip-chicken-coop-v1.glb",
+    "meshSha256": "2f217c5c90d88517e867488931463e3944ed27cf08cd5eb23e49d753ecf15275",
+    "atlasPath": "atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
+    "atlasSha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2",
+    "atlasWidth": 1024,
+    "atlasHeight": 256,
+    "atlasSpriteCount": 143
+  },
+  "source": {
+    "compilerId": "mclone-structure-dsl-v2",
+    "path": "tools/structure-lab/examples/coop_rosehip/structure.ts",
+    "sha256": "69c9c3d3a35382697d783b3c022e586fd989b7084196b70c796e04fb561e9d2a",
+    "semanticSha256": "61ee5b186e1f3a7ba23484441364ecd6f52d214b726c5ec41a8aff0d3f3f4e1e"
+  },
+  "lighting": {
+    "id": "fixed-midday-full-bright-ao-v1",
+    "description": "Production face shading and ambient occlusion with full midday light baked into vertex colors."
+  },
+  "assetPacks": [
+    {
+      "id": "mclone-authored",
+      "origin": "first_party",
+      "contentFingerprint": "sha256:be4ef110a35a1cc4a539d4b4aa19488668c7a1c7f3d9712159cd648e3c3f8b65",
+      "sha256": "db34b12e9dc1e8864ac8ca0b8e8b5f7654d7f0d8c616e04623e8f7ac8991173b"
+    },
+    {
+      "id": "mclone-generated-fallback",
+      "origin": "generated",
+      "contentFingerprint": "sha256:5760de9a6f85e2bac3794bbd5833af37322a672caaf1af752faf83a3a51abe39",
+      "sha256": "a7cab40a0ae313b65a10a78749d60172b4d6482a6098ca171e2d1ea80c450595"
+    }
+  ],
+  "assetProvenance": {
+    "firstParty": 22,
+    "generated": 122,
+    "minecraftReference": 0,
+    "unknown": 0,
+    "missing": 1
+  }
+}

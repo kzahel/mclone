@@ -23,6 +23,11 @@ export const FIRST_PARTY_STRUCTURES: readonly FirstPartyStructure[] = [
   firstPartyStructure("barn_lean_to_short", "farmstead-barn-lean-to-short-v1"),
   firstPartyStructure("barn_lean_to_standard", "farmstead-barn-lean-to-a-v2"),
   firstPartyStructure("barn_lean_to_long", "farmstead-barn-lean-to-long-v1"),
+  firstPartyStructure(
+    "coop_rosehip",
+    "farmstead-rosehip-chicken-coop-v1",
+    "lab-only",
+  ),
 ];
 
 function firstPartyStructure(

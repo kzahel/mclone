@@ -6,7 +6,9 @@ Status: **vertical slice active 2026-07-21. The TypeScript DSL and generated
 JSON drift gate, strict Rust loader, promoted cottage/barn families,
 Rust preview compiler, original first-party farmstead materials, and read-only
 Three.js catalogue are implemented. The first Structure-Lab-native outbuilding
-and closeout gates remain. In-browser block editing is indefinitely deferred.**
+is implemented and visually accepted. Closeout gates and deletion of the
+temporary test-only Rust oracles remain. In-browser block editing is
+indefinitely deferred.**
 
 Last reconciled: **2026-07-21**.
 
@@ -33,6 +35,10 @@ Last reconciled: **2026-07-21**.
 - Shared-helper provenance hashes the complete local TypeScript import graph,
   so editing family vocabulary or DSL behavior invalidates generated JSON as
   reliably as editing a leaf `structure.ts` file.
+- `farmstead-rosehip-chicken-coop-v1` is the first Lab-native building. Its
+  direct TypeScript recipe creates a raised henhouse, gabled roof, nests, ramp,
+  timber run, yard socket, and chicken marker without any Rust authoring body.
+  The lab-only preview contains 346 placed blocks and 1,641 visible faces.
 - The catalogue shell uses React, Zustand, Vite, Three.js, one retained canvas,
   stable URL state, build-layer clipping, component/marker/bounds controls,
   material and provenance facts, and responsive light/dark layouts.

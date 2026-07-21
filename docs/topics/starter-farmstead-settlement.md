@@ -128,7 +128,9 @@ The direction is accepted before all of its consumers are ready:
   still moving.
 - The live Rust engine now has a small pure template/transform/material-role
   kernel, persisted standalone Structure Lab, and bounded cottage/barn families
-  from Tacticals 208–210, but no true structure-start/reference/piece runtime.
+  from Tacticals 208–210. Tactical 214 has since externalized and promoted all
+  bounded members through canonical TypeScript-authored records, and added the
+  first Lab-native chicken coop, but no true structure-start/reference/piece runtime.
   [`../structures.md`](../structures.md) explicitly requires that foundation
   before large cross-chunk structures.
 - The generated block-state lane now includes oak/spruce planks, cobblestone,
@@ -709,13 +711,13 @@ approved; do not reserve a block of numbers in advance.
 | ID | Workstream | State | Current evidence or dependency | Next transition |
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
-| `FS-01` | standalone structure-authoring lab | `proven` | Tacticals 208–210: shared kernel, accepted version-two standard forms, named cottage depth/entry and barn length/optional-lean-to families, guarded 81-chunk comparison gallery, SQLite reopen, and three visual iteration receipts | follow the source-first [`structure-lab.md`](structure-lab.md) contract when externalizing authored records; do not broaden into arbitrary dimensions |
-| `FS-02` | coherent farm block/material/collision kit | `active` | five full-cube states plus glass and transform/collision-aware spruce stairs/slabs are proven through Tactical 209; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
+| `FS-01` | standalone structure-authoring lab | `proven` | Tactical 214: strict TypeScript source graph, generated JSON drift gate, Rust loader/compiler, twelve promoted family members, Lab-native coop, and inspected read-only catalogue | add buildings through finite source-first recipes; do not broaden into arbitrary dimensions or browser editing |
+| `FS-02` | coherent farm block/material/collision kit | `active` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
 | `FS-05` | starter-content overlay and realized-instance identity | `waiting` | conceptual identity accepted; live descriptor has only profile, seed, and topology | persisted overlay/blueprint/instance version contract lands without changing pure Overworld output |
 | `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `waiting` | neutral survey contract accepted; depends on structure/overlay placement seams, not final original terrain | deterministic plan receipt and Flat Grass grading canary pass |
-| `FS-07` | first fixed farmhouse/barn/garden/pen/pond/oak composition | `waiting` | reusable building art has begun; settlement lifecycle and site plan remain absent | selected-site chunks render, persist, reopen, and regenerate from source identity |
+| `FS-07` | first fixed farmhouse/barn/garden/pen/pond/oak composition | `waiting` | promoted cottage/barn families and a Lab-native coop are reusable; settlement lifecycle and site plan remain absent | selected-site chunks render, persist, reopen, and regenerate from source identity |
 | `FS-08` | resident and player marker realization | `waiting` | cow/chicken persistence is proven separately; settlement marker idempotence is absent | no duplicate residents and safe player arrival across reopen/regeneration |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
