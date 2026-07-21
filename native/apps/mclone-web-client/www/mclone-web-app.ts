@@ -104,7 +104,6 @@ const runtime: AppRuntime = {
     sessionBusy: false,
     lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
     touchControlsMode: "auto",
-    touchLookSensitivityAvailable: false,
     touchControlsVisible: false,
     status: "booting",
     bootstrapStatusRetired: false,
