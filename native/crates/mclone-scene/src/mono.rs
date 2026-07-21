@@ -488,6 +488,10 @@ impl McloneSceneHost {
         self.diagnostic_panel.set_debug_diagnostics_visible(visible);
     }
 
+    pub fn mono_debug_diagnostics_visible(&self) -> bool {
+        self.diagnostic_panel.debug_diagnostics_visible()
+    }
+
     pub fn set_mono_travel_assist_mode(&mut self, mode: GameTravelAssistMode) {
         self.travel_assist_mode = mode;
         if mode != GameTravelAssistMode::Blink {

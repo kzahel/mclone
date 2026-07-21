@@ -1494,7 +1494,7 @@ impl TouchInputSettings {
     pub const MAX_LOOK_SENSITIVITY: f32 = 5.0;
     pub const DEFAULT_MOVEMENT_STICK_RADIUS: f32 = 50.0;
 
-    fn normalized(self) -> Self {
+    pub fn normalized(self) -> Self {
         let look_sensitivity = if self.look_sensitivity.is_finite() {
             self.look_sensitivity
                 .clamp(Self::MIN_LOOK_SENSITIVITY, Self::MAX_LOOK_SENSITIVITY)

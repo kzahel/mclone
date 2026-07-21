@@ -11,6 +11,10 @@ use anyhow::Result;
 use glam::{Vec2, Vec3};
 use mclone_app_runtime::chunk_tracking_radius_for_render_distance;
 use mclone_app_runtime::client_experience::web_client_experience_profile;
+use mclone_app_runtime::input_preferences::{
+    ClientInputPreferences, PreferenceKeyValueStore, parse_touch_controls_mode,
+    touch_controls_mode_label,
+};
 use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, PlatformOperationToken};
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
@@ -29,7 +33,7 @@ use mclone_client::BlockInteractionTarget;
 use mclone_core::{BlockPos, ChunkPos, Direction, Vec3d};
 use mclone_input::{
     FlatInputAction, InputPromptKind, KeyboardKey, MouseWheelDirection, PointerButton,
-    ResolvedFlatInput, TouchControlsMode, TouchInputAdapter, TouchInputEvent,
+    ResolvedFlatInput, TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings,
 };
 use mclone_render::actor_composition_fixture::ActorCompositionFixture;
 use mclone_render::chunk::{
@@ -105,12 +109,39 @@ impl mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage
         "browser localStorage mclone.assetPacks.v1"
     }
 }
+
+#[derive(Clone, Copy, Debug, Default)]
+struct WebPreferenceKeyValueStore;
+
+impl PreferenceKeyValueStore for WebPreferenceKeyValueStore {
+    fn get(&self, key: &str) -> Result<Option<String>> {
+        let Some(storage) =
+            web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+        else {
+            return Ok(None);
+        };
+        storage
+            .get_item(key)
+            .map_err(|error| anyhow::anyhow!("read browser localStorage: {error:?}"))
+    }
+
+    fn set(&self, key: &str, value: &str) -> Result<()> {
+        let storage = web_sys::window()
+            .and_then(|window| window.local_storage().ok().flatten())
+            .ok_or_else(|| anyhow::anyhow!("browser localStorage is unavailable"))?;
+        storage
+            .set_item(key, value)
+            .map_err(|error| anyhow::anyhow!("write browser localStorage: {error:?}"))
+    }
+
+    fn label(&self) -> &str {
+        "browser localStorage input preferences"
+    }
+}
 use crate::web_server_worker::WebIntegratedServerRunnerConfig;
 
 const RESUME_OBSERVATION_FRAMES: u8 = 8;
 const INITIAL_PRESENTATION_STABLE_FRAMES: u8 = 6;
-const TOUCH_LOOK_SENSITIVITY_MIN: f32 = 0.1;
-const TOUCH_LOOK_SENSITIVITY_MAX: f32 = 6.0;
 
 #[derive(Debug, Default)]
 struct WebHostEffects {
@@ -263,6 +294,8 @@ pub struct WebSceneHost {
     touch_look_sensitivity: f32,
     touch_settings_available: bool,
     touch_controls_mode: TouchControlsMode,
+    input_preferences: ClientInputPreferences,
+    input_preference_error: Option<String>,
     touch_overlay: TouchOverlay,
     interactive_input: MonoInteractiveInputRouter,
     touch_input: TouchInputAdapter,
@@ -1140,7 +1173,6 @@ impl WebSceneHost {
         self.report(None, false, 0.0, false).map_err(JsValue::from)
     }
 
-
     #[wasm_bindgen(js_name = previewBlockTarget)]
     pub fn preview_block_target(&self) -> Result<JsValue, JsValue> {
         self.block_target_report().map_err(JsValue::from)
@@ -1302,7 +1334,6 @@ impl WebSceneHost {
         self.report(None, false, 0.0, false).map_err(JsValue::from)
     }
 
-
     #[wasm_bindgen(js_name = setDebugOverlayVisible)]
     pub fn set_debug_overlay_visible(&mut self, visible: bool) -> Result<JsValue, JsValue> {
         self.host_mut()?.set_mono_debug_diagnostics_visible(visible);
@@ -1330,11 +1361,12 @@ impl WebSceneHost {
         sensitivity: f32,
         available: bool,
     ) -> Result<JsValue, JsValue> {
-        self.touch_look_sensitivity = if sensitivity.is_finite() {
-            sensitivity.clamp(TOUCH_LOOK_SENSITIVITY_MIN, TOUCH_LOOK_SENSITIVITY_MAX)
-        } else {
-            1.0
-        };
+        self.touch_look_sensitivity = TouchInputSettings {
+            look_sensitivity: sensitivity,
+            ..TouchInputSettings::default()
+        }
+        .normalized()
+        .look_sensitivity;
         self.touch_input
             .set_look_sensitivity(self.touch_look_sensitivity);
         self.touch_settings_available = available;
@@ -1344,16 +1376,18 @@ impl WebSceneHost {
 
     #[wasm_bindgen(js_name = setTouchControlsMode)]
     pub fn set_touch_controls_mode(&mut self, mode: &str) -> Result<JsValue, JsValue> {
-        self.touch_controls_mode = match mode {
-            "auto" => TouchControlsMode::Auto,
-            "on" => TouchControlsMode::On,
-            "off" => TouchControlsMode::Off,
-            other => return Err(JsValue::from_str(&format!("invalid touch mode {other:?}"))),
-        };
+        self.touch_controls_mode = parse_touch_controls_mode(mode)
+            .ok_or_else(|| JsValue::from_str(&format!("invalid touch mode {mode:?}")))?;
         self.refresh_touch_overlay_from_input()?;
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
+    #[wasm_bindgen(js_name = setTouchInputAvailable)]
+    pub fn set_touch_input_available(&mut self, available: bool) -> Result<JsValue, JsValue> {
+        self.touch_settings_available = available;
+        self.refresh_touch_overlay_from_input()?;
+        self.ui_report(false, None).map_err(JsValue::from)
+    }
 
     #[wasm_bindgen(js_name = openTitleUi)]
     pub fn open_title_ui(&mut self) -> Result<JsValue, JsValue> {
@@ -1478,7 +1512,6 @@ impl WebSceneHost {
             }
         }
     }
-
 
     #[wasm_bindgen(js_name = beginLobbySmokeWithChunkSpan)]
     pub fn begin_lobby_smoke_with_chunk_span(
@@ -1657,7 +1690,6 @@ impl WebSceneHost {
             .map_err(js_error)?;
         self.ui_report(false, None).map_err(JsValue::from)
     }
-
 
     #[wasm_bindgen(js_name = shutdown)]
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
@@ -1910,6 +1942,16 @@ async fn create_scene_host(
     let render_color_profile = render_options.color_profile.as_str().to_owned();
     let initial_center = scene.center();
     let initial_speed = f64::from(scene.movement_speed_multiplier);
+    let input_preference_store = WebPreferenceKeyValueStore;
+    let (input_preferences, input_preference_error) =
+        match ClientInputPreferences::load(&input_preference_store) {
+            Ok(preferences) => (preferences, None),
+            Err(error) => {
+                let message = format!("load {}: {error:#}", input_preference_store.label());
+                web_sys::console::warn_1(&JsValue::from_str(&message));
+                (ClientInputPreferences::default(), Some(message))
+            }
+        };
     let asset_pack_file_count = PackedAssetSource::from_bytes(reference_pack_bytes.clone())
         .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
         .file_count();
@@ -1975,7 +2017,7 @@ async fn create_scene_host(
         initial_speed,
     );
     let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
-    Ok(WebSceneHost {
+    let mut web_host = WebSceneHost {
         context,
         depth,
         host: Some(host),
@@ -2001,12 +2043,17 @@ async fn create_scene_host(
         asset_pack_file_count,
         pending_asset_pack_file_count: None,
         status_overlay: StatusOverlay::hidden(),
-        touch_look_sensitivity: 1.0,
+        touch_look_sensitivity: input_preferences.touch_look_sensitivity,
         touch_settings_available: false,
-        touch_controls_mode: TouchControlsMode::Auto,
+        touch_controls_mode: input_preferences.touch_controls_mode,
+        input_preferences,
+        input_preference_error,
         touch_overlay: TouchOverlay::hidden(),
         interactive_input: MonoInteractiveInputRouter::new(),
-        touch_input: TouchInputAdapter::new(),
+        touch_input: TouchInputAdapter::with_settings(TouchInputSettings {
+            look_sensitivity: input_preferences.touch_look_sensitivity,
+            ..TouchInputSettings::default()
+        }),
         ui_touch_id: None,
         last_action: None,
         last_frame: LastFrameStats::default(),
@@ -2019,7 +2066,9 @@ async fn create_scene_host(
         render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
-    })
+    };
+    web_host.refresh_touch_overlay_from_input()?;
+    Ok(web_host)
 }
 
 impl WebSceneHost {
@@ -2132,6 +2181,7 @@ impl WebSceneHost {
         }
         self.refresh_touch_overlay_from_input()
             .map_err(|error| format!("refresh shared touch overlay: {error:?}"))?;
+        self.persist_input_preferences_if_changed();
 
         let value = self.ui_report(disposition.handled, None)?;
         let object: js_sys::Object = value.unchecked_into();
@@ -2332,11 +2382,32 @@ impl WebSceneHost {
             .touch_settings_available
             .then_some(GameTouchSettings::new(
                 self.touch_look_sensitivity,
-                TOUCH_LOOK_SENSITIVITY_MIN,
-                TOUCH_LOOK_SENSITIVITY_MAX,
+                TouchInputSettings::MIN_LOOK_SENSITIVITY,
+                TouchInputSettings::MAX_LOOK_SENSITIVITY,
             ));
         self.host_mut()?.set_mono_ui_context(context);
         Ok(())
+    }
+
+    fn persist_input_preferences_if_changed(&mut self) {
+        let current = ClientInputPreferences {
+            touch_look_sensitivity: self.touch_look_sensitivity,
+            touch_controls_mode: self.touch_controls_mode,
+        }
+        .normalized();
+        if current == self.input_preferences {
+            return;
+        }
+        let store = WebPreferenceKeyValueStore;
+        match current.store(&store) {
+            Ok(()) => self.input_preference_error = None,
+            Err(error) => {
+                let message = format!("store {}: {error:#}", store.label());
+                web_sys::console::warn_1(&JsValue::from_str(&message));
+                self.input_preference_error = Some(message);
+            }
+        }
+        self.input_preferences = current;
     }
 
     fn apply_ui_event(
@@ -2366,11 +2437,20 @@ impl WebSceneHost {
                 self.refresh_mono_ui_context()
                     .map_err(|error| format!("refresh web UI context: {error:?}"))?;
             }
-            if let GameUiAction::SetTouchLookSensitivity(value) = action {
-                self.touch_look_sensitivity = value;
+            if matches!(action, GameUiAction::SetTouchLookSensitivity(_)) {
+                if let Some(settings) = self
+                    .host
+                    .as_ref()
+                    .and_then(|host| host.mono_ui_render_state().touch_settings)
+                {
+                    self.touch_look_sensitivity = settings.clamped_look_sensitivity();
+                    self.touch_input
+                        .set_look_sensitivity(self.touch_look_sensitivity);
+                }
                 self.refresh_mono_ui_context()
                     .map_err(|error| format!("refresh web UI context: {error:?}"))?;
             }
+            self.persist_input_preferences_if_changed();
             self.last_action = Some(action);
         }
         self.ui_report(handled, action)
@@ -2412,7 +2492,11 @@ impl WebSceneHost {
                     report_set_number(&object, "touchLookSensitivity", f64::from(value))?;
                 }
                 GameUiAction::SetTouchControlsMode(mode) => {
-                    report_set_string(&object, "touchControlsMode", touch_mode_label(mode))?;
+                    report_set_string(
+                        &object,
+                        "touchControlsMode",
+                        touch_controls_mode_label(mode),
+                    )?;
                 }
                 GameUiAction::SelectWorld(id) | GameUiAction::OpenWorld(id) => {
                     report_set_number(&object, "catalogWorldUiId", id.0 as f64)?;
@@ -3564,10 +3648,15 @@ impl WebSceneHost {
                 world_catalog.status.message.as_str(),
             )?;
             report_set_string(&object, "renderColorProfile", &self.render_color_profile)?;
+            report_set_bool(
+                &object,
+                "debugOverlayVisible",
+                host.mono_debug_diagnostics_visible(),
+            )?;
             report_set_string(
                 &object,
                 "touchControlsMode",
-                touch_mode_label(self.touch_controls_mode),
+                touch_controls_mode_label(self.touch_controls_mode),
             )?;
             report_set_number(
                 &object,
@@ -3579,6 +3668,10 @@ impl WebSceneHost {
                 "touchLookSensitivityAvailable",
                 self.touch_settings_available,
             )?;
+            report_set_bool(&object, "touchControlsVisible", self.touch_overlay.visible)?;
+            if let Some(error) = &self.input_preference_error {
+                report_set_string(&object, "inputPreferenceError", error)?;
+            }
             write_session_state(&object, host.session_state())?;
             report_set_bool(
                 &object,
@@ -3929,7 +4022,6 @@ fn find_interaction_surface(host: &McloneSceneHost) -> Option<BlockPos> {
     None
 }
 
-
 fn aim_player_host_at_block(host: &mut McloneSceneHost, block: BlockPos) {
     let target = Vec3::new(
         block.x as f32 + 0.5,
@@ -3962,14 +4054,6 @@ fn set_host_camera_look_at(host: &mut McloneSceneHost, eye: Vec3, target: Vec3) 
 
 fn browser_now_millis() -> f64 {
     js_sys::Date::now()
-}
-
-fn touch_mode_label(mode: TouchControlsMode) -> &'static str {
-    match mode {
-        TouchControlsMode::Auto => "auto",
-        TouchControlsMode::On => "on",
-        TouchControlsMode::Off => "off",
-    }
 }
 
 fn browser_keyboard_key(code: &str, legacy_key: &str) -> Option<KeyboardKey> {

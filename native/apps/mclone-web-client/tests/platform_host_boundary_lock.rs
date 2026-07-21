@@ -3,6 +3,8 @@ const WEB_APP: &str = include_str!("../www/mclone-web-app.ts");
 const WEB_INPUT: &str = include_str!("../www/mclone-web-input.ts");
 const WEB_SMOKE_OBSERVER: &str = include_str!("../www/mclone-web-smoke-observer.ts");
 const WEB_TOUCH: &str = include_str!("../www/mclone-web-touch.ts");
+const INPUT_PREFERENCES: &str =
+    include_str!("../../../crates/mclone-app-runtime/src/input_preferences.rs");
 const FLAT_ANDROID: &str = include_str!("../../mclone-android-client/src/surface_driver.rs");
 
 #[test]
@@ -123,4 +125,43 @@ fn semantic_smoke_registry_is_query_gated_outside_the_product_adapter() {
             "unused direct diagnostic export survived: {removed_export}"
         );
     }
+}
+
+#[test]
+fn browser_input_preferences_have_one_rust_policy_owner() {
+    for required in [
+        "pub trait PreferenceKeyValueStore",
+        "ClientInputPreferences",
+        "TOUCH_LOOK_SENSITIVITY_STORAGE_KEY",
+        "TOUCH_CONTROLS_MODE_STORAGE_KEY",
+        "TouchInputSettings::DEFAULT_LOOK_SENSITIVITY",
+    ] {
+        assert!(
+            INPUT_PREFERENCES.contains(required),
+            "shared Rust input preferences lost {required}"
+        );
+    }
+    assert!(WEB_SCENE_HOST.contains("impl PreferenceKeyValueStore"));
+    assert!(WEB_SCENE_HOST.contains("ClientInputPreferences::load"));
+    assert!(WEB_SCENE_HOST.contains("persist_input_preferences_if_changed"));
+    for (label, source) in [("app", WEB_APP), ("touch", WEB_TOUCH)] {
+        for forbidden in [
+            "mclone.web.lookSensitivity",
+            "mclone.web.touchControlsMode",
+            "DEFAULT_LOOK_SENSITIVITY",
+            "clampLookSensitivity",
+            "loadStoredSettings",
+            "storeLookSensitivity",
+            "storeTouchControlsMode",
+            "TouchControlsMode",
+            "setNativeTouchLookSensitivity",
+            "setNativeTouchControlsMode",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "production {label} TypeScript regained preference policy through {forbidden}"
+            );
+        }
+    }
+    assert!(WEB_TOUCH.contains("setTouchInputAvailable"));
 }

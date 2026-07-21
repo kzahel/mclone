@@ -5,41 +5,32 @@
 
 export interface TouchControlApp {
   canvas: HTMLCanvasElement;
-  lookSensitivity: number;
-  touchControlsMode: "auto" | "on" | "off";
   handleRawTouch(
     phase: "start" | "move" | "end" | "cancel",
     pointerId: number,
     clientX: number,
     clientY: number,
   ): boolean;
-  setNativeTouchLookSensitivity(
-    value: number,
-    available?: boolean,
-    persist?: boolean,
-  ): Record<string, any> | null;
+  setTouchInputAvailable(available: boolean): Record<string, any> | null;
 }
 
 export interface TouchControlSnapshot {
-  visible: boolean;
   activePointerCount: number;
 }
 
 export class TouchControls {
   private readonly app: TouchControlApp;
   readonly canvas: HTMLCanvasElement;
-  private visible: boolean;
   private readonly activePointerIds: Set<number>;
   private lastTouchAt: number;
 
   constructor(app: TouchControlApp) {
     this.app = app;
     this.canvas = app.canvas;
-    this.visible = false;
     this.activePointerIds = new Set();
     this.lastTouchAt = 0;
 
-    this.setVisible(hasTouchInput());
+    this.app.setTouchInputAvailable(hasTouchInput());
     this.bindCanvas();
     window.addEventListener("blur", () => this.clearAll());
   }
@@ -84,7 +75,7 @@ export class TouchControls {
     }
     this.markTouchEvent();
     event.preventDefault();
-    this.setVisible(true);
+    this.app.setTouchInputAvailable(true);
     this.canvas.focus();
     if (phase === "start") {
       this.activePointerIds.add(event.pointerId);
@@ -105,15 +96,6 @@ export class TouchControls {
     this.activePointerIds.clear();
   }
 
-  setVisible(visible: boolean): void {
-    this.visible = this.app.touchControlsMode !== "off" && Boolean(visible);
-    this.app.setNativeTouchLookSensitivity(
-      this.app.lookSensitivity,
-      this.visible,
-      false,
-    );
-  }
-
   private markTouchEvent(): void {
     this.lastTouchAt = performance.now();
   }
@@ -124,7 +106,6 @@ export class TouchControls {
 
   snapshot(): TouchControlSnapshot {
     return {
-      visible: this.visible,
       activePointerCount: this.activePointerIds.size,
     };
   }

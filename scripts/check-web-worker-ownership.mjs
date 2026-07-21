@@ -111,13 +111,6 @@ const moduleRegistry = {
       "opaque record transactions and browser error classification",
     ],
   },
-  "mclone-web-settings.ts": {
-    family: "catalog-settings",
-    baselineLines: 83,
-    workerEntry: false,
-    workerConstruction: false,
-    responsibilities: ["browser settings persistence mechanics"],
-  },
   "mclone-web-smoke-observer.ts": {
     family: "threading-smoke",
     baselineLines: 0,

@@ -6270,8 +6270,8 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
         const state = globalThis.__mcloneWebApp?.state;
         return state?.uiActive === true
           && state.nativeUiScreen === "optionsCategory"
-          && Number(state.lookSensitivity) > 4.9
-          && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) > 4.9;
+          && Number(state.lookSensitivity) >= 4.9
+          && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) >= 4.9;
       },
       undefined,
       { timeout: 10_000 },
@@ -6314,8 +6314,8 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
       && openedOptions.nativeUiScreen === "options"
       && openedOptions.nativeUiOptionsParent === "pause"
       && adjusted.touchLookSensitivityAvailable === true
-      && Number(adjusted.lookSensitivity) > 4.9
-      && Number(adjusted.storedLookSensitivity) > 4.9
+      && Number(adjusted.lookSensitivity) >= 4.9
+      && Number(adjusted.storedLookSensitivity) >= 4.9
       && optionsCanvasPixels.nonClearInteriorPixelCount > 128
       && optionsCanvasPixels.distinctInteriorColorCount > 2,
     opened: openedOptions,

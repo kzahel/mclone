@@ -3,10 +3,10 @@
 // Game/engine vocabulary is permitted here because this is not a production
 // platform adapter.
 
-import type { TouchControlsMode } from "./mclone-web-settings.js";
 import type { WebSceneHost } from "mclone-web-client-wasm";
 
 type WasmReport = Record<string, any>;
+type TouchControlsMode = "auto" | "on" | "off";
 
 interface SmokeRuntimeState extends Record<string, any> {
   ok: boolean;
@@ -53,11 +53,6 @@ interface SmokeRuntime {
     clientY: number,
     pointerType?: string,
   ) => WasmReport | null;
-  setNativeTouchLookSensitivity?: (
-    value: number,
-    available?: boolean,
-    persist?: boolean,
-  ) => WasmReport | null;
   setNativeTouchControlsMode?: (
     mode: TouchControlsMode,
     persist?: boolean,
@@ -84,15 +79,6 @@ interface SmokeBridge {
   pauseRendering(): void;
   resumeRendering(): void;
   setNativeDebugOverlay(visible: boolean): WasmReport | null;
-  setNativeTouchLookSensitivity(
-    value: number,
-    available?: boolean,
-    persist?: boolean,
-  ): WasmReport | null;
-  setNativeTouchControlsMode(
-    mode: TouchControlsMode,
-    persist?: boolean,
-  ): WasmReport | null;
   touchControls: { snapshot(): WasmReport } | null;
   drainLobbyOperations(): void;
   backgroundCycleForObserver(): WasmReport | null;
@@ -142,7 +128,6 @@ export function installWebSmokeObserver(
       Object.assign(runtime.state, platformRuntime.state);
       const touch = app.touchControls?.snapshot();
       if (touch) {
-        runtime.state.touchControlsVisible = touch.visible;
         runtime.state.touchPointerActiveCount = touch.activePointerCount;
       }
     },
@@ -360,13 +345,13 @@ export function installWebSmokeObserver(
       { fromPointer: true, pointerType },
     );
   };
-  runtime.setNativeTouchLookSensitivity = (value, available, persist) => (
-    app.setNativeTouchLookSensitivity(value, available, persist)
+  runtime.setNativeTouchControlsMode = (mode, _persist) => apply(
+    (session) => session.setTouchControlsMode(mode),
   );
-  runtime.setNativeTouchControlsMode = (mode, persist) => (
-    app.setNativeTouchControlsMode(mode, persist)
-  );
-  runtime.touchControlState = () => app.touchControls?.snapshot() ?? null;
+  runtime.touchControlState = () => ({
+    visible: runtime.state.touchControlsVisible === true,
+    activePointerCount: app.touchControls?.snapshot().activePointerCount ?? 0,
+  });
   runtime.beginLobbySmoke = (chunkSpan = 2) => {
     const report = apply(
       (session) => session.beginLobbySmokeWithChunkSpan(chunkSpan),

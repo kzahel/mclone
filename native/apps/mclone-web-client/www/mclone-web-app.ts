@@ -1,14 +1,6 @@
 import { fetchAssetPack } from "./mclone-render-compiler-shared.js";
 import { PolledWorkerTransport } from "./mclone-worker-transport.js";
 import { bindInput } from "./mclone-web-input.js";
-import {
-  clampLookSensitivity,
-  DEFAULT_LOOK_SENSITIVITY,
-  loadStoredSettings,
-  storeLookSensitivity,
-  storeTouchControlsMode,
-} from "./mclone-web-settings.js";
-import type { TouchControlsMode } from "./mclone-web-settings.js";
 import type { WebSmokeObserver } from "./mclone-web-smoke-observer.js";
 import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
 import {
@@ -102,9 +94,6 @@ const runtime: AppRuntime = {
     tickFrameBusy: false,
     tickPhase: "idle",
     sessionBusy: false,
-    lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
-    touchControlsMode: "auto",
-    touchControlsVisible: false,
     status: "booting",
     bootstrapStatusRetired: false,
   },
@@ -156,8 +145,6 @@ class WebFrameDriver {
   authoredAssetPack: Uint8Array | null;
   fallbackAssetPack: Uint8Array | null;
   touchControls: TouchControls | null;
-  lookSensitivity: number;
-  touchControlsMode: TouchControlsMode;
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
   radiusChunks: number;
@@ -181,11 +168,6 @@ class WebFrameDriver {
     this.authoredAssetPack = null;
     this.fallbackAssetPack = null;
     this.touchControls = null;
-    const settings = loadStoredSettings();
-    this.lookSensitivity = settings.lookSensitivity;
-    this.touchControlsMode = settings.touchControlsMode;
-    runtime.state.lookSensitivity = this.lookSensitivity;
-    runtime.state.touchControlsMode = this.touchControlsMode;
     this.pointerDragging = false;
     this.pointerDown = null;
     this.radiusChunks = DEFAULT_RADIUS_CHUNKS;
@@ -292,8 +274,7 @@ class WebFrameDriver {
       "applyWorldCatalogError",
       "setDebugOverlayVisible",
       "setStatusOverlay",
-      "setTouchLookSensitivity",
-      "setTouchControlsMode",
+      "setTouchInputAvailable",
       "setHidden",
       "takeLobbyRuntimeStart",
       "completeLobbyWorldStart",
@@ -326,12 +307,6 @@ class WebFrameDriver {
         });
     });
     this.touchControls = new TouchControls(this);
-    this.setNativeTouchControlsMode(this.touchControlsMode, false);
-    this.setNativeTouchLookSensitivity(
-      this.lookSensitivity,
-      this.touchControls.snapshot().visible,
-      false,
-    );
     this.syncCanvasSize();
     runtime.state.status = "rendering";
     this.setNativeStatusOverlay(runtime.state.status, true, true);
@@ -602,44 +577,15 @@ class WebFrameDriver {
     return report;
   }
 
-  setNativeTouchLookSensitivity(
-    value: number,
-    available = Boolean(this.touchControls?.snapshot().visible),
-    persist = true,
-  ): WasmReport | null {
-    const clamped = clampLookSensitivity(value);
-    this.lookSensitivity = clamped;
-    runtime.state.lookSensitivity = clamped;
-    if (persist) {
-      storeLookSensitivity(clamped);
-    }
+  setTouchInputAvailable(available: boolean): WasmReport | null {
     if (!this.session) {
       return null;
     }
     if (this.sessionBusy) {
-      setTimeout(() => this.setNativeTouchLookSensitivity(clamped, available, persist), 0);
+      setTimeout(() => this.setTouchInputAvailable(available), 0);
       return deferredUiReport();
     }
-    const report = this.session.setTouchLookSensitivity(clamped, Boolean(available));
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  setNativeTouchControlsMode(mode: TouchControlsMode, persist = true): WasmReport | null {
-    this.touchControlsMode = mode;
-    runtime.state.touchControlsMode = mode;
-    if (persist) {
-      storeTouchControlsMode(mode);
-    }
-    this.touchControls?.setVisible(mode === "on" || hasTouchInput());
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.setNativeTouchControlsMode(mode, persist), 0);
-      return deferredUiReport();
-    }
-    const report = this.session.setTouchControlsMode(mode);
+    const report = this.session.setTouchInputAvailable(Boolean(available));
     this.applyNativeUiReport(report);
     return report;
   }
@@ -664,25 +610,6 @@ class WebFrameDriver {
     runtime.state.forceFullbright = this.forceFullbright;
     if (typeof report.renderColorProfile !== "undefined") {
       runtime.state.renderColorProfile = String(report.renderColorProfile);
-    }
-    if (typeof report.touchLookSensitivity !== "undefined") {
-      const sensitivity = clampLookSensitivity(report.touchLookSensitivity);
-      if (sensitivity !== this.lookSensitivity) {
-        this.lookSensitivity = sensitivity;
-        runtime.state.lookSensitivity = sensitivity;
-        storeLookSensitivity(sensitivity);
-      }
-    }
-    if (typeof report.touchControlsMode !== "undefined") {
-      const mode = report.touchControlsMode === "on" || report.touchControlsMode === "off"
-        ? report.touchControlsMode
-        : "auto";
-      if (mode !== this.touchControlsMode) {
-        this.touchControlsMode = mode;
-        runtime.state.touchControlsMode = mode;
-        storeTouchControlsMode(mode);
-        this.touchControls?.setVisible(mode === "on" || hasTouchInput());
-      }
     }
     if (typeof report.renderDistance !== "undefined") {
       this.radiusChunks = clampRadiusChunks(report.renderDistance);
