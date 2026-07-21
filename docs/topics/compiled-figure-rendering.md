@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 104 |
-| total parts | 2,246 |
-| boxes | 2,041 |
+| figures | 107 |
+| total parts | 2,296 |
+| boxes | 2,091 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 332 |
-| parts with any texture reference | 531 |
-| individual texture applications | 842 |
+| ASCII textures | 344 |
+| parts with any texture reference | 555 |
+| individual texture applications | 887 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 86 | 1,704 | 1,704 | 0 / 0 / 0 |
+| canonical `examples/` | 89 | 1,754 | 1,754 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -636,7 +636,26 @@ posture, attachment continuity, flap or run cadence, tail and neck
 follow-through, foot grounding, and loop continuity, and approved by the user
 on 2026-07-21.
 
-All 842 applications target an explicit face of a box. They range from single
+The twenty-third post-migration content batch adds Pigeon, Robin, and Bee as
+approved canonical box-only rigs. Pigeon is a 17-part steady flier with a
+stocky slate body, iridescent neck, pale cere, barred broad wings, and
+three-feather dark-banded tail; Robin is a 16-part quick flutter rig with an
+olive-brown body, orange face and breast, short beak, fine wing bars, and paired
+tail feathers; and Bee is a 17-part hover rig with a striped abdomen, fuzzy
+thorax, large dark eyes, antennae, six tucked legs, stinger, and two paired
+cell-patterned wings. All 50 parts are canonical boxes and use 12 combined
+pixel textures across 24 textured parts and 45 explicit box-face applications.
+Typechecking, the Asset Lab test suite, the first-party figure drift check, and
+the repository diff check pass. Clean multi-angle sheets and four-cycle videos
+were rendered under `/tmp/mclone-asset-lab/batch-23` and inspected for identity,
+flight posture, attachment continuity, distinct flap cadence, paired-wing
+motion, tail follow-through, and loop continuity. The batch was approved by the
+user on 2026-07-21 after the pigeon's head/neck side-face coplanarity was
+removed by narrowing its neck and the nearby neck/breast depth margin was
+increased. The evidence and deferred prevention proposal live in
+[`figure-surface-stability.md`](figure-surface-stability.md).
+
+All 887 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

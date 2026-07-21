@@ -168,6 +168,10 @@ series implements the same concern, normally reuse the document slug in its
   and cross-platform validation. Tactical
   [`181`](../tactical/181-compiled-figure-static-box-proof.md) owns the first
   bounded static-box/UV artifact proof.
+- [`figure-surface-stability.md`](figure-surface-stability.md): accepted
+  authoring contract for avoiding same-facing coplanar figure parts, the
+  corrected Batch 23 pigeon evidence, and a deferred sampled-pose surface
+  linter with a report-first catalog rollout.
 - [`asset-pack-profiles.md`](asset-pack-profiles.md): shared UI asset-pack
   selection, pack-time generated missing assets, runtime provenance, and the
   standalone first-party boundary.

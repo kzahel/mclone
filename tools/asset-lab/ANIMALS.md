@@ -225,10 +225,10 @@ reviewed rigs and then filling macro gaps.
 | Eagle / Hawk | P2 | ✅ | W | bald eagle (white head), hawk | `examples/eagle` — approved 15-box bald eagle with broad wings, white head/tail, hooked beak, and talons |
 | Penguin | P2 | ✅ | B | emperor, chick | `examples/penguin` — approved 12-box emperor penguin with hanging flippers, broad webbed feet, and lateral body waddle |
 | Duck | P2 | ✅ | W/S | (see Farm) | `examples/mallard_duck`; approved drake in Farm section |
-| Pigeon / Dove | P3 | ☐ | W | — | |
+| Pigeon / Dove | P3 | ✅ | W | — | `examples/pigeon` — approved 17-box rock pigeon with iridescent neck, pale cere, barred broad wings, three-feather tail, and steady flight |
 | Crow / Raven | P3 | ✅ | W | — | `examples/raven` — approved 18-box common raven with heavy beak, throat shag, broad layered wings, wedge tail, and measured soar |
 | Flamingo | P3 | ✅ | W | — | `examples/flamingo` — approved 17-box greater flamingo with angular S-neck, two-stage stilt legs, and slow planted walk |
-| Songbird (robin/sparrow) | P3 | ☐ | W | color morphs | generic small-bird base |
+| Songbird (robin/sparrow) | P3 | ✅ | W | color morphs | `examples/robin` — approved 16-box European robin with orange face and breast, fine wing bars, short beak, and quick flutter |
 | Peacock | P3 | ✅ | W | — | `examples/peacock` — approved 22-box Indian peacock with crest, patterned wings, and parented seven-feather tail fan |
 | Ostrich / Emu | P3 | ✅ | B | — | `examples/ostrich` — approved 21-box male ostrich with tiny white-edged wings, long bare neck, two-stage legs, broad feet, and fast run |
 
@@ -267,7 +267,7 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Butterfly | P1 | ✅ | W | color morphs, moth | `examples/butterfly` — canonical nine-box figure with pixel-patterned wing slabs; rounded A/B in `legacy-examples/butterfly_rounded` |
-| Bee | P1 | ☐ | W | — | iconic; reuses `wingFlap` |
+| Bee | P1 | ✅ | W | — | `examples/bee` — approved 17-box worker bee with striped abdomen, fuzzy thorax, paired cell-patterned wings, six legs, and rapid hover |
 | Ladybug | P2 | ☐ | C/W | — | |
 | Dragonfly | P2 | ☐ | W | — | four wings |
 | Spider | P2 | ☐ | C | small, large, color morphs | 8 legs → needs N-leg crawl |

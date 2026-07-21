@@ -81,3 +81,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   platform initialization and mechanics stay local; browser TS input
   semantics, web-Rust string-action dispatch, and production smoke mirrors
   are the gaps to close
+- `figure-surface-stability` — same-facing coplanar and near-coplanar figure
+  surfaces, corrected pigeon evidence, authoring guidance, and a deferred
+  sampled-pose catalog linter
