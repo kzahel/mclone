@@ -2,10 +2,14 @@
 
 Topic: `platform-boundary-convergence`
 
-Status: open master tracker; implementation is audit-ready. Tactical
+Status: open master tracker. Tactical
 [`207`](../tactical/207-shared-scene-operation-coordinator.md) completed
-Phases 0–6 on 2026-07-21. Phase 7, a separately staffed independent fixpoint
-audit, is the current pickup.
+Phases 0–6 on 2026-07-21. The Phase 7 independent fixpoint audit
+([`211`](../tactical/211-platform-boundary-fixpoint-audit.md)) completed the
+same day: the 207 claims verified under fresh code reading, but the fixpoint
+evidence is only partially met and a bounded remaining-work backlog was
+appended. The current pickup is Phase 8, the audit-remediation backlog
+([`212`](../tactical/212-boundary-audit-cleanup-backlog.md)).
 This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
@@ -31,16 +35,22 @@ an implementing agent should attempt the whole refactor in one pass. It owns:
 The documents below it have narrower jobs:
 
 - Tactical [`207`](../tactical/207-shared-scene-operation-coordinator.md) is
-  the executable plan for the current operation-lifecycle workstream. Its
-  phases should land as separately reviewable commit series. A phase may move
-  to a child tactical if code reading reveals an independent risk or owner,
-  but it does not need a new tactical merely because it has several commits.
+  the completed execution record for the operation-lifecycle workstream.
+- Tactical [`211`](../tactical/211-platform-boundary-fixpoint-audit.md) is
+  the completed Phase 7 audit record; its findings, verdicts, and evidence
+  are authoritative over any implementing tactical's closing prose.
+- Tactical [`212`](../tactical/212-boundary-audit-cleanup-backlog.md) is the
+  executable plan for the current Phase 8 remediation workstream. Its slices
+  should land as separately reviewable commit series. A slice may move to a
+  child tactical if code reading reveals an independent risk or owner, but
+  it does not need a new tactical merely because it has several commits.
 - The child topic documents own their durable subsystem contracts and evidence.
-- A later standalone audit tactical, opened only after implementation stops,
-  is the only document allowed to close this parent.
+- A standalone audit tactical, opened only after implementation stops, is
+  the only document allowed to close this parent; the Phase 9 audit is the
+  next such opportunity.
 
 When resuming work, read the current phase row and its exit gate here, then use
-the corresponding Tactical 207 slice for code-level details. Do not restart
+the corresponding Tactical 212 slice for code-level details. Do not restart
 from the historical pass ledger.
 
 ## Top-Level Frame
@@ -136,6 +146,7 @@ row when it closes, including what it deliberately left open.
 | 206 preferences/bootstrap policy | 2026-07-21 | app.ts → 1,057; host-boundary series closed | coarse-operation pumps remained → 207 |
 | 207 shared scene operation coordinator | implementation through Gate A on 2026-07-21 | — | borrow-free ABI and one token family landed; one opaque operation drain remains before tactical closeout |
 | 207 implementation closeout | 2026-07-21 | tactical complete; borrow-free ABI, one token family, and one opaque operation drain; combined boundary 24,334 → 24,173 | parent remains open for independent audit; unchanged actor-ID/age lifecycle fixture remains separately recorded baseline debt |
+| 211 independent fixpoint audit | 2026-07-21 | 207 claims verified by fresh reading (same shared coordinator on native and web, opaque drain real, zero async-borrow exports, one token family); parent held open | fixpoint proof is compile/source-lock only, export pin covers only `WebSceneHost`, ~800-line catalog-storage policy in web Rust, duplicated catalog apply loop with drift, dead web frame timing, smoke exports on the production ABI, rim in-flight guards; backlog chartered → 212 |
 
 ## Measured State (2026-07-21 Audit)
 
@@ -219,7 +230,9 @@ remaining-work note.
 | 4–5. Former candidate phases | **folded into Phase 3 at Gate A** | Avoid artificial phases now that runtime startup already shares one ticket/completion lifecycle | Catalog/asset adoption, readiness, and quiescence exits are enforced by Phase 3 |
 | 5b. Storage-address lowering | **skipped at Gate A** | Retain the small stable physical-name mapping at its lower-total-cost owner | Reopen only if future schema work demonstrates combined net deletion |
 | 6. Implementation closeout | **complete 2026-07-21** | Delete old paths, validate every affected platform boundary, demonstrate extensibility, and report final deltas | Tactical 207 closed itself and appended its ledger row; headed Wayland pixel gates and native compile/render controls passed; the parent remains open |
-| 7. Independent fixpoint audit | **next, separate tactical** | Fresh code review by a reviewer/agent outside the implementation series | Closure protocol below passes or the audit appends precise remaining work and reopens implementation |
+| 7. Independent fixpoint audit | **complete 2026-07-21** ([Tactical 211](../tactical/211-platform-boundary-fixpoint-audit.md)) | Fresh code review by a reviewer/agent outside the implementation series | Outcome (b) of the protocol: precise remaining work appended (fixpoint-evidence gaps G1/G2, findings F1–F6, decision D1) and implementation reopened as Phase 8 |
+| 8. Audit-remediation backlog | **next** ([Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md)) | Land the trailing 207 cleanup, fix the audit findings (catalog-plan hoist, apply-loop dedup, timing convergence, smoke-ABI split, rim-guard collapse), and upgrade the fixpoint to a behavioral demonstration with widened export pins | Every 212 slice closed with its own gate; scoreboard column appended; no combined-boundary growth without measured behavioral gain |
+| 9. Second fixpoint audit | not before Phase 8 closes | Short re-audit against the closure protocol, first checking the behavioral fixpoint test and widened pins from 212 | Closure protocol passes and the parent closes under it, or precise remaining work is appended again |
 
 ### Phase Boundaries
 
@@ -231,8 +244,9 @@ remaining-work note.
 - Gate A skipped Phase 5b because the small stable store/index mapping is
   legitimate platform mechanics and moving it would grow the combined
   boundary. Reopen it only with a measured net-deletion case.
-- Phase 7 is not the last implementation commit or a closeout paragraph. It is
-  a later, separately opened audit workstream.
+- Phase 7 was a separately opened audit workstream, not an implementation
+  closeout; it ran as Tactical 211 and reopened implementation as Phase 8.
+  Phase 9 repeats that shape after Tactical 212 closes.
 
 ## Scoreboard
 
@@ -241,20 +255,30 @@ all rows. The 2026-07-21 values are the immutable campaign baseline. Phase 0
 must also record a clean-revision start baseline because unrelated work may
 have changed the live counts since the audit.
 
-| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Closeout |
-|---|---:|---:|---:|---:|---:|---:|
-| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** | **3,599** |
-| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** | **3,622 / 16** |
-| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** | **20,574** |
-| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** | **24,173 (-161 cumulative; +25 closeout)** |
-| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 | 24,731 |
-| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 |
-| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** | **42** |
-| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** | **0** |
-| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** | **1** |
-| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 |
-| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress | **no; headed Wayland traces pass** |
-| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero | same product shape; +25 query-gated smoke-capture lines |
+| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Closeout | Audit 211 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** | **3,599** | 3,555 |
+| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** | **3,622 / 16** | — |
+| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** | **20,574** | 20,566 |
+| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** | **24,173 (-161 cumulative; +25 closeout)** | 24,121 |
+| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 | 24,731 | 24,731 |
+| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 |
+| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** | **42** | 42 |
+| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** | **0** | 0 |
+| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** | **1** | 1 (+2 rim in-flight guards noted) |
+| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 |
+| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress | **no; headed Wayland traces pass** | no; 207 traces accepted |
+| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero | same product shape; +25 query-gated smoke-capture lines | drain confirmed opaque; two TS-authored domain schema tables remain (skipped 5b) |
+
+Audit-column notes: measured on a tree that included Tactical 207's
+then-uncommitted trailing cleanup (legacy IndexedDB migration deletion,
+−44 TS / −8 web-Rust lines), which subsequently landed as `5bf2ffa2`;
+the orphan-store decision it left open is Tactical 212 Slice 0. The
+cfg-fork metric
+counts exactly `cfg(not(target_arch = "wasm32"))` occurrences; the full
+fork-site census including positive `wasm32` gates and `cfg_attr` is
+95 / 133. Measurement commands are recorded in
+[Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md).
 
 ## Closure Protocol
 
@@ -288,12 +312,23 @@ have changed the live counts since the audit.
 
 ## Immediate Next Workstream
 
-Open a standalone Phase 7 audit tactical in a later session and assign it to a
-reviewer or agent outside the Tactical 207 implementation series. The opaque
-operation drain is live, headed Wayland validation replaced the invalid
-headless capture evidence, and the clean scoreboard clears both Rust-side and
-combined deletion gates. The audit must read the code afresh and either close
-this parent under the closure protocol or append precise remaining work.
+Execute [Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md),
+the Phase 8 audit-remediation backlog, starting with Slice 0 (resolve the
+`WORLD_DB_VERSION` orphan-store decision left open when the trailing
+cleanup landed as `5bf2ffa2`). The Phase 7 audit
+([Tactical 211](../tactical/211-platform-boundary-fixpoint-audit.md))
+verified the 207 claims by fresh code reading and held the parent open on
+two evidence gaps (the fixpoint is compile/source-lock only; the export pin
+covers only `WebSceneHost`) plus a bounded findings list: the ~800-line
+catalog storage-plan policy in web-only Rust, the duplicated catalog apply
+loop in `mclone-scene/src/session.rs` (with live drift), dead web
+frame-timing accounting, smoke-only exports on the production ABI, and two
+rim in-flight guards duplicating ledger state.
+
+After 212 closes, open the Phase 9 second fixpoint audit. It should be
+short: check the behavioral fixpoint test and widened export pins first,
+then the rest of the closure protocol. Only that audit may close this
+parent.
 
 The full browser lifecycle aggregate still exposes the already reproduced
 actor-ID/age persistence fixture from Tacticals 197 and 202. Tactical 207's
@@ -301,5 +336,7 @@ operation-specific cancellation, warmup replacement, resource rebuild,
 quiescence, and shutdown checks pass; the unrelated actor assertion remains
 unchanged and is not a hidden parent-boundary failure.
 
-The optional storage-address move is not part of this workstream. The current
-small physical-name switch is platform mechanics and was cheaper to retain.
+The optional storage-address move (skipped Slice 5b) remains out of this
+workstream, and the audit recommended against new campaigns around cfg-fork
+counts or web-Rust line mass; roughly 85% of the fork sites are legitimate
+platform mechanics.
