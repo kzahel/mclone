@@ -1,6 +1,6 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. Slices 0–2 are complete; Slice 3 is next. This is
+Status: active 2026-07-21. Slices 0–3 are complete; Slice 4 is next. This is
 the implementation charter for the
 remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
@@ -175,7 +175,7 @@ with no black or transparent pixels. This slice grows app-runtime by 26 lines,
 scene by 3, and web-only Rust by 29 for explicit clock ownership and the
 diagnostic pin; Slice 3 remains the planned boundary-mass reduction.
 
-## Slice 3: Hoist CatalogExecutionCore into shared Rust
+## Slice 3: Hoist CatalogExecutionCore into shared Rust — complete 2026-07-21
 
 Motivation: audit F1 — the largest single mass of policy living in
 web-only Rust (~800 lines), and the direct answer to the parent topic's
@@ -209,6 +209,21 @@ tests green in the shared crate; wasm build and
 `pnpm native:web:catalog-smoke` (headed) pass; scoreboard reports the
 relocation honestly (web-only Rust down, app-runtime up, combined
 boundary down).
+
+Completion evidence: `CatalogExecutionCore`, its typed storage plans, and all
+nine policy/state-machine tests now live in
+`mclone-app-runtime::catalog_storage_plan`. The browser adapter supplies its
+backend label and maps shared world identities to browser writer-lease names;
+the remaining web module only encodes plans, decodes IndexedDB rows, and owns
+the wasm wrapper/smoke constructor. The source lock now pins that ownership
+split. `web_catalog_execution.rs` is 1,510 → 349 lines, total web-only Rust is
+20,595 → 19,434 (-1,161), and app-runtime is 33,903 → 35,076 (+1,173); the
+combined TypeScript-plus-web-Rust boundary is 24,150 → 22,989 (-1,161).
+Native and wasm checks passed, the nine relocated tests and both web ownership
+lock suites passed, and the headed catalog lane exercised the real
+plan-encode/IndexedDB-read/decode continuation through create, open, record,
+and delete. Its inspected final capture was the expected one-row world list
+with no black or transparent pixels.
 
 ## Slice 4: Remove test scaffolding from the production ABI and widen the pins
 

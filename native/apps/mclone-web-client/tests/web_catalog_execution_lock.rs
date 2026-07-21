@@ -12,6 +12,10 @@ fn ordinary_catalog_policy_is_rust_owned() {
     let indexed_db = fs::read_to_string(root.join("www/mclone-web-world-catalog.ts")).unwrap();
     let scene = fs::read_to_string(root.join("src/web_scene_host.rs")).unwrap();
     let execution = fs::read_to_string(root.join("src/web_catalog_execution.rs")).unwrap();
+    let storage_plan = fs::read_to_string(
+        root.join("../../crates/mclone-app-runtime/src/catalog_storage_plan.rs"),
+    )
+    .unwrap();
 
     assert!(app.contains("takeSceneOperation("));
     assert!(app.contains("operation.takeIndexedDbExecution()"));
@@ -38,9 +42,15 @@ fn ordinary_catalog_policy_is_rust_owned() {
     assert!(!scene.contains("catalogOperation"));
 
     assert!(execution.contains("CatalogExecutionCore"));
-    assert!(execution.contains("WorldCatalogRequest::CreateWorld"));
-    assert!(execution.contains("DeleteManyStage"));
-    assert!(execution.contains("clear_world_transactions"));
+    assert!(execution.contains("encode_storage_step"));
+    assert!(execution.contains("decode_web_local_world_summaries"));
+    assert!(!execution.contains("enum DeleteManyStage"));
+    assert!(!execution.contains("fn clear_world_transactions"));
+
+    assert!(storage_plan.contains("pub struct CatalogExecutionCore"));
+    assert!(storage_plan.contains("WorldCatalogRequest::CreateWorld"));
+    assert!(storage_plan.contains("enum DeleteManyStage"));
+    assert!(storage_plan.contains("fn clear_world_transactions"));
 }
 
 #[test]

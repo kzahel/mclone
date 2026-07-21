@@ -4,6 +4,7 @@ pub mod asset_pack_preferences;
 pub mod asset_pack_ui;
 pub mod camera_reconcile;
 pub mod catalog_executor;
+pub mod catalog_storage_plan;
 pub mod client_catalog_policy;
 pub mod client_connection;
 pub mod client_experience;
