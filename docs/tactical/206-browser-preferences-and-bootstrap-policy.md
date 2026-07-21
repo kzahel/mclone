@@ -1,9 +1,9 @@
 # Tactical 206: Browser Preferences And Bootstrap Policy
 
-Status: active 2026-07-21. Tacticals 203-205 established the shared
-interactive route, moved ordinary browser input onto it, and isolated semantic
-diagnostics. This tactical starts from the smaller production adapter that
-remains and closes its preference and initial-bootstrap policy seams.
+Status: complete 2026-07-21. Browser preferences, initial host/resource
+selection, presentation defaults, post-Wasm status, and rich diagnostics now
+have Rust owners. TypeScript retains browser initialization and mechanical
+execution without reconstructing those policies.
 
 Topic: `platform-host-boundary`
 
@@ -216,6 +216,76 @@ Several neighboring responsibilities are already correct and must survive:
 16. The ordinary frame result is an operational projection; the rich semantic
     snapshot is requested only by the opt-in observer.
 
+## Landed Outcome
+
+`ClientInputPreferences` in `mclone-app-runtime` now owns the browser-visible
+touch preference keys, defaults, parsing, normalization, and persistence
+format. Browser Rust uses a domain-blind `web_sys` key/value adapter, applies
+the resulting settings before live input begins, and persists shared setting
+effects. The deleted `mclone-web-settings.ts` no longer supplies a second
+schema or clamp.
+
+Rust now authors the bootstrap resource plan as opaque numeric request IDs and
+URLs. TypeScript version-decorates and fetches those resources generically into
+`WebBootstrapResources`; only Rust resolves IDs to reference, authored, and
+fallback roles. One `mclone_web_create_scene_host_with_startup` entry chooses
+the local-integrated or remote-WebSocket runtime from the opaque startup
+handle, so product TypeScript no longer branches on engine host meaning or
+mirrors render/generation options.
+
+`WebHostCapabilities` carries raw touch availability and viewport width into
+Rust-owned initial presentation policy. Rust chooses the initial debug overlay
+and owns all post-Wasm status overlays. TypeScript retains only the generic
+pre-Wasm `Starting mclone…` element and fatal fallback, plus natural canvas,
+module, fetch, Worker, rAF, DOM, pointer/fullscreen, storage, and WebSocket
+mechanics.
+
+Ordinary host methods now return a small operational projection containing
+only cadence, sizing, capture/UI disposition, lifecycle, and pending-operation
+facts. The query-gated smoke observer explicitly requests
+`diagnosticSnapshot()` when tests need camera, world, gameplay, render, Worker,
+or statistics state. The product adapter neither reads those fields nor
+installs the semantic global on ordinary pages.
+
+The final authored browser inventory is 3,780 TypeScript lines across 16
+modules. `mclone-web-app.ts` is 1,057 lines, the explicit smoke observer is 391
+lines, and all registered Worker/scene domain-aware debts remain at zero. The
+remaining TypeScript is deliberate platform machinery or explicit test code,
+not a second gameplay/runtime policy layer.
+
+## Execution Record
+
+Commits:
+
+- `5164f959` (`Move browser input preferences into Rust`)
+- `a2a6ac43` (`Move browser host bootstrap policy into Rust`)
+- `2a3e6fd3` (`Move browser startup presentation policy into Rust`)
+- `18736f1c` (`Separate browser operations from diagnostics`)
+- `68b9fd5c` (`Wait for remote browser queues to drain`)
+
+Validation completed on 2026-07-21:
+
+- shared preference normalization/round-trip tests and startup-ownership,
+  native-scene, and browser host-boundary locks;
+- wasm32 web-client, desktop, flat-Android, and Android-XR compile checks;
+- generated bindings/TypeScript, Worker unit tests and ownership, scene-host
+  adoption, and thin-adapter purity gates;
+- headed direct-host, local app-loop, mobile, world-catalog, asset-pack,
+  IndexedDB reload, and remote-WebSocket browser smokes; and
+- the ordinary-page absence probe, which confirmed that the semantic smoke
+  global is not installed without explicit opt-in.
+
+The headed desktop, mobile, catalog, asset-pack, IndexedDB, and remote captures
+were inspected. They showed normal world/HUD rendering, touch controls and
+options, world create/open/delete, authored-only asset restoration, persisted
+block placement after reload, and remote-WebSocket movement and interaction.
+
+The final browser runs exposed and closed three integration races rather than
+weakening their assertions: restored asset preferences now dispatch their
+Rust-authored pending operation during warm-up, frame-idle state is published
+after the active rAF callback completes, and the remote smoke waits for the
+zero-queue state that its final assertion already requires.
+
 ## Stop Conditions
 
 Stop for renewed review if:
@@ -253,12 +323,13 @@ the local/remote branch into browser Rust are not stop conditions.
 ## Code Map
 
 - `native/apps/mclone-web-client/www/mclone-web-app.ts`
-- `native/apps/mclone-web-client/www/mclone-web-settings.ts`
 - `native/apps/mclone-web-client/www/mclone-render-compiler-shared.ts`
 - `native/apps/mclone-web-client/www/mclone-web-smoke-observer.ts`
+- `native/apps/mclone-web-client/src/web_bootstrap.rs`
 - `native/apps/mclone-web-client/src/web_scene_host.rs`
 - `native/apps/mclone-web-client/src/web_canvas.rs`
 - `native/crates/mclone-input/src/lib.rs`
+- `native/crates/mclone-app-runtime/src/input_preferences.rs`
 - `native/crates/mclone-app-runtime/src/client_experience.rs`
 - `native/crates/mclone-scene/src/host_effects.rs`
 - `native/apps/mclone-web-client/tests/platform_host_boundary_lock.rs`

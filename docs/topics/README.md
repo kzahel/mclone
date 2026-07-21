@@ -136,12 +136,12 @@ series implements the same concern, normally reuse the document slug in its
   TypeScript. Completed Tactical 201 removed the accidental managed-lobby
   installer; completed Tactical 202 found no replacement coarse-operation
   actor and cleaned the surviving seams through their existing Rust owners.
-- [`platform-host-boundary.md`](platform-host-boundary.md): accepted clean
-  interactive host direction and code-grounded current/desired audit — one
-  shared Rust input/context/action path across native, browser, Android, and XR
-  where applicable; autonomous platform initialization and mechanics remain
-  local; production TypeScript input semantics, the browser-Rust string-action
-  dispatch surface, and smoke-state mirrors are the primary remaining gaps.
+- [`platform-host-boundary.md`](platform-host-boundary.md): completed
+  interactive host convergence — one shared Rust input/context/action path
+  across native, browser, Android, and XR where applicable; Rust-owned browser
+  preferences/bootstrap/status; operational-only product reports; and an
+  explicit semantic test observer while autonomous platform mechanics remain
+  local.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted

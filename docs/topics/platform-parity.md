@@ -119,6 +119,14 @@ burn-down.
 > Parity Closeout Milestone D then promoted production browser Far LOD through
 > the shared resident-tile worker/runtime/render path. It owns the exact
 > remaining four-row browser feature ledger and active LOD sequence.
+> Refreshed on 2026-07-21 after Tacticals 203-206 completed the shared
+> platform-host boundary. Desktop, flat Android, and browser now use one
+> `MonoInteractiveInputRouter`; browser TypeScript forwards raw input and owns
+> browser mechanics; Rust owns browser preference semantics, initial
+> host/resource selection, presentation defaults, and post-Wasm status; and
+> rich semantic browser diagnostics are available only through an explicit
+> query-gated observer. Headed local, mobile, catalog, asset-pack, IndexedDB,
+> and remote-WebSocket smokes passed with inspected captures.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -256,7 +264,7 @@ use (and should) · — n/a.
 | `app-runtime::SingleViewRuntime` | ✅ | ✅ | ✅ | ✅ (via scene host) | `cargo test -p mclone-app-runtime` |
 | `app-runtime::frame_render` | ✅ | ✅ (via scene host) | ✅ | ✅ (via scene host) | `native:desktop-offscreen:smoke`; `native:web:smoke` |
 | `app-runtime::local_single_view` (native scene runtime) | ✅ (composed by the scene host) | — (wasm-gated) | ✅ (composed by the scene host) | ✅ (composed by the scene host) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene` |
-| `app-runtime::host_mode` (local vs remote) | ✅ | ✅ (browser connection services adapt local worker/IndexedDB/WebSocket mechanics) | ✅ | ✅ (local/remote via scene host) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build`; `pnpm native:web:remote-smoke` |
+| `app-runtime::host_mode` (local vs remote) | ✅ | ✅ (one browser-Rust bootstrap selects local worker/IndexedDB or remote WebSocket; TS supplies only connection mechanics) | ✅ | ✅ (local/remote via scene host) | `cargo test -p mclone-app-runtime host_mode`; `pnpm native:web:build`; `pnpm native:web:remote-smoke`; Tactical 206 |
 | `app-runtime::session` (world-session coordinator) | ✅ (desktop flat dynamic; desktop XR dynamic via scene host, automated XR replacement-click smoke pending) | ✅ (initial local/remote plus menu New World restart; JoinRemote reconnect wired, connect-screen smoke pending) | ✅ (shared Mono host initial local/remote and New World / Join Remote replacement; AVD New World session smoke) | ✅ (initial local/remote plus shared scene replacement; Quest in-headset New World replacement smoke, automated controller replacement-click smoke pending) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-scene`; `pnpm native:web:app-smoke`; `pnpm native:web:remote-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke` |
 | `app-runtime::client_session_policy` (display-neutral session UI action policy) | ✅ (desktop flat/offscreen and desktop XR via `mclone-scene` execute shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; native startup payloads remain host-local) | ✅ (web adapter executes shared seed/join/start/quit effects, status/restoration/startup projection, and teardown/quit-title transitions; JS async worker startup remains host-local) | ✅ (shared Mono host executes seed/join/start/quit effects and failed-start UI restoration; Android activity/surface remains local) | ✅ (scene host executes shared seed/join/start/quit effects, status/startup projection, failed-start UI restoration, and quit-title transitions; Android activity/session adapters remain host-local) | `cargo test -p mclone-app-runtime client_session_policy`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:android-xr:session-smoke`; tactical 141 Slice 4d; tactical 143 Slice 4a; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (scene host executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
@@ -306,6 +314,10 @@ Concretely:
   browser connection/compiler/async-operation services while the shared host
   owns session, input/camera, render admission and synchronization, frame
   assembly, effects, actors, settings, UI/HUD, diagnostics, and accounting.
+  DOM modules forward raw physical input into the shared interactive router;
+  browser Rust owns preferences and one opaque local/remote bootstrap; and the
+  product adapter sees only operational results while a query-gated test
+  observer requests rich diagnostics explicitly.
   The resident shared-memory render compiler and server/worldgen/light worker
   topology remain intact. JoinRemote reconnect is wired, with a dedicated
   connect-screen text/input smoke still pending.
@@ -365,8 +377,10 @@ are built, exactly as transport/storage were:
   controller-ray trigger clicks. User headset validation says the current menu
   works mostly fine; the XR target still needs automated smoke coverage and
   comfort tuning.
-- **Real inventory / items, crafting, mob AI / spawning, chat, settings
-  persistence — absent.** Only a fixed 7-block debug hotbar exists.
+- **Real inventory / items, crafting, mob AI / spawning, chat, and broad
+  settings coverage — absent.** Only a fixed 7-block debug hotbar exists.
+  Touch-input and asset-pack preferences now have typed shared persistence,
+  but this is not yet a general graphics/audio/keybind settings surface.
 
 ## Shared-First Feature Checklist
 
@@ -393,10 +407,10 @@ shared owner before building more desktop-local surface area.
 | Authoritative simulation, world state, ticking, and scheduling | `mclone-server` plus domain crates (`mclone-worldgen`, `mclone-light`) | process/app startup, dedicated/integrated host construction |
 | Assets, content loading, registries, and resource-pack shape | `mclone-assets` plus future shared content registries | platform file/package/HTTP access adapters |
 | Rendering semantics and render-session data | `mclone-render-session`, `mclone-render` | swapchain/surface ownership, platform render target acquisition |
-| Persistence, saves, player data, and durable settings | future shared persistence/settings contract; do not hide this in one app | filesystem/localStorage/app-storage adapters and migration entrypoints |
-| Diagnostics, profiling, telemetry, and smoke reports | future shared diagnostics contract | platform counters that only exist in that backend, exported through shared report structs |
+| Persistence, saves, player data, and durable settings | shared typed persistence coordination plus feature-specific preference codecs in `mclone-app-runtime`; extend instead of hiding policy in one app | filesystem/SQLite/IndexedDB/localStorage/app-storage mechanics and explicitly scoped migration entrypoints |
+| Diagnostics, profiling, telemetry, and smoke reports | shared Rust owners and typed/Rust-authored snapshots; production adapters consume only operational projections | platform counters that only exist in that backend and explicit test-observer exposure |
 | Jobs, workers, priorities, cancellation, and budgets | future shared job/scheduler contract | native thread/Web Worker/Android worker creation and platform wakeups |
-| Preferences/config, keybinds, graphics/audio/debug options | future shared preferences contract, consumed by `mclone-ui` and app adapters | platform persistence path and launch overrides |
+| Preferences/config, keybinds, graphics/audio/debug options | shared input bindings and typed preference codecs in `mclone-input` / `mclone-app-runtime`, consumed by shared UI/scene owners | opaque key/value storage, platform persistence path, raw capability facts, and launch overrides |
 | Text input, IME, clipboard, chat/commands/signs/server address entry | `mclone-ui` text model plus platform text adapters | IME composition events, clipboard permissions, soft-keyboard visibility |
 | Inventory, items, crafting, containers, and item use | future shared gameplay/content contracts in client/server/content crates | platform input that selects or activates shared actions |
 | Particles, block damage, transient effects, and animation events | future shared presentation/event contracts | target-specific rendering of shared effect records |
@@ -482,14 +496,14 @@ lower-level render residency and explicit product/evidence gaps:
    player movement path. Remaining work is automated XR menu coverage, comfort
    tuning, a flat-Android interaction action smoke, and the connect/world-select
    `EditBox` surface. (tactical 089, tactical 090)
-5. **Finish the shared input-intent layer.** Unify raw input → intent across
-   keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
-   pointer, and interact**, not just locomotion. Required for XR interaction and
-   for XR interaction and cross-platform menu/pointer parity. Flat Android now
-   has shared touch movement/action/hotbar intents. The current/desired adapter
-   audit and accepted environment-initialization boundary live in
-   [`platform-host-boundary.md`](platform-host-boundary.md). (tactical 076
-   follow-up)
+5. **Maintain the completed shared platform-host boundary.** Tacticals 203-206
+   unified ordinary flat keyboard/mouse/touch input through
+   `MonoInteractiveInputRouter`, preserved XR's richer shared snapshot route,
+   and removed browser preference/bootstrap/diagnostic policy from product
+   TypeScript. Future rebinding UI, text entry, or device support must extend
+   those shared owners rather than add app-local action maps. The completed
+   audit and environment-initialization boundary live in
+   [`platform-host-boundary.md`](platform-host-boundary.md).
 6. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through
