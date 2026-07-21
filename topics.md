@@ -84,3 +84,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `figure-surface-stability` — same-facing coplanar and near-coplanar figure
   surfaces, corrected pigeon evidence, authoring guidance, and a deferred
   sampled-pose catalog linter
+- `animal-catalogue` — shared Asset Lab semantic viewer, generated canonical
+  figure catalogue, and production `/animals/` deployment

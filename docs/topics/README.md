@@ -172,6 +172,9 @@ series implements the same concern, normally reuse the document slug in its
   authoring contract for avoiding same-facing coplanar figure parts, the
   corrected Batch 23 pigeon evidence, and a deferred sampled-pose surface
   linter with a report-first catalog rollout.
+- [`animal-catalogue.md`](animal-catalogue.md): active read-only React and
+  Three.js catalogue for canonical Asset Lab figures, generated from validated
+  semantic JSON and deployed at `/animals/` through the existing web bundle.
 - [`asset-pack-profiles.md`](asset-pack-profiles.md): shared UI asset-pack
   selection, pack-time generated missing assets, runtime provenance, and the
   standalone first-party boundary.
