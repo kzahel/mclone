@@ -4476,7 +4476,8 @@ async function runCatalogUiProbe(page, canvas) {
       && finalState.sessionWorldId === firstWorldId
       && finalState.nativeUiScreen === "worldList"
       && Number(finalState.worldCatalogEntryCount) === 1
-      && finalState.worldCatalogLoading === false,
+      && finalState.worldCatalogLoading === false
+      && Number(finalState.lastReport?.frameRenderViewsMs) > 0,
     before,
     firstWorldId,
     secondWorldId,
@@ -5368,6 +5369,7 @@ async function compactNativeUiState(page) {
         uiCoversWorld: state.lastReport?.uiCoversWorld,
         uiScreen: state.lastReport?.uiScreen,
         guiCommandCount: state.lastReport?.guiCommandCount,
+        frameRenderViewsMs: state.lastReport?.frameRenderViewsMs,
       },
     };
   });

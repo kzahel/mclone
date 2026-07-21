@@ -1,6 +1,6 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. Slices 0–1 are complete; Slice 2 is next. This is
+Status: active 2026-07-21. Slices 0–2 are complete; Slice 3 is next. This is
 the implementation charter for the
 remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
@@ -133,7 +133,7 @@ inspected world-list capture after its progress sample was made cadence-aware:
 it now waits for an observed input-bearing frame instead of assuming two such
 frames fit inside a fixed 50 ms window.
 
-## Slice 2: Converge frame-timing accounting on MonotonicClock
+## Slice 2: Converge frame-timing accounting on MonotonicClock — complete 2026-07-21
 
 Motivation: audit F3, and a live behavior fix — web frame-pipeline
 accounting currently reads `0.0`.
@@ -159,6 +159,21 @@ both methods of counting); web timing produces nonzero elapsed values,
 verified through an existing diagnostic/smoke probe under the headed
 lane; native timing values unchanged in kind; `cargo test` for both
 crates green.
+
+Completion evidence: `SingleViewRuntime`, connection pumping, far-LOD
+aging, and timed frame composition now consume injected
+`MonotonicClockHandle`s. The browser adapter supplies a live
+`performance.now()` clock while retaining the rAF timestamp projection as
+its monotonic floor; native defaults continue to use `Instant`. The four
+ad-hoc timing families and their wasm zero/Date arms are gone. App-runtime's
+negative-wasm cfg count is 110 → 98 and its full `target_arch = "wasm32"`
+marker census is 133 → 112. The focused injected-clock test passed, as did
+the full 279 app-runtime and 125 scene tests, and the wasm build passed. The
+headed catalog lane reported `frameRenderViewsMs: 0.395` (and asserted it was
+positive); its inspected capture contained the expected one-row world list
+with no black or transparent pixels. This slice grows app-runtime by 26 lines,
+scene by 3, and web-only Rust by 29 for explicit clock ownership and the
+diagnostic pin; Slice 3 remains the planned boundary-mass reduction.
 
 ## Slice 3: Hoist CatalogExecutionCore into shared Rust
 

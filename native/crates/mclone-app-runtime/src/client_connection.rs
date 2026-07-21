@@ -1,6 +1,4 @@
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
 
 use anyhow::{Context, Result};
 use mclone_protocol::{ClientCommand, ServerUpdate};
@@ -10,6 +8,7 @@ use mclone_server::{
 };
 
 use crate::host_mode::update_drain_exchange;
+use crate::monotonic::{MonotonicClockHandle, MonotonicInstant};
 use crate::{RuntimeUpdatePumpBudget, RuntimeUpdatePumpReport, SingleViewRuntime, elapsed_ms};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -250,12 +249,13 @@ pub fn pump_client_connection_updates_report<C>(
 where
     C: ClientConnection + ?Sized,
 {
-    let pump_start = pump_timing_start();
+    let clock = core.monotonic_clock().clone();
+    let pump_start = clock.now();
     let mut report = RuntimeUpdatePumpReport::default();
     loop {
-        let drain_start = pump_timing_start();
+        let drain_start = clock.now();
         let drain = connection.try_drain_next_update()?;
-        report.drain_updates_ms += pump_elapsed_ms(drain_start);
+        report.drain_updates_ms += pump_elapsed_ms(&clock, drain_start);
         let Some(queued_update) = drain.update else {
             report.remaining_queue_depth = drain.remaining_queue_depth;
             report.remaining_queue_bytes = drain.remaining_queue_bytes;
@@ -284,7 +284,7 @@ where
             .oldest_applied_update_age_ms
             .max(elapsed_ms(queued_age));
 
-        if budget.exhausted_after_update(pump_elapsed(pump_start), &report.apply_report) {
+        if budget.exhausted_after_update(pump_elapsed(&clock, pump_start), &report.apply_report) {
             let metrics = connection.pending_update_metrics()?;
             report.remaining_queue_depth = metrics.update_depth;
             report.remaining_queue_bytes = metrics.update_bytes;
@@ -300,39 +300,12 @@ where
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-type PumpTimingSample = Instant;
-
-#[cfg(target_arch = "wasm32")]
-type PumpTimingSample = f64;
-
-#[cfg(not(target_arch = "wasm32"))]
-fn pump_timing_start() -> PumpTimingSample {
-    Instant::now()
+fn pump_elapsed(clock: &MonotonicClockHandle, start: MonotonicInstant) -> Duration {
+    clock.elapsed_since(start)
 }
 
-#[cfg(target_arch = "wasm32")]
-fn pump_timing_start() -> PumpTimingSample {
-    js_sys::Date::now()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn pump_elapsed(start: PumpTimingSample) -> Duration {
-    start.elapsed()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn pump_elapsed(start: PumpTimingSample) -> Duration {
-    let elapsed_ms = (js_sys::Date::now() - start).max(0.0);
-    if elapsed_ms.is_finite() {
-        Duration::from_secs_f64(elapsed_ms / 1000.0)
-    } else {
-        Duration::ZERO
-    }
-}
-
-fn pump_elapsed_ms(start: PumpTimingSample) -> f64 {
-    elapsed_ms(pump_elapsed(start))
+fn pump_elapsed_ms(clock: &MonotonicClockHandle, start: MonotonicInstant) -> f64 {
+    elapsed_ms(pump_elapsed(clock, start))
 }
 
 #[cfg(test)]

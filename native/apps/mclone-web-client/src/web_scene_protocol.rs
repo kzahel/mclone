@@ -9,7 +9,7 @@ use mclone_app_runtime::catalog_executor::{
     DeferredWorldCatalogOperationHandle, WorldCatalogOperation, WorldCatalogOperationService,
 };
 use mclone_app_runtime::monotonic::{
-    MonotonicClockHandle, MonotonicInstant, ProjectedMonotonicClock,
+    MonotonicClock, MonotonicClockHandle, MonotonicInstant, ProjectedMonotonicClock,
 };
 use mclone_app_runtime::platform_operation::{PlatformOperation, PlatformOperationCompletion};
 use mclone_app_runtime::world_catalog::{WorldCatalogError, WorldCatalogResponse};
@@ -18,8 +18,29 @@ use mclone_app_runtime::world_catalog::{WorldCatalogError, WorldCatalogResponse}
 /// the corresponding neutral clock and catalog service.
 #[derive(Debug)]
 pub struct WebScenePlatformServices {
-    clock: ProjectedMonotonicClock,
+    clock: WebMonotonicClock,
     catalog: DeferredWorldCatalogOperationHandle,
+}
+
+#[derive(Clone, Debug, Default)]
+struct WebMonotonicClock {
+    projected: ProjectedMonotonicClock,
+}
+
+impl WebMonotonicClock {
+    fn observe_millis(&self, millis: f64) -> MonotonicInstant {
+        self.projected.observe_millis(millis)
+    }
+}
+
+impl MonotonicClock for WebMonotonicClock {
+    fn now(&self) -> MonotonicInstant {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(performance) = web_sys::window().and_then(|window| window.performance()) {
+            return self.projected.observe_millis(performance.now());
+        }
+        self.projected.now()
+    }
 }
 
 /// Browser-frame lifecycle retained by the rAF driver rim.
@@ -163,8 +184,8 @@ impl WebSceneFrameDriverPolicy {
 
 impl WebScenePlatformServices {
     pub fn new() -> (Self, MonotonicClockHandle, WorldCatalogOperationService) {
-        let clock = ProjectedMonotonicClock::default();
-        let clock_handle = clock.handle();
+        let clock = WebMonotonicClock::default();
+        let clock_handle = MonotonicClockHandle::new(clock.clone());
         let (catalog_operations, catalog) = WorldCatalogOperationService::deferred();
         (Self { clock, catalog }, clock_handle, catalog_operations)
     }
@@ -174,7 +195,7 @@ impl WebScenePlatformServices {
     }
 
     pub fn clock_handle(&self) -> MonotonicClockHandle {
-        self.clock.handle()
+        MonotonicClockHandle::new(self.clock.clone())
     }
 
     pub fn take_catalog_operation(&self) -> Option<PlatformOperation<WorldCatalogOperation>> {

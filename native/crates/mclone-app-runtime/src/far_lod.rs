@@ -2,11 +2,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
-use std::sync::OnceLock;
 use std::time::Duration;
-#[cfg(not(target_arch = "wasm32"))]
-use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetPath, AssetSource};
@@ -27,7 +23,7 @@ use mclone_worldgen::block::{
 use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_surface_chunk};
 use serde::Deserialize;
 
-use crate::monotonic::MonotonicInstant;
+use crate::monotonic::{MonotonicClockHandle, MonotonicInstant};
 
 pub const DEFAULT_FAR_TERRAIN_LOD_START_MARGIN_CHUNKS: u32 = 0;
 pub const MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS: u32 = 1;
@@ -63,18 +59,6 @@ pub const STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET: usize = 24;
 
 pub const SEA_LEVEL: f32 = 63.0;
 pub const FAR_TERRAIN_LOD_MATERIALS_PATH: &str = "assets/mclone/lod/materials.v1.json";
-
-#[cfg(not(target_arch = "wasm32"))]
-fn far_lod_now() -> MonotonicInstant {
-    static ORIGIN: OnceLock<Instant> = OnceLock::new();
-    let elapsed = ORIGIN.get_or_init(Instant::now).elapsed();
-    MonotonicInstant::from_nanos(u64::try_from(elapsed.as_nanos()).unwrap_or(u64::MAX))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn far_lod_now() -> MonotonicInstant {
-    MonotonicInstant::ZERO
-}
 
 #[derive(Clone, Debug)]
 pub struct FarTerrainLodBuildRequest {
@@ -137,7 +121,7 @@ impl FarTerrainLodBuildRequest {
             pos,
             FarTerrainLodSourceKey::new(12345, FarTerrainLodConfig::enabled(), false),
             None,
-            far_lod_now(),
+            MonotonicInstant::ZERO,
         )
     }
 
@@ -680,6 +664,7 @@ struct FarTerrainLodTileMetadata {
 
 #[derive(Debug)]
 pub struct FarTerrainLodCache {
+    clock: MonotonicClockHandle,
     source_key: Option<FarTerrainLodSourceKey>,
     view_key: Option<FarTerrainLodBuildKey>,
     movement_direction: (i32, i32),
@@ -716,7 +701,18 @@ pub struct FarTerrainLodCache {
 
 impl Default for FarTerrainLodCache {
     fn default() -> Self {
+        Self::with_clock(MonotonicClockHandle::default())
+    }
+}
+
+impl FarTerrainLodCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_clock(clock: MonotonicClockHandle) -> Self {
         Self {
+            clock,
             source_key: None,
             view_key: None,
             movement_direction: (0, 0),
@@ -747,12 +743,6 @@ impl Default for FarTerrainLodCache {
             max_double_resident_tiles: 0,
             now: MonotonicInstant::ZERO,
         }
-    }
-}
-
-impl FarTerrainLodCache {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn clear(&mut self) -> usize {
@@ -792,7 +782,7 @@ impl FarTerrainLodCache {
         build_budget: usize,
     ) -> Result<()> {
         self.advance_for_camera_at(
-            far_lod_now(),
+            self.clock.now(),
             config,
             seed,
             center,
@@ -1753,7 +1743,7 @@ fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarT
             false,
         ),
         None,
-        far_lod_now(),
+        MonotonicInstant::ZERO,
     ))
     .mesh
 }
@@ -2556,7 +2546,7 @@ mod tests {
                 ChunkPos::new(0, 0),
                 source,
                 None,
-                far_lod_now(),
+                MonotonicInstant::ZERO,
             ))
             .mesh;
             (mesh.vertex_count(), mesh.index_count())
@@ -2684,12 +2674,14 @@ mod tests {
             cache.source_key.unwrap(),
             cache.neighbor_sample_spacings(pos),
             None,
-            far_lod_now(),
+            MonotonicInstant::ZERO,
         );
         compiler
             .completed
             .push(compile_far_terrain_lod_request(request));
-        cache.inflight_builds.insert(replacement, far_lod_now());
+        cache
+            .inflight_builds
+            .insert(replacement, MonotonicInstant::ZERO);
         cache.accept_completed(&mut compiler).unwrap();
         assert_eq!(cache.double_resident_tiles, 1);
         assert_eq!(cache.max_double_resident_tiles, 1);
@@ -2740,7 +2732,7 @@ mod tests {
                 source_key,
                 [4; 4],
                 None,
-                far_lod_now(),
+                MonotonicInstant::ZERO,
             ));
         cache
             .pending_builds
@@ -2749,7 +2741,7 @@ mod tests {
                 source_key,
                 [4; 4],
                 None,
-                far_lod_now(),
+                MonotonicInstant::ZERO,
             ));
 
         cache.submit_builds(&mut compiler, 1).unwrap();
@@ -2824,7 +2816,7 @@ mod tests {
             source,
             [4; 4],
             None,
-            far_lod_now(),
+            MonotonicInstant::ZERO,
         );
         compile_far_terrain_lod_request_cached(first, &mut cache);
         let first_chunks = cache.chunks.len();
@@ -2834,7 +2826,7 @@ mod tests {
             source,
             [4; 4],
             None,
-            far_lod_now(),
+            MonotonicInstant::ZERO,
         );
         compile_far_terrain_lod_request_cached(adjacent, &mut cache);
 

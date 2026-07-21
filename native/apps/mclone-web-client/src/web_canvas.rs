@@ -2026,20 +2026,21 @@ impl std::fmt::Debug for WebSceneRuntimeService {
 
 impl WebSceneRuntimeService {
     pub fn new(
-        runtime: WebRuntime,
+        mut runtime: WebRuntime,
         mesh_assets: TexturedMeshAssets,
         render_worker: WebRenderWorkerCoordinator,
         clock: MonotonicClockHandle,
         world_instance_id: u64,
         priority: RuntimeRenderPriority,
     ) -> Self {
+        runtime.scene_core_mut().set_monotonic_clock(clock.clone());
         let render_worker = render_worker.world_handle(world_instance_id, priority);
         let worker_generation = render_worker.active_generation();
         Self {
             runtime,
             mesh_assets,
             render_compiler: WebRenderSectionCompiler::new(),
-            far_lod_cache: FarTerrainLodCache::new(),
+            far_lod_cache: FarTerrainLodCache::with_clock(clock.clone()),
             lod_coverage: LodCoverageCoordinator::new(),
             clock,
             render_worker,

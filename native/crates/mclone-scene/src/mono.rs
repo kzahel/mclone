@@ -1499,6 +1499,7 @@ impl McloneSceneHost {
                     render_options,
                     world_gui,
                     |_| GuiDrawList::new(),
+                    &self.services.clock,
                     &mut render_stats,
                 );
                 rendered

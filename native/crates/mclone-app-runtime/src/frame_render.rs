@@ -26,34 +26,34 @@ use mclone_render::uniform::{PerViewSlot, SINGLE_VIEW_SLOT};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_ui::{GuiDrawList, UiDrawCacheStats};
 
+use crate::monotonic::{MonotonicClockHandle, MonotonicInstant};
+
 pub const MIN_FLAT_RENDER_SCALE: f32 = 0.25;
 pub const MAX_FLAT_RENDER_SCALE: f32 = 2.0;
 const SCALE_EPSILON: f32 = 0.000_1;
 
-#[cfg(not(target_arch = "wasm32"))]
-type CompositionTimingSample = std::time::Instant;
-
-#[cfg(target_arch = "wasm32")]
-type CompositionTimingSample = f64;
-
-#[cfg(not(target_arch = "wasm32"))]
-fn composition_timing_now() -> CompositionTimingSample {
-    std::time::Instant::now()
+fn composition_timing_start(
+    clock: Option<&MonotonicClockHandle>,
+    enabled: bool,
+) -> Option<MonotonicInstant> {
+    enabled.then(|| {
+        clock
+            .expect("timed frame rendering requires a monotonic clock")
+            .now()
+    })
 }
 
-#[cfg(target_arch = "wasm32")]
-fn composition_timing_now() -> CompositionTimingSample {
-    js_sys::Date::now()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn composition_timing_elapsed_ms(start: CompositionTimingSample) -> f64 {
-    start.elapsed().as_secs_f64() * 1000.0
-}
-
-#[cfg(target_arch = "wasm32")]
-fn composition_timing_elapsed_ms(start: CompositionTimingSample) -> f64 {
-    (js_sys::Date::now() - start).max(0.0)
+fn composition_timing_elapsed_ms(
+    clock: Option<&MonotonicClockHandle>,
+    start: Option<MonotonicInstant>,
+) -> f64 {
+    start.map_or(0.0, |start| {
+        clock
+            .expect("timed frame rendering requires a monotonic clock")
+            .elapsed_since(start)
+            .as_secs_f64()
+            * 1_000.0
+    })
 }
 
 const FLAT_SCALE_PRESENT_WGSL: &str = r#"
@@ -564,6 +564,7 @@ impl FlatRenderResources {
             None,
             None,
             None,
+            None,
             render_stats,
         )?;
         if !gui.covers_world {
@@ -996,6 +997,7 @@ fn render_composed_translucent_terrain(
     active_options: TexturedSectionRenderOptions,
     view_slot: PerViewSlot,
     active_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+    timing_clock: Option<&MonotonicClockHandle>,
 ) -> f64 {
     let placed_stereo_draw = match composition.placed.prepared {
         PlacedTerrainPrepared::Mono(_) => None,
@@ -1029,7 +1031,7 @@ fn render_composed_translucent_terrain(
                 );
             }
             TerrainCompositionSource::Placed => {
-                let placed_started_at = composition_timing_now();
+                let placed_started_at = composition_timing_start(timing_clock, true);
                 composition
                     .placed
                     .draw
@@ -1046,7 +1048,7 @@ fn render_composed_translucent_terrain(
                         composition.placed.context,
                         view_slot,
                     );
-                placed_draw_ms += composition_timing_elapsed_ms(placed_started_at);
+                placed_draw_ms += composition_timing_elapsed_ms(timing_clock, placed_started_at);
             }
         }
         start = end;
@@ -1199,6 +1201,7 @@ where
         None,
         None,
         None,
+        None,
         render_stats,
     )
 }
@@ -1257,6 +1260,7 @@ where
         None,
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
         None,
+        None,
         render_stats,
     )
 }
@@ -1314,6 +1318,7 @@ where
         None,
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
         None,
+        None,
         render_stats,
     )
 }
@@ -1339,6 +1344,7 @@ pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain_timed<BuildGui
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
 where
@@ -1369,6 +1375,7 @@ where
         None,
         None,
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
+        Some(clock),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1424,6 +1431,7 @@ where
         None,
         None,
         None,
+        None,
         render_stats,
     )
 }
@@ -1446,6 +1454,7 @@ pub fn render_full_frame_for_view_timed<BuildGuiDraw>(
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
 where
@@ -1468,6 +1477,7 @@ where
         render_options,
         gui,
         build_gui_draw,
+        clock,
         render_stats,
         SINGLE_VIEW_SLOT,
     )
@@ -1491,6 +1501,7 @@ pub fn render_full_frame_for_view_timed_in_slot<BuildGuiDraw>(
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
@@ -1522,6 +1533,7 @@ where
         None,
         None,
         None,
+        Some(clock),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1625,6 +1637,7 @@ where
         None,
         None,
         None,
+        None,
         render_stats,
     )
 }
@@ -1679,6 +1692,7 @@ where
         far_lod_mesh,
         None,
         Some(prepared_draw),
+        None,
         None,
         None,
         render_stats,
@@ -1737,6 +1751,7 @@ where
         None,
         Some(prepared_draw),
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        None,
         None,
         render_stats,
     )
@@ -1797,6 +1812,7 @@ where
         Some(prepared_draw),
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
         None,
+        None,
         render_stats,
     )
 }
@@ -1820,6 +1836,7 @@ pub fn render_full_frame_for_view_with_prepared_records_timed<BuildGuiDraw>(
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
 where
@@ -1843,6 +1860,7 @@ where
         render_options,
         gui,
         build_gui_draw,
+        clock,
         render_stats,
         SINGLE_VIEW_SLOT,
     )
@@ -1867,6 +1885,7 @@ pub fn render_full_frame_for_view_with_prepared_records_timed_in_slot<BuildGuiDr
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
@@ -1898,6 +1917,7 @@ where
         Some(prepared_records),
         None,
         None,
+        Some(clock),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1925,6 +1945,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot<BuildG
     build_gui_draw: BuildGuiDraw,
     far_lod: Option<&mut FarTerrainLodRenderer>,
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
@@ -1956,6 +1977,7 @@ where
         None,
         Some(prepared_draw),
         None,
+        Some(clock),
         Some(&mut timing),
         render_stats,
     )?;
@@ -1986,6 +2008,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_time
     build_gui_draw: BuildGuiDraw,
     far_lod: Option<&mut FarTerrainLodRenderer>,
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
@@ -2017,6 +2040,7 @@ where
         None,
         Some(prepared_draw),
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(clock),
         Some(&mut timing),
         render_stats,
     )?;
@@ -2047,6 +2071,7 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_t
     build_gui_draw: BuildGuiDraw,
     far_lod: Option<&mut FarTerrainLodRenderer>,
     far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
@@ -2078,6 +2103,7 @@ where
         None,
         Some(prepared_draw),
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
+        Some(clock),
         Some(&mut timing),
         render_stats,
     )?;
@@ -2108,6 +2134,7 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
+    timing_clock: Option<&MonotonicClockHandle>,
     mut timing: Option<&mut FullFrameRenderTiming>,
     render_stats: &mut RenderStreamStats,
 ) -> Result<FullFrameRenderSummary>
@@ -2126,7 +2153,7 @@ where
     let mut terrain_stats = TexturedSectionRenderStats::default();
     let mut placed_terrain_stats = TexturedSectionRenderStats::default();
     if !gui.covers_world {
-        let sky_start = timing.is_some().then(composition_timing_now);
+        let sky_start = composition_timing_start(timing_clock, timing.is_some());
         let background_clear_color = if fog.enabled {
             clear_frame_color(frame.encoder, frame.target, fog.clear_color());
             fog.clear_color()
@@ -2158,12 +2185,12 @@ where
             sky_clear_color
         };
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), sky_start) {
-            timing.sky_ms += composition_timing_elapsed_ms(start);
+            timing.sky_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
         }
         let far_lod_depth_ready =
             far_lod.is_some() && far_lod_mesh.is_some_and(|mesh| !mesh.is_empty());
         if let Some(far_lod) = far_lod {
-            let far_lod_start = timing.is_some().then(composition_timing_now);
+            let far_lod_start = composition_timing_start(timing_clock, timing.is_some());
             let far_lod_stats = far_lod.render_in_slot(
                 frame.device,
                 frame.queue,
@@ -2179,7 +2206,7 @@ where
             render_stats.far_lod_region_draw_count = far_lod_stats.region_draw_count;
             render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), far_lod_start) {
-                timing.far_lod_ms += composition_timing_elapsed_ms(start);
+                timing.far_lod_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
         }
         // The sky/clear pass prepared the background; the chunk pass loads it.
@@ -2199,7 +2226,7 @@ where
         } else {
             TexturedSectionRenderPhase::All
         };
-        let terrain_start = timing.is_some().then(composition_timing_now);
+        let terrain_start = composition_timing_start(timing_clock, timing.is_some());
         let frame_stats = render_terrain_phase(
             draw,
             frame.queue,
@@ -2215,7 +2242,7 @@ where
         )?;
         terrain_stats = frame_stats;
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), terrain_start) {
-            timing.terrain_opaque_ms += composition_timing_elapsed_ms(start);
+            timing.terrain_opaque_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
         }
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
@@ -2307,7 +2334,7 @@ where
             None => {}
         }
         if !actor_instances.is_empty() {
-            let actor_start = timing.is_some().then(composition_timing_now);
+            let actor_start = composition_timing_start(timing_clock, timing.is_some());
             actor_stats = actors
                 .context("actor instances requested without actor draw resources")?
                 .render_in_slot(
@@ -2321,7 +2348,7 @@ where
                     view_slot,
                 )?;
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
-                timing.actor_ms += composition_timing_elapsed_ms(start);
+                timing.actor_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
         }
         if let Some(OpaqueWorldInsertion::Composition(composition)) =
@@ -2329,7 +2356,7 @@ where
             && let Some(placed) = composition.actors.as_mut()
             && !placed.instances.is_empty()
         {
-            let actor_start = timing.is_some().then(composition_timing_now);
+            let actor_start = composition_timing_start(timing_clock, timing.is_some());
             placed_actor_stats = placed.draw.render_composed_in_slot(
                 frame.device,
                 frame.queue,
@@ -2342,12 +2369,12 @@ where
                 view_slot,
             )?;
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
-                timing.placed_actor_ms += composition_timing_elapsed_ms(start);
+                timing.placed_actor_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
         }
         if split_translucent_terrain {
             let translucent_target = render_target.with_loaded_color().with_loaded_depth();
-            let translucent_start = timing.is_some().then(composition_timing_now);
+            let translucent_start = composition_timing_start(timing_clock, timing.is_some());
             if let Some(OpaqueWorldInsertion::Composition(composition)) =
                 opaque_world_insertion.as_ref()
             {
@@ -2362,6 +2389,7 @@ where
                     render_options,
                     view_slot,
                     prepared_stereo_draw,
+                    timing_clock,
                 );
                 if let Some(timing) = timing.as_deref_mut() {
                     timing.placed_draw_ms += placed_draw_ms;
@@ -2382,11 +2410,12 @@ where
                 )?;
             }
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), translucent_start) {
-                timing.terrain_translucent_ms += composition_timing_elapsed_ms(start);
+                timing.terrain_translucent_ms +=
+                    composition_timing_elapsed_ms(timing_clock, Some(start));
             }
         }
         if let Some(overlay) = underwater_overlay {
-            let screen_effect_start = timing.is_some().then(composition_timing_now);
+            let screen_effect_start = composition_timing_start(timing_clock, timing.is_some());
             screen_effects
                 .context("underwater overlay requested without screen effects renderer")?
                 .render_underwater_in_slot(
@@ -2398,7 +2427,7 @@ where
                     view_slot,
                 );
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), screen_effect_start) {
-                timing.screen_effect_ms += composition_timing_elapsed_ms(start);
+                timing.screen_effect_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
         }
         render_stats.drawn_section_count = render_stats
@@ -2419,7 +2448,7 @@ where
     let gui_draw = build_gui_draw(render_stats);
     let gui_command_count = gui_draw.commands().len();
     if gui.active {
-        let gui_start = timing.is_some().then(composition_timing_now);
+        let gui_start = composition_timing_start(timing_clock, timing.is_some());
         gui_renderer
             .context("active GUI requested without GUI renderer")?
             .render(
@@ -2436,7 +2465,7 @@ where
                 },
             )?;
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), gui_start) {
-            timing.gui_ms += composition_timing_elapsed_ms(start);
+            timing.gui_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
         }
     }
 

@@ -104,6 +104,7 @@ use mclone_ui::{
 use crate::host_mode::SingleViewHostMode;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::monotonic::MonotonicDeadline;
+use crate::monotonic::{MonotonicClockHandle, MonotonicInstant};
 
 pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
@@ -1176,6 +1177,7 @@ pub struct TargetRenderWorkStats {
 #[derive(Debug)]
 pub struct SingleViewRuntime {
     engine: EngineRenderSession,
+    clock: MonotonicClockHandle,
     asset_epoch: u64,
     render_distance: u32,
     chunk_tracking_radius: u32,
@@ -1212,6 +1214,7 @@ impl SingleViewRuntime {
     ) -> Self {
         Self {
             engine: EngineRenderSession::new(client),
+            clock: MonotonicClockHandle::default(),
             asset_epoch: 0,
             render_distance,
             chunk_tracking_radius,
@@ -1294,6 +1297,14 @@ impl SingleViewRuntime {
 
     pub const fn engine_mut(&mut self) -> &mut EngineRenderSession {
         &mut self.engine
+    }
+
+    pub fn set_monotonic_clock(&mut self, clock: MonotonicClockHandle) {
+        self.clock = clock;
+    }
+
+    pub const fn monotonic_clock(&self) -> &MonotonicClockHandle {
+        &self.clock
     }
 
     pub const fn asset_epoch(&self) -> u64 {
@@ -1450,16 +1461,16 @@ impl SingleViewRuntime {
         &mut self,
         updates: Vec<ServerUpdate>,
     ) -> RuntimeUpdateApplyReport {
-        let total_start = timing_start();
-        let dirty_mark_start = timing_start();
+        let total_start = self.clock.now();
+        let dirty_mark_start = self.clock.now();
         let update_report = self.engine.mark_server_update_render_dirty(&updates);
-        let dirty_mark_ms = timing_elapsed_ms(dirty_mark_start);
-        let client_apply_start = timing_start();
+        let dirty_mark_ms = timing_elapsed_ms(&self.clock, dirty_mark_start);
+        let client_apply_start = self.clock.now();
         self.client_mut().apply_updates(updates);
-        let client_apply_updates_ms = timing_elapsed_ms(client_apply_start);
+        let client_apply_updates_ms = timing_elapsed_ms(&self.clock, client_apply_start);
         let mut report = RuntimeUpdateApplyReport {
             changed: update_report.changed,
-            total_ms: timing_elapsed_ms(total_start),
+            total_ms: timing_elapsed_ms(&self.clock, total_start),
             dirty_mark_ms,
             client_apply_updates_ms,
             updates: update_report.updates,
@@ -2978,40 +2989,33 @@ pub fn micros_to_ms(micros: u128) -> f64 {
     micros as f64 / 1000.0
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-type RuntimeTimingSample = Instant;
-
-#[cfg(target_arch = "wasm32")]
-type RuntimeTimingSample = ();
-
-#[cfg(not(target_arch = "wasm32"))]
-fn timing_start() -> Option<RuntimeTimingSample> {
-    Some(Instant::now())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn timing_start() -> Option<RuntimeTimingSample> {
-    None
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn timing_elapsed_ms(start: Option<RuntimeTimingSample>) -> f64 {
-    start.map_or(0.0, |start| elapsed_ms(start.elapsed()))
-}
-
-#[cfg(target_arch = "wasm32")]
-fn timing_elapsed_ms(_start: Option<RuntimeTimingSample>) -> f64 {
-    0.0
+fn timing_elapsed_ms(clock: &MonotonicClockHandle, start: MonotonicInstant) -> f64 {
+    elapsed_ms(clock.elapsed_since(start))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use mclone_core::{CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
     use mclone_render_session::{
         RenderSectionCompileRequest, RenderSectionCompileResult, RenderSectionCompiler,
     };
     use mclone_server::{ChunkLoadingProgressCell, ChunkLoadingProgressSnapshot};
+
+    use crate::monotonic::MonotonicClock;
+
+    #[derive(Debug, Default)]
+    struct SteppingTestClock {
+        nanos: AtomicU64,
+    }
+
+    impl MonotonicClock for SteppingTestClock {
+        fn now(&self) -> MonotonicInstant {
+            MonotonicInstant::from_nanos(self.nanos.fetch_add(1_000_000, Ordering::Relaxed))
+        }
+    }
 
     fn time_update(day_time: u64) -> ServerUpdate {
         ServerUpdate::TimeUpdate {
@@ -3220,6 +3224,18 @@ mod tests {
         assert_eq!(accumulated.other_update_timing.total_ms, 22.0);
         assert_eq!(accumulated.mixed_update_timing.total_ms, 26.0);
         assert_eq!(accumulated.mixed_update_timing.updates, 4);
+    }
+
+    #[test]
+    fn runtime_update_apply_uses_injected_monotonic_clock() {
+        let mut runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 0, 0);
+        runtime.set_monotonic_clock(MonotonicClockHandle::new(SteppingTestClock::default()));
+
+        let report = runtime.apply_server_updates_report(vec![time_update(6_000)]);
+
+        assert_eq!(report.dirty_mark_ms, 1.0);
+        assert_eq!(report.client_apply_updates_ms, 1.0);
+        assert_eq!(report.total_ms, 5.0);
     }
 
     #[test]

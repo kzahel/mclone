@@ -200,6 +200,7 @@ struct LastFrameStats {
     far_lod_uploaded_bytes: usize,
     accepted_compile_section_count: usize,
     poll_updates: usize,
+    render_views_ms: f64,
 }
 
 enum WebRuntimeStartEffect {
@@ -940,6 +941,7 @@ impl WebSceneHost {
             far_lod_uploaded_bytes: summary.render.far_lod_uploaded_bytes,
             accepted_compile_section_count: summary.upload.completed_compile_section_count,
             poll_updates: summary.upload.poll_updates,
+            render_views_ms: summary.timing.render_views_ms,
         };
         if host.mono_ui_screen() == Some(GameScreen::Pause) && summary.render.gui_command_count > 0
         {
@@ -4003,6 +4005,11 @@ impl WebSceneHost {
             self.last_frame.accepted_compile_section_count as f64,
         )?;
         report_set_number(&object, "pollUpdates", self.last_frame.poll_updates as f64)?;
+        report_set_number(
+            &object,
+            "frameRenderViewsMs",
+            self.last_frame.render_views_ms,
+        )?;
         report_set_bool(&object, "playable", self.last_frame.drawn_section_count > 0)?;
         report_set_number(
             &object,

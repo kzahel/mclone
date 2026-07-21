@@ -1180,17 +1180,19 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                     .unwrap_or(options.render_compile_worker_count),
                 options.render_compile_worker_timing_enabled,
             )?;
+        let core = SingleViewRuntime::local_integrated_with_seed(
+            options.seed,
+            options.center,
+            options.render_distance,
+            options.chunk_tracking_radius(),
+        );
+        let far_lod_cache = FarTerrainLodCache::with_clock(core.monotonic_clock().clone());
         let mut scene = Self {
-            core: SingleViewRuntime::local_integrated_with_seed(
-                options.seed,
-                options.center,
-                options.render_distance,
-                options.chunk_tracking_radius(),
-            ),
+            core,
             connection: IntegratedRunnerConnection::new(server_runner),
             mesh_assets,
             render_compile_dispatcher,
-            far_lod_cache: FarTerrainLodCache::new(),
+            far_lod_cache,
             lod_coverage: LodCoverageCoordinator::new(),
             deferred_chunk_drops: Box::new(NativeDeferredDropService::new()?),
             simulation_cadence: options.cadence,
@@ -2873,12 +2875,13 @@ where
                 .context("failed to initialize remote dedicated scene runtime")?;
             core.apply_exchange(deferred_command_exchange());
         }
+        let far_lod_cache = FarTerrainLodCache::with_clock(core.monotonic_clock().clone());
         Ok(Self {
             core,
             connection,
             mesh_assets,
             render_compile_dispatcher,
-            far_lod_cache: FarTerrainLodCache::new(),
+            far_lod_cache,
             lod_coverage: LodCoverageCoordinator::new(),
         })
     }

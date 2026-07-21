@@ -3987,6 +3987,7 @@ impl McloneSceneHost {
                     |_| summary_ui_draw,
                     far_lod,
                     far_lod_mesh,
+                    &self.services.clock,
                     &mut render_stats,
                     view_slot,
                 )
@@ -4017,6 +4018,7 @@ impl McloneSceneHost {
                     |_| summary_ui_draw,
                     far_lod,
                     far_lod_mesh,
+                    &self.services.clock,
                     &mut render_stats,
                     view_slot,
                 )

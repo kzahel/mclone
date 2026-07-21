@@ -98,6 +98,19 @@ pub struct MonotonicClockHandle {
     inner: Arc<dyn MonotonicClock>,
 }
 
+impl Default for MonotonicClockHandle {
+    fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            system_monotonic_clock()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            ProjectedMonotonicClock::default().handle()
+        }
+    }
+}
+
 impl MonotonicClockHandle {
     pub fn new(clock: impl MonotonicClock + 'static) -> Self {
         Self {
