@@ -21,14 +21,40 @@ struct LocalShape {
     offset: OffsetKind,
 }
 
+/// Returns the coarse bounds enclosing a block's complete collision shape.
+///
+/// Multi-box shapes such as stairs fill less space than this union. Movement,
+/// point containment, and entity overlap must use [`block_collision_aabbs`].
 pub fn block_collision_aabb(state: BlockStateId, pos: BlockPos) -> Option<Aabb> {
-    shape_for(state, ShapeUse::Collision).map(|shape| shape.world_aabb(pos))
+    let mut shapes = block_collision_aabbs(state, pos).into_iter();
+    let first = shapes.next()?;
+    Some(shapes.fold(first, |bounds, shape| {
+        Aabb::new(
+            bounds.min_x.min(shape.min_x),
+            bounds.min_y.min(shape.min_y),
+            bounds.min_z.min(shape.min_z),
+            bounds.max_x.max(shape.max_x),
+            bounds.max_y.max(shape.max_y),
+            bounds.max_z.max(shape.max_z),
+        )
+    }))
+}
+
+/// Iterates the exact axis-aligned boxes in a block's collision shape without
+/// allocating for the common one-box case.
+pub fn block_collision_aabbs(state: BlockStateId, pos: BlockPos) -> impl Iterator<Item = Aabb> {
+    shapes_for(state, ShapeUse::Collision)
+        .into_iter()
+        .flatten()
+        .map(move |shape| shape.world_aabb(pos))
 }
 
 pub fn block_outline_aabbs(state: BlockStateId, pos: BlockPos) -> Vec<Aabb> {
-    shape_for(state, ShapeUse::Outline)
-        .map(|shape| vec![shape.world_aabb(pos)])
-        .unwrap_or_default()
+    shapes_for(state, ShapeUse::Outline)
+        .into_iter()
+        .flatten()
+        .map(|shape| shape.world_aabb(pos))
+        .collect()
 }
 
 pub fn clip_block_outline(
@@ -37,8 +63,26 @@ pub fn clip_block_outline(
     to: Vec3d,
     pos: BlockPos,
 ) -> Option<BlockHitResult> {
-    let shape = shape_for(state, ShapeUse::Outline)?;
-    clip_aabb(from, to, pos, shape.world_aabb(pos))
+    shapes_for(state, ShapeUse::Outline)
+        .into_iter()
+        .flatten()
+        .filter_map(|shape| clip_aabb(from, to, pos, shape.world_aabb(pos)))
+        .min_by(|left, right| {
+            from.distance_to_sqr(left.location)
+                .total_cmp(&from.distance_to_sqr(right.location))
+        })
+}
+
+fn shapes_for(state: BlockStateId, use_case: ShapeUse) -> [Option<LocalShape>; 2] {
+    match state.0 {
+        terrain_id::SPRUCE_SLAB_BOTTOM => [Some(bottom_slab()), None],
+        terrain_id::SPRUCE_SLAB_TOP => [Some(top_slab()), None],
+        terrain_id::SPRUCE_STAIRS_NORTH => straight_bottom_stair(0.0, 0.0, 1.0, 0.5),
+        terrain_id::SPRUCE_STAIRS_EAST => straight_bottom_stair(0.5, 0.0, 1.0, 1.0),
+        terrain_id::SPRUCE_STAIRS_SOUTH => straight_bottom_stair(0.0, 0.5, 1.0, 1.0),
+        terrain_id::SPRUCE_STAIRS_WEST => straight_bottom_stair(0.0, 0.0, 0.5, 1.0),
+        _ => [shape_for(state, use_case), None],
+    }
 }
 
 fn shape_for(state: BlockStateId, use_case: ShapeUse) -> Option<LocalShape> {
@@ -224,6 +268,33 @@ fn local_box(min_x: f64, min_y: f64, min_z: f64, max_x: f64, max_y: f64, max_z: 
 
 fn full_block() -> LocalShape {
     local_box(0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+}
+
+fn bottom_slab() -> LocalShape {
+    local_box(0.0, 0.0, 0.0, 1.0, 0.5, 1.0)
+}
+
+fn top_slab() -> LocalShape {
+    local_box(0.0, 0.5, 0.0, 1.0, 1.0, 1.0)
+}
+
+fn straight_bottom_stair(
+    upper_min_x: f64,
+    upper_min_z: f64,
+    upper_max_x: f64,
+    upper_max_z: f64,
+) -> [Option<LocalShape>; 2] {
+    [
+        Some(bottom_slab()),
+        Some(local_box(
+            upper_min_x,
+            0.5,
+            upper_min_z,
+            upper_max_x,
+            1.0,
+            upper_max_z,
+        )),
+    ]
 }
 
 fn is_small_flower(id: u32) -> bool {
@@ -1043,5 +1114,37 @@ mod tests {
         )
         .expect("inside ray should produce a hit");
         assert!(inside.inside);
+    }
+
+    #[test]
+    fn spruce_slabs_and_straight_stairs_use_java_shaped_boxes() {
+        let pos = BlockPos::new(1, 2, 3);
+
+        assert_eq!(
+            block_collision_aabbs(state(terrain_id::SPRUCE_SLAB_BOTTOM), pos).collect::<Vec<_>>(),
+            vec![Aabb::new(1.0, 2.0, 3.0, 2.0, 2.5, 4.0)]
+        );
+        assert_eq!(
+            block_collision_aabbs(state(terrain_id::SPRUCE_SLAB_TOP), pos).collect::<Vec<_>>(),
+            vec![Aabb::new(1.0, 2.5, 3.0, 2.0, 3.0, 4.0)]
+        );
+        assert_eq!(
+            block_collision_aabbs(state(terrain_id::SPRUCE_STAIRS_NORTH), pos).collect::<Vec<_>>(),
+            vec![
+                Aabb::new(1.0, 2.0, 3.0, 2.0, 2.5, 4.0),
+                Aabb::new(1.0, 2.5, 3.0, 2.0, 3.0, 3.5),
+            ]
+        );
+        assert_eq!(
+            block_collision_aabbs(state(terrain_id::SPRUCE_STAIRS_EAST), pos).collect::<Vec<_>>(),
+            vec![
+                Aabb::new(1.0, 2.0, 3.0, 2.0, 2.5, 4.0),
+                Aabb::new(1.5, 2.5, 3.0, 2.0, 3.0, 4.0),
+            ]
+        );
+        assert_eq!(
+            block_collision_aabb(state(terrain_id::SPRUCE_STAIRS_NORTH), pos),
+            Some(Aabb::unit_block(pos))
+        );
     }
 }

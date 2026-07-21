@@ -2,13 +2,14 @@
 
 Topic: `starter-farmstead-settlement`
 
-Status: **vision and staged direction accepted 2026-07-21. The first
-standalone building-authoring slice is proven through Tactical 208: a shared
-template/transform/material-role kernel, minimal full-cube palette, original
-cottage and barn, normal persisted chunks, SQLite reopen, and inspected
-production renders. Full settlement placement remains staged behind its own
-structure, overlay, site-plan, and content work. Original terrain and hydrology
-are quality upgrades, not blockers for continued standalone building art.**
+Status: **vision and staged direction accepted 2026-07-21. Tacticals 208 and
+209 prove the standalone building loop and its first human-directed charm
+iteration: shared templates/themes/transforms, a small full-cube plus
+glass/stair/slab palette, version-two cottage and barn, normal persisted chunks,
+SQLite reopen, and inspected production renders. Full settlement placement
+remains staged behind its own structure, overlay, site-plan, and content work.
+Original terrain and hydrology are quality upgrades, not blockers for continued
+standalone building art.**
 
 Last reconciled: **2026-07-21**.
 
@@ -130,9 +131,11 @@ The direction is accepted before all of its consumers are ready:
   [`../structures.md`](../structures.md) explicitly requires that foundation
   before large cross-chunk structures.
 - The generated block-state lane now includes oak/spruce planks, cobblestone,
-  stone bricks, and vertical hay for the building lab. A convincing farm kit
-  still needs roof shapes, fences and gates, doors, windows, farmland, crops,
-  and their collision/render/gameplay facts.
+  stone bricks, vertical hay, glass, and straight spruce stairs/slabs. The
+  extracted and repo-owned asset paths, transforms, light facts, and
+  multi-box collision path cover that first detail family. A convincing farm
+  kit still needs doors, fences and gates, farmland, crops, props, and their
+  collision/render/gameplay facts.
 - The live shared protocol and persisted authored fixture currently prove cow
   and chicken residents. Additional animals must be admitted only after their
   actual shared simulation, persistence, protocol, asset, and render paths are
@@ -705,8 +708,8 @@ approved; do not reserve a block of numbers in advance.
 | ID | Workstream | State | Current evidence or dependency | Next transition |
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
-| `FS-01` | standalone building-authoring lab | `proven` | Tactical 208: shared kernel, cottage, barn/lean-to, 49 lit chunks, SQLite reopen, four inspected renders | gather human visual feedback before selecting the next detail family |
-| `FS-02` | coherent farm block/material/collision kit | `ready` | first five full-cube building states are proven; roof shapes, doors/windows, fences/gates, farmland, and crops remain | choose one coherent family from visual feedback and prove shared render/collision/gameplay facts |
+| `FS-01` | standalone building-authoring lab | `proven` | Tacticals 208–209: shared kernel, version-two cottage/barn/lean-to, 49 lit chunks, SQLite reopen, and two four-view visual reviews | gather human feedback on the charm pass before authoring a second building family or external data format |
+| `FS-02` | coherent farm block/material/collision kit | `active` | five full-cube states plus glass and transform/collision-aware spruce stairs/slabs are proven through Tactical 209; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
 | `FS-05` | starter-content overlay and realized-instance identity | `waiting` | conceptual identity accepted; live descriptor has only profile, seed, and topology | persisted overlay/blueprint/instance version contract lands without changing pure Overworld output |
@@ -752,11 +755,13 @@ series actually begins, not for this documentation-only planning phase.
 
 ## Next Work
 
-Tactical 208 is complete. The immediate farmstead checkpoint is human visual
-feedback on its blind cottage-and-barn baseline. Use that feedback to choose a
-single coherent `FS-02` detail slice—most likely roof shapes plus doors/windows,
-or the fence/gate family—then author one controlled variant before expanding to
-whole-site composition.
+Tactical 209 is complete. The immediate checkpoint is human visual feedback on
+the version-two charm pass. If the building language is accepted, the best
+standalone-authoring follow-up is either one controlled cottage variant plus a
+textual/captured voxel source format, or a pause in building art while `FS-04`
+proves the true structure lifecycle. If the next composition slice needs
+enclosures first, resume `FS-02` with the fence/gate family; do not add doors,
+props, crops, and fences as one undirected content batch.
 
 `FS-04`, the true cross-chunk structure lifecycle, remains the first hard
 blocker for materializing the eventual settlement during normal generation. It
@@ -834,7 +839,8 @@ plan. It does not need recursive jigsaw assembly.
 
 ## Remaining Validation Contract
 
-Tactical 208 proves only the standalone template and persisted-gallery loop.
+Tacticals 208–209 prove only the standalone template, first detail family, and
+persisted-gallery loop.
 Settlement tacticals should additionally plan for:
 
 - deterministic receipts for candidate scores, chosen anchor/rotation, grade
@@ -935,3 +941,4 @@ each composition expansion before moving on.
 - [`../creatures.md`](../creatures.md)
 - [`../lod-architecture.md`](../lod-architecture.md)
 - [`../tactical/208-standalone-building-lab.md`](../tactical/208-standalone-building-lab.md)
+- [`../tactical/209-building-charm-pass.md`](../tactical/209-building-charm-pass.md)

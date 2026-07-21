@@ -10,7 +10,7 @@ use mclone_protocol::{
 
 use crate::{
     ClientInventory, ClientRuntime,
-    block_shapes::{block_collision_aabb, block_outline_aabbs, clip_block_outline},
+    block_shapes::{block_collision_aabbs, block_outline_aabbs, clip_block_outline},
 };
 
 pub const CREATIVE_PICK_RANGE: f64 = 5.0;
@@ -166,7 +166,9 @@ impl ClientRuntime {
         let Some(state) = self.block_state_at_block_pos(pos) else {
             return false;
         };
-        block_collision_aabb(state, pos).is_some_and(|aabb| aabb.contains(point))
+        block_collision_aabbs(state, pos)
+            .into_iter()
+            .any(|aabb| aabb.contains(point))
     }
 
     pub fn pick_block(

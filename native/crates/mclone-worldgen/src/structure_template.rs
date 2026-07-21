@@ -5,7 +5,8 @@ use std::fmt;
 use mclone_core::{BlockPos, ChunkPos};
 
 use crate::block::{
-    OAK_LOG_X, OAK_LOG_Z, RawBlockId, SPRUCE_LOG_X, SPRUCE_LOG_Z, WALL_TORCH_EAST,
+    OAK_LOG_X, OAK_LOG_Z, RawBlockId, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_STAIRS_EAST,
+    SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH, SPRUCE_STAIRS_WEST, WALL_TORCH_EAST,
     WALL_TORCH_NORTH, WALL_TORCH_SOUTH, WALL_TORCH_WEST,
 };
 
@@ -34,6 +35,14 @@ pub enum TemplateMaterialRole {
     TimberX,
     TimberZ,
     Roof,
+    RoofNorth,
+    RoofEast,
+    RoofSouth,
+    RoofWest,
+    RoofSlabBottom,
+    RoofSlabTop,
+    Glazing,
+    Trim,
     Floor,
     Accent,
 }
@@ -430,22 +439,46 @@ fn transform_block_state(
             }
         }
         WALL_TORCH_NORTH | WALL_TORCH_EAST | WALL_TORCH_SOUTH | WALL_TORCH_WEST => {
-            transform_wall_torch(block, mirror, rotation)
+            transform_horizontal_facing(
+                block,
+                [
+                    WALL_TORCH_NORTH,
+                    WALL_TORCH_EAST,
+                    WALL_TORCH_SOUTH,
+                    WALL_TORCH_WEST,
+                ],
+                mirror,
+                rotation,
+            )
+        }
+        SPRUCE_STAIRS_NORTH | SPRUCE_STAIRS_EAST | SPRUCE_STAIRS_SOUTH | SPRUCE_STAIRS_WEST => {
+            transform_horizontal_facing(
+                block,
+                [
+                    SPRUCE_STAIRS_NORTH,
+                    SPRUCE_STAIRS_EAST,
+                    SPRUCE_STAIRS_SOUTH,
+                    SPRUCE_STAIRS_WEST,
+                ],
+                mirror,
+                rotation,
+            )
         }
         _ => block,
     }
 }
 
-fn transform_wall_torch(
+fn transform_horizontal_facing(
     block: RawBlockId,
+    directions: [RawBlockId; 4],
     mirror: TemplateMirror,
     rotation: TemplateRotation,
 ) -> RawBlockId {
     let (mut x, mut z) = match block {
-        WALL_TORCH_NORTH => (0, -1),
-        WALL_TORCH_EAST => (1, 0),
-        WALL_TORCH_SOUTH => (0, 1),
-        WALL_TORCH_WEST => (-1, 0),
+        id if id == directions[0] => (0, -1),
+        id if id == directions[1] => (1, 0),
+        id if id == directions[2] => (0, 1),
+        id if id == directions[3] => (-1, 0),
         _ => unreachable!(),
     };
     match mirror {
@@ -460,10 +493,10 @@ fn transform_wall_torch(
         TemplateRotation::CounterClockwise90 => (z, -x),
     };
     match (x, z) {
-        (0, -1) => WALL_TORCH_NORTH,
-        (1, 0) => WALL_TORCH_EAST,
-        (0, 1) => WALL_TORCH_SOUTH,
-        (-1, 0) => WALL_TORCH_WEST,
+        (0, -1) => directions[0],
+        (1, 0) => directions[1],
+        (0, 1) => directions[2],
+        (-1, 0) => directions[3],
         _ => unreachable!(),
     }
 }
@@ -471,7 +504,10 @@ fn transform_wall_torch(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::{BRICKS, OAK_LOG_X, OAK_LOG_Z, STONE, WALL_TORCH_EAST};
+    use crate::block::{
+        BRICKS, OAK_LOG_X, OAK_LOG_Z, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH, STONE,
+        WALL_TORCH_EAST,
+    };
 
     fn theme() -> StructureMaterialTheme {
         StructureMaterialTheme::new("test-theme")
@@ -551,6 +587,28 @@ mod tests {
             .unwrap();
 
         assert_eq!(placed.blocks[0].block, WALL_TORCH_NORTH);
+    }
+
+    #[test]
+    fn mirror_then_rotation_transforms_stair_facing_state() {
+        let mut builder = StructureTemplateBuilder::new("roof", [1, 1, 1]).unwrap();
+        builder
+            .set(
+                BlockPos::ZERO,
+                TemplateBlockState::Exact(SPRUCE_STAIRS_EAST),
+            )
+            .unwrap();
+        let placed = builder
+            .build()
+            .place(&StructurePlaceSettings {
+                origin: BlockPos::ZERO,
+                rotation: TemplateRotation::Clockwise90,
+                mirror: TemplateMirror::X,
+                theme: &theme(),
+            })
+            .unwrap();
+
+        assert_eq!(placed.blocks[0].block, SPRUCE_STAIRS_NORTH);
     }
 
     #[test]

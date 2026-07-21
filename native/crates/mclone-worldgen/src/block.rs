@@ -217,6 +217,13 @@ pub const SPRUCE_PLANKS: RawBlockId = 210;
 pub const COBBLESTONE: RawBlockId = 211;
 pub const STONE_BRICKS: RawBlockId = 212;
 pub const HAY_BLOCK: RawBlockId = 213;
+pub const GLASS: RawBlockId = 214;
+pub const SPRUCE_STAIRS_NORTH: RawBlockId = 215;
+pub const SPRUCE_STAIRS_EAST: RawBlockId = 216;
+pub const SPRUCE_STAIRS_SOUTH: RawBlockId = 217;
+pub const SPRUCE_STAIRS_WEST: RawBlockId = 218;
+pub const SPRUCE_SLAB_BOTTOM: RawBlockId = 219;
+pub const SPRUCE_SLAB_TOP: RawBlockId = 220;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -360,6 +367,13 @@ impl GeneratedBlockId {
     pub const COBBLESTONE: Self = Self(COBBLESTONE);
     pub const STONE_BRICKS: Self = Self(STONE_BRICKS);
     pub const HAY_BLOCK: Self = Self(HAY_BLOCK);
+    pub const GLASS: Self = Self(GLASS);
+    pub const SPRUCE_STAIRS_NORTH: Self = Self(SPRUCE_STAIRS_NORTH);
+    pub const SPRUCE_STAIRS_EAST: Self = Self(SPRUCE_STAIRS_EAST);
+    pub const SPRUCE_STAIRS_SOUTH: Self = Self(SPRUCE_STAIRS_SOUTH);
+    pub const SPRUCE_STAIRS_WEST: Self = Self(SPRUCE_STAIRS_WEST);
+    pub const SPRUCE_SLAB_BOTTOM: Self = Self(SPRUCE_SLAB_BOTTOM);
+    pub const SPRUCE_SLAB_TOP: Self = Self(SPRUCE_SLAB_TOP);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -460,6 +474,17 @@ pub const fn block_light_opacity(block_id: RawBlockId) -> u8 {
         1
     } else if has_fluid(block_id) {
         1
+    } else if matches!(
+        block_id,
+        GLASS
+            | SPRUCE_STAIRS_NORTH
+            | SPRUCE_STAIRS_EAST
+            | SPRUCE_STAIRS_SOUTH
+            | SPRUCE_STAIRS_WEST
+            | SPRUCE_SLAB_BOTTOM
+            | SPRUCE_SLAB_TOP
+    ) {
+        0
     } else if material_blocks_motion(block_id) {
         15
     } else {
@@ -884,6 +909,11 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         COBBLESTONE => "minecraft:cobblestone",
         STONE_BRICKS => "minecraft:stone_bricks",
         HAY_BLOCK => "minecraft:hay_block",
+        GLASS => "minecraft:glass",
+        SPRUCE_STAIRS_NORTH | SPRUCE_STAIRS_EAST | SPRUCE_STAIRS_SOUTH | SPRUCE_STAIRS_WEST => {
+            "minecraft:spruce_stairs"
+        }
+        SPRUCE_SLAB_BOTTOM | SPRUCE_SLAB_TOP => "minecraft:spruce_slab",
         _ => "minecraft:unknown",
     }
 }
@@ -929,6 +959,9 @@ mod tests {
         assert_eq!(block_light_opacity(PUMPKIN), 15);
         assert_eq!(block_light_opacity(MELON), 15);
         assert_eq!(block_light_opacity(MOSSY_COBBLESTONE), 15);
+        assert_eq!(block_light_opacity(GLASS), 0);
+        assert_eq!(block_light_opacity(SPRUCE_STAIRS_EAST), 0);
+        assert_eq!(block_light_opacity(SPRUCE_SLAB_BOTTOM), 0);
         assert_eq!(block_light_opacity(VINE), 0);
         assert_eq!(block_light_opacity(VINE_NORTH), 0);
         assert_eq!(block_light_opacity(VINE_WEST), 0);

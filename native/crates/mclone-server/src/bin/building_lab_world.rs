@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use mclone_server::write_building_lab_dir;
 
 #[cfg(not(target_arch = "wasm32"))]
-const DEFAULT_WORLD_ROOT: &str = "/tmp/mclone-building-lab";
+const DEFAULT_WORLD_ROOT: &str = "/tmp/mclone-building-lab-v2";
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {

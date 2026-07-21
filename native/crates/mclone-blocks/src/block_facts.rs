@@ -134,6 +134,13 @@ pub mod terrain_id {
     pub const HORN_CORAL_WALL_FAN_EAST: u32 = 206;
     pub const HORN_CORAL_WALL_FAN_SOUTH: u32 = 207;
     pub const HORN_CORAL_WALL_FAN_WEST: u32 = 208;
+    pub const GLASS: u32 = 214;
+    pub const SPRUCE_STAIRS_NORTH: u32 = 215;
+    pub const SPRUCE_STAIRS_EAST: u32 = 216;
+    pub const SPRUCE_STAIRS_SOUTH: u32 = 217;
+    pub const SPRUCE_STAIRS_WEST: u32 = 218;
+    pub const SPRUCE_SLAB_BOTTOM: u32 = 219;
+    pub const SPRUCE_SLAB_TOP: u32 = 220;
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

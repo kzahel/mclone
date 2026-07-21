@@ -63,6 +63,8 @@ const fn visual_class_name(class: FirstPartyVisualClass) -> &'static str {
     match class {
         FirstPartyVisualClass::Empty => "empty",
         FirstPartyVisualClass::Solid => "solid",
+        FirstPartyVisualClass::Slab => "slab",
+        FirstPartyVisualClass::Stair => "stair",
         FirstPartyVisualClass::CrossedPlane => "crossed_plane",
         FirstPartyVisualClass::Flat => "flat",
         FirstPartyVisualClass::Fluid => "fluid",

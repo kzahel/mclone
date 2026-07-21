@@ -108,7 +108,9 @@ impl BlockStateRecord {
         property == "waterlogged"
             && matches!(
                 self.block.path(),
-                "tube_coral"
+                "spruce_stairs"
+                    | "spruce_slab"
+                    | "tube_coral"
                     | "brain_coral"
                     | "bubble_coral"
                     | "fire_coral"
@@ -588,6 +590,32 @@ const FACING_NORTH: &[(&str, &str)] = &[("facing", "north")];
 const FACING_EAST: &[(&str, &str)] = &[("facing", "east")];
 const FACING_SOUTH: &[(&str, &str)] = &[("facing", "south")];
 const FACING_WEST: &[(&str, &str)] = &[("facing", "west")];
+const STAIRS_NORTH_BOTTOM_STRAIGHT: &[(&str, &str)] = &[
+    ("facing", "north"),
+    ("half", "bottom"),
+    ("shape", "straight"),
+    ("waterlogged", "false"),
+];
+const STAIRS_EAST_BOTTOM_STRAIGHT: &[(&str, &str)] = &[
+    ("facing", "east"),
+    ("half", "bottom"),
+    ("shape", "straight"),
+    ("waterlogged", "false"),
+];
+const STAIRS_SOUTH_BOTTOM_STRAIGHT: &[(&str, &str)] = &[
+    ("facing", "south"),
+    ("half", "bottom"),
+    ("shape", "straight"),
+    ("waterlogged", "false"),
+];
+const STAIRS_WEST_BOTTOM_STRAIGHT: &[(&str, &str)] = &[
+    ("facing", "west"),
+    ("half", "bottom"),
+    ("shape", "straight"),
+    ("waterlogged", "false"),
+];
+const SLAB_BOTTOM: &[(&str, &str)] = &[("type", "bottom"), ("waterlogged", "false")];
+const SLAB_TOP: &[(&str, &str)] = &[("type", "top"), ("waterlogged", "false")];
 const AGE_0: &[(&str, &str)] = &[("age", "0")];
 const AGE_3: &[(&str, &str)] = &[("age", "3")];
 const AGE_20: &[(&str, &str)] = &[("age", "20")];
@@ -962,6 +990,13 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
     (211, "minecraft:cobblestone", EMPTY_PROPS),
     (212, "minecraft:stone_bricks", EMPTY_PROPS),
     (213, "minecraft:hay_block", AXIS_Y),
+    (214, "minecraft:glass", EMPTY_PROPS),
+    (215, "minecraft:spruce_stairs", STAIRS_NORTH_BOTTOM_STRAIGHT),
+    (216, "minecraft:spruce_stairs", STAIRS_EAST_BOTTOM_STRAIGHT),
+    (217, "minecraft:spruce_stairs", STAIRS_SOUTH_BOTTOM_STRAIGHT),
+    (218, "minecraft:spruce_stairs", STAIRS_WEST_BOTTOM_STRAIGHT),
+    (219, "minecraft:spruce_slab", SLAB_BOTTOM),
+    (220, "minecraft:spruce_slab", SLAB_TOP),
 ];
 
 #[cfg(test)]
@@ -980,7 +1015,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 214);
+        assert_eq!(registry.len(), 221);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -1020,6 +1055,16 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:hay_block[axis=y]"),
             Some(BlockStateId(213))
+        );
+        assert_eq!(
+            registry.id_for_key(
+                "minecraft:spruce_stairs[facing=east,half=bottom,shape=straight,waterlogged=false]"
+            ),
+            Some(BlockStateId(216))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:spruce_slab[type=top,waterlogged=false]"),
+            Some(BlockStateId(220))
         );
         assert_eq!(
             registry.id_for_key("minecraft:clay"),

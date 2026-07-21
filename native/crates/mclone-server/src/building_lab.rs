@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkStatus};
 use mclone_worldgen::block::{
-    AIR, ALLIUM, BRICKS, COARSE_DIRT, COBBLESTONE, CORNFLOWER, DANDELION, DIRT, GRASS_BLOCK,
-    GRAVEL, HAY_BLOCK, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, OAK_PLANKS, POPPY, RED_TERRACOTTA,
-    SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_PLANKS, STONE, STONE_BRICKS, TORCH,
-    WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
+    AIR, ALLIUM, BRICKS, COARSE_DIRT, COBBLESTONE, CORNFLOWER, DANDELION, DIRT, GLASS, GRASS_BLOCK,
+    GRAVEL, HAY_BLOCK, MOSSY_COBBLESTONE, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, OAK_PLANKS, POPPY,
+    RED_TERRACOTTA, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_PLANKS, SPRUCE_SLAB_BOTTOM,
+    SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH,
+    SPRUCE_STAIRS_WEST, STONE, STONE_BRICKS, TORCH, WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
 };
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 use mclone_worldgen::structure_template::{
@@ -29,15 +30,15 @@ use crate::{
     WorldGenerationProfile,
 };
 
-pub const BUILDING_LAB_GALLERY_ID: &str = "standalone-building-lab-v1";
+pub const BUILDING_LAB_GALLERY_ID: &str = "standalone-building-lab-v2";
 pub const BUILDING_LAB_MARKER_FILE: &str = "mclone-building-lab.json";
 pub const BUILDING_LAB_SCHEMA_VERSION: u32 = 1;
 pub const BUILDING_LAB_SEED: i64 = 20_801;
 pub const BUILDING_LAB_VOID_PADDING_RADIUS: i32 = 3;
 
-const COTTAGE_ORIGIN: BlockPos = BlockPos::new(-29, 64, -10);
-const BARN_ORIGIN: BlockPos = BlockPos::new(7, 64, -12);
-const BARN_LEAN_TO_ORIGIN: BlockPos = BlockPos::new(28, 64, -7);
+const COTTAGE_ORIGIN: BlockPos = BlockPos::new(-29, 63, -10);
+const BARN_ORIGIN: BlockPos = BlockPos::new(7, 63, -12);
+const BARN_LEAN_TO_ORIGIN: BlockPos = BlockPos::new(28, 63, -7);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -179,111 +180,143 @@ pub fn building_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
 }
 
 pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
-    let mut builder = StructureTemplateBuilder::new("farmstead-cottage-a-v1", [15, 12, 17])?;
+    let mut builder = StructureTemplateBuilder::new("farmstead-cottage-a-v2", [15, 15, 17])?;
     let foundation = role(TemplateMaterialRole::Foundation);
     let wall = role(TemplateMaterialRole::Wall);
     let timber_y = role(TemplateMaterialRole::TimberY);
     let timber_x = role(TemplateMaterialRole::TimberX);
     let timber_z = role(TemplateMaterialRole::TimberZ);
-    let roof = role(TemplateMaterialRole::Roof);
+    let roof_east = role(TemplateMaterialRole::RoofEast);
+    let roof_west = role(TemplateMaterialRole::RoofWest);
+    let roof_slab = role(TemplateMaterialRole::RoofSlabBottom);
     let floor = role(TemplateMaterialRole::Floor);
+    let glazing = role(TemplateMaterialRole::Glazing);
     let accent = role(TemplateMaterialRole::Accent);
 
     builder.fill_box(BlockPos::new(1, 0, 2), BlockPos::new(14, 1, 13), foundation)?;
-    builder.fill_box(BlockPos::new(1, 1, 2), BlockPos::new(14, 6, 13), wall)?;
+    builder.fill_box(BlockPos::new(1, 1, 2), BlockPos::new(14, 7, 13), wall)?;
     builder.fill_box(
-        BlockPos::new(2, 1, 3),
+        BlockPos::new(2, 2, 3),
         BlockPos::new(13, 6, 12),
         TemplateBlockState::Exact(AIR),
     )?;
     builder.fill_box(BlockPos::new(2, 1, 3), BlockPos::new(13, 2, 12), floor)?;
 
+    // Restraint here is intentional: the first pass outlined nearly every
+    // opening with dark full logs. Four structural corners and one high belt
+    // preserve the timber language while allowing the plaster to read.
     for &(x, z) in &[(1, 2), (13, 2), (1, 12), (13, 12)] {
-        column(&mut builder, x, z, 1, 6, timber_y)?;
+        column(&mut builder, x, z, 1, 7, timber_y)?;
     }
-    for y in [1, 5] {
-        line_x(&mut builder, 1, 14, y, 2, timber_x)?;
-        line_x(&mut builder, 1, 14, y, 12, timber_x)?;
-        line_z(&mut builder, 1, 2, 13, y, timber_z)?;
-        line_z(&mut builder, 13, 2, 13, y, timber_z)?;
-    }
+    line_x(&mut builder, 1, 14, 6, 2, timber_x)?;
+    line_x(&mut builder, 1, 14, 6, 12, timber_x)?;
+    line_z(&mut builder, 1, 2, 13, 6, timber_z)?;
+    line_z(&mut builder, 13, 2, 13, 6, timber_z)?;
 
-    // South facade: a central two-block entrance and two framed windows.
+    // The south facade is intentionally unbalanced: broad kitchen glazing and
+    // a flower box to the left, an offset doorway, and a smaller raised pane.
     builder.fill_box(
-        BlockPos::new(7, 2, 12),
-        BlockPos::new(9, 5, 13),
+        BlockPos::new(9, 2, 12),
+        BlockPos::new(10, 5, 13),
         TemplateBlockState::Exact(AIR),
     )?;
-    framed_window_z(&mut builder, 3, 5, 12)?;
-    framed_window_z(&mut builder, 10, 12, 12)?;
-    column(&mut builder, 6, 12, 1, 6, timber_y)?;
-    column(&mut builder, 9, 12, 1, 6, timber_y)?;
-    line_x(&mut builder, 6, 10, 5, 12, timber_x)?;
+    builder.fill_box(BlockPos::new(3, 2, 12), BlockPos::new(6, 4, 13), glazing)?;
+    builder.fill_box(BlockPos::new(11, 3, 12), BlockPos::new(13, 5, 13), glazing)?;
+    line_x(&mut builder, 3, 6, 4, 12, timber_x)?;
+    line_x(&mut builder, 11, 13, 5, 12, timber_x)?;
+    builder.fill_box(BlockPos::new(3, 1, 13), BlockPos::new(6, 2, 14), floor)?;
+    builder.set(BlockPos::new(3, 2, 13), TemplateBlockState::Exact(POPPY))?;
+    builder.set(
+        BlockPos::new(5, 2, 13),
+        TemplateBlockState::Exact(CORNFLOWER),
+    )?;
 
-    // Side windows keep the otherwise solid full-cube prototype readable.
-    framed_window_x(&mut builder, 1, 5, 7)?;
-    framed_window_x(&mut builder, 13, 5, 7)?;
+    // Side panes are offset rather than mirrored, giving each approach a
+    // slightly different read.
+    builder.fill_box(BlockPos::new(1, 2, 6), BlockPos::new(2, 4, 9), glazing)?;
+    line_z(&mut builder, 1, 6, 9, 4, timber_z)?;
+    builder.fill_box(BlockPos::new(13, 3, 4), BlockPos::new(14, 5, 6), glazing)?;
+    line_z(&mut builder, 13, 4, 6, 5, timber_z)?;
 
-    // Filled gables sit inside a stepped, full-cube roof silhouette.
-    builder.fill_box(BlockPos::new(2, 6, 2), BlockPos::new(13, 7, 3), wall)?;
-    builder.fill_box(BlockPos::new(4, 7, 2), BlockPos::new(11, 8, 3), wall)?;
-    builder.fill_box(BlockPos::new(6, 8, 2), BlockPos::new(9, 9, 3), wall)?;
-    builder.fill_box(BlockPos::new(2, 6, 12), BlockPos::new(13, 7, 13), wall)?;
-    builder.fill_box(BlockPos::new(4, 7, 12), BlockPos::new(11, 8, 13), wall)?;
-    builder.fill_box(BlockPos::new(6, 8, 12), BlockPos::new(9, 9, 13), wall)?;
-    column(&mut builder, 7, 2, 6, 9, timber_y)?;
-    column(&mut builder, 7, 12, 6, 9, timber_y)?;
-    line_x(&mut builder, 2, 13, 6, 2, timber_x)?;
-    line_x(&mut builder, 2, 13, 6, 12, timber_x)?;
+    // Filled plaster gables sit beneath a continuous 45-degree stair roof.
+    // Each row climbs toward the ridge and keeps the eaves one block beyond
+    // both facades.
+    for layer in 0..=6 {
+        let y = 6 + layer;
+        let left_roof_x = layer;
+        let right_roof_x = 14 - layer;
+        if layer > 0 {
+            builder.fill_box(
+                BlockPos::new(left_roof_x + 1, y, 2),
+                BlockPos::new(right_roof_x, y + 1, 3),
+                wall,
+            )?;
+            builder.fill_box(
+                BlockPos::new(left_roof_x + 1, y, 12),
+                BlockPos::new(right_roof_x, y + 1, 13),
+                wall,
+            )?;
+        }
+        line_z(&mut builder, left_roof_x, 1, 14, y, roof_east)?;
+        line_z(&mut builder, right_roof_x, 1, 14, y, roof_west)?;
+    }
+    line_z(&mut builder, 7, 1, 14, 13, roof_slab)?;
+    column(&mut builder, 7, 2, 6, 13, timber_y)?;
+    column(&mut builder, 7, 12, 6, 13, timber_y)?;
+    builder.fill_box(BlockPos::new(6, 8, 12), BlockPos::new(7, 10, 13), glazing)?;
+    builder.fill_box(BlockPos::new(8, 8, 12), BlockPos::new(9, 10, 13), glazing)?;
 
-    roof_band(&mut builder, 0, 3, 6, 1, 14, roof)?;
-    roof_band(&mut builder, 12, 15, 6, 1, 14, roof)?;
-    roof_band(&mut builder, 2, 5, 7, 1, 14, roof)?;
-    roof_band(&mut builder, 10, 13, 7, 1, 14, roof)?;
-    roof_band(&mut builder, 4, 7, 8, 1, 14, roof)?;
-    roof_band(&mut builder, 8, 11, 8, 1, 14, roof)?;
-    roof_band(&mut builder, 6, 9, 9, 1, 14, roof)?;
-
-    // A shallow porch is part of the authored cottage rather than a random
-    // facade mutation. Its marker leaves room for a future path socket.
+    // A small offset porch gives the entry depth without hiding the facade.
     builder.fill_box(
-        BlockPos::new(5, 0, 13),
-        BlockPos::new(11, 1, 16),
+        BlockPos::new(8, 0, 13),
+        BlockPos::new(12, 1, 15),
         foundation,
     )?;
-    builder.fill_box(BlockPos::new(5, 1, 13), BlockPos::new(11, 2, 16), floor)?;
-    column(&mut builder, 5, 15, 2, 6, timber_y)?;
-    column(&mut builder, 10, 15, 2, 6, timber_y)?;
-    builder.fill_box(BlockPos::new(4, 5, 12), BlockPos::new(6, 6, 16), roof)?;
-    builder.fill_box(BlockPos::new(10, 5, 12), BlockPos::new(12, 6, 16), roof)?;
-    builder.fill_box(BlockPos::new(6, 6, 12), BlockPos::new(10, 7, 16), roof)?;
+    builder.fill_box(BlockPos::new(8, 1, 13), BlockPos::new(12, 2, 15), floor)?;
+    builder.fill_box(BlockPos::new(8, 1, 15), BlockPos::new(12, 2, 16), roof_slab)?;
+    column(&mut builder, 8, 13, 2, 5, timber_y)?;
+    column(&mut builder, 11, 13, 2, 5, timber_y)?;
+    builder.fill_box(BlockPos::new(7, 5, 12), BlockPos::new(13, 6, 14), roof_slab)?;
     builder.set(
-        BlockPos::new(6, 3, 13),
-        TemplateBlockState::Exact(WALL_TORCH_SOUTH),
-    )?;
-    builder.set(
-        BlockPos::new(9, 3, 13),
+        BlockPos::new(7, 3, 13),
         TemplateBlockState::Exact(WALL_TORCH_SOUTH),
     )?;
 
-    // The chimney is deliberately off-center and rises clear of the roof.
-    builder.fill_box(BlockPos::new(10, 5, 5), BlockPos::new(12, 11, 7), accent)?;
-    builder.set(BlockPos::new(10, 11, 5), accent)?;
-    builder.set(BlockPos::new(11, 11, 6), accent)?;
+    // A narrow off-center chimney interrupts the roof line without becoming a
+    // second tower. The sparse cap keeps a handmade silhouette.
+    builder.fill_box(BlockPos::new(10, 5, 5), BlockPos::new(11, 14, 7), accent)?;
+    builder.set(BlockPos::new(9, 14, 5), accent)?;
+    builder.set(BlockPos::new(11, 14, 6), accent)?;
 
-    builder.marker(BlockPos::new(8, 2, 16), "entrance:south")?;
+    // A few foundation substitutions prevent the base from reading as a
+    // perfectly clean extrusion while keeping weathering deterministic.
+    for pos in [
+        BlockPos::new(2, 0, 12),
+        BlockPos::new(5, 0, 12),
+        BlockPos::new(12, 0, 12),
+        BlockPos::new(1, 0, 5),
+        BlockPos::new(13, 0, 9),
+    ] {
+        builder.set(pos, TemplateBlockState::Exact(MOSSY_COBBLESTONE))?;
+    }
+
+    builder.marker(BlockPos::new(9, 2, 16), "entrance:south")?;
     builder.marker(BlockPos::new(1, 2, 7), "attachment:west-yard")?;
     Ok(builder.build())
 }
 
 pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
-    let mut builder = StructureTemplateBuilder::new("farmstead-barn-core-a-v1", [21, 14, 18])?;
+    let mut builder = StructureTemplateBuilder::new("farmstead-barn-core-a-v2", [21, 14, 18])?;
     let foundation = role(TemplateMaterialRole::Foundation);
     let wall = role(TemplateMaterialRole::Wall);
     let timber_y = role(TemplateMaterialRole::TimberY);
     let timber_x = role(TemplateMaterialRole::TimberX);
     let timber_z = role(TemplateMaterialRole::TimberZ);
-    let roof = role(TemplateMaterialRole::Roof);
+    let roof_east = role(TemplateMaterialRole::RoofEast);
+    let roof_west = role(TemplateMaterialRole::RoofWest);
+    let roof_slab = role(TemplateMaterialRole::RoofSlabBottom);
+    let glazing = role(TemplateMaterialRole::Glazing);
+    let trim = role(TemplateMaterialRole::Trim);
     let floor = role(TemplateMaterialRole::Floor);
     let accent = role(TemplateMaterialRole::Accent);
 
@@ -316,40 +349,55 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
 
     // The open central bay makes the barn legible at arrival distance.
     builder.fill_box(
-        BlockPos::new(7, 2, 15),
-        BlockPos::new(14, 7, 16),
+        BlockPos::new(8, 2, 15),
+        BlockPos::new(13, 7, 16),
         TemplateBlockState::Exact(AIR),
     )?;
-    column(&mut builder, 6, 15, 1, 8, timber_y)?;
-    column(&mut builder, 14, 15, 1, 8, timber_y)?;
-    line_x(&mut builder, 6, 15, 7, 15, timber_x)?;
+    column(&mut builder, 7, 15, 1, 8, trim)?;
+    column(&mut builder, 13, 15, 1, 8, trim)?;
+    line_x(&mut builder, 7, 14, 7, 15, trim)?;
     framed_window_z(&mut builder, 3, 5, 15)?;
     framed_window_z(&mut builder, 16, 18, 15)?;
     framed_window_x(&mut builder, 1, 5, 7)?;
+    white_frame_window_z(&mut builder, 3, 5, 15, trim)?;
+    white_frame_window_z(&mut builder, 16, 18, 15, trim)?;
 
-    builder.fill_box(BlockPos::new(3, 8, 2), BlockPos::new(18, 9, 3), wall)?;
-    builder.fill_box(BlockPos::new(6, 9, 2), BlockPos::new(15, 10, 3), wall)?;
-    builder.fill_box(BlockPos::new(9, 10, 2), BlockPos::new(12, 11, 3), wall)?;
-    builder.fill_box(BlockPos::new(3, 8, 15), BlockPos::new(18, 9, 16), wall)?;
-    builder.fill_box(BlockPos::new(6, 9, 15), BlockPos::new(15, 10, 16), wall)?;
-    builder.fill_box(BlockPos::new(9, 10, 15), BlockPos::new(12, 11, 16), wall)?;
-    builder.fill_box(
-        BlockPos::new(9, 8, 15),
-        BlockPos::new(12, 10, 16),
-        TemplateBlockState::Exact(AIR),
-    )?;
-    column(&mut builder, 10, 2, 8, 11, timber_y)?;
-    column(&mut builder, 10, 15, 10, 11, timber_y)?;
-    line_x(&mut builder, 3, 18, 8, 2, timber_x)?;
-    line_x(&mut builder, 3, 18, 8, 15, timber_x)?;
+    // A thin four-stage gambrel roof keeps the broad barn mass but removes the
+    // first pass's three-block-deep full-cube terraces.
+    for z in [2, 15] {
+        builder.fill_box(BlockPos::new(1, 8, z), BlockPos::new(20, 9, z + 1), wall)?;
+        builder.fill_box(BlockPos::new(4, 9, z), BlockPos::new(17, 10, z + 1), wall)?;
+        builder.fill_box(BlockPos::new(7, 10, z), BlockPos::new(14, 11, z + 1), wall)?;
+        builder.fill_box(BlockPos::new(10, 11, z), BlockPos::new(11, 12, z + 1), wall)?;
+    }
+    builder.fill_box(BlockPos::new(9, 8, 15), BlockPos::new(12, 10, 16), glazing)?;
+    column(&mut builder, 8, 15, 8, 11, trim)?;
+    column(&mut builder, 12, 15, 8, 11, trim)?;
+    line_x(&mut builder, 8, 13, 10, 15, trim)?;
 
-    roof_band(&mut builder, 0, 3, 8, 1, 17, roof)?;
-    roof_band(&mut builder, 18, 21, 8, 1, 17, roof)?;
-    roof_band(&mut builder, 3, 6, 9, 1, 17, roof)?;
-    roof_band(&mut builder, 15, 18, 9, 1, 17, roof)?;
-    roof_band(&mut builder, 6, 9, 10, 1, 17, roof)?;
-    roof_band(&mut builder, 12, 15, 10, 1, 17, roof)?;
-    roof_band(&mut builder, 9, 12, 11, 1, 17, roof)?;
+    for &(x, y, state) in &[
+        (2, 8, roof_east),
+        (5, 9, roof_east),
+        (8, 10, roof_east),
+        (9, 11, roof_east),
+        (18, 8, roof_west),
+        (15, 9, roof_west),
+        (12, 10, roof_west),
+        (11, 11, roof_west),
+    ] {
+        line_z(&mut builder, x, 1, 17, y, state)?;
+    }
+    for &(min_x, max_x, y) in &[
+        (0, 2, 8),
+        (19, 21, 8),
+        (3, 5, 9),
+        (16, 18, 9),
+        (6, 8, 10),
+        (13, 15, 10),
+    ] {
+        roof_band(&mut builder, min_x, max_x, y, 1, 17, roof_slab)?;
+    }
+    line_z(&mut builder, 10, 1, 17, 12, roof_slab)?;
 
     // Hay and interior posts are fixed scene dressing, visible through the
     // broad entrance but still replaceable by later marker processors.
@@ -373,11 +421,12 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
 }
 
 pub fn barn_lean_to_template() -> Result<StructureTemplate, TemplateError> {
-    let mut builder = StructureTemplateBuilder::new("farmstead-barn-lean-to-a-v1", [7, 8, 13])?;
+    let mut builder = StructureTemplateBuilder::new("farmstead-barn-lean-to-a-v2", [7, 8, 13])?;
     let foundation = role(TemplateMaterialRole::Foundation);
     let timber_y = role(TemplateMaterialRole::TimberY);
     let timber_z = role(TemplateMaterialRole::TimberZ);
-    let roof = role(TemplateMaterialRole::Roof);
+    let roof_west = role(TemplateMaterialRole::RoofWest);
+    let roof_slab = role(TemplateMaterialRole::RoofSlabBottom);
     let floor = role(TemplateMaterialRole::Floor);
     let accent = role(TemplateMaterialRole::Accent);
 
@@ -388,9 +437,11 @@ pub fn barn_lean_to_template() -> Result<StructureTemplate, TemplateError> {
         column(&mut builder, 6, z, 2, 5, timber_y)?;
     }
     line_z(&mut builder, 6, 0, 13, 4, timber_z)?;
-    builder.fill_box(BlockPos::new(0, 6, 0), BlockPos::new(3, 7, 13), roof)?;
-    builder.fill_box(BlockPos::new(2, 5, 0), BlockPos::new(5, 6, 13), roof)?;
-    builder.fill_box(BlockPos::new(4, 4, 0), BlockPos::new(7, 5, 13), roof)?;
+    line_z(&mut builder, 0, 0, 13, 6, roof_slab)?;
+    line_z(&mut builder, 1, 0, 13, 5, roof_west)?;
+    builder.fill_box(BlockPos::new(2, 5, 0), BlockPos::new(4, 6, 13), roof_slab)?;
+    line_z(&mut builder, 4, 0, 13, 4, roof_west)?;
+    builder.fill_box(BlockPos::new(5, 4, 0), BlockPos::new(7, 5, 13), roof_slab)?;
     builder.fill_box(BlockPos::new(4, 2, 2), BlockPos::new(7, 4, 5), accent)?;
     builder.fill_box(BlockPos::new(2, 2, 8), BlockPos::new(6, 3, 11), accent)?;
     builder.marker(BlockPos::new(0, 2, 6), "attachment:west-barn")?;
@@ -399,25 +450,41 @@ pub fn barn_lean_to_template() -> Result<StructureTemplate, TemplateError> {
 }
 
 fn cottage_theme() -> StructureMaterialTheme {
-    StructureMaterialTheme::new("warm-oak-and-plaster-v1")
+    StructureMaterialTheme::new("warm-oak-and-plaster-v2")
         .with(TemplateMaterialRole::Foundation, COBBLESTONE)
         .with(TemplateMaterialRole::Wall, WHITE_TERRACOTTA)
         .with(TemplateMaterialRole::TimberY, OAK_LOG)
         .with(TemplateMaterialRole::TimberX, OAK_LOG_X)
         .with(TemplateMaterialRole::TimberZ, OAK_LOG_Z)
         .with(TemplateMaterialRole::Roof, SPRUCE_PLANKS)
+        .with(TemplateMaterialRole::RoofNorth, SPRUCE_STAIRS_NORTH)
+        .with(TemplateMaterialRole::RoofEast, SPRUCE_STAIRS_EAST)
+        .with(TemplateMaterialRole::RoofSouth, SPRUCE_STAIRS_SOUTH)
+        .with(TemplateMaterialRole::RoofWest, SPRUCE_STAIRS_WEST)
+        .with(TemplateMaterialRole::RoofSlabBottom, SPRUCE_SLAB_BOTTOM)
+        .with(TemplateMaterialRole::RoofSlabTop, SPRUCE_SLAB_TOP)
+        .with(TemplateMaterialRole::Glazing, GLASS)
+        .with(TemplateMaterialRole::Trim, OAK_PLANKS)
         .with(TemplateMaterialRole::Floor, OAK_PLANKS)
         .with(TemplateMaterialRole::Accent, BRICKS)
 }
 
 fn barn_theme() -> StructureMaterialTheme {
-    StructureMaterialTheme::new("red-spruce-working-barn-v1")
+    StructureMaterialTheme::new("red-spruce-working-barn-v2")
         .with(TemplateMaterialRole::Foundation, STONE_BRICKS)
         .with(TemplateMaterialRole::Wall, RED_TERRACOTTA)
         .with(TemplateMaterialRole::TimberY, SPRUCE_LOG)
         .with(TemplateMaterialRole::TimberX, SPRUCE_LOG_X)
         .with(TemplateMaterialRole::TimberZ, SPRUCE_LOG_Z)
         .with(TemplateMaterialRole::Roof, SPRUCE_PLANKS)
+        .with(TemplateMaterialRole::RoofNorth, SPRUCE_STAIRS_NORTH)
+        .with(TemplateMaterialRole::RoofEast, SPRUCE_STAIRS_EAST)
+        .with(TemplateMaterialRole::RoofSouth, SPRUCE_STAIRS_SOUTH)
+        .with(TemplateMaterialRole::RoofWest, SPRUCE_STAIRS_WEST)
+        .with(TemplateMaterialRole::RoofSlabBottom, SPRUCE_SLAB_BOTTOM)
+        .with(TemplateMaterialRole::RoofSlabTop, SPRUCE_SLAB_TOP)
+        .with(TemplateMaterialRole::Glazing, GLASS)
+        .with(TemplateMaterialRole::Trim, WHITE_TERRACOTTA)
         .with(TemplateMaterialRole::Floor, OAK_PLANKS)
         .with(TemplateMaterialRole::Accent, HAY_BLOCK)
 }
@@ -500,7 +567,7 @@ fn framed_window_z(
     builder.fill_box(
         BlockPos::new(min_x, 2, z),
         BlockPos::new(max_x_exclusive, 4, z + 1),
-        TemplateBlockState::Exact(AIR),
+        role(TemplateMaterialRole::Glazing),
     )?;
     column(
         builder,
@@ -538,7 +605,7 @@ fn framed_window_x(
     builder.fill_box(
         BlockPos::new(x, 2, min_z),
         BlockPos::new(x + 1, 4, max_z_exclusive),
-        TemplateBlockState::Exact(AIR),
+        role(TemplateMaterialRole::Glazing),
     )?;
     column(
         builder,
@@ -564,6 +631,19 @@ fn framed_window_x(
         4,
         role(TemplateMaterialRole::TimberZ),
     )?;
+    Ok(())
+}
+
+fn white_frame_window_z(
+    builder: &mut StructureTemplateBuilder,
+    min_x: i32,
+    max_x_exclusive: i32,
+    z: i32,
+    trim: TemplateBlockState,
+) -> Result<(), TemplateError> {
+    column(builder, min_x - 1, z, 1, 5, trim)?;
+    column(builder, max_x_exclusive, z, 1, 5, trim)?;
+    line_x(builder, min_x - 1, max_x_exclusive + 1, 4, z, trim)?;
     Ok(())
 }
 
@@ -824,7 +904,7 @@ mod tests {
         let barn = barn_core_template().unwrap();
         let lean_to = barn_lean_to_template().unwrap();
 
-        assert_eq!(cottage.size(), [15, 12, 17]);
+        assert_eq!(cottage.size(), [15, 15, 17]);
         assert!(cottage.blocks().len() > 900);
         assert_eq!(cottage.markers().len(), 2);
         assert_eq!(barn.size(), [21, 14, 18]);
@@ -850,8 +930,12 @@ mod tests {
             BlockStateId(u32::from(COBBLESTONE))
         );
         assert_eq!(
-            block_at(&records, COTTAGE_ORIGIN.offset(7, 9, 4)),
-            BlockStateId(u32::from(SPRUCE_PLANKS))
+            block_at(&records, COTTAGE_ORIGIN.offset(0, 6, 4)),
+            BlockStateId(u32::from(SPRUCE_STAIRS_EAST))
+        );
+        assert_eq!(
+            block_at(&records, COTTAGE_ORIGIN.offset(3, 2, 12)),
+            BlockStateId(u32::from(GLASS))
         );
         assert_eq!(
             block_at(&records, BARN_ORIGIN.offset(1, 3, 2)),
@@ -860,6 +944,18 @@ mod tests {
         assert_eq!(
             block_at(&records, BARN_ORIGIN.offset(3, 3, 5)),
             BlockStateId(u32::from(HAY_BLOCK))
+        );
+        assert_eq!(
+            block_at(&records, BARN_ORIGIN.offset(3, 2, 15)),
+            BlockStateId(u32::from(GLASS))
+        );
+        assert_eq!(
+            block_at(&records, BARN_ORIGIN.offset(2, 3, 15)),
+            BlockStateId(u32::from(WHITE_TERRACOTTA))
+        );
+        assert_eq!(
+            block_at(&records, BARN_ORIGIN.offset(2, 8, 4)),
+            BlockStateId(u32::from(SPRUCE_STAIRS_EAST))
         );
     }
 

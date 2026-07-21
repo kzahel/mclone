@@ -9,6 +9,8 @@ use crate::{AssetPath, BlockStateRecord, BlockStateRegistry, ResourceLocation};
 pub enum FirstPartyVisualClass {
     Empty,
     Solid,
+    Slab,
+    Stair,
     CrossedPlane,
     Flat,
     Fluid,
@@ -64,8 +66,11 @@ pub fn canonical_first_party_asset_inventory() -> CanonicalFirstPartyAssetInvent
         .map(|state| {
             let class = visual_class(state.block.path());
             let material = (class != FirstPartyVisualClass::Empty).then(|| {
-                ResourceLocation::new("mclone", format!("block/{}", state.block.path()))
-                    .expect("registry block paths produce valid first-party material ids")
+                ResourceLocation::new(
+                    "mclone",
+                    format!("block/{}", material_path(state.block.path())),
+                )
+                .expect("registry block paths produce valid first-party material ids")
             });
             FirstPartyBlockVisual {
                 state,
@@ -153,6 +158,8 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
     match block {
         "air" | "cave_air" => FirstPartyVisualClass::Empty,
         "water" | "lava" => FirstPartyVisualClass::Fluid,
+        "spruce_slab" => FirstPartyVisualClass::Slab,
+        "spruce_stairs" => FirstPartyVisualClass::Stair,
         "lily_pad" => FirstPartyVisualClass::Flat,
         "grass"
         | "tall_grass"
@@ -202,6 +209,13 @@ fn visual_class(block: &str) -> FirstPartyVisualClass {
     }
 }
 
+fn material_path(block: &str) -> &str {
+    match block {
+        "spruce_slab" | "spruce_stairs" => "spruce_planks",
+        _ => block,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,7 +224,7 @@ mod tests {
     fn canonical_inventory_covers_every_repo_owned_runtime_block_state() {
         let inventory = canonical_first_party_asset_inventory();
 
-        assert_eq!(inventory.block_visuals.len(), 214);
+        assert_eq!(inventory.block_visuals.len(), 221);
         assert_eq!(
             inventory
                 .block_visuals
@@ -218,11 +232,19 @@ mod tests {
                 .map(|visual| visual.state.canonical_key())
                 .collect::<BTreeSet<_>>()
                 .len(),
-            214
+            221
         );
         assert!(inventory.block_visuals.iter().any(|visual| {
             visual.state.block.to_string() == "minecraft:water"
                 && visual.class == FirstPartyVisualClass::Fluid
+        }));
+        assert!(inventory.block_visuals.iter().any(|visual| {
+            visual.state.block.to_string() == "minecraft:spruce_stairs"
+                && visual.class == FirstPartyVisualClass::Stair
+                && visual
+                    .material
+                    .as_ref()
+                    .is_some_and(|material| material.to_string() == "mclone:block/spruce_planks")
         }));
         assert!(
             inventory

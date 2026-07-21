@@ -1,6 +1,6 @@
 use mclone_core::{Aabb, BlockPos, BlockStateId, Vec3d};
 
-use crate::block_collision_aabb;
+use crate::block_collision_aabbs;
 
 pub const COLLISION_EPSILON: f64 = 1.0e-7;
 
@@ -70,7 +70,7 @@ where
                 let Some(block_state) = block_state_at(pos) else {
                     continue;
                 };
-                if let Some(block_box) = block_collision_aabb(block_state, pos) {
+                for block_box in block_collision_aabbs(block_state, pos) {
                     if block_box.intersects(area) {
                         solids.push(block_box);
                     }

@@ -1,4 +1,6 @@
-use mclone_blocks::{block_collision_aabb, collision_aabb_for_feet_position};
+use mclone_blocks::{
+    block_collision_aabb, block_collision_aabbs, collision_aabb_for_feet_position,
+};
 use mclone_core::{Aabb, BlockPos, Vec3d};
 use mclone_protocol::EntityKind;
 use mclone_worldgen::block::{GRASS_BLOCK, RawBlockId, generated_block_state_id, has_fluid};
@@ -189,9 +191,7 @@ fn entity_aabb_collides(
             for x in min_x..=max_x {
                 let block_pos = BlockPos::new(x, y, z);
                 let block = block_at(block_pos).ok_or(SpawnPlacementFailure::MissingBlockData)?;
-                if let Some(block_box) =
-                    block_collision_aabb(generated_block_state_id(block), block_pos)
-                {
+                for block_box in block_collision_aabbs(generated_block_state_id(block), block_pos) {
                     if block_box.intersects(entity_box) {
                         return Ok(true);
                     }

@@ -267,6 +267,12 @@ impl TexturedMeshCatalog {
                 (FirstPartyVisualClass::Solid, Some(sprite)) => {
                     first_party_solid_faces(record.block.path(), sprite)
                 }
+                (FirstPartyVisualClass::Slab, Some(sprite)) => {
+                    first_party_slab_faces(record, sprite)
+                }
+                (FirstPartyVisualClass::Stair, Some(sprite)) => {
+                    first_party_stair_faces(record, sprite)
+                }
                 (FirstPartyVisualClass::CrossedPlane, Some(sprite)) => {
                     first_party_crossed_faces(record.block.path(), sprite)
                 }
@@ -550,6 +556,81 @@ fn first_party_solid_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBl
         )
     })
     .collect()
+}
+
+fn first_party_cuboid_faces(
+    block: &str,
+    from: [f32; 3],
+    to: [f32; 3],
+    sprite: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let tint = textured_block_tint(block, 0);
+    [
+        (ModelFaceDirection::Down, from[1] == 0.0),
+        (ModelFaceDirection::Up, to[1] == 16.0),
+        (ModelFaceDirection::North, from[2] == 0.0),
+        (ModelFaceDirection::South, to[2] == 16.0),
+        (ModelFaceDirection::West, from[0] == 0.0),
+        (ModelFaceDirection::East, to[0] == 16.0),
+    ]
+    .into_iter()
+    .map(|(direction, touches_boundary)| {
+        first_party_face(
+            direction,
+            touches_boundary.then_some(direction),
+            from,
+            to,
+            sprite,
+            tint,
+        )
+    })
+    .collect()
+}
+
+fn first_party_slab_faces(
+    record: &mclone_assets::BlockStateRecord,
+    sprite: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let (min_y, max_y) = if record
+        .properties
+        .get("type")
+        .is_some_and(|kind| kind == "top")
+    {
+        (8.0, 16.0)
+    } else {
+        (0.0, 8.0)
+    };
+    first_party_cuboid_faces(
+        record.block.path(),
+        [0.0, min_y, 0.0],
+        [16.0, max_y, 16.0],
+        sprite,
+    )
+}
+
+fn first_party_stair_faces(
+    record: &mclone_assets::BlockStateRecord,
+    sprite: AtlasSpriteUv,
+) -> Vec<TexturedBlockFace> {
+    let mut faces = first_party_cuboid_faces(
+        record.block.path(),
+        [0.0, 0.0, 0.0],
+        [16.0, 8.0, 16.0],
+        sprite,
+    );
+    let (from, to) = match record.properties.get("facing").map(String::as_str) {
+        Some("north") => ([0.0, 8.0, 0.0], [16.0, 16.0, 8.0]),
+        Some("south") => ([0.0, 8.0, 8.0], [16.0, 16.0, 16.0]),
+        Some("west") => ([0.0, 8.0, 0.0], [8.0, 16.0, 16.0]),
+        _ => ([8.0, 8.0, 0.0], [16.0, 16.0, 16.0]),
+    };
+    faces.extend(first_party_cuboid_faces(
+        record.block.path(),
+        from,
+        to,
+        sprite,
+    ));
+    faces
 }
 
 fn first_party_crossed_faces(block: &str, sprite: AtlasSpriteUv) -> Vec<TexturedBlockFace> {
@@ -1065,6 +1146,44 @@ mod tests {
         );
         assert_eq!(textured_block_tint("lily_pad", -1), TexturedBlockTint::None);
         assert_eq!(textured_block_tint("bamboo", 0), TexturedBlockTint::None);
+    }
+
+    #[test]
+    fn first_party_slab_and_stair_geometry_preserves_partial_bounds() {
+        let sprite = AtlasSpriteUv {
+            u0: 0.0,
+            v0: 0.0,
+            u1: 1.0,
+            v1: 1.0,
+        };
+        let slab = mclone_assets::BlockStateRecord::new(
+            BlockStateId(220),
+            ResourceLocation::parse("minecraft:spruce_slab").unwrap(),
+            [("type", "top"), ("waterlogged", "false")],
+        );
+        let stair = mclone_assets::BlockStateRecord::new(
+            BlockStateId(216),
+            ResourceLocation::parse("minecraft:spruce_stairs").unwrap(),
+            [
+                ("facing", "east"),
+                ("half", "bottom"),
+                ("shape", "straight"),
+                ("waterlogged", "false"),
+            ],
+        );
+
+        let slab_faces = first_party_slab_faces(&slab, sprite);
+        assert_eq!(slab_faces.len(), 6);
+        assert!(slab_faces.iter().all(|face| face.from[1] == 8.0));
+        let stair_faces = first_party_stair_faces(&stair, sprite);
+        assert_eq!(stair_faces.len(), 12);
+        assert!(
+            stair_faces
+                .iter()
+                .any(|face| { face.from == [8.0, 8.0, 0.0] && face.to == [16.0, 16.0, 16.0] })
+        );
+        assert!(!full_cube_occluder(&slab_faces));
+        assert!(!full_cube_occluder(&stair_faces));
     }
 
     #[test]
