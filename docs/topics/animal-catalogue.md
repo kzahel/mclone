@@ -2,9 +2,11 @@
 
 Topic: `animal-catalogue`
 
-Status: active implementation. The target is a read-only, production-built
-Asset Lab catalogue at `https://mclone.kzahel.com/animals/`, delivered by the
-existing native-web bundle and after-main-push deployment path.
+Status: implementation and local acceptance complete 2026-07-21; production
+push and live-site verification remain. The target is a read-only,
+production-built Asset Lab catalogue at
+`https://mclone.kzahel.com/animals/`, delivered by the existing native-web
+bundle and after-main-push deployment path.
 
 ## Scope
 
@@ -125,14 +127,50 @@ occur.
 
 ## Implementation Slices
 
-1. Extract a reusable viewport/controller around the existing scene renderer,
-   add correct bounds-based framing and disposal, and move the development
-   preview onto it.
-2. Add deterministic static catalogue generation and thumbnails from canonical
-   semantic JSON.
-3. Add the React catalogue shell and responsive, accessible interaction model.
-4. Add production-subpath tests, bundle/deploy integration, and documentation.
-5. Push `main`, monitor the local deploy worker, and validate `/animals/` live.
+1. [x] Extract a reusable viewport/controller around the existing scene
+   renderer, add correct bounds-based framing and disposal, and move the
+   development preview onto it.
+2. [x] Add deterministic static catalogue generation and thumbnails from
+   canonical semantic JSON.
+3. [x] Add the React catalogue shell and responsive, accessible interaction
+   model.
+4. [x] Add production-subpath tests, bundle/deploy integration, and
+   documentation.
+5. [ ] Push `main`, monitor the local deploy worker, and validate `/animals/`
+   live.
+
+## Local Acceptance Evidence
+
+The implemented path passes:
+
+- `pnpm asset-lab:typecheck`;
+- `pnpm asset-lab:test`: 16 semantic, scene, discovery, hash, and generation
+  tests plus the first-party figure drift gate;
+- `pnpm asset-lab:web:test`: desktop and 390px production-subpath Playwright
+  lanes covering deep links, animation advance/pause/keyboard scrub, camera
+  pixel change, search, keyboard selection, figure replacement, one-canvas
+  ownership, theme, responsive width, and browser/page errors;
+- `pnpm native:web:worker:test`: directory routing, isolation headers, nested
+  hashed-asset immutable caching, and catalogue-data revalidation; and
+- `pnpm native:web:bundle`: complete asset packs, WASM, web glue, catalogue
+  generation, and final `dist-native-web/animals/` staging.
+
+The desktop dark-mode and 390px mobile screenshots at
+`/tmp/mclone-animal-catalogue-desktop.png` and
+`/tmp/mclone-animal-catalogue-mobile.png` were inspected. Figure framing,
+textures, floor contact, selected-row visibility, controls, catalogue layout,
+inspector, and mobile stacking are coherent.
+
+The final bundle inspection re-hashed every staged semantic figure, required
+every thumbnail, confirmed hashed JS/CSS references use `/animals/assets/`,
+and found one manifest, one JSON and one PNG per local canonical source. The
+local inventory can include uncommitted sources; production inventory is
+deliberately generated from the pushed deploy worktree.
+
+The current application JavaScript is about 745 KB minified and 200 KB gzip,
+dominated by the one Three.js viewport plus React. Figure JSON is fetched lazily
+per selection and catalogue thumbnails use native lazy loading. Further code
+splitting is measurement-gated rather than required for first publication.
 
 ## Code And Documentation Map
 
@@ -169,6 +207,7 @@ occur.
 
 ## Recommended Next Work
 
-Complete the five slices above without introducing a separate Asset Lab core
-package. Reconsider a workspace package only when a consumer outside
-`tools/asset-lab` needs the TypeScript viewer contract.
+Push `main`, let the existing deployment hook publish the same bundle, and run
+the live HTTP/browser acceptance receipt. Then mark this topic complete with
+the deployed commit and live evidence. Reconsider a workspace package only
+when a consumer outside `tools/asset-lab` needs the TypeScript viewer contract.
