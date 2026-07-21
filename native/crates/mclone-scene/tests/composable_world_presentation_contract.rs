@@ -195,7 +195,8 @@ fn actor_renderer_shared_topology_and_per_world_state_are_exact() {
 fn actor_composition_is_opt_in_shared_and_portable() {
     let actor = read("../mclone-render/src/entity.rs");
     let direct = braced_item(&actor, "pub fn render_in_slot(");
-    let composed = braced_item(&actor, "pub fn render_composed_in_slot(");
+    let composed_entry = braced_item(&actor, "pub fn render_composed_in_slot(");
+    let composed = braced_item(&actor, "fn render_composed_in_slot_with_preparation(");
     let composed_multiview = braced_item(&actor, "pub fn render_composed_multiview(");
     let direct_uniforms = braced_item(&actor, "fn uniform_bytes(");
     let placed_uniforms = braced_item(&actor, "fn placed_uniform_bytes(");
@@ -209,6 +210,9 @@ fn actor_composition_is_opt_in_shared_and_portable() {
     assert!(!direct.contains("select_composed_actors"));
     assert!(!direct_uniforms.contains("WorldCompositionContext"));
     assert!(!direct_uniforms.contains("placement"));
+    assert!(composed_entry.contains("context: WorldCompositionContext"));
+    assert!(composed_entry.contains("render_composed_in_slot_with_preparation("));
+    assert!(composed_entry.contains("true,"));
     assert!(composed.contains("context: WorldCompositionContext"));
     assert!(composed.contains("select_composed_actors"));
     assert!(composed.contains("renderer.pipeline(context.clip())"));
@@ -352,7 +356,13 @@ fn standby_preview_starts_as_an_observer_and_activation_exchanges_authority() {
 #[test]
 fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
     let frame = read("../mclone-app-runtime/src/frame_render.rs");
-    let render = braced_item(&frame, "fn render_full_frame_for_view_inner<BuildGuiDraw>(");
+    let entry = braced_item(&frame, "fn render_full_frame_for_view_inner<BuildGuiDraw>(");
+    let render = braced_item(
+        &frame,
+        "fn render_full_frame_for_view_inner_with_actor_preparation<BuildGuiDraw>(",
+    );
+    assert!(entry.contains("render_full_frame_for_view_inner_with_actor_preparation("));
+    assert!(entry.contains("FrameActorPreparation::Refresh"));
     assert_in_order(
         render,
         &[
