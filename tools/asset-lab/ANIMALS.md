@@ -180,6 +180,7 @@ reviewed rigs and then filling macro gaps.
 | Chimpanzee | P3 | ✅ | B/Q | — | `examples/chimpanzee` — approved 24-box agile knuckle-walker with pale ears, muzzle, and lighter proportions than the gorilla |
 | Orangutan | P3 | ✅ | B/Q | — | `examples/orangutan` — approved 27-box adult male with rust-orange shag, dark cheek flanges, and exceptionally long forelimbs |
 | Lemur | P3 | ✅ | Q/B | ring-tailed | `examples/ring_tailed_lemur` — approved 22-box slender quadruped with amber-eyed mask and seven-section banded tail |
+| Mandrill | P3 | ✅ | Q/B | female, juvenile | `examples/mandrill` — approved 22-box adult male with olive mantle, gold beard, vivid blue-red muzzle, colorful rump, grounded knuckle walk, and separate threat-yawn action |
 
 ## Small & exotic mammals
 
@@ -254,6 +255,7 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Fish (generic) | P1 | ✅ | S | clownfish, tropical morphs, cod, salmon, pufferfish | `examples/fish` — approved 10-box blue/yellow tropical fish with a lateral two-stage tail |
+| Ocean sunfish | P3 | ✅ | S | juvenile | `examples/ocean_sunfish` — approved 13-box mola with a mottled tall disk body, tiny mouth, tall dorsal and anal fins, scalloped clavus, gentle sculling swim, and separate surface-bask roll |
 | Swordfish | P3 | ✅ | S | blue marlin | `examples/swordfish` — approved 16-box swordfish with cobalt-silver flanks, long three-stage rostrum, swept fins, crescent tail, fast swim, and separate lateral bill-slash action |
 | Pufferfish | P3 | ✅ | S | spotted, porcupinefish | `examples/pufferfish` — approved 18-box spotted puffer with a compact spiny body, puckered mouth, swim cycle, and separately selectable inflate and deflate actions |
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
@@ -264,7 +266,7 @@ reviewed rigs and then filling macro gaps.
 | Octopus | P2 | ✅ | S | — | `examples/octopus` — approved 32-box common octopus with mottled mantle, raised eyes, visible sucker rows, eight three-stage tentacles, and coordinated jet swim |
 | Cuttlefish | P3 | ✅ | S | common, flamboyant | `examples/cuttlefish` — approved common cuttlefish with a patterned broad mantle, traveling lateral-fin wave, large W-pupil eyes, eight arms, and a separate paired feeding-tentacle strike |
 | Crab | P2 | ✅ | C | — | `examples/crab` — approved 31-box red rock crab with patterned broad carapace, raised eyes, articulated chelae, eight two-stage legs, and explicit sideways scuttle |
-| Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
+| Sea turtle | P2 | ✅ | S | adult, hatchling | `examples/sea_turtle` — canonical 11-box adult with patterned shell, articulated neck, broad front flippers, rear paddles, and steady swim |
 | Seahorse | P3 | ✅ | S | — | `examples/seahorse` — approved 21-box common seahorse with long snout, raised coronet, plated trunk, fluttering fins, and five-stage curled tail |
 | Jellyfish | P3 | ✅ | S | — | `examples/jellyfish` — approved 32-box moon jellyfish with stepped bell, four two-stage oral arms, eight two-stage tentacles, and asymmetric pulse animation |
 | Starfish | P3 | ✅ | ST | — | `examples/starfish` — approved 17-box ochre sea star with patterned central disc, five independently rooted three-stage arms, tube-foot markings, and slow traveling creep |
@@ -306,6 +308,7 @@ reviewed rigs and then filling macro gaps.
 | Beetle | P3 | ✅ | C | rhino/stag beetle | `examples/stag_beetle` — approved 27-box male stag beetle with split chestnut wing cases, broad thorax, branched mandibles, clubbed antennae, six two-stage legs, and alternating tripod crawl |
 | Grasshopper / Cricket | P3 | ✅ | H | — | `examples/grasshopper` — approved 24-box meadow grasshopper with folded wings, long antennae, four two-stage walking legs, oversized three-stage hind legs, and synchronized springing hop |
 | Praying mantis | P2 | ✅ | C | green, brown | `examples/praying_mantis` — review candidate European mantis with triangular head, long prothorax, folded spined forelegs, four-leg stalk, veined wings, and separate raptorial strike action |
+| Leaf insect | P3 | ✅ | C | giant leaf insect, walking leaf | `examples/leaf_insect` — approved 31-box giant leaf insect with broad veined abdomen, six scalloped leaf lobes, six two-stage legs, slow creep, and separate camouflage-sway action |
 | Scorpion | P3 | ✅ | C | — | `examples/scorpion` — approved 36-box desert scorpion with broad pedipalps, eight two-stage legs, forward-curled seven-part tail, dark stinger, and alternating wave crawl |
 | Roly-poly / Pill bug | P2 | ✅ | C | — | `examples/roly_poly` — approved 27-box common pill bug with seven stepped shell bands, fourteen short legs, antennae, tail plate, separate crawl, and middle-rooted roll-up/unroll actions that tuck both ends below the shell |
 | Earwig (pincher bug) | P2 | ✅ | C | — | `examples/earwig` — approved 30-box common earwig with five raised abdomen bands, long antennae, six two-stage legs, paired three-part rear forceps, and tripod scuttle |
