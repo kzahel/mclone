@@ -29,6 +29,7 @@ members = [
   "apps/mclone-android-client",
   "apps/mclone-android-xr-client",
   "apps/mclone-native-client",
+  "apps/mclone-structure-compiler",
   "apps/mclone-web-client",
 ]
 resolver = "3"
@@ -85,6 +86,7 @@ pollster = "0.4"
 openxr = "0.21"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10"
 rusqlite = { version = "0.32", features = ["bundled"] }
 tungstenite = "0.28"
 uuid = { version = "1", features = ["js", "serde", "v4"] }

@@ -29,6 +29,7 @@ pub struct CanonicalStructureRecord {
     pub tags: Vec<String>,
     pub family: Option<CanonicalStructureFamily>,
     pub components: Vec<CanonicalStructureComponent>,
+    pub palette: Vec<CanonicalStructurePaletteEntry>,
     pub blocks: Vec<CanonicalStructureBlock>,
     pub sockets: Vec<CanonicalStructureSocket>,
     pub themes: Vec<CanonicalStructureTheme>,
@@ -64,8 +65,15 @@ pub struct CanonicalStructureComponent {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CanonicalStructurePaletteEntry {
+    pub key: String,
+    pub state: TemplateBlockState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CanonicalStructureBlock {
     pub local_pos: BlockPos,
+    pub palette_index: usize,
     pub state: TemplateBlockState,
     pub components: Vec<String>,
 }
@@ -190,14 +198,17 @@ pub fn load_canonical_structure_json(
             ));
         }
         previous_pos = Some(pos);
-        let state = palette.get(block.palette).copied().ok_or_else(|| {
-            CanonicalStructureError::Invalid(format!(
-                "structure `{}` block {index} references palette index {} outside 0..{}",
-                raw.id,
-                block.palette,
-                palette.len()
-            ))
-        })?;
+        let state = palette
+            .get(block.palette)
+            .map(|entry| entry.state)
+            .ok_or_else(|| {
+                CanonicalStructureError::Invalid(format!(
+                    "structure `{}` block {index} references palette index {} outside 0..{}",
+                    raw.id,
+                    block.palette,
+                    palette.len()
+                ))
+            })?;
         validate_sorted_unique_strings(
             &block.components,
             &format!("block {index} components"),
@@ -214,6 +225,7 @@ pub fn load_canonical_structure_json(
         builder.set(pos, state)?;
         blocks.push(CanonicalStructureBlock {
             local_pos: pos,
+            palette_index: block.palette,
             state,
             components: block.components,
         });
@@ -234,8 +246,8 @@ pub fn load_canonical_structure_json(
         }
         let used_roles = palette
             .iter()
-            .filter_map(|state| match state {
-                TemplateBlockState::Role(role) => Some(*role),
+            .filter_map(|entry| match entry.state {
+                TemplateBlockState::Role(role) => Some(role),
                 TemplateBlockState::Exact(_) => None,
             })
             .collect::<BTreeSet<_>>();
@@ -274,6 +286,7 @@ pub fn load_canonical_structure_json(
                 optional: component.optional,
             })
             .collect(),
+        palette,
         blocks,
         sockets,
         themes,
@@ -337,7 +350,7 @@ fn validate_size(size: [i32; 3], structure_id: &str) -> Result<(), CanonicalStru
 fn validate_palette(
     entries: &[RawPaletteEntry],
     structure_id: &str,
-) -> Result<Vec<TemplateBlockState>, CanonicalStructureError> {
+) -> Result<Vec<CanonicalStructurePaletteEntry>, CanonicalStructureError> {
     if entries.is_empty() {
         return invalid(format!("structure `{structure_id}` palette is empty"));
     }
@@ -370,7 +383,10 @@ fn validate_palette(
                 })?,
             ),
         };
-        result.push(state);
+        result.push(CanonicalStructurePaletteEntry {
+            key: entry.key.clone(),
+            state,
+        });
     }
     Ok(result)
 }

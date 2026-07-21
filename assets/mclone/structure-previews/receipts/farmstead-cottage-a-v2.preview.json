@@ -1,0 +1,312 @@
+{
+  "schemaVersion": 1,
+  "compilerId": "mclone-structure-preview-v1",
+  "structureId": "farmstead-cottage-a-v2",
+  "label": "Warm Oak Cottage",
+  "description": "A steep-gabled plaster cottage with an offset canopy porch, flower box, and handmade chimney.",
+  "category": "building",
+  "tags": [
+    "cottage",
+    "farmstead",
+    "starter-settlement"
+  ],
+  "family": {
+    "id": "farmstead-cottage",
+    "member": "standard-canopy-porch",
+    "label": "Farmstead Cottage"
+  },
+  "size": [
+    15,
+    15,
+    17
+  ],
+  "authoredOperationCount": 1320,
+  "placedBlockCount": 923,
+  "materialBill": [
+    {
+      "paletteKey": "accent",
+      "count": 20
+    },
+    {
+      "paletteKey": "cornflower",
+      "count": 1
+    },
+    {
+      "paletteKey": "floor",
+      "count": 110
+    },
+    {
+      "paletteKey": "foundation",
+      "count": 146
+    },
+    {
+      "paletteKey": "glazing",
+      "count": 24
+    },
+    {
+      "paletteKey": "mossyCobblestone",
+      "count": 5
+    },
+    {
+      "paletteKey": "poppy",
+      "count": 1
+    },
+    {
+      "paletteKey": "roofEast",
+      "count": 91
+    },
+    {
+      "paletteKey": "roofSlabBottom",
+      "count": 29
+    },
+    {
+      "paletteKey": "roofWest",
+      "count": 89
+    },
+    {
+      "paletteKey": "timberX",
+      "count": 23
+    },
+    {
+      "paletteKey": "timberY",
+      "count": 40
+    },
+    {
+      "paletteKey": "timberZ",
+      "count": 27
+    },
+    {
+      "paletteKey": "wall",
+      "count": 316
+    },
+    {
+      "paletteKey": "wallTorchSouth",
+      "count": 1
+    }
+  ],
+  "components": [
+    {
+      "id": "chimney",
+      "label": "Brick chimney",
+      "optional": true,
+      "blockCount": 20
+    },
+    {
+      "id": "porch",
+      "label": "Canopy porch",
+      "optional": true,
+      "blockCount": 39
+    },
+    {
+      "id": "roof",
+      "label": "Steep spruce roof",
+      "optional": false,
+      "blockCount": 267
+    },
+    {
+      "id": "shell",
+      "label": "Foundation and plaster shell",
+      "optional": false,
+      "blockCount": 497
+    },
+    {
+      "id": "timber-frame",
+      "label": "Oak timber frame",
+      "optional": false,
+      "blockCount": 62
+    },
+    {
+      "id": "weathering",
+      "label": "Foundation weathering",
+      "optional": true,
+      "blockCount": 5
+    },
+    {
+      "id": "windows",
+      "label": "Windows and flower box",
+      "optional": false,
+      "blockCount": 33
+    }
+  ],
+  "markers": [
+    {
+      "kind": "entrance:south",
+      "pos": [
+        9,
+        2,
+        16
+      ]
+    },
+    {
+      "kind": "attachment:west-yard",
+      "pos": [
+        1,
+        2,
+        7
+      ]
+    }
+  ],
+  "sockets": [
+    {
+      "id": "west-yard",
+      "kind": "attachment:yard",
+      "pos": [
+        1,
+        2,
+        7
+      ],
+      "facing": "west"
+    }
+  ],
+  "defaultTheme": "warm-oak-and-plaster-v2",
+  "geometry": {
+    "vertexCount": 14156,
+    "indexCount": 21234,
+    "faceCount": 3539,
+    "boundsMin": [
+      0.0,
+      0.0,
+      1.0
+    ],
+    "boundsMax": [
+      15.0,
+      15.0,
+      16.0
+    ],
+    "solidFaceCount": 1254,
+    "cutoutFaceCount": 2285,
+    "translucentFaceCount": 0,
+    "componentGroups": [
+      {
+        "id": "chimney",
+        "faceCount": 64
+      },
+      {
+        "id": "porch",
+        "faceCount": 141
+      },
+      {
+        "id": "roof",
+        "faceCount": 2301
+      },
+      {
+        "id": "shell",
+        "faceCount": 780
+      },
+      {
+        "id": "timber-frame",
+        "faceCount": 116
+      },
+      {
+        "id": "weathering",
+        "faceCount": 10
+      },
+      {
+        "id": "windows",
+        "faceCount": 127
+      }
+    ],
+    "verticalLayers": [
+      {
+        "y": 0,
+        "faceCount": 203
+      },
+      {
+        "y": 1,
+        "faceCount": 192
+      },
+      {
+        "y": 2,
+        "faceCount": 122
+      },
+      {
+        "y": 3,
+        "faceCount": 127
+      },
+      {
+        "y": 4,
+        "faceCount": 118
+      },
+      {
+        "y": 5,
+        "faceCount": 153
+      },
+      {
+        "y": 6,
+        "faceCount": 538
+      },
+      {
+        "y": 7,
+        "faceCount": 342
+      },
+      {
+        "y": 8,
+        "faceCount": 356
+      },
+      {
+        "y": 9,
+        "faceCount": 344
+      },
+      {
+        "y": 10,
+        "faceCount": 308
+      },
+      {
+        "y": 11,
+        "faceCount": 324
+      },
+      {
+        "y": 12,
+        "faceCount": 316
+      },
+      {
+        "y": 13,
+        "faceCount": 84
+      },
+      {
+        "y": 14,
+        "faceCount": 12
+      }
+    ]
+  },
+  "artifacts": {
+    "meshPath": "meshes/farmstead-cottage-a-v2.glb",
+    "meshSha256": "d01454b782e71c15fff86ebd9577118b1dd00f755406e07b379f62d6dafd1f5f",
+    "atlasPath": "atlases/terrain-a9e5b639cffb8aac9d78eed71e04cfb8fa64d181d79f0439c0a331dbb3592651.png",
+    "atlasSha256": "a9e5b639cffb8aac9d78eed71e04cfb8fa64d181d79f0439c0a331dbb3592651",
+    "atlasWidth": 1024,
+    "atlasHeight": 256,
+    "atlasSpriteCount": 143
+  },
+  "source": {
+    "compilerId": "mclone-structure-dsl-v1",
+    "path": "tools/structure-lab/examples/cottage_standard/structure.ts",
+    "sha256": "25e610c976c3ab749fbaff0eaf3944974e2cee61b19ca13013055ae28e9f331c",
+    "semanticSha256": "ea974ed0c8c4f3264673a77bb96d0862fe33e05078a1e1664d1183048400366f"
+  },
+  "lighting": {
+    "id": "fixed-midday-full-bright-ao-v1",
+    "description": "Production face shading and ambient occlusion with full midday light baked into vertex colors."
+  },
+  "assetPacks": [
+    {
+      "id": "mclone-authored",
+      "origin": "first_party",
+      "contentFingerprint": "sha256:5163575cf87c239a519963340f172e589fcd851575ed7dac680052f91c6e4f1d",
+      "sha256": "7a0012e5856b9029648e716c0b211d17b8b3090f91a2c3db0d42dc5ee8fb2f1f"
+    },
+    {
+      "id": "mclone-generated-fallback",
+      "origin": "generated",
+      "contentFingerprint": "sha256:5760de9a6f85e2bac3794bbd5833af37322a672caaf1af752faf83a3a51abe39",
+      "sha256": "a7cab40a0ae313b65a10a78749d60172b4d6482a6098ca171e2d1ea80c450595"
+    }
+  ],
+  "assetProvenance": {
+    "firstParty": 8,
+    "generated": 136,
+    "minecraftReference": 0,
+    "unknown": 0,
+    "missing": 1
+  }
+}

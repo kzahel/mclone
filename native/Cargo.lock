@@ -1780,6 +1780,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-structure-compiler"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "image",
+ "mclone-assets",
+ "mclone-core",
+ "mclone-mesh",
+ "mclone-worldgen",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "mclone-ui"
 version = "0.0.0"
 dependencies = [

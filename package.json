@@ -220,6 +220,8 @@
     "structure-lab:install": "pnpm --dir ./tools/structure-lab install",
     "structure-lab:typecheck": "pnpm --dir ./tools/structure-lab typecheck",
     "structure-lab:test": "pnpm --dir ./tools/structure-lab test",
+    "structure-lab:previews:check": "pnpm --dir ./tools/structure-lab previews:check",
+    "structure-lab:previews:write": "pnpm --dir ./tools/structure-lab previews:write",
     "structure-lab:structures:check": "pnpm --dir ./tools/structure-lab structures:check",
     "structure-lab:structures:write": "pnpm --dir ./tools/structure-lab structures:write",
     "texture-lab:install": "pnpm --dir ./tools/texture-lab install",

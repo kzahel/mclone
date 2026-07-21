@@ -6,6 +6,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/structure-json.test.ts && pnpm structures:check",
+    "previews:check": "tsx src/sync-previews.ts --check",
+    "previews:write": "tsx src/sync-previews.ts --write",
     "structures:check": "tsx src/sync-first-party.ts --check",
     "structures:write": "tsx src/sync-first-party.ts --write"
   },
