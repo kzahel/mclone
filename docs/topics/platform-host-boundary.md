@@ -3,12 +3,14 @@
 Topic: `platform-host-boundary`
 
 Status: direction accepted and implementation in progress 2026-07-21.
-Tactical
-[`203`](../tactical/203-shared-interactive-router-native-adoption.md) completed
-the shared synchronous interactive router and adopted it on desktop and flat
-Android. Active Tactical
-[`204`](../tactical/204-browser-raw-input-adoption.md) is adopting that landed
-API for raw browser keyboard, pointer, wheel, and touch input. The existing
+Tacticals
+[`203`](../tactical/203-shared-interactive-router-native-adoption.md) and
+[`204`](../tactical/204-browser-raw-input-adoption.md) completed the shared
+synchronous interactive router and adopted it on desktop, flat Android, and
+the browser raw-input path. Active Tactical
+[`205`](../tactical/205-browser-diagnostic-observer-isolation.md) is moving the
+semantic report mirror and smoke command registry out of the production
+browser adapter. The existing
 shared scene, input,
 actor/mailbox, rendering, and platform-operation contracts are the foundation;
 the remaining work is to converge the interactive host rim and isolate browser
@@ -189,38 +191,41 @@ Use these tests when ownership is unclear:
 Audit date: 2026-07-21.
 
 The current architecture is not a failed design. Most deep semantic ownership
-has already converged successfully. The remaining problem is concentrated at
-the interactive platform rim and the browser diagnostic surface.
+has already converged successfully. Tacticals 203 and 204 closed the
+interactive platform rim; the remaining problem is concentrated at the
+browser diagnostic surface, then preference/bootstrap policy.
 
-The browser ownership gate currently reports:
+At the start of this topic, the browser ownership gate reported:
 
 - 5,275 authored TypeScript lines across 16 registered modules;
 - five Worker entry points and one generic Worker construction site;
 - 56 registered domain-aware Worker/scene debts at zero; and
 - seven explicit SAB copy facts.
 
-Those gates correctly prove that server jobs, render compilation, socket
+Those gates correctly proved that server jobs, render compilation, socket
 protocol state, persistence continuations, session-start selection, lobby
 start sequencing, and readiness policy are not duplicated in TypeScript. They
-do **not** prove that TypeScript is free of input, UI, gameplay, or diagnostic
-vocabulary: the current registries intentionally classify the 886-line
+did **not** prove that TypeScript was free of input, UI, gameplay, or diagnostic
+vocabulary: the registries classified the former 886-line
 `mclone-web-input.ts`/`mclone-web-touch.ts` family as ordinary browser
-translation and do not inspect its action mapping.
+translation and did not inspect its action mapping. Tactical 204 closed that
+input gap and added a host-boundary source lock. The diagnostic global and
+report mirror are the active remaining output-boundary gap.
 
 ### Summary Matrix
 
 | Area | Current state | Assessment | Desired direction |
 |---|---|---|---|
 | Shared scene/client ownership | `McloneSceneHost` owns session, render admission, frame assembly, camera movement application, UI model, interaction, warm-world, and lifecycle policy | Healthy foundation | Keep; route all interactive hosts through it |
-| Shared input vocabulary | `mclone-input` owns keyboard keys, pointer buttons, bindings, `FlatInputIntent`, `FlatInputFrame`, keyboard/mouse held state, touch state, gamepad state, capabilities, and preferences | Healthy but incomplete outer boundary | Add/clarify neutral event ingestion and shared routing; avoid parallel final dispatch |
+| Shared input vocabulary | `mclone-input` owns keyboard keys, pointer buttons, bindings, `FlatInputIntent`, `FlatInputFrame`, keyboard/mouse held state, touch state, gamepad state, capabilities, and preferences; `mclone-scene` owns the interactive router | Healthy converged outer boundary for flat hosts | Keep neutral event ingestion and shared routing; avoid parallel final dispatch |
 | Desktop flat input | `WinitFrameDriver` owns `MonoInteractiveInputRouter`; its leaf adapter normalizes winit facts and executes cursor/redraw mechanics while ordinary final UI/game dispatch is shared | Native route converged; desktop-only renderer/development shortcuts remain classified diagnostics | Keep the typed direct route and prevent app-local semantic dispatch from returning |
 | Flat Android input | The surface driver owns the same `MonoInteractiveInputRouter`; keyboard, pointer, touch frames, look, and held cadence use it while Android retains activity/surface/coordinate mechanics | Native route converged; touch hit testing remains at the Android rim pending cross-web touch work | Keep the typed route and converge the touch model during browser adoption |
 | XR input | `mclone-xr-host` converts OpenXR action state into neutral `XrControllerSnapshot`; `mclone-scene` owns locomotion, comfort, teleport, menu pointer, and action meaning | Strong precedent | Preserve modality-specific shared scene policy; do not force XR through a flat/browser event ABI |
 | Offscreen/test input | Scripts construct `FlatInputFrame`, `FlatInputAction`, and `GameUiAction` directly | Appropriate semantic test client | Keep; do not mistake tests for platform glue |
-| Web keyboard/mouse | TypeScript maps DOM codes to `forward`, `jump`, `sprint`, hotbar, pause/help/debug, break/place, and camera-speed behavior | Clear semantic duplication | TS forwards raw DOM facts; browser Rust normalizes; shared Rust resolves and routes |
-| Web touch | TypeScript owns virtual-control layout, gesture roles, joystick dead zone, movement axes, Jump/Attack/Use/Descend buttons, menu toggling, and overlay state | Largest input fork | Share touch control model/resolution with Android/Rust; TS retains pointer capture and DOM mechanics |
-| Web frame input | TS stores held action booleans and passes fourteen game-shaped input arguments plus time to `renderFrame` | Wrong boundary | Rust holds input state; browser frame call supplies time/presentation facts, not Jump/etc. |
-| Browser Rust dispatch | `WebSceneHost` accepts string-keyed `"break"`/`"place"` world actions and exposes direct UI key/pointer/help/hotbar entry points plus a wide `GameUiAction` export surface | Fourth parallel semantic dispatch stack | Route through the same shared router; exports shrink to raw events, frame, operations, and capabilities |
+| Web keyboard/mouse | **Closed in Tactical 204:** TypeScript forwards raw DOM facts; browser Rust normalizes them and the shared router resolves meaning | Converged production input path | Keep source lock; isolate remaining diagnostic shortcuts |
+| Web touch | **Closed in Tactical 204:** TypeScript retains contacts/capture/synthetic-event mechanics while shared Rust owns layout, roles, dead zone, sensitivity, and actions | Converged with flat Android | Keep the shared touch owner and thin DOM adapter |
+| Web frame input | **Closed in Tactical 204:** Rust holds input state and `renderFrame` receives time only | Correct boundary | Prevent semantic frame reconstruction in TypeScript |
+| Browser Rust dispatch | **Closed for ordinary input in Tactical 204:** raw key/pointer/wheel/touch exports feed `MonoInteractiveInputRouter`; direct semantic exports remain smoke-only debt | Production route converged; diagnostic ABI still broad | Tactical 205 isolates/deletes diagnostic exports |
 | UI routing | Shared `mclone-ui`/scene own UI state, but native apps and web TS still decide which raw events call pause/help/debug/UI pointer entry points | Partial convergence | Shared context router decides UI versus world; leaf returns/obeys generic handled/capture/redraw disposition |
 | Shared host effects | `mclone-scene::HostEffects` already carries mouse-lock, frame pacing, touch-mode, quit-to-title, and exit effects for shared UI policy | Good but not yet the interactive input boundary | Reuse/extend narrowly where Rust really decides; do not route autonomous setup through it |
 | Cadence and presentation | Browser owns rAF, visibility callbacks, canvas resize, WebGPU presentation; native owns winit redraw/surface; XR owns OpenXR frame/swapchain sequencing | Correct asymmetry | Keep physical loops platform-owned behind shared time/render contracts |
@@ -259,13 +264,14 @@ dispatcher are another important foundation. Shared Rust already decides many
 UI/settings effects once, while native, Android, XR, and offscreen hosts supply
 mechanical implementations.
 
-The shared outer native router now exists as
+The shared outer interactive router now exists as
 `mclone-scene::MonoInteractiveInputRouter`. It accepts neutral keyboard,
 pointer, wheel, touch-derived flat frames, and held cadence, resolves them
 using the existing input components, routes them according to scene/UI
-context, and returns a mechanical `MonoInputDisposition`. Desktop and flat
-Android have adopted it. The remaining interactive gap is the browser, whose
-TypeScript and web-only Rust paths still perform their own semantic dispatch.
+context, and returns a mechanical `MonoInputDisposition`. Desktop, flat
+Android, and browser have adopted it. Browser Rust parses raw DOM encodings;
+TypeScript retains only event and browser-mechanics handling. The remaining
+host-boundary gap is the browser diagnostic/output surface.
 
 The current wheel behavior is a concrete example of why the outer route
 matters. Shared `KeyboardMouseBindings` maps wheel movement to hotbar stepping.
@@ -313,10 +319,9 @@ and feeds their frames through `MonoInteractiveInputRouter`. Its former
 hotbar selection, Attack, Use, and look is deleted. This proves the browser
 does not need a separate TypeScript joystick/action implementation.
 
-Touch-control hit testing (`touch_control_at`) remains app-local even though
-the stateful touch resolver and final route are shared. The browser tactical
-must decide how to share the touch layout/model without forcing native through
-a DOM-shaped ABI.
+Touch-control hit testing (`touch_control_at`) and the stateful touch resolver
+are now shared by flat Android and browser without forcing native through a
+DOM-shaped ABI.
 
 Android activity/window/surface recreation, lifecycle save calls, redraw
 cadence, audio-device construction, and conversion from winit touch coordinates
@@ -358,50 +363,21 @@ The common rule is shared semantic ownership, not identical device data.
 
 ### Browser Input And UI Audit
 
-The browser interactive rim is the clearest remaining violation.
+Tactical 204 closed the former browser input violation. `mclone-web-input.ts`
+and `mclone-web-touch.ts` now forward raw key, pointer, wheel, touch/pen,
+focus, and viewport facts. Browser Rust normalizes browser encodings, shared
+Rust maintains held and touch state, and `MonoInteractiveInputRouter` owns
+binding plus UI/game routing. `WebSceneHost::renderFrame` receives time only.
 
-`mclone-web-input.ts` currently:
+The TypeScript modules no longer contain action-state names, hotbar/menu
+mapping, break/place strings, camera-speed policy, touch button roles,
+joystick/dead-zone policy, or semantic overlay construction. Browser and flat
+Android share the touch hit-test and stateful adapter. A focused Rust source
+lock rejects reintroduction of these production paths.
 
-- defines action-state names `forward`, `backward`, `left`, `right`,
-  `turnLeft`, `turnRight`, `jump`, `descend`, `shift`, and `sprint`;
-- maps `KeyboardEvent.code` and legacy keys directly to those names;
-- maps digits to a nine-slot hotbar;
-- intercepts Escape, F1, Backquote, and N for pause/help/debug/movement-mode
-  actions;
-- maps mouse release to `interactBlock("break")` or
-  `interactBlock("place")`; and
-- changes wheel input into camera-speed adjustment.
-
-`mclone-web-touch.ts` currently:
-
-- defines browser-local joystick dimensions and dead-zone policy;
-- assigns left and right screen halves to movement and look;
-- emits named movement keys and analog movement impulses;
-- defines `jump`, `attack`, `use`, and `descend` touch buttons;
-- calls block break/place directly for Attack/Use;
-- toggles the pause UI from its menu region; and
-- generates a game-specific touch overlay report for Rust rendering.
-
-`WebFrameDriver` then stores these semantic booleans and deltas. Every rAF it
-constructs keyboard turn, movement, Jump, Descend, Sneak, Sprint, and analog
-movement arguments and passes fourteen input arguments plus time individually
-to `WebSceneHost::renderFrame`. Rust reconstructs the shared `FlatInputFrame`
-from those semantic arguments.
-
-The browser Rust half of the rim carries the matching debt. `WebSceneHost`
-currently accepts string-keyed world actions (`"break"`/`"place"` mapped to
-Attack/Use), exposes direct UI key, pointer, help, and hotbar entry points,
-and answers a wide `GameUiAction`-shaped export surface. Cleaning only the
-TypeScript callers would leave that string-action ABI alive inside web-only
-Rust and fail invariant 11; Stage 3 must re-route the Rust dispatch through
-the shared router and shrink the export surface at the same time.
-
-This is precisely backwards from the target. TypeScript should forward raw
-code/key/state/repeat, pointer button/state/position/delta, wheel, touch contact,
-focus, and viewport facts. Browser Rust should normalize browser encodings into
-shared Rust types. Shared Rust should maintain held state and resolve bindings.
-The frame call should advance using Rust-owned input state and need only time,
-presentation, or platform-frame facts.
+Direct semantic `WebSceneHost` exports remain only because the production
+module still installs them as smoke commands. They have no ordinary input
+caller and are the explicit deletion/isolation ledger for Tactical 205.
 
 The browser may still:
 
@@ -801,12 +777,12 @@ source code or transports.
 
 | Gap | Current owner(s) | Desired owner | Required deletion/adoption evidence |
 |---|---|---|---|
-| Browser key/action map | `mclone-web-input.ts` | `mclone-input` bindings/resolver | No action-name table or key-to-game switch in production TS |
-| Browser held input/frame assembly | `WebFrameDriver` | shared Rust input/router | `renderFrame` no longer receives game booleans from TS |
-| Browser mouse Attack/Use | TS pointer release logic | shared binding/context router | TS forwards button/gesture only; no break/place strings |
-| Browser Escape/F1/debug/movement shortcuts | TS | shared input/UI/client-experience routing | No direct semantic UI/debug calls from DOM key handlers |
-| Browser wheel camera-speed policy | TS | shared binding/runtime shortcut policy | Wheel becomes neutral physical input |
-| Browser touch game model | `mclone-web-touch.ts` | shared input/UI model used with Android | No Jump/Attack/Use/Descend or movement-key vocabulary in TS |
+| Browser key/action map | **Closed in Tactical 204:** raw TypeScript forwarding into `mclone-input` bindings | shared bindings/resolver | Source lock rejects action-name tables and key-to-game switches in production TS |
+| Browser held input/frame assembly | **Closed in Tactical 204:** `WebSceneHost` router state | shared Rust input/router | `renderFrame` receives time only |
+| Browser mouse Attack/Use | **Closed in Tactical 204:** raw click/button forwarding | shared binding/context router | No ordinary TypeScript break/place strings |
+| Browser Escape/F1/debug/movement shortcuts | **Closed in Tactical 204:** raw key forwarding | shared input/UI/client-experience routing | No direct semantic UI/debug calls from DOM key handlers |
+| Browser wheel camera-speed policy | **Closed in Tactical 204:** raw wheel forwarding | shared binding/runtime shortcut policy | Shared resolver owns meaning |
+| Browser touch game model | **Closed in Tactical 204:** raw contact forwarding plus browser mechanics | shared input/UI model used with Android | No action names, control roles, or dead-zone policy in production TS |
 | Desktop final `FlatInputFrame` dispatch | **Closed in Tactical 203:** `MonoInteractiveInputRouter` | shared interactive router | Source lock rejects the deleted app-local final-dispatch methods |
 | Android final `FlatInputFrame` dispatch | **Closed in Tactical 203:** `MonoInteractiveInputRouter` | same shared interactive router | Source lock rejects the deleted app-local final-dispatch method |
 | Duplicated winit normalization | desktop and flat Android apps | small reusable winit adapter | Same key/button/focus conversion used by both without a winit dependency in engine crates |
@@ -817,7 +793,7 @@ source code or transports.
 | Asset pack role assembly | TS constants/argument order | shared Rust asset plan | TS fetches Rust-requested resources without authored/reference/fallback selection logic |
 | Browser startup/status projection | TS clamps/mirrors engine settings, selects debug visibility, and interprets post-Wasm status phases | shared startup/settings/UI owners; generic pre-Wasm browser status only | TS reports capabilities and shows generic bootstrap/fatal state without reconstructing engine configuration or phases |
 | Semantic Wasm method surface | `WebSceneHost` exports + TS validation | small event/frame/operation/capability ABI | Ordinary app no longer validates dozens of gameplay/smoke methods |
-| Browser Rust semantic dispatch | `web_scene_host.rs` string world actions and per-action UI exports | shared interactive router behind a raw event/frame ABI | No `"break"`/`"place"` strings or per-action UI/game exports remain in web-only Rust |
+| Browser Rust semantic dispatch | **Closed for ordinary input in Tactical 204;** smoke-only direct exports remain | shared router plus test-only diagnostic facade | No semantic per-action exports remain in the production adapter surface |
 | Production semantic state mirror | `__mcloneWebApp.state` and `applyReport` | Rust state plus bounded operational projection | No broad per-frame copy into production global state |
 | Production smoke command hooks | `mclone-web-app.ts` global methods | test-only observer/harness | Ordinary production global excludes semantic smoke methods |
 | Rich report bag | `WebSceneHost::report` | typed internal diagnostics and test observer | Platform frame result contains only operational fields; semantic receipt schema is separate |
@@ -883,17 +859,7 @@ the Wasm ABI from defining the engine architecture.
 - Retain DOM listener, capture, pointer-lock, fullscreen, and rAF mechanics in
   TypeScript.
 
-### Stage 4: Preferences and bootstrap cleanup
-
-- Move browser preference schema/default/clamping/application into shared Rust.
-- Give TypeScript a generic persistence mechanism where browser persistence is
-  still desired.
-- Consolidate initial web host construction behind a Rust-authored bootstrap
-  decision while retaining browser capability setup and byte fetch mechanics.
-- Review asset-resource requests so TypeScript does not assign logical pack
-  roles.
-
-### Stage 5: Diagnostic and smoke isolation
+### Stage 4: Diagnostic and smoke isolation
 
 - Define a Rust-authored diagnostic/test observer.
 - Move semantic state projection and smoke-only commands out of production
@@ -903,6 +869,16 @@ the Wasm ABI from defining the engine architecture.
   for browser mechanics, integration, and screenshots.
 - Delete superseded report fields and direct semantic Wasm exports after all
   consumers move.
+
+### Stage 5: Preferences and bootstrap cleanup
+
+- Move browser preference schema/default/clamping/application into shared Rust.
+- Give TypeScript a generic persistence mechanism where browser persistence is
+  still desired.
+- Consolidate initial web host construction behind a Rust-authored bootstrap
+  decision while retaining browser capability setup and byte fetch mechanics.
+- Review asset-resource requests so TypeScript does not assign logical pack
+  roles.
 
 ### Stage 6: Closeout and parity validation
 
@@ -1123,10 +1099,11 @@ record executor, `mclone-input`, `McloneSceneHost`, and `HostEffects` as the
 patterns. Do not move the TypeScript input/report surface wholesale into
 web-only Rust.
 
-The next tactical should begin by defining and proving the shared interactive
-router on native typed paths, then adopt flat Android and browser raw events,
-and finally isolate the diagnostic observer. It should explicitly preserve
-autonomous platform initialization and healthy physical asymmetry.
+The shared interactive router is now proven on native typed paths and adopted
+by flat Android and browser raw events. The active tactical should isolate the
+diagnostic observer, after which preference/bootstrap policy can move behind
+the smaller production adapter. Both must preserve autonomous platform
+initialization and healthy physical asymmetry.
 
 The outcome is not “TypeScript contains fewer game words” in isolation. The
 outcome is that every applicable host drives one shared Rust behavior path,

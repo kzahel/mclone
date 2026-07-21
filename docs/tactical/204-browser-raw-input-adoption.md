@@ -1,8 +1,9 @@
 # Tactical 204: Browser Raw Input Adoption
 
-Status: active 2026-07-21. The landed native router and current browser
-keyboard, pointer, touch, frame, and smoke consumers have been inventoried;
-implementation starts with ownership locks and the raw Wasm boundary.
+Status: complete 2026-07-21. Ordinary browser keyboard, pointer, wheel, and
+touch input now crosses a raw physical boundary into the same shared Rust
+router used by desktop and flat Android. Headed desktop and mobile browser
+smokes passed and their screenshots were inspected.
 
 Topic: `platform-host-boundary`
 
@@ -27,7 +28,7 @@ This tactical changes the production input path. It does not yet perform the
 full diagnostic/global-state cleanup or the preference/bootstrap cleanup;
 those are the next two bounded tacticals in the series.
 
-## Current Shape
+## Starting Shape
 
 `mclone-web-input.ts` currently maps DOM events directly to movement action
 names, hotbar slots, pause/help/debug behavior, string-keyed block break/place,
@@ -192,6 +193,53 @@ diagnostic/test observer and removal of the production semantic report mirror
 and smoke command registry. Then create the preference/bootstrap tactical from
 the smaller production web host that remains. Do not combine those concerns
 into this input cutover merely because they share `mclone-web-app.ts`.
+
+## Landed Outcome
+
+`WebSceneHost` now owns `MonoInteractiveInputRouter`, `TouchInputAdapter`, and
+browser touch-contact bookkeeping. Its ordinary input exports accept physical
+DOM encodings and positions, normalize them in browser Rust, and feed the
+shared router. `renderFrame` receives time only; TypeScript no longer authors
+a held gameplay frame.
+
+The browser input and touch modules retain DOM listener registration,
+coordinate conversion, pointer lock/capture, the click-versus-drag rule,
+synthetic-mouse suppression, pen forwarding, and event cancellation. They no
+longer contain action maps, game action names, touch control roles, joystick
+dead-zone policy, or UI/game routing. Browser and flat Android now share touch
+control hit testing and the shared touch adapter.
+
+The cutover also fixed the shared scene host's touch-sensitivity setter: shared
+UI settings now update the live mono-input context directly, so the browser no
+longer needs to infer a settings change from an action label.
+
+Two boundaries deliberately remain for Tactical 205:
+
+- production `mclone-web-app.ts` still copies a broad semantic frame/UI report
+  into `__mcloneWebApp.state`; and
+- smoke-only semantic methods are still attached to that production global,
+  although ordinary input no longer calls them.
+
+These are diagnostic exposure debts, not alternate production input paths.
+
+## Execution Record
+
+- `5c9e0981` opened the tactical and froze the browser input boundary.
+- `0440e510` moved flat touch hit testing to the shared UI/input model.
+- `9872721f` cut keyboard, pointer, wheel, touch, and held-frame input over to
+  the shared Rust route and added a source lock against regression.
+
+Validation completed on 2026-07-21:
+
+- web-client and shared scene Rust tests passed, including the new platform
+  host-boundary locks;
+- the wasm32 web client, desktop, flat Android, and Android XR clients checked;
+- TypeScript, Worker ownership, scene-host adoption, thin-adapter purity,
+  formatting, and diff gates passed;
+- headed Wayland desktop and mobile browser app smokes passed; and
+- desktop world/HUD/UI captures and mobile world/touch/joystick/options
+  captures were inspected. The mobile probe also passed movement, look, Jump,
+  Attack/Use, UI, and persisted touch-sensitivity checks.
 
 ## Stop Conditions
 
