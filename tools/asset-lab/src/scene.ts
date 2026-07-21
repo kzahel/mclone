@@ -3,7 +3,9 @@ import type { BoxFaceName, ClipSpec, FaceSpec, FigureAsset, PartSpec, Vec3 } fro
 
 export interface FigureScene {
   root: THREE.Group;
+  setClip(clipName?: string): void;
   update(timeSeconds: number): void;
+  dispose(): void;
 }
 
 export interface FigureSceneOptions {
@@ -19,6 +21,11 @@ interface PartObject {
   basePosition: THREE.Vector3;
   baseRotation: THREE.Euler;
   baseScale: THREE.Vector3;
+}
+
+interface PreparedClip {
+  source: ClipSpec;
+  keysByPart: Map<string, ClipSpec["keys"]>;
 }
 
 export function createFigureScene(asset: FigureAsset, clipName?: string, options: FigureSceneOptions = {}): FigureScene {
@@ -93,7 +100,10 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
     }
   }
 
-  const clip = clipName ? asset.clips[clipName] : undefined;
+  const clips = new Map(
+    Object.entries(asset.clips).map(([name, clip]) => [name, prepareClip(clip)]),
+  );
+  let activeClip = clipName === undefined ? undefined : requiredClip(clips, clipName, asset.name);
 
   if (options.debug) {
     root.add(createAxisMarker(0.35));
@@ -101,15 +111,24 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
 
   return {
     root,
+    setClip(nextClipName?: string) {
+      activeClip = nextClipName === undefined
+        ? undefined
+        : requiredClip(clips, nextClipName, asset.name);
+    },
     update(timeSeconds: number) {
       for (const part of parts.values()) {
         part.group.position.copy(part.basePosition);
         part.group.rotation.copy(part.baseRotation);
         part.group.scale.copy(part.baseScale);
       }
-      if (clip) {
-        applyClip(parts, clip, timeSeconds);
+      if (activeClip) {
+        applyClip(parts, activeClip, timeSeconds);
       }
+    },
+    dispose() {
+      disposeObjectResources(root, materialMap.values(), textureMap.values());
+      root.clear();
     },
   };
 }
@@ -286,41 +305,125 @@ function createLabel(text: string): THREE.Object3D {
   return sprite;
 }
 
-function applyClip(parts: Map<string, PartObject>, clip: ClipSpec, timeSeconds: number): void {
+export function disposeObjectTree(root: THREE.Object3D): void {
+  disposeObjectResources(root, [], []);
+}
+
+function disposeObjectResources(
+  root: THREE.Object3D,
+  extraMaterials: Iterable<THREE.Material>,
+  extraTextures: Iterable<THREE.Texture>,
+): void {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>(extraMaterials);
+  const textures = new Set<THREE.Texture>(extraTextures);
+
+  root.traverse((object) => {
+    const renderable = object as THREE.Object3D & {
+      geometry?: THREE.BufferGeometry;
+      material?: THREE.Material | THREE.Material[];
+    };
+    if (renderable.geometry) {
+      geometries.add(renderable.geometry);
+    }
+    if (Array.isArray(renderable.material)) {
+      for (const material of renderable.material) {
+        materials.add(material);
+      }
+    } else if (renderable.material) {
+      materials.add(renderable.material);
+    }
+  });
+
+  for (const material of materials) {
+    collectMaterialTextures(material, textures);
+  }
+  for (const geometry of geometries) {
+    geometry.dispose();
+  }
+  for (const material of materials) {
+    material.dispose();
+  }
+  for (const texture of textures) {
+    texture.dispose();
+  }
+}
+
+function collectMaterialTextures(material: THREE.Material, textures: Set<THREE.Texture>): void {
+  const materialWithMaps = material as THREE.Material & Record<string, unknown>;
+  for (const property of [
+    "alphaMap",
+    "aoMap",
+    "bumpMap",
+    "displacementMap",
+    "emissiveMap",
+    "envMap",
+    "lightMap",
+    "map",
+    "metalnessMap",
+    "normalMap",
+    "roughnessMap",
+  ]) {
+    const value = materialWithMaps[property];
+    if (value instanceof THREE.Texture) {
+      textures.add(value);
+    }
+  }
+}
+
+function prepareClip(clip: ClipSpec): PreparedClip {
+  const keysByPart = new Map<string, ClipSpec["keys"]>();
+  for (const key of clip.keys) {
+    const keys = keysByPart.get(key[0]) ?? [];
+    keys.push(key);
+    keysByPart.set(key[0], keys);
+  }
+  for (const keys of keysByPart.values()) {
+    keys.sort((left, right) => left[1] - right[1]);
+  }
+  return { source: clip, keysByPart };
+}
+
+function requiredClip(
+  clips: Map<string, PreparedClip>,
+  clipName: string,
+  figureName: string,
+): PreparedClip {
+  const clip = clips.get(clipName);
+  if (!clip) {
+    throw new Error(`Figure '${figureName}' has no clip '${clipName}'`);
+  }
+  return clip;
+}
+
+function applyClip(parts: Map<string, PartObject>, prepared: PreparedClip, timeSeconds: number): void {
   if (!Number.isFinite(timeSeconds)) {
     throw new Error("Animation presentation time must be finite");
   }
+  const clip = prepared.source;
   const duration = clipDuration(clip);
   const localTime = clip.loop && duration > 0
     ? ((timeSeconds % duration) + duration) % duration
     : THREE.MathUtils.clamp(timeSeconds, 0, duration);
-  const byPart = new Map<string, ClipSpec["keys"]>();
 
-  for (const key of clip.keys) {
-    const keys = byPart.get(key[0]) ?? [];
-    keys.push(key);
-    byPart.set(key[0], keys);
-  }
-
-  for (const [partName, keys] of byPart.entries()) {
+  for (const [partName, keys] of prepared.keysByPart.entries()) {
     const part = parts.get(partName);
     if (!part) {
       continue;
     }
-    const sorted = [...keys].sort((left, right) => left[1] - right[1]);
-    const translation = sampleChannel(sorted, localTime, (key) => key[2].at);
+    const translation = sampleChannel(keys, localTime, (key) => key[2].at);
     if (translation) {
       part.group.position.copy(part.basePosition).add(toVector(translation));
     }
 
-    const rotation = channelSpan(sorted, localTime, (key) => key[2].rot);
+    const rotation = channelSpan(keys, localTime, (key) => key[2].rot);
     if (rotation) {
       const left = additiveRotation(part.baseRotation, rotation.left);
       const right = additiveRotation(part.baseRotation, rotation.right);
       part.group.quaternion.slerpQuaternions(left, right, rotation.alpha).normalize();
     }
 
-    const scale = sampleChannel(sorted, localTime, (key) => key[2].scale);
+    const scale = sampleChannel(keys, localTime, (key) => key[2].scale);
     if (scale) {
       part.group.scale.fromArray(scale);
     }

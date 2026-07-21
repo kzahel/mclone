@@ -5,7 +5,12 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/figure-json.test.ts tests/scene-animation.test.ts && pnpm figures:check",
+    "test": "tsx --test tests/figure-json.test.ts tests/scene-animation.test.ts tests/catalog.test.ts && pnpm figures:check",
+    "catalog:build": "tsx src/build-web-catalog.ts",
+    "web:dev": "pnpm catalog:build && vite --config src/web/vite.config.ts",
+    "web:build": "pnpm catalog:build && vite build --config src/web/vite.config.ts",
+    "web:preview": "vite preview --config src/web/vite.config.ts",
+    "web:test": "playwright test -c playwright.config.ts",
     "figures:check": "tsx src/sync-first-party.ts --check",
     "figures:write": "tsx src/sync-first-party.ts --write",
     "preview": "vite --host 127.0.0.1",
@@ -19,15 +24,21 @@
     "install:browsers": "playwright install chromium"
   },
   "dependencies": {
-    "three": "^0.178.0"
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "three": "^0.178.0",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@types/three": "0.178.1",
+    "@vitejs/plugin-react": "^6.0.3",
     "tsx": "^4.20.6",
     "typescript": "^5.7.2",
-    "vite": "^7.0.0"
+    "vite": "^8.1.5"
   },
   "engines": {
     "node": ">=20"

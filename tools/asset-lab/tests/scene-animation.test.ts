@@ -50,6 +50,30 @@ test("repeated updates reset base scale and retain arbitrary-time motion", () =>
   assert.ok(1 - Math.abs(first.dot(body.quaternion)) > 1e-9);
 });
 
+test("switches clips on one shared semantic scene and disposes cleanly", () => {
+  const asset = figureWithKeys([
+    ["body", 0, { at: [0, 0, 0] }],
+    ["body", 1, { at: [0, 1, 0] }],
+  ]);
+  asset.clips.reverse = {
+    loop: false,
+    keys: [
+      ["body", 0, { at: [0, 1, 0] }],
+      ["body", 1, { at: [0, 0, 0] }],
+    ],
+  };
+  const scene = createFigureScene(asset, "motion", { jointMarkers: false });
+  const body = requiredPart(scene.root, "body");
+
+  scene.update(0.25);
+  assert.ok(Math.abs(body.position.y - 0.25) < 1e-6);
+  scene.setClip("reverse");
+  scene.update(0.25);
+  assert.ok(Math.abs(body.position.y - 0.75) < 1e-6);
+  assert.throws(() => scene.setClip("missing"), /has no clip 'missing'/);
+  assert.doesNotThrow(() => scene.dispose());
+});
+
 function requiredPart(root: THREE.Object3D, name: string): THREE.Object3D {
   const part = root.getObjectByName(name);
   assert.ok(part, `missing part '${name}'`);

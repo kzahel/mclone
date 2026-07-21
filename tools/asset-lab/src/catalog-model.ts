@@ -1,0 +1,195 @@
+import type { LocomotionKind } from "./dsl";
+
+export interface AnimalCatalogClip {
+  durationSeconds: number;
+  fps?: number;
+  locomotionKind?: LocomotionKind;
+  loop: boolean;
+  name: string;
+}
+
+export interface AnimalCatalogFigure {
+  clipCount: number;
+  clips: AnimalCatalogClip[];
+  defaultClip: string;
+  jsonPath: string;
+  label: string;
+  materialCount: number;
+  name: string;
+  partCount: number;
+  semanticBytes: number;
+  semanticSha256: string;
+  textureCount: number;
+  thumbnailPath: string;
+}
+
+export interface AnimalCatalogDocument {
+  catalogSha256: string;
+  figures: AnimalCatalogFigure[];
+  schemaVersion: 1;
+  summary: {
+    canonicalFigures: number;
+    clips: number;
+    parts: number;
+  };
+}
+
+export function parseAnimalCatalog(value: unknown, sourceLabel: string): AnimalCatalogDocument {
+  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.figures)) {
+    throw new Error(`Expected '${sourceLabel}' to contain an animal catalogue schema-v1 document`);
+  }
+  if (!isSha256(value.catalogSha256) || !isCatalogSummary(value.summary)) {
+    throw new Error(`Animal catalogue '${sourceLabel}' has invalid summary metadata`);
+  }
+
+  const figures = value.figures.map((figure, index) => parseCatalogFigure(figure, sourceLabel, index));
+  if (value.summary.canonicalFigures !== figures.length) {
+    throw new Error(
+      `Animal catalogue '${sourceLabel}' expected ${value.summary.canonicalFigures} figures but contains ${figures.length}`,
+    );
+  }
+  const names = new Set<string>();
+  for (const figure of figures) {
+    if (names.has(figure.name)) {
+      throw new Error(`Animal catalogue '${sourceLabel}' contains duplicate figure '${figure.name}'`);
+    }
+    names.add(figure.name);
+  }
+
+  return {
+    catalogSha256: value.catalogSha256,
+    figures,
+    schemaVersion: 1,
+    summary: value.summary,
+  };
+}
+
+export function formatFigureLabel(name: string): string {
+  return name
+    .split(/[_-]+/u)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+export function chooseDefaultClip(clipNames: readonly string[]): string {
+  if (clipNames.length === 0) {
+    throw new Error("Cannot choose a default from an empty clip list");
+  }
+  const priorities = ["walk", "fly", "swim", "run", "idle"];
+  for (const priority of priorities) {
+    if (clipNames.includes(priority)) {
+      return priority;
+    }
+  }
+  return [...clipNames].sort((left, right) => left.localeCompare(right))[0] as string;
+}
+
+function parseCatalogFigure(value: unknown, sourceLabel: string, index: number): AnimalCatalogFigure {
+  if (
+    !isRecord(value)
+    || !isSafeName(value.name)
+    || typeof value.label !== "string"
+    || !isNonnegativeInteger(value.partCount)
+    || !isNonnegativeInteger(value.materialCount)
+    || !isNonnegativeInteger(value.textureCount)
+    || !isNonnegativeInteger(value.clipCount)
+    || !isPositiveInteger(value.semanticBytes)
+    || !isSha256(value.semanticSha256)
+    || !isRelativeArtifactPath(value.jsonPath, ".json")
+    || !isRelativeArtifactPath(value.thumbnailPath, ".png")
+    || !Array.isArray(value.clips)
+    || !isSafeName(value.defaultClip)
+  ) {
+    throw new Error(`Animal catalogue '${sourceLabel}' has an invalid figure at index ${index}`);
+  }
+  const clips = value.clips.map((clip, clipIndex) => parseCatalogClip(clip, sourceLabel, index, clipIndex));
+  if (value.clipCount !== clips.length || !clips.some((clip) => clip.name === value.defaultClip)) {
+    throw new Error(`Animal catalogue '${sourceLabel}' has inconsistent clips for '${value.name}'`);
+  }
+  return {
+    clipCount: value.clipCount,
+    clips,
+    defaultClip: value.defaultClip,
+    jsonPath: value.jsonPath,
+    label: value.label,
+    materialCount: value.materialCount,
+    name: value.name,
+    partCount: value.partCount,
+    semanticBytes: value.semanticBytes,
+    semanticSha256: value.semanticSha256,
+    textureCount: value.textureCount,
+    thumbnailPath: value.thumbnailPath,
+  };
+}
+
+function parseCatalogClip(
+  value: unknown,
+  sourceLabel: string,
+  figureIndex: number,
+  clipIndex: number,
+): AnimalCatalogClip {
+  if (
+    !isRecord(value)
+    || !isSafeName(value.name)
+    || typeof value.loop !== "boolean"
+    || typeof value.durationSeconds !== "number"
+    || !Number.isFinite(value.durationSeconds)
+    || value.durationSeconds <= 0
+    || (value.fps !== undefined && (typeof value.fps !== "number" || !Number.isFinite(value.fps) || value.fps <= 0))
+    || (value.locomotionKind !== undefined && !isLocomotionKind(value.locomotionKind))
+  ) {
+    throw new Error(
+      `Animal catalogue '${sourceLabel}' has an invalid clip at figure ${figureIndex}, clip ${clipIndex}`,
+    );
+  }
+  return {
+    durationSeconds: value.durationSeconds,
+    ...(value.fps === undefined ? {} : { fps: value.fps }),
+    ...(value.locomotionKind === undefined ? {} : { locomotionKind: value.locomotionKind }),
+    loop: value.loop,
+    name: value.name,
+  };
+}
+
+function isCatalogSummary(value: unknown): value is AnimalCatalogDocument["summary"] {
+  return isRecord(value)
+    && isNonnegativeInteger(value.canonicalFigures)
+    && isNonnegativeInteger(value.clips)
+    && isNonnegativeInteger(value.parts);
+}
+
+function isLocomotionKind(value: unknown): value is LocomotionKind {
+  return value === "biped-walk"
+    || value === "quadruped-walk"
+    || value === "slither"
+    || value === "swim"
+    || value === "wing-flap";
+}
+
+function isSafeName(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z0-9][a-z0-9_-]*$/u.test(value);
+}
+
+function isRelativeArtifactPath(value: unknown, extension: string): value is string {
+  return typeof value === "string"
+    && !value.startsWith("/")
+    && !value.includes("..")
+    && value.endsWith(extension);
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+function isNonnegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
