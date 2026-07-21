@@ -102,3 +102,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `starter-farmstead-settlement` — reusable authored building vocabulary and
   the staged path from standalone templates to an adaptive demo farmstead;
   Tactical 208 begins implementation with the cottage-and-barn lab
+- `structure-lab` — source-first authored structure DSL, generated-JSON drift
+  gates, Rust-baked review artifacts, and a read-only public catalogue

@@ -709,7 +709,7 @@ approved; do not reserve a block of numbers in advance.
 | ID | Workstream | State | Current evidence or dependency | Next transition |
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
-| `FS-01` | standalone building-authoring lab | `proven` | Tacticals 208–210: shared kernel, accepted version-two standard forms, named cottage depth/entry and barn length/optional-lean-to families, guarded 81-chunk comparison gallery, SQLite reopen, and three visual iteration receipts | externalize authored voxel records when editing-in-Rust becomes the next authoring bottleneck; do not broaden into arbitrary dimensions |
+| `FS-01` | standalone building-authoring lab | `proven` | Tacticals 208–210: shared kernel, accepted version-two standard forms, named cottage depth/entry and barn length/optional-lean-to families, guarded 81-chunk comparison gallery, SQLite reopen, and three visual iteration receipts | follow the source-first [`structure-lab.md`](structure-lab.md) contract when externalizing authored records; do not broaden into arbitrary dimensions |
 | `FS-02` | coherent farm block/material/collision kit | `active` | five full-cube states plus glass and transform/collision-aware spruce stairs/slabs are proven through Tactical 209; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
@@ -760,9 +760,11 @@ Tactical 210 is complete. The accepted standard cottage and barn now sit inside
 bounded authored families rather than becoming arbitrary numeric extrusions:
 cottages select `snug`, `standard`, or `deep` plans plus a stoop or canopy
 porch; barns select `short`, `standard`, or `long` structural bays and compose
-the east lean-to independently. The next standalone-authoring bottleneck is a
-textual/captured voxel source format so additional authored siblings do not
-need to be embedded directly in Rust. It can pause while `FS-04` proves the true
+the east lean-to independently. The accepted next standalone-authoring
+direction now lives in [`structure-lab.md`](structure-lab.md): agent-authored
+TypeScript DSL sources generate drift-checked canonical JSON and Rust-baked
+static preview meshes for a polished read-only catalogue. In-browser editing is
+indefinitely deferred. This lane can pause while `FS-04` proves the true
 structure lifecycle. If the next composition slice needs enclosures first,
 resume `FS-02` with the fence/gate family; do not add doors, props, crops, and
 fences as one undirected content batch.

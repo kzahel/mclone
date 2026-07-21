@@ -104,6 +104,11 @@ series implements the same concern, normally reuse the document slug in its
   exact touched-chunk scheduling, authored-tree reservation, persistent
   residents, an `FS-*` dependency/proof ledger, tactical completion gates, and
   the deliberately deferred Far LOD proxy.
+- [`structure-lab.md`](structure-lab.md): accepted source-first Structure Lab
+  direction—agent-authored TypeScript DSL, mandatory generated-JSON drift
+  gates, Rust build-time baked meshes, a polished read-only
+  React/Zustand/Three.js catalogue, checked runtime promotion, and indefinite
+  deferral of in-browser editing.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   vanilla-shaped client-authoritative interim, planned server validation
   checks, the preserved sequenced-input-replay path, and remote-actor
