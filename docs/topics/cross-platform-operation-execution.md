@@ -4,10 +4,11 @@ Topic: `cross-platform-operation-execution`
 
 Status: high-level actor/mailbox direction accepted 2026-07-20. Tactical
 [`201`](../tactical/201-lobby-content-simplification.md) removed the accidental
-managed installer and its TypeScript policy surface. The required fresh
-post-cleanup review found no replacement provisioning actor, but did justify
-the bounded existing-owner cleanup in active Tactical
-[`202`](../tactical/202-web-scene-async-boundary-cleanup.md).
+managed installer and its TypeScript policy surface. Completed Tactical
+[`202`](../tactical/202-web-scene-async-boundary-cleanup.md) then performed the
+required fresh post-cleanup review: it found no replacement provisioning
+actor, and completed the bounded existing-owner cleanup the surviving seams
+justified.
 
 ## Top-Level Frame
 
@@ -264,6 +265,12 @@ Out of scope:
   API; and
 - runtime storage-schema migration or upgrade semantics. Any future migration
   campaign requires separate pre-admission/offline review.
+
+Synchronous/raw host input, browser environment initialization, presentation
+cadence, and diagnostic-observer boundaries are governed by
+[`platform-host-boundary.md`](platform-host-boundary.md). They share the same
+single-semantic-owner principle but should not be forced through an actor or
+operation mailbox merely for structural uniformity.
 
 ## Directional Invariants
 
@@ -709,6 +716,7 @@ Shared actor/mailbox precedents:
 
 Related records:
 
+- [`platform-host-boundary.md`](platform-host-boundary.md)
 - [`embedded-worlds.md`](embedded-worlds.md)
 - [`unified-persistence-interface.md`](unified-persistence-interface.md)
 - [`world-dimension-storage-layout.md`](world-dimension-storage-layout.md)

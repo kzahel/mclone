@@ -76,3 +76,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `world-dimension-storage-layout` — realm-global native SQLite metadata plus
   dimension-local SQLite shards beneath one world persistence owner, while
   browser IndexedDB remains physically consolidated
+- `platform-host-boundary` — one shared Rust input/context/action path across
+  desktop, browser, flat Android, and XR interactive hosts; autonomous
+  platform initialization and mechanics stay local; browser TS input
+  semantics, web-Rust string-action dispatch, and production smoke mirrors
+  are the gaps to close

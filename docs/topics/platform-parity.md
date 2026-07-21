@@ -486,7 +486,10 @@ lower-level render residency and explicit product/evidence gaps:
    keyboard/mouse, touch, pointer, and XR controllers, covering **menu-nav,
    pointer, and interact**, not just locomotion. Required for XR interaction and
    for XR interaction and cross-platform menu/pointer parity. Flat Android now
-   has shared touch movement/action/hotbar intents. (tactical 076 follow-up)
+   has shared touch movement/action/hotbar intents. The current/desired adapter
+   audit and accepted environment-initialization boundary live in
+   [`platform-host-boundary.md`](platform-host-boundary.md). (tactical 076
+   follow-up)
 6. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through

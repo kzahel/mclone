@@ -134,8 +134,14 @@ series implements the same concern, normally reuse the document slug in its
   accepted shared Rust actor/mailbox direction across native threads and
   browser Workers while preserving direct native execution and domain-blind
   TypeScript. Completed Tactical 201 removed the accidental managed-lobby
-  installer; its fresh post-cleanup ownership review is the next work, with no
-  coarse-operation actor tactical pre-authorized.
+  installer; completed Tactical 202 found no replacement coarse-operation
+  actor and cleaned the surviving seams through their existing Rust owners.
+- [`platform-host-boundary.md`](platform-host-boundary.md): accepted clean
+  interactive host direction and code-grounded current/desired audit — one
+  shared Rust input/context/action path across native, browser, Android, and XR
+  where applicable; autonomous platform initialization and mechanics remain
+  local; production TypeScript input semantics, the browser-Rust string-action
+  dispatch surface, and smoke-state mirrors are the primary remaining gaps.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted
