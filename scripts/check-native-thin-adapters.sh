@@ -37,10 +37,10 @@ if rg -n -U --glob '!offscreen_scene_host.rs' \
 fi
 
 required_pose_entries=(
-  'native/apps/mclone-native-client/src/winit_frame_driver.rs:advance_mono_input_frame'
+  'native/apps/mclone-native-client/src/winit_frame_driver.rs:advance_held_frame'
   'native/apps/mclone-native-client/src/offscreen_scene_host.rs:advance_mono_input_frame'
   'native/apps/mclone-native-client/src/desktop_xr.rs:apply_frame_locomotion'
-  'native/apps/mclone-android-client/src/surface_driver.rs:advance_mono_input_frame'
+  'native/apps/mclone-android-client/src/surface_driver.rs:advance_held_frame'
   'native/apps/mclone-android-xr-client/src/lib.rs:apply_frame_locomotion'
 )
 
