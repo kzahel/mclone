@@ -5665,27 +5665,12 @@ impl McloneSceneHost {
     ) -> Result<bool> {
         let mut scene_replaced = false;
         for start in effects.session_starts {
-            #[cfg(not(target_arch = "wasm32"))]
-            let scene = {
-                let Some(world_root) = self.active_world.scene.world_root.clone() else {
-                    let error = WorldCatalogError::unsupported("Persistent worlds unavailable");
-                    log::warn!("XR catalog session start failed: {error}");
+            let scene = match self.catalog_session_scene_options(&start.summary) {
+                Ok(scene) => scene,
+                Err(error) => {
+                    log::warn!("catalog session start failed: {error}");
                     continue;
-                };
-                self.catalog_world_scene(&start.summary, world_root.join(start.summary.id.as_str()))
-            };
-            #[cfg(target_arch = "wasm32")]
-            let scene = {
-                let mut scene = self.active_world.scene.clone();
-                scene.seed = start.summary.seed;
-                scene.world_generation_profile = start.summary.world_generation_profile;
-                scene.use_initial_spawn_center = start
-                    .summary
-                    .world_generation_profile
-                    .authored_missing_chunk()
-                    .is_none();
-                scene.world_dir = None;
-                scene
+                }
             };
             self.status_overlay = StatusOverlay::hidden();
             self.session.request_start(
@@ -5704,6 +5689,33 @@ impl McloneSceneHost {
             scene_replaced |= self.execute_xr_catalog_request(request, device, queue)?;
         }
         Ok(scene_replaced)
+    }
+
+    fn catalog_session_scene_options(
+        &self,
+        summary: &LocalWorldSummary,
+    ) -> Result<McloneSceneHostOptions, WorldCatalogError> {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let Some(world_root) = self.active_world.scene.world_root.clone() else {
+                return Err(WorldCatalogError::unsupported(
+                    "Persistent worlds unavailable",
+                ));
+            };
+            Ok(self.catalog_world_scene(summary, world_root.join(summary.id.as_str())))
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let mut scene = self.active_world.scene.clone();
+            scene.seed = summary.seed;
+            scene.world_generation_profile = summary.world_generation_profile;
+            scene.use_initial_spawn_center = summary
+                .world_generation_profile
+                .authored_missing_chunk()
+                .is_none();
+            scene.world_dir = None;
+            Ok(scene)
+        }
     }
 
     pub(crate) fn execute_xr_catalog_request(
@@ -5751,42 +5763,13 @@ impl McloneSceneHost {
             self.try_issue_lobby_destination_start(&mut launch, device, queue)?;
             self.lobby_launch = Some(launch);
         }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.apply_xr_catalog_effects(effects, device, queue)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let mut scene_replaced = false;
-            for start in effects.session_starts {
-                let mut scene = self.active_world.scene.clone();
-                scene.seed = start.summary.seed;
-                scene.world_generation_profile = start.summary.world_generation_profile;
-                scene.use_initial_spawn_center = start
-                    .summary
-                    .world_generation_profile
-                    .authored_missing_chunk()
-                    .is_none();
-                scene.world_dir = None;
-                self.status_overlay = StatusOverlay::hidden();
-                self.session.request_start(
-                    start.request,
-                    ScenePendingSessionStart {
-                        runtime_kind: SessionRuntimeKind::Local,
-                        options: scene,
-                        descriptor: start.descriptor,
-                    },
-                );
-                self.ui.clear_input();
-                self.menu_pointer_down = false;
-            }
-            for request in effects.catalog_requests {
-                scene_replaced |= self.execute_xr_catalog_request(request, device, queue)?;
-            }
-            let render_state = self.current_mono_ui_render_state();
-            self.ui.commit_render_state(render_state);
-            Ok(scene_replaced)
-        }
+        let scene_replaced = self.apply_xr_catalog_effects(effects, device, queue)?;
+        // Deferred completions arrive between frames. Preserve the browser's
+        // immediate input/render projection refresh and give any future native
+        // deferred driver the same behavior.
+        let render_state = self.current_mono_ui_render_state();
+        self.ui.commit_render_state(render_state);
+        Ok(scene_replaced)
     }
 
     pub(crate) fn apply_xr_session_effects(

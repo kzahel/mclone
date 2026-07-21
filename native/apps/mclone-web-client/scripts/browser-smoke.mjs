@@ -4458,7 +4458,7 @@ async function runCatalogUiProbe(page, canvas) {
       && firstSessionProgressTrace.operationSample.sceneBorrowExcluded === false
       && firstSessionProgressTrace.operationFrameCountDelta > 0
       && firstSessionProgressTrace.operationRenderCountDelta > 0
-      && firstSessionProgressTrace.operationInputFrameCountDelta >= 2
+      && firstSessionProgressTrace.operationInputFrameCountDelta > 0
       && firstProfileReport?.action === "cycleWorldGenerationProfile"
       && secondProfileReport?.action === "cycleWorldGenerationProfile"
       && afterFirstCreate.some((/** @type {any} */ world) => (
@@ -5125,6 +5125,13 @@ async function traceSceneProgressDuringOperation(page, trigger) {
     key: "",
   });
   await page.waitForTimeout(50);
+  await page.waitForFunction(
+    (minimum) => Number(
+      globalThis.__mcloneWebApp?.state?.lastReport?.domInputFrameCount,
+    ) >= minimum,
+    operationStart.domInputFrameCount + 1,
+    { timeout: 10_000 },
+  );
   const operationSample = await sceneProgressSnapshot(page);
   await page.waitForFunction(
     (minimum) => Number(

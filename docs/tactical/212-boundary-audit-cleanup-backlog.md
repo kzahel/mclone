@@ -1,7 +1,7 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. Slice 0 is resolved as an explicit no-migration
-decision; Slice 1 is next. This is the implementation charter for the
+Status: active 2026-07-21. Slices 0–1 are complete; Slice 2 is next. This is
+the implementation charter for the
 remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
 It is a bounded cleanup series, not a new campaign: every slice below has
@@ -96,7 +96,7 @@ Exit gate: D1 resolved explicitly here and in the Slice 0 commit message; the
 existing lock tests continue to reject legacy migration/store policy. No code
 or lock-test update is required.
 
-## Slice 1: Deduplicate the catalog effect apply loop
+## Slice 1: Deduplicate the catalog effect apply loop — complete 2026-07-21
 
 Motivation: audit F2. The wasm branch of
 `poll_external_catalog_operations`
@@ -121,6 +121,17 @@ Exit gate: one shared loop; the duplicated block is deleted (~40 lines);
 `cargo test -p mclone-scene` green; a web catalog smoke
 (`pnpm native:web:catalog-smoke`) passes headed; scoreboard cfg delta
 reported.
+
+Completion evidence: catalog session scene construction is isolated in one
+helper with cfg-forked bodies, while both deferred and immediate paths use the
+same effect loop. The deferred path retains the immediate render-state commit
+on both architectures because completions arrive between frames and input must
+observe the new projection without waiting for presentation. Scene Rust is
+24,731 → 24,714 lines and the scoreboard's negative-wasm cfg count is 71 → 70.
+All 125 scene unit tests passed. The headed catalog lane passed with an
+inspected world-list capture after its progress sample was made cadence-aware:
+it now waits for an observed input-bearing frame instead of assuming two such
+frames fit inside a fixed 50 ms window.
 
 ## Slice 2: Converge frame-timing accounting on MonotonicClock
 
