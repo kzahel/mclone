@@ -170,6 +170,7 @@ reviewed rigs and then filling macro gaps.
 | Tapir | P3 | ✅ | Q | Malayan, lowland; striped baby | `examples/malayan_tapir` — approved 23-box adult with a massive pale saddle, black fore and rear masses, white-rimmed ears, broad feet, and short three-stage trunk |
 | Okapi | P3 | ✅ | Q | — | `examples/okapi` — approved 24-box adult with a deep chestnut body, shorter giraffe-like neck, huge ears, small ossicones, and white-barred rump and legs |
 | Warthog | P3 | ✅ | Q | — | `examples/warthog` — approved 30-box adult with a wide low head, cheek bosses, paired two-stage tusks, stiff dorsal mane, and raised tufted tail |
+| Gerenuk | P3 | ✅ | Q | female | `examples/gerenuk` — approved 28-box male with a slender tan body, exceptionally long neck and legs, paired two-stage lyre horns, careful walk, and separate hind-leg upright-browse action |
 
 ## Primates
 
@@ -251,6 +252,7 @@ reviewed rigs and then filling macro gaps.
 | Marabou stork | P3 | ✅ | B | — | `examples/marabou_stork` — approved 19-box marabou with black-white plumage, bare pink head and neck, hanging throat pouch, long planted legs, wetland stalk, and separate broad wing-display action |
 | Kakapo | P3 | ✅ | B | — | `examples/kakapo` — approved 12-box moss-green flightless parrot with owl-like facial disc, tiny patterned wings, stout planted feet, slow waddle, and separate inflated booming display |
 | Great blue heron | P3 | ✅ | B | gray heron | `examples/great_blue_heron` — approved 20-box wader with slate patterned wings, folded three-stage S-neck, dagger bill, black crest, long planted legs, marsh stalk, and separate spear-strike action |
+| Atlantic puffin | P3 | ✅ | B | horned puffin | `examples/atlantic_puffin` — approved 15-box seabird with black mantle, white face, deep multicolor bill, orange webbed feet, cliff waddle, and separate broad wing-drying action |
 
 ## Marine & aquatic
 
@@ -268,6 +270,7 @@ reviewed rigs and then filling macro gaps.
 | Octopus | P2 | ✅ | S | — | `examples/octopus` — approved 32-box common octopus with mottled mantle, raised eyes, visible sucker rows, eight three-stage tentacles, and coordinated jet swim |
 | Cuttlefish | P3 | ✅ | S | common, flamboyant | `examples/cuttlefish` — approved common cuttlefish with a patterned broad mantle, traveling lateral-fin wave, large W-pupil eyes, eight arms, and a separate paired feeding-tentacle strike |
 | Crab | P2 | ✅ | C | — | `examples/crab` — approved 31-box red rock crab with patterned broad carapace, raised eyes, articulated chelae, eight two-stage legs, and explicit sideways scuttle |
+| Coconut crab | P3 | ✅ | C | juvenile | `examples/coconut_crab` — approved 39-box terrestrial giant with blue-violet patterned shell, raised eyes, unequal crushing claws, eight three-stage legs, lateral island scuttle, and separate coconut-crack action |
 | Sea turtle | P2 | ✅ | S | adult, hatchling | `examples/sea_turtle` — canonical 11-box adult with patterned shell, articulated neck, broad front flippers, rear paddles, and steady swim |
 | Seahorse | P3 | ✅ | S | — | `examples/seahorse` — approved 21-box common seahorse with long snout, raised coronet, plated trunk, fluttering fins, and five-stage curled tail |
 | Jellyfish | P3 | ✅ | S | — | `examples/jellyfish` — approved 32-box moon jellyfish with stepped bell, four two-stage oral arms, eight two-stage tentacles, and asymmetric pulse animation |
