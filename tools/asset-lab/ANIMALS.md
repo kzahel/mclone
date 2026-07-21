@@ -205,6 +205,7 @@ reviewed rigs and then filling macro gaps.
 | Pangolin | P3 | ✅ | Q | — | `examples/pangolin` — approved 23-box adult with five overlapping scale plates, earless pointed head, clawed feet, and four-stage armored tail; **roll-up** remains future work |
 | Mongoose | P3 | ✅ | Q | — | `examples/mongoose` — approved 19-box low runner with a narrow speckled body, pointed muzzle, small ears, dark feet, and three-stage tail |
 | Binturong | P3 | ✅ | Q | — | `examples/binturong` — approved 24-box adult with a shaggy charcoal coat, pale whiskers, plantigrade feet, slow canopy prowl, and separate five-stage prehensile-tail curl action |
+| Honey badger | P3 | ✅ | Q | — | `examples/honey_badger` — approved 21-box adult with a continuous pale mantle, black underbody, heavy clawed paws, determined trot, and separate alternating digging-swipe action |
 
 ## Marsupials & monotremes
 
@@ -234,6 +235,7 @@ reviewed rigs and then filling macro gaps.
 | Crow / Raven | P3 | ✅ | W | — | `examples/raven` — approved 18-box common raven with heavy beak, throat shag, broad layered wings, wedge tail, and measured soar |
 | Flamingo | P3 | ✅ | W | — | `examples/flamingo` — approved 17-box greater flamingo with angular S-neck, two-stage stilt legs, and slow planted walk |
 | Shoebill | P3 | ✅ | B | — | `examples/shoebill` — approved 22-box slate-gray shoebill with a short crest, long planted legs, oversized hooked bill, measured stalk, and separate abrupt bill-snap action |
+| Pelican | P3 | ✅ | W | great white, brown | `examples/pelican` — approved 18-box great white pelican with broad black-edged wings, long articulated neck, enormous orange bill and pouch, planted webbed feet, shore waddle, and separate pouch-scoop action |
 | Songbird (robin/sparrow) | P3 | ✅ | W | color morphs | `examples/robin` — approved 16-box European robin with orange face and breast, fine wing bars, short beak, and quick flutter |
 | Peacock | P3 | ✅ | W | — | `examples/peacock` — approved 22-box Indian peacock with crest, patterned wings, and parented seven-feather tail fan |
 | Ostrich / Emu | P3 | ✅ | B | — | `examples/ostrich` — approved 21-box male ostrich with tiny white-edged wings, long bare neck, two-stage legs, broad feet, and fast run |
@@ -248,6 +250,7 @@ reviewed rigs and then filling macro gaps.
 | Fish (generic) | P1 | ✅ | S | clownfish, tropical morphs, cod, salmon, pufferfish | `examples/fish` — approved 10-box blue/yellow tropical fish with a lateral two-stage tail |
 | Pufferfish | P3 | ✅ | S | spotted, porcupinefish | `examples/pufferfish` — approved 18-box spotted puffer with a compact spiny body, puckered mouth, swim cycle, and separately selectable inflate and deflate actions |
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
+| Manta ray | P3 | ✅ | S | reef manta, oceanic manta | `examples/manta_ray` — approved 16-box reef manta with patterned diamond disc, paired cephalic fins, long four-stage tail, undulating wing swim, and separate full barrel-roll action |
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
 | Octopus | P2 | ✅ | S | — | `examples/octopus` — approved 32-box common octopus with mottled mantle, raised eyes, visible sucker rows, eight three-stage tentacles, and coordinated jet swim |
