@@ -230,6 +230,16 @@ facts. Both composites and the ordinary mono control were inspected:
 The mono control remained a normal full-frame capture with eleven drawn
 sections, two drawn actors, and no auxiliary allocation or presentation call.
 
+### Slice 4a — authoritative interest cardinality
+
+Implemented on 2026-07-21. A focused `RealmServer` test grows one ordinary
+player source into two co-located sources and then four mixed co-located and
+separated player/observer sources. Co-location retains one aggregate ticket;
+the separated sources expand the union to three resident chunks. Removing each
+source drops only its now-unreferenced ticket while the other centers survive,
+and removing all four returns the aggregate and scheduler ticket counts to
+zero. The focused server test passes without rendering or couch-only authority.
+
 ## Explicit Deferrals
 
 - Native, web, Android, OpenXR, or Steam Input gamepad collectors.

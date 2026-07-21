@@ -34,6 +34,96 @@ fn wait_for_observer_snapshot(
 }
 
 #[test]
+fn one_two_and_four_interest_sources_union_overlap_and_remove_cleanly() {
+    let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
+    server
+        .set_world_generation_profile(WorldGenerationProfile::authored_only())
+        .unwrap();
+    server.set_lighting_enabled(false);
+
+    let shared = ChunkPos::new(0, 0);
+    let separated_a = ChunkPos::new(8, 0);
+    let separated_b = ChunkPos::new(-8, 0);
+    let player = server.add_player();
+    server
+        .try_handle_command_for_player(
+            player,
+            ClientCommand::SetChunkView(zero_radius_view(shared)),
+        )
+        .unwrap();
+
+    let one = server.chunk_tracking_diagnostics();
+    assert_eq!((one.player_count, one.observer_count), (1, 0));
+    assert_eq!(one.aggregate_resident_chunks, 1);
+    assert_eq!(server.scheduler().ticket_count_at(shared), 1);
+
+    let overlap = server
+        .add_observer(
+            DimensionKey::overworld(),
+            zero_radius_view(shared),
+            ObserverSimulationInterest::ResidencyOnly,
+        )
+        .unwrap();
+    let two = server.chunk_tracking_diagnostics();
+    assert_eq!((two.player_count, two.observer_count), (1, 1));
+    assert_eq!(two.aggregate_resident_chunks, 1);
+    assert_eq!(two.aggregate_player_ticket_chunks, 1);
+    assert_eq!(server.scheduler().ticket_count_at(shared), 1);
+
+    let far_a = server
+        .add_observer(
+            DimensionKey::overworld(),
+            zero_radius_view(separated_a),
+            ObserverSimulationInterest::ResidencyOnly,
+        )
+        .unwrap();
+    let far_b = server
+        .add_observer(
+            DimensionKey::overworld(),
+            zero_radius_view(separated_b),
+            ObserverSimulationInterest::ResidencyOnly,
+        )
+        .unwrap();
+    let four = server.chunk_tracking_diagnostics();
+    assert_eq!((four.player_count, four.observer_count), (1, 3));
+    assert_eq!(four.aggregate_resident_chunks, 3);
+    assert_eq!(server.scheduler().ticket_count_at(shared), 1);
+    assert_eq!(server.scheduler().ticket_count_at(separated_a), 1);
+    assert_eq!(server.scheduler().ticket_count_at(separated_b), 1);
+
+    assert!(server.remove_observer(far_a).unwrap());
+    let after_far_removal = server.chunk_tracking_diagnostics();
+    assert_eq!(after_far_removal.aggregate_resident_chunks, 2);
+    assert_eq!(server.scheduler().ticket_count_at(separated_a), 0);
+    assert_eq!(server.scheduler().ticket_count_at(shared), 1);
+    assert_eq!(server.scheduler().ticket_count_at(separated_b), 1);
+
+    assert!(server.remove_observer(overlap).unwrap());
+    assert_eq!(
+        server
+            .chunk_tracking_diagnostics()
+            .aggregate_resident_chunks,
+        2
+    );
+    assert_eq!(server.scheduler().ticket_count_at(shared), 1);
+    assert!(server.remove_player(player));
+    assert_eq!(
+        server
+            .chunk_tracking_diagnostics()
+            .aggregate_resident_chunks,
+        1
+    );
+    assert_eq!(server.scheduler().ticket_count_at(shared), 0);
+    assert_eq!(server.scheduler().ticket_count_at(separated_b), 1);
+
+    assert!(server.remove_observer(far_b).unwrap());
+    let empty = server.chunk_tracking_diagnostics();
+    assert_eq!((empty.player_count, empty.observer_count), (0, 0));
+    assert_eq!(empty.aggregate_resident_chunks, 0);
+    assert_eq!(server.scheduler().ticket_count_at(separated_b), 0);
+}
+
+#[test]
 fn residency_observer_overlaps_player_without_becoming_a_player() {
     let mut server = RealmServer::with_world_store(12_345, Box::new(MemoryWorldStore::new()));
     server
