@@ -1,9 +1,9 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. All mandatory implementation Slices 0–6 are
-complete; closeout measurement and the independent Phase 9 audit handoff are
-next. This is the implementation charter for the remaining work appended by
-the Phase 7 audit
+Status: complete 2026-07-21. All mandatory implementation Slices 0–6 are
+complete; optional Slice 7 was deliberately skipped at closeout. The parent
+concern remains open for the independent Phase 9 audit. This is the execution
+record for the remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
 It is a bounded cleanup series, not a new campaign: every slice below has
 a named target, a measured motivation from the audit, and its own exit
@@ -407,6 +407,37 @@ Do these only after Slices 1–6; they are hygiene, not convergence.
 
 Exit gate: behavior-neutral; `pnpm native:web:typecheck` and the lock
 suites green; counts reported.
+
+Closeout disposition: skipped. Neither the large mechanical file split nor
+the unrelated TypeScript micro-cleanups are required by an audit finding or a
+closure criterion. Starting them after all mandatory gates passed would widen
+the review surface without strengthening the Phase 9 evidence. They may be
+picked up later as independent hygiene if they become locally useful.
+
+## Closeout
+
+Mandatory Slices 0–6 are complete. Relative to the Phase 7 audit column,
+authored web TypeScript is 3,555 → 3,593 (+38), web-only Rust is
+20,566 → 19,636 (-930), and the combined boundary is 24,121 → 23,229
+(-892). The TypeScript growth is query-gated smoke observation for the ABI
+split, while the web-Rust reduction is principally the 1,161-line catalog-plan
+ownership move. Shared scene Rust is 24,731 → 24,730 (-1) and shared
+app-runtime is 33,877 → 35,111 (+1,234), primarily because that catalog policy
+and its tests now live at their shared owner.
+
+The exact production/smoke export pins are 37 / 3 / 6 / 6 / 8, async mutable
+wasm exports remain zero, the two rim guards are gone, and the scoreboard's
+negative-wasm cfg counts are 70 / 98. Headed operation traces still advance
+active frame/render/input counters. Slice 6 supplies the previously missing
+runtime behavioral fixpoint proof.
+
+What remains for the parent concern is the separately executed Phase 9 audit,
+not more implementation in this tactical. That reviewer must freshly read the
+code and validate the closure protocol before changing the parent status. The
+unchanged actor-ID/age lifecycle fixture remains separately recorded baseline
+debt; it does not invalidate the operation-specific asset replacement,
+resource rebuild, cancellation, quiescence, or shutdown evidence. No legacy
+web-world migration or obsolete-schema accommodation remains or is planned.
 
 ## Ordering
 
