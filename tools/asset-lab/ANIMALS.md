@@ -182,6 +182,7 @@ reviewed rigs and then filling macro gaps.
 | Orangutan | P3 | ✅ | B/Q | — | `examples/orangutan` — approved 27-box adult male with rust-orange shag, dark cheek flanges, and exceptionally long forelimbs |
 | Lemur | P3 | ✅ | Q/B | ring-tailed | `examples/ring_tailed_lemur` — approved 22-box slender quadruped with amber-eyed mask and seven-section banded tail |
 | Mandrill | P3 | ✅ | Q/B | female, juvenile | `examples/mandrill` — approved 22-box adult male with olive mantle, gold beard, vivid blue-red muzzle, colorful rump, grounded knuckle walk, and separate threat-yawn action |
+| Proboscis monkey | P3 | ✅ | Q/B | female, juvenile | `examples/proboscis_monkey` — approved 26-box adult male with russet mantle, pale pot belly, long pendant nose, five-stage raised tail, canopy hand-walk, and separate nasal-call action |
 
 ## Small & exotic mammals
 
@@ -253,6 +254,7 @@ reviewed rigs and then filling macro gaps.
 | Kakapo | P3 | ✅ | B | — | `examples/kakapo` — approved 12-box moss-green flightless parrot with owl-like facial disc, tiny patterned wings, stout planted feet, slow waddle, and separate inflated booming display |
 | Great blue heron | P3 | ✅ | B | gray heron | `examples/great_blue_heron` — approved 20-box wader with slate patterned wings, folded three-stage S-neck, dagger bill, black crest, long planted legs, marsh stalk, and separate spear-strike action |
 | Atlantic puffin | P3 | ✅ | B | horned puffin | `examples/atlantic_puffin` — approved 15-box seabird with black mantle, white face, deep multicolor bill, orange webbed feet, cliff waddle, and separate broad wing-drying action |
+| Ruby-throated hummingbird | P3 | ✅ | W | female, juvenile | `examples/ruby_throated_hummingbird` — approved 17-box male with emerald back, pixel ruby gorget, needle bill, paired two-stage wings, rapid hover, and separate downward flower-feeding dip |
 
 ## Marine & aquatic
 
@@ -263,6 +265,7 @@ reviewed rigs and then filling macro gaps.
 | Swordfish | P3 | ✅ | S | blue marlin | `examples/swordfish` — approved 16-box swordfish with cobalt-silver flanks, long three-stage rostrum, swept fins, crescent tail, fast swim, and separate lateral bill-slash action |
 | Pufferfish | P3 | ✅ | S | spotted, porcupinefish | `examples/pufferfish` — approved 18-box spotted puffer with a compact spiny body, puckered mouth, swim cycle, and separately selectable inflate and deflate actions |
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
+| Hammerhead shark | P3 | ✅ | S | scalloped, great | `examples/hammerhead_shark` — approved 19-box scalloped hammerhead with stepped cephalofoil, end-set eyes, gill markings, swept fins, vertical caudal tail, cruising swim, and separate sensor-sweep action |
 | Manta ray | P3 | ✅ | S | reef manta, oceanic manta | `examples/manta_ray` — approved 16-box reef manta with patterned diamond disc, paired cephalic fins, long four-stage tail, undulating wing swim, and separate full barrel-roll action |
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
