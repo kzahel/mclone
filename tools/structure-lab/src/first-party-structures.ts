@@ -28,7 +28,7 @@ export const FIRST_PARTY_STRUCTURES: readonly FirstPartyStructure[] = [
 function firstPartyStructure(
   name: string,
   id: string,
-  runtimeStatus: FirstPartyStructure["runtimeStatus"] = "parity-canary",
+  runtimeStatus: FirstPartyStructure["runtimeStatus"] = "promoted",
 ): FirstPartyStructure {
   const runtimePath = `assets/mclone/structures/${id}.structure.json`;
   return {

@@ -17,7 +17,8 @@ test("builds a public-safe catalog from checked Rust preview receipts", async ()
       (entry) => entry.structureId === "farmstead-cottage-a-v2",
     );
     assert.ok(standard);
-    assert.equal(standard.runtimeStatus, "parity-canary");
+    assert.equal(standard.runtimeStatus, "promoted");
+    assert.equal(catalog.summary.runtimePromoted, 12);
     assert.ok(catalog.structures.every((entry) => entry.assetProvenance.minecraftReference === 0));
     assert.ok(catalog.structures.every((entry) => entry.assetProvenance.unknown === 0));
     const deployed = parseStructureCatalog(

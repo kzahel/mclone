@@ -190,3 +190,12 @@ the red clay, spruce, dressed stone, hay, glazing, broad entrance, and gambrel
 silhouette all resolve without diagnostic material tiles. Three Playwright
 tests cover the cottage guide, mobile layout, barn selection/search, and
 single-canvas invariant.
+
+### Slice 5 runtime promotion
+
+The existing `CottageVariant`, `BarnLength`, and `BarnVariant` APIs now select
+and load checked canonical JSON for every bounded member. Gallery themes also
+come from canonical default-theme records. The prior Rust builders are excluded
+from production compilation and retained temporarily under `cfg(test)` as
+independent migration oracles. The promoted paths pass the original gallery,
+family-size, placement, lighting, and SQLite-reopen suites unchanged.

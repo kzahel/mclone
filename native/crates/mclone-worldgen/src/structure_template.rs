@@ -341,6 +341,7 @@ impl TemplateBoundingBox {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TemplateError {
+    InvalidCanonicalRecord(String),
     InvalidSize([i32; 3]),
     InvalidBox {
         min: BlockPos,
@@ -359,6 +360,12 @@ pub enum TemplateError {
 impl fmt::Display for TemplateError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidCanonicalRecord(message) => {
+                write!(
+                    formatter,
+                    "canonical structure record is invalid: {message}"
+                )
+            }
             Self::InvalidSize(size) => write!(formatter, "template size {size:?} must be positive"),
             Self::InvalidBox { min, max_exclusive } => write!(
                 formatter,

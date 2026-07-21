@@ -5,18 +5,26 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use mclone_core::{BlockPos, ChunkPos, ChunkRevision, ChunkStatus};
+#[cfg(test)]
 use mclone_worldgen::block::{
-    AIR, ALLIUM, BRICKS, COARSE_DIRT, COBBLESTONE, CORNFLOWER, DANDELION, DIRT, GLASS, GRASS_BLOCK,
-    GRAVEL, HAY_BLOCK, MOSSY_COBBLESTONE, OAK_LOG, OAK_LOG_X, OAK_LOG_Z, OAK_PLANKS, POPPY,
+    AIR, BRICKS, COBBLESTONE, GLASS, MOSSY_COBBLESTONE, OAK_LOG, OAK_LOG_Z, OAK_PLANKS,
     RED_TERRACOTTA, SPRUCE_LOG, SPRUCE_LOG_X, SPRUCE_LOG_Z, SPRUCE_PLANKS, SPRUCE_SLAB_BOTTOM,
     SPRUCE_SLAB_TOP, SPRUCE_STAIRS_EAST, SPRUCE_STAIRS_NORTH, SPRUCE_STAIRS_SOUTH,
-    SPRUCE_STAIRS_WEST, STONE, STONE_BRICKS, TORCH, WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
+    SPRUCE_STAIRS_WEST, STONE_BRICKS, WALL_TORCH_SOUTH, WHITE_TERRACOTTA,
+};
+use mclone_worldgen::block::{
+    ALLIUM, COARSE_DIRT, CORNFLOWER, DANDELION, DIRT, GRASS_BLOCK, GRAVEL, HAY_BLOCK, OAK_LOG_X,
+    POPPY, STONE, TORCH,
 };
 use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
+use mclone_worldgen::structure_json::load_canonical_structure_json;
 use mclone_worldgen::structure_template::{
     PlacedStructureTemplate, StructureMaterialTheme, StructurePlaceSettings, StructureTemplate,
-    StructureTemplateBuilder, TemplateBlockState, TemplateError, TemplateMaterialRole,
-    TemplateMirror, TemplateRotation,
+    TemplateError, TemplateMirror, TemplateRotation,
+};
+#[cfg(test)]
+use mclone_worldgen::structure_template::{
+    StructureTemplateBuilder, TemplateBlockState, TemplateMaterialRole,
 };
 use serde::{Deserialize, Serialize};
 
@@ -65,6 +73,7 @@ pub enum CottageDepth {
 }
 
 impl CottageDepth {
+    #[cfg(test)]
     const fn front_z(self) -> i32 {
         match self {
             Self::Snug => 10,
@@ -73,6 +82,7 @@ impl CottageDepth {
         }
     }
 
+    #[cfg(test)]
     const fn slug(self) -> &'static str {
         match self {
             Self::Snug => "snug",
@@ -91,6 +101,7 @@ pub enum CottageEntry {
 }
 
 impl CottageEntry {
+    #[cfg(test)]
     const fn slug(self) -> &'static str {
         match self {
             Self::Stoop => "stoop",
@@ -122,6 +133,7 @@ pub enum BarnLength {
 }
 
 impl BarnLength {
+    #[cfg(test)]
     const fn front_z(self) -> i32 {
         match self {
             Self::Short => 11,
@@ -130,6 +142,7 @@ impl BarnLength {
         }
     }
 
+    #[cfg(test)]
     const fn slug(self) -> &'static str {
         match self {
             Self::Short => "short",
@@ -447,6 +460,39 @@ pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
 }
 
 pub fn cottage_template_for(variant: CottageVariant) -> Result<StructureTemplate, TemplateError> {
+    let json = match (variant.depth, variant.entry) {
+        (CottageDepth::Snug, CottageEntry::Stoop) => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-cottage-snug-stoop-v1.structure.json"
+        )),
+        (CottageDepth::Snug, CottageEntry::CanopyPorch) => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-cottage-snug-canopy-porch-v1.structure.json"
+        )),
+        (CottageDepth::Standard, CottageEntry::Stoop) => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-cottage-standard-stoop-v1.structure.json"
+        )),
+        (CottageDepth::Standard, CottageEntry::CanopyPorch) => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-cottage-a-v2.structure.json"
+        )),
+        (CottageDepth::Deep, CottageEntry::Stoop) => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-cottage-deep-stoop-v1.structure.json"
+        )),
+        (CottageDepth::Deep, CottageEntry::CanopyPorch) => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-cottage-deep-canopy-porch-v1.structure.json"
+        )),
+    };
+    load_promoted_template(json)
+}
+
+#[cfg(test)]
+fn legacy_cottage_template_for(
+    variant: CottageVariant,
+) -> Result<StructureTemplate, TemplateError> {
     let front_z = variant.depth.front_z();
     let size_z = front_z
         + match variant.entry {
@@ -674,6 +720,25 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
 }
 
 pub fn barn_core_template_for(length: BarnLength) -> Result<StructureTemplate, TemplateError> {
+    let json = match length {
+        BarnLength::Short => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-barn-core-short-v1.structure.json"
+        )),
+        BarnLength::Standard => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-barn-core-a-v2.structure.json"
+        )),
+        BarnLength::Long => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-barn-core-long-v1.structure.json"
+        )),
+    };
+    load_promoted_template(json)
+}
+
+#[cfg(test)]
+fn legacy_barn_core_template_for(length: BarnLength) -> Result<StructureTemplate, TemplateError> {
     let front_z = length.front_z();
     let id = if length == BarnLength::Standard {
         "farmstead-barn-core-a-v2".to_owned()
@@ -811,6 +876,27 @@ pub fn barn_lean_to_template() -> Result<StructureTemplate, TemplateError> {
 }
 
 pub fn barn_lean_to_template_for(length: BarnLength) -> Result<StructureTemplate, TemplateError> {
+    let json = match length {
+        BarnLength::Short => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-barn-lean-to-short-v1.structure.json"
+        )),
+        BarnLength::Standard => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-barn-lean-to-a-v2.structure.json"
+        )),
+        BarnLength::Long => include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../assets/mclone/structures/farmstead-barn-lean-to-long-v1.structure.json"
+        )),
+    };
+    load_promoted_template(json)
+}
+
+#[cfg(test)]
+fn legacy_barn_lean_to_template_for(
+    length: BarnLength,
+) -> Result<StructureTemplate, TemplateError> {
     let size_z = length.front_z() - 2;
     let id = if length == BarnLength::Standard {
         "farmstead-barn-lean-to-a-v2".to_owned()
@@ -875,7 +961,25 @@ pub fn barn_templates_for(variant: BarnVariant) -> Result<BarnTemplateSet, Templ
     })
 }
 
+fn load_promoted_template(json: &str) -> Result<StructureTemplate, TemplateError> {
+    load_canonical_structure_json(json)
+        .map(|record| record.template)
+        .map_err(|error| TemplateError::InvalidCanonicalRecord(error.to_string()))
+}
+
 fn cottage_theme() -> StructureMaterialTheme {
+    load_canonical_structure_json(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../assets/mclone/structures/farmstead-cottage-a-v2.structure.json"
+    )))
+    .expect("checked canonical cottage must load")
+    .default_theme()
+    .expect("checked canonical cottage must declare its default theme")
+    .clone()
+}
+
+#[cfg(test)]
+fn legacy_cottage_theme() -> StructureMaterialTheme {
     StructureMaterialTheme::new("warm-oak-and-plaster-v2")
         .with(TemplateMaterialRole::Foundation, COBBLESTONE)
         .with(TemplateMaterialRole::Wall, WHITE_TERRACOTTA)
@@ -896,6 +1000,18 @@ fn cottage_theme() -> StructureMaterialTheme {
 }
 
 fn barn_theme() -> StructureMaterialTheme {
+    load_canonical_structure_json(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../assets/mclone/structures/farmstead-barn-core-a-v2.structure.json"
+    )))
+    .expect("checked canonical barn must load")
+    .default_theme()
+    .expect("checked canonical barn must declare its default theme")
+    .clone()
+}
+
+#[cfg(test)]
+fn legacy_barn_theme() -> StructureMaterialTheme {
     StructureMaterialTheme::new("red-spruce-working-barn-v2")
         .with(TemplateMaterialRole::Foundation, STONE_BRICKS)
         .with(TemplateMaterialRole::Wall, RED_TERRACOTTA)
@@ -915,10 +1031,12 @@ fn barn_theme() -> StructureMaterialTheme {
         .with(TemplateMaterialRole::Accent, HAY_BLOCK)
 }
 
+#[cfg(test)]
 fn role(role: TemplateMaterialRole) -> TemplateBlockState {
     TemplateBlockState::Role(role)
 }
 
+#[cfg(test)]
 fn column(
     builder: &mut StructureTemplateBuilder,
     x: i32,
@@ -935,6 +1053,7 @@ fn column(
     Ok(())
 }
 
+#[cfg(test)]
 fn line_x(
     builder: &mut StructureTemplateBuilder,
     min_x: i32,
@@ -951,6 +1070,7 @@ fn line_x(
     Ok(())
 }
 
+#[cfg(test)]
 fn line_z(
     builder: &mut StructureTemplateBuilder,
     x: i32,
@@ -967,6 +1087,7 @@ fn line_z(
     Ok(())
 }
 
+#[cfg(test)]
 fn roof_band(
     builder: &mut StructureTemplateBuilder,
     min_x: i32,
@@ -984,6 +1105,7 @@ fn roof_band(
     Ok(())
 }
 
+#[cfg(test)]
 fn framed_window_z(
     builder: &mut StructureTemplateBuilder,
     min_x: i32,
@@ -1022,6 +1144,7 @@ fn framed_window_z(
     Ok(())
 }
 
+#[cfg(test)]
 fn framed_window_x(
     builder: &mut StructureTemplateBuilder,
     x: i32,
@@ -1060,6 +1183,7 @@ fn framed_window_x(
     Ok(())
 }
 
+#[cfg(test)]
 fn white_frame_window_z(
     builder: &mut StructureTemplateBuilder,
     min_x: i32,
@@ -1525,9 +1649,9 @@ mod tests {
     fn canonical_cottage_family_matches_the_accepted_rust_oracle() {
         for (json, variant) in CANONICAL_COTTAGES {
             let canonical = load_canonical_structure_json(json).unwrap();
-            let accepted = cottage_template_for(variant).unwrap();
+            let accepted = legacy_cottage_template_for(variant).unwrap();
             assert_canonical_template_matches(&canonical, &accepted);
-            assert_eq!(canonical.default_theme(), Some(&cottage_theme()));
+            assert_eq!(canonical.default_theme(), Some(&legacy_cottage_theme()));
             assert_eq!(canonical.blocks.len(), canonical.template.blocks().len());
             assert_eq!(canonical.sockets.len(), 1);
             assert_eq!(canonical.components.len(), 7);
@@ -1538,17 +1662,17 @@ mod tests {
     fn canonical_barn_family_matches_the_accepted_rust_oracle() {
         for (json, length) in CANONICAL_BARN_CORES {
             let canonical = load_canonical_structure_json(json).unwrap();
-            let accepted = barn_core_template_for(length).unwrap();
+            let accepted = legacy_barn_core_template_for(length).unwrap();
             assert_canonical_template_matches(&canonical, &accepted);
-            assert_eq!(canonical.default_theme(), Some(&barn_theme()));
+            assert_eq!(canonical.default_theme(), Some(&legacy_barn_theme()));
             assert_eq!(canonical.sockets.len(), 1);
             assert_eq!(canonical.components.len(), 6);
         }
         for (json, length) in CANONICAL_BARN_LEAN_TOS {
             let canonical = load_canonical_structure_json(json).unwrap();
-            let accepted = barn_lean_to_template_for(length).unwrap();
+            let accepted = legacy_barn_lean_to_template_for(length).unwrap();
             assert_canonical_template_matches(&canonical, &accepted);
-            assert_eq!(canonical.default_theme(), Some(&barn_theme()));
+            assert_eq!(canonical.default_theme(), Some(&legacy_barn_theme()));
             assert_eq!(canonical.sockets.len(), 1);
             assert_eq!(canonical.components.len(), 4);
         }

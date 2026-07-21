@@ -10,7 +10,7 @@ test("loads the checked cottage with guide and presentation controls", async ({ 
   await expect(canvas).toBeVisible();
   await expect(canvas).toHaveAttribute("data-viewer-status", "ready");
   await expect(page.locator(".viewerHeader h2")).toHaveText("Warm Oak Cottage");
-  await expect(page.locator(".statusBadge").last()).toContainText("Runtime parity canary");
+  await expect(page.locator(".statusBadge").last()).toContainText("Runtime");
   await expect(page.locator("canvas")).toHaveCount(1);
   await expect(page.getByRole("slider", { name: "Build layer" })).toHaveValue("14");
   await expect(page.locator(".materialList li")).not.toHaveCount(0);
