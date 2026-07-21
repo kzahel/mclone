@@ -443,7 +443,6 @@ pub struct WebSceneHost {
     render_worker: WebRenderWorkerCoordinator,
     initial_asset_packs: InitialAssetPacks,
     asset_pack_file_count: usize,
-    asset_pack_preparation_in_flight: Option<PlatformOperationToken>,
     pending_asset_pack_file_count: Option<(u64, usize)>,
     status_overlay: StatusOverlay,
     touch_look_sensitivity: f32,
@@ -461,7 +460,6 @@ pub struct WebSceneHost {
     update_count: usize,
     interaction_count: usize,
     mesh_build_count: usize,
-    catalog_operation_in_flight: bool,
     render_color_profile: String,
     last_runner_kind: String,
 }
@@ -1730,32 +1728,30 @@ impl WebSceneHost {
         }
         if self
             .host_ref()?
-            .pending_external_asset_pack_selection()
-            .is_some_and(|pending| self.asset_pack_preparation_in_flight != Some(pending.token))
+            .pending_external_asset_pack_preparation_count()
+            != 0
+            && let Some(effect) = take_asset_pack_preparation(self)?
         {
-            return take_asset_pack_preparation(self)
-                .map(WebSceneOperation::new)
-                .map(Some);
+            return Ok(Some(WebSceneOperation::new(effect)));
         }
         if let Some(pending) = self.host_mut()?.take_external_runtime_start() {
             return Ok(Some(WebSceneOperation::new(lower_runtime_start(
                 pending, resources,
             ))));
         }
-        if !self.catalog_operation_in_flight {
-            if let Some(pending) = self.platform.take_catalog_operation() {
-                let token = pending.token;
-                let execution = WebCatalogExecution::new(
-                    token,
-                    pending.kind.request.request,
-                    pending.kind.active_world,
-                )
-                .map_err(JsValue::from)?;
-                self.catalog_operation_in_flight = true;
-                return Ok(Some(WebSceneOperation::new(
-                    WebSceneOperationEffect::IndexedDb(execution),
-                )));
-            }
+        if self.host_ref()?.pending_external_catalog_operation_count() != 0
+            && let Some(pending) = self.platform.take_catalog_operation()
+        {
+            let token = pending.token;
+            let execution = WebCatalogExecution::new(
+                token,
+                pending.kind.request.request,
+                pending.kind.active_world,
+            )
+            .map_err(JsValue::from)?;
+            return Ok(Some(WebSceneOperation::new(
+                WebSceneOperationEffect::IndexedDb(execution),
+            )));
         }
         Ok(None)
     }
@@ -1809,7 +1805,6 @@ impl WebSceneHost {
                 None,
             ),
             WebSceneOperationCompletion::IndexedDb { token, outcome } => {
-                self.catalog_operation_in_flight = false;
                 self.platform
                     .complete_catalog_operation(PlatformOperationCompletion {
                         token,
@@ -1919,17 +1914,10 @@ fn lower_runtime_start(
 
 fn take_asset_pack_preparation(
     host: &mut WebSceneHost,
-) -> Result<WebSceneOperationEffect, JsValue> {
-    let pending = host
-        .host_ref()?
-        .pending_external_asset_pack_selection()
-        .cloned()
-        .ok_or_else(|| JsValue::from_str("no browser asset-pack selection is pending"))?;
-    if host.asset_pack_preparation_in_flight.is_some() {
-        return Err(JsValue::from_str(
-            "browser asset-pack preparation is already in flight",
-        ));
-    }
+) -> Result<Option<WebSceneOperationEffect>, JsValue> {
+    let Some(pending) = host.host_mut()?.take_external_asset_pack_selection() else {
+        return Ok(None);
+    };
     let enabled = |id| {
         pending
             .kind
@@ -1953,8 +1941,7 @@ fn take_asset_pack_preparation(
     .map_err(|error| JsValue::from_str(&format!("failed to inspect selected packs: {error}")))?
     .into_iter()
     .sum();
-    host.asset_pack_preparation_in_flight = Some(pending.token);
-    Ok(WebSceneOperationEffect::Assets {
+    Ok(Some(WebSceneOperationEffect::Assets {
         token: pending.token,
         content_generation: pending.kind.content_generation,
         selected_file_count,
@@ -1967,7 +1954,7 @@ fn take_asset_pack_preparation(
             reference_enabled,
             render_worker: host.render_worker.clone(),
         },
-    })
+    }))
 }
 
 fn apply_asset_pack_preparation(
@@ -1977,13 +1964,7 @@ fn apply_asset_pack_preparation(
     selected_file_count: usize,
     outcome: Result<PreparedSceneAssets, String>,
 ) -> Result<JsValue, JsValue> {
-    if host.asset_pack_preparation_in_flight != Some(token) {
-        return Err(JsValue::from_str(
-            "asset preparation ticket does not match the in-flight request",
-        ));
-    }
     let succeeded = outcome.is_ok();
-    host.asset_pack_preparation_in_flight = None;
     let applied = host
         .host_mut()?
         .complete_external_asset_pack_preparation(token, outcome)
@@ -2203,7 +2184,6 @@ async fn create_scene_host(
         render_worker,
         initial_asset_packs,
         asset_pack_file_count,
-        asset_pack_preparation_in_flight: None,
         pending_asset_pack_file_count: None,
         status_overlay: StatusOverlay::new("Generating world...", true),
         touch_look_sensitivity: input_preferences.touch_look_sensitivity,
@@ -2224,7 +2204,6 @@ async fn create_scene_host(
         update_count: 0,
         interaction_count: 0,
         mesh_build_count: 0,
-        catalog_operation_in_flight: false,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
     };

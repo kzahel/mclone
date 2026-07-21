@@ -1,10 +1,7 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. Slices 0–4 are implemented; Slice 5 is next. The
-full lobby lifecycle lane must be rerun after Slice 5 removes the asset-pack
-in-flight guard that currently times out before Slice 4's rebuild subcase. This is
-the implementation charter for the
-remaining work appended by the Phase 7 audit
+Status: active 2026-07-21. Slices 0–5 are implemented; Slice 6 is next. This
+is the implementation charter for the remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
 It is a bounded cleanup series, not a new campaign: every slice below has
 a named target, a measured motivation from the audit, and its own exit
@@ -278,11 +275,16 @@ the already-current `cuboid-proxy-v1` contract.
 
 The aggregate lobby lifecycle lane was attempted twice. Both runs completed
 the main lifecycle scenarios and then timed out in the asset-pack replacement
-wait, before reaching the resource-rebuild subcase. That guard is the explicit
-target of Slice 5, so Slice 5 must rerun the full lane and append the remaining
-exit evidence; do not treat the focused rebuild check as waived.
+wait, before reaching the resource-rebuild subcase. Slice 5 traced that timeout
+to stale disposable generated asset packs (209 visual entries against the
+current 221-entry registry), regenerated and strictly validated those packs,
+and reran the lane. Both the live asset-replacement and resource-rebuild
+subcases now pass and their captures were inspected. The aggregate lane still
+reports false solely through the unchanged actor-ID/age persistence fixture
+already carried as separate baseline debt by Tactical 207; it reached and
+passed both boundary subcases on two consecutive runs.
 
-## Slice 5: Collapse rim in-flight guards onto the ledger
+## Slice 5: Collapse rim in-flight guards onto the ledger — complete 2026-07-21
 
 Motivation: audit F5 — the last identity-adjacent duplication.
 
@@ -309,6 +311,27 @@ Targets:
 Exit gate: both rim fields deleted; re-entry, duplicate, and stale
 rejection covered by ledger resolutions with tests; no behavior change
 observable from TypeScript.
+
+Completion evidence: `catalog_operation_in_flight` and
+`asset_pack_preparation_in_flight` are deleted. Shared scene services expose
+their ledger `pending_len`, while their deferred platform handles provide a
+one-shot take; browser Rust no longer mirrors operation identity or compares
+tokens. A shared-operation test covers one-shot dispatch, re-entry while the
+ledger remains pending, applied completion, duplicate completion, and stale
+completion after epoch teardown. Source locks require the shared pending/take
+calls and pin both deleted rim fields at zero occurrences.
+
+The wasm build and the complete app-runtime, scene, and web-client test suites
+passed. The focused headed asset-replacement probe advanced the content epoch
+from 0 to 1, selected authored-only assets, cleared the active lobby launch,
+and rendered non-black/non-transparent output. Two full headed lifecycle runs
+then reached and passed both the asset-replacement and resource-rebuild
+subcases; the inspected captures showed the active world before and after the
+resource rebuild. Their aggregate verdict remained false only because the
+known separate actor-persistence fixture regenerated entity IDs and ages on
+world reopen, the same baseline debt recorded at Tactical 207 closeout. No
+TypeScript product behavior changed; the only browser-script addition is a
+focused smoke selector and failure-state diagnostic for this boundary.
 
 ## Slice 6: Behavioral fixpoint demonstration
 

@@ -5772,6 +5772,13 @@ impl McloneSceneHost {
         Ok(scene_replaced)
     }
 
+    pub fn pending_external_catalog_operation_count(&self) -> usize {
+        self.services
+            .catalog_operations
+            .as_ref()
+            .map_or(0, WorldCatalogOperationService::pending_len)
+    }
+
     pub(crate) fn apply_xr_session_effects(
         &mut self,
         effects: ClientSessionEffects,

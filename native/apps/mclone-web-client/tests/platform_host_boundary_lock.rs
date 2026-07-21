@@ -56,6 +56,30 @@ fn browser_scene_host_owns_the_shared_raw_input_route() {
 }
 
 #[test]
+fn coarse_operation_reentry_and_currentness_stay_ledger_owned() {
+    for required in [
+        "pending_external_asset_pack_preparation_count",
+        "take_external_asset_pack_selection",
+        "pending_external_catalog_operation_count",
+    ] {
+        assert!(
+            WEB_SCENE_HOST.contains(required),
+            "browser host no longer delegates {required} to shared operation state"
+        );
+    }
+    for forbidden in [
+        "asset_pack_preparation_in_flight",
+        "catalog_operation_in_flight",
+        "asset preparation ticket does not match",
+    ] {
+        assert!(
+            !WEB_SCENE_HOST.contains(forbidden),
+            "browser host regained parallel operation identity through {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn production_typescript_input_modules_are_game_semantic_free() {
     for (label, source) in [("keyboard/mouse", WEB_INPUT), ("touch", WEB_TOUCH)] {
         for forbidden in [

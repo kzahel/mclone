@@ -153,6 +153,18 @@ fn rust_boundary_identity_and_async_export_debt_only_decreases() {
             0,
         ),
         (
+            "browser-local asset operation identity guard",
+            WEB_SCENE_HOST,
+            "asset_pack_preparation_in_flight",
+            0,
+        ),
+        (
+            "browser-local catalog operation guard",
+            WEB_SCENE_HOST,
+            "catalog_operation_in_flight",
+            0,
+        ),
+        (
             "asset epoch used as external operation identity",
             SCENE_ASSET_REPLACEMENT,
             "ExternalAssetPackSelection {\n    pub epoch",

@@ -138,10 +138,16 @@ impl McloneSceneHost {
         Ok(())
     }
 
-    pub fn pending_external_asset_pack_selection(
-        &self,
-    ) -> Option<&PlatformOperation<ExternalAssetPackSelection>> {
-        self.pending_external_asset_pack_selection.as_ref()
+    /// Take one platform delivery while leaving identity/currentness in the
+    /// shared operation ledger until completion or epoch teardown.
+    pub fn take_external_asset_pack_selection(
+        &mut self,
+    ) -> Option<PlatformOperation<ExternalAssetPackSelection>> {
+        self.pending_external_asset_pack_selection.take()
+    }
+
+    pub fn pending_external_asset_pack_preparation_count(&self) -> usize {
+        self.external_asset_pack_operations.pending_len()
     }
 
     pub fn configure_asset_pack_preference_storage(

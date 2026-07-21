@@ -77,6 +77,7 @@ const actorCompositionProbe = process.argv.includes("--actor-composition-probe")
   || process.env.MCLONE_NATIVE_WEB_ACTOR_COMPOSITION_PROBE === "1";
 const lobbyRuntimeProbe = process.argv.includes("--lobby-runtime-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_RUNTIME_PROBE === "1";
+const lobbyAssetReplacementProbe = process.argv.includes("--lobby-asset-replacement-probe");
 const lobbyScenarioLifecycleProbe = process.argv.includes("--lobby-scenario-lifecycle-probe")
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_LIFECYCLE_PROBE === "1";
 const lobbyScenarioBoundsProbe = process.argv.includes("--lobby-scenario-bounds-probe")
@@ -92,12 +93,15 @@ const lobbyScenarioMobileProbe = process.argv.includes("--lobby-scenario-mobile-
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_MOBILE_PROBE === "1";
 const lobbyScenarioProbe = process.argv.includes("--lobby-scenario-probe")
   || process.argv.includes("--lobby-scenario-mobile-probe")
+  || lobbyAssetReplacementProbe
   || lobbyScenarioLifecycleProbe
   || lobbyScenarioBoundsProbe
   || lobbyScenarioCatalogProbe
   || process.env.MCLONE_NATIVE_WEB_LOBBY_SCENARIO_PROBE === "1";
 const lobbyScenarioProbeLabel = lobbyScenarioLifecycleProbe
   ? "lifecycle"
+  : lobbyAssetReplacementProbe
+  ? "asset-replacement"
   : lobbyScenarioBoundsProbe
   ? "bounds-4x4"
   : lobbyScenarioCatalogProbe
@@ -975,6 +979,8 @@ async function run() {
           : null;
         const lobbyScenarioProbeResult = lobbyScenarioLifecycleProbe
           ? await runLobbyScenarioLifecycleProbe(page, canvas)
+          : lobbyAssetReplacementProbe
+          ? await exerciseBrowserAssetReplacementDuringWarmup(page, canvas)
           : await completeLobbyScenarioProductAcceptance(
             page,
             canvas,
@@ -2160,18 +2166,38 @@ async function applyBrowserAssetSelectionWithoutReload(page) {
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
   const applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
-  await page.waitForFunction(
-    ({ epoch, completionCount }) => {
+  try {
+    await page.waitForFunction(
+      ({ epoch, completionCount }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        const report = state?.lastReport;
+        return Number(state?.assetPackCompletionCount) > completionCount
+          && Number(report?.activeAssetEpoch) === epoch
+          && report?.assetReplacementState === "active"
+          && state?.lobbyLaunchActive === false;
+      },
+      { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
+      { timeout: 120_000 },
+    );
+  } catch (error) {
+    const diagnostic = await page.evaluate(() => {
       const state = globalThis.__mcloneWebApp?.state;
-      const report = state?.lastReport;
-      return Number(state?.assetPackCompletionCount) > completionCount
-        && Number(report?.activeAssetEpoch) === epoch
-        && report?.assetReplacementState === "active"
-        && state?.lobbyLaunchActive === false;
-    },
-    { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
-    { timeout: 120_000 },
-  );
+      return {
+        ok: state?.ok,
+        status: state?.status,
+        assetPackCompletionCount: state?.assetPackCompletionCount,
+        activeAssetEpoch: state?.activeAssetEpoch,
+        assetReplacementState: state?.assetReplacementState,
+        assetPackActiveAuthored: state?.assetPackActiveAuthored,
+        assetPackActiveReference: state?.assetPackActiveReference,
+        lobbyLaunchActive: state?.lobbyLaunchActive,
+        lastReport: state?.lastReport,
+      };
+    });
+    throw new Error(
+      `asset replacement wait failed: ${error instanceof Error ? error.stack : String(error)}\n${JSON.stringify(diagnostic, null, 2)}`,
+    );
+  }
   return {
     before,
     applyReport,

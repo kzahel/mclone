@@ -637,4 +637,39 @@ mod tests {
             [PlatformOperationResolution::Stale(_)]
         ));
     }
+
+    #[test]
+    fn deferred_dispatch_is_one_shot_while_ledger_rejects_duplicate_and_stale_results() {
+        let (executor, handle) = deferred_platform_operation_executor();
+        let mut service = PlatformOperationService::new(Box::new(executor));
+        let token = service.issue(TestOperation::OpenCatalog, RestoreState("catalog"));
+
+        let dispatched = handle.take_submitted().expect("first dispatch");
+        assert_eq!(dispatched.token, token);
+        assert!(handle.take_submitted().is_none());
+        assert_eq!(service.pending_len(), 1);
+
+        handle.submit_completion(ok(token, "worlds"));
+        assert!(matches!(
+            service.poll().as_slice(),
+            [PlatformOperationResolution::Applied {
+                value: "worlds",
+                ..
+            }]
+        ));
+        handle.submit_completion(ok(token, "duplicate"));
+        assert!(matches!(
+            service.poll().as_slice(),
+            [PlatformOperationResolution::Duplicate(_)]
+        ));
+
+        let late = service.issue(TestOperation::Reconnect, RestoreState("disconnected"));
+        assert_eq!(handle.take_submitted().unwrap().token, late);
+        assert_eq!(service.begin_epoch().len(), 1);
+        handle.submit_completion(ok(late, "late"));
+        assert!(matches!(
+            service.poll().as_slice(),
+            [PlatformOperationResolution::Stale(_)]
+        ));
+    }
 }
