@@ -2,14 +2,15 @@
 
 Topic: `starter-farmstead-settlement`
 
-Status: **vision and staged direction accepted 2026-07-21. Tacticals 208 and
-209 prove the standalone building loop and its first human-directed charm
-iteration: shared templates/themes/transforms, a small full-cube plus
-glass/stair/slab palette, version-two cottage and barn, normal persisted chunks,
-SQLite reopen, and inspected production renders. Full settlement placement
-remains staged behind its own structure, overlay, site-plan, and content work.
-Original terrain and hydrology are quality upgrades, not blockers for continued
-standalone building art.**
+Status: **vision and staged direction accepted 2026-07-21. Tacticals 208–210
+prove the standalone building loop, human-directed charm iteration, and first
+bounded building families: named cottage depth/entry plans and barn
+length/lean-to compositions over shared templates, themes, transforms, a small
+full-cube plus glass/stair/slab palette, normal persisted chunks, SQLite reopen,
+and inspected production renders. Full settlement placement remains staged
+behind its own structure, overlay, site-plan, and content work. Original terrain
+and hydrology are quality upgrades, not blockers for continued standalone
+building art.**
 
 Last reconciled: **2026-07-21**.
 
@@ -126,8 +127,8 @@ The direction is accepted before all of its consumers are ready:
   demo seed should not be treated as stable while the relevant macro fields are
   still moving.
 - The live Rust engine now has a small pure template/transform/material-role
-  kernel and persisted standalone building lab from Tactical 208, but no true
-  structure-start/reference/piece runtime.
+  kernel, persisted standalone building lab, and bounded cottage/barn families
+  from Tacticals 208–210, but no true structure-start/reference/piece runtime.
   [`../structures.md`](../structures.md) explicitly requires that foundation
   before large cross-chunk structures.
 - The generated block-state lane now includes oak/spruce planks, cobblestone,
@@ -708,7 +709,7 @@ approved; do not reserve a block of numbers in advance.
 | ID | Workstream | State | Current evidence or dependency | Next transition |
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
-| `FS-01` | standalone building-authoring lab | `proven` | Tacticals 208–209: shared kernel, version-two cottage/barn/lean-to, 49 lit chunks, SQLite reopen, and two four-view visual reviews | gather human feedback on the charm pass before authoring a second building family or external data format |
+| `FS-01` | standalone building-authoring lab | `proven` | Tacticals 208–210: shared kernel, accepted version-two standard forms, named cottage depth/entry and barn length/optional-lean-to families, guarded 81-chunk comparison gallery, SQLite reopen, and three visual iteration receipts | externalize authored voxel records when editing-in-Rust becomes the next authoring bottleneck; do not broaden into arbitrary dimensions |
 | `FS-02` | coherent farm block/material/collision kit | `active` | five full-cube states plus glass and transform/collision-aware spruce stairs/slabs are proven through Tactical 209; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
@@ -755,13 +756,16 @@ series actually begins, not for this documentation-only planning phase.
 
 ## Next Work
 
-Tactical 209 is complete. The immediate checkpoint is human visual feedback on
-the version-two charm pass. If the building language is accepted, the best
-standalone-authoring follow-up is either one controlled cottage variant plus a
-textual/captured voxel source format, or a pause in building art while `FS-04`
-proves the true structure lifecycle. If the next composition slice needs
-enclosures first, resume `FS-02` with the fence/gate family; do not add doors,
-props, crops, and fences as one undirected content batch.
+Tactical 210 is complete. The accepted standard cottage and barn now sit inside
+bounded authored families rather than becoming arbitrary numeric extrusions:
+cottages select `snug`, `standard`, or `deep` plans plus a stoop or canopy
+porch; barns select `short`, `standard`, or `long` structural bays and compose
+the east lean-to independently. The next standalone-authoring bottleneck is a
+textual/captured voxel source format so additional authored siblings do not
+need to be embedded directly in Rust. It can pause while `FS-04` proves the true
+structure lifecycle. If the next composition slice needs enclosures first,
+resume `FS-02` with the fence/gate family; do not add doors, props, crops, and
+fences as one undirected content batch.
 
 `FS-04`, the true cross-chunk structure lifecycle, remains the first hard
 blocker for materializing the eventual settlement during normal generation. It
@@ -839,8 +843,8 @@ plan. It does not need recursive jigsaw assembly.
 
 ## Remaining Validation Contract
 
-Tacticals 208–209 prove only the standalone template, first detail family, and
-persisted-gallery loop.
+Tacticals 208–210 prove only the standalone template, first detail family,
+bounded building-family selection, and persisted-gallery loop.
 Settlement tacticals should additionally plan for:
 
 - deterministic receipts for candidate scores, chosen anchor/rotation, grade

@@ -35,10 +35,129 @@ pub const BUILDING_LAB_MARKER_FILE: &str = "mclone-building-lab.json";
 pub const BUILDING_LAB_SCHEMA_VERSION: u32 = 1;
 pub const BUILDING_LAB_SEED: i64 = 20_801;
 pub const BUILDING_LAB_VOID_PADDING_RADIUS: i32 = 3;
+pub const BUILDING_FAMILY_LAB_GALLERY_ID: &str = "bounded-building-families-v1";
+pub const BUILDING_FAMILY_LAB_MARKER_FILE: &str = "mclone-building-family-lab.json";
+pub const BUILDING_FAMILY_LAB_SEED: i64 = 21_001;
+pub const BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS: i32 = 4;
 
 const COTTAGE_ORIGIN: BlockPos = BlockPos::new(-29, 63, -10);
 const BARN_ORIGIN: BlockPos = BlockPos::new(7, 63, -12);
 const BARN_LEAN_TO_ORIGIN: BlockPos = BlockPos::new(28, 63, -7);
+
+const FAMILY_COTTAGE_ORIGINS: [BlockPos; 3] = [
+    BlockPos::new(-31, 63, 10),
+    BlockPos::new(-7, 63, 10),
+    BlockPos::new(17, 63, 10),
+];
+const FAMILY_BARN_ORIGINS: [BlockPos; 3] = [
+    BlockPos::new(-45, 63, -34),
+    BlockPos::new(-12, 63, -34),
+    BlockPos::new(25, 63, -34),
+];
+
+/// Curated longitudinal cottage plans. Width, wall height, and roof pitch are
+/// authored invariants rather than raw procedural dimensions.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CottageDepth {
+    Snug,
+    Standard,
+    Deep,
+}
+
+impl CottageDepth {
+    const fn front_z(self) -> i32 {
+        match self {
+            Self::Snug => 10,
+            Self::Standard => 12,
+            Self::Deep => 14,
+        }
+    }
+
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Snug => "snug",
+            Self::Standard => "standard",
+            Self::Deep => "deep",
+        }
+    }
+}
+
+/// Authored cottage entry modules. A stoop keeps the doorway accessible but
+/// does not claim the footprint or posts of the accepted canopy porch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CottageEntry {
+    Stoop,
+    CanopyPorch,
+}
+
+impl CottageEntry {
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Stoop => "stoop",
+            Self::CanopyPorch => "canopy-porch",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CottageVariant {
+    pub depth: CottageDepth,
+    pub entry: CottageEntry,
+}
+
+impl CottageVariant {
+    pub const STANDARD: Self = Self::new(CottageDepth::Standard, CottageEntry::CanopyPorch);
+
+    pub const fn new(depth: CottageDepth, entry: CottageEntry) -> Self {
+        Self { depth, entry }
+    }
+}
+
+/// Curated barn lengths measured in whole structural bays.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BarnLength {
+    Short,
+    Standard,
+    Long,
+}
+
+impl BarnLength {
+    const fn front_z(self) -> i32 {
+        match self {
+            Self::Short => 11,
+            Self::Standard => 15,
+            Self::Long => 19,
+        }
+    }
+
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Short => "short",
+            Self::Standard => "standard",
+            Self::Long => "long",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BarnVariant {
+    pub length: BarnLength,
+    pub lean_to: bool,
+}
+
+impl BarnVariant {
+    pub const STANDARD: Self = Self::new(BarnLength::Standard, true);
+
+    pub const fn new(length: BarnLength, lean_to: bool) -> Self {
+        Self { length, lean_to }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BarnTemplateSet {
+    pub core: StructureTemplate,
+    pub lean_to: Option<StructureTemplate>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,6 +259,101 @@ pub fn building_lab_records() -> ChunkStoreResult<(BuildingLabManifest, Vec<Chun
     Ok((manifest, records))
 }
 
+pub fn building_family_lab_records() -> ChunkStoreResult<(BuildingLabManifest, Vec<ChunkRecord>)> {
+    let cottage_variants = [
+        CottageVariant::new(CottageDepth::Snug, CottageEntry::Stoop),
+        CottageVariant::STANDARD,
+        CottageVariant::new(CottageDepth::Deep, CottageEntry::CanopyPorch),
+    ];
+    let barn_variants = [
+        BarnVariant::new(BarnLength::Short, false),
+        BarnVariant::STANDARD,
+        BarnVariant::new(BarnLength::Long, true),
+    ];
+    let cottage_theme = cottage_theme();
+    let barn_theme = barn_theme();
+    let mut placements = Vec::with_capacity(8);
+
+    for (variant, origin) in cottage_variants.into_iter().zip(FAMILY_COTTAGE_ORIGINS) {
+        placements.push(
+            cottage_template_for(variant)
+                .map_err(template_error)?
+                .place(&StructurePlaceSettings {
+                    origin,
+                    rotation: TemplateRotation::None,
+                    mirror: TemplateMirror::None,
+                    theme: &cottage_theme,
+                })
+                .map_err(template_error)?,
+        );
+    }
+    for (variant, origin) in barn_variants.into_iter().zip(FAMILY_BARN_ORIGINS) {
+        let family = barn_templates_for(variant).map_err(template_error)?;
+        placements.push(
+            family
+                .core
+                .place(&StructurePlaceSettings {
+                    origin,
+                    rotation: TemplateRotation::None,
+                    mirror: TemplateMirror::None,
+                    theme: &barn_theme,
+                })
+                .map_err(template_error)?,
+        );
+        if let Some(lean_to) = family.lean_to {
+            placements.push(
+                lean_to
+                    .place(&StructurePlaceSettings {
+                        origin: origin.offset(21, 0, 5),
+                        rotation: TemplateRotation::None,
+                        mirror: TemplateMirror::None,
+                        theme: &barn_theme,
+                    })
+                    .map_err(template_error)?,
+            );
+        }
+    }
+
+    let mut chunks = BTreeMap::new();
+    for chunk_z in
+        -BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS..=BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS
+    {
+        for chunk_x in
+            -BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS..=BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS
+        {
+            let mut buffer = MutableChunkBlockBuffer::new(
+                chunk_x,
+                chunk_z,
+                AUTHORED_WORLD_MIN_Y,
+                AUTHORED_WORLD_HEIGHT,
+            );
+            author_flat_grass_chunk(&mut buffer);
+            chunks.insert(ChunkPos::new(chunk_x, chunk_z), buffer);
+        }
+    }
+
+    author_family_gallery_landscape(&mut chunks)?;
+    for placement in &placements {
+        stamp_placement(&mut chunks, placement)?;
+    }
+
+    let generated = chunks
+        .into_iter()
+        .map(|(pos, buffer)| (pos, GeneratedChunk::from_mutable_buffer(buffer)))
+        .collect::<BTreeMap<_, _>>();
+    let records = light_generated_chunks(&generated);
+    let manifest = BuildingLabManifest {
+        schema_version: BUILDING_LAB_SCHEMA_VERSION,
+        gallery_id: BUILDING_FAMILY_LAB_GALLERY_ID.to_owned(),
+        seed: BUILDING_FAMILY_LAB_SEED,
+        world_generation_profile: WorldGenerationProfile::authored_only(),
+        void_padding_radius: BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS,
+        expected_spawn: [10.5, 64.0, 54.5],
+        placements: placements.iter().map(template_receipt).collect(),
+    };
+    Ok((manifest, records))
+}
+
 pub fn write_building_lab_to_store(
     store: &mut dyn WorldStore,
 ) -> ChunkStoreResult<BuildingLabManifest> {
@@ -157,10 +371,28 @@ pub fn building_lab_memory_store() -> ChunkStoreResult<(BuildingLabManifest, Mem
     Ok((manifest, store))
 }
 
+pub fn write_building_family_lab_to_store(
+    store: &mut dyn WorldStore,
+) -> ChunkStoreResult<BuildingLabManifest> {
+    let (manifest, records) = building_family_lab_records()?;
+    for record in &records {
+        store.save_chunk(&mclone_protocol::DimensionKey::overworld(), record)?;
+    }
+    store.flush()?;
+    Ok(manifest)
+}
+
+pub fn building_family_lab_memory_store()
+-> ChunkStoreResult<(BuildingLabManifest, MemoryWorldStore)> {
+    let mut store = MemoryWorldStore::new();
+    let manifest = write_building_family_lab_to_store(&mut store)?;
+    Ok((manifest, store))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub fn write_building_lab_dir(root: impl AsRef<Path>) -> ChunkStoreResult<BuildingLabManifest> {
     let root = root.as_ref();
-    validate_lab_root_for_rebuild(root)?;
+    validate_lab_root_for_rebuild(root, BUILDING_LAB_MARKER_FILE, BUILDING_LAB_GALLERY_ID)?;
     fs::create_dir_all(root)?;
     remove_existing_lab_database(root)?;
 
@@ -175,12 +407,61 @@ pub fn write_building_lab_dir(root: impl AsRef<Path>) -> ChunkStoreResult<Buildi
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+pub fn write_building_family_lab_dir(
+    root: impl AsRef<Path>,
+) -> ChunkStoreResult<BuildingLabManifest> {
+    let root = root.as_ref();
+    validate_lab_root_for_rebuild(
+        root,
+        BUILDING_FAMILY_LAB_MARKER_FILE,
+        BUILDING_FAMILY_LAB_GALLERY_ID,
+    )?;
+    fs::create_dir_all(root)?;
+    remove_existing_lab_database(root)?;
+
+    let mut store = SqliteWorldStore::open_world_dir(root)?;
+    let manifest = write_building_family_lab_to_store(&mut store)?;
+    store.close()?;
+    let marker = serde_json::to_vec_pretty(&manifest).map_err(|error| {
+        ChunkStoreError::InvalidData(format!(
+            "failed to encode building family lab marker: {error}"
+        ))
+    })?;
+    fs::write(building_family_lab_marker_path(root), marker)?;
+    Ok(manifest)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn building_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
     root.as_ref().join(BUILDING_LAB_MARKER_FILE)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn building_family_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
+    root.as_ref().join(BUILDING_FAMILY_LAB_MARKER_FILE)
+}
+
 pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
-    let mut builder = StructureTemplateBuilder::new("farmstead-cottage-a-v2", [15, 15, 17])?;
+    cottage_template_for(CottageVariant::STANDARD)
+}
+
+pub fn cottage_template_for(variant: CottageVariant) -> Result<StructureTemplate, TemplateError> {
+    let front_z = variant.depth.front_z();
+    let size_z = front_z
+        + match variant.entry {
+            CottageEntry::Stoop => 3,
+            CottageEntry::CanopyPorch => 5,
+        };
+    let id = if variant == CottageVariant::STANDARD {
+        "farmstead-cottage-a-v2".to_owned()
+    } else {
+        format!(
+            "farmstead-cottage-{}-{}-v1",
+            variant.depth.slug(),
+            variant.entry.slug()
+        )
+    };
+    let mut builder = StructureTemplateBuilder::new(id, [15, 15, size_z])?;
     let foundation = role(TemplateMaterialRole::Foundation);
     let wall = role(TemplateMaterialRole::Wall);
     let timber_y = role(TemplateMaterialRole::TimberY);
@@ -193,50 +474,89 @@ pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
     let glazing = role(TemplateMaterialRole::Glazing);
     let accent = role(TemplateMaterialRole::Accent);
 
-    builder.fill_box(BlockPos::new(1, 0, 2), BlockPos::new(14, 1, 13), foundation)?;
-    builder.fill_box(BlockPos::new(1, 1, 2), BlockPos::new(14, 7, 13), wall)?;
+    builder.fill_box(
+        BlockPos::new(1, 0, 2),
+        BlockPos::new(14, 1, front_z + 1),
+        foundation,
+    )?;
+    builder.fill_box(
+        BlockPos::new(1, 1, 2),
+        BlockPos::new(14, 7, front_z + 1),
+        wall,
+    )?;
     builder.fill_box(
         BlockPos::new(2, 2, 3),
-        BlockPos::new(13, 6, 12),
+        BlockPos::new(13, 6, front_z),
         TemplateBlockState::Exact(AIR),
     )?;
-    builder.fill_box(BlockPos::new(2, 1, 3), BlockPos::new(13, 2, 12), floor)?;
+    builder.fill_box(BlockPos::new(2, 1, 3), BlockPos::new(13, 2, front_z), floor)?;
 
     // Restraint here is intentional: the first pass outlined nearly every
     // opening with dark full logs. Four structural corners and one high belt
     // preserve the timber language while allowing the plaster to read.
-    for &(x, z) in &[(1, 2), (13, 2), (1, 12), (13, 12)] {
+    for &(x, z) in &[(1, 2), (13, 2), (1, front_z), (13, front_z)] {
         column(&mut builder, x, z, 1, 7, timber_y)?;
     }
     line_x(&mut builder, 1, 14, 6, 2, timber_x)?;
-    line_x(&mut builder, 1, 14, 6, 12, timber_x)?;
-    line_z(&mut builder, 1, 2, 13, 6, timber_z)?;
-    line_z(&mut builder, 13, 2, 13, 6, timber_z)?;
+    line_x(&mut builder, 1, 14, 6, front_z, timber_x)?;
+    line_z(&mut builder, 1, 2, front_z + 1, 6, timber_z)?;
+    line_z(&mut builder, 13, 2, front_z + 1, 6, timber_z)?;
 
     // The south facade is intentionally unbalanced: broad kitchen glazing and
     // a flower box to the left, an offset doorway, and a smaller raised pane.
     builder.fill_box(
-        BlockPos::new(9, 2, 12),
-        BlockPos::new(10, 5, 13),
+        BlockPos::new(9, 2, front_z),
+        BlockPos::new(10, 5, front_z + 1),
         TemplateBlockState::Exact(AIR),
     )?;
-    builder.fill_box(BlockPos::new(3, 2, 12), BlockPos::new(6, 4, 13), glazing)?;
-    builder.fill_box(BlockPos::new(11, 3, 12), BlockPos::new(13, 5, 13), glazing)?;
-    line_x(&mut builder, 3, 6, 4, 12, timber_x)?;
-    line_x(&mut builder, 11, 13, 5, 12, timber_x)?;
-    builder.fill_box(BlockPos::new(3, 1, 13), BlockPos::new(6, 2, 14), floor)?;
-    builder.set(BlockPos::new(3, 2, 13), TemplateBlockState::Exact(POPPY))?;
+    builder.fill_box(
+        BlockPos::new(3, 2, front_z),
+        BlockPos::new(6, 4, front_z + 1),
+        glazing,
+    )?;
+    builder.fill_box(
+        BlockPos::new(11, 3, front_z),
+        BlockPos::new(13, 5, front_z + 1),
+        glazing,
+    )?;
+    line_x(&mut builder, 3, 6, 4, front_z, timber_x)?;
+    line_x(&mut builder, 11, 13, 5, front_z, timber_x)?;
+    builder.fill_box(
+        BlockPos::new(3, 1, front_z + 1),
+        BlockPos::new(6, 2, front_z + 2),
+        floor,
+    )?;
     builder.set(
-        BlockPos::new(5, 2, 13),
+        BlockPos::new(3, 2, front_z + 1),
+        TemplateBlockState::Exact(POPPY),
+    )?;
+    builder.set(
+        BlockPos::new(5, 2, front_z + 1),
         TemplateBlockState::Exact(CORNFLOWER),
     )?;
 
     // Side panes are offset rather than mirrored, giving each approach a
     // slightly different read.
-    builder.fill_box(BlockPos::new(1, 2, 6), BlockPos::new(2, 4, 9), glazing)?;
-    line_z(&mut builder, 1, 6, 9, 4, timber_z)?;
+    let west_window_z = front_z / 2;
+    builder.fill_box(
+        BlockPos::new(1, 2, west_window_z),
+        BlockPos::new(2, 4, west_window_z + 3),
+        glazing,
+    )?;
+    line_z(
+        &mut builder,
+        1,
+        west_window_z,
+        west_window_z + 3,
+        4,
+        timber_z,
+    )?;
     builder.fill_box(BlockPos::new(13, 3, 4), BlockPos::new(14, 5, 6), glazing)?;
     line_z(&mut builder, 13, 4, 6, 5, timber_z)?;
+    if variant.depth == CottageDepth::Deep {
+        builder.fill_box(BlockPos::new(13, 2, 9), BlockPos::new(14, 4, 12), glazing)?;
+        line_z(&mut builder, 13, 9, 12, 4, timber_z)?;
+    }
 
     // Filled plaster gables sit beneath a continuous 45-degree stair roof.
     // Each row climbs toward the ridge and keeps the eaves one block beyond
@@ -252,35 +572,75 @@ pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
                 wall,
             )?;
             builder.fill_box(
-                BlockPos::new(left_roof_x + 1, y, 12),
-                BlockPos::new(right_roof_x, y + 1, 13),
+                BlockPos::new(left_roof_x + 1, y, front_z),
+                BlockPos::new(right_roof_x, y + 1, front_z + 1),
                 wall,
             )?;
         }
-        line_z(&mut builder, left_roof_x, 1, 14, y, roof_east)?;
-        line_z(&mut builder, right_roof_x, 1, 14, y, roof_west)?;
+        line_z(&mut builder, left_roof_x, 1, front_z + 2, y, roof_east)?;
+        line_z(&mut builder, right_roof_x, 1, front_z + 2, y, roof_west)?;
     }
-    line_z(&mut builder, 7, 1, 14, 13, roof_slab)?;
+    line_z(&mut builder, 7, 1, front_z + 2, 13, roof_slab)?;
     column(&mut builder, 7, 2, 6, 13, timber_y)?;
-    column(&mut builder, 7, 12, 6, 13, timber_y)?;
-    builder.fill_box(BlockPos::new(6, 8, 12), BlockPos::new(7, 10, 13), glazing)?;
-    builder.fill_box(BlockPos::new(8, 8, 12), BlockPos::new(9, 10, 13), glazing)?;
-
-    // A small offset porch gives the entry depth without hiding the facade.
+    column(&mut builder, 7, front_z, 6, 13, timber_y)?;
     builder.fill_box(
-        BlockPos::new(8, 0, 13),
-        BlockPos::new(12, 1, 15),
-        foundation,
+        BlockPos::new(6, 8, front_z),
+        BlockPos::new(7, 10, front_z + 1),
+        glazing,
     )?;
-    builder.fill_box(BlockPos::new(8, 1, 13), BlockPos::new(12, 2, 15), floor)?;
-    builder.fill_box(BlockPos::new(8, 1, 15), BlockPos::new(12, 2, 16), roof_slab)?;
-    column(&mut builder, 8, 13, 2, 5, timber_y)?;
-    column(&mut builder, 11, 13, 2, 5, timber_y)?;
-    builder.fill_box(BlockPos::new(7, 5, 12), BlockPos::new(13, 6, 14), roof_slab)?;
-    builder.set(
-        BlockPos::new(7, 3, 13),
-        TemplateBlockState::Exact(WALL_TORCH_SOUTH),
+    builder.fill_box(
+        BlockPos::new(8, 8, front_z),
+        BlockPos::new(9, 10, front_z + 1),
+        glazing,
     )?;
+
+    match variant.entry {
+        CottageEntry::Stoop => {
+            builder.fill_box(
+                BlockPos::new(8, 1, front_z + 1),
+                BlockPos::new(11, 2, front_z + 2),
+                roof_slab,
+            )?;
+            builder.fill_box(
+                BlockPos::new(8, 5, front_z),
+                BlockPos::new(11, 6, front_z + 2),
+                roof_slab,
+            )?;
+            builder.set(
+                BlockPos::new(8, 3, front_z + 1),
+                TemplateBlockState::Exact(WALL_TORCH_SOUTH),
+            )?;
+        }
+        CottageEntry::CanopyPorch => {
+            // A small offset porch gives the entry depth without hiding the facade.
+            builder.fill_box(
+                BlockPos::new(8, 0, front_z + 1),
+                BlockPos::new(12, 1, front_z + 3),
+                foundation,
+            )?;
+            builder.fill_box(
+                BlockPos::new(8, 1, front_z + 1),
+                BlockPos::new(12, 2, front_z + 3),
+                floor,
+            )?;
+            builder.fill_box(
+                BlockPos::new(8, 1, front_z + 3),
+                BlockPos::new(12, 2, front_z + 4),
+                roof_slab,
+            )?;
+            column(&mut builder, 8, front_z + 1, 2, 5, timber_y)?;
+            column(&mut builder, 11, front_z + 1, 2, 5, timber_y)?;
+            builder.fill_box(
+                BlockPos::new(7, 5, front_z),
+                BlockPos::new(13, 6, front_z + 2),
+                roof_slab,
+            )?;
+            builder.set(
+                BlockPos::new(7, 3, front_z + 1),
+                TemplateBlockState::Exact(WALL_TORCH_SOUTH),
+            )?;
+        }
+    }
 
     // A narrow off-center chimney interrupts the roof line without becoming a
     // second tower. The sparse cap keeps a handmade silhouette.
@@ -291,22 +651,35 @@ pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
     // A few foundation substitutions prevent the base from reading as a
     // perfectly clean extrusion while keeping weathering deterministic.
     for pos in [
-        BlockPos::new(2, 0, 12),
-        BlockPos::new(5, 0, 12),
-        BlockPos::new(12, 0, 12),
+        BlockPos::new(2, 0, front_z),
+        BlockPos::new(5, 0, front_z),
+        BlockPos::new(12, 0, front_z),
         BlockPos::new(1, 0, 5),
         BlockPos::new(13, 0, 9),
     ] {
         builder.set(pos, TemplateBlockState::Exact(MOSSY_COBBLESTONE))?;
     }
 
-    builder.marker(BlockPos::new(9, 2, 16), "entrance:south")?;
-    builder.marker(BlockPos::new(1, 2, 7), "attachment:west-yard")?;
+    builder.marker(BlockPos::new(9, 2, size_z - 1), "entrance:south")?;
+    builder.marker(
+        BlockPos::new(1, 2, west_window_z + 1),
+        "attachment:west-yard",
+    )?;
     Ok(builder.build())
 }
 
 pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
-    let mut builder = StructureTemplateBuilder::new("farmstead-barn-core-a-v2", [21, 14, 18])?;
+    barn_core_template_for(BarnLength::Standard)
+}
+
+pub fn barn_core_template_for(length: BarnLength) -> Result<StructureTemplate, TemplateError> {
+    let front_z = length.front_z();
+    let id = if length == BarnLength::Standard {
+        "farmstead-barn-core-a-v2".to_owned()
+    } else {
+        format!("farmstead-barn-core-{}-v1", length.slug())
+    };
+    let mut builder = StructureTemplateBuilder::new(id, [21, 14, front_z + 3])?;
     let foundation = role(TemplateMaterialRole::Foundation);
     let wall = role(TemplateMaterialRole::Wall);
     let timber_y = role(TemplateMaterialRole::TimberY);
@@ -320,60 +693,72 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
     let floor = role(TemplateMaterialRole::Floor);
     let accent = role(TemplateMaterialRole::Accent);
 
-    builder.fill_box(BlockPos::new(1, 0, 2), BlockPos::new(20, 1, 16), foundation)?;
-    builder.fill_box(BlockPos::new(1, 1, 2), BlockPos::new(20, 8, 16), wall)?;
+    builder.fill_box(
+        BlockPos::new(1, 0, 2),
+        BlockPos::new(20, 1, front_z + 1),
+        foundation,
+    )?;
+    builder.fill_box(
+        BlockPos::new(1, 1, 2),
+        BlockPos::new(20, 8, front_z + 1),
+        wall,
+    )?;
     builder.fill_box(
         BlockPos::new(2, 1, 3),
-        BlockPos::new(19, 8, 15),
+        BlockPos::new(19, 8, front_z),
         TemplateBlockState::Exact(AIR),
     )?;
-    builder.fill_box(BlockPos::new(2, 1, 3), BlockPos::new(19, 2, 15), floor)?;
+    builder.fill_box(BlockPos::new(2, 1, 3), BlockPos::new(19, 2, front_z), floor)?;
 
-    for &(x, z) in &[(1, 2), (19, 2), (1, 15), (19, 15)] {
+    for &(x, z) in &[(1, 2), (19, 2), (1, front_z), (19, front_z)] {
         column(&mut builder, x, z, 1, 8, timber_y)?;
     }
     for x in [6, 14] {
         column(&mut builder, x, 2, 1, 8, timber_y)?;
-        column(&mut builder, x, 15, 1, 8, timber_y)?;
+        column(&mut builder, x, front_z, 1, 8, timber_y)?;
     }
-    for z in [7, 11] {
+    for z in (7..front_z).step_by(4) {
         column(&mut builder, 1, z, 1, 8, timber_y)?;
         column(&mut builder, 19, z, 1, 8, timber_y)?;
     }
     for y in [1, 5, 7] {
         line_x(&mut builder, 1, 20, y, 2, timber_x)?;
-        line_x(&mut builder, 1, 20, y, 15, timber_x)?;
-        line_z(&mut builder, 1, 2, 16, y, timber_z)?;
-        line_z(&mut builder, 19, 2, 16, y, timber_z)?;
+        line_x(&mut builder, 1, 20, y, front_z, timber_x)?;
+        line_z(&mut builder, 1, 2, front_z + 1, y, timber_z)?;
+        line_z(&mut builder, 19, 2, front_z + 1, y, timber_z)?;
     }
 
     // The open central bay makes the barn legible at arrival distance.
     builder.fill_box(
-        BlockPos::new(8, 2, 15),
-        BlockPos::new(13, 7, 16),
+        BlockPos::new(8, 2, front_z),
+        BlockPos::new(13, 7, front_z + 1),
         TemplateBlockState::Exact(AIR),
     )?;
-    column(&mut builder, 7, 15, 1, 8, trim)?;
-    column(&mut builder, 13, 15, 1, 8, trim)?;
-    line_x(&mut builder, 7, 14, 7, 15, trim)?;
-    framed_window_z(&mut builder, 3, 5, 15)?;
-    framed_window_z(&mut builder, 16, 18, 15)?;
+    column(&mut builder, 7, front_z, 1, 8, trim)?;
+    column(&mut builder, 13, front_z, 1, 8, trim)?;
+    line_x(&mut builder, 7, 14, 7, front_z, trim)?;
+    framed_window_z(&mut builder, 3, 5, front_z)?;
+    framed_window_z(&mut builder, 16, 18, front_z)?;
     framed_window_x(&mut builder, 1, 5, 7)?;
-    white_frame_window_z(&mut builder, 3, 5, 15, trim)?;
-    white_frame_window_z(&mut builder, 16, 18, 15, trim)?;
+    white_frame_window_z(&mut builder, 3, 5, front_z, trim)?;
+    white_frame_window_z(&mut builder, 16, 18, front_z, trim)?;
 
     // A thin four-stage gambrel roof keeps the broad barn mass but removes the
     // first pass's three-block-deep full-cube terraces.
-    for z in [2, 15] {
+    for z in [2, front_z] {
         builder.fill_box(BlockPos::new(1, 8, z), BlockPos::new(20, 9, z + 1), wall)?;
         builder.fill_box(BlockPos::new(4, 9, z), BlockPos::new(17, 10, z + 1), wall)?;
         builder.fill_box(BlockPos::new(7, 10, z), BlockPos::new(14, 11, z + 1), wall)?;
         builder.fill_box(BlockPos::new(10, 11, z), BlockPos::new(11, 12, z + 1), wall)?;
     }
-    builder.fill_box(BlockPos::new(9, 8, 15), BlockPos::new(12, 10, 16), glazing)?;
-    column(&mut builder, 8, 15, 8, 11, trim)?;
-    column(&mut builder, 12, 15, 8, 11, trim)?;
-    line_x(&mut builder, 8, 13, 10, 15, trim)?;
+    builder.fill_box(
+        BlockPos::new(9, 8, front_z),
+        BlockPos::new(12, 10, front_z + 1),
+        glazing,
+    )?;
+    column(&mut builder, 8, front_z, 8, 11, trim)?;
+    column(&mut builder, 12, front_z, 8, 11, trim)?;
+    line_x(&mut builder, 8, 13, 10, front_z, trim)?;
 
     for &(x, y, state) in &[
         (2, 8, roof_east),
@@ -385,7 +770,7 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
         (12, 10, roof_west),
         (11, 11, roof_west),
     ] {
-        line_z(&mut builder, x, 1, 17, y, state)?;
+        line_z(&mut builder, x, 1, front_z + 2, y, state)?;
     }
     for &(min_x, max_x, y) in &[
         (0, 2, 8),
@@ -395,9 +780,9 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
         (6, 8, 10),
         (13, 15, 10),
     ] {
-        roof_band(&mut builder, min_x, max_x, y, 1, 17, roof_slab)?;
+        roof_band(&mut builder, min_x, max_x, y, 1, front_z + 2, roof_slab)?;
     }
-    line_z(&mut builder, 10, 1, 17, 12, roof_slab)?;
+    line_z(&mut builder, 10, 1, front_z + 2, 12, roof_slab)?;
 
     // Hay and interior posts are fixed scene dressing, visible through the
     // broad entrance but still replaceable by later marker processors.
@@ -406,22 +791,32 @@ pub fn barn_core_template() -> Result<StructureTemplate, TemplateError> {
     column(&mut builder, 7, 8, 2, 8, timber_y)?;
     column(&mut builder, 13, 8, 2, 8, timber_y)?;
     builder.set(
-        BlockPos::new(8, 4, 15),
+        BlockPos::new(8, 4, front_z),
         TemplateBlockState::Exact(WALL_TORCH_SOUTH),
     )?;
     builder.set(
-        BlockPos::new(13, 4, 15),
+        BlockPos::new(13, 4, front_z),
         TemplateBlockState::Exact(WALL_TORCH_SOUTH),
     )?;
 
-    builder.marker(BlockPos::new(10, 2, 17), "entrance:south")?;
+    builder.marker(BlockPos::new(10, 2, front_z + 2), "entrance:south")?;
     builder.marker(BlockPos::new(20, 2, 8), "attachment:east-lean-to")?;
-    builder.marker(BlockPos::new(10, 8, 15), "loft:front")?;
+    builder.marker(BlockPos::new(10, 8, front_z), "loft:front")?;
     Ok(builder.build())
 }
 
 pub fn barn_lean_to_template() -> Result<StructureTemplate, TemplateError> {
-    let mut builder = StructureTemplateBuilder::new("farmstead-barn-lean-to-a-v2", [7, 8, 13])?;
+    barn_lean_to_template_for(BarnLength::Standard)
+}
+
+pub fn barn_lean_to_template_for(length: BarnLength) -> Result<StructureTemplate, TemplateError> {
+    let size_z = length.front_z() - 2;
+    let id = if length == BarnLength::Standard {
+        "farmstead-barn-lean-to-a-v2".to_owned()
+    } else {
+        format!("farmstead-barn-lean-to-{}-v1", length.slug())
+    };
+    let mut builder = StructureTemplateBuilder::new(id, [7, 8, size_z])?;
     let foundation = role(TemplateMaterialRole::Foundation);
     let timber_y = role(TemplateMaterialRole::TimberY);
     let timber_z = role(TemplateMaterialRole::TimberZ);
@@ -430,23 +825,53 @@ pub fn barn_lean_to_template() -> Result<StructureTemplate, TemplateError> {
     let floor = role(TemplateMaterialRole::Floor);
     let accent = role(TemplateMaterialRole::Accent);
 
-    builder.fill_box(BlockPos::new(0, 0, 0), BlockPos::new(7, 1, 13), foundation)?;
-    builder.fill_box(BlockPos::new(0, 1, 0), BlockPos::new(7, 2, 13), floor)?;
-    for z in [0, 6, 12] {
+    builder.fill_box(
+        BlockPos::new(0, 0, 0),
+        BlockPos::new(7, 1, size_z),
+        foundation,
+    )?;
+    builder.fill_box(BlockPos::new(0, 1, 0), BlockPos::new(7, 2, size_z), floor)?;
+    let mut post_zs = (0..size_z).step_by(6).collect::<Vec<_>>();
+    if post_zs.last().copied() != Some(size_z - 1) {
+        post_zs.push(size_z - 1);
+    }
+    for z in post_zs {
         column(&mut builder, 0, z, 2, 7, timber_y)?;
         column(&mut builder, 6, z, 2, 5, timber_y)?;
     }
-    line_z(&mut builder, 6, 0, 13, 4, timber_z)?;
-    line_z(&mut builder, 0, 0, 13, 6, roof_slab)?;
-    line_z(&mut builder, 1, 0, 13, 5, roof_west)?;
-    builder.fill_box(BlockPos::new(2, 5, 0), BlockPos::new(4, 6, 13), roof_slab)?;
-    line_z(&mut builder, 4, 0, 13, 4, roof_west)?;
-    builder.fill_box(BlockPos::new(5, 4, 0), BlockPos::new(7, 5, 13), roof_slab)?;
+    line_z(&mut builder, 6, 0, size_z, 4, timber_z)?;
+    line_z(&mut builder, 0, 0, size_z, 6, roof_slab)?;
+    line_z(&mut builder, 1, 0, size_z, 5, roof_west)?;
+    builder.fill_box(
+        BlockPos::new(2, 5, 0),
+        BlockPos::new(4, 6, size_z),
+        roof_slab,
+    )?;
+    line_z(&mut builder, 4, 0, size_z, 4, roof_west)?;
+    builder.fill_box(
+        BlockPos::new(5, 4, 0),
+        BlockPos::new(7, 5, size_z),
+        roof_slab,
+    )?;
     builder.fill_box(BlockPos::new(4, 2, 2), BlockPos::new(7, 4, 5), accent)?;
-    builder.fill_box(BlockPos::new(2, 2, 8), BlockPos::new(6, 3, 11), accent)?;
-    builder.marker(BlockPos::new(0, 2, 6), "attachment:west-barn")?;
-    builder.marker(BlockPos::new(6, 2, 12), "yard:south")?;
+    builder.fill_box(
+        BlockPos::new(2, 2, size_z - 5),
+        BlockPos::new(6, 3, size_z - 2),
+        accent,
+    )?;
+    builder.marker(BlockPos::new(0, 2, size_z / 2), "attachment:west-barn")?;
+    builder.marker(BlockPos::new(6, 2, size_z - 1), "yard:south")?;
     Ok(builder.build())
+}
+
+pub fn barn_templates_for(variant: BarnVariant) -> Result<BarnTemplateSet, TemplateError> {
+    Ok(BarnTemplateSet {
+        core: barn_core_template_for(variant.length)?,
+        lean_to: variant
+            .lean_to
+            .then(|| barn_lean_to_template_for(variant.length))
+            .transpose()?,
+    })
 }
 
 fn cottage_theme() -> StructureMaterialTheme {
@@ -718,6 +1143,67 @@ fn author_gallery_landscape(
     Ok(())
 }
 
+fn author_family_gallery_landscape(
+    chunks: &mut BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
+) -> ChunkStoreResult<()> {
+    // Two quiet comparison lanes make longitudinal growth legible without
+    // turning the family lab into a settlement composition prematurely.
+    for x in -36_i32..=36 {
+        for z in 32_i32..=34 {
+            let block = if (x + z).rem_euclid(5) == 0 {
+                COARSE_DIRT
+            } else {
+                GRAVEL
+            };
+            set_world_block(chunks, BlockPos::new(x, 63, z), block)?;
+        }
+    }
+    for x in -49_i32..=61 {
+        for z in -9_i32..=-7 {
+            let block = if (x - z).rem_euclid(6) == 0 {
+                COARSE_DIRT
+            } else {
+                GRAVEL
+            };
+            set_world_block(chunks, BlockPos::new(x, 63, z), block)?;
+        }
+    }
+    for (entrance_x, entrance_z, lane_z) in [
+        (-22, 22, 32),
+        (2, 26, 32),
+        (26, 30, 32),
+        (-35, -21, -9),
+        (-2, -17, -9),
+        (35, -13, -9),
+    ] {
+        for z in entrance_z..=lane_z {
+            set_world_block(chunks, BlockPos::new(entrance_x, 63, z), COARSE_DIRT)?;
+        }
+    }
+    for z in -7..=54 {
+        for x in 9..=11 {
+            set_world_block(chunks, BlockPos::new(x, 63, z), GRAVEL)?;
+        }
+    }
+
+    for (x, z, block) in [
+        (-34, 29, DANDELION),
+        (-15, 31, POPPY),
+        (9, 29, ALLIUM),
+        (34, 30, CORNFLOWER),
+        (-47, -5, ALLIUM),
+        (-22, -11, DANDELION),
+        (18, -5, POPPY),
+        (59, -11, CORNFLOWER),
+    ] {
+        set_world_block(chunks, BlockPos::new(x, 64, z), block)?;
+    }
+    for &(x, z) in &[(-26, 33), (-2, 33), (22, 33), (-39, -8), (-6, -8), (31, -8)] {
+        set_world_block(chunks, BlockPos::new(x, 64, z), TORCH)?;
+    }
+    Ok(())
+}
+
 fn stamp_placement(
     chunks: &mut BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
     placement: &PlacedStructureTemplate,
@@ -815,7 +1301,11 @@ fn template_error(error: TemplateError) -> ChunkStoreError {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn validate_lab_root_for_rebuild(root: &Path) -> ChunkStoreResult<()> {
+fn validate_lab_root_for_rebuild(
+    root: &Path,
+    marker_file: &str,
+    gallery_id: &str,
+) -> ChunkStoreResult<()> {
     if !root.exists() {
         return Ok(());
     }
@@ -825,7 +1315,7 @@ fn validate_lab_root_for_rebuild(root: &Path) -> ChunkStoreResult<()> {
             root.display()
         )));
     }
-    let marker_path = building_lab_marker_path(root);
+    let marker_path = root.join(marker_file);
     if marker_path.exists() {
         let bytes = fs::read(&marker_path)?;
         let existing: BuildingLabManifest = serde_json::from_slice(&bytes).map_err(|error| {
@@ -835,14 +1325,14 @@ fn validate_lab_root_for_rebuild(root: &Path) -> ChunkStoreResult<()> {
             ))
         })?;
         if existing.schema_version != BUILDING_LAB_SCHEMA_VERSION
-            || existing.gallery_id != BUILDING_LAB_GALLERY_ID
+            || existing.gallery_id != gallery_id
         {
             return Err(ChunkStoreError::InvalidData(format!(
                 "building lab root `{}` belongs to gallery `{}` schema {}, not `{}` schema {}",
                 root.display(),
                 existing.gallery_id,
                 existing.schema_version,
-                BUILDING_LAB_GALLERY_ID,
+                gallery_id,
                 BUILDING_LAB_SCHEMA_VERSION
             )));
         }
@@ -912,6 +1402,107 @@ mod tests {
         assert_eq!(barn.markers().len(), 3);
         assert_eq!(lean_to.size(), [7, 8, 13]);
         assert_eq!(lean_to.markers().len(), 2);
+    }
+
+    #[test]
+    fn bounded_cottage_family_preserves_authored_invariants() {
+        assert_eq!(
+            cottage_template().unwrap(),
+            cottage_template_for(CottageVariant::STANDARD).unwrap()
+        );
+
+        let snug = cottage_template_for(CottageVariant::new(
+            CottageDepth::Snug,
+            CottageEntry::CanopyPorch,
+        ))
+        .unwrap();
+        let standard = cottage_template_for(CottageVariant::STANDARD).unwrap();
+        let deep = cottage_template_for(CottageVariant::new(
+            CottageDepth::Deep,
+            CottageEntry::CanopyPorch,
+        ))
+        .unwrap();
+        assert_eq!(snug.size(), [15, 15, 15]);
+        assert_eq!(standard.size(), [15, 15, 17]);
+        assert_eq!(deep.size(), [15, 15, 19]);
+        assert!(snug.blocks().len() < standard.blocks().len());
+        assert!(standard.blocks().len() < deep.blocks().len());
+
+        for depth in [
+            CottageDepth::Snug,
+            CottageDepth::Standard,
+            CottageDepth::Deep,
+        ] {
+            let stoop =
+                cottage_template_for(CottageVariant::new(depth, CottageEntry::Stoop)).unwrap();
+            assert_eq!(stoop.size()[0..2], [15, 15]);
+            assert_eq!(stoop.size()[2], depth.front_z() + 3);
+            assert_eq!(stoop.markers().len(), 2);
+            assert_eq!(
+                stoop,
+                cottage_template_for(CottageVariant::new(depth, CottageEntry::Stoop)).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn bounded_barn_family_uses_whole_bays_and_optional_lean_to() {
+        assert_eq!(
+            barn_core_template().unwrap(),
+            barn_core_template_for(BarnLength::Standard).unwrap()
+        );
+        assert_eq!(
+            barn_lean_to_template().unwrap(),
+            barn_lean_to_template_for(BarnLength::Standard).unwrap()
+        );
+
+        let short = barn_templates_for(BarnVariant::new(BarnLength::Short, false)).unwrap();
+        let standard = barn_templates_for(BarnVariant::STANDARD).unwrap();
+        let long = barn_templates_for(BarnVariant::new(BarnLength::Long, true)).unwrap();
+        assert_eq!(short.core.size(), [21, 14, 14]);
+        assert_eq!(standard.core.size(), [21, 14, 18]);
+        assert_eq!(long.core.size(), [21, 14, 22]);
+        assert!(short.core.blocks().len() < standard.core.blocks().len());
+        assert!(standard.core.blocks().len() < long.core.blocks().len());
+        assert!(short.lean_to.is_none());
+        assert_eq!(standard.lean_to.unwrap().size(), [7, 8, 13]);
+        assert_eq!(long.lean_to.unwrap().size(), [7, 8, 17]);
+    }
+
+    #[test]
+    fn family_gallery_builds_lit_comparison_records() {
+        let (manifest, records) = building_family_lab_records().unwrap();
+
+        assert_eq!(manifest.gallery_id, BUILDING_FAMILY_LAB_GALLERY_ID);
+        assert_eq!(manifest.placements.len(), 8);
+        assert_eq!(records.len(), 81);
+        assert!(records.iter().all(|record| {
+            record.snapshot.status == ChunkStatus::Light && record.snapshot.light_correct
+        }));
+        for origin in FAMILY_COTTAGE_ORIGINS {
+            assert_eq!(
+                block_at(&records, origin.offset(1, 0, 2)),
+                BlockStateId(u32::from(COBBLESTONE))
+            );
+        }
+        let ids = manifest
+            .placements
+            .iter()
+            .map(|placement| placement.template_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            [
+                "farmstead-cottage-snug-stoop-v1",
+                "farmstead-cottage-a-v2",
+                "farmstead-cottage-deep-canopy-porch-v1",
+                "farmstead-barn-core-short-v1",
+                "farmstead-barn-core-a-v2",
+                "farmstead-barn-lean-to-a-v2",
+                "farmstead-barn-core-long-v1",
+                "farmstead-barn-lean-to-long-v1",
+            ]
+        );
     }
 
     #[test]
@@ -985,5 +1576,43 @@ mod tests {
         assert!(chunk.snapshot.light_correct);
         assert!(building_lab_marker_path(&root).is_file());
         fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn sqlite_family_gallery_reopens_and_protects_unrelated_roots() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
+        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "mclone-building-family-lab-test-{}-{serial}",
+            std::process::id()
+        ));
+        let manifest = write_building_family_lab_dir(&root).unwrap();
+        assert_eq!(manifest.placements.len(), 8);
+
+        let mut reopened = SqliteWorldStore::open_world_dir(&root).unwrap();
+        let chunk = reopened
+            .load_chunk(
+                &mclone_protocol::DimensionKey::overworld(),
+                FAMILY_COTTAGE_ORIGINS[0].chunk_pos(),
+            )
+            .unwrap()
+            .expect("family cottage chunk persisted");
+        reopened.close().unwrap();
+        assert!(chunk.snapshot.light_correct);
+        assert!(building_family_lab_marker_path(&root).is_file());
+        fs::remove_dir_all(&root).unwrap();
+
+        let unrelated = std::env::temp_dir().join(format!(
+            "mclone-building-family-unrelated-{}-{serial}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&unrelated).unwrap();
+        fs::write(unrelated.join("keep.txt"), b"not a gallery").unwrap();
+        assert!(write_building_family_lab_dir(&unrelated).is_err());
+        assert!(unrelated.join("keep.txt").is_file());
+        fs::remove_dir_all(unrelated).unwrap();
     }
 }

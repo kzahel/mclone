@@ -63,14 +63,21 @@ pub use authored_fixture::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use authored_fixture::{authored_world_fixture_marker_path, write_authored_world_fixture_dir};
 pub use building_lab::{
-    BUILDING_LAB_GALLERY_ID, BUILDING_LAB_MARKER_FILE, BUILDING_LAB_SCHEMA_VERSION,
-    BUILDING_LAB_SEED, BUILDING_LAB_VOID_PADDING_RADIUS, BuildingLabManifest,
-    BuildingLabMarkerReceipt, BuildingLabTemplateReceipt, barn_core_template,
-    barn_lean_to_template, building_lab_memory_store, building_lab_records, cottage_template,
-    write_building_lab_to_store,
+    BUILDING_FAMILY_LAB_GALLERY_ID, BUILDING_FAMILY_LAB_MARKER_FILE, BUILDING_FAMILY_LAB_SEED,
+    BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS, BUILDING_LAB_GALLERY_ID, BUILDING_LAB_MARKER_FILE,
+    BUILDING_LAB_SCHEMA_VERSION, BUILDING_LAB_SEED, BUILDING_LAB_VOID_PADDING_RADIUS, BarnLength,
+    BarnTemplateSet, BarnVariant, BuildingLabManifest, BuildingLabMarkerReceipt,
+    BuildingLabTemplateReceipt, CottageDepth, CottageEntry, CottageVariant, barn_core_template,
+    barn_core_template_for, barn_lean_to_template, barn_lean_to_template_for, barn_templates_for,
+    building_family_lab_memory_store, building_family_lab_records, building_lab_memory_store,
+    building_lab_records, cottage_template, cottage_template_for,
+    write_building_family_lab_to_store, write_building_lab_to_store,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use building_lab::{building_lab_marker_path, write_building_lab_dir};
+pub use building_lab::{
+    building_family_lab_marker_path, building_lab_marker_path, write_building_family_lab_dir,
+    write_building_lab_dir,
+};
 pub use cadence::{
     DEFAULT_GAMEPLAY_RATE_HZ, DEFAULT_HOST_RATE_HZ, DEFAULT_MAX_CATCH_UP_HOST_FRAMES,
     DEFAULT_PHYSICS_RATE_HZ, SimulationCadence, SimulationCadenceAdvance, SimulationCadenceConfig,
