@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 92 |
-| total parts | 2,000 |
-| boxes | 1,795 |
+| figures | 95 |
+| total parts | 2,079 |
+| boxes | 1,874 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 283 |
-| parts with any texture reference | 450 |
-| individual texture applications | 707 |
+| ASCII textures | 295 |
+| parts with any texture reference | 474 |
+| individual texture applications | 744 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 74 | 1,458 | 1,458 | 0 / 0 / 0 |
+| canonical `examples/` | 77 | 1,537 | 1,537 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -575,7 +575,20 @@ rendered under `/tmp/mclone-asset-lab/batch-18` and inspected for identity,
 grounding, attachment continuity, gait cadence, scale or plume behavior, tail
 follow-through, and loop continuity, and approved by the user on 2026-07-21.
 
-All 707 applications target an explicit face of a box. They range from single
+The nineteenth post-migration content batch adds Spotted Hyena, Warthog, and
+Wildebeest as approved canonical box-only rigs. Spotted Hyena is a 21-part
+quick lope rig with tall heavy shoulders, a lower compact rear, spotted flanks,
+raised dorsal mane, and short brush tail; Warthog is a 30-part compact trotter
+with a wide low head, cheek bosses, paired two-stage tusks, stiff dorsal mane,
+and raised tufted tail; and Wildebeest is a 28-part front-heavy trudging rig
+with dark shoulders, a lowered long face, hanging beard, sweeping three-stage
+horns, and black tail. All 79 parts are canonical boxes and use 12 combined
+pixel textures. Clean multi-angle sheets and four-cycle videos were rendered
+under `/tmp/mclone-asset-lab/batch-19` and inspected for identity, grounding,
+attachment continuity, gait cadence, horn and tusk stability, secondary
+motion, and loop continuity, and approved by the user on 2026-07-21.
+
+All 744 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

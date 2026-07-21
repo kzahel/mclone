@@ -130,7 +130,7 @@ reviewed rigs and then filling macro gaps.
 | Wolf | P0 | ✅ | Q | gray, black, arctic (white), pup | `examples/wolf` — canonical 16-box tall wolf with a vanilla-derived shoulder mass, upright ears, long legs, and heavy tail; rounded A/B retained at `legacy-examples/wolf_rounded` |
 | Fox | P1 | ✅ | Q | red, arctic (white), fennec (huge ears), kit | `examples/fox` — canonical 18-box low fox with oversized ears, black-stocking texture, and attached white-tipped tail; rounded A/B retained at `legacy-examples/fox_rounded` |
 | Coyote | P3 | ☐ | Q | — | between wolf and fox |
-| Hyena | P3 | ☐ | Q | spotted, striped | not a canid, but a dog-like rig fits |
+| Hyena | P3 | ✅ | Q | spotted, striped | `examples/spotted_hyena` — approved 21-box spotted hyena with tall heavy shoulders, lower rear, blunt dark muzzle, raised mane, and short brush tail |
 
 ## Felids (big cats)
 
@@ -164,10 +164,10 @@ reviewed rigs and then filling macro gaps.
 | Camel | P2 | ✅ | Q | one hump (dromedary), two hump (bactrian) | `examples/camel` — approved 26-box dromedary with stepped hump, long articulated neck, and broad desert feet |
 | Bison / Buffalo | P3 | ✅ | Q | — | `examples/american_bison` — approved 27-box bull with layered hump, compact rear, low shaggy head, short horns, and beard |
 | Antelope / Gazelle / Impala | P2 | ✅ | Q | horns; springbok, oryx | `examples/gemsbok_oryx` — approved 24-box gemsbok with black-white mask, flank stripe, leg stockings, and twin two-stage spear horns |
-| Wildebeest / Gnu | P3 | ☐ | Q | — | safari staple |
+| Wildebeest / Gnu | P3 | ✅ | Q | — | `examples/wildebeest` — approved 28-box blue wildebeest with massive dark shoulders, lowered long face, beard, sweeping three-stage horns, and black tail |
 | Tapir | P3 | ☐ | Q | — | short trunk; baby is striped |
 | Okapi | P3 | ☐ | Q | — | giraffe cousin, zebra legs |
-| Warthog | P3 | ☐ | Q | — | tusks; pig-class rig |
+| Warthog | P3 | ✅ | Q | — | `examples/warthog` — approved 30-box adult with a wide low head, cheek bosses, paired two-stage tusks, stiff dorsal mane, and raised tufted tail |
 
 ## Primates
 
