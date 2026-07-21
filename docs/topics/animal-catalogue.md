@@ -2,9 +2,8 @@
 
 Topic: `animal-catalogue`
 
-Status: implementation and local acceptance complete 2026-07-21; production
-push and live-site verification remain. The target is a read-only,
-production-built Asset Lab catalogue at
+Status: complete and live-accepted 2026-07-21. The read-only,
+production-built Asset Lab catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
 
@@ -136,7 +135,7 @@ occur.
    model.
 4. [x] Add production-subpath tests, bundle/deploy integration, and
    documentation.
-5. [ ] Push `main`, monitor the local deploy worker, and validate `/animals/`
+5. [x] Push `main`, monitor the local deploy worker, and validate `/animals/`
    live.
 
 ## Local Acceptance Evidence
@@ -171,6 +170,37 @@ The current application JavaScript is about 745 KB minified and 200 KB gzip,
 dominated by the one Three.js viewport plus React. Figure JSON is fetched lazily
 per selection and catalogue thumbnails use native lazy loading. Further code
 splitting is measurement-gated rather than required for first publication.
+
+## Live Acceptance Evidence
+
+Commit `464ef78f30a340d10d4d79e04d12c10eec5b7958` deployed through the clean
+after-main-push worktree on 2026-07-21 as Cloudflare Worker version
+`f4259d04-de58-4185-b6dc-5ef9c32b60d3f`. The production receipt established:
+
+- `/animals/`, its manifest, the selected semantic JSON, and its nested hashed
+  assets all return HTTP 200 with the expected content types and site isolation
+  headers;
+- HTML and stable catalogue data revalidate, while
+  `/animals/assets/index-C5yxnj2Q.js` is immutable for one year;
+- manifest SHA-256
+  `cd8a90a3810debc762b5fec87f345f172ab3e85ddac1d1943f8d7e25f27e8d81`
+  covers 92 figures, 92 clips, and 1,808 parts;
+- live King Cobra JSON is 46,993 bytes and re-hashes to its advertised
+  `9cdf6c02bb4c0cc2bb5d70cd3695b2e51f4aa942ad22b984996e5eb600b005db`;
+- the `king_cobra` / `slither` deep link restored, animation advanced, pause
+  held exact time, keyboard scrubbing reached authored values, and preset,
+  pointer-orbit, and pointer-pan actions each changed rendered pixels;
+- search replaced King Cobra with Owl while retaining exactly one canvas, a
+  390px viewport had no horizontal overflow, and all observed requests,
+  browser console events, and page errors were clean; and
+- `/tmp/mclone-animal-catalogue-live.png` was inspected after the live camera
+  interactions.
+
+The first clean publication also proved and repaired a deploy prerequisite:
+the root worktree dependency link does not contain Asset Lab's independently
+locked Vite package. The bundle now installs that package with a frozen
+lockfile when absent, and the successful production build ran from the clean
+deploy worktree rather than the active checkout.
 
 ## Code And Documentation Map
 
@@ -207,7 +237,7 @@ splitting is measurement-gated rather than required for first publication.
 
 ## Recommended Next Work
 
-Push `main`, let the existing deployment hook publish the same bundle, and run
-the live HTTP/browser acceptance receipt. Then mark this topic complete with
-the deployed commit and live evidence. Reconsider a workspace package only
-when a consumer outside `tools/asset-lab` needs the TypeScript viewer contract.
+No acceptance work remains. Reconsider a workspace package only when a
+consumer outside `tools/asset-lab` needs the TypeScript viewer contract. Treat
+further bundle splitting or upload batching as measurement-led deployment
+improvements rather than catalogue correctness work.
