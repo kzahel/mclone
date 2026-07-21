@@ -20,9 +20,13 @@ test("discovers and round-trips every canonical TypeScript structure", async () 
   }
 });
 
-test("the standard cottage is the first promoted structure", async () => {
-  assert.equal(FIRST_PARTY_STRUCTURES.length, 1);
-  const document = await loadStructureJsonDocument(FIRST_PARTY_STRUCTURES[0]!.sourcePath);
+test("the standard cottage remains a promoted family member", async () => {
+  assert.equal(FIRST_PARTY_STRUCTURES.length, 12);
+  const standard = FIRST_PARTY_STRUCTURES.find(
+    (entry) => entry.runtimeStructureId === "farmstead-cottage-a-v2",
+  );
+  assert.ok(standard);
+  const document = await loadStructureJsonDocument(standard.sourcePath);
   assert.equal(document.asset.id, "farmstead-cottage-a-v2");
   assert.deepEqual(document.asset.size, [15, 15, 17]);
   assert.equal(document.asset.defaultTheme, "warm-oak-and-plaster-v2");

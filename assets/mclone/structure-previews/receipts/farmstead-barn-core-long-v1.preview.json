@@ -1,277 +1,259 @@
 {
   "schemaVersion": 1,
   "compilerId": "mclone-structure-preview-v1",
-  "structureId": "farmstead-cottage-a-v2",
-  "label": "Warm Oak Cottage",
-  "description": "A steep-gabled plaster cottage with a offset canopy porch, flower box, and handmade chimney.",
+  "structureId": "farmstead-barn-core-long-v1",
+  "label": "Long Bay Red Barn",
+  "description": "A timber-bayed red barn with a broad working entrance, gambrel roof, loft window, and visible hay stores.",
   "category": "building",
   "tags": [
-    "cottage",
+    "barn",
     "farmstead",
     "starter-settlement"
   ],
   "family": {
-    "id": "farmstead-cottage",
-    "member": "standard-canopy-porch",
-    "label": "Farmstead Cottage"
+    "id": "farmstead-barn",
+    "member": "long-core",
+    "label": "Farmstead Barn"
   },
   "size": [
-    15,
-    15,
-    17
+    21,
+    14,
+    22
   ],
-  "authoredOperationCount": 1320,
-  "placedBlockCount": 923,
+  "authoredOperationCount": 3212,
+  "placedBlockCount": 1598,
   "materialBill": [
     {
       "paletteKey": "accent",
-      "count": 20
-    },
-    {
-      "paletteKey": "cornflower",
-      "count": 1
+      "count": 30
     },
     {
       "paletteKey": "floor",
-      "count": 110
+      "count": 272
     },
     {
       "paletteKey": "foundation",
-      "count": 146
+      "count": 342
     },
     {
       "paletteKey": "glazing",
-      "count": 24
-    },
-    {
-      "paletteKey": "mossyCobblestone",
-      "count": 5
-    },
-    {
-      "paletteKey": "poppy",
-      "count": 1
+      "count": 18
     },
     {
       "paletteKey": "roofEast",
-      "count": 91
+      "count": 80
     },
     {
       "paletteKey": "roofSlabBottom",
-      "count": 29
+      "count": 260
     },
     {
       "paletteKey": "roofWest",
-      "count": 89
+      "count": 80
     },
     {
       "paletteKey": "timberX",
-      "count": 23
+      "count": 82
     },
     {
       "paletteKey": "timberY",
-      "count": 40
+      "count": 71
     },
     {
       "paletteKey": "timberZ",
-      "count": 27
+      "count": 110
+    },
+    {
+      "paletteKey": "trim",
+      "count": 45
     },
     {
       "paletteKey": "wall",
-      "count": 316
+      "count": 206
     },
     {
       "paletteKey": "wallTorchSouth",
-      "count": 1
+      "count": 2
     }
   ],
   "components": [
     {
-      "id": "chimney",
-      "label": "Brick chimney",
+      "id": "hay",
+      "label": "Interior hay stores",
       "optional": true,
-      "blockCount": 20
+      "blockCount": 42
     },
     {
-      "id": "porch",
-      "label": "Canopy porch",
+      "id": "lighting",
+      "label": "Entrance lanterns",
       "optional": true,
-      "blockCount": 39
+      "blockCount": 2
     },
     {
       "id": "roof",
-      "label": "Steep spruce roof",
+      "label": "Four-stage gambrel roof",
       "optional": false,
-      "blockCount": 267
+      "blockCount": 476
     },
     {
       "id": "shell",
-      "label": "Foundation and plaster shell",
+      "label": "Stone floor and red shell",
       "optional": false,
-      "blockCount": 497
+      "blockCount": 777
     },
     {
       "id": "timber-frame",
-      "label": "Oak timber frame",
+      "label": "Spruce structural bays",
       "optional": false,
-      "blockCount": 62
-    },
-    {
-      "id": "weathering",
-      "label": "Foundation weathering",
-      "optional": true,
-      "blockCount": 5
+      "blockCount": 241
     },
     {
       "id": "windows",
-      "label": "Windows and flower box",
+      "label": "Framed working windows",
       "optional": false,
-      "blockCount": 33
+      "blockCount": 60
     }
   ],
   "markers": [
     {
       "kind": "entrance:south",
       "pos": [
-        9,
+        10,
         2,
-        16
+        21
       ]
     },
     {
-      "kind": "attachment:west-yard",
+      "kind": "attachment:east-lean-to",
       "pos": [
-        1,
+        20,
         2,
-        7
+        8
+      ]
+    },
+    {
+      "kind": "loft:front",
+      "pos": [
+        10,
+        8,
+        19
       ]
     }
   ],
   "sockets": [
     {
-      "id": "west-yard",
-      "kind": "attachment:yard",
+      "id": "east-lean-to",
+      "kind": "attachment:lean-to",
       "pos": [
-        1,
+        20,
         2,
-        7
+        8
       ],
-      "facing": "west"
+      "facing": "east"
     }
   ],
-  "defaultTheme": "warm-oak-and-plaster-v2",
+  "defaultTheme": "red-spruce-working-barn-v2",
   "geometry": {
-    "vertexCount": 14156,
-    "indexCount": 21234,
-    "faceCount": 3539,
+    "vertexCount": 21256,
+    "indexCount": 31884,
+    "faceCount": 5314,
     "boundsMin": [
       0.0,
       0.0,
       1.0
     ],
     "boundsMax": [
-      15.0,
-      15.0,
-      16.0
+      21.0,
+      12.5,
+      21.0
     ],
-    "solidFaceCount": 1254,
-    "cutoutFaceCount": 2285,
+    "solidFaceCount": 1854,
+    "cutoutFaceCount": 3460,
     "translucentFaceCount": 0,
     "componentGroups": [
       {
-        "id": "chimney",
-        "faceCount": 64
+        "id": "hay",
+        "faceCount": 109
       },
       {
-        "id": "porch",
-        "faceCount": 141
+        "id": "lighting",
+        "faceCount": 8
       },
       {
         "id": "roof",
-        "faceCount": 2301
+        "faceCount": 3557
       },
       {
         "id": "shell",
-        "faceCount": 780
+        "faceCount": 991
       },
       {
         "id": "timber-frame",
-        "faceCount": 116
-      },
-      {
-        "id": "weathering",
-        "faceCount": 10
+        "faceCount": 476
       },
       {
         "id": "windows",
-        "faceCount": 127
+        "faceCount": 173
       }
     ],
     "verticalLayers": [
       {
         "y": 0,
-        "faceCount": 203
+        "faceCount": 416
       },
       {
         "y": 1,
-        "faceCount": 192
+        "faceCount": 334
       },
       {
         "y": 2,
-        "faceCount": 122
+        "faceCount": 196
       },
       {
         "y": 3,
-        "faceCount": 127
+        "faceCount": 180
       },
       {
         "y": 4,
-        "faceCount": 118
+        "faceCount": 152
       },
       {
         "y": 5,
-        "faceCount": 153
+        "faceCount": 141
       },
       {
         "y": 6,
-        "faceCount": 538
+        "faceCount": 140
       },
       {
         "y": 7,
-        "faceCount": 342
+        "faceCount": 198
       },
       {
         "y": 8,
-        "faceCount": 356
+        "faceCount": 997
       },
       {
         "y": 9,
-        "faceCount": 344
+        "faceCount": 1001
       },
       {
         "y": 10,
-        "faceCount": 308
+        "faceCount": 963
       },
       {
         "y": 11,
-        "faceCount": 324
+        "faceCount": 478
       },
       {
         "y": 12,
-        "faceCount": 316
-      },
-      {
-        "y": 13,
-        "faceCount": 84
-      },
-      {
-        "y": 14,
-        "faceCount": 12
+        "faceCount": 118
       }
     ]
   },
   "artifacts": {
-    "meshPath": "meshes/farmstead-cottage-a-v2.glb",
-    "meshSha256": "f971965620aba98be3b76532aad3a2aa0aa7475aa38e165449c6c4ff427be645",
+    "meshPath": "meshes/farmstead-barn-core-long-v1.glb",
+    "meshSha256": "377f11e31acf381d60bdeb3d7a9bd1205c9b6198bba1f4b0f295f88d19785d3a",
     "atlasPath": "atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
     "atlasSha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2",
     "atlasWidth": 1024,
@@ -280,9 +262,9 @@
   },
   "source": {
     "compilerId": "mclone-structure-dsl-v2",
-    "path": "tools/structure-lab/examples/cottage_standard/structure.ts",
-    "sha256": "0945e9cc89a8724b1810a7c80e96af6fe83c57810c8003079ec362119b1be1a3",
-    "semanticSha256": "fd2c9020bd4b09f5e9db7c70631451213a22bacee3f51e8610538c97ef35fb07"
+    "path": "tools/structure-lab/examples/barn_core_long/structure.ts",
+    "sha256": "d28549d5c6501875d4dfce7fa526b9d429f457ad9e7ca9560bb5bd149626209c",
+    "semanticSha256": "8596ba429ca2c3f46a594afadd80d19bee30d51e57cc386d324788a8ed7a8608"
   },
   "lighting": {
     "id": "fixed-midday-full-bright-ao-v1",

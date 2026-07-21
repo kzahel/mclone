@@ -19,7 +19,7 @@ import {
   type StructureTheme,
 } from "./model";
 
-export const STRUCTURE_COMPILER_ID = "mclone-structure-dsl-v1";
+export const STRUCTURE_COMPILER_ID = "mclone-structure-dsl-v2";
 
 export interface StructureJsonDocument {
   asset: StructureAsset;

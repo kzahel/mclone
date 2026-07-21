@@ -11,18 +11,22 @@ test("builds a public-safe catalog from checked Rust preview receipts", async ()
   const outRoot = path.join(parent, "catalog");
   try {
     const catalog = await buildWebCatalog({ outRoot, thumbnails: false });
-    assert.equal(catalog.summary.structures, 1);
-    assert.equal(catalog.structures[0]?.structureId, "farmstead-cottage-a-v2");
-    assert.equal(catalog.structures[0]?.runtimeStatus, "parity-canary");
-    assert.equal(catalog.structures[0]?.assetProvenance.minecraftReference, 0);
-    assert.equal(catalog.structures[0]?.assetProvenance.unknown, 0);
+    assert.equal(catalog.summary.structures, 12);
+    assert.equal(catalog.summary.families, 2);
+    const standard = catalog.structures.find(
+      (entry) => entry.structureId === "farmstead-cottage-a-v2",
+    );
+    assert.ok(standard);
+    assert.equal(standard.runtimeStatus, "parity-canary");
+    assert.ok(catalog.structures.every((entry) => entry.assetProvenance.minecraftReference === 0));
+    assert.ok(catalog.structures.every((entry) => entry.assetProvenance.unknown === 0));
     const deployed = parseStructureCatalog(
       JSON.parse(await fs.readFile(path.join(outRoot, "catalog", "catalog.v1.json"), "utf8")),
       "test catalog",
     );
     assert.deepEqual(deployed, catalog);
-    await fs.access(path.join(outRoot, catalog.structures[0]!.meshPath));
-    await fs.access(path.join(outRoot, catalog.structures[0]!.atlasPath));
+    await fs.access(path.join(outRoot, standard.meshPath));
+    await fs.access(path.join(outRoot, standard.atlasPath));
   } finally {
     await fs.rm(parent, { recursive: true, force: true });
   }

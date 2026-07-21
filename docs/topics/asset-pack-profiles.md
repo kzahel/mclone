@@ -18,13 +18,14 @@ forces overview submissions and rejects transparent or monochrome captures;
 Chrome 147/150 on the current displayless Linux host remains blocked at that
 presentation/readback boundary despite green shared-host receipts.
 
-Post-closeout extension (2026-07-21): Texture Lab now authors ten original
+Post-closeout extension (2026-07-21): Texture Lab now authors fourteen original
 farmstead runtime materials for Structure Lab. They replace diagnostic
 fallback tiles for plaster, cobblestone, mossy cobblestone, oak log, oak and
-spruce planks, brick, poppy, cornflower, and wall torch. The strict prepared-set
-ledger now reports 22 first-party and 130 generated resolutions, with zero
-Minecraft-reference or unknown resolutions; the initial Structure Lab preview
-subset reports 18 first-party and 126 generated resolutions.
+spruce planks, brick, poppy, cornflower, and wall torch, then add spruce log,
+stone brick, red terracotta, and hay for the barn family. The strict
+prepared-set ledger now reports 26 first-party and 126 generated resolutions,
+with zero Minecraft-reference or unknown resolutions; Structure Lab preview
+receipts report 22 first-party and 122 generated resolutions.
 
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth

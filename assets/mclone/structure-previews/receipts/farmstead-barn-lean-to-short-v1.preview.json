@@ -1,0 +1,215 @@
+{
+  "schemaVersion": 1,
+  "compilerId": "mclone-structure-preview-v1",
+  "structureId": "farmstead-barn-lean-to-short-v1",
+  "label": "Compact Barn Lean-to",
+  "description": "An open-sided hay and livestock shelter that sockets onto the east wall of a matching farmstead barn.",
+  "category": "outbuilding",
+  "tags": [
+    "barn",
+    "farmstead",
+    "lean-to",
+    "starter-settlement"
+  ],
+  "family": {
+    "id": "farmstead-barn",
+    "member": "short-lean-to",
+    "label": "Farmstead Barn"
+  },
+  "size": [
+    7,
+    8,
+    9
+  ],
+  "authoredOperationCount": 235,
+  "placedBlockCount": 235,
+  "materialBill": [
+    {
+      "paletteKey": "accent",
+      "count": 28
+    },
+    {
+      "paletteKey": "floor",
+      "count": 63
+    },
+    {
+      "paletteKey": "foundation",
+      "count": 63
+    },
+    {
+      "paletteKey": "roofSlabBottom",
+      "count": 45
+    },
+    {
+      "paletteKey": "roofWest",
+      "count": 18
+    },
+    {
+      "paletteKey": "timberY",
+      "count": 18
+    }
+  ],
+  "components": [
+    {
+      "id": "floor",
+      "label": "Stone and timber floor",
+      "optional": false,
+      "blockCount": 126
+    },
+    {
+      "id": "frame",
+      "label": "Open spruce frame",
+      "optional": false,
+      "blockCount": 18
+    },
+    {
+      "id": "hay",
+      "label": "Hay stores",
+      "optional": true,
+      "blockCount": 28
+    },
+    {
+      "id": "roof",
+      "label": "Sloping spruce roof",
+      "optional": false,
+      "blockCount": 63
+    }
+  ],
+  "markers": [
+    {
+      "kind": "attachment:west-barn",
+      "pos": [
+        0,
+        2,
+        4
+      ]
+    },
+    {
+      "kind": "yard:south",
+      "pos": [
+        6,
+        2,
+        8
+      ]
+    }
+  ],
+  "sockets": [
+    {
+      "id": "west-barn",
+      "kind": "attachment:barn",
+      "pos": [
+        0,
+        2,
+        4
+      ],
+      "facing": "west"
+    }
+  ],
+  "defaultTheme": "red-spruce-working-barn-v2",
+  "geometry": {
+    "vertexCount": 3028,
+    "indexCount": 4542,
+    "faceCount": 757,
+    "boundsMin": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "boundsMax": [
+      7.0,
+      6.5,
+      9.0
+    ],
+    "solidFaceCount": 292,
+    "cutoutFaceCount": 465,
+    "translucentFaceCount": 0,
+    "componentGroups": [
+      {
+        "id": "floor",
+        "faceCount": 165
+      },
+      {
+        "id": "frame",
+        "faceCount": 77
+      },
+      {
+        "id": "hay",
+        "faceCount": 50
+      },
+      {
+        "id": "roof",
+        "faceCount": 465
+      }
+    ],
+    "verticalLayers": [
+      {
+        "y": 0,
+        "faceCount": 95
+      },
+      {
+        "y": 1,
+        "faceCount": 70
+      },
+      {
+        "y": 2,
+        "faceCount": 52
+      },
+      {
+        "y": 3,
+        "faceCount": 48
+      },
+      {
+        "y": 4,
+        "faceCount": 216
+      },
+      {
+        "y": 5,
+        "faceCount": 225
+      },
+      {
+        "y": 6,
+        "faceCount": 51
+      }
+    ]
+  },
+  "artifacts": {
+    "meshPath": "meshes/farmstead-barn-lean-to-short-v1.glb",
+    "meshSha256": "943ce120aa851e6a7166560590d4e4cfee52735a2b44bf6e551bb33ca4523290",
+    "atlasPath": "atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
+    "atlasSha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2",
+    "atlasWidth": 1024,
+    "atlasHeight": 256,
+    "atlasSpriteCount": 143
+  },
+  "source": {
+    "compilerId": "mclone-structure-dsl-v2",
+    "path": "tools/structure-lab/examples/barn_lean_to_short/structure.ts",
+    "sha256": "c542114960adfb7f3fbaae9f79b311bc149f5189002f169fe5d71f43a2f16379",
+    "semanticSha256": "4809cac6eceb58deb12ebcc14c19d307f01fbf6e145149fb25f087356664525f"
+  },
+  "lighting": {
+    "id": "fixed-midday-full-bright-ao-v1",
+    "description": "Production face shading and ambient occlusion with full midday light baked into vertex colors."
+  },
+  "assetPacks": [
+    {
+      "id": "mclone-authored",
+      "origin": "first_party",
+      "contentFingerprint": "sha256:be4ef110a35a1cc4a539d4b4aa19488668c7a1c7f3d9712159cd648e3c3f8b65",
+      "sha256": "db34b12e9dc1e8864ac8ca0b8e8b5f7654d7f0d8c616e04623e8f7ac8991173b"
+    },
+    {
+      "id": "mclone-generated-fallback",
+      "origin": "generated",
+      "contentFingerprint": "sha256:5760de9a6f85e2bac3794bbd5833af37322a672caaf1af752faf83a3a51abe39",
+      "sha256": "a7cab40a0ae313b65a10a78749d60172b4d6482a6098ca171e2d1ea80c450595"
+    }
+  ],
+  "assetProvenance": {
+    "firstParty": 22,
+    "generated": 122,
+    "minecraftReference": 0,
+    "unknown": 0,
+    "missing": 1
+  }
+}

@@ -3,9 +3,9 @@
 Topic: `structure-lab`
 
 Status: **vertical slice active 2026-07-21. The TypeScript DSL and generated
-JSON drift gate, strict Rust loader, exact standard-cottage parity canary, Rust
-preview compiler, original first-party farmstead materials, and read-only
-Three.js catalogue are implemented. Family migration and the first
+JSON drift gate, strict Rust loader, exact cottage/barn family parity canaries,
+Rust preview compiler, original first-party farmstead materials, and read-only
+Three.js catalogue are implemented. Runtime promotion and the first
 Structure-Lab-native outbuilding remain. In-browser block editing is
 indefinitely deferred.**
 
@@ -26,11 +26,18 @@ Last reconciled: **2026-07-21**.
   component groups. The 599,400-byte GLB references one 1024x256 shared atlas.
 - The public receipt resolves 18 first-party and 126 generated asset paths,
   one optional missing path, and zero Minecraft-reference or unknown paths.
+- Twelve finite family members are externalized: all six cottage depth/entry
+  combinations plus short, standard, and long barn cores and lean-tos. Every
+  generated template matches its accepted Rust constructor exactly.
+- Shared-helper provenance hashes the complete local TypeScript import graph,
+  so editing family vocabulary or DSL behavior invalidates generated JSON as
+  reliably as editing a leaf `structure.ts` file.
 - The catalogue shell uses React, Zustand, Vite, Three.js, one retained canvas,
   stable URL state, build-layer clipping, component/marker/bounds controls,
   material and provenance facts, and responsive light/dark layouts.
-- The original farmstead texture recipes cover the cottage's plaster, stone,
-  mossy stone, oak log, oak and spruce planks, brick, flowers, and wall torch.
+- The original farmstead texture recipes cover plaster, cobblestone, mossy
+  stone, dressed stone, oak and spruce logs and planks, brick, painted red
+  clay, bound hay, flowers, and wall torch.
   Texture Lab review sheets and full desktop/mobile catalogue captures were
   inspected before accepting the presentation baseline.
 

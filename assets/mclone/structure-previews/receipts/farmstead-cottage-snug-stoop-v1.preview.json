@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "compilerId": "mclone-structure-preview-v1",
-  "structureId": "farmstead-cottage-a-v2",
-  "label": "Warm Oak Cottage",
-  "description": "A steep-gabled plaster cottage with a offset canopy porch, flower box, and handmade chimney.",
+  "structureId": "farmstead-cottage-snug-stoop-v1",
+  "label": "Cozy Oak Cottage",
+  "description": "A steep-gabled plaster cottage with a simple stoop, flower box, and handmade chimney.",
   "category": "building",
   "tags": [
     "cottage",
@@ -12,16 +12,16 @@
   ],
   "family": {
     "id": "farmstead-cottage",
-    "member": "standard-canopy-porch",
+    "member": "snug-stoop",
     "label": "Farmstead Cottage"
   },
   "size": [
     15,
     15,
-    17
+    13
   ],
-  "authoredOperationCount": 1320,
-  "placedBlockCount": 923,
+  "authoredOperationCount": 1082,
+  "placedBlockCount": 773,
   "materialBill": [
     {
       "paletteKey": "accent",
@@ -33,11 +33,11 @@
     },
     {
       "paletteKey": "floor",
-      "count": 110
+      "count": 80
     },
     {
       "paletteKey": "foundation",
-      "count": 146
+      "count": 112
     },
     {
       "paletteKey": "glazing",
@@ -53,31 +53,31 @@
     },
     {
       "paletteKey": "roofEast",
-      "count": 91
+      "count": 77
     },
     {
       "paletteKey": "roofSlabBottom",
-      "count": 29
+      "count": 20
     },
     {
       "paletteKey": "roofWest",
-      "count": 89
+      "count": 75
     },
     {
       "paletteKey": "timberX",
-      "count": 23
+      "count": 25
     },
     {
       "paletteKey": "timberY",
-      "count": 40
+      "count": 34
     },
     {
       "paletteKey": "timberZ",
-      "count": 27
+      "count": 23
     },
     {
       "paletteKey": "wall",
-      "count": 316
+      "count": 275
     },
     {
       "paletteKey": "wallTorchSouth",
@@ -93,27 +93,27 @@
     },
     {
       "id": "porch",
-      "label": "Canopy porch",
+      "label": "Entry stoop",
       "optional": true,
-      "blockCount": 39
+      "blockCount": 10
     },
     {
       "id": "roof",
       "label": "Steep spruce roof",
       "optional": false,
-      "blockCount": 267
+      "blockCount": 237
     },
     {
       "id": "shell",
       "label": "Foundation and plaster shell",
       "optional": false,
-      "blockCount": 497
+      "blockCount": 408
     },
     {
       "id": "timber-frame",
       "label": "Oak timber frame",
       "optional": false,
-      "blockCount": 62
+      "blockCount": 58
     },
     {
       "id": "weathering",
@@ -125,7 +125,7 @@
       "id": "windows",
       "label": "Windows and flower box",
       "optional": false,
-      "blockCount": 33
+      "blockCount": 35
     }
   ],
   "markers": [
@@ -134,7 +134,7 @@
       "pos": [
         9,
         2,
-        16
+        12
       ]
     },
     {
@@ -142,7 +142,7 @@
       "pos": [
         1,
         2,
-        7
+        6
       ]
     }
   ],
@@ -153,16 +153,16 @@
       "pos": [
         1,
         2,
-        7
+        6
       ],
       "facing": "west"
     }
   ],
   "defaultTheme": "warm-oak-and-plaster-v2",
   "geometry": {
-    "vertexCount": 14156,
-    "indexCount": 21234,
-    "faceCount": 3539,
+    "vertexCount": 11960,
+    "indexCount": 17940,
+    "faceCount": 2990,
     "boundsMin": [
       0.0,
       0.0,
@@ -171,10 +171,10 @@
     "boundsMax": [
       15.0,
       15.0,
-      16.0
+      12.0
     ],
-    "solidFaceCount": 1254,
-    "cutoutFaceCount": 2285,
+    "solidFaceCount": 1078,
+    "cutoutFaceCount": 1912,
     "translucentFaceCount": 0,
     "componentGroups": [
       {
@@ -183,19 +183,19 @@
       },
       {
         "id": "porch",
-        "faceCount": 141
+        "faceCount": 52
       },
       {
         "id": "roof",
-        "faceCount": 2301
+        "faceCount": 1964
       },
       {
         "id": "shell",
-        "faceCount": 780
+        "faceCount": 661
       },
       {
         "id": "timber-frame",
-        "faceCount": 116
+        "faceCount": 105
       },
       {
         "id": "weathering",
@@ -203,65 +203,65 @@
       },
       {
         "id": "windows",
-        "faceCount": 127
+        "faceCount": 134
       }
     ],
     "verticalLayers": [
       {
         "y": 0,
-        "faceCount": 203
+        "faceCount": 161
       },
       {
         "y": 1,
-        "faceCount": 192
+        "faceCount": 151
       },
       {
         "y": 2,
-        "faceCount": 122
+        "faceCount": 110
       },
       {
         "y": 3,
-        "faceCount": 127
+        "faceCount": 115
       },
       {
         "y": 4,
-        "faceCount": 118
+        "faceCount": 100
       },
       {
         "y": 5,
-        "faceCount": 153
+        "faceCount": 120
       },
       {
         "y": 6,
-        "faceCount": 538
+        "faceCount": 443
       },
       {
         "y": 7,
-        "faceCount": 342
+        "faceCount": 298
       },
       {
         "y": 8,
-        "faceCount": 356
-      },
-      {
-        "y": 9,
-        "faceCount": 344
-      },
-      {
-        "y": 10,
         "faceCount": 308
       },
       {
+        "y": 9,
+        "faceCount": 296
+      },
+      {
+        "y": 10,
+        "faceCount": 260
+      },
+      {
         "y": 11,
-        "faceCount": 324
+        "faceCount": 276
       },
       {
         "y": 12,
-        "faceCount": 316
+        "faceCount": 268
       },
       {
         "y": 13,
-        "faceCount": 84
+        "faceCount": 72
       },
       {
         "y": 14,
@@ -270,8 +270,8 @@
     ]
   },
   "artifacts": {
-    "meshPath": "meshes/farmstead-cottage-a-v2.glb",
-    "meshSha256": "f971965620aba98be3b76532aad3a2aa0aa7475aa38e165449c6c4ff427be645",
+    "meshPath": "meshes/farmstead-cottage-snug-stoop-v1.glb",
+    "meshSha256": "4c10e30aa209dd14ab0efc117f1af66d56d39adc47689faf4315bb11e9e70d51",
     "atlasPath": "atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
     "atlasSha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2",
     "atlasWidth": 1024,
@@ -280,9 +280,9 @@
   },
   "source": {
     "compilerId": "mclone-structure-dsl-v2",
-    "path": "tools/structure-lab/examples/cottage_standard/structure.ts",
-    "sha256": "0945e9cc89a8724b1810a7c80e96af6fe83c57810c8003079ec362119b1be1a3",
-    "semanticSha256": "fd2c9020bd4b09f5e9db7c70631451213a22bacee3f51e8610538c97ef35fb07"
+    "path": "tools/structure-lab/examples/cottage_snug_stoop/structure.ts",
+    "sha256": "ba946f40e9be4132c3b70f5a72581af984f1149beb10fea75f2e4c1cff87addb",
+    "semanticSha256": "1f9fe6b031514baf093c23c32f6021082f6cb29908d97c2597426cc8da1a0f82"
   },
   "lighting": {
     "id": "fixed-midday-full-bright-ao-v1",

@@ -47,7 +47,7 @@ export async function buildWebCatalog(
       atlasPath: `catalog/${receipt.artifacts.atlasPath}`,
       receiptPath: `catalog/receipts/${receipt.structureId}.preview.json`,
       thumbnailPath: `catalog/thumbnails/${receipt.structureId}.png`,
-      runtimeStatus: "parity-canary",
+      runtimeStatus: structure.runtimeStatus,
     });
   }
   entries.sort((left, right) => left.label.localeCompare(right.label));

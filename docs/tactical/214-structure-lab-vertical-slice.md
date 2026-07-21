@@ -173,3 +173,20 @@ Rust before catalogue acceptance. Their block review sheets and the complete
 desktop, sliced dark-mode desktop, and 390-pixel mobile catalogue captures were
 inspected under `/tmp`. The mobile proof also caught and fixed absent URL layer
 state incorrectly coercing to layer zero.
+
+### Slice 5 family externalization
+
+All bounded cottage and barn members crossed the canonical boundary on
+2026-07-21. Six cottage records cover the Cartesian product of snug, standard,
+and deep plans with stoop and canopy entry modules. Three barn cores and three
+matching lean-tos cover short, standard, and long bay plans. Focused Rust tests
+prove exact template, block, marker, size, and default-theme equality for all
+twelve records before runtime promotion.
+
+The catalogue now contains 10,369 placed blocks across twelve recipes and two
+families. Its checked artifact set is 6.3 MB across one shared atlas, twelve
+GLBs, and twelve receipts. A full standard-barn browser capture was inspected;
+the red clay, spruce, dressed stone, hay, glazing, broad entrance, and gambrel
+silhouette all resolve without diagnostic material tiles. Three Playwright
+tests cover the cottage guide, mobile layout, barn selection/search, and
+single-canvas invariant.

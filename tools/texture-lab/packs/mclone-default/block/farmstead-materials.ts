@@ -6,10 +6,14 @@ export function defineFarmsteadMaterialTextures(api: TextureLabApi): void {
   definePlaster(api);
   defineCobblestone(api, "cobblestone", false);
   defineCobblestone(api, "mossy_cobblestone", true);
-  defineLog(api);
+  defineLog(api, "oak_log", "#725036", "#9a7350", "#4b3427", "#36251e");
+  defineLog(api, "spruce_log", "#503622", "#765439", "#35241a", "#271a14");
   definePlanks(api, "oak_planks", "#a97942", "#6a4327", "#d1a468");
   definePlanks(api, "spruce_planks", "#684428", "#3e281b", "#95663d");
   defineBricks(api);
+  defineStoneBricks(api);
+  defineRedTerracotta(api);
+  defineHay(api);
   defineFlower(api, "poppy", "#b92f2b", "#ee5a40", "#f4b13d");
   defineFlower(api, "cornflower", "#4168bd", "#7199ed", "#d7d8a9");
   defineWallTorch(api);
@@ -140,24 +144,33 @@ function defineCobblestone(api: TextureLabApi, name: string, mossy: boolean): vo
   api.block(`farmstead-${name.replaceAll("_", "-")}`, cube(textureName));
 }
 
-function defineLog(api: TextureLabApi): void {
-  api.palette("farmstead_oak_bark", {
-    base: "#725036",
-    light: "#9a7350",
-    shadow: "#4b3427",
-    dark: "#36251e",
+function defineLog(
+  api: TextureLabApi,
+  name: "oak_log" | "spruce_log",
+  base: string,
+  light: string,
+  shadow: string,
+  dark: string,
+): void {
+  const textureName = `farmstead_${name}`;
+  const paletteName = `${textureName}_bark`;
+  api.palette(paletteName, {
+    base,
+    light,
+    shadow,
+    dark,
   });
-  api.texture("farmstead_oak_log", {
+  api.texture(textureName, {
     size: 32,
     source: "final-color",
-    palette: "farmstead_oak_bark",
+    palette: paletteName,
     base: "base",
-    exportPath: "assets/mclone/textures/block/oak_log.png",
+    exportPath: `assets/mclone/textures/block/${name}.png`,
     preview: { cube: true, tiling: "x" },
     catalog: farmsteadCatalog("timber", "y180-safe", "x"),
     layers: [
       api.macroNoise({
-        seed: "farmstead-oak-bark",
+        seed: `farmstead-${name}-bark`,
         frequency: 5,
         octaves: 2,
         colors: ["shadow", "base", "light"],
@@ -191,7 +204,7 @@ function defineLog(api: TextureLabApi): void {
       }),
     ],
   });
-  api.block("farmstead-oak-log", cube("farmstead_oak_log"));
+  api.block(`farmstead-${name.replaceAll("_", "-")}`, cube(textureName));
 }
 
 function definePlanks(
@@ -301,6 +314,147 @@ function defineBricks(api: TextureLabApi): void {
     ],
   });
   api.block("farmstead-bricks", cube("farmstead_bricks"));
+}
+
+function defineStoneBricks(api: TextureLabApi): void {
+  api.palette("farmstead_stone_bricks", {
+    base: "#7d8178",
+    light: "#a5a99d",
+    dark: "#555b54",
+    mortar: "#444b46",
+  });
+  api.texture("farmstead_stone_bricks", {
+    size: 32,
+    source: "final-color",
+    palette: "farmstead_stone_bricks",
+    base: "base",
+    exportPath: "assets/mclone/textures/block/stone_bricks.png",
+    preview: { cube: true, tiling: "xy" },
+    catalog: farmsteadCatalog("dressed-stone", "y180-safe"),
+    layers: [
+      api.macroNoise({
+        seed: "farmstead-stone-brick-grain",
+        frequency: 6,
+        octaves: 2,
+        colors: ["dark", "base", "light"],
+        opacity: 0.16,
+      }),
+      api.mask({
+        colors: { m: "mortar", l: "light", d: "dark" },
+        skip: ".",
+        upscale: "nearest",
+        opacity: 0.78,
+        authoring: { role: "structure", label: "STAGGERED STONE COURSES" },
+        pixels: [
+          "mmmmmmmmmmmmmmmm",
+          ".......m........",
+          "..l....m....d...",
+          ".......m........",
+          "mmmmmmmmmmmmmmmm",
+          "...m.......m....",
+          "...m.d.....m..l.",
+          "...m.......m....",
+          "mmmmmmmmmmmmmmmm",
+          ".......m........",
+          ".d.....m...l....",
+          ".......m........",
+          "mmmmmmmmmmmmmmmm",
+          "...m.......m....",
+          "...m..l....m.d..",
+          "...m.......m....",
+        ],
+      }),
+    ],
+  });
+  api.block("farmstead-stone-bricks", cube("farmstead_stone_bricks"));
+}
+
+function defineRedTerracotta(api: TextureLabApi): void {
+  api.palette("farmstead_red_terracotta", {
+    base: "#974535",
+    light: "#b96048",
+    shadow: "#713329",
+    dark: "#58261f",
+  });
+  api.texture("farmstead_red_terracotta", {
+    size: 32,
+    source: "final-color",
+    palette: "farmstead_red_terracotta",
+    base: "base",
+    exportPath: "assets/mclone/textures/block/red_terracotta.png",
+    preview: { cube: true, tiling: "xy" },
+    catalog: farmsteadCatalog("painted-clay", "y180-safe"),
+    layers: [
+      api.macroNoise({
+        seed: "farmstead-red-terracotta-clouds",
+        frequency: 5,
+        octaves: 3,
+        colors: ["shadow", "base", "light"],
+        opacity: 0.2,
+        contrast: 0.95,
+      }),
+      api.speckles({
+        seed: "farmstead-red-terracotta-grain",
+        density: 0.06,
+        colors: ["dark", "light"],
+        opacity: 0.18,
+      }),
+    ],
+  });
+  api.block("farmstead-red-terracotta", cube("farmstead_red_terracotta"));
+}
+
+function defineHay(api: TextureLabApi): void {
+  api.palette("farmstead_hay", {
+    base: "#c99a35",
+    light: "#e2bd59",
+    shadow: "#936926",
+    tie: "#725025",
+  });
+  api.texture("farmstead_hay", {
+    size: 32,
+    source: "final-color",
+    palette: "farmstead_hay",
+    base: "base",
+    exportPath: "assets/mclone/textures/block/hay_block.png",
+    preview: { cube: true, tiling: "x" },
+    catalog: farmsteadCatalog("hay", "y180-safe", "x"),
+    layers: [
+      api.macroNoise({
+        seed: "farmstead-hay-fibers",
+        frequency: 8,
+        octaves: 2,
+        colors: ["shadow", "base", "light"],
+        opacity: 0.2,
+      }),
+      api.mask({
+        colors: { s: "shadow", l: "light", t: "tie" },
+        skip: ".",
+        upscale: "smooth",
+        opacity: 0.7,
+        authoring: { role: "structure", label: "BOUND HAY FIBERS" },
+        pixels: [
+          "..s..l...s..l...",
+          "..s...l..s...l..",
+          "...s..l...s..l..",
+          "...s...l..s...l.",
+          "tttttttttttttttt",
+          "..s..l...s..l...",
+          "..s...l..s...l..",
+          "...s..l...s..l..",
+          "...s...l..s...l.",
+          "..s..l...s..l...",
+          "..s...l..s...l..",
+          "tttttttttttttttt",
+          "...s...l..s...l.",
+          "..s..l...s..l...",
+          "..s...l..s...l..",
+          "...s..l...s..l..",
+        ],
+      }),
+    ],
+  });
+  api.block("farmstead-hay", cube("farmstead_hay"));
 }
 
 function defineFlower(

@@ -1371,10 +1371,98 @@ mod tests {
     use mclone_core::{BlockStateId, chunk_section_index};
     use mclone_worldgen::structure_json::load_canonical_structure_json;
 
-    const CANONICAL_COTTAGE_JSON: &str = include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../../assets/mclone/structures/farmstead-cottage-a-v2.structure.json"
-    ));
+    const CANONICAL_COTTAGES: [(&str, CottageVariant); 6] = [
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-cottage-snug-stoop-v1.structure.json"
+            )),
+            CottageVariant::new(CottageDepth::Snug, CottageEntry::Stoop),
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-cottage-snug-canopy-porch-v1.structure.json"
+            )),
+            CottageVariant::new(CottageDepth::Snug, CottageEntry::CanopyPorch),
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-cottage-standard-stoop-v1.structure.json"
+            )),
+            CottageVariant::new(CottageDepth::Standard, CottageEntry::Stoop),
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-cottage-a-v2.structure.json"
+            )),
+            CottageVariant::STANDARD,
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-cottage-deep-stoop-v1.structure.json"
+            )),
+            CottageVariant::new(CottageDepth::Deep, CottageEntry::Stoop),
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-cottage-deep-canopy-porch-v1.structure.json"
+            )),
+            CottageVariant::new(CottageDepth::Deep, CottageEntry::CanopyPorch),
+        ),
+    ];
+
+    const CANONICAL_BARN_CORES: [(&str, BarnLength); 3] = [
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-barn-core-short-v1.structure.json"
+            )),
+            BarnLength::Short,
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-barn-core-a-v2.structure.json"
+            )),
+            BarnLength::Standard,
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-barn-core-long-v1.structure.json"
+            )),
+            BarnLength::Long,
+        ),
+    ];
+
+    const CANONICAL_BARN_LEAN_TOS: [(&str, BarnLength); 3] = [
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-barn-lean-to-short-v1.structure.json"
+            )),
+            BarnLength::Short,
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-barn-lean-to-a-v2.structure.json"
+            )),
+            BarnLength::Standard,
+        ),
+        (
+            include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../assets/mclone/structures/farmstead-barn-lean-to-long-v1.structure.json"
+            )),
+            BarnLength::Long,
+        ),
+    ];
 
     fn block_at(records: &[ChunkRecord], pos: BlockPos) -> BlockStateId {
         let record = records
@@ -1411,11 +1499,10 @@ mod tests {
         assert_eq!(lean_to.markers().len(), 2);
     }
 
-    #[test]
-    fn canonical_cottage_matches_the_accepted_rust_canary() {
-        let canonical = load_canonical_structure_json(CANONICAL_COTTAGE_JSON).unwrap();
-        let accepted = cottage_template().unwrap();
-
+    fn assert_canonical_template_matches(
+        canonical: &mclone_worldgen::structure_json::CanonicalStructureRecord,
+        accepted: &StructureTemplate,
+    ) {
         assert_eq!(canonical.template.id(), accepted.id());
         assert_eq!(canonical.template.size(), accepted.size());
         assert_eq!(canonical.template.markers(), accepted.markers());
@@ -1432,10 +1519,39 @@ mod tests {
                 "canonical cottage first differs at block {index}: canonical {canonical_block:?}, accepted {accepted_block:?}"
             );
         }
-        assert_eq!(canonical.default_theme(), Some(&cottage_theme()));
-        assert_eq!(canonical.blocks.len(), canonical.template.blocks().len());
-        assert_eq!(canonical.sockets.len(), 1);
-        assert_eq!(canonical.components.len(), 7);
+    }
+
+    #[test]
+    fn canonical_cottage_family_matches_the_accepted_rust_oracle() {
+        for (json, variant) in CANONICAL_COTTAGES {
+            let canonical = load_canonical_structure_json(json).unwrap();
+            let accepted = cottage_template_for(variant).unwrap();
+            assert_canonical_template_matches(&canonical, &accepted);
+            assert_eq!(canonical.default_theme(), Some(&cottage_theme()));
+            assert_eq!(canonical.blocks.len(), canonical.template.blocks().len());
+            assert_eq!(canonical.sockets.len(), 1);
+            assert_eq!(canonical.components.len(), 7);
+        }
+    }
+
+    #[test]
+    fn canonical_barn_family_matches_the_accepted_rust_oracle() {
+        for (json, length) in CANONICAL_BARN_CORES {
+            let canonical = load_canonical_structure_json(json).unwrap();
+            let accepted = barn_core_template_for(length).unwrap();
+            assert_canonical_template_matches(&canonical, &accepted);
+            assert_eq!(canonical.default_theme(), Some(&barn_theme()));
+            assert_eq!(canonical.sockets.len(), 1);
+            assert_eq!(canonical.components.len(), 6);
+        }
+        for (json, length) in CANONICAL_BARN_LEAN_TOS {
+            let canonical = load_canonical_structure_json(json).unwrap();
+            let accepted = barn_lean_to_template_for(length).unwrap();
+            assert_canonical_template_matches(&canonical, &accepted);
+            assert_eq!(canonical.default_theme(), Some(&barn_theme()));
+            assert_eq!(canonical.sockets.len(), 1);
+            assert_eq!(canonical.components.len(), 4);
+        }
     }
 
     #[test]
