@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 const WAYLAND_SOCKET_PATTERN = /^wayland-\d+$/u;
 const WAYLAND_OZONE_ARG = "--ozone-platform=wayland";
 
+/** @param {string | undefined} xdgRuntimeDir */
 export function findWaylandSockets(xdgRuntimeDir) {
   if (!xdgRuntimeDir || !existsSync(xdgRuntimeDir)) {
     return [];
