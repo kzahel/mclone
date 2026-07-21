@@ -2,13 +2,16 @@
 
 Topic: `cross-platform-operation-execution`
 
-Status: high-level actor/mailbox direction accepted 2026-07-20. Tactical
+Status: active direction; shared scene-operation convergence is implemented
+through Slices 0–2 and Gate A in active Tactical
+[`207`](../tactical/207-shared-scene-operation-coordinator.md). Tactical
 [`201`](../tactical/201-lobby-content-simplification.md) removed the accidental
 managed installer and its TypeScript policy surface. Completed Tactical
 [`202`](../tactical/202-web-scene-async-boundary-cleanup.md) then performed the
-required fresh post-cleanup review: it found no replacement provisioning
-actor, and completed the bounded existing-owner cleanup the surviving seams
-justified.
+required fresh post-cleanup review and completed its bounded existing-owner
+cleanup. A later strict audit found that the remaining named TypeScript pumps
+still form a platform-specific scene-operation coordinator even though Rust
+owns each individual decision.
 
 ## Top-Level Frame
 
@@ -62,6 +65,34 @@ versioned persistent world at all. The accepted response is to simplify the
 feature before generalizing its machinery. Moving the existing workflow into
 a Rust actor would fix language ownership while preserving the wrong product
 abstraction.
+
+## Renewed Simplification Decision
+
+The managed installer remains deleted and must not return. The renewed concern
+is smaller and more general: product TypeScript still separately recognizes
+active session start, lobby runtime start, catalog execution, asset
+preparation, scene-host async exclusion, and render readiness. Rust chooses
+the work, but TypeScript still maintains operation-specific pending sets,
+promise tails, drain guards, report flags, and completion calls.
+
+The browser's asynchronous APIs justify a different physical driver, not a
+different semantic coordinator. Shared Rust should own one coherent coarse
+scene-operation request/completion lifecycle. Native may execute its effects
+directly or on typed threads; browser Rust may lower them into mechanical
+Worker, IndexedDB, fetch, or scheduling effects; TypeScript should execute
+those effects without seeing lobby, catalog, asset, or scene target meaning.
+
+This does not require one universal actor. The existing session, lobby,
+catalog, asset, render, and operation-ledger owners should be assembled behind
+the smallest shared scene facade that releases its mutable borrow before
+platform work suspends. Tactical 207 is implementing that deletion-oriented
+cutover.
+
+The same review resolved the only semantic browser migration exception: old
+pre-dimension IndexedDB worlds are disposable. The v5-to-v6 cursor copy,
+legacy store vocabulary, and TypeScript `minecraft:overworld` assignment have
+been removed. Future persisted-format conversion requires a separate
+pre-admission or offline decision.
 
 ## Vocabulary
 
@@ -250,10 +281,10 @@ transports while satisfying the same ownership model.
 
 Managed-scenario provisioning is not a target actor. Tactical 201 removed that
 special subsystem and retained the embedded-world behavior on ordinary
-primitives. The completed post-cleanup inventory found no replacement
-provisioning operation to standardize. It did find a few web-scene seams where
-TypeScript still projects decisions already owned by Rust; Tactical 202 cleans
-those seams without adding a new actor.
+primitives. Tactical 202 then removed the clear TypeScript decisions without
+adding a replacement provisioning actor. Tactical 207 addresses the surviving
+coarse scene-operation lifecycle, not the deleted installer: it converges how
+the existing session, lobby, catalog, asset, and readiness owners are driven.
 
 Out of scope:
 
@@ -537,6 +568,14 @@ layer's state from a timeout alone.
     fresh review. New actors remain justified individually.
 12. A production cut removes superseded code rather than maintaining parallel
     old/new paths.
+13. Opaque but operation-specific TypeScript pumps are an intermediate state,
+    not the final reusable platform boundary.
+14. Shared Rust owns the coarse scene-operation lifecycle; browser async work
+    is a mechanical effect/completion driver of that lifecycle.
+15. Long-running browser work should use owned tickets and later completions,
+    not hold `&mut WebSceneHost` across an await and globally exclude frames.
+16. Pre-dimension browser worlds are disposable; production TypeScript carries
+    no runtime Overworld migration or legacy-store policy.
 
 ## Tactical 201 Implementation Answers
 
@@ -648,6 +687,12 @@ owner, then remove duplicate platform sequencing without inventing another
 framework. Apply it to another consumer only when a fresh review finds real
 mutable state or sequencing that must remain consistent across native and web.
 
+[`Tactical 207`](../tactical/207-shared-scene-operation-coordinator.md) is the
+active continuation after a stricter simplification audit. Slices 0–2 and its
+post-identity decision gate are complete. It does not contradict the deletion
+of the managed installer or justify a universal actor; its current pickup is a
+consolidated opaque browser-operation drain.
+
 ## Validation Expectations
 
 ### Tactical 201 and 202 boundary proof
@@ -726,6 +771,7 @@ Related records:
 - [`../tactical/199-unified-persistence-interface.md`](../tactical/199-unified-persistence-interface.md)
 - [`../tactical/201-lobby-content-simplification.md`](../tactical/201-lobby-content-simplification.md)
 - [`../tactical/202-web-scene-async-boundary-cleanup.md`](../tactical/202-web-scene-async-boundary-cleanup.md)
+- [`../tactical/207-shared-scene-operation-coordinator.md`](../tactical/207-shared-scene-operation-coordinator.md)
 
 Vanilla reference:
 
@@ -750,10 +796,10 @@ Vanilla reference:
 - Preserve native direct execution and use the vanilla
   `IOWorker`/`ProcessorMailbox` ownership lesson without copying Java's runtime
   shape.
-- Treat Tactical 202's completed inventory as the current baseline: 5,275
-  authored TypeScript lines, one generic Worker-construction site, and no
-  identified need for another actor abstraction.
-- Start another tactical only from a named remaining semantic owner or a
+- Treat the named session, lobby, catalog, asset, lifetime, and readiness pumps
+  as one concrete simplification target for Tactical 207, while retaining the
+  specialized resident actors beneath them.
+- Start further tacticals only from a named remaining semantic owner or
   concrete operation, not from a desire to make the topology look uniform.
 
 The important result is that subtraction worked. The lobby now runs on a

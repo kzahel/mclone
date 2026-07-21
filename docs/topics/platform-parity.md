@@ -407,7 +407,7 @@ shared owner before building more desktop-local surface area.
 | Authoritative simulation, world state, ticking, and scheduling | `mclone-server` plus domain crates (`mclone-worldgen`, `mclone-light`) | process/app startup, dedicated/integrated host construction |
 | Assets, content loading, registries, and resource-pack shape | `mclone-assets` plus future shared content registries | platform file/package/HTTP access adapters |
 | Rendering semantics and render-session data | `mclone-render-session`, `mclone-render` | swapchain/surface ownership, platform render target acquisition |
-| Persistence, saves, player data, and durable settings | shared typed persistence coordination plus feature-specific preference codecs in `mclone-app-runtime`; extend instead of hiding policy in one app | filesystem/SQLite/IndexedDB/localStorage/app-storage mechanics and explicitly scoped migration entrypoints |
+| Persistence, saves, player data, and durable settings | shared typed persistence coordination plus feature-specific preference codecs in `mclone-app-runtime`; extend instead of hiding policy in one app | filesystem/SQLite/IndexedDB/localStorage/app-storage mechanics; future shipped-format conversion requires an explicit pre-admission/offline design |
 | Diagnostics, profiling, telemetry, and smoke reports | shared Rust owners and typed/Rust-authored snapshots; production adapters consume only operational projections | platform counters that only exist in that backend and explicit test-observer exposure |
 | Jobs, workers, priorities, cancellation, and budgets | future shared job/scheduler contract | native thread/Web Worker/Android worker creation and platform wakeups |
 | Preferences/config, keybinds, graphics/audio/debug options | shared input bindings and typed preference codecs in `mclone-input` / `mclone-app-runtime`, consumed by shared UI/scene owners | opaque key/value storage, platform persistence path, raw capability facts, and launch overrides |
@@ -503,7 +503,10 @@ lower-level render residency and explicit product/evidence gaps:
    TypeScript. Future rebinding UI, text entry, or device support must extend
    those shared owners rather than add app-local action maps. The completed
    audit and environment-initialization boundary live in
-   [`platform-host-boundary.md`](platform-host-boundary.md).
+   [`platform-host-boundary.md`](platform-host-boundary.md). Active Tactical
+   207 separately converges the remaining coarse session/lobby/catalog/asset
+   browser pumps under shared Rust operation ownership; it must simplify the
+   adapter without reopening the synchronous input boundary.
 6. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through

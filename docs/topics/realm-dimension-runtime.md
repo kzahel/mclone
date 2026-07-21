@@ -138,8 +138,9 @@ unified:
 - player records remain realm-root records keyed by profile UUID and carry a
   validated current `DimensionKey`;
 - SQLite and IndexedDB chunk/entity records are dimension-qualified, with
-  exact v1/v5 rows migrated to `minecraft:overworld` and native collision
-  coverage for equal coordinates in different dimensions;
+  native collision coverage for equal coordinates in different dimensions.
+  The former browser v5 compatibility copy to `minecraft:overworld` was
+  deleted on 2026-07-21 because old internal browser worlds are disposable;
 - players carry one current dimension and all command/publication paths route
   through that runtime; players and realm-global `ObserverId`s retain
   source-owned views and outbound queues inside that dimension;
@@ -257,12 +258,13 @@ One deletable realm container should expose two logical scopes:
 | realm saved data and monotonic clock | environment/day/weather when local |
 | session/account association | chunk interest/tickets and local spawn data |
 
-The native store should qualify chunk/entity records with `dimension_key` and
-the browser store should add the same logical key beneath its realm `worldId`.
-Realm-root player/statistics APIs stay independent of dimension. Existing
-worlds migrate as one realm containing `minecraft:overworld`; old player
-records default to that dimension. Migration must be transactional or
-explicitly recoverable.
+The native store qualifies chunk/entity records with `dimension_key` and the
+browser store adds the same logical key beneath its realm `worldId`.
+Realm-root player/statistics APIs stay independent of dimension. Pre-release
+browser formats are not admitted or migrated by production TypeScript. The
+native executor still contains earlier exact-v1 compatibility behavior, but
+that is not a release promise and must not constrain the accepted future
+sharded layout.
 
 ## Player and Statistics Lifecycle
 

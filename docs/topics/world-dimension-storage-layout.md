@@ -231,15 +231,17 @@ The accepted target is a physical-format change only. `WorldStore`,
 `WorldStoreRequest`, `WorldStoreCompletion`, record codecs, revisions, and
 logical `DimensionKey` addressing should remain stable.
 
-Current native worlds use the single-file SQLite schema version 2. A tactical
-must explicitly decide whether those internal worlds are disposable or must be
-preserved. Preservation must not introduce live, mid-session schema-upgrade or
-shard-migration semantics. Use an out-of-band or pre-start conversion with a
-staged result and recoverable publication before a writable realm starts, or
-make an intentional pre-release format break with clear diagnostics.
+Current internal worlds are disposable and are not a compatibility requirement
+for the native sharding tactical. Prefer an intentional pre-release format
+break with clear diagnostics over carrying forward the existing native
+exact-v1 compatibility path. If a future shipped format genuinely requires
+preservation, use an out-of-band or pre-start conversion with a staged result
+and recoverable publication before a writable realm starts; do not introduce
+live mid-session migration semantics.
 
-The browser layout is unchanged by this direction and requires no corresponding
-IndexedDB schema migration.
+The browser layout is unchanged by this direction. Its former v5-to-v6
+Overworld cursor copy has been deleted, and production TypeScript contains no
+record migration policy.
 
 ## Questions For The Implementing Tactical
 

@@ -378,6 +378,7 @@ paths.
 ## Related
 
 - [`world-generation-profiles.md`](world-generation-profiles.md)
+- [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
 - [`../worldgen-status.md`](../worldgen-status.md)
 - [`../reference-minecraft.md`](../reference-minecraft.md)

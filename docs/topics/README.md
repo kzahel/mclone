@@ -97,6 +97,13 @@ series implements the same concern, normally reuse the document slug in its
   landmark sequence. Tactical
   [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) owns the
   first bounded terrain foundation.
+- [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md): accepted
+  terrain-adaptive blueprint direction for a maximal but incrementally built
+  demo farmstead, including a cross-profile starter-content overlay, vanilla
+  structure vocabulary, hydrology and authored-water fallbacks, site grading,
+  exact touched-chunk scheduling, authored-tree reservation, persistent
+  residents, an `FS-*` dependency/proof ledger, tactical completion gates, and
+  the deliberately deferred Far LOD proxy.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   vanilla-shaped client-authoritative interim, planned server validation
   checks, the preserved sequenced-input-replay path, and remote-actor
@@ -131,17 +138,23 @@ series implements the same concern, normally reuse the document slug in its
   dimension SQLite shards, retained logical dimension keys and world-level
   ownership, and deliberately consolidated browser IndexedDB.
 - [`cross-platform-operation-execution.md`](cross-platform-operation-execution.md):
-  accepted shared Rust actor/mailbox direction across native threads and
-  browser Workers while preserving direct native execution and domain-blind
-  TypeScript. Completed Tactical 201 removed the accidental managed-lobby
-  installer; completed Tactical 202 found no replacement coarse-operation
-  actor and cleaned the surviving seams through their existing Rust owners.
+  active shared Rust actor/mailbox direction across native threads and browser
+  Workers while preserving direct native execution and domain-blind
+  TypeScript. Completed Tacticals 201-202 removed the accidental managed-lobby
+  installer and its clear platform decisions; active Tactical 207 has landed
+  Slices 0–2 and Gate A and is converging the remaining scene-operation pump.
 - [`platform-host-boundary.md`](platform-host-boundary.md): completed
   interactive host convergence — one shared Rust input/context/action path
   across native, browser, Android, and XR where applicable; Rust-owned browser
   preferences/bootstrap/status; operational-only product reports; and an
   explicit semantic test observer while autonomous platform mechanics remain
   local.
+- [`platform-boundary-convergence.md`](platform-boundary-convergence.md):
+  parent record for the shared/platform code-split campaign — the
+  sixteen-pass ledger, the 2026-07-21 two-sided measured audit, the
+  both-language scoreboard every pass must report, and the standalone-audit
+  closure protocol that keeps implementing tacticals from declaring the
+  whole concern done.
 - [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
   resident-tile producer mechanism, the settle contract, the confirmed
   coverage-defect ledger (altitude graph-cull voids, suppression/painted

@@ -3,6 +3,12 @@
 Status: complete 2026-07-20. Fresh post-Tactical-201 ownership review,
 implementation, and available-lane validation are complete.
 
+Superseded follow-up: the 2026-07-21 simplification review deleted the retained
+browser migration exception and opened
+[`Tactical 207`](207-shared-scene-operation-coordinator.md). That tactical is
+active through Slices 0–2 and its post-identity decision gate; the sections
+below remain the execution record and scope decisions of Tactical 202.
+
 Topic: `cross-platform-operation-execution`
 
 Related topics:

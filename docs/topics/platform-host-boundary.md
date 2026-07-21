@@ -212,7 +212,7 @@ input gap and added a host-boundary source lock. Tactical 205 then moved the
 diagnostic global and semantic report projection into an explicit query-gated
 observer. Tactical 206 removed the semantic settings module, host/resource
 selection, startup presentation policy, and rich ordinary report. The final
-gate reports 3,780 authored TypeScript lines across 16 modules;
+gate reports 3,736 authored TypeScript lines across 16 modules;
 `mclone-web-app.ts` is 1,057 lines and the separately classified smoke observer
 is 391 lines. All registered Worker/scene ownership debts remain at zero.
 
@@ -235,7 +235,7 @@ is 391 lines. All registered Worker/scene ownership debts remain at zero.
 | Cadence and presentation | Browser owns rAF, visibility callbacks, canvas resize, WebGPU presentation; native owns winit redraw/surface; XR owns OpenXR frame/swapchain sequencing | Correct asymmetry | Keep physical loops platform-owned behind shared time/render contracts |
 | Workers/jobs/render compiler | Worker-resident Rust actors own meaning; TS handles module loading, SAB/message transport, wakeups, and failure envelopes | Healthy | Preserve existing actor/mailbox boundaries |
 | WebSocket | Worker-resident Rust owns protocol/lifecycle/backpressure; TS executes open/send/event/close actions | Healthy model | Preserve; use as an example of a thin mechanical executor |
-| Persistence | Rust owns record meaning, revisions, continuations, and writer authority; TS maps stable namespaces and executes IndexedDB requests | Healthy with one exception | Preserve; keep the legacy v5-to-v6 Overworld migration quarantined |
+| Persistence | Rust owns record meaning, revisions, continuations, and writer authority; TS maps stable namespaces and executes IndexedDB requests | Healthy current execution boundary; further address lowering belongs to Tactical 207 | Keep TypeScript mechanical and remove its remaining record-family mappings through the operation follow-up |
 | Catalog | Rust owns catalog continuation and UI meaning; TS executes stable store/index actions | Healthy specialized adapter | Preserve; do not fold into a universal host interface |
 | Startup assembly | **Closed in Tactical 206:** TS loads Wasm and browser facilities, fetches Rust-requested resources, and calls one Rust scene-host constructor | Converged policy with healthy browser assembly | Keep browser mechanics autonomous and host/session meaning in Rust |
 | Asset loading | **Closed in Tactical 206:** TS fetches opaque ID/URL requests; browser Rust assigns pack roles and retains the bytes | Mechanical fetch with Rust-owned semantic assembly | Keep resource IDs stable and role resolution out of TS |
@@ -459,7 +459,7 @@ table records their post-series responsibilities:
 | `mclone-web-input.ts` (161) | raw DOM keyboard/mouse forwarding and browser event mechanics | Healthy thin physical adapter |
 | `mclone-web-touch.ts` (131) | raw touch/pen forwarding, pointer capture, and synthetic-mouse hygiene | Healthy thin physical adapter over shared Rust touch policy |
 | `mclone-web-smoke-observer.ts` (391) | query-gated semantic reports, test aliases/receipts, and retained smoke commands | Appropriate explicit test client; absent from ordinary pages |
-| `mclone-web-world-catalog.ts` (414) | IndexedDB schema, store/index resolution, catalog transactions | Healthy specialized executor except the locked legacy Overworld migration |
+| `mclone-web-world-catalog.ts` (370) | IndexedDB schema, store/index resolution, catalog transactions | Mechanical specialized executor; Tactical 207 reviews moving its remaining record-family addressing into browser Rust |
 | `mclone-web-persistence-executor.ts` (471) | namespace-to-store addressing, IndexedDB record requests, error classification | Healthy mechanical executor |
 | `mclone-web-world-lease.ts` (51) | Web Lock writer lease | Healthy mechanical lifetime adapter |
 | `mclone-worker-transport.ts` (47) | generic Worker construction, post/poll/terminate | Healthy reusable platform machinery |
@@ -503,13 +503,11 @@ stores and keys. That is platform storage addressing, not gameplay policy.
 Likewise, `mclone-web-world-catalog.ts` owns database/store/index creation and
 transactions.
 
-One accepted exception remains: the legacy pre-dimension upgrade cursor
-assigns old records to `minecraft:overworld` (it runs whenever the old
-pre-dimension stores still exist during the version-6 open, not on an
-explicit stored-version check). That is semantic migration code in TypeScript. It is
-quarantined by `web_scene_async_boundary_lock` and is outside this host-input
-cleanup. Remove or replace it only through a separate data-compatibility
-decision; do not create runtime migration machinery here.
+The former pre-dimension upgrade cursor and its `minecraft:overworld`
+assignment were removed on 2026-07-21 after the project explicitly declared
+old internal browser worlds disposable. Source locks reject restoring that
+semantic compatibility policy to TypeScript. Any future shipped-format
+conversion requires a separate pre-admission or offline design.
 
 ### Preferences Audit
 
@@ -817,7 +815,7 @@ source code or transports.
 | Production semantic state mirror | **Closed in Tactical 205:** no broad copy; ordinary pages define no `__mcloneWebApp` | Rust state plus bounded operational projection | Product source lock rejects representative state fields and mirror helpers |
 | Production smoke command hooks | **Closed in Tactical 205:** query-gated `mclone-web-smoke-observer.ts` owns them | test-only observer/harness | Ordinary production global excludes semantic smoke methods |
 | Rich report bag | **Closed in Tactical 206:** ordinary calls return `operational_report`; only the opt-in observer requests `diagnosticSnapshot()` | typed operational result plus explicit diagnostic snapshot | Product TS is locked against representative diagnostic fields |
-| Legacy IndexedDB dimension migration | catalog TS upgrade callback | separate offline/data compatibility decision | Remains quarantined until explicitly replaced; not part of this tactical |
+| Legacy IndexedDB dimension migration | **Closed 2026-07-21:** compatibility code deleted because old internal worlds are disposable | no production owner | Source locks reject legacy store labels and `minecraft:overworld` migration policy in TypeScript |
 
 ## Implemented Sequence
 
@@ -916,8 +914,8 @@ the Wasm ABI from defining the engine architecture.
 ## Acceptance Criteria
 
 All criteria below were satisfied on 2026-07-21. The test-only observer remains
-an intentional semantic engine client, and the legacy IndexedDB migration plus
-optional winit normalization cleanup remain separately scoped exceptions.
+an intentional semantic engine client, and optional winit normalization
+cleanup remains separately scoped.
 
 1. Changing the default binding for Jump, Attack, Use, menu, help, camera view,
    or hotbar selection requires one shared Rust change.
@@ -994,8 +992,6 @@ intentional or independently scoped:
 - TypeScript retains DOM, canvas, rAF, Worker, WebSocket, IndexedDB, fetch,
   permission, and pointer/fullscreen mechanics; browser Rust may call
   localStorage through the domain-blind `web_sys` adapter;
-- the legacy IndexedDB dimension migration remains quarantined under its own
-  data-compatibility decision; and
 - further unification of asynchronous catalog/session/asset continuations is
   governed by
   [`cross-platform-operation-execution.md`](cross-platform-operation-execution.md),
@@ -1063,7 +1059,7 @@ mechanics are not stop conditions.
   part of the ownership move;
 - implementing a full end-user rebinding UI in the first slice;
 - adding web audio, clipboard, IME, chat, or other missing product features;
-- changing world database layout or the accepted legacy IndexedDB migration;
+- changing world database layout or adding any persisted-format migration;
 - replacing existing specialized actor/mailbox systems; or
 - removing semantic APIs from explicit tests and offscreen harnesses.
 
