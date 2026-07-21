@@ -16,6 +16,8 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
   await expect(page.locator(".summaryItem").first()).not.toContainText("0");
+  await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("3");
+  await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
   const firstTime = Number(await canvas.getAttribute("data-time"));
   await page.waitForTimeout(220);
@@ -41,6 +43,22 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await page.keyboard.press("ArrowRight");
   await expect(canvas).toHaveAttribute("data-time", "0.0010");
   await page.getByRole("button", { name: "Play animation" }).click();
+
+  const promotionFilter = page.getByRole("combobox", { name: "Runtime status" });
+  await promotionFilter.selectOption("runtime");
+  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator("[data-catalog-name='player']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='chicken']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='upright_bear']")).toBeVisible();
+  await expect(page.locator("[data-runtime-promoted='false']")).toHaveCount(0);
+  await page.locator("[data-catalog-name='chicken']").click();
+  await expect(page.locator(".promotionStatus")).toContainText("Runtime promoted");
+  await expect(page.locator(".promotionStatus")).toContainText("mclone:chicken");
+  await expect(page.locator(".promotionStatus")).toContainText("assets/mclone/figures/chicken.figure.json");
+  await promotionFilter.selectOption("asset-lab");
+  await expect(page.locator("[data-catalog-name='chicken']")).toHaveCount(0);
+  await expect(page.locator("[data-catalog-name='king_cobra']")).toBeVisible();
+  await promotionFilter.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search" });
   await search.fill("owl");

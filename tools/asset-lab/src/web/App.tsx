@@ -5,6 +5,7 @@ import { FigureViewer } from "./FigureViewer";
 import {
   assetUrl,
   type MotionFilter,
+  type PromotionFilter,
   useAnimalCatalogueStore,
 } from "./store";
 
@@ -18,12 +19,19 @@ const motionOptions: Array<{ label: string; value: MotionFilter }> = [
   { label: "Other rigs", value: "other" },
 ];
 
+const promotionOptions: Array<{ label: string; value: PromotionFilter }> = [
+  { label: "All figures", value: "all" },
+  { label: "Runtime only", value: "runtime" },
+  { label: "Lab only", value: "asset-lab" },
+];
+
 export function App(): JSX.Element {
   const catalog = useAnimalCatalogueStore((state) => state.catalog);
   const error = useAnimalCatalogueStore((state) => state.error);
   const loadCatalog = useAnimalCatalogueStore((state) => state.loadCatalog);
   const loadStatus = useAnimalCatalogueStore((state) => state.loadStatus);
   const motionFilter = useAnimalCatalogueStore((state) => state.motionFilter);
+  const promotionFilter = useAnimalCatalogueStore((state) => state.promotionFilter);
   const restoreUrlSelection = useAnimalCatalogueStore((state) => state.restoreUrlSelection);
   const search = useAnimalCatalogueStore((state) => state.search);
   const selectClip = useAnimalCatalogueStore((state) => state.selectClip);
@@ -31,6 +39,7 @@ export function App(): JSX.Element {
   const selectedClipName = useAnimalCatalogueStore((state) => state.selectedClipName);
   const selectedFigureName = useAnimalCatalogueStore((state) => state.selectedFigureName);
   const setMotionFilter = useAnimalCatalogueStore((state) => state.setMotionFilter);
+  const setPromotionFilter = useAnimalCatalogueStore((state) => state.setPromotionFilter);
   const setSearch = useAnimalCatalogueStore((state) => state.setSearch);
   const syncSystemTheme = useAnimalCatalogueStore((state) => state.syncSystemTheme);
   const themeMode = useAnimalCatalogueStore((state) => state.themeMode);
@@ -66,7 +75,7 @@ export function App(): JSX.Element {
     return () => cancelAnimationFrame(frame);
   }, [loadStatus, selectedFigureName]);
 
-  const figures = filterFigures(catalog?.figures ?? [], search, motionFilter);
+  const figures = filterFigures(catalog?.figures ?? [], search, motionFilter, promotionFilter);
   const selectedFigure = catalog?.figures.find((figure) => figure.name === selectedFigureName);
   const activeClipName = selectedFigure?.clips.some((clip) => clip.name === selectedClipName)
     ? selectedClipName as string
@@ -83,6 +92,7 @@ export function App(): JSX.Element {
           <SummaryItem label="figures" value={catalog?.summary.canonicalFigures ?? 0} />
           <SummaryItem label="clips" value={catalog?.summary.clips ?? 0} />
           <SummaryItem label="parts" value={catalog?.summary.parts ?? 0} />
+          <SummaryItem label="runtime" value={catalog?.summary.runtimePromotedFigures ?? 0} />
         </div>
         <div className="topActions">
           <a className="siteLink" href="/">Play Mclone</a>
@@ -117,6 +127,17 @@ export function App(): JSX.Element {
                 ))}
               </select>
             </label>
+            <label>
+              <span>Runtime status</span>
+              <select
+                value={promotionFilter}
+                onChange={(event) => setPromotionFilter(event.target.value as PromotionFilter)}
+              >
+                {promotionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
             <div className="resultCount" aria-live="polite">
               {figures.length} figure{figures.length === 1 ? "" : "s"}
             </div>
@@ -128,12 +149,16 @@ export function App(): JSX.Element {
                 key={figure.name}
                 className={figure.name === selectedFigureName ? "catalogRow selected" : "catalogRow"}
                 data-catalog-name={figure.name}
+                data-runtime-promoted={figure.runtimePromotion === undefined ? "false" : "true"}
                 aria-current={figure.name === selectedFigureName ? "true" : undefined}
                 onClick={() => selectFigure(figure.name)}
               >
                 <img src={assetUrl(figure.thumbnailPath)} alt="" loading="lazy" />
                 <span className="catalogRowText">
-                  <strong>{figure.label}</strong>
+                  <span className="catalogRowHeading">
+                    <strong>{figure.label}</strong>
+                    {figure.runtimePromotion ? <span className="promotionBadge">Runtime</span> : null}
+                  </span>
                   <span>{motionLabel(figure)} · {figure.partCount} parts</span>
                 </span>
               </button>
@@ -212,13 +237,27 @@ function FigureInspector({
         </p>
         <code className="hashLine">{figure.semanticSha256}</code>
       </section>
-      <section className="inspectorSection callout">
-        <h3>Asset Lab example</h3>
-        <p>
-          Catalogue inclusion is not runtime promotion. The game independently
-          consumes promoted semantic JSON through the shared Rust figure path.
-        </p>
-      </section>
+      {figure.runtimePromotion ? (
+        <section className="inspectorSection callout promotionStatus runtimePromoted">
+          <h3>Runtime promoted</h3>
+          <p>
+            This checked semantic figure ships in the game asset pack and is
+            available through the shared Rust actor-figure registry.
+          </p>
+          <dl className="promotionMetadata">
+            <div><dt>Figure ID</dt><dd><code>{figure.runtimePromotion.figureId}</code></dd></div>
+            <div><dt>Packed JSON</dt><dd><code>{figure.runtimePromotion.jsonPath}</code></dd></div>
+          </dl>
+        </section>
+      ) : (
+        <section className="inspectorSection callout promotionStatus assetLabOnly">
+          <h3>Asset Lab only</h3>
+          <p>
+            This canonical example is available for review here but is not yet
+            included in the game's runtime actor-figure registry.
+          </p>
+        </section>
+      )}
     </div>
   );
 }
@@ -235,6 +274,7 @@ function filterFigures(
   figures: readonly AnimalCatalogFigure[],
   search: string,
   motionFilter: MotionFilter,
+  promotionFilter: PromotionFilter,
 ): AnimalCatalogFigure[] {
   const query = search.trim().toLocaleLowerCase();
   return figures.filter((figure) => {
@@ -243,7 +283,11 @@ function filterFigures(
     ));
     const matchesMotion = motionFilter === "all"
       || (motionFilter === "other" ? motionKinds.size === 0 : motionKinds.has(motionFilter));
-    if (!matchesMotion) {
+    const matchesPromotion = promotionFilter === "all"
+      || (promotionFilter === "runtime"
+        ? figure.runtimePromotion !== undefined
+        : figure.runtimePromotion === undefined);
+    if (!matchesMotion || !matchesPromotion) {
       return false;
     }
     if (!query) {
@@ -254,6 +298,9 @@ function filterFigures(
       figure.name,
       ...figure.clips.map((clip) => clip.name),
       ...motionKinds,
+      ...(figure.runtimePromotion
+        ? ["runtime", "promoted", figure.runtimePromotion.figureId, figure.runtimePromotion.jsonPath]
+        : ["asset lab only"]),
     ].join(" ").toLocaleLowerCase();
     return haystack.includes(query);
   });

@@ -314,6 +314,37 @@ h3 {
   white-space: nowrap;
 }
 
+.catalogRowHeading {
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.catalogRowText .catalogRowHeading {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.catalogRowHeading strong {
+  min-width: 0;
+  flex: 1;
+}
+
+.catalogRowText .promotionBadge {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
 .catalogRowText span,
 .listMessage {
   color: var(--muted);
@@ -532,6 +563,26 @@ h3 {
   border: 1px solid var(--accent-border);
   border-radius: 7px;
   background: var(--accent-soft);
+}
+
+.assetLabOnly {
+  border-color: var(--border);
+  background: var(--card);
+}
+
+.promotionMetadata {
+  margin-top: 10px !important;
+  padding-top: 10px;
+  border-top: 1px solid var(--accent-border);
+}
+
+.promotionMetadata div {
+  align-items: start;
+}
+
+.promotionMetadata dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .inspectorNote,

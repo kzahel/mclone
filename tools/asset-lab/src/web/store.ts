@@ -14,6 +14,7 @@ export type MotionFilter =
   | "swim"
   | "slither"
   | "other";
+export type PromotionFilter = "all" | "runtime" | "asset-lab";
 export type ThemeMode = "light" | "dark";
 
 interface AnimalCatalogueState {
@@ -22,6 +23,7 @@ interface AnimalCatalogueState {
   loadCatalog: () => Promise<void>;
   loadStatus: LoadStatus;
   motionFilter: MotionFilter;
+  promotionFilter: PromotionFilter;
   restoreUrlSelection: () => void;
   search: string;
   selectClip: (clipName: string) => void;
@@ -29,6 +31,7 @@ interface AnimalCatalogueState {
   selectedClipName: string | null;
   selectedFigureName: string | null;
   setMotionFilter: (filter: MotionFilter) => void;
+  setPromotionFilter: (filter: PromotionFilter) => void;
   setSearch: (search: string) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
   themeMode: ThemeMode;
@@ -41,6 +44,7 @@ export const useAnimalCatalogueStore = create<AnimalCatalogueState>((set, get) =
   error: null,
   loadStatus: "idle",
   motionFilter: "all",
+  promotionFilter: "all",
   search: "",
   selectedClipName: null,
   selectedFigureName: null,
@@ -112,6 +116,10 @@ export const useAnimalCatalogueStore = create<AnimalCatalogueState>((set, get) =
 
   setMotionFilter(motionFilter) {
     set({ motionFilter });
+  },
+
+  setPromotionFilter(promotionFilter) {
+    set({ promotionFilter });
   },
 
   syncSystemTheme(themeMode) {
