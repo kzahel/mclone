@@ -827,13 +827,15 @@ once.
 - Record native desktop, flat Android, web desktop/mobile, and offscreen input
   behavior before changing ownership, including the currently undocumented
   browser semantics: gameplay input suppression while a native UI is active
-  (zeroed deltas plus default key state), the ≤4px drag-cancels-click
-  threshold on break/place, the 800ms touch-to-synthetic-mouse suppression
+  (zeroed deltas plus default key state), the 4px click/drag threshold on
+  break/place (movement greater than 4px cancels the click), the 800ms
+  touch-to-synthetic-mouse suppression
   window, the `shift`-to-Sneak rename and arrow-turn versus A/D-strafe split,
   one-shot Attack/Use versus held Jump/Descend touch buttons, dead-zone
   renormalized analog impulses with pen-as-touch, wheel delta-mode scaling,
   and pointer-lock reacquisition on resume. Each recorded behavior must later
-  land in the shared router or be documented as retained browser hygiene.
+  land in the shared router, be documented as retained browser hygiene, or be
+  explicitly rejected as accidental platform drift.
 
 ### Stage 1: Shared interactive input/router contract
 
@@ -901,9 +903,9 @@ the Wasm ABI from defining the engine architecture.
 - Run XR build/control gates if shared input or scene contracts affect XR.
 - Run the Worker ownership, scene-host adoption, generated-bindgen, and
   TypeScript gates with new host-boundary locks.
-- Refresh this topic's audit and the platform-parity matrix, and sweep stale
-  authored-line figures in adjacent docs (`docs/topics/README.md`,
-  `web-worker-runtime-ownership.md`) against current gate output.
+- Refresh this topic's audit and the platform-parity matrix, and verify current
+  summary figures in adjacent docs against gate output while preserving
+  explicitly historical per-slice figures.
 
 ## Acceptance Criteria
 

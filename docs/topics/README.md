@@ -115,7 +115,7 @@ series implements the same concern, normally reuse the document slug in its
 - [`web-worker-runtime-ownership.md`](web-worker-runtime-ownership.md): accepted
   isolated-Rust-actor and domain-blind-TypeScript direction for browser
   Workers, including the landed server-job actor and main-side Rust render
-  coordinator, current 6,484-line TypeScript inventory, external-SAB-mailbox
+  coordinator, current 5,275-line TypeScript inventory, external-SAB-mailbox
   versus shared-Wasm-heap distinction, copy/lifecycle tradeoffs, and explicit
   shared-linear-memory revisit gates. Tactical
   [`197`](../tactical/197-domain-blind-web-worker-broker.md) owns the approved
