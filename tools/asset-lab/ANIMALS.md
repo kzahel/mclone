@@ -165,6 +165,7 @@ reviewed rigs and then filling macro gaps.
 | Bison / Buffalo | P3 | ✅ | Q | — | `examples/american_bison` — approved 27-box bull with layered hump, compact rear, low shaggy head, short horns, and beard |
 | Antelope / Gazelle / Impala | P2 | ✅ | Q | horns; springbok, oryx | `examples/gemsbok_oryx` — approved 24-box gemsbok with black-white mask, flank stripe, leg stockings, and twin two-stage spear horns |
 | Saiga antelope | P3 | ✅ | Q | male, female, winter coat | `examples/saiga_antelope` — approved 24-box sandy saiga with a low trunk-like nose, ridged paired horns, cream belly, long legs, and steppe trot |
+| Musk ox | P3 | ✅ | Q | bull, cow, calf | `examples/musk_ox` — approved 29-box musk ox with a low woolly barrel, connected shag curtain, broad pale horn boss, short dark legs, and heavy tundra trudge |
 | Wildebeest / Gnu | P3 | ✅ | Q | — | `examples/wildebeest` — approved 28-box blue wildebeest with massive dark shoulders, lowered long face, beard, sweeping three-stage horns, and black tail |
 | Tapir | P3 | ✅ | Q | Malayan, lowland; striped baby | `examples/malayan_tapir` — approved 23-box adult with a massive pale saddle, black fore and rear masses, white-rimmed ears, broad feet, and short three-stage trunk |
 | Okapi | P3 | ✅ | Q | — | `examples/okapi` — approved 24-box adult with a deep chestnut body, shorter giraffe-like neck, huge ears, small ossicones, and white-barred rump and legs |
@@ -235,6 +236,7 @@ reviewed rigs and then filling macro gaps.
 | Songbird (robin/sparrow) | P3 | ✅ | W | color morphs | `examples/robin` — approved 16-box European robin with orange face and breast, fine wing bars, short beak, and quick flutter |
 | Peacock | P3 | ✅ | W | — | `examples/peacock` — approved 22-box Indian peacock with crest, patterned wings, and parented seven-feather tail fan |
 | Ostrich / Emu | P3 | ✅ | B | — | `examples/ostrich` — approved 21-box male ostrich with tiny white-edged wings, long bare neck, two-stage legs, broad feet, and fast run |
+| Cassowary | P3 | ✅ | B | southern, northern | `examples/cassowary` — approved 23-box southern cassowary with black plumage, cobalt neck, red wattles, tall casque, forest run, and separate defensive kick action |
 
 ## Marine & aquatic
 
@@ -255,6 +257,7 @@ reviewed rigs and then filling macro gaps.
 | Lobster | P3 | ✅ | C | — | `examples/lobster` — approved 43-box American lobster with heavy mottled carapace, long antennae, articulated claws, eight walking legs, five abdomen plates, and broad tail fan |
 | Shrimp | P3 | ✅ | S | — | `examples/shrimp` — approved 41-box pink shrimp with pointed rostrum, stalked eyes, long antennae, six walking legs, ten swimmerets, curled plated abdomen, and paddle swim |
 | Mantis shrimp | P3 | ✅ | C/S | peacock, zebra | `examples/mantis_shrimp` — approved peacock mantis shrimp with vivid plated shell, stalked eyes, six walking legs, swimmerets, broad tail fan, and separate paired raptorial punch action |
+| Nautilus | P3 | ✅ | S | chambered nautilus | `examples/nautilus` — approved 28-box chambered nautilus with stepped spiral shell, hooded face, eight two-stage tentacles, jet hover, and separate retract/emerge actions |
 | Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |
 | Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
 | Walrus | P2 | ✅ | S/Q | Atlantic, Pacific | `examples/walrus` — review candidate Atlantic walrus with massive wrinkled body, paired whisker pads and tusks, broad foreflippers, and split hind flippers |
