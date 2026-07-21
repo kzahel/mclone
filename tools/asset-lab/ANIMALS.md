@@ -239,7 +239,7 @@ reviewed rigs and then filling macro gaps.
 | Fish (generic) | P1 | ✅ | S | clownfish, tropical morphs, cod, salmon, pufferfish | `examples/fish` — approved 10-box blue/yellow tropical fish with a lateral two-stage tail |
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
-| Whale | P2 | ☐ | S | orca, humpback, blue | scale challenge |
+| Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
 | Octopus | P2 | ☐ | S | — | 8 articulated cuboid tentacles |
 | Crab | P2 | ☐ | C | — | sideways multi-leg |
 | Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
@@ -247,8 +247,8 @@ reviewed rigs and then filling macro gaps.
 | Jellyfish | P3 | ☐ | S | — | pulse animation |
 | Starfish | P3 | ☐ | ST | — | nearly static |
 | Lobster / Shrimp | P3 | ☐ | C/S | — | |
-| Seal / Sea lion | P3 | ☐ | S/Q | — | also Polar |
-| Manatee / Dugong | P3 | ☐ | S | — | slow "sea cow"; zoo/aquarium staple |
+| Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |
+| Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
 
 ## Reptiles & amphibians
 

@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 98 |
-| total parts | 2,153 |
-| boxes | 1,948 |
+| figures | 101 |
+| total parts | 2,191 |
+| boxes | 1,986 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 308 |
-| parts with any texture reference | 493 |
-| individual texture applications | 780 |
+| ASCII textures | 320 |
+| parts with any texture reference | 509 |
+| individual texture applications | 805 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 80 | 1,611 | 1,611 | 0 / 0 / 0 |
+| canonical `examples/` | 83 | 1,649 | 1,649 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -601,7 +601,25 @@ were rendered under `/tmp/mclone-asset-lab/batch-20` and inspected for identity,
 grounding, attachment continuity, gait cadence, neck and snout stability,
 secondary motion, and loop continuity, and approved by the user on 2026-07-21.
 
-All 780 applications target an explicit face of a box. They range from single
+The twenty-first post-migration content batch adds Orca, Manatee, and Harbor
+Seal as approved canonical box-only rigs. Orca is a 15-part fast cruiser
+with bright eye and saddle patches, a continuous white underside, a tall dorsal
+fin, rear-swept pectorals, and horizontal flukes; Manatee is an 11-part slow
+glider with a massive stepped body, blunt whiskered muzzle, paired paddle
+flippers, and one broad horizontal spoon tail; and Harbor Seal is a 12-part
+swimmer with a tapered spotted body, round earless head, pale whiskered muzzle,
+short foreflippers, and paired hind flippers carried by a flexing pelvis
+segment. All
+38 parts are canonical boxes and use 12 combined pixel textures. Typechecking,
+the Asset Lab test suite, and the first-party figure drift check pass. Clean
+multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-21` and inspected for identity, attachment
+continuity, propulsion axis and cadence, paired-flipper separation, secondary
+motion, and loop continuity, and approved by the user on 2026-07-21 after the
+orca's separate lower-flank blocks were replaced by a continuous white
+underside and its pectoral fins were flattened and swept rearward.
+
+All 805 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
