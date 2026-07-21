@@ -120,7 +120,7 @@ The completed slice has the following evidence:
 - `cargo test --manifest-path native/Cargo.toml -p mclone-assets` passes 63
   unit tests, its runtime/tooling boundary test, and the prepared action
   metadata case;
-- `pnpm asset-lab:web:build` produces 98 figures, 100 clips, and 1,974 parts;
+- `pnpm asset-lab:web:build` produces 101 figures, 105 clips, and 2,067 parts;
 - production-subpath Playwright passes three desktop/mobile/action tests,
   including grouped roles, the action filter, restart, final-pose hold,
   automatic `nextClip`, URL state, and clean browser/page errors; and
@@ -132,6 +132,16 @@ The completed slice has the following evidence:
 The corrected sheets prove that the two chains curl down from the middle band,
 leaving the armored plates outside. `roll_up` closes and holds, `unroll` begins
 from that exact pose, and `crawl` remains a separate continuous clip.
+
+## Follow-up Content Evidence
+
+Snail is the second accepted canonical figure to use the action contract. Its
+looping `glide` default remains separate from non-looping `retract` and
+`emerge`; `retract` holds its final pose, while `emerge` returns automatically
+to `glide`. The soft-foot bottom stays on one ground plane throughout both
+interpolated actions, and the independently parented shell settles onto that
+same plane at full withdrawal. This proves the metadata on an anatomy and
+action shape unrelated to Roly-poly without introducing a shared pose helper.
 
 ## Recommended Next Direction
 

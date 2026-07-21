@@ -241,7 +241,7 @@ reviewed rigs and then filling macro gaps.
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
 | Octopus | P2 | ☐ | S | — | 8 articulated cuboid tentacles |
-| Crab | P2 | ☐ | C | — | sideways multi-leg |
+| Crab | P2 | ✅ | C | — | `examples/crab` — approved 31-box red rock crab with patterned broad carapace, raised eyes, articulated chelae, eight two-stage legs, and explicit sideways scuttle |
 | Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
 | Seahorse | P3 | ☐ | S | — | |
 | Jellyfish | P3 | ☐ | S | — | pulse animation |
@@ -277,8 +277,8 @@ reviewed rigs and then filling macro gaps.
 | Scorpion | P3 | ✅ | C | — | `examples/scorpion` — approved 36-box desert scorpion with broad pedipalps, eight two-stage legs, forward-curled seven-part tail, dark stinger, and alternating wave crawl |
 | Roly-poly / Pill bug | P2 | ✅ | C | — | `examples/roly_poly` — approved 27-box common pill bug with seven stepped shell bands, fourteen short legs, antennae, tail plate, separate crawl, and middle-rooted roll-up/unroll actions that tuck both ends below the shell |
 | Earwig (pincher bug) | P2 | ✅ | C | — | `examples/earwig` — approved 30-box common earwig with five raised abdomen bands, long antennae, six two-stage legs, paired three-part rear forceps, and tripod scuttle |
-| Centipede / Millipede | P3 | ☐ | C/SL | — | many legs; segment chain |
-| Snail | P3 | ☐ | SL | — | shell; very slow |
+| Centipede / Millipede | P3 | ✅ | C/SL | — | `examples/centipede` — approved 48-box giant centipede with eight articulated body plates, sixteen two-stage legs, long antennae, venom claws, and a traveling body/footfall wave |
+| Snail | P3 | ✅ | SL | — | `examples/snail` — approved 14-box garden snail with mottled foot, stepped spiral shell, eye stalks, slow glide, and grounded retract/emerge actions that lower and raise the shell |
 
 > **Shared "roll-up" pose:** Roly-poly is the first corrected action proof.
 > Give Armadillo and Pangolin independent authored actions next, then extract a

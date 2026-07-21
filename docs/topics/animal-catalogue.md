@@ -205,7 +205,7 @@ existing one-canvas interaction contract. The focused promoted capture at
 
 The animation-action follow-up retains the existing gates and adds semantic
 default/label/role/`nextClip` validation to the generated manifest. Local
-production output contains 98 figures, 100 clips, and 1,974 parts. Playwright
+production output contains 101 figures, 105 clips, and 2,067 parts. Playwright
 proves grouped Roly-poly clips, the Special actions filter, repeated action
 restart, non-looping final-pose hold, automatic return from `unroll` to
 `crawl`, URL synchronization, and clean browser/page errors. The held action

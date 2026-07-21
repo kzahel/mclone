@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 116 |
-| total parts | 2,516 |
-| boxes | 2,311 |
+| figures | 119 |
+| total parts | 2,609 |
+| boxes | 2,404 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 371 |
-| parts with any texture reference | 610 |
-| individual texture applications | 998 |
+| ASCII textures | 379 |
+| parts with any texture reference | 627 |
+| individual texture applications | 1,033 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 98 | 1,974 | 1,974 | 0 / 0 / 0 |
+| canonical `examples/` | 101 | 2,067 | 2,067 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -718,7 +718,28 @@ also establishes the additive clip role/default/completion contract recorded
 in [`figure-animation-actions.md`](figure-animation-actions.md). No shared
 roll-up helper, N-leg gait macro, or surface checker changed.
 
-All 998 applications target an explicit face of a box. They range from single
+The twenty-seventh post-migration content batch adds Crab, Centipede, and Snail
+as approved canonical box-only rigs. Crab is a 31-part
+red rock crab with a patterned broad carapace, raised eyes, articulated
+chelae, eight two-stage legs, and lateral locomotion; Centipede is a 48-part
+giant centipede with eight articulated body plates, sixteen two-stage legs,
+long antennae, venom claws, and a traveling body/footfall wave; and Snail is a
+14-part garden snail with a mottled foot, stepped spiral shell, raised eye
+stalks, a slow glide, and non-looping retract/emerge actions. All 93 parts are
+canonical boxes and use eight combined pixel textures across 17 textured
+parts and 35 explicit box-face applications. The Asset Lab typecheck, 17-test
+semantic suite, first-party figure drift gate, and 101-figure/105-clip web
+production build pass. Clean multi-angle sheets, multi-cycle locomotion videos,
+and one-shot Snail action reviews were rendered under
+`/tmp/mclone-asset-lab/batch-27` and inspected for identity, grounding,
+attachment continuity, sideways crab cadence, the centipede's traveling leg
+wave, shell/body separation, full withdrawal behind an aperture, and loop or
+action endpoint continuity. The Snail's soft-foot bottom remains fixed at the
+ground plane throughout both actions while the shell settles to meet it at
+full withdrawal. The user approved the batch after that continuous-grounding
+correction. No shared gait macro or surface checker changed.
+
+All 1,033 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
