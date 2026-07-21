@@ -223,6 +223,7 @@ reviewed rigs and then filling macro gaps.
 | Tasmanian devil | P3 | ✅ | Q | — | `examples/tasmanian_devil` — approved 23-box black adult with red inner ears, white chest and shoulder marks, oversized jaw, short strong legs, and thick tail |
 | Platypus | P3 | ✅ | Q/S | — | `examples/platypus` — approved 15-box low swimmer with broad slate bill, four webbed feet, two-stage paddle tail, and alternating paddle cycle |
 | Echidna | P3 | ✅ | Q | — | `examples/echidna` — approved 18-box short-beaked adult with domed spine coat, elongated snout, broad clawed feet, and compact digging walk |
+| Quokka | P3 | ✅ | Q | juvenile | `examples/quokka` — approved 22-box adult with compact haunches, round ears, smiling cream muzzle, sturdy paws, tapered tail, island walk, and separate curious-reach action |
 
 ## Birds
 
@@ -249,6 +250,7 @@ reviewed rigs and then filling macro gaps.
 | Secretary bird | P3 | ✅ | B | — | `examples/secretary_bird` — approved 26-box adult with swept black crest, orange face, gray-black plumage, long planted legs, grassland stalk, and separate abrupt stomp-strike action |
 | Marabou stork | P3 | ✅ | B | — | `examples/marabou_stork` — approved 19-box marabou with black-white plumage, bare pink head and neck, hanging throat pouch, long planted legs, wetland stalk, and separate broad wing-display action |
 | Kakapo | P3 | ✅ | B | — | `examples/kakapo` — approved 12-box moss-green flightless parrot with owl-like facial disc, tiny patterned wings, stout planted feet, slow waddle, and separate inflated booming display |
+| Great blue heron | P3 | ✅ | B | gray heron | `examples/great_blue_heron` — approved 20-box wader with slate patterned wings, folded three-stage S-neck, dagger bill, black crest, long planted legs, marsh stalk, and separate spear-strike action |
 
 ## Marine & aquatic
 
@@ -280,6 +282,7 @@ reviewed rigs and then filling macro gaps.
 | Anglerfish | P3 | ✅ | S | deep-sea anglerfish | `examples/anglerfish` — approved 25-box deep-sea anglerfish with oversized toothed jaw, paired fins, articulated lure, tail hover, and separate jaw-snap action |
 | Leafy seadragon | P3 | ✅ | S | weedy seadragon | `examples/leafy_seadragon` — approved 26-box leafy seadragon with plated narrow trunk, horse-like head, five-stage tail, layered camouflage appendages, hover-swim, and separate leaf-fan action |
 | Moray eel | P3 | ✅ | S | giant, snowflake | `examples/moray_eel` — approved 19-box giant moray with mottled seven-stage body, exposed teeth, traveling ribbon swim, and separate forward jaw-lunge action |
+| Electric eel | P3 | ✅ | S | juvenile | `examples/electric_eel` — approved 15-box adult with blunt face, long dark patterned body, orange throat, segmented underside fin, ribbon swim, and separate electric-pulse action |
 
 ## Reptiles & amphibians
 
