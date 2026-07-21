@@ -115,12 +115,12 @@ remain later runtime slices.
 The completed slice has the following evidence:
 
 - `pnpm asset-lab:typecheck` passes the strict TypeScript contract;
-- `pnpm asset-lab:test` passes 17 semantic, JSON, scene, discovery, catalogue,
+- `pnpm asset-lab:test` passes 19 semantic, JSON, scene, discovery, catalogue,
   and first-party drift tests, including action metadata round trips;
 - `cargo test --manifest-path native/Cargo.toml -p mclone-assets` passes 63
   unit tests, its runtime/tooling boundary test, and the prepared action
   metadata case;
-- `pnpm asset-lab:web:build` produces 101 figures, 105 clips, and 2,067 parts;
+- `pnpm asset-lab:web:build` produces 104 figures, 109 clips, and 2,141 parts;
 - production-subpath Playwright passes three desktop/mobile/action tests,
   including grouped roles, the action filter, restart, final-pose hold,
   automatic `nextClip`, URL state, and clean browser/page errors; and
@@ -142,6 +142,37 @@ to `glide`. The soft-foot bottom stays on one ground plane throughout both
 interpolated actions, and the independently parented shell settles onto that
 same plane at full withdrawal. This proves the metadata on an anatomy and
 action shape unrelated to Roly-poly without introducing a shared pose helper.
+
+Batch 28 adds an accepted Frog with `hop` as its explicit
+looping locomotion default and `jump` as a separate non-looping action. The
+action authors a larger airborne arc and landing sequence, then uses
+`nextClip: "hop"` to return to ordinary movement. The user approved it with
+Gecko and Mouse after the contact-projection correction below.
+
+The first sinusoidal version read as floaty, while a manual piecewise correction
+read as jumpy and inaccurate. Procedural cycle tracks therefore now accept
+optional scalar `min` and `max` constraints. The builder evaluates the ordinary
+waveform, applies the limits, and bakes the result into normal clip keys. Limits
+must be finite and `min` cannot exceed `max`; they are available to `bob`,
+`swing`, `contactSwing`, and `followThrough`.
+
+Scalar limits alone constrained the authored body or joint channel rather than
+the transformed foot pad, so they did not produce the requested abrupt physical
+contact. `walkCycle` now also accepts authoring-time `groundContacts`. After all
+tracks and follow-through are sampled, the baker evaluates the actual contact
+box through its complete hierarchy. If its lower surface penetrates `groundY`,
+a bounded numerical root solve rotates one declared ancestor hinge just enough
+to meet the plane. The contact box is counter-rotated by default so its sampled
+pad orientation remains flat. Every correction is baked into ordinary keys;
+unreachable contacts reject the source.
+
+Frog's two clips remain fully procedural. Their body bobs may dip `0.04` figure
+units below nominal rest, while four declared pad contacts project the front-arm
+and hind-shin hinges against `y = 0`. The correction becomes zero as soon as a
+pad clears the plane, producing the velocity discontinuity at landing that a
+scalar clamp could only approximate. This remains a deterministic one-plane,
+one-hinge authoring constraint, not general multi-joint IK, runtime collision,
+or a semantic figure-format change.
 
 ## Recommended Next Direction
 

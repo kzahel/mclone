@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 119 |
-| total parts | 2,609 |
-| boxes | 2,404 |
+| figures | 122 |
+| total parts | 2,683 |
+| boxes | 2,478 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 379 |
-| parts with any texture reference | 627 |
-| individual texture applications | 1,033 |
+| ASCII textures | 388 |
+| parts with any texture reference | 646 |
+| individual texture applications | 1,060 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 101 | 2,067 | 2,067 | 0 / 0 / 0 |
+| canonical `examples/` | 104 | 2,141 | 2,141 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -739,7 +739,28 @@ ground plane throughout both actions while the shell settles to meet it at
 full withdrawal. The user approved the batch after that continuous-grounding
 correction. No shared gait macro or surface checker changed.
 
-All 1,033 applications target an explicit face of a box. They range from single
+The twenty-eighth post-migration content batch adds Frog, Gecko, and Mouse as
+approved canonical box-only rigs. Frog is a 19-part green
+frog with a broad head, raised amber eyes, folded hind legs, a looping hop, and
+a separate non-looping jump action that returns to locomotion; Gecko is a
+25-part Tokay gecko with orange-spotted blue-gray hide, four two-stage sprawled
+legs, adhesive toe pads, a tapered tail, and a ground-plane scuttle; and Mouse
+is a 30-part field mouse with a mottled body, stepped ears, pointed muzzle, six
+whiskers, tiny paws, a four-stage tail, and a quick scurry. All 74 parts are
+canonical boxes and use nine combined pixel textures across 19 textured parts
+and 27 explicit box-face applications. Clean locomotion sheets and a separate
+Frog jump sheet were rendered under `/tmp/mclone-asset-lab/batch-28` and
+inspected at the first drawable milestone for each figure. The Asset Lab
+typecheck, 19-test semantic suite, first-party figure drift gate, repository
+diff check, and 104-figure/109-clip web production build pass. Four clean MP4
+reviews under the same batch directory were inspected for silhouette,
+grounding, limb attachment, loop continuity, the Frog's airborne arc and
+projected pad contact, in-plane Gecko footwork, Mouse tail follow-through, and
+visible surface interference. The user approved the complete batch after the
+Frog's procedural landing changed from scalar clamping to transformed pad
+projection with hinge correction and pad counter-rotation.
+
+All 1,060 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

@@ -166,6 +166,57 @@ walkCycle("walk", {
 });
 ```
 
+Procedural tracks can constrain their evaluated scalar with `min` and `max`.
+The limit is applied after the waveform is evaluated and before ordinary clip
+keys are baked. A lower bound of zero turns the negative half of a bob into an
+exact grounded interval without requiring hand-authored keys or a runtime
+constraint solver:
+
+```ts
+walkCycle("hop", {
+  duration: 0.82,
+  samples: 33,
+  tracks: [
+    bob("body", { axis: "y", amount: 0.25, phase: 0.5, min: 0 }),
+    swing("hind_leg", { axis: "x", degrees: 28, phase: 0.5, min: 0 }),
+  ],
+});
+```
+
+Constraints are available on `bob`, `swing`, `contactSwing`, and
+`followThrough`. They limit that track's scalar output, not a part's final
+world-space transform, and therefore do not perform collision detection or IK.
+
+When a procedural pose must react to the transformed bottom of an actual box,
+`walkCycle` also accepts authoring-time `groundContacts`. Tracks and
+follow-through are sampled first. For each sample whose contact box would pass
+below `groundY`, the baker numerically corrects one bounded ancestor hinge until
+the box bottom reaches the plane. By default it counter-rotates the contact box
+by the same amount so a flat pad stays flat:
+
+```ts
+walkCycle("hop", {
+  duration: 0.82,
+  samples: 33,
+  groundContacts: [{
+    contactPart: "hind_foot_l",
+    solvePart: "hind_shin_l",
+    axis: "x",
+    minCorrectionDegrees: -65,
+    maxCorrectionDegrees: 65,
+  }],
+  tracks: [
+    bob("body", { axis: "y", amount: 0.25, phase: 0.5, min: -0.04 }),
+  ],
+});
+```
+
+This is a deterministic one-plane, one-hinge contact projection. It preserves
+the authored hierarchy and emits ordinary clip keys, but it is not a general
+multi-joint IK or collision solver. Contact and solve parts must exist, the
+contact must be a box below the solve-part ancestor, correction bounds must
+contain zero, and an unreachable ground plane rejects the source.
+
 Use gait macros when the anatomy is conventional. They are authoring shortcuts,
 not runtime procedural animation. Walk macros export ordinary keyframes plus
 `clip.locomotion` metadata describing cycle distance, speed, forward direction,

@@ -1,3 +1,5 @@
+import * as THREE from "three";
+
 export type Vec3 = readonly [number, number, number];
 export type EulerDeg = Vec3;
 
@@ -140,7 +142,14 @@ export interface ClipSpec extends ClipPresentationSpec {
 
 export type AxisName = "x" | "y" | "z";
 
-export interface SwingOptions {
+export interface CycleValueConstraint {
+  /** Lower bound applied after evaluating the procedural waveform. */
+  min?: number;
+  /** Upper bound applied after evaluating the procedural waveform. */
+  max?: number;
+}
+
+export interface SwingOptions extends CycleValueConstraint {
   axis?: AxisName;
   degrees: number;
   center?: number;
@@ -148,7 +157,7 @@ export interface SwingOptions {
   phase?: number;
 }
 
-export interface BobOptions {
+export interface BobOptions extends CycleValueConstraint {
   axis?: AxisName;
   amount: number;
   center?: number;
@@ -160,7 +169,7 @@ export interface ContactSwingOptions extends SwingOptions {
   stanceRatio: number;
 }
 
-export interface FollowThroughOptions {
+export interface FollowThroughOptions extends CycleValueConstraint {
   source: string;
   sourceChannel?: "rot" | "pos";
   sourceAxis?: AxisName;
@@ -180,10 +189,25 @@ export type CycleTrack =
 export interface WalkCycleSpec extends ClipPresentationSpec {
   duration?: number;
   fps?: number;
+  groundContacts?: GroundContactConstraint[];
   locomotion?: ClipLocomotionSpec;
   loop?: boolean;
   samples?: number;
   tracks: CycleTrack[];
+}
+
+export interface GroundContactConstraint {
+  /** Box whose transformed lower surface may not pass below groundY. */
+  contactPart: string;
+  /** Ancestor hinge whose animated rotation is corrected after track sampling. */
+  solvePart: string;
+  axis?: AxisName;
+  groundY?: number;
+  /** Bounds on the correction added to the sampled solve-part angle. */
+  minCorrectionDegrees?: number;
+  maxCorrectionDegrees?: number;
+  /** Counter-rotate the contact box so its sampled pad orientation is retained. */
+  preserveContactRotation?: boolean;
 }
 
 export interface CycleTimingSpec extends ClipPresentationSpec {
@@ -508,12 +532,12 @@ class FigureBuilder {
       asciiTexture: (name, texture) => this.asciiTexture(name, texture),
       part: (name, draft) => this.part(name, draft),
       clip: (name, spec) => this.clip(name, spec),
-      walkCycle: (name, spec) => this.clip(name, buildWalkCycleClip(spec)),
-      bipedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildBipedWalkCycle(spec))),
-      quadrupedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildQuadrupedWalkCycle(spec))),
-      slither: (name, spec) => this.clip(name, buildWalkCycleClip(buildSlitherCycle(spec))),
-      swim: (name, spec) => this.clip(name, buildWalkCycleClip(buildSwimCycle(spec))),
-      wingFlap: (name, spec) => this.clip(name, buildWalkCycleClip(buildWingFlapCycle(spec))),
+      walkCycle: (name, spec) => this.clip(name, buildWalkCycleClip(spec, this.parts)),
+      bipedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildBipedWalkCycle(spec), this.parts)),
+      quadrupedWalk: (name, spec) => this.clip(name, buildWalkCycleClip(buildQuadrupedWalkCycle(spec), this.parts)),
+      slither: (name, spec) => this.clip(name, buildWalkCycleClip(buildSlitherCycle(spec), this.parts)),
+      swim: (name, spec) => this.clip(name, buildWalkCycleClip(buildSwimCycle(spec), this.parts)),
+      wingFlap: (name, spec) => this.clip(name, buildWalkCycleClip(buildWingFlapCycle(spec), this.parts)),
       swing,
       contactSwing,
       bob,
@@ -625,6 +649,7 @@ function swing(part: string, options: SwingOptions): CycleTrack {
   if (options.phase !== undefined) {
     track.phase = options.phase;
   }
+  copyCycleValueConstraint(track, options);
   return track;
 }
 
@@ -642,6 +667,7 @@ function bob(part: string, options: BobOptions): CycleTrack {
   if (options.phase !== undefined) {
     track.phase = options.phase;
   }
+  copyCycleValueConstraint(track, options);
   return track;
 }
 
@@ -664,6 +690,7 @@ function contactSwing(part: string, options: ContactSwingOptions): CycleTrack {
   if (options.phase !== undefined) {
     track.phase = options.phase;
   }
+  copyCycleValueConstraint(track, options);
   return track;
 }
 
@@ -692,7 +719,20 @@ function followThrough(part: string, options: FollowThroughOptions): CycleTrack 
   if (options.center !== undefined) {
     track.center = options.center;
   }
+  copyCycleValueConstraint(track, options);
   return track;
+}
+
+function copyCycleValueConstraint(
+  track: CycleValueConstraint,
+  options: CycleValueConstraint,
+): void {
+  if (options.min !== undefined) {
+    track.min = options.min;
+  }
+  if (options.max !== undefined) {
+    track.max = options.max;
+  }
 }
 
 function buildQuadrupedWalkCycle(spec: QuadrupedWalkSpec): WalkCycleSpec {
@@ -1055,7 +1095,7 @@ function contactSpec(part: string, role: string, phaseStart: number, stanceRatio
   };
 }
 
-function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
+function buildWalkCycleClip(spec: WalkCycleSpec, parts: readonly PartSpec[]): ClipSpec {
   const duration = spec.duration ?? 1;
   const samples = spec.samples ?? 9;
   if (!Number.isFinite(duration) || duration <= 0) {
@@ -1082,7 +1122,7 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
     }
     for (let index = 0; index < samples; index += 1) {
       const progress = index / (samples - 1);
-      const value = track.kind === "contactSwing"
+      const proceduralValue = track.kind === "contactSwing"
         ? contactCycleValue(
           progress,
           track.phase ?? 0,
@@ -1098,6 +1138,7 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
           track.kind === "swing" ? track.degrees : track.amount,
           track.frequency ?? 1,
         );
+      const value = constrainCycleValue(proceduralValue, track.min, track.max);
       const transform = ensureFrameTransform(frameParts[index], track.part);
       if (track.kind === "swing" || track.kind === "contactSwing") {
         const rot = mutableVec(transform.rot);
@@ -1112,6 +1153,7 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
   }
 
   applyFollowThroughTracks(frameParts, spec.tracks, samples);
+  applyGroundContactConstraints(frameParts, spec.groundContacts ?? [], parts);
 
   const keys: ClipKey[] = [];
   for (const [index, parts] of frameParts.entries()) {
@@ -1143,6 +1185,239 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
   return clip;
 }
 
+function applyGroundContactConstraints(
+  frames: Map<string, TransformKey>[],
+  constraints: readonly GroundContactConstraint[],
+  parts: readonly PartSpec[],
+): void {
+  if (constraints.length === 0) {
+    return;
+  }
+  const partsByName = new Map(parts.map((part) => [part.name, part]));
+  for (const constraint of constraints) {
+    validateGroundContactConstraint(constraint, partsByName);
+  }
+  for (const [frameIndex, frame] of frames.entries()) {
+    for (const constraint of constraints) {
+      projectGroundContact(frame, constraint, partsByName, frameIndex);
+    }
+  }
+}
+
+function validateGroundContactConstraint(
+  constraint: GroundContactConstraint,
+  partsByName: ReadonlyMap<string, PartSpec>,
+): void {
+  const contactPart = partsByName.get(constraint.contactPart);
+  if (!contactPart) {
+    throw new Error(`ground contact references missing contact part '${constraint.contactPart}'`);
+  }
+  if (contactPart.primitive.kind !== "box") {
+    throw new Error(`ground contact part '${constraint.contactPart}' must be a box`);
+  }
+  const solvePart = partsByName.get(constraint.solvePart);
+  if (!solvePart) {
+    throw new Error(`ground contact references missing solve part '${constraint.solvePart}'`);
+  }
+  if (!isAncestorPart(constraint.solvePart, contactPart, partsByName)) {
+    throw new Error(
+      `ground contact solve part '${constraint.solvePart}' must be an ancestor of '${constraint.contactPart}'`,
+    );
+  }
+  if (constraint.axis !== undefined && !["x", "y", "z"].includes(constraint.axis)) {
+    throw new Error(`ground contact for '${constraint.contactPart}' has invalid axis '${constraint.axis}'`);
+  }
+  const groundY = constraint.groundY ?? 0;
+  const minCorrection = constraint.minCorrectionDegrees ?? -75;
+  const maxCorrection = constraint.maxCorrectionDegrees ?? 75;
+  if (!Number.isFinite(groundY)) {
+    throw new Error(`ground contact for '${constraint.contactPart}' groundY must be finite`);
+  }
+  if (!Number.isFinite(minCorrection) || !Number.isFinite(maxCorrection)) {
+    throw new Error(`ground contact for '${constraint.contactPart}' correction bounds must be finite`);
+  }
+  if (minCorrection > 0 || maxCorrection < 0 || minCorrection > maxCorrection) {
+    throw new Error(
+      `ground contact for '${constraint.contactPart}' correction bounds must contain zero`,
+    );
+  }
+}
+
+function isAncestorPart(
+  ancestorName: string,
+  part: PartSpec,
+  partsByName: ReadonlyMap<string, PartSpec>,
+): boolean {
+  let parentName = part.parent;
+  while (parentName !== undefined) {
+    if (parentName === ancestorName) {
+      return true;
+    }
+    parentName = partsByName.get(parentName)?.parent;
+  }
+  return false;
+}
+
+function projectGroundContact(
+  frame: Map<string, TransformKey>,
+  constraint: GroundContactConstraint,
+  partsByName: ReadonlyMap<string, PartSpec>,
+  frameIndex: number,
+): void {
+  const groundY = constraint.groundY ?? 0;
+  const tolerance = 1e-6;
+  const solveTransform = ensureFrameTransform(frame, constraint.solvePart);
+  const rotation = mutableVec(solveTransform.rot);
+  const axis = constraint.axis ?? "x";
+  const axisIndex = axis === "x" ? 0 : axis === "y" ? 1 : 2;
+  const originalAngle = rotation[axisIndex];
+  const preserveContactRotation = constraint.preserveContactRotation ?? true;
+  const contactTransform = preserveContactRotation
+    ? ensureFrameTransform(frame, constraint.contactPart)
+    : undefined;
+  const contactRotation = contactTransform ? mutableVec(contactTransform.rot) : undefined;
+  const originalContactAngle = contactRotation?.[axisIndex] ?? 0;
+  // Emit the sampled hinge value on every frame so interpolation cannot hold
+  // a previous contact correction through the unconstrained flight interval.
+  solveTransform.rot = rotation;
+  if (contactTransform && contactRotation) {
+    contactTransform.rot = contactRotation;
+  }
+  if (boxBottomY(constraint.contactPart, frame, partsByName) >= groundY - tolerance) {
+    return;
+  }
+
+  const evaluate = (correction: number): number => {
+    rotation[axisIndex] = originalAngle + correction;
+    solveTransform.rot = rotation;
+    if (contactTransform && contactRotation) {
+      contactRotation[axisIndex] = originalContactAngle - correction;
+      contactTransform.rot = contactRotation;
+    }
+    return boxBottomY(constraint.contactPart, frame, partsByName) - groundY;
+  };
+
+  const roots = [
+    findNearestGroundRoot(evaluate, constraint.minCorrectionDegrees ?? -75),
+    findNearestGroundRoot(evaluate, constraint.maxCorrectionDegrees ?? 75),
+  ].filter((value): value is number => value !== undefined);
+  rotation[axisIndex] = originalAngle;
+  if (contactTransform && contactRotation) {
+    contactRotation[axisIndex] = originalContactAngle;
+  }
+  if (roots.length === 0) {
+    throw new Error(
+      `ground contact '${constraint.contactPart}' could not reach y=${groundY} by correcting ` +
+      `'${constraint.solvePart}' at sample ${frameIndex}`,
+    );
+  }
+  const correction = roots.reduce((best, value) =>
+    Math.abs(value) < Math.abs(best) ? value : best
+  );
+  rotation[axisIndex] = originalAngle + correction;
+  solveTransform.rot = rotation;
+  if (contactTransform && contactRotation) {
+    contactRotation[axisIndex] = originalContactAngle - correction;
+    contactTransform.rot = contactRotation;
+  }
+}
+
+function findNearestGroundRoot(
+  evaluate: (correction: number) => number,
+  correctionLimit: number,
+): number | undefined {
+  if (correctionLimit === 0) {
+    return undefined;
+  }
+  const direction = Math.sign(correctionLimit);
+  const distance = Math.abs(correctionLimit);
+  const stepDegrees = 1;
+  let previousCorrection = 0;
+  let previousValue = evaluate(0);
+  for (let step = 1; step <= Math.ceil(distance / stepDegrees); step += 1) {
+    const correction = direction * Math.min(distance, step * stepDegrees);
+    const value = evaluate(correction);
+    if (value >= 0 && previousValue < 0) {
+      let penetrating = previousCorrection;
+      let clear = correction;
+      for (let iteration = 0; iteration < 18; iteration += 1) {
+        const middle = (penetrating + clear) / 2;
+        if (evaluate(middle) >= 0) {
+          clear = middle;
+        } else {
+          penetrating = middle;
+        }
+      }
+      return clear;
+    }
+    previousCorrection = correction;
+    previousValue = value;
+  }
+  return undefined;
+}
+
+function boxBottomY(
+  partName: string,
+  frame: ReadonlyMap<string, TransformKey>,
+  partsByName: ReadonlyMap<string, PartSpec>,
+): number {
+  const part = partsByName.get(partName);
+  if (!part || part.primitive.kind !== "box") {
+    throw new Error(`Cannot evaluate box bottom for '${partName}'`);
+  }
+  const worldMatrix = partWorldMatrix(part, frame, partsByName);
+  const [width, height, depth] = part.primitive.size;
+  let bottom = Number.POSITIVE_INFINITY;
+  for (const x of [-width / 2, width / 2]) {
+    for (const y of [-height / 2, height / 2]) {
+      for (const z of [-depth / 2, depth / 2]) {
+        bottom = Math.min(bottom, new THREE.Vector3(x, y, z).applyMatrix4(worldMatrix).y);
+      }
+    }
+  }
+  return bottom;
+}
+
+function partWorldMatrix(
+  part: PartSpec,
+  frame: ReadonlyMap<string, TransformKey>,
+  partsByName: ReadonlyMap<string, PartSpec>,
+): THREE.Matrix4 {
+  const chain: PartSpec[] = [];
+  let current: PartSpec | undefined = part;
+  while (current) {
+    chain.push(current);
+    current = current.parent ? partsByName.get(current.parent) : undefined;
+  }
+  chain.reverse();
+
+  const world = new THREE.Matrix4();
+  for (const chainPart of chain) {
+    const transform = frame.get(chainPart.name);
+    const pivot = new THREE.Vector3(...(chainPart.joint?.pivot ?? chainPart.pivot ?? [0, 0, 0]));
+    const baseAt = chainPart.at ?? [0, 0, 0];
+    const deltaAt = transform?.at ?? [0, 0, 0];
+    const position = new THREE.Vector3(
+      baseAt[0] + pivot.x + deltaAt[0],
+      baseAt[1] + pivot.y + deltaAt[1],
+      baseAt[2] + pivot.z + deltaAt[2],
+    );
+    const baseRotation = chainPart.rot ?? [0, 0, 0];
+    const deltaRotation = transform?.rot ?? [0, 0, 0];
+    const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(
+      THREE.MathUtils.degToRad(baseRotation[0] + deltaRotation[0]),
+      THREE.MathUtils.degToRad(baseRotation[1] + deltaRotation[1]),
+      THREE.MathUtils.degToRad(baseRotation[2] + deltaRotation[2]),
+      "XYZ",
+    ));
+    const scale = new THREE.Vector3(...(transform?.scale ?? [1, 1, 1]));
+    const groupMatrix = new THREE.Matrix4().compose(position, quaternion, scale);
+    const contentMatrix = new THREE.Matrix4().makeTranslation(-pivot.x, -pivot.y, -pivot.z);
+    world.multiply(groupMatrix).multiply(contentMatrix);
+  }
+  return world;
+}
+
 function validateCycleTrack(track: CycleTrack): void {
   if (!track.part.trim()) {
     throw new Error("walkCycle track part is required");
@@ -1150,6 +1425,7 @@ function validateCycleTrack(track: CycleTrack): void {
   if (track.axis !== undefined && !["x", "y", "z"].includes(track.axis)) {
     throw new Error(`walkCycle track '${track.part}' has invalid axis '${track.axis}'`);
   }
+  validateCycleValueConstraint(track);
   if (track.kind === "followThrough") {
     if (!track.source.trim()) {
       throw new Error(`walkCycle track '${track.part}' followThrough source is required`);
@@ -1189,6 +1465,18 @@ function validateCycleTrack(track: CycleTrack): void {
     (!Number.isFinite(track.stanceRatio) || track.stanceRatio <= 0 || track.stanceRatio >= 1)
   ) {
     throw new Error(`walkCycle track '${track.part}' stanceRatio must be between 0 and 1`);
+  }
+}
+
+function validateCycleValueConstraint(track: CycleTrack): void {
+  if (track.min !== undefined && !Number.isFinite(track.min)) {
+    throw new Error(`walkCycle track '${track.part}' min must be finite`);
+  }
+  if (track.max !== undefined && !Number.isFinite(track.max)) {
+    throw new Error(`walkCycle track '${track.part}' max must be finite`);
+  }
+  if (track.min !== undefined && track.max !== undefined && track.min > track.max) {
+    throw new Error(`walkCycle track '${track.part}' min must not exceed max`);
   }
 }
 
@@ -1257,6 +1545,10 @@ function ensureFrameTransform(frame: Map<string, TransformKey> | undefined, part
 
 function cycleValue(progress: number, phase: number, center: number, amount: number, frequency: number): number {
   return center + Math.cos((progress * frequency + phase) * Math.PI * 2) * amount;
+}
+
+function constrainCycleValue(value: number, min: number | undefined, max: number | undefined): number {
+  return Math.min(max ?? Number.POSITIVE_INFINITY, Math.max(min ?? Number.NEGATIVE_INFINITY, value));
 }
 
 function contactCycleValue(
@@ -1352,13 +1644,17 @@ function computeFollowThroughValues(
   const values: number[] = [];
   for (let index = 0; index <= period; index += 1) {
     if (amplitude <= 1e-6) {
-      values.push(center);
+      values.push(constrainCycleValue(center, track.min, track.max));
       continue;
     }
     const wrapped = (((index % period) - lagSamples) % period + period) % period;
     const normalized = (centered[wrapped] ?? 0) / amplitude;
     const normalizedVelocity = velocityAmplitude > 1e-6 ? (velocity[wrapped] ?? 0) / velocityAmplitude : 0;
-    values.push(center + track.degrees * (normalized + overshoot * normalizedVelocity));
+    values.push(constrainCycleValue(
+      center + track.degrees * (normalized + overshoot * normalizedVelocity),
+      track.min,
+      track.max,
+    ));
   }
   return values;
 }

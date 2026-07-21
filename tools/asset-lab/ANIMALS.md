@@ -183,7 +183,7 @@ reviewed rigs and then filling macro gaps.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Mouse / Rat | P2 | ☐ | Q | — | tiny; long tail |
+| Mouse / Rat | P2 | ✅ | Q | — | `examples/mouse` — approved 30-box field mouse with mottled body, stepped pink ears, pointed muzzle, six whiskers, tiny paws, four-stage tail, and quick scurry |
 | Squirrel | P2 | ✅ | Q/H | gray, red; flying squirrel | `examples/red_squirrel` — approved 18-box Eurasian red squirrel with synchronized bound, deep haunches, and three-stage plume tail |
 | Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit`; rounded A/B in `legacy-examples/rabbit_rounded` |
 | Hedgehog | P3 | ✅ | Q | — | `examples/hedgehog` — approved 19-box low quadruped with pointed cream face, tiny legs, and four-step pixel-textured spine coat |
@@ -255,11 +255,11 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Snake | P2 | ✅ | SL | green, brown, cobra (hood), rattlesnake | `examples/king_cobra` — approved 15-box king cobra with raised patterned hood, forked tongue, and seven-stage slither chain |
-| Lizard / Gecko | P2 | ☐ | Q | gecko, iguana, chameleon | small sprawled quadruped |
+| Lizard / Gecko | P2 | ✅ | Q | gecko, iguana, chameleon | `examples/gecko` — approved 25-box Tokay gecko with orange-spotted blue-gray hide, raised eyes, four two-stage sprawled legs, adhesive toe pads, tapered tail, and lateral scuttle |
 | Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles |
 | Crocodile / Alligator | P2 | ✅ | Q | croc, gator | `examples/crocodile` — approved 24-box Nile crocodile with armored back, long jaw, sprawled walk, and articulated tail |
 | Komodo dragon | P3 | ☐ | Q | — | giant monitor lizard; zoo headliner |
-| Frog | P2 | ☐ | H | green, tree-frog morphs, toad; tadpole | wants `hop`; tadpole is S |
+| Frog | P2 | ✅ | H | green, tree-frog morphs, toad; tadpole | `examples/frog` — approved 19-box green frog with raised amber eyes, broad head, folded hind legs, toe pads, looping hop, and separate one-shot jump action |
 | Salamander / Newt | P3 | ☐ | Q | — | |
 
 ## Insects & arthropods

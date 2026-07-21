@@ -111,6 +111,124 @@ test("preserves named action presentation and default-clip metadata", () => {
   assert.equal(parsed.clips.unroll?.nextClip, "roll_up");
 });
 
+test("procedural cycle tracks clamp their baked scalar values", () => {
+  const asset = figure("constrained_cycle", ({
+    bob,
+    box,
+    followThrough,
+    mat,
+    part,
+    swing,
+    walkCycle,
+  }) => {
+    mat("skin", "#667766");
+    part("body", box({ size: [1, 1, 1], material: "skin" }));
+    part("head", box({ parent: "body", size: [0.5, 0.5, 0.5], material: "skin" }));
+    part("tail", box({ parent: "body", size: [0.2, 0.2, 0.8], material: "skin" }));
+    walkCycle("hop", {
+      duration: 1,
+      samples: 9,
+      tracks: [
+        bob("body", { axis: "y", amount: 0.2, center: 0, phase: 0.5, min: 0 }),
+        swing("head", { axis: "x", degrees: 20, min: -5, max: 5 }),
+        followThrough("tail", {
+          source: "body",
+          sourceChannel: "pos",
+          sourceAxis: "y",
+          axis: "x",
+          degrees: 12,
+          min: -3,
+          max: 3,
+        }),
+      ],
+    });
+  });
+
+  const clip = asset.clips.hop;
+  assert.ok(clip);
+  const bodyLift = clip.keys
+    .filter(([part]) => part === "body")
+    .map(([, , transform]) => transform.at?.[1]);
+  assert.ok(bodyLift.every((value) => value !== undefined && value >= 0));
+  assert.ok(bodyLift.filter((value) => value === 0).length >= 5);
+  assert.equal(Math.max(...bodyLift.filter((value): value is number => value !== undefined)), 0.2);
+
+  const headSwing = clip.keys
+    .filter(([part]) => part === "head")
+    .map(([, , transform]) => transform.rot?.[0]);
+  assert.ok(headSwing.every((value) => value !== undefined && value >= -5 && value <= 5));
+
+  const tailFollow = clip.keys
+    .filter(([part]) => part === "tail")
+    .map(([, , transform]) => transform.rot?.[0]);
+  assert.ok(tailFollow.every((value) => value !== undefined && value >= -3 && value <= 3));
+
+  assert.throws(
+    () => figure("invalid_constraint", ({ bob, box, mat, part, walkCycle }) => {
+      mat("skin", "#667766");
+      part("body", box({ size: [1, 1, 1], material: "skin" }));
+      walkCycle("hop", {
+        tracks: [bob("body", { amount: 0.2, min: 1, max: 0 })],
+      });
+    }),
+    /min must not exceed max/,
+  );
+});
+
+test("procedural ground contacts project a foot through its ancestor hinge", () => {
+  const asset = figure("projected_contact", ({ bob, box, mat, part, walkCycle }) => {
+    mat("skin", "#667766");
+    part("body", box({ at: [0, 0.75, 0], size: [0.4, 0.4, 0.4], material: "skin" }));
+    part("leg", box({
+      parent: "body",
+      at: [0, -0.45, 0],
+      size: [0.2, 0.5, 0.2],
+      material: "skin",
+      joint: { pivot: [0, 0.25, 0], axis: [1, 0, 0] },
+    }));
+    part("foot", box({
+      parent: "leg",
+      at: [0, -0.2, -0.08],
+      size: [0.3, 0.2, 0.4],
+      material: "skin",
+    }));
+    walkCycle("bounce", {
+      duration: 1,
+      samples: 17,
+      groundContacts: [{
+        contactPart: "foot",
+        solvePart: "leg",
+        axis: "x",
+        minCorrectionDegrees: -65,
+        maxCorrectionDegrees: 65,
+      }],
+      tracks: [bob("body", { axis: "y", amount: 0.06, phase: 0.5 })],
+    });
+  });
+
+  const clip = asset.clips.bounce;
+  assert.ok(clip);
+  const bodyLift = clip.keys
+    .filter(([part]) => part === "body")
+    .map(([, , transform]) => transform.at?.[1]);
+  assert.ok(bodyLift.some((value) => value !== undefined && value < 0));
+
+  const hingeAngles = clip.keys
+    .filter(([part]) => part === "leg")
+    .map(([, , transform]) => transform.rot?.[0]);
+  assert.equal(hingeAngles.length, 17);
+  assert.ok(hingeAngles.some((value) => value !== undefined && Math.abs(value) > 0.1));
+  assert.ok(hingeAngles.some((value) => value === 0));
+
+  const footAngles = clip.keys
+    .filter(([part]) => part === "foot")
+    .map(([, , transform]) => transform.rot?.[0]);
+  assert.equal(footAngles.length, 17);
+  for (let index = 0; index < hingeAngles.length; index += 1) {
+    assert.ok(Math.abs((hingeAngles[index] ?? 0) + (footAngles[index] ?? 0)) < 1e-9);
+  }
+});
+
 test("swim macro exports ordinary body tail fin keys and locomotion", () => {
   const asset = figure("swimmer", ({ mat, part, box, swim }) => {
     mat("skin", "#447799");
