@@ -1509,7 +1509,15 @@ async function run() {
             && state.loadedCenterZ === state.centerZ
             && state.loadedChunkCount === expectedLoadedChunkCount
             && state.pendingCompileJobCount === 0
-            && state.renderPendingWork === false;
+            && state.renderPendingWork === false
+            && state.runnerCommandQueueDepth === 0
+            && state.runnerUpdateQueueDepth === 0
+            && state.runnerPendingJobs === 0
+            && state.runnerPendingPublications === 0
+            && state.lastReport?.runnerCommandQueueDepth === 0
+            && state.lastReport?.runnerUpdateQueueDepth === 0
+            && state.lastReport?.runnerPendingJobs === 0
+            && state.lastReport?.runnerPendingPublications === 0;
         },
         undefined,
         { timeout: 60_000 },
