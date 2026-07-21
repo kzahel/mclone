@@ -127,7 +127,7 @@ The direction is accepted before all of its consumers are ready:
   demo seed should not be treated as stable while the relevant macro fields are
   still moving.
 - The live Rust engine now has a small pure template/transform/material-role
-  kernel, persisted standalone building lab, and bounded cottage/barn families
+  kernel, persisted standalone Structure Lab, and bounded cottage/barn families
   from Tacticals 208–210, but no true structure-start/reference/piece runtime.
   [`../structures.md`](../structures.md) explicitly requires that foundation
   before large cross-chunk structures.
@@ -709,7 +709,7 @@ approved; do not reserve a block of numbers in advance.
 | ID | Workstream | State | Current evidence or dependency | Next transition |
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
-| `FS-01` | standalone building-authoring lab | `proven` | Tacticals 208–210: shared kernel, accepted version-two standard forms, named cottage depth/entry and barn length/optional-lean-to families, guarded 81-chunk comparison gallery, SQLite reopen, and three visual iteration receipts | follow the source-first [`structure-lab.md`](structure-lab.md) contract when externalizing authored records; do not broaden into arbitrary dimensions |
+| `FS-01` | standalone structure-authoring lab | `proven` | Tacticals 208–210: shared kernel, accepted version-two standard forms, named cottage depth/entry and barn length/optional-lean-to families, guarded 81-chunk comparison gallery, SQLite reopen, and three visual iteration receipts | follow the source-first [`structure-lab.md`](structure-lab.md) contract when externalizing authored records; do not broaden into arbitrary dimensions |
 | `FS-02` | coherent farm block/material/collision kit | `active` | five full-cube states plus glass and transform/collision-aware spruce stairs/slabs are proven through Tactical 209; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |

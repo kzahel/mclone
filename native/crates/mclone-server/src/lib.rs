@@ -3,7 +3,6 @@
 mod authored_fixture;
 #[cfg(test)]
 mod block_light_bridge;
-mod building_lab;
 mod cadence;
 mod dimension;
 mod distance_manager;
@@ -38,6 +37,7 @@ mod scheduler;
 #[cfg(test)]
 mod sky_light_bridge;
 mod spawn;
+mod structure_lab;
 mod timing;
 mod types;
 #[cfg(target_arch = "wasm32")]
@@ -62,22 +62,6 @@ pub use authored_fixture::{
 };
 #[cfg(not(target_arch = "wasm32"))]
 pub use authored_fixture::{authored_world_fixture_marker_path, write_authored_world_fixture_dir};
-pub use building_lab::{
-    BUILDING_FAMILY_LAB_GALLERY_ID, BUILDING_FAMILY_LAB_MARKER_FILE, BUILDING_FAMILY_LAB_SEED,
-    BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS, BUILDING_LAB_GALLERY_ID, BUILDING_LAB_MARKER_FILE,
-    BUILDING_LAB_SCHEMA_VERSION, BUILDING_LAB_SEED, BUILDING_LAB_VOID_PADDING_RADIUS, BarnLength,
-    BarnTemplateSet, BarnVariant, BuildingLabManifest, BuildingLabMarkerReceipt,
-    BuildingLabTemplateReceipt, CottageDepth, CottageEntry, CottageVariant, barn_core_template,
-    barn_core_template_for, barn_lean_to_template, barn_lean_to_template_for, barn_templates_for,
-    building_family_lab_memory_store, building_family_lab_records, building_lab_memory_store,
-    building_lab_records, cottage_template, cottage_template_for,
-    write_building_family_lab_to_store, write_building_lab_to_store,
-};
-#[cfg(not(target_arch = "wasm32"))]
-pub use building_lab::{
-    building_family_lab_marker_path, building_lab_marker_path, write_building_family_lab_dir,
-    write_building_lab_dir,
-};
 pub use cadence::{
     DEFAULT_GAMEPLAY_RATE_HZ, DEFAULT_HOST_RATE_HZ, DEFAULT_MAX_CATCH_UP_HOST_FRAMES,
     DEFAULT_PHYSICS_RATE_HZ, SimulationCadence, SimulationCadenceAdvance, SimulationCadenceConfig,
@@ -140,6 +124,22 @@ pub use scheduler::{
 pub use spawn::{
     find_safe_surface_spawn_for_loaded_profile, initial_spawn_center_for_profile,
     initial_spawn_center_for_seed,
+};
+pub use structure_lab::{
+    BarnLength, BarnTemplateSet, BarnVariant, CottageDepth, CottageEntry, CottageVariant,
+    STRUCTURE_FAMILY_LAB_GALLERY_ID, STRUCTURE_FAMILY_LAB_MARKER_FILE, STRUCTURE_FAMILY_LAB_SEED,
+    STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS, STRUCTURE_LAB_GALLERY_ID, STRUCTURE_LAB_MARKER_FILE,
+    STRUCTURE_LAB_SCHEMA_VERSION, STRUCTURE_LAB_SEED, STRUCTURE_LAB_VOID_PADDING_RADIUS,
+    StructureLabManifest, StructureLabMarkerReceipt, StructureLabTemplateReceipt,
+    barn_core_template, barn_core_template_for, barn_lean_to_template, barn_lean_to_template_for,
+    barn_templates_for, cottage_template, cottage_template_for, structure_family_lab_memory_store,
+    structure_family_lab_records, structure_lab_memory_store, structure_lab_records,
+    write_structure_family_lab_to_store, write_structure_lab_to_store,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use structure_lab::{
+    structure_family_lab_marker_path, structure_lab_marker_path, write_structure_family_lab_dir,
+    write_structure_lab_dir,
 };
 pub use timing::{
     ChunkSchedulerPublicationDiagnostics, ChunkSchedulerTickReport, ChunkSchedulerTickTiming,

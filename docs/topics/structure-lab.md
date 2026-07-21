@@ -35,10 +35,12 @@ and file-format noun while retaining the established Asset Lab relationship:
 - `*.structure.json` — generated canonical semantic record; and
 - structure palette, block, marker, socket, transform, and placement receipts.
 
-The existing `mclone-server::building_lab` module and persisted galleries from
+The existing `mclone-server::structure_lab` module and persisted galleries from
 Tacticals 208–210 are the current proof environment, not the website
-implementation. They may become migration fixtures without forcing a product
-rename or a premature engine-module rename.
+implementation. The live module and Rust API were renamed from the historical
+`building_lab` vocabulary when this topic was accepted; completed tactical
+filenames remain execution records. The galleries may become migration
+fixtures without making their Rust-authored bodies permanent.
 
 ## Product Decision
 
@@ -383,7 +385,7 @@ infrastructure.
 - Deployed catalogue product precedent:
   [`animal-catalogue.md`](animal-catalogue.md)
 - Current building and family implementation:
-  [`../../native/crates/mclone-server/src/building_lab.rs`](../../native/crates/mclone-server/src/building_lab.rs)
+  [`../../native/crates/mclone-server/src/structure_lab.rs`](../../native/crates/mclone-server/src/structure_lab.rs)
 - Current structure-template kernel:
   [`../../native/crates/mclone-worldgen/src/structure_template.rs`](../../native/crates/mclone-worldgen/src/structure_template.rs)
 - Farmstead vision and integration sequence:

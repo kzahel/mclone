@@ -30,15 +30,15 @@ use crate::{
     WorldGenerationProfile,
 };
 
-pub const BUILDING_LAB_GALLERY_ID: &str = "standalone-building-lab-v2";
-pub const BUILDING_LAB_MARKER_FILE: &str = "mclone-building-lab.json";
-pub const BUILDING_LAB_SCHEMA_VERSION: u32 = 1;
-pub const BUILDING_LAB_SEED: i64 = 20_801;
-pub const BUILDING_LAB_VOID_PADDING_RADIUS: i32 = 3;
-pub const BUILDING_FAMILY_LAB_GALLERY_ID: &str = "bounded-building-families-v1";
-pub const BUILDING_FAMILY_LAB_MARKER_FILE: &str = "mclone-building-family-lab.json";
-pub const BUILDING_FAMILY_LAB_SEED: i64 = 21_001;
-pub const BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS: i32 = 4;
+pub const STRUCTURE_LAB_GALLERY_ID: &str = "standalone-structure-lab-v2";
+pub const STRUCTURE_LAB_MARKER_FILE: &str = "mclone-structure-lab.json";
+pub const STRUCTURE_LAB_SCHEMA_VERSION: u32 = 1;
+pub const STRUCTURE_LAB_SEED: i64 = 20_801;
+pub const STRUCTURE_LAB_VOID_PADDING_RADIUS: i32 = 3;
+pub const STRUCTURE_FAMILY_LAB_GALLERY_ID: &str = "bounded-structure-families-v1";
+pub const STRUCTURE_FAMILY_LAB_MARKER_FILE: &str = "mclone-structure-family-lab.json";
+pub const STRUCTURE_FAMILY_LAB_SEED: i64 = 21_001;
+pub const STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS: i32 = 4;
 
 const COTTAGE_ORIGIN: BlockPos = BlockPos::new(-29, 63, -10);
 const BARN_ORIGIN: BlockPos = BlockPos::new(7, 63, -12);
@@ -161,36 +161,36 @@ pub struct BarnTemplateSet {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BuildingLabMarkerReceipt {
+pub struct StructureLabMarkerReceipt {
     pub kind: String,
     pub pos: [i32; 3],
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BuildingLabTemplateReceipt {
+pub struct StructureLabTemplateReceipt {
     pub template_id: String,
     pub theme_id: String,
     pub bounds_min: [i32; 3],
     pub bounds_max_exclusive: [i32; 3],
     pub touched_chunks: Vec<[i32; 2]>,
     pub block_count: usize,
-    pub markers: Vec<BuildingLabMarkerReceipt>,
+    pub markers: Vec<StructureLabMarkerReceipt>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct BuildingLabManifest {
+pub struct StructureLabManifest {
     pub schema_version: u32,
     pub gallery_id: String,
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
     pub void_padding_radius: i32,
     pub expected_spawn: [f64; 3],
-    pub placements: Vec<BuildingLabTemplateReceipt>,
+    pub placements: Vec<StructureLabTemplateReceipt>,
 }
 
-pub fn building_lab_records() -> ChunkStoreResult<(BuildingLabManifest, Vec<ChunkRecord>)> {
+pub fn structure_lab_records() -> ChunkStoreResult<(StructureLabManifest, Vec<ChunkRecord>)> {
     let cottage = cottage_template().map_err(template_error)?;
     let barn = barn_core_template().map_err(template_error)?;
     let lean_to = barn_lean_to_template().map_err(template_error)?;
@@ -224,8 +224,8 @@ pub fn building_lab_records() -> ChunkStoreResult<(BuildingLabManifest, Vec<Chun
     ];
 
     let mut chunks = BTreeMap::new();
-    for chunk_z in -BUILDING_LAB_VOID_PADDING_RADIUS..=BUILDING_LAB_VOID_PADDING_RADIUS {
-        for chunk_x in -BUILDING_LAB_VOID_PADDING_RADIUS..=BUILDING_LAB_VOID_PADDING_RADIUS {
+    for chunk_z in -STRUCTURE_LAB_VOID_PADDING_RADIUS..=STRUCTURE_LAB_VOID_PADDING_RADIUS {
+        for chunk_x in -STRUCTURE_LAB_VOID_PADDING_RADIUS..=STRUCTURE_LAB_VOID_PADDING_RADIUS {
             let mut buffer = MutableChunkBlockBuffer::new(
                 chunk_x,
                 chunk_z,
@@ -247,19 +247,20 @@ pub fn building_lab_records() -> ChunkStoreResult<(BuildingLabManifest, Vec<Chun
         .map(|(pos, buffer)| (pos, GeneratedChunk::from_mutable_buffer(buffer)))
         .collect::<BTreeMap<_, _>>();
     let records = light_generated_chunks(&generated);
-    let manifest = BuildingLabManifest {
-        schema_version: BUILDING_LAB_SCHEMA_VERSION,
-        gallery_id: BUILDING_LAB_GALLERY_ID.to_owned(),
-        seed: BUILDING_LAB_SEED,
+    let manifest = StructureLabManifest {
+        schema_version: STRUCTURE_LAB_SCHEMA_VERSION,
+        gallery_id: STRUCTURE_LAB_GALLERY_ID.to_owned(),
+        seed: STRUCTURE_LAB_SEED,
         world_generation_profile: WorldGenerationProfile::authored_only(),
-        void_padding_radius: BUILDING_LAB_VOID_PADDING_RADIUS,
+        void_padding_radius: STRUCTURE_LAB_VOID_PADDING_RADIUS,
         expected_spawn: [3.5, 64.0, 40.5],
         placements: placements.iter().map(template_receipt).collect(),
     };
     Ok((manifest, records))
 }
 
-pub fn building_family_lab_records() -> ChunkStoreResult<(BuildingLabManifest, Vec<ChunkRecord>)> {
+pub fn structure_family_lab_records() -> ChunkStoreResult<(StructureLabManifest, Vec<ChunkRecord>)>
+{
     let cottage_variants = [
         CottageVariant::new(CottageDepth::Snug, CottageEntry::Stoop),
         CottageVariant::STANDARD,
@@ -316,10 +317,10 @@ pub fn building_family_lab_records() -> ChunkStoreResult<(BuildingLabManifest, V
 
     let mut chunks = BTreeMap::new();
     for chunk_z in
-        -BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS..=BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS
+        -STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS..=STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS
     {
         for chunk_x in
-            -BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS..=BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS
+            -STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS..=STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS
         {
             let mut buffer = MutableChunkBlockBuffer::new(
                 chunk_x,
@@ -342,22 +343,22 @@ pub fn building_family_lab_records() -> ChunkStoreResult<(BuildingLabManifest, V
         .map(|(pos, buffer)| (pos, GeneratedChunk::from_mutable_buffer(buffer)))
         .collect::<BTreeMap<_, _>>();
     let records = light_generated_chunks(&generated);
-    let manifest = BuildingLabManifest {
-        schema_version: BUILDING_LAB_SCHEMA_VERSION,
-        gallery_id: BUILDING_FAMILY_LAB_GALLERY_ID.to_owned(),
-        seed: BUILDING_FAMILY_LAB_SEED,
+    let manifest = StructureLabManifest {
+        schema_version: STRUCTURE_LAB_SCHEMA_VERSION,
+        gallery_id: STRUCTURE_FAMILY_LAB_GALLERY_ID.to_owned(),
+        seed: STRUCTURE_FAMILY_LAB_SEED,
         world_generation_profile: WorldGenerationProfile::authored_only(),
-        void_padding_radius: BUILDING_FAMILY_LAB_VOID_PADDING_RADIUS,
+        void_padding_radius: STRUCTURE_FAMILY_LAB_VOID_PADDING_RADIUS,
         expected_spawn: [10.5, 64.0, 54.5],
         placements: placements.iter().map(template_receipt).collect(),
     };
     Ok((manifest, records))
 }
 
-pub fn write_building_lab_to_store(
+pub fn write_structure_lab_to_store(
     store: &mut dyn WorldStore,
-) -> ChunkStoreResult<BuildingLabManifest> {
-    let (manifest, records) = building_lab_records()?;
+) -> ChunkStoreResult<StructureLabManifest> {
+    let (manifest, records) = structure_lab_records()?;
     for record in &records {
         store.save_chunk(&mclone_protocol::DimensionKey::overworld(), record)?;
     }
@@ -365,16 +366,16 @@ pub fn write_building_lab_to_store(
     Ok(manifest)
 }
 
-pub fn building_lab_memory_store() -> ChunkStoreResult<(BuildingLabManifest, MemoryWorldStore)> {
+pub fn structure_lab_memory_store() -> ChunkStoreResult<(StructureLabManifest, MemoryWorldStore)> {
     let mut store = MemoryWorldStore::new();
-    let manifest = write_building_lab_to_store(&mut store)?;
+    let manifest = write_structure_lab_to_store(&mut store)?;
     Ok((manifest, store))
 }
 
-pub fn write_building_family_lab_to_store(
+pub fn write_structure_family_lab_to_store(
     store: &mut dyn WorldStore,
-) -> ChunkStoreResult<BuildingLabManifest> {
-    let (manifest, records) = building_family_lab_records()?;
+) -> ChunkStoreResult<StructureLabManifest> {
+    let (manifest, records) = structure_family_lab_records()?;
     for record in &records {
         store.save_chunk(&mclone_protocol::DimensionKey::overworld(), record)?;
     }
@@ -382,63 +383,63 @@ pub fn write_building_family_lab_to_store(
     Ok(manifest)
 }
 
-pub fn building_family_lab_memory_store()
--> ChunkStoreResult<(BuildingLabManifest, MemoryWorldStore)> {
+pub fn structure_family_lab_memory_store()
+-> ChunkStoreResult<(StructureLabManifest, MemoryWorldStore)> {
     let mut store = MemoryWorldStore::new();
-    let manifest = write_building_family_lab_to_store(&mut store)?;
+    let manifest = write_structure_family_lab_to_store(&mut store)?;
     Ok((manifest, store))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn write_building_lab_dir(root: impl AsRef<Path>) -> ChunkStoreResult<BuildingLabManifest> {
+pub fn write_structure_lab_dir(root: impl AsRef<Path>) -> ChunkStoreResult<StructureLabManifest> {
     let root = root.as_ref();
-    validate_lab_root_for_rebuild(root, BUILDING_LAB_MARKER_FILE, BUILDING_LAB_GALLERY_ID)?;
+    validate_lab_root_for_rebuild(root, STRUCTURE_LAB_MARKER_FILE, STRUCTURE_LAB_GALLERY_ID)?;
     fs::create_dir_all(root)?;
     remove_existing_lab_database(root)?;
 
     let mut store = SqliteWorldStore::open_world_dir(root)?;
-    let manifest = write_building_lab_to_store(&mut store)?;
+    let manifest = write_structure_lab_to_store(&mut store)?;
     store.close()?;
     let marker = serde_json::to_vec_pretty(&manifest).map_err(|error| {
-        ChunkStoreError::InvalidData(format!("failed to encode building lab marker: {error}"))
+        ChunkStoreError::InvalidData(format!("failed to encode structure lab marker: {error}"))
     })?;
-    fs::write(building_lab_marker_path(root), marker)?;
+    fs::write(structure_lab_marker_path(root), marker)?;
     Ok(manifest)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn write_building_family_lab_dir(
+pub fn write_structure_family_lab_dir(
     root: impl AsRef<Path>,
-) -> ChunkStoreResult<BuildingLabManifest> {
+) -> ChunkStoreResult<StructureLabManifest> {
     let root = root.as_ref();
     validate_lab_root_for_rebuild(
         root,
-        BUILDING_FAMILY_LAB_MARKER_FILE,
-        BUILDING_FAMILY_LAB_GALLERY_ID,
+        STRUCTURE_FAMILY_LAB_MARKER_FILE,
+        STRUCTURE_FAMILY_LAB_GALLERY_ID,
     )?;
     fs::create_dir_all(root)?;
     remove_existing_lab_database(root)?;
 
     let mut store = SqliteWorldStore::open_world_dir(root)?;
-    let manifest = write_building_family_lab_to_store(&mut store)?;
+    let manifest = write_structure_family_lab_to_store(&mut store)?;
     store.close()?;
     let marker = serde_json::to_vec_pretty(&manifest).map_err(|error| {
         ChunkStoreError::InvalidData(format!(
-            "failed to encode building family lab marker: {error}"
+            "failed to encode structure family lab marker: {error}"
         ))
     })?;
-    fs::write(building_family_lab_marker_path(root), marker)?;
+    fs::write(structure_family_lab_marker_path(root), marker)?;
     Ok(manifest)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn building_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
-    root.as_ref().join(BUILDING_LAB_MARKER_FILE)
+pub fn structure_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
+    root.as_ref().join(STRUCTURE_LAB_MARKER_FILE)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn building_family_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
-    root.as_ref().join(BUILDING_FAMILY_LAB_MARKER_FILE)
+pub fn structure_family_lab_marker_path(root: impl AsRef<Path>) -> PathBuf {
+    root.as_ref().join(STRUCTURE_FAMILY_LAB_MARKER_FILE)
 }
 
 pub fn cottage_template() -> Result<StructureTemplate, TemplateError> {
@@ -1222,12 +1223,12 @@ fn set_world_block(
     let chunk_pos = pos.chunk_pos();
     let chunk = chunks.get_mut(&chunk_pos).ok_or_else(|| {
         ChunkStoreError::InvalidData(format!(
-            "building lab write {pos:?} escaped authored chunk radius"
+            "structure lab write {pos:?} escaped authored chunk radius"
         ))
     })?;
     if pos.y < chunk.min_y || pos.y >= chunk.min_y + chunk.height {
         return Err(ChunkStoreError::InvalidData(format!(
-            "building lab write {pos:?} escaped authored world height"
+            "structure lab write {pos:?} escaped authored world height"
         )));
     }
     chunk.set_block_at_y(pos.x.rem_euclid(16), pos.y, pos.z.rem_euclid(16), block);
@@ -1268,8 +1269,8 @@ fn light_generated_chunks(chunks: &BTreeMap<ChunkPos, GeneratedChunk>) -> Vec<Ch
         .collect()
 }
 
-fn template_receipt(placement: &PlacedStructureTemplate) -> BuildingLabTemplateReceipt {
-    BuildingLabTemplateReceipt {
+fn template_receipt(placement: &PlacedStructureTemplate) -> StructureLabTemplateReceipt {
+    StructureLabTemplateReceipt {
         template_id: placement.template_id.clone(),
         theme_id: placement.theme_id.clone(),
         bounds_min: block_pos_array(placement.bounds.min),
@@ -1284,7 +1285,7 @@ fn template_receipt(placement: &PlacedStructureTemplate) -> BuildingLabTemplateR
         markers: placement
             .markers
             .iter()
-            .map(|marker| BuildingLabMarkerReceipt {
+            .map(|marker| StructureLabMarkerReceipt {
                 kind: marker.kind.clone(),
                 pos: block_pos_array(marker.pos),
             })
@@ -1297,7 +1298,7 @@ const fn block_pos_array(pos: BlockPos) -> [i32; 3] {
 }
 
 fn template_error(error: TemplateError) -> ChunkStoreError {
-    ChunkStoreError::InvalidData(format!("building lab template is invalid: {error}"))
+    ChunkStoreError::InvalidData(format!("structure lab template is invalid: {error}"))
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1311,29 +1312,29 @@ fn validate_lab_root_for_rebuild(
     }
     if !root.is_dir() {
         return Err(ChunkStoreError::InvalidData(format!(
-            "building lab root `{}` is not a directory",
+            "structure lab root `{}` is not a directory",
             root.display()
         )));
     }
     let marker_path = root.join(marker_file);
     if marker_path.exists() {
         let bytes = fs::read(&marker_path)?;
-        let existing: BuildingLabManifest = serde_json::from_slice(&bytes).map_err(|error| {
+        let existing: StructureLabManifest = serde_json::from_slice(&bytes).map_err(|error| {
             ChunkStoreError::InvalidData(format!(
-                "failed to parse building lab marker `{}`: {error}",
+                "failed to parse structure lab marker `{}`: {error}",
                 marker_path.display()
             ))
         })?;
-        if existing.schema_version != BUILDING_LAB_SCHEMA_VERSION
+        if existing.schema_version != STRUCTURE_LAB_SCHEMA_VERSION
             || existing.gallery_id != gallery_id
         {
             return Err(ChunkStoreError::InvalidData(format!(
-                "building lab root `{}` belongs to gallery `{}` schema {}, not `{}` schema {}",
+                "structure lab root `{}` belongs to gallery `{}` schema {}, not `{}` schema {}",
                 root.display(),
                 existing.gallery_id,
                 existing.schema_version,
                 gallery_id,
-                BUILDING_LAB_SCHEMA_VERSION
+                STRUCTURE_LAB_SCHEMA_VERSION
             )));
         }
         return Ok(());
@@ -1471,9 +1472,9 @@ mod tests {
 
     #[test]
     fn family_gallery_builds_lit_comparison_records() {
-        let (manifest, records) = building_family_lab_records().unwrap();
+        let (manifest, records) = structure_family_lab_records().unwrap();
 
-        assert_eq!(manifest.gallery_id, BUILDING_FAMILY_LAB_GALLERY_ID);
+        assert_eq!(manifest.gallery_id, STRUCTURE_FAMILY_LAB_GALLERY_ID);
         assert_eq!(manifest.placements.len(), 8);
         assert_eq!(records.len(), 81);
         assert!(records.iter().all(|record| {
@@ -1507,9 +1508,9 @@ mod tests {
 
     #[test]
     fn gallery_builds_lit_persistable_cross_chunk_records() {
-        let (manifest, records) = building_lab_records().unwrap();
+        let (manifest, records) = structure_lab_records().unwrap();
 
-        assert_eq!(manifest.gallery_id, BUILDING_LAB_GALLERY_ID);
+        assert_eq!(manifest.gallery_id, STRUCTURE_LAB_GALLERY_ID);
         assert_eq!(manifest.placements.len(), 3);
         assert_eq!(records.len(), 49);
         assert!(records.iter().all(|record| {
@@ -1558,10 +1559,10 @@ mod tests {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
         let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "mclone-building-lab-test-{}-{serial}",
+            "mclone-structure-lab-test-{}-{serial}",
             std::process::id()
         ));
-        let manifest = write_building_lab_dir(&root).unwrap();
+        let manifest = write_structure_lab_dir(&root).unwrap();
         assert_eq!(manifest.placements.len(), 3);
 
         let mut reopened = SqliteWorldStore::open_world_dir(&root).unwrap();
@@ -1574,7 +1575,7 @@ mod tests {
             .expect("cottage chunk persisted");
         reopened.close().unwrap();
         assert!(chunk.snapshot.light_correct);
-        assert!(building_lab_marker_path(&root).is_file());
+        assert!(structure_lab_marker_path(&root).is_file());
         fs::remove_dir_all(&root).unwrap();
     }
 
@@ -1586,10 +1587,10 @@ mod tests {
         static NEXT_TEMP: AtomicU64 = AtomicU64::new(1);
         let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "mclone-building-family-lab-test-{}-{serial}",
+            "mclone-structure-family-lab-test-{}-{serial}",
             std::process::id()
         ));
-        let manifest = write_building_family_lab_dir(&root).unwrap();
+        let manifest = write_structure_family_lab_dir(&root).unwrap();
         assert_eq!(manifest.placements.len(), 8);
 
         let mut reopened = SqliteWorldStore::open_world_dir(&root).unwrap();
@@ -1602,16 +1603,16 @@ mod tests {
             .expect("family cottage chunk persisted");
         reopened.close().unwrap();
         assert!(chunk.snapshot.light_correct);
-        assert!(building_family_lab_marker_path(&root).is_file());
+        assert!(structure_family_lab_marker_path(&root).is_file());
         fs::remove_dir_all(&root).unwrap();
 
         let unrelated = std::env::temp_dir().join(format!(
-            "mclone-building-family-unrelated-{}-{serial}",
+            "mclone-structure-family-unrelated-{}-{serial}",
             std::process::id()
         ));
         fs::create_dir_all(&unrelated).unwrap();
         fs::write(unrelated.join("keep.txt"), b"not a gallery").unwrap();
-        assert!(write_building_family_lab_dir(&unrelated).is_err());
+        assert!(write_structure_family_lab_dir(&unrelated).is_err());
         assert!(unrelated.join("keep.txt").is_file());
         fs::remove_dir_all(unrelated).unwrap();
     }

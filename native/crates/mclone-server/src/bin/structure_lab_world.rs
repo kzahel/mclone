@@ -4,17 +4,17 @@ use std::error::Error;
 use std::path::PathBuf;
 
 #[cfg(not(target_arch = "wasm32"))]
-use mclone_server::write_building_lab_dir;
+use mclone_server::write_structure_lab_dir;
 
 #[cfg(not(target_arch = "wasm32"))]
-const DEFAULT_WORLD_ROOT: &str = "/tmp/mclone-building-lab-v2";
+const DEFAULT_WORLD_ROOT: &str = "/tmp/mclone-structure-lab-v2";
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> Result<(), Box<dyn Error>> {
     let root = parse_root(std::env::args().skip(1))?;
-    let manifest = write_building_lab_dir(&root)?;
+    let manifest = write_structure_lab_dir(&root)?;
     println!(
-        "MCLONE_BUILDING_LAB id={} seed={} generation={} dir={} spawn={:?} placements={}",
+        "MCLONE_STRUCTURE_LAB id={} seed={} generation={} dir={} spawn={:?} placements={}",
         manifest.gallery_id,
         manifest.seed,
         manifest.world_generation_profile.label(),
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     for placement in manifest.placements {
         println!(
-            "MCLONE_BUILDING_TEMPLATE id={} theme={} bounds={:?}..{:?} chunks={} blocks={} markers={}",
+            "MCLONE_STRUCTURE_TEMPLATE id={} theme={} bounds={:?}..{:?} chunks={} blocks={} markers={}",
             placement.template_id,
             placement.theme_id,
             placement.bounds_min,
@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 #[cfg(target_arch = "wasm32")]
 fn main() {
-    panic!("building_lab_world is a native-only authoring utility");
+    panic!("structure_lab_world is a native-only authoring utility");
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -51,7 +51,7 @@ fn parse_root(args: impl IntoIterator<Item = String>) -> Result<PathBuf, Box<dyn
             "--root" => root = PathBuf::from(args.next().ok_or("--root requires PATH")?),
             "--help" | "-h" => {
                 println!(
-                    "building_lab_world [--root PATH]\n\nCreates or rebuilds the persistent standalone building gallery.\nDefault root: {DEFAULT_WORLD_ROOT}"
+                    "structure_lab_world [--root PATH]\n\nCreates or rebuilds the persistent standalone structure gallery.\nDefault root: {DEFAULT_WORLD_ROOT}"
                 );
                 std::process::exit(0);
             }
