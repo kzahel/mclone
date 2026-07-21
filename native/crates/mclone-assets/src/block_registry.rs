@@ -957,6 +957,11 @@ const TERRAIN_MVP_STATES: &[(u32, &str, &[(&str, &str)])] = &[
         "minecraft:horn_coral_wall_fan",
         FACING_WEST_WATERLOGGED_TRUE,
     ),
+    (209, "minecraft:oak_planks", EMPTY_PROPS),
+    (210, "minecraft:spruce_planks", EMPTY_PROPS),
+    (211, "minecraft:cobblestone", EMPTY_PROPS),
+    (212, "minecraft:stone_bricks", EMPTY_PROPS),
+    (213, "minecraft:hay_block", AXIS_Y),
 ];
 
 #[cfg(test)]
@@ -975,7 +980,7 @@ mod tests {
     fn terrain_mvp_registry_names_current_generated_ids() {
         let registry = BlockStateRegistry::terrain_mvp();
 
-        assert_eq!(registry.len(), 209);
+        assert_eq!(registry.len(), 214);
         assert_eq!(
             registry.by_id(BlockStateId(0)).unwrap().canonical_key(),
             "minecraft:air"
@@ -1007,6 +1012,14 @@ mod tests {
         assert_eq!(
             registry.id_for_key("minecraft:lava[level=8]"),
             Some(BlockStateId(87))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:oak_planks"),
+            Some(BlockStateId(209))
+        );
+        assert_eq!(
+            registry.id_for_key("minecraft:hay_block[axis=y]"),
+            Some(BlockStateId(213))
         );
         assert_eq!(
             registry.id_for_key("minecraft:clay"),

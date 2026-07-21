@@ -2,15 +2,13 @@
 
 Topic: `starter-farmstead-settlement`
 
-Status: **vision and staged direction accepted 2026-07-21. Use a reusable,
-terrain-adaptive settlement blueprint, initially art-directed against a selected
-`mclone-overworld-v1` seed. Preserve the maximal farmstead as the destination,
-but begin with a deliberately small composition that can be regenerated and
-expanded as original terrain, structure, block, creature, and LOD systems
-mature. Treat it as a profile-neutral starter-content overlay with authored
-water fallbacks and optional natural-hydrology upgrades. This topic authorizes
-documentation, reference research, and planning only; no implementation
-tactical is active.**
+Status: **vision and staged direction accepted 2026-07-21. The first
+standalone building-authoring slice is proven through Tactical 208: a shared
+template/transform/material-role kernel, minimal full-cube palette, original
+cottage and barn, normal persisted chunks, SQLite reopen, and inspected
+production renders. Full settlement placement remains staged behind its own
+structure, overlay, site-plan, and content work. Original terrain and hydrology
+are quality upgrades, not blockers for continued standalone building art.**
 
 Last reconciled: **2026-07-21**.
 
@@ -126,12 +124,15 @@ The direction is accepted before all of its consumers are ready:
   [`mclone-overworld-generation.md`](mclone-overworld-generation.md). A final
   demo seed should not be treated as stable while the relevant macro fields are
   still moving.
-- The live Rust engine has no true structure-start/reference/piece runtime.
+- The live Rust engine now has a small pure template/transform/material-role
+  kernel and persisted standalone building lab from Tactical 208, but no true
+  structure-start/reference/piece runtime.
   [`../structures.md`](../structures.md) explicitly requires that foundation
   before large cross-chunk structures.
-- The current generated block-state lane is still a terrain-focused subset. A
-  convincing farm kit needs planks, roof shapes, fences and gates, doors,
-  windows, farmland, crops, hay, and their collision/render/gameplay facts.
+- The generated block-state lane now includes oak/spruce planks, cobblestone,
+  stone bricks, and vertical hay for the building lab. A convincing farm kit
+  still needs roof shapes, fences and gates, doors, windows, farmland, crops,
+  and their collision/render/gameplay facts.
 - The live shared protocol and persisted authored fixture currently prove cow
   and chicken residents. Additional animals must be admitted only after their
   actual shared simulation, persistence, protocol, asset, and render paths are
@@ -683,6 +684,18 @@ upstream work such as mountains/valleys, structure foundations, or block
 content may advance under its own topic and tactical. This keeps the content
 integration coherent without serializing the whole engine behind the farm.
 
+### Upstream Capability Watchlist
+
+These capabilities improve later site selection or unlock optional variants,
+but they are not farmstead implementation sequence numbers and do not block
+standalone building iteration:
+
+| Upstream ID | Capability | State | Farmstead effect |
+|---|---|---|---|
+| `UP-WG-192` | original mountains and valleys | `ready` | improves scenic seed scouting and natural grade choices |
+| `UP-WG-196` | periodic original terrain fields | `waiting` | required only before claiming periodic Mclone-terrain placement |
+| `UP-HYDROLOGY` | original rivers, wetlands, waterfall reaches, and flow facts | `waiting` | upgrades authored pond/channel fallback into natural-water attachment and mill-site selection |
+
 ### Progress Ledger
 
 Stable `FS-*` identifiers refer to integration workstreams, not tactical
@@ -692,20 +705,18 @@ approved; do not reserve a block of numbers in advance.
 | ID | Workstream | State | Current evidence or dependency | Next transition |
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
-| `FS-01` | original mountains and valleys | `ready` | planned upstream Tactical 192; current foundation terrain is live | upstream tactical accepts maps, pixels, determinism, and host evidence |
-| `FS-02` | periodic original terrain fields | `waiting` | upstream Tactical 196 waits for the accepted Tactical 192 field set | periodic terrain, decoration, Worker, and persistence proof lands |
-| `FS-03` | original rivers, wetlands, waterfalls, and mill-reach facts | `waiting` | upstream work follows mountains/valleys and periodic field proof; authored-water fallback remains valid | a dedicated hydrology tactical exposes neutral production samples |
-| `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; live Rust runtime is absent | bounded structure-foundation tactical proves a small original cross-chunk structure |
-| `FS-05` | coherent farm block/material/collision kit | `ready` | required semantic roles are named; current generated-state lane is incomplete | inventory tactical chooses the minimum real first kit and proves shared assets/render/collision facts |
-| `FS-06` | template, marker, transform, palette, place-setting, and processor kernel | `waiting` | depends on `FS-04`; must preserve the accepted vanilla vocabulary boundaries | original template places deterministically across chunks and survives reopen |
-| `FS-07` | starter-content overlay and realized-instance identity | `waiting` | conceptual identity accepted; live descriptor has only profile, seed, and topology | persisted overlay/blueprint/instance version contract lands without changing pure Overworld output |
-| `FS-08` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `waiting` | neutral survey contract accepted; depends on structure/overlay placement seams | deterministic plan receipt and Flat Grass grading canary pass |
-| `FS-09` | first fixed farmhouse/barn/garden/pen/pond/oak composition | `waiting` | depends on `FS-04` through `FS-08` | selected-site chunks render, persist, reopen, and regenerate from source identity |
-| `FS-10` | resident and player marker realization | `waiting` | cow/chicken persistence is proven separately; settlement marker idempotence is absent | no duplicate residents and safe player arrival across reopen/regeneration |
-| `FS-11` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
-| `FS-12` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
-| `FS-13` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
-| `FS-14` | settlement Far LOD proxy | `deferred` | current Far LOD honestly omits structures and edits | shared presentation-only proxy passes real/LOD exclusion and settle evidence |
+| `FS-01` | standalone building-authoring lab | `proven` | Tactical 208: shared kernel, cottage, barn/lean-to, 49 lit chunks, SQLite reopen, four inspected renders | gather human visual feedback before selecting the next detail family |
+| `FS-02` | coherent farm block/material/collision kit | `ready` | first five full-cube building states are proven; roof shapes, doors/windows, fences/gates, farmland, and crops remain | choose one coherent family from visual feedback and prove shared render/collision/gameplay facts |
+| `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
+| `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
+| `FS-05` | starter-content overlay and realized-instance identity | `waiting` | conceptual identity accepted; live descriptor has only profile, seed, and topology | persisted overlay/blueprint/instance version contract lands without changing pure Overworld output |
+| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `waiting` | neutral survey contract accepted; depends on structure/overlay placement seams, not final original terrain | deterministic plan receipt and Flat Grass grading canary pass |
+| `FS-07` | first fixed farmhouse/barn/garden/pen/pond/oak composition | `waiting` | reusable building art has begun; settlement lifecycle and site plan remain absent | selected-site chunks render, persist, reopen, and regenerate from source identity |
+| `FS-08` | resident and player marker realization | `waiting` | cow/chicken persistence is proven separately; settlement marker idempotence is absent | no duplicate residents and safe player arrival across reopen/regeneration |
+| `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
+| `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
+| `FS-11` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
+| `FS-12` | settlement Far LOD proxy | `deferred` | current Far LOD honestly omits structures and edits | shared presentation-only proxy passes real/LOD exclusion and settle evidence |
 
 The `ready` rows are not an instruction to start all of them. They identify
 work that can be scheduled without inventing a missing predecessor. The topic's
@@ -741,29 +752,23 @@ series actually begins, not for this documentation-only planning phase.
 
 ## Next Work
 
-There is no active farmstead tactical yet. The recommended project sequence
-starts with `FS-01` through already-planned Tactical 192. Accept its first
-mountain/valley field set and landscapes before `FS-02` periodic fields, then
-let those two upstream proofs unlock `FS-03` hydrology. This follows the
-original-terrain sequence already accepted in
-[`mclone-overworld-generation.md`](mclone-overworld-generation.md) and avoids
-selecting a supposedly durable farmstead seed against terrain known to be
-temporary.
+Tactical 208 is complete. The immediate farmstead checkpoint is human visual
+feedback on its blind cottage-and-barn baseline. Use that feedback to choose a
+single coherent `FS-02` detail slice—most likely roof shapes plus doors/windows,
+or the fence/gate family—then author one controlled variant before expanding to
+whole-site composition.
 
-The first hard blocker owned by farmstead integration is separately `FS-04`,
-the true cross-chunk structure lifecycle. It may be scheduled alongside the
-upstream terrain lane when project capacity permits. Its initial tactical
-should follow [`../structures.md`](../structures.md): status and persisted
-metadata foundation, per-chunk clipped placement, and one small original proof
-structure. It should not begin with the farmstead, templates, jigsaw, or
-villages.
+`FS-04`, the true cross-chunk structure lifecycle, remains the first hard
+blocker for materializing the eventual settlement during normal generation. It
+may advance independently and should follow [`../structures.md`](../structures.md):
+status and persisted metadata foundation, per-chunk clipped placement, and one
+small original proof structure. It should not begin by making the maximal
+farmstead its test case.
 
-`FS-05`, the farm content-kit inventory, can be scoped independently while the
-structure foundation advances. Tactical 192 and later original-terrain work may
-also continue independently because Stage 1 retains authored-water fallback.
-After `FS-04` is proven, reconcile whether `FS-06` template placement or
-`FS-07` overlay identity is the smallest next end-to-end slice; do not assume
-their order until the landed structure persistence seam is visible.
+Tactical 192, Tactical 196, and later hydrology work remain independent terrain
+quality lanes. They should advance for Mclone Overworld quality and before a
+durable showcase seed is selected, but neither they nor `FS-04` should pause
+standalone building art, material work, or reference-driven iteration.
 
 ## Staged Direction
 
@@ -827,10 +832,10 @@ plan. It does not need recursive jigsaw assembly.
 - Consider upgrade provenance only when a real shipped-world migration requires
   it.
 
-## Future Validation Contract
+## Remaining Validation Contract
 
-No implementation validation is due from this documentation-only slice. A
-future tactical should plan for:
+Tactical 208 proves only the standalone template and persisted-gallery loop.
+Settlement tacticals should additionally plan for:
 
 - deterministic receipts for candidate scores, chosen anchor/rotation, grade
   volume, plan bounds, touched-chunk manifest, pieces, reservations, special
@@ -887,15 +892,19 @@ each composition expansion before moving on.
 - Allow a visual watermill before animation or functional machinery, and keep
   gameplay mechanics outside world-generation ownership.
 - Record current Far LOD omission honestly and defer a shared settlement proxy.
-- Do not implement until a dedicated tactical is approved after a fresh
-  readiness audit.
+- Start building art as complete authored stamps with controlled transforms,
+  semantic themes, markers, and bounded optional modules; do not require final
+  terrain or the full structure lifecycle for that standalone iteration.
+- Require a dedicated tactical and fresh readiness audit before each larger
+  settlement integration slice.
 
 ## Open Questions
 
 - Which original terrain milestone is stable enough for the first meaningful
   seed scout and selected demo seed?
-- Should the first authoring asset be a captured voxel template, a textual
-  first-party format, or both through a compiler?
+- When should the proven code-authored template builder gain a textual or
+  captured voxel source format and compiler, and what stable identity should
+  that format carry?
 - Which semantic farm material roles should be content prerequisites versus
   temporary mappings?
 - Does the first watercourse terminate in the pond, leave it, or adapt a later
@@ -925,3 +934,4 @@ each composition expansion before moving on.
 - [`../entity-architecture.md`](../entity-architecture.md)
 - [`../creatures.md`](../creatures.md)
 - [`../lod-architecture.md`](../lod-architecture.md)
+- [`../tactical/208-standalone-building-lab.md`](../tactical/208-standalone-building-lab.md)

@@ -210,7 +210,7 @@ mod tests {
     fn canonical_inventory_covers_every_repo_owned_runtime_block_state() {
         let inventory = canonical_first_party_asset_inventory();
 
-        assert_eq!(inventory.block_visuals.len(), 209);
+        assert_eq!(inventory.block_visuals.len(), 214);
         assert_eq!(
             inventory
                 .block_visuals
@@ -218,7 +218,7 @@ mod tests {
                 .map(|visual| visual.state.canonical_key())
                 .collect::<BTreeSet<_>>()
                 .len(),
-            209
+            214
         );
         assert!(inventory.block_visuals.iter().any(|visual| {
             visual.state.block.to_string() == "minecraft:water"

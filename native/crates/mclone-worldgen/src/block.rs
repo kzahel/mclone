@@ -212,6 +212,11 @@ pub const HORN_CORAL_WALL_FAN_NORTH: RawBlockId = 205;
 pub const HORN_CORAL_WALL_FAN_EAST: RawBlockId = 206;
 pub const HORN_CORAL_WALL_FAN_SOUTH: RawBlockId = 207;
 pub const HORN_CORAL_WALL_FAN_WEST: RawBlockId = 208;
+pub const OAK_PLANKS: RawBlockId = 209;
+pub const SPRUCE_PLANKS: RawBlockId = 210;
+pub const COBBLESTONE: RawBlockId = 211;
+pub const STONE_BRICKS: RawBlockId = 212;
+pub const HAY_BLOCK: RawBlockId = 213;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct GeneratedBlockId(pub RawBlockId);
@@ -350,6 +355,11 @@ impl GeneratedBlockId {
     pub const HORN_CORAL_WALL_FAN_EAST: Self = Self(HORN_CORAL_WALL_FAN_EAST);
     pub const HORN_CORAL_WALL_FAN_SOUTH: Self = Self(HORN_CORAL_WALL_FAN_SOUTH);
     pub const HORN_CORAL_WALL_FAN_WEST: Self = Self(HORN_CORAL_WALL_FAN_WEST);
+    pub const OAK_PLANKS: Self = Self(OAK_PLANKS);
+    pub const SPRUCE_PLANKS: Self = Self(SPRUCE_PLANKS);
+    pub const COBBLESTONE: Self = Self(COBBLESTONE);
+    pub const STONE_BRICKS: Self = Self(STONE_BRICKS);
+    pub const HAY_BLOCK: Self = Self(HAY_BLOCK);
 
     pub const fn raw(self) -> RawBlockId {
         self.0
@@ -869,6 +879,11 @@ pub const fn block_name(block_id: RawBlockId) -> &'static str {
         | HORN_CORAL_WALL_FAN_WEST => "minecraft:horn_coral_wall_fan",
         SEA_PICKLE_1 | SEA_PICKLE_2 | SEA_PICKLE_3 | SEA_PICKLE_4 => "minecraft:sea_pickle",
         MOSSY_COBBLESTONE => "minecraft:mossy_cobblestone",
+        OAK_PLANKS => "minecraft:oak_planks",
+        SPRUCE_PLANKS => "minecraft:spruce_planks",
+        COBBLESTONE => "minecraft:cobblestone",
+        STONE_BRICKS => "minecraft:stone_bricks",
+        HAY_BLOCK => "minecraft:hay_block",
         _ => "minecraft:unknown",
     }
 }

@@ -96,3 +96,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `platform-boundary-convergence` — parent ledger for the shared/platform
   code-split campaign: both-language scoreboard, pass history, and the
   standalone-audit closure protocol above the child boundary topics
+- `starter-farmstead-settlement` — reusable authored building vocabulary and
+  the staged path from standalone templates to an adaptive demo farmstead;
+  Tactical 208 begins implementation with the cottage-and-barn lab
