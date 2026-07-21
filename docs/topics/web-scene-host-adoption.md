@@ -618,9 +618,10 @@ grid used by native-owned startup. Web reports retain observed progress counts
 after the worker diagnostics bridge carries compact loading/view cell grids
 instead of dropping those detailed snapshots at the worker boundary. The
 mobile smoke captures `/tmp/mclone-native-web-mobile-startup.png` at
-that milestone. Chrome's canvas readback is still black in this environment,
-but the live report proves a non-empty chunk target and GUI command list before
-admission; the DOM bootstrap has already retired at that point.
+that milestone. At that time Chrome's canvas readback was still black in the
+headless runner, but the live report proved a non-empty chunk target and GUI
+command list before admission; the DOM bootstrap had already retired. The
+headed Wayland closeout below supersedes that capture limitation.
 
 Device feedback then exposed a high-DPI coordinate-space regression isolated
 to the moving joystick visual. Browser touch input and overlay positions are
@@ -630,3 +631,19 @@ active stick outside the visible GUI on typical mobile device-pixel ratios.
 It now converts the base and thumb through the active `GuiScale`; the mobile
 smoke locks that the active joystick reaches the shared HUD inside its bounds
 and captures `/tmp/mclone-native-web-mobile-joystick.png` while held.
+
+## Post-Adoption Operation Closeout (2026-07-21)
+
+Tactical 207 completed the coarse-operation follow-up without replacing the
+scene host. `WebSceneHost` now exposes one opaque take/complete operation
+lifecycle for runtime start, catalog execution, and asset preparation. Its
+export count fell from 48 to 42, all four async mutable Wasm exports are gone,
+and rAF/input remain callable while platform work is in flight. A test-only
+coarse operation compiles without a TypeScript variant or another export.
+
+The earlier black-capture notes above are historical runner evidence. Headed
+Chrome on the live Wayland session passed the WebGPU probe and local, remote,
+mobile, catalog, asset-pack, IndexedDB, lobby-runtime, desktop-lobby, and
+mobile-touch lobby pixel gates; the captures were inspected. Keep headed
+Wayland as the Linux browser render-validation lane rather than treating
+headless transparent canvases as product output.

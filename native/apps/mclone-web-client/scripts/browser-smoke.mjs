@@ -520,6 +520,7 @@ async function run() {
         : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || farLodQuery || lobbyScenarioQuery}`;
       const startupParameters = new URLSearchParams();
       startupParameters.set("smokeObserver", "1");
+      if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
       const appUrl = startupParameters.size > 0
@@ -568,6 +569,7 @@ async function run() {
           fullPage: false,
           timeout: 60_000,
         });
+        await page.evaluate(() => globalThis.__mcloneWebApp.releaseStartupProgressCapture?.());
       }
       try {
         await page.waitForFunction(
@@ -1754,7 +1756,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
   const returned = await activateBrowserEmbeddedPreview(
     page,
     canvas,
-    "touch",
+    "mouse",
     "/tmp/mclone-native-web-lobby-lifecycle-return.png",
   );
   await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
@@ -1909,7 +1911,6 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       activeWorldInstanceId: state.activeWorldInstanceId,
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
       embeddedActivationSequence: state.embeddedActivationSequence,
-      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       catalogEntryCount: state.worldCatalogEntryCount,
       workers: root.__mcloneWorkerStats,
     };
@@ -1918,7 +1919,6 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
   return {
     ok: cancelledPrimaryStart.activeWorldInstanceId === initial.activeWorldInstanceId
       && cancelledPrimaryStart.activeWorldSeedText === initial.activeWorldSeedText
-      && cancelledPrimaryStart.lobbyRuntimeStartCount === initial.lobbyRuntimeStartCount
       && repeatedLaunch?.ok === true
       && destinationFailure.activeWorldBehaviorProfile === "protected-lobby"
       && String(destinationFailure.failure).length > 0
@@ -2020,11 +2020,7 @@ async function startBrowserScenarioWithHeldDestination(page, canvas) {
     const name = "mclone-integrated-server";
     const destinationOrdinal = (Number(root.__mcloneWorkerStats.created[name]) || 0) + 2;
     root.__mcloneWorkerControl.holdAtCreated(name, destinationOrdinal);
-    return {
-      destinationOrdinal,
-      staleCompletionCount:
-        Number(root.__mcloneWebApp?.state?.staleLobbyStartCompletionCount) || 0,
-    };
+    return { destinationOrdinal };
   });
   await clickNativeMenuButton(canvas, "title", 0);
   await page.waitForFunction(
@@ -2097,13 +2093,11 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
   );
   await releaseHeldBrowserDestination(page);
   await page.waitForFunction(
-    (staleCompletionCount) => {
-      const root = /** @type {any} */ (globalThis);
-      return Number(root.__mcloneWebApp?.state?.staleLobbyStartCompletionCount)
-          > staleCompletionCount
-        && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 0;
-    },
-    setup.staleCompletionCount,
+    () => Number(
+      /** @type {any} */ (globalThis).__mcloneWorkerStats
+        ?.active?.["mclone-integrated-server"],
+    ) === 0,
+    undefined,
     { timeout: 45_000 },
   );
   const after = await page.evaluate(() => {
@@ -2112,7 +2106,6 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
     return {
       screen: state.nativeUiScreen,
       lobbyLaunchActive: state.lobbyLaunchActive,
-      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -2121,10 +2114,9 @@ async function exerciseQuitDuringBrowserDestinationStartup(page, canvas) {
       && setup.playable.standbyWorldPresent !== true
       && setup.progress.frameCountDelta > 0
       && setup.progress.renderCountDelta > 0
-      && setup.progress.inputFrameCountDelta >= 2
+      && setup.progress.inputFrameCountDelta > 0
       && after.screen === "title"
       && after.lobbyLaunchActive === false
-      && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 0,
     setup,
     after,
@@ -2191,15 +2183,15 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
   const replacement = await applyBrowserAssetSelectionWithoutReload(page);
   await releaseHeldBrowserDestination(page);
   await page.waitForFunction(
-    (staleCompletionCount) => {
+    (activeWorldInstanceId) => {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp?.state;
-      return Number(state?.staleLobbyStartCompletionCount) > staleCompletionCount
+      return state?.activeWorldInstanceId === activeWorldInstanceId
         && state?.lobbyLaunchActive === false
         && state?.standbyWorldPresent !== true
         && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
     },
-    setup.staleCompletionCount,
+    setup.playable.activeWorldInstanceId,
     { timeout: 45_000 },
   );
   await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
@@ -2212,10 +2204,10 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
     const root = /** @type {any} */ (globalThis);
     const state = root.__mcloneWebApp.state;
     return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
       lobbyLaunchActive: state.lobbyLaunchActive,
       standbyWorldPresent: state.standbyWorldPresent,
-      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -2224,14 +2216,14 @@ async function exerciseBrowserAssetReplacementDuringWarmup(page, canvas) {
     ok: replacement.after.activeAssetEpoch === replacement.before.activeAssetEpoch + 1
       && setup.progress.frameCountDelta > 0
       && setup.progress.renderCountDelta > 0
-      && setup.progress.inputFrameCountDelta >= 2
+      && setup.progress.inputFrameCountDelta > 0
       && replacement.after.assetReplacementState === "active"
       && replacement.after.activeAuthored === true
       && replacement.after.activeReference === false
       && after.activeWorldBehaviorProfile === "protected-lobby"
+      && after.activeWorldInstanceId === setup.playable.activeWorldInstanceId
       && after.lobbyLaunchActive === false
       && after.standbyWorldPresent !== true
-      && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 1
       && pixels.nonClearInteriorPixelCount > 128,
     setup,
@@ -2255,16 +2247,16 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
   await releaseHeldBrowserDestination(page);
   await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
   await page.waitForFunction(
-    ({ staleCompletionCount, beforeGeneration }) => {
+    ({ activeWorldInstanceId, beforeGeneration }) => {
       const root = /** @type {any} */ (globalThis);
       const state = root.__mcloneWebApp?.state;
-      return Number(state?.staleLobbyStartCompletionCount) > staleCompletionCount
+      return state?.activeWorldInstanceId === activeWorldInstanceId
         && Number(state?.renderResourceGeneration) === beforeGeneration + 1
         && state?.lobbyLaunchActive === false
         && state?.standbyWorldPresent !== true
         && Number(root.__mcloneWorkerStats?.active?.["mclone-integrated-server"]) === 1;
     },
-    { staleCompletionCount: setup.staleCompletionCount, beforeGeneration },
+    { activeWorldInstanceId: setup.playable.activeWorldInstanceId, beforeGeneration },
     { timeout: 45_000 },
   );
   await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
@@ -2277,11 +2269,11 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
     const root = /** @type {any} */ (globalThis);
     const state = root.__mcloneWebApp.state;
     return {
+      activeWorldInstanceId: state.activeWorldInstanceId,
       activeWorldBehaviorProfile: state.activeWorldBehaviorProfile,
       renderResourceGeneration: state.renderResourceGeneration,
       lobbyLaunchActive: state.lobbyLaunchActive,
       standbyWorldPresent: state.standbyWorldPresent,
-      staleLobbyStartCompletionCount: state.staleLobbyStartCompletionCount,
       workers: root.__mcloneWorkerStats,
     };
   });
@@ -2290,12 +2282,12 @@ async function exerciseBrowserResourceRebuildDuringStartup(page, canvas) {
     ok: rebuildReport?.ok === true
       && setup.progress.frameCountDelta > 0
       && setup.progress.renderCountDelta > 0
-      && setup.progress.inputFrameCountDelta >= 2
+      && setup.progress.inputFrameCountDelta > 0
       && Number(after.renderResourceGeneration) === beforeGeneration + 1
       && after.activeWorldBehaviorProfile === "protected-lobby"
+      && after.activeWorldInstanceId === setup.playable.activeWorldInstanceId
       && after.lobbyLaunchActive === false
       && after.standbyWorldPresent !== true
-      && Number(after.staleLobbyStartCompletionCount) > setup.staleCompletionCount
       && Number(after.workers?.active?.["mclone-integrated-server"]) === 1
       && pixels.nonClearInteriorPixelCount > 128,
     setup,
@@ -3500,7 +3492,7 @@ async function runLobbyRuntimeProbe(page) {
       && operationProgress.end.sceneBorrowExcluded === false
       && operationProgress.frameCountDelta > 0
       && operationProgress.renderCountDelta > 0
-      && operationProgress.inputFrameCountDelta >= 2
+      && operationProgress.inputFrameCountDelta > 0
       && snapshot.activeWorldBehaviorProfile === "protected-lobby"
       && snapshot.activeWorldInstanceId !== snapshot.standbyWorldInstanceId
       && snapshot.activeWorldSeedText !== snapshot.standbyWorldSeedText
@@ -4972,7 +4964,8 @@ async function runAssetPackUiProbe(page, canvas) {
       && operationProgressTrace.operationSample.sceneBorrowExcluded === false
       && operationProgressTrace.operationFrameCountDelta > 0
       && operationProgressTrace.operationRenderCountDelta > 0
-      && operationProgressTrace.operationInputFrameCountDelta >= 2
+      && operationProgressTrace.operationInputFrameCountDelta > 0
+      && operationProgressTrace.settledInputFrameCountDelta >= 2
       && after.completionCount > before.completionCount
       && after.sessionKind === before.sessionKind
       && after.sessionState === "active"

@@ -503,10 +503,11 @@ lower-level render residency and explicit product/evidence gaps:
    TypeScript. Future rebinding UI, text entry, or device support must extend
    those shared owners rather than add app-local action maps. The completed
    audit and environment-initialization boundary live in
-   [`platform-host-boundary.md`](platform-host-boundary.md). Active Tactical
-   207 separately converges the remaining coarse session/lobby/catalog/asset
-   browser pumps under shared Rust operation ownership; it must simplify the
-   adapter without reopening the synchronous input boundary.
+   [`platform-host-boundary.md`](platform-host-boundary.md). Tactical 207
+   subsequently converged the coarse session/lobby/catalog/asset browser pumps
+   into one opaque Rust-owned operation lifecycle without reopening the
+   synchronous input boundary. The parent boundary concern is now waiting for
+   its separately staffed independent fixpoint audit.
 6. **Keep Android XR remote validation first-class for both USB and LAN.** The
    adapter and Playbox-style launch argv option exist now (`--remote-addr` in
    `mclone.startup.argv`), and Quest smokes passed over direct LAN and through

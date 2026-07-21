@@ -631,6 +631,16 @@ entries, and the unchanged seven-copy ledger. See
 [`Tactical 202`](../tactical/202-web-scene-async-boundary-cleanup.md) for the
 source locks and available-lane browser evidence.
 
+Tactical 207 subsequently removed the operation-specific main-thread pumps
+without changing this topic's Worker, private-heap, SAB, or copy topology.
+Runtime start, catalog execution, and asset preparation now leave browser Rust
+through one opaque operation wrapper and return through one completion fold.
+TypeScript retains one physical Promise registry/drain and cannot inspect the
+operation variant. Headed Wayland local, remote, mobile, catalog, asset,
+IndexedDB, and lobby lanes passed with inspected pixels; Worker ownership still
+reports five Worker entries, one construction site, and seven explicit copy
+facts.
+
 ## Validation And Evidence
 
 Worker-convergence slices must preserve:

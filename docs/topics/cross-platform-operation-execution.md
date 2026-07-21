@@ -2,9 +2,11 @@
 
 Topic: `cross-platform-operation-execution`
 
-Status: active direction; shared scene-operation convergence is implemented
-through Slices 0–2 and Gate A in active Tactical
-[`207`](../tactical/207-shared-scene-operation-coordinator.md). Tactical
+Status: implemented direction; shared scene-operation convergence completed
+Slices 0–6 and Gate A in Tactical
+[`207`](../tactical/207-shared-scene-operation-coordinator.md). The parent
+[`platform-boundary-convergence`](platform-boundary-convergence.md) concern is
+ready for its separately staffed independent audit. Tactical
 [`201`](../tactical/201-lobby-content-simplification.md) removed the accidental
 managed installer and its TypeScript policy surface. Completed Tactical
 [`202`](../tactical/202-web-scene-async-boundary-cleanup.md) then performed the
@@ -85,8 +87,8 @@ those effects without seeing lobby, catalog, asset, or scene target meaning.
 This does not require one universal actor. The existing session, lobby,
 catalog, asset, render, and operation-ledger owners should be assembled behind
 the smallest shared scene facade that releases its mutable borrow before
-platform work suspends. Tactical 207 is implementing that deletion-oriented
-cutover.
+platform work suspends. Tactical 207 completed that deletion-oriented
+cutover with one opaque operation drain and one operation-token family.
 
 The same review resolved the only semantic browser migration exception: old
 pre-dimension IndexedDB worlds are disposable. The v5-to-v6 cursor copy,
@@ -282,8 +284,8 @@ transports while satisfying the same ownership model.
 Managed-scenario provisioning is not a target actor. Tactical 201 removed that
 special subsystem and retained the embedded-world behavior on ordinary
 primitives. Tactical 202 then removed the clear TypeScript decisions without
-adding a replacement provisioning actor. Tactical 207 addresses the surviving
-coarse scene-operation lifecycle, not the deleted installer: it converges how
+adding a replacement provisioning actor. Tactical 207 addressed the surviving
+coarse scene-operation lifecycle, not the deleted installer: it converged how
 the existing session, lobby, catalog, asset, and readiness owners are driven.
 
 Out of scope:
@@ -687,11 +689,13 @@ owner, then remove duplicate platform sequencing without inventing another
 framework. Apply it to another consumer only when a fresh review finds real
 mutable state or sequencing that must remain consistent across native and web.
 
-[`Tactical 207`](../tactical/207-shared-scene-operation-coordinator.md) is the
-active continuation after a stricter simplification audit. Slices 0–2 and its
-post-identity decision gate are complete. It does not contradict the deletion
-of the managed installer or justify a universal actor; its current pickup is a
-consolidated opaque browser-operation drain.
+[`Tactical 207`](../tactical/207-shared-scene-operation-coordinator.md)
+completed the continuation opened by a stricter simplification audit. Its
+borrow-free issue/effect/completion ABI, one ledger-token family, and opaque
+browser-operation drain deleted the named lobby, catalog, and asset pumps
+without changing Worker topology or creating a universal actor. Product
+TypeScript has one domain-blind physical Promise drain; Rust owns admission,
+identity, ordering, cancellation, completion acceptance, and installation.
 
 ## Validation Expectations
 
@@ -725,6 +729,16 @@ catalog, lobby, lifecycle, and mobile semantic paths passed to the extent
 available on this host. Their only failures were the same recorded transparent
 capture and invalid-device resource-rebuild limitations. The two-runtime lobby
 probe passed outright.
+
+Tactical 207 then passed the complete Rust workspace, Wasm, generated
+bindings/typecheck, ownership, source-lock, Android APK, Android XR APK,
+desktop OpenXR compile, offscreen render, and stereo-emulation controls. The
+browser WebGPU probe and local, remote, catalog, asset-pack, IndexedDB, mobile,
+lobby-runtime, desktop-lobby, and mobile-touch lobby lanes passed under headed
+Wayland Chrome with inspected captures. Operation traces prove frames, renders,
+and input continue during coarse work. The broader lifecycle aggregate retains
+its pre-existing actor-ID/age persistence fixture, while all operation-specific
+cancellation, replacement, rebuild, quiescence, and shutdown checks pass.
 
 ### Continuing actor boundary
 
@@ -796,9 +810,9 @@ Vanilla reference:
 - Preserve native direct execution and use the vanilla
   `IOWorker`/`ProcessorMailbox` ownership lesson without copying Java's runtime
   shape.
-- Treat the named session, lobby, catalog, asset, lifetime, and readiness pumps
-  as one concrete simplification target for Tactical 207, while retaining the
-  specialized resident actors beneath them.
+- Preserve Tactical 207's one opaque operation drain and specialized resident
+  actors; a new coarse operation using an existing mechanical capability must
+  require no TypeScript branch or new host export.
 - Start further tacticals only from a named remaining semantic owner or
   concrete operation, not from a desire to make the topology look uniform.
 

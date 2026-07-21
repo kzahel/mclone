@@ -1,9 +1,10 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: implementation active. Slices 0–3 and the mandatory post-identity
-decision gate landed on 2026-07-21. The browser ABI cutover, one
-boundary-operation token family, and the consolidated opaque browser-operation
-drain are live; Slice 6 validation and closeout are the current pickup. The
+Status: implementation complete 2026-07-21. Slices 0–3, the mandatory
+post-identity decision gate, and Slice 6 closeout have landed. The browser ABI
+cutover, one boundary-operation token family, and the consolidated opaque
+browser-operation drain are live. The parent concern remains open for its
+separately staffed independent fixpoint audit. The
 original proposal framed
 success as deleting the remaining named TypeScript pumps. The measured
 two-sided audit showed the complexity mass sits on the Rust side, so the plan
@@ -326,9 +327,55 @@ their pixel gates, and the lobby lifecycle lane still times out during preview
 activation as it did at Slice 0. Those are explicit Slice 6 validation
 dispositions; they are not counted as pixel/lifecycle passes.
 
-The missing piece is not policy. It is one shared way to issue owned work,
-release the scene borrow, and fold a later platform completion back through a
-single identity system.
+### Slice 6 Wayland and closeout evidence
+
+The earlier transparent captures were a runner mistake, not product evidence.
+`pnpm host:check` found the live `wayland-0` socket and prescribed headed
+Chrome with `HEADED=1`, `WAYLAND_DISPLAY=wayland-0`,
+`XDG_SESSION_TYPE=wayland`, and `--ozone-platform=wayland`. Under that exact
+environment the minimal WebGPU probe returned opaque pixel
+`[0, 89, 255, 255]`, and its blue/red capture was inspected.
+
+Headed local, remote, catalog, asset-pack, IndexedDB reload, mobile, lobby
+runtime, desktop lobby, and mobile-touch lobby lanes then passed their
+semantic and pixel gates. Their captures showed real terrain, UI, HUD, and
+touch controls. The harness changes needed for repeatable headed validation
+remain query-gated test behavior:
+
+- progress samples require at least one input turn during the fixed sampling
+  window and at least two turns by settled completion, instead of assuming two
+  animation frames occur inside 50–100 ms;
+- the mobile observer can hold the first startup-progress frame until its
+  screenshot is captured, and ordinary pages never install that observer; and
+- lifecycle checks no longer wait for the deleted
+  `staleLobbyStartCompletionCount`. They assert retained active-world
+  identity, standby absence, worker quiescence, and renderer generation
+  directly. A source lock rejects the obsolete diagnostic's return.
+
+The lifecycle lane completed its cancellation, destination failure, repeated
+launch, visibility/resume, quit-during-startup, asset-replacement-during-
+warmup, resource-rebuild-during-startup, mutation reopen, and shutdown checks.
+Those operation-specific results passed with no page errors and zero active
+integrated-server Workers after shutdown. Its aggregate remains false only at
+the unchanged actor-persistence fixture: a relaunched authored world has valid
+later actor IDs and reset ages while the terrain mutation persists. Tacticals
+197 and 202 already reproduced this on pre-cutover controls. The assertion was
+not weakened, and entity persistence was not pulled into this operation-
+boundary tactical.
+
+The complete Rust workspace, focused scene/app-runtime/web tests, Wasm checks
+and test compilation, generated bindings/typecheck, thin-adapter, scene-host,
+Worker-ownership, debt, and fixpoint gates passed. Desktop OpenXR compiled;
+flat Android and Android XR APKs built. Desktop offscreen and headset-free
+stereo rendered successfully, and both captures were inspected.
+
+Final clean-tree values are 3,599 authored TypeScript lines, 20,574 web-only
+Rust lines, and 24,173 combined lines. Relative to `8a3e9b12`, those are -158,
+-3, and -161. The 25 TypeScript lines added after Slice 3 are the deterministic
+query-gated startup capture hook. Shared `mclone-scene` is 24,731 lines,
+`mclone-app-runtime` is 33,877, host exports are 48 -> 42, async mutable
+exports are 4 -> 0, identity systems are 4 -> 1, and cfg forks remain
+71 / 110.
 
 ### Genuine browser constraints
 
@@ -652,7 +699,9 @@ deletion, or the retained platform mapping is documented as the cheaper owner.
 
 ### Slice 6: Cutover validation, deletion closeout, and ledger report
 
-Status: current pickup.
+Status: complete 2026-07-21. The evidence and one explicit pre-existing
+lifecycle-fixture disposition are recorded above; the parent ledger and
+scoreboard are updated without closing the parent concern.
 
 - Delete superseded reports, exported methods, state fields, helpers, tests,
   and historical compatibility branches rather than retaining two paths.

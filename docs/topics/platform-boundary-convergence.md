@@ -2,11 +2,10 @@
 
 Topic: `platform-boundary-convergence`
 
-Status: open master tracker. Tactical
-[`207`](../tactical/207-shared-scene-operation-coordinator.md) is the active
-implementation workstream; Phases 0–3 and the mandatory Gate A re-inventory
-are complete. Cutover validation and implementation closeout are the current
-pickup.
+Status: open master tracker; implementation is audit-ready. Tactical
+[`207`](../tactical/207-shared-scene-operation-coordinator.md) completed
+Phases 0–6 on 2026-07-21. Phase 7, a separately staffed independent fixpoint
+audit, is the current pickup.
 This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
@@ -136,6 +135,7 @@ row when it closes, including what it deliberately left open.
 | 205 diagnostic observer isolation | 2026-07-21 | app.ts 2,263 → 1,261; observer split out | preferences/bootstrap deferred to 206 |
 | 206 preferences/bootstrap policy | 2026-07-21 | app.ts → 1,057; host-boundary series closed | coarse-operation pumps remained → 207 |
 | 207 shared scene operation coordinator | implementation through Gate A on 2026-07-21 | — | borrow-free ABI and one token family landed; one opaque operation drain remains before tactical closeout |
+| 207 implementation closeout | 2026-07-21 | tactical complete; borrow-free ABI, one token family, and one opaque operation drain; combined boundary 24,334 → 24,173 | parent remains open for independent audit; unchanged actor-ID/age lifecycle fixture remains separately recorded baseline debt |
 
 ## Measured State (2026-07-21 Audit)
 
@@ -218,8 +218,8 @@ remaining-work note.
 | 3. Opaque operation drain, readiness, and quiescence | **complete 2026-07-21** | Replace runtime/catalog/asset-specific browser pumps and host exports with one opaque Rust-authored take/complete lifecycle while retaining mechanical executors | One product TypeScript drain; named pumps, report wakeups, and readiness reconstruction deleted; exports 48 → 42; clean combined boundary 24,334 → 24,148 |
 | 4–5. Former candidate phases | **folded into Phase 3 at Gate A** | Avoid artificial phases now that runtime startup already shares one ticket/completion lifecycle | Catalog/asset adoption, readiness, and quiescence exits are enforced by Phase 3 |
 | 5b. Storage-address lowering | **skipped at Gate A** | Retain the small stable physical-name mapping at its lower-total-cost owner | Reopen only if future schema work demonstrates combined net deletion |
-| 6. Implementation closeout | **current** | Delete old paths, validate every affected platform boundary, demonstrate extensibility, and report final deltas | Tactical 207 closes itself and appends a ledger row, but leaves this parent open |
-| 7. Independent fixpoint audit | future separate tactical | Fresh code review by a reviewer/agent outside the implementation series | Closure protocol below passes or the audit appends precise remaining work and reopens implementation |
+| 6. Implementation closeout | **complete 2026-07-21** | Delete old paths, validate every affected platform boundary, demonstrate extensibility, and report final deltas | Tactical 207 closed itself and appended its ledger row; headed Wayland pixel gates and native compile/render controls passed; the parent remains open |
+| 7. Independent fixpoint audit | **next, separate tactical** | Fresh code review by a reviewer/agent outside the implementation series | Closure protocol below passes or the audit appends precise remaining work and reopens implementation |
 
 ### Phase Boundaries
 
@@ -241,20 +241,20 @@ all rows. The 2026-07-21 values are the immutable campaign baseline. Phase 0
 must also record a clean-revision start baseline because unrelated work may
 have changed the live counts since the audit.
 
-| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 |
-|---|---:|---:|---:|---:|---:|
-| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** |
-| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** |
-| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** |
-| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** |
-| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 |
-| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 |
-| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** |
-| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** |
-| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** |
-| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 |
-| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress |
-| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero |
+| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Closeout |
+|---|---:|---:|---:|---:|---:|---:|
+| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** | **3,599** |
+| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** | **3,622 / 16** |
+| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** | **20,574** |
+| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** | **24,173 (-161 cumulative; +25 closeout)** |
+| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 | 24,731 |
+| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 |
+| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** | **42** |
+| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** | **0** |
+| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** | **1** |
+| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 |
+| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress | **no; headed Wayland traces pass** |
+| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero | same product shape; +25 query-gated smoke-capture lines |
 
 ## Closure Protocol
 
@@ -288,12 +288,18 @@ have changed the live counts since the audit.
 
 ## Immediate Next Workstream
 
-Continue Tactical [`207`](../tactical/207-shared-scene-operation-coordinator.md)
-at implementation closeout. The opaque operation drain is live and the clean
-scoreboard clears both Rust-side and combined deletion gates. The remaining
-review packet is validation, documentation/ledger refresh, and an explicit
-disposition for the browser pixel-capture and lifecycle failures already
-recorded at the clean baseline.
+Open a standalone Phase 7 audit tactical in a later session and assign it to a
+reviewer or agent outside the Tactical 207 implementation series. The opaque
+operation drain is live, headed Wayland validation replaced the invalid
+headless capture evidence, and the clean scoreboard clears both Rust-side and
+combined deletion gates. The audit must read the code afresh and either close
+this parent under the closure protocol or append precise remaining work.
+
+The full browser lifecycle aggregate still exposes the already reproduced
+actor-ID/age persistence fixture from Tacticals 197 and 202. Tactical 207's
+operation-specific cancellation, warmup replacement, resource rebuild,
+quiescence, and shutdown checks pass; the unrelated actor assertion remains
+unchanged and is not a hidden parent-boundary failure.
 
 The optional storage-address move is not part of this workstream. The current
 small physical-name switch is platform mechanics and was cheaper to retain.

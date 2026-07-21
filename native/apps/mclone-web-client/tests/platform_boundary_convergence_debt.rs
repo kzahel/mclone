@@ -9,6 +9,10 @@ const WEB_APP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-web-app.ts"
 ));
+const BROWSER_SMOKE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/scripts/browser-smoke.mjs"
+));
 const WEB_SCENE_HOST: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_scene_host.rs"
@@ -124,6 +128,16 @@ fn rust_boundary_identity_and_async_export_debt_only_decreases() {
     ] {
         assert_at_most(label, source, needle, ceiling);
     }
+}
+
+#[test]
+fn browser_smoke_uses_current_operation_outcomes() {
+    assert_at_most(
+        "deleted stale-completion diagnostic",
+        BROWSER_SMOKE,
+        "staleLobbyStartCompletionCount",
+        0,
+    );
 }
 
 #[test]

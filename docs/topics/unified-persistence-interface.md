@@ -771,6 +771,14 @@ startup ready report contains no persistence continuation, so the Worker now
 posts that complete Rust-authored envelope directly instead of passing it
 through the executor and rewriting its kind, request id, and empty update list.
 
+Tactical 207 likewise preserved the persistence contract. Catalog execution
+now travels through the scene host's opaque operation drain, but the specialized
+Rust continuation and mechanical IndexedDB executor remain. Gate A measured
+the stable physical store/index mapping and retained it in TypeScript because
+moving it would grow the combined boundary without deleting persistence
+policy. Reopen that address-lowering choice only with a concrete schema need
+and a measured net-deletion case.
+
 ## Related Documents And Code
 
 - [`persistence-architecture.md`](../persistence-architecture.md): durable

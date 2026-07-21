@@ -464,6 +464,7 @@ class WebFrameDriver {
     }
     const frame = await this.renderHostFrame(performance.now());
     this.handleSceneFrame(frame);
+    await smokeObserver?.waitForStartupProgressCapture(frame);
     return Boolean(frame.initialPresentationReady);
   }
 

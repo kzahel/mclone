@@ -235,7 +235,7 @@ is 391 lines. All registered Worker/scene ownership debts remain at zero.
 | Cadence and presentation | Browser owns rAF, visibility callbacks, canvas resize, WebGPU presentation; native owns winit redraw/surface; XR owns OpenXR frame/swapchain sequencing | Correct asymmetry | Keep physical loops platform-owned behind shared time/render contracts |
 | Workers/jobs/render compiler | Worker-resident Rust actors own meaning; TS handles module loading, SAB/message transport, wakeups, and failure envelopes | Healthy | Preserve existing actor/mailbox boundaries |
 | WebSocket | Worker-resident Rust owns protocol/lifecycle/backpressure; TS executes open/send/event/close actions | Healthy model | Preserve; use as an example of a thin mechanical executor |
-| Persistence | Rust owns record meaning, revisions, continuations, and writer authority; TS maps stable namespaces and executes IndexedDB requests | Healthy current execution boundary; further address lowering belongs to Tactical 207 | Keep TypeScript mechanical and remove its remaining record-family mappings through the operation follow-up |
+| Persistence | Rust owns record meaning, revisions, continuations, and writer authority; TS maps stable namespaces and executes IndexedDB requests | Healthy current execution boundary; Tactical 207 retained the small physical-address mapping as lower-total-cost browser mechanics | Keep TypeScript mechanical; reopen address lowering only with measured combined deletion |
 | Catalog | Rust owns catalog continuation and UI meaning; TS executes stable store/index actions | Healthy specialized adapter | Preserve; do not fold into a universal host interface |
 | Startup assembly | **Closed in Tactical 206:** TS loads Wasm and browser facilities, fetches Rust-requested resources, and calls one Rust scene-host constructor | Converged policy with healthy browser assembly | Keep browser mechanics autonomous and host/session meaning in Rust |
 | Asset loading | **Closed in Tactical 206:** TS fetches opaque ID/URL requests; browser Rust assigns pack roles and retains the bytes | Mechanical fetch with Rust-owned semantic assembly | Keep resource IDs stable and role resolution out of TS |
@@ -455,11 +455,11 @@ table records their post-series responsibilities:
 
 | Module | Current responsibility | Host-boundary assessment |
 |---|---|---|
-| `mclone-web-app.ts` (1,057 lines) | browser assembly, rAF, canvas, generic fetch, raw capability reporting, and mechanical async service driving | Healthy production adapter; ordinary reports are operational only |
+| `mclone-web-app.ts` (853 lines) | browser assembly, rAF, canvas, generic fetch, raw capability reporting, and one opaque mechanical operation drain | Healthy production adapter; ordinary reports are operational only |
 | `mclone-web-input.ts` (161) | raw DOM keyboard/mouse forwarding and browser event mechanics | Healthy thin physical adapter |
 | `mclone-web-touch.ts` (131) | raw touch/pen forwarding, pointer capture, and synthetic-mouse hygiene | Healthy thin physical adapter over shared Rust touch policy |
-| `mclone-web-smoke-observer.ts` (391) | query-gated semantic reports, test aliases/receipts, and retained smoke commands | Appropriate explicit test client; absent from ordinary pages |
-| `mclone-web-world-catalog.ts` (370) | IndexedDB schema, store/index resolution, catalog transactions | Mechanical specialized executor; Tactical 207 reviews moving its remaining record-family addressing into browser Rust |
+| `mclone-web-smoke-observer.ts` (437) | query-gated semantic reports, test aliases/receipts, deterministic capture holds, and retained smoke commands | Appropriate explicit test client; absent from ordinary pages |
+| `mclone-web-world-catalog.ts` (414) | IndexedDB schema, store/index resolution, catalog transactions | Mechanical specialized executor; Tactical 207 retained physical addressing here after measuring a move as net growth |
 | `mclone-web-persistence-executor.ts` (471) | namespace-to-store addressing, IndexedDB record requests, error classification | Healthy mechanical executor |
 | `mclone-web-world-lease.ts` (51) | Web Lock writer lease | Healthy mechanical lifetime adapter |
 | `mclone-worker-transport.ts` (47) | generic Worker construction, post/poll/terminate | Healthy reusable platform machinery |
@@ -816,6 +816,7 @@ source code or transports.
 | Production smoke command hooks | **Closed in Tactical 205:** query-gated `mclone-web-smoke-observer.ts` owns them | test-only observer/harness | Ordinary production global excludes semantic smoke methods |
 | Rich report bag | **Closed in Tactical 206:** ordinary calls return `operational_report`; only the opt-in observer requests `diagnosticSnapshot()` | typed operational result plus explicit diagnostic snapshot | Product TS is locked against representative diagnostic fields |
 | Legacy IndexedDB dimension migration | **Closed 2026-07-21:** compatibility code deleted because old internal worlds are disposable | no production owner | Source locks reject legacy store labels and `minecraft:overworld` migration policy in TypeScript |
+| Coarse browser operation pumps | **Closed in Tactical 207:** one opaque take/complete drain replaces named session, lobby, catalog, and asset coordination | shared scene and browser-Rust operation owners | 48 → 42 exports, 4 → 0 async mutable exports, one token family, and a fixpoint test with zero TypeScript variant knowledge |
 
 ## Implemented Sequence
 
@@ -992,10 +993,10 @@ intentional or independently scoped:
 - TypeScript retains DOM, canvas, rAF, Worker, WebSocket, IndexedDB, fetch,
   permission, and pointer/fullscreen mechanics; browser Rust may call
   localStorage through the domain-blind `web_sys` adapter;
-- further unification of asynchronous catalog/session/asset continuations is
-  governed by
-  [`cross-platform-operation-execution.md`](cross-platform-operation-execution.md),
-  not by reopening the synchronous host-input boundary.
+- asynchronous catalog/session/asset continuations now use Tactical 207's one
+  opaque drain. Its independent audit is governed by
+  [`platform-boundary-convergence.md`](platform-boundary-convergence.md), not
+  by reopening the synchronous host-input boundary.
 
 The regression rule is simple: new platform support may add physical facts or
 mechanical capabilities, while new product meaning must extend the shared Rust

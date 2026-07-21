@@ -62,6 +62,7 @@ interface SmokeRuntime {
   sceneBorrowExcluded?: () => boolean;
   backgroundSaveForSmoke?: () => WasmReport | null;
   shutdownForSmoke?: () => Promise<WasmReport | null>;
+  releaseStartupProgressCapture?: () => void;
 }
 
 interface SmokeBridge {
@@ -98,6 +99,7 @@ export interface WebSmokeObserver {
     effect: WasmReport | null,
     completion: WasmReport,
   ): void;
+  waitForStartupProgressCapture(report: WasmReport): Promise<void>;
 }
 
 declare global {
@@ -108,6 +110,10 @@ export function installWebSmokeObserver(
   app: SmokeBridge,
 ): WebSmokeObserver {
   let latestObservedReport: WasmReport | null = null;
+  const holdStartupProgress = new URLSearchParams(globalThis.location.search)
+    .get("holdStartupProgress") === "1";
+  let startupProgressCaptureConsumed = false;
+  let releaseStartupProgressCapture: (() => void) | null = null;
   const runtime: SmokeRuntime = {
     ready: false,
     state: {
@@ -127,6 +133,11 @@ export function installWebSmokeObserver(
       lastInteraction: null,
       currentTarget: null,
     },
+  };
+  runtime.releaseStartupProgressCapture = () => {
+    const release = releaseStartupProgressCapture;
+    releaseStartupProgressCapture = null;
+    release?.();
   };
   const observerRenderRadius = (): number => {
     const radius = Math.round(Number(runtime.state.radiusChunks));
@@ -273,6 +284,19 @@ export function installWebSmokeObserver(
           observer.observeWorldCatalogCompletion();
           break;
       }
+    },
+    waitForStartupProgressCapture(report): Promise<void> {
+      if (
+        !holdStartupProgress
+        || startupProgressCaptureConsumed
+        || report.startupProgressVisible !== true
+      ) {
+        return Promise.resolve();
+      }
+      startupProgressCaptureConsumed = true;
+      return new Promise((resolve) => {
+        releaseStartupProgressCapture = resolve;
+      });
     },
   };
   const apply = (
