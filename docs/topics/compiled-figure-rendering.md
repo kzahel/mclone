@@ -336,24 +336,24 @@ explicitly legacy and executable.
 ## Current Texture And UV Evidence
 
 The current authored figures do not describe generally unwrapped characters.
-An inventory taken on 2026-07-20 from both source roots found:
+An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 86 |
-| total parts | 1,872 |
-| boxes | 1,667 |
+| figures | 89 |
+| total parts | 1,935 |
+| boxes | 1,730 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 257 |
-| parts with any texture reference | 392 |
-| individual texture applications | 622 |
+| ASCII textures | 269 |
+| parts with any texture reference | 416 |
+| individual texture applications | 655 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 68 | 1,330 | 1,330 | 0 / 0 / 0 |
+| canonical `examples/` | 71 | 1,393 | 1,393 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -547,7 +547,22 @@ inspected for identity, grounding, attachment continuity, idle or gait cadence,
 secondary motion, marking visibility, and loop continuity, and approved by the
 user on 2026-07-20.
 
-All 622 applications target an explicit face of a box. They range from single
+The seventeenth post-migration content batch adds Bat, Opossum, and Sloth as
+approved canonical box-only rigs. Bat is a 19-part flying
+mammal with large stepped ears, broad three-stage membrane wings, tucked hind
+feet, and a tail membrane; Opossum is a 24-part gray quadruped with a white
+pointed two-stage face, black-pink ears, pink feet and nose, and a high
+six-stage bare prehensile tail; and Sloth is a 20-part low quadruped with a
+masked face, horizontal body, exceptionally long two-stage forelimbs, bent
+hind limbs, broad hooked contact paws, and a deliberately slow crawl. All 63
+parts are canonical boxes and use 12 combined pixel textures. Clean multi-angle
+sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-17` and inspected for identity, grounding or flight
+posture, attachment continuity, flap or crawl cadence, segmented-tail and
+articulated-limb follow-through, secondary motion, and loop continuity, and
+approved by the user on 2026-07-21.
+
+All 655 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
@@ -1376,10 +1391,11 @@ Raccoon/Red Squirrel/River Otter, and
 Chimpanzee/Orangutan/Ring-tailed Lemur, Polar Bear/Cheetah/Jaguar, and
 Moose/American Bison/Gemsbok Oryx, Donkey/Mallard Duck/Wild Turkey,
 Red Panda/Meerkat/Hedgehog, Beaver/Capybara/Platypus,
-Porcupine/Echidna/Armadillo, and Koala/Wombat/Tasmanian Devil content batches
-extend the canonical authoring roster to 68 without changing the promoted
-runtime set. Instancing is now the strongest independent performance candidate;
-box-part LOD and a measured sampled/GPU pose path remain separate follow-ups.
+Porcupine/Echidna/Armadillo, Koala/Wombat/Tasmanian Devil, and
+Bat/Opossum/Sloth content batches extend the canonical authoring roster to 71
+without changing the promoted runtime set. Instancing is now the strongest
+independent performance candidate; box-part LOD and a measured sampled/GPU
+pose path remain separate follow-ups.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The existing actor-record boundary keeps later instancing, LOD, and GPU crowd

@@ -190,11 +190,11 @@ reviewed rigs and then filling macro gaps.
 | Porcupine | P3 | ✅ | Q | — | `examples/porcupine` — approved 21-box heavy adult with high pale-tipped quill mantle, small face, sturdy legs, and short thick tail |
 | Raccoon | P2 | ✅ | Q | — | `examples/raccoon` — approved 18-box adult with broad face mask, dark paws, cautious walk, and four-stage ringed tail |
 | Beaver | P3 | ✅ | Q | — | `examples/beaver` — approved 19-box adult with blunt muzzle, orange incisors, compact legs, and broad crosshatched two-stage paddle tail |
-| Bat | P2 | ☐ | W | — | flying mammal; reuses `wingFlap` |
+| Bat | P2 | ✅ | W | — | `examples/bat` — approved 19-box flying mammal with large stepped ears, broad three-stage membrane wings, tucked feet, and tail membrane |
 | Meerkat | P2 | ✅ | Q | — | `examples/meerkat` — approved 19-box upright sentry with striped torso, dark eye patches, folded forepaws, planted feet, balancing tail, and scanning cycle |
 | Otter | P2 | ✅ | Q/S | river, sea | `examples/river_otter` — approved 17-box river otter with elongated body, webbed paws, and two-stage lateral swim tail |
 | Red panda | P2 | ✅ | Q | — | `examples/red_panda` — approved 21-box adult with rust coat, white mask and ruff, dark legs, and plush six-section ringed tail |
-| Sloth | P3 | ☐ | Q | two-toe, three-toe | very slow / hanging; mostly ST |
+| Sloth | P3 | ✅ | Q | two-toe, three-toe | `examples/sloth` — approved 20-box low quadruped with masked face, long two-stage forelimbs, bent hind limbs, hooked contact paws, and very slow crawl |
 | Capybara | P3 | ✅ | Q | — | `examples/capybara` — approved 16-box tailless barrel with high blunt head, tiny ears, short planted legs, and calm walk |
 | Anteater | P3 | ☐ | Q | giant, tamandua | long snout + tongue |
 | Armadillo | P3 | ✅ | Q | — | `examples/armadillo` — approved 23-box nine-banded adult with stepped armor, pointed head, upright ears, clawed feet, and three-stage plated tail; roll-up remains future work |
@@ -209,7 +209,7 @@ reviewed rigs and then filling macro gaps.
 | Koala | P3 | ✅ | Q | adult, joey | `examples/koala` — approved 21-box upright adult with oversized stepped ears, broad dark nose, pale belly, folded long arms, planted feet, and cling idle |
 | Wallaby | P3 | ☐ | H | — | smaller kangaroo rig |
 | Wombat | P3 | ✅ | Q | — | `examples/wombat` — approved 17-box common wombat with broad head, low barrel, tiny ears, short powerful legs, wide clawed paws, and slow walk |
-| Opossum | P3 | ☐ | Q | — | prehensile tail; hangs |
+| Opossum | P3 | ✅ | Q | — | `examples/opossum` — approved 24-box adult with white pointed face, black-pink ears, pink feet and nose, and six-stage bare prehensile tail |
 | Tasmanian devil | P3 | ✅ | Q | — | `examples/tasmanian_devil` — approved 23-box black adult with red inner ears, white chest and shoulder marks, oversized jaw, short strong legs, and thick tail |
 | Platypus | P3 | ✅ | Q/S | — | `examples/platypus` — approved 15-box low swimmer with broad slate bill, four webbed feet, two-stage paddle tail, and alternating paddle cycle |
 | Echidna | P3 | ✅ | Q | — | `examples/echidna` — approved 18-box short-beaked adult with domed spine coat, elongated snout, broad clawed feet, and compact digging walk |
