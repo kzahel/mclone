@@ -80,7 +80,7 @@ interface SmokeBridge {
   pauseRendering(): void;
   resumeRendering(): void;
   touchControls: { snapshot(): WasmReport } | null;
-  drainLobbyOperations(): void;
+  drainSceneOperations(): void;
   backgroundCycleForObserver(): WasmReport | null;
   shutdownForObserver(): Promise<WasmReport | null>;
 }
@@ -94,6 +94,10 @@ export interface WebSmokeObserver {
   observeLobbyRuntimeStart(result: WasmReport): void;
   observeAssetPackCompletion(): void;
   observeWorldCatalogCompletion(): void;
+  observeSceneOperationCompletion(
+    effect: WasmReport | null,
+    completion: WasmReport,
+  ): void;
 }
 
 declare global {
@@ -254,6 +258,22 @@ export function installWebSmokeObserver(
       runtime.state.worldCatalogCompletionCount =
         (Number(runtime.state.worldCatalogCompletionCount) || 0) + 1;
     },
+    observeSceneOperationCompletion(_effect, completion): void {
+      switch (completion.sceneOperationReceipt) {
+        case "active-runtime":
+          observer.resetForSessionRestart();
+          break;
+        case "lobby-runtime":
+          observer.observeLobbyRuntimeStart(completion);
+          break;
+        case "assets":
+          observer.observeAssetPackCompletion();
+          break;
+        case "catalog":
+          observer.observeWorldCatalogCompletion();
+          break;
+      }
+    },
   };
   const apply = (
     operation: (session: WebSceneHost) => WasmReport,
@@ -372,7 +392,7 @@ export function installWebSmokeObserver(
     const report = apply(
       (session) => session.beginLobbySmokeWithChunkSpan(chunkSpan),
     );
-    app.drainLobbyOperations();
+    app.drainSceneOperations();
     return report;
   };
   runtime.sceneBorrowExcluded = () => app.sceneHostForObserver() === null;

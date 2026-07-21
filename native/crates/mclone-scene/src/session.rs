@@ -1033,6 +1033,11 @@ impl McloneSceneHost {
         self.session.pending_start().is_some()
     }
 
+    pub fn take_external_runtime_start(&mut self) -> Option<ExternalSceneSessionStart> {
+        self.take_external_session_start()
+            .or_else(|| self.take_lobby_world_start())
+    }
+
     pub const fn lobby_launch_active(&self) -> bool {
         self.lobby_launch.is_some()
     }

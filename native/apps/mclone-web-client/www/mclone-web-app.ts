@@ -8,9 +8,8 @@ import {
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
 import type {
-  WebAssetPackPreparation,
   WebCatalogExecution,
-  WebRuntimeStart,
+  WebSceneOperation,
   WebSceneHost,
 } from "mclone-web-client-wasm";
 
@@ -136,8 +135,6 @@ class WebFrameDriver {
   lastFrameTime: number;
   tickFrameBusy: boolean;
   pendingSceneOperations: Set<Promise<void>>;
-  lobbyOperationDrainActive: boolean;
-  worldCatalogOperationTail: Promise<void>;
 
   constructor() {
     // Required for the app to run; `init()` re-validates with `instanceof HTMLCanvasElement` and
@@ -152,8 +149,6 @@ class WebFrameDriver {
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
     this.pendingSceneOperations = new Set();
-    this.lobbyOperationDrainActive = false;
-    this.worldCatalogOperationTail = Promise.resolve();
   }
 
   async init(): Promise<void> {
@@ -324,7 +319,6 @@ class WebFrameDriver {
 
   async shutdownForObserver(): Promise<WasmReport | null> {
     await this.waitForObserverIdle(true);
-    await this.worldCatalogOperationTail;
     while (this.pendingSceneOperations.size > 0) {
       await Promise.allSettled([...this.pendingSceneOperations]);
     }
@@ -345,54 +339,92 @@ class WebFrameDriver {
     return report;
   }
 
-  drainLobbyOperations(): void {
-    if (!this.session || this.lobbyOperationDrainActive) {
-      return;
-    }
-    this.lobbyOperationDrainActive = true;
+  drainSceneOperations(
+    options: { fromPointer?: boolean; pointerType?: string } = {},
+  ): void {
+    if (!this.session) return;
     try {
       for (;;) {
-        const start = this.session.takeLobbyRuntimeStart(
+        const operation = this.session.takeSceneOperation(
           SERVER_WORKER_URL.href,
           SERVER_JOB_WORKER_URL.href,
           BINDGEN_JS_URL.href,
           BINDGEN_WASM_URL.href,
         );
-        if (!start) {
-          break;
-        }
-        this.launchLobbyRuntime(start);
+        if (!operation) break;
+        this.trackSceneOperation(this.executeSceneOperation(operation, options));
       }
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       console.error(error);
       publishRuntimeState(runtime.state);
-    } finally {
-      this.lobbyOperationDrainActive = false;
     }
   }
 
-  launchLobbyRuntime(start: WebRuntimeStart): void {
-    if (!this.session) return;
-    const task = (async () => {
-      try {
-        const result = await start.start();
-        smokeObserver?.observeLobbyRuntimeStart(result);
-        if (!this.session) return;
-        const report = this.session.completeRuntimeStart(start);
-        this.applyNativeUiReport(report);
-        this.drainLobbyOperations();
-      } catch (error) {
-        runtime.state.ok = false;
-        runtime.state.status = stringifyError(error);
-        console.error(error);
-        publishRuntimeState(runtime.state);
-      } finally {
-        start.free();
+  async executeSceneOperation(
+    operation: WebSceneOperation,
+    options: { fromPointer?: boolean; pointerType?: string } = {},
+  ): Promise<void> {
+    const session = this.session;
+    if (!session) {
+      operation.free();
+      return;
+    }
+    let db: IDBDatabase | null = null;
+    let execution: WebCatalogExecution | null = null;
+    let effectReport: WasmReport | null = null;
+    let consumed = false;
+    try {
+      execution = operation.takeIndexedDbExecution() ?? null;
+      if (execution) {
+        db = await openWorldDb();
+        await execution.awaitWriterRetirements();
+        await executeIndexedDbCatalogExecution(db, execution);
+        operation.completeIndexedDbExecution(execution);
+      } else {
+        effectReport = await operation.start();
       }
-    })();
-    this.trackSceneOperation(task);
+      if (this.session !== session) return;
+      const completion = session.completeSceneOperation(operation);
+      consumed = true;
+      smokeObserver?.observeSceneOperationCompletion(effectReport, completion);
+      this.applyNativeUiReport(completion, options);
+      this.syncCanvasSize();
+      if (
+        options.fromPointer
+        && options.pointerType !== "touch"
+        && completion.sessionActive === true
+      ) {
+        this.requestPointerLock();
+      }
+      runtime.state.status = "ready";
+      publishRuntimeState(runtime.state);
+    } catch (error) {
+      const message = stringifyError(error);
+      console.error(error);
+      if (!consumed && this.session === session) {
+        try {
+          if (execution) {
+            operation.completeIndexedDbExecution(execution, message);
+          }
+          const completion = session.completeSceneOperation(operation);
+          consumed = true;
+          smokeObserver?.observeSceneOperationCompletion(effectReport, completion);
+          this.applyNativeUiReport(completion, options);
+        } catch (completionError) {
+          runtime.state.ok = false;
+          runtime.state.status = stringifyError(completionError);
+          console.error(completionError);
+          publishRuntimeState(runtime.state);
+        }
+      }
+    } finally {
+      execution?.free();
+      db?.close();
+      operation.free();
+      this.drainSceneOperations();
+    }
   }
 
   async tickFrame(now: number): Promise<void> {
@@ -418,7 +450,7 @@ class WebFrameDriver {
     // failure bound.
     const deadline = performance.now() + 60_000;
     while (performance.now() < deadline) {
-      if (await this.streamFrameOnce({ awaitWorker: true })) {
+      if (await this.streamFrameOnce()) {
         return;
       }
       await nextAnimationFrame();
@@ -426,15 +458,12 @@ class WebFrameDriver {
     throw new Error("timed out warming up the shared scene host");
   }
 
-  async streamFrameOnce(options: { awaitWorker?: boolean } = {}): Promise<boolean> {
+  async streamFrameOnce(): Promise<boolean> {
     if (!this.session) {
       return true;
     }
     const frame = await this.renderHostFrame(performance.now());
     this.handleSceneFrame(frame);
-    if (options.awaitWorker && Number(frame.renderWorkerPendingRequestCount) > 0) {
-      await nextAnimationFrame();
-    }
     return Boolean(frame.initialPresentationReady);
   }
 
@@ -462,9 +491,7 @@ class WebFrameDriver {
       hideBootstrapStatus();
     }
     publishRuntimeState(runtime.state);
-    this.dispatchSceneSessionOperation(frame);
-    this.dispatchAssetPackOperation(frame);
-    this.drainLobbyOperations();
+    this.drainSceneOperations();
   }
 
   reportHostFailure(message: string): WasmReport | null {
@@ -507,166 +534,7 @@ class WebFrameDriver {
       this.requestPointerLock();
     }
     publishRuntimeState(runtime.state);
-    this.dispatchSceneSessionOperation(report, options);
-    this.dispatchWorldCatalogOperation(report, options);
-    this.dispatchAssetPackOperation(report);
-    this.drainLobbyOperations();
-  }
-
-  dispatchSceneSessionOperation(
-    report: WasmReport,
-    options: { fromPointer?: boolean, pointerType?: string } = {},
-  ): void {
-    if (report.sessionStartPending !== true) {
-      return;
-    }
-    this.trackSceneOperation(this.completeSceneSessionStart(options));
-  }
-
-  dispatchWorldCatalogOperation(
-    report: WasmReport,
-    options: { fromPointer?: boolean, pointerType?: string } = {},
-  ): void {
-    if (report.catalogRequest !== true) {
-      return;
-    }
-    this.worldCatalogOperationTail = this.worldCatalogOperationTail
-      .then(() => this.completeWorldCatalogRequest(options))
-      .catch((error: unknown) => {
-        runtime.state.ok = false;
-        runtime.state.status = stringifyError(error);
-        console.error(error);
-        publishRuntimeState(runtime.state);
-      });
-  }
-
-  dispatchAssetPackOperation(report: WasmReport): void {
-    if (report.assetPackRequest !== true) {
-      return;
-    }
-    this.trackSceneOperation(this.completeAssetPackSelection(report));
-  }
-
-  async completeAssetPackSelection(_report: WasmReport): Promise<void> {
-    if (!this.session) {
-      return;
-    }
-    const session = this.session;
-    let preparation: WebAssetPackPreparation | null = null;
-    try {
-      preparation = session.takeAssetPackPreparation();
-      await preparation.start();
-      const completion = session.applyAssetPackPreparation(preparation);
-      this.applyNativeUiReport(completion);
-      smokeObserver?.observeAssetPackCompletion();
-    } catch (error) {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      console.error(error);
-      publishRuntimeState(runtime.state);
-    } finally {
-      preparation?.free();
-    }
-  }
-
-  async completeWorldCatalogRequest(
-    options: { fromPointer?: boolean, pointerType?: string } = {},
-  ): Promise<void> {
-    if (!this.session) {
-      return;
-    }
-    const session = this.session;
-    let db: IDBDatabase | null = null;
-    let execution: WebCatalogExecution | null = null;
-    try {
-      execution = session.takeWorldCatalogExecution();
-      db = await openWorldDb();
-      await execution.awaitWriterRetirements();
-      await executeIndexedDbCatalogExecution(db, execution);
-      const completion = session.applyWorldCatalogExecution(execution);
-      smokeObserver?.observeWorldCatalogCompletion();
-      this.applyNativeUiReport(completion, options);
-    } catch (error) {
-      const message = stringifyError(error);
-      console.error(error);
-      try {
-        if (!execution) {
-          throw error;
-        }
-        const failure = session.applyWorldCatalogError(execution, message);
-        smokeObserver?.observeWorldCatalogCompletion();
-        this.applyNativeUiReport(failure, options);
-      } catch (completionError) {
-        runtime.state.ok = false;
-        runtime.state.status = stringifyError(completionError);
-        console.error(completionError);
-        publishRuntimeState(runtime.state);
-      }
-    } finally {
-      execution?.free();
-      db?.close();
-    }
-  }
-
-  async completeSceneSessionStart(
-    options: { fromPointer?: boolean, pointerType?: string } = {},
-  ): Promise<void> {
-    if (!this.session) {
-      return;
-    }
-    const session = this.session;
-    this.clearGameplayInput();
-    this.releasePointerLockForUi();
-    let start: WebRuntimeStart | null = null;
-    let startReport: WasmReport | null = null;
-    try {
-      start = session.takePendingSessionStart(
-        SERVER_WORKER_URL.href,
-        SERVER_JOB_WORKER_URL.href,
-        BINDGEN_JS_URL.href,
-        BINDGEN_WASM_URL.href,
-      );
-      await start.start();
-      startReport = session.completeRuntimeStart(start);
-    } catch (error) {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      console.error(error);
-    } finally {
-      start?.free();
-    }
-    if (!startReport?.ok) {
-      this.reportHostFailure(runtime.state.status);
-      publishRuntimeState(runtime.state);
-      return;
-    }
-
-    this.applyNativeUiReport(startReport);
-    if (startReport.sessionActive !== true) {
-      publishRuntimeState(runtime.state);
-      return;
-    }
-
-    this.resetStreamingStateForSessionRestart();
-    try {
-      this.syncCanvasSize();
-      if (options.fromPointer && options.pointerType !== "touch") {
-        this.requestPointerLock();
-      }
-    } catch (error) {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      this.reportHostFailure(runtime.state.status);
-      console.error(error);
-      publishRuntimeState(runtime.state);
-      return;
-    }
-    runtime.state.status = "ready";
-    publishRuntimeState(runtime.state);
-  }
-
-  resetStreamingStateForSessionRestart(): void {
-    smokeObserver?.resetForSessionRestart();
+    this.drainSceneOperations(options);
   }
 
   trackSceneOperation(task: Promise<void>): void {

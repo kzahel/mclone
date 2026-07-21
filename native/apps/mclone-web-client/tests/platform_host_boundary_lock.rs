@@ -220,7 +220,7 @@ fn browser_bootstrap_roles_and_host_selection_stay_in_rust() {
         "fetchBootstrapResources",
         "WebBootstrapResources",
         "resources.add(response.requestId, response.bytes)",
-        "takeAssetPackPreparation()",
+        "takeSceneOperation(",
     ] {
         assert!(
             WEB_APP.contains(required),
@@ -304,13 +304,17 @@ fn ordinary_browser_results_are_operational_not_diagnostic() {
     for required in [
         "initialPresentationReady",
         "renderWorkerPendingRequestCount",
-        "sessionStartPending",
         "sessionActive",
-        "assetPackRequest",
     ] {
         assert!(
             operational.contains(required),
             "operational browser result lost {required}"
+        );
+    }
+    for retired in ["sessionStartPending", "catalogRequest", "assetPackRequest"] {
+        assert!(
+            !operational.contains(retired),
+            "operational browser result retained named operation wakeup {retired}"
         );
     }
     for forbidden in [
@@ -335,7 +339,7 @@ fn ordinary_browser_results_are_operational_not_diagnostic() {
     }
 
     assert!(WEB_SCENE_HOST.contains("js_name = diagnosticSnapshot"));
-    assert!(WEB_APP.contains("this.dispatchAssetPackOperation(frame);"));
+    assert!(WEB_APP.contains("this.drainSceneOperations();"));
     assert!(WEB_SMOKE_OBSERVER.contains("app.observerSnapshot(report)"));
     assert!(WEB_SMOKE_OBSERVER.contains("latestReport()"));
 }

@@ -13,10 +13,12 @@ fn ordinary_catalog_policy_is_rust_owned() {
     let scene = fs::read_to_string(root.join("src/web_scene_host.rs")).unwrap();
     let execution = fs::read_to_string(root.join("src/web_catalog_execution.rs")).unwrap();
 
-    assert!(app.contains("takeWorldCatalogExecution"));
-    assert!(app.contains("applyWorldCatalogExecution"));
-    assert!(app.contains("session.takeWorldCatalogExecution()"));
-    assert!(app.contains("session.applyWorldCatalogExecution(execution)"));
+    assert!(app.contains("takeSceneOperation("));
+    assert!(app.contains("operation.takeIndexedDbExecution()"));
+    assert!(app.contains("operation.completeIndexedDbExecution(execution)"));
+    assert!(app.contains("session.completeSceneOperation(operation)"));
+    assert!(!app.contains("takeWorldCatalogExecution"));
+    assert!(!app.contains("applyWorldCatalogExecution"));
     assert!(!app.contains("catalogRequestId"));
     assert!(!app.contains("catalogOperation"));
     assert!(!app.contains("catalogGenerationProfile"));
@@ -30,7 +32,8 @@ fn ordinary_catalog_policy_is_rust_owned() {
     assert!(!indexed_db.contains("createIndexedDbCatalogWorld"));
     assert!(!indexed_db.contains("mclone_web_catalog_prepare_create_world"));
 
-    assert!(scene.contains("PendingWebCatalogOperation"));
+    assert!(scene.contains("self.platform.take_catalog_operation()"));
+    assert!(!scene.contains("PendingWebCatalogOperation"));
     assert!(!scene.contains("write_catalog_request"));
     assert!(!scene.contains("catalogOperation"));
 

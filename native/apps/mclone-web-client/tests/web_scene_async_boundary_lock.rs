@@ -19,6 +19,10 @@ const WEB_SCENE_PROTOCOL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/src/web_scene_protocol.rs"
 ));
+const SCENE_SESSION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../crates/mclone-scene/src/session.rs"
+));
 const WORLD_CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-web-world-catalog.ts"
@@ -30,9 +34,11 @@ fn active_session_dispatch_is_rust_owned() {
     assert!(!WEB_APP.contains("operationKind === \"localWorld\""));
     assert!(!WEB_APP.contains("session.startIndexedDbLocalWorld("));
     assert!(!WEB_APP.contains("session.joinRemoteWebSocket("));
-    assert!(WEB_APP.contains("session.takePendingSessionStart("));
-    assert!(WEB_APP.contains("session.completeRuntimeStart(start)"));
-    assert!(WEB_SCENE_HOST.contains("pub fn take_pending_runtime_start"));
+    assert!(WEB_APP.contains("this.session.takeSceneOperation("));
+    assert!(WEB_APP.contains("session.completeSceneOperation(operation)"));
+    assert!(WEB_SCENE_HOST.contains("pub fn take_scene_operation"));
+    assert!(WEB_SCENE_HOST.contains("pub fn complete_scene_operation"));
+    assert!(!WEB_SCENE_HOST.contains("js_name = takePendingSessionStart"));
     assert!(!WEB_SCENE_HOST.contains("pub async fn start_pending_session"));
     assert!(!WEB_SCENE_HOST.contains("pub async fn shutdown_async"));
     assert!(!WEB_SCENE_HOST.contains("pub async fn complete_asset_pack_selection"));
@@ -43,14 +49,16 @@ fn active_session_dispatch_is_rust_owned() {
 }
 
 #[test]
-fn lobby_runtime_start_is_an_opaque_rust_ticket() {
+fn lobby_runtime_start_uses_the_opaque_operation_drain() {
     assert!(!WEB_APP.contains("operation.kind === \"start\""));
     assert!(!WEB_APP.contains("session.prepareLobbyWorldStart("));
     assert!(!WEB_APP.contains("operation.requestId"));
-    assert!(WEB_APP.contains("session.takeLobbyRuntimeStart("));
-    assert!(WEB_APP.contains("session.completeRuntimeStart(start)"));
+    assert!(WEB_APP.contains("this.session.takeSceneOperation("));
+    assert!(WEB_APP.contains("session.completeSceneOperation(operation)"));
 
-    assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_runtime_start"));
+    assert!(SCENE_SESSION.contains("pub fn take_external_runtime_start"));
+    assert!(!WEB_SCENE_HOST.contains("js_name = takeLobbyRuntimeStart"));
+    assert!(!WEB_SCENE_HOST.contains("js_name = completeRuntimeStart"));
     assert!(!WEB_SCENE_HOST.contains("pub fn take_lobby_operation"));
     assert!(!WEB_SCENE_HOST.contains("pub fn prepare_lobby_world_start"));
     assert!(!WEB_SCENE_HOST.contains("lobby_world_starts:"));
@@ -64,8 +72,9 @@ fn browser_session_lifecycle_is_not_mirrored() {
 
 #[test]
 fn readiness_and_ready_envelopes_are_rust_authored() {
-    assert!(WEB_APP.contains("const streamingSettled = Boolean(frame.streamingIdle)"));
+    assert!(!WEB_APP.contains("const streamingSettled ="));
     assert!(WEB_APP.contains("return Boolean(frame.initialPresentationReady)"));
+    assert!(!WEB_APP.contains("frame.renderWorkerPendingRequestCount"));
     assert!(!WEB_APP.contains("const runnerSettled ="));
     assert!(!WEB_APP.contains("let stableFrames ="));
     assert!(WEB_SCENE_HOST.contains("fn observe_initial_presentation_frame"));

@@ -56,7 +56,8 @@ use mclone_audio::PreparedAudioAssets;
 use mclone_client::ClientRuntime;
 #[cfg(test)]
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus, chunk_section_index,
+    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_SECTION_VOLUME, CHUNK_WIDTH, ChunkStatus,
+    chunk_section_index,
 };
 use mclone_core::{
     AxisTopology, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, LodTileKey,

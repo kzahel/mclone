@@ -4,8 +4,9 @@ Topic: `platform-boundary-convergence`
 
 Status: open master tracker. Tactical
 [`207`](../tactical/207-shared-scene-operation-coordinator.md) is the active
-implementation workstream; Phases 0–2 and the mandatory Gate A re-inventory
-are complete. The consolidated opaque-operation drain is the current pickup.
+implementation workstream; Phases 0–3 and the mandatory Gate A re-inventory
+are complete. Cutover validation and implementation closeout are the current
+pickup.
 This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
@@ -214,10 +215,10 @@ remaining-work note.
 | 1. Borrow-free browser ABI | **complete 2026-07-21** | Replace every exported async mutable borrow with synchronous issue/take and later completion submission over owned values | Four async mutable exports and the global busy policy are gone. Catalog start advanced frame/render/input +4/+4/+4 during its sample; asset preparation +3/+3/+3; lobby warmup +6/+6/+6. |
 | 2. One boundary-operation token family | **complete 2026-07-21** | Re-key session, lobby, catalog, and asset-preparation completions onto `PlatformOperationService`/`PlatformOperationLedger` and delete parallel request identities | Identity systems are 4 → 1. Catalog uses an opaque token-bearing execution ticket; assets retain a documented content generation; shared ledger and scene ownership tests cover rejection and teardown. |
 | Gate A. Fresh inventory and re-scope | **complete 2026-07-21** | Measure what the first three phases already deleted and choose the smallest remaining cut | Runtime starts were already converged; former Phases 3–5 were folded into one opaque-operation drain; optional storage lowering was skipped as net growth |
-| 3. Opaque operation drain, readiness, and quiescence | **current** | Replace runtime/catalog/asset-specific browser pumps and host exports with one opaque Rust-authored take/complete lifecycle while retaining mechanical executors | One product TypeScript drain, Rust-owned admission/readiness/cancellation, materially fewer exports, and a net-smaller combined boundary |
+| 3. Opaque operation drain, readiness, and quiescence | **complete 2026-07-21** | Replace runtime/catalog/asset-specific browser pumps and host exports with one opaque Rust-authored take/complete lifecycle while retaining mechanical executors | One product TypeScript drain; named pumps, report wakeups, and readiness reconstruction deleted; exports 48 → 42; clean combined boundary 24,334 → 24,148 |
 | 4–5. Former candidate phases | **folded into Phase 3 at Gate A** | Avoid artificial phases now that runtime startup already shares one ticket/completion lifecycle | Catalog/asset adoption, readiness, and quiescence exits are enforced by Phase 3 |
 | 5b. Storage-address lowering | **skipped at Gate A** | Retain the small stable physical-name mapping at its lower-total-cost owner | Reopen only if future schema work demonstrates combined net deletion |
-| 6. Implementation closeout | pending | Delete old paths, validate every affected platform boundary, demonstrate extensibility, and report final deltas | Tactical 207 closes itself and appends a ledger row, but leaves this parent open |
+| 6. Implementation closeout | **current** | Delete old paths, validate every affected platform boundary, demonstrate extensibility, and report final deltas | Tactical 207 closes itself and appends a ledger row, but leaves this parent open |
 | 7. Independent fixpoint audit | future separate tactical | Fresh code review by a reviewer/agent outside the implementation series | Closure protocol below passes or the audit appends precise remaining work and reopens implementation |
 
 ### Phase Boundaries
@@ -240,20 +241,20 @@ all rows. The 2026-07-21 values are the immutable campaign baseline. Phase 0
 must also record a clean-revision start baseline because unrelated work may
 have changed the live counts since the audit.
 
-| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 |
-|---|---:|---:|---:|---:|
-| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 |
-| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 |
-| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 |
-| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) |
-| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 |
-| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 |
-| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 |
-| async mutable wasm exports | 4 | 4 | **0** | **0** |
-| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** |
-| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 |
-| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained |
-| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 |
+| Metric | Clean baseline | Phase 0 | Phase 1 | Phase 2 | Phase 3 |
+|---|---:|---:|---:|---:|---:|
+| authored web TypeScript lines | 3,757 | 3,759 | 3,685 | 3,686 | **3,574** |
+| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 | 3,709 / 16 | **3,597 / 16** |
+| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 | 20,695 | **20,574** |
+| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative) | 24,381 (+47 cumulative; -6 phase-local) | **24,148 (-186 cumulative; -233 phase-local)** |
+| shared `mclone-scene` Rust lines | 24,632 | 24,632 | 24,632 | 24,726 | 24,731 |
+| shared `mclone-app-runtime` Rust lines | 33,877 | 33,877 | 33,877 | 33,877 | 33,877 |
+| `WebSceneHost` exported methods | 48 | 48 | 48 | 48 | **42** |
+| async mutable wasm exports | 4 | 4 | **0** | **0** | **0** |
+| boundary-operation identity/staleness systems | 4 | 4, classified | 4 | **1** | **1** |
+| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 | 71 / 110 |
+| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** | no; progress traces retained | no; semantic probes retain progress |
+| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | global borrow guard deleted; named dispatch remains | 259 lines inventoried; one drain is Phase 3 | one generic physical-Promise registry and drain; named state machines zero |
 
 ## Closure Protocol
 
@@ -288,22 +289,11 @@ have changed the live counts since the audit.
 ## Immediate Next Workstream
 
 Continue Tactical [`207`](../tactical/207-shared-scene-operation-coordinator.md)
-at the consolidated opaque-operation drain. Gate A found that active and
-lobby starts already share one runtime ticket and completion lifecycle, so it
-dropped the standalone runtime-convergence phase and folded the remaining
-catalog/asset/readiness/quiescence work together.
-
-The current review packet is:
-
-1. add one opaque Rust wrapper over runtime-start, catalog, and asset work;
-2. replace the named TypeScript dispatch/completion paths with one generic
-   drain while retaining capability-specific browser mechanics;
-3. move catalog serialization, operation availability, readiness, and
-   cancellation authority fully behind Rust dispositions;
-4. delete the redundant ticket exports, report flags, lobby guard, catalog
-   promise tail, and render-queue readiness reconstruction; and
-5. validate the affected browser/shared/native boundaries, then proceed to
-   implementation closeout.
+at implementation closeout. The opaque operation drain is live and the clean
+scoreboard clears both Rust-side and combined deletion gates. The remaining
+review packet is validation, documentation/ledger refresh, and an explicit
+disposition for the browser pixel-capture and lifecycle failures already
+recorded at the clean baseline.
 
 The optional storage-address move is not part of this workstream. The current
 small physical-name switch is platform mechanics and was cheaper to retain.

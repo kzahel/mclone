@@ -36,27 +36,29 @@ fn typescript_scene_operation_coordination_debt_only_decreases() {
         ("global scene borrow guard", "sessionBusy", 0),
         ("scene borrow spin helper", "waitForSessionIdle", 0),
         ("lobby promise registry", "pendingLobbyRuntimeStarts", 0),
-        ("lobby drain guard", "lobbyOperationDrainActive", 5),
-        ("catalog promise tail", "worldCatalogOperationTail", 5),
+        ("lobby drain guard", "lobbyOperationDrainActive", 0),
+        ("catalog promise tail", "worldCatalogOperationTail", 0),
         (
             "session dispatch branch",
             "dispatchSceneSessionOperation",
-            3,
+            0,
         ),
         (
             "catalog dispatch branch",
             "dispatchWorldCatalogOperation",
-            2,
+            0,
         ),
-        ("asset dispatch branch", "dispatchAssetPackOperation", 3),
+        ("asset dispatch branch", "dispatchAssetPackOperation", 0),
         ("catalog string identity", "catalogRequestId", 0),
-        ("session report wakeup", "sessionStartPending", 1),
-        ("asset report wakeup", "assetPackRequest", 1),
+        ("session report wakeup", "sessionStartPending", 0),
+        ("catalog report wakeup", "catalogRequest", 0),
+        ("asset report wakeup", "assetPackRequest", 0),
         (
             "render-queue readiness reconstruction",
             "renderWorkerPendingRequestCount",
-            1,
+            0,
         ),
+        ("opaque operation drain", "drainSceneOperations", 5),
     ] {
         assert_at_most(label, WEB_APP, needle, ceiling);
     }
@@ -122,4 +124,18 @@ fn rust_boundary_identity_and_async_export_debt_only_decreases() {
     ] {
         assert_at_most(label, source, needle, ceiling);
     }
+}
+
+#[test]
+fn test_only_coarse_operation_is_a_boundary_fixpoint() {
+    assert!(WEB_SCENE_HOST.contains("TestOnlyRemote(String)"));
+    assert!(!WEB_APP.contains("TestOnlyRemote"));
+
+    let host_exports = WEB_SCENE_HOST
+        .lines()
+        .skip_while(|line| *line != "impl WebSceneHost {")
+        .take_while(|line| *line != "}")
+        .filter(|line| line.contains("#[wasm_bindgen(js_name"))
+        .count();
+    assert_eq!(host_exports, 42);
 }

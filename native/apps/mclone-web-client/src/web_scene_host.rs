@@ -6,7 +6,6 @@
 //! and asset epochs remain in `McloneSceneHost`.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::rc::Rc;
 
 use anyhow::Result;
@@ -26,7 +25,7 @@ use mclone_app_runtime::session::{
     ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
 };
 use mclone_app_runtime::world_catalog::{
-    LocalWorldId, WorldCatalogError, WorldCatalogErrorKind, WorldCatalogRequest,
+    WorldCatalogError, WorldCatalogErrorKind, WorldCatalogResponse,
 };
 use mclone_assets::{
     MemoryAssetSource, PackedAssetSource, default_player_figure_path, load_prepared_figure,
@@ -204,88 +203,28 @@ struct LastFrameStats {
 }
 
 enum WebRuntimeStartEffect {
-    Integrated {
-        config: WebIntegratedServerRunnerConfig,
+    Integrated(WebIntegratedServerRunnerConfig),
+    Remote(String),
+    #[cfg(test)]
+    TestOnlyRemote(String),
+}
+#[cfg(test)]
+const _: fn(String) -> WebRuntimeStartEffect = WebRuntimeStartEffect::TestOnlyRemote;
+
+enum WebSceneOperationEffect {
+    Runtime {
+        pending: ExternalSceneSessionStart,
+        start: WebRuntimeStartEffect,
         center: ChunkPos,
         render_distance: u32,
     },
-    Remote {
-        url: String,
-        center: ChunkPos,
-        render_distance: u32,
+    IndexedDb(WebCatalogExecution),
+    Assets {
+        token: PlatformOperationToken,
+        content_generation: u64,
+        selected_file_count: usize,
+        effect: WebAssetPackPreparationEffect,
     },
-}
-
-struct WebRuntimeStartState {
-    pending: Option<ExternalSceneSessionStart>,
-    outcome: Option<Result<crate::WebRuntime, String>>,
-}
-
-/// Opaque owned browser runtime-start ticket. `start()` synchronously moves
-/// the effect into a Promise-owned future, so awaiting that Promise never
-/// retains a wasm-bindgen borrow of this ticket or `WebSceneHost`.
-#[wasm_bindgen]
-pub struct WebRuntimeStart {
-    effect: Option<WebRuntimeStartEffect>,
-    state: Rc<RefCell<WebRuntimeStartState>>,
-}
-
-impl WebRuntimeStart {
-    fn new(pending: ExternalSceneSessionStart, effect: WebRuntimeStartEffect) -> Self {
-        Self {
-            effect: Some(effect),
-            state: Rc::new(RefCell::new(WebRuntimeStartState {
-                pending: Some(pending),
-                outcome: None,
-            })),
-        }
-    }
-}
-
-#[wasm_bindgen]
-impl WebRuntimeStart {
-    #[wasm_bindgen(js_name = start)]
-    pub fn start(&mut self) -> Result<js_sys::Promise, JsValue> {
-        let effect = self
-            .effect
-            .take()
-            .ok_or_else(|| JsValue::from_str("runtime start ticket was already started"))?;
-        let (world_id, storage_source_kind) = self
-            .state
-            .borrow()
-            .pending
-            .as_ref()
-            .and_then(|pending| pending.storage_source.as_ref())
-            .map(|source| {
-                (
-                    Some(source.world_id().to_owned()),
-                    Some(source.kind_label().to_owned()),
-                )
-            })
-            .unwrap_or_default();
-        let state = Rc::clone(&self.state);
-        Ok(wasm_bindgen_futures::future_to_promise(async move {
-            let outcome = execute_web_runtime_start(effect).await;
-            let ok = outcome.is_ok();
-            let error = outcome.as_ref().err().cloned();
-            state.borrow_mut().outcome = Some(outcome);
-
-            let object = js_sys::Object::new();
-            report_set_bool(&object, "ok", ok).map_err(JsValue::from)?;
-            if let Some(error) = error {
-                report_set_string(&object, "reason", &error).map_err(JsValue::from)?;
-            }
-            // Source identity is returned only after construction as smoke and
-            // support diagnostics; it cannot select or configure the effect.
-            if let Some(world_id) = world_id {
-                report_set_string(&object, "worldId", &world_id).map_err(JsValue::from)?;
-            }
-            if let Some(kind) = storage_source_kind {
-                report_set_string(&object, "storageSourceKind", &kind).map_err(JsValue::from)?;
-            }
-            Ok(object.into())
-        }))
-    }
 }
 
 struct WebAssetPackPreparationEffect {
@@ -298,67 +237,141 @@ struct WebAssetPackPreparationEffect {
     render_worker: WebRenderWorkerCoordinator,
 }
 
-struct WebAssetPackPreparationState {
-    outcome: Option<Result<PreparedSceneAssets, String>>,
+type WebRuntimeResources = (String, String, String, String);
+
+enum WebSceneOperationCompletion {
+    Runtime {
+        pending: ExternalSceneSessionStart,
+        outcome: Result<crate::WebRuntime, String>,
+    },
+    IndexedDb {
+        token: PlatformOperationToken,
+        outcome: Result<WorldCatalogResponse, String>,
+    },
+    Assets {
+        token: PlatformOperationToken,
+        content_generation: u64,
+        selected_file_count: usize,
+        outcome: Result<PreparedSceneAssets, String>,
+    },
 }
 
-/// Owned browser asset-preparation ticket. Render-worker readiness and CPU
-/// pack preparation run in the returned Promise without borrowing the scene.
+/// Opaque Rust-admitted Promise or IndexedDB effect; meaning and identity stay private.
 #[wasm_bindgen]
-pub struct WebAssetPackPreparation {
-    effect: Option<WebAssetPackPreparationEffect>,
-    state: Rc<RefCell<WebAssetPackPreparationState>>,
-    token: PlatformOperationToken,
-    content_generation: u64,
-    selected_file_count: usize,
+pub struct WebSceneOperation {
+    effect: Option<WebSceneOperationEffect>,
+    completion: Rc<RefCell<Option<WebSceneOperationCompletion>>>,
+    indexed_db_token: Option<PlatformOperationToken>,
+}
+
+impl WebSceneOperation {
+    fn new(effect: WebSceneOperationEffect) -> Self {
+        Self {
+            effect: Some(effect),
+            completion: Default::default(),
+            indexed_db_token: None,
+        }
+    }
 }
 
 #[wasm_bindgen]
-impl WebAssetPackPreparation {
+impl WebSceneOperation {
+    /// Start Worker/render preparation work without retaining a host borrow.
     #[wasm_bindgen(js_name = start)]
     pub fn start(&mut self) -> Result<js_sys::Promise, JsValue> {
+        if matches!(self.effect, Some(WebSceneOperationEffect::IndexedDb(..))) {
+            return Err(JsValue::from_str(
+                "IndexedDB scene operation must use its action plan",
+            ));
+        }
         let effect = self
             .effect
             .take()
-            .ok_or_else(|| JsValue::from_str("asset preparation ticket was already started"))?;
-        let state = Rc::clone(&self.state);
+            .ok_or_else(|| JsValue::from_str("scene operation was already started"))?;
+        let completion = Rc::clone(&self.completion);
         Ok(wasm_bindgen_futures::future_to_promise(async move {
-            let outcome = execute_web_asset_pack_preparation(effect).await;
-            let ok = outcome.is_ok();
-            let error = outcome.as_ref().err().cloned();
-            state.borrow_mut().outcome = Some(outcome);
-            let object = js_sys::Object::new();
-            report_set_bool(&object, "ok", ok).map_err(JsValue::from)?;
-            if let Some(error) = error {
-                report_set_string(&object, "reason", &error).map_err(JsValue::from)?;
-            }
-            Ok(object.into())
+            let completed = match effect {
+                WebSceneOperationEffect::Runtime {
+                    pending,
+                    start,
+                    center,
+                    render_distance,
+                } => WebSceneOperationCompletion::Runtime {
+                    pending,
+                    outcome: execute_web_runtime_start(start, center, render_distance).await,
+                },
+                WebSceneOperationEffect::Assets {
+                    token,
+                    content_generation,
+                    selected_file_count,
+                    effect,
+                } => WebSceneOperationCompletion::Assets {
+                    token,
+                    content_generation,
+                    selected_file_count,
+                    outcome: execute_web_asset_pack_preparation(effect).await,
+                },
+                WebSceneOperationEffect::IndexedDb(..) => unreachable!(),
+            };
+            *completion.borrow_mut() = Some(completed);
+            Ok(JsValue::UNDEFINED)
         }))
+    }
+
+    /// Take the optional mechanical IndexedDB plan. `undefined` means the
+    /// operation uses the Promise executor returned by `start()`.
+    #[wasm_bindgen(js_name = takeIndexedDbExecution)]
+    pub fn take_indexed_db_execution(&mut self) -> Result<Option<WebCatalogExecution>, JsValue> {
+        if !matches!(self.effect, Some(WebSceneOperationEffect::IndexedDb(..))) {
+            return Ok(None);
+        }
+        let Some(WebSceneOperationEffect::IndexedDb(execution)) = self.effect.take() else {
+            unreachable!()
+        };
+        self.indexed_db_token = Some(execution.token().map_err(JsValue::from)?);
+        Ok(Some(execution))
+    }
+
+    /// Return a completed IndexedDB plan to the opaque operation.
+    #[wasm_bindgen(js_name = completeIndexedDbExecution)]
+    pub fn complete_indexed_db_execution(
+        &mut self,
+        execution: &WebCatalogExecution,
+        error: Option<String>,
+    ) -> Result<(), JsValue> {
+        let token = self
+            .indexed_db_token
+            .take()
+            .ok_or_else(|| JsValue::from_str("scene operation does not use IndexedDB"))?;
+        if execution.token().map_err(JsValue::from)? != token {
+            return Err(JsValue::from_str(
+                "IndexedDB execution does not match the scene operation",
+            ));
+        }
+        *self.completion.borrow_mut() = Some(WebSceneOperationCompletion::IndexedDb {
+            token,
+            outcome: error.map_or_else(|| execution.response(), Err),
+        });
+        Ok(())
     }
 }
 
 async fn execute_web_runtime_start(
-    effect: WebRuntimeStartEffect,
+    start: WebRuntimeStartEffect,
+    center: ChunkPos,
+    render_distance: u32,
 ) -> Result<crate::WebRuntime, String> {
-    let (mut runtime, center, render_distance) = match effect {
-        WebRuntimeStartEffect::Integrated {
-            config,
-            center,
-            render_distance,
-        } => (
-            crate::WebRuntime::web_worker_integrated_at(config, center).await?,
-            center,
-            render_distance,
-        ),
-        WebRuntimeStartEffect::Remote {
-            url,
-            center,
-            render_distance,
-        } => (
-            crate::WebRuntime::websocket_remote_at(url, center).await?,
-            center,
-            render_distance,
-        ),
+    let mut runtime = match start {
+        WebRuntimeStartEffect::Integrated(config) => {
+            crate::WebRuntime::web_worker_integrated_at(config, center).await?
+        }
+        WebRuntimeStartEffect::Remote(url) => {
+            crate::WebRuntime::websocket_remote_at(url, center).await?
+        }
+        #[cfg(test)]
+        WebRuntimeStartEffect::TestOnlyRemote(url) => {
+            crate::WebRuntime::websocket_remote_at(url, center).await?
+        }
     };
     runtime.request_chunk_view_deferred(
         center,
@@ -447,17 +460,10 @@ pub struct WebSceneHost {
     update_count: usize,
     interaction_count: usize,
     mesh_build_count: usize,
-    catalog_operations: VecDeque<PendingWebCatalogOperation>,
+    catalog_operation_in_flight: bool,
     render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
-}
-
-#[derive(Debug)]
-struct PendingWebCatalogOperation {
-    token: PlatformOperationToken,
-    request: WorldCatalogRequest,
-    active_world: Option<LocalWorldId>,
 }
 
 #[wasm_bindgen]
@@ -1640,63 +1646,133 @@ impl WebSceneHost {
         self.diagnostic_snapshot()
     }
 
-    /// Lower the one shared-policy pending session into an owned browser
-    /// runtime-start ticket.
-    ///
-    /// TypeScript supplies only platform URLs. Rust retains the classified
-    /// local/remote request, local storage identity, scene configuration, and
-    /// completion/failure semantics.
-    #[wasm_bindgen(js_name = takePendingSessionStart)]
-    pub fn take_pending_runtime_start(
+    /// Take the next Rust-admitted coarse operation through one opaque
+    /// browser boundary. URL arguments are mechanical Worker resources; all
+    /// target, identity, ordering, and acceptance state remains in Rust.
+    #[wasm_bindgen(js_name = takeSceneOperation)]
+    pub fn take_scene_operation(
         &mut self,
         worker_url: String,
         job_worker_url: String,
         bindgen_js_url: String,
         bindgen_wasm_url: String,
-    ) -> Result<WebRuntimeStart, JsValue> {
-        let pending = self.take_pending_session_start()?;
-        match pending.descriptor.clone() {
-            ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
-                let mut config = WebIntegratedServerRunnerConfig::new(
-                    seed,
-                    worker_url,
-                    job_worker_url,
-                    bindgen_js_url,
-                    bindgen_wasm_url,
-                );
-                if let Some(id) = id {
-                    config = config.with_indexed_db_world(id.as_str(), false);
-                }
-                config.world_generation_profile = pending.scene.world_generation_profile;
-                config.world_topology = pending.scene.world_topology;
-                config.world_behavior_profile = pending.scene.world_behavior_profile;
-                config.freeze_scheduled_fluid_ticks = pending.scene.freeze_scheduled_fluid_ticks;
-                config.debug_passive_showcase = pending.scene.debug_passive_showcase;
-                config.debug_auxiliary_player_script = pending.scene.debug_auxiliary_player_script;
-                let center = pending.scene.center();
-                let render_distance = pending.scene.render_distance;
-                Ok(WebRuntimeStart::new(
-                    pending,
-                    WebRuntimeStartEffect::Integrated {
-                        config,
-                        center,
-                        render_distance,
-                    },
-                ))
-            }
-            ActiveSessionDescriptor::Remote { endpoint } => {
-                let center = pending.scene.center();
-                let render_distance = pending.scene.render_distance;
-                Ok(WebRuntimeStart::new(
-                    pending,
-                    WebRuntimeStartEffect::Remote {
-                        url: endpoint.address,
-                        center,
-                        render_distance,
-                    },
-                ))
+    ) -> Result<Option<WebSceneOperation>, JsValue> {
+        let resources = (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url);
+        if let Some(pending) = self.host_mut()?.take_external_session_start() {
+            return Ok(Some(WebSceneOperation::new(lower_runtime_start(
+                pending,
+                resources.clone(),
+            ))));
+        }
+        if self
+            .host_ref()?
+            .pending_external_asset_pack_selection()
+            .is_some_and(|pending| self.asset_pack_preparation_in_flight != Some(pending.token))
+        {
+            return take_asset_pack_preparation(self)
+                .map(WebSceneOperation::new)
+                .map(Some);
+        }
+        if let Some(pending) = self.host_mut()?.take_external_runtime_start() {
+            return Ok(Some(WebSceneOperation::new(lower_runtime_start(
+                pending, resources,
+            ))));
+        }
+        if !self.catalog_operation_in_flight {
+            if let Some(pending) = self.platform.take_catalog_operation() {
+                let token = pending.token;
+                let execution = WebCatalogExecution::new(
+                    token,
+                    pending.kind.request.request,
+                    pending.kind.active_world,
+                )
+                .map_err(JsValue::from)?;
+                self.catalog_operation_in_flight = true;
+                return Ok(Some(WebSceneOperation::new(
+                    WebSceneOperationEffect::IndexedDb(execution),
+                )));
             }
         }
+        Ok(None)
+    }
+
+    /// Resolve one opaque operation through its specialized Rust owner.
+    #[wasm_bindgen(js_name = completeSceneOperation)]
+    pub fn complete_scene_operation(
+        &mut self,
+        operation: &mut WebSceneOperation,
+    ) -> Result<JsValue, JsValue> {
+        let completion = operation
+            .completion
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| JsValue::from_str("scene operation was consumed"))?;
+        let (report, receipt, source) = match completion {
+            WebSceneOperationCompletion::Runtime { pending, outcome } => {
+                let receipt = match &pending.target {
+                    mclone_scene::ExternalSceneStartTarget::Lobby { .. } => "lobby-runtime",
+                    mclone_scene::ExternalSceneStartTarget::ActiveSession { .. } => {
+                        "active-runtime"
+                    }
+                };
+                let source = pending
+                    .storage_source
+                    .as_ref()
+                    .map(|source| (source.world_id().to_owned(), source.kind_label().to_owned()));
+                let report = match outcome {
+                    Ok(runtime) => self.complete_started_runtime(pending, runtime)?,
+                    Err(error) => {
+                        self.host_mut()?.fail_external_session_start(pending, error);
+                        self.ui_report(false, None).map_err(JsValue::from)?
+                    }
+                };
+                (report, receipt, source)
+            }
+            WebSceneOperationCompletion::Assets {
+                token,
+                content_generation,
+                selected_file_count,
+                outcome,
+            } => (
+                apply_asset_pack_preparation(
+                    self,
+                    token,
+                    content_generation,
+                    selected_file_count,
+                    outcome,
+                )?,
+                "assets",
+                None,
+            ),
+            WebSceneOperationCompletion::IndexedDb { token, outcome } => {
+                self.catalog_operation_in_flight = false;
+                self.platform
+                    .complete_catalog_operation(PlatformOperationCompletion {
+                        token,
+                        result: outcome.map_err(|message| {
+                            WorldCatalogError::new(WorldCatalogErrorKind::StorageFailure, message)
+                        }),
+                    });
+                let (device, queue) = (&self.context.device, &self.context.queue);
+                self.host
+                    .as_mut()
+                    .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
+                    .poll_external_catalog_operations(device, queue)
+                    .map_err(js_error)?;
+                (
+                    self.ui_report(false, None).map_err(JsValue::from)?,
+                    "catalog",
+                    None,
+                )
+            }
+        };
+        let object: js_sys::Object = report.unchecked_into();
+        report_set_string(&object, "sceneOperationReceipt", receipt).map_err(JsValue::from)?;
+        if let Some((world_id, source_kind)) = source {
+            report_set_string(&object, "worldId", &world_id).map_err(JsValue::from)?;
+            report_set_string(&object, "storageSourceKind", &source_kind).map_err(JsValue::from)?;
+        }
+        Ok(object.into())
     }
 
     #[wasm_bindgen(js_name = beginLobbySmokeWithChunkSpan)]
@@ -1712,155 +1788,6 @@ impl WebSceneHost {
                     .with_preview_bounds(bounds)
                     .map_err(js_error)?,
             )
-            .map_err(js_error)?;
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
-
-    /// Lower one shared-policy lobby start directly into an opaque browser
-    /// runtime ticket. JavaScript supplies browser resource URLs but never
-    /// receives fields with which to select the request token, role, content,
-    /// or storage decision.
-    #[wasm_bindgen(js_name = takeLobbyRuntimeStart)]
-    pub fn take_lobby_runtime_start(
-        &mut self,
-        worker_url: String,
-        job_worker_url: String,
-        bindgen_js_url: String,
-        bindgen_wasm_url: String,
-    ) -> Result<Option<WebRuntimeStart>, JsValue> {
-        let Some(pending) = self.host_mut()?.take_lobby_world_start() else {
-            return Ok(None);
-        };
-        if matches!(
-            &pending.target,
-            mclone_scene::ExternalSceneStartTarget::ActiveSession { .. }
-        ) {
-            return Err(JsValue::from_str(
-                "lobby queue produced an active-session start",
-            ));
-        }
-        let seed = pending.scene.seed;
-        let storage_source = pending
-            .storage_source
-            .as_ref()
-            .ok_or_else(|| JsValue::from_str("scenario world start omitted its storage source"))?;
-        let observer_only = matches!(
-            &pending.target,
-            mclone_scene::ExternalSceneStartTarget::Lobby {
-                role: mclone_app_runtime::scenario_content::LobbyWorldRole::Destination,
-                ..
-            }
-        );
-        let mut config = WebIntegratedServerRunnerConfig::new(
-            seed,
-            worker_url,
-            job_worker_url,
-            bindgen_js_url,
-            bindgen_wasm_url,
-        )
-        .with_world_generation_profile(pending.scene.world_generation_profile)
-        .with_world_topology(pending.scene.world_topology)
-        .with_world_behavior_profile(pending.scene.world_behavior_profile)
-        .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
-        .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
-        .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
-        .with_observer_only(observer_only);
-        config = match storage_source {
-            mclone_app_runtime::scenario_content::LobbyWorldSource::TransientAuthored(fixture) => {
-                config.with_transient_authored_fixture(*fixture)
-            }
-            mclone_app_runtime::scenario_content::LobbyWorldSource::AppPrivate(_)
-            | mclone_app_runtime::scenario_content::LobbyWorldSource::Catalog(_) => {
-                config.with_indexed_db_world(storage_source.world_id(), false)
-            }
-        };
-        let center = pending.scene.center();
-        let render_distance = pending.scene.render_distance;
-        Ok(Some(WebRuntimeStart::new(
-            pending,
-            WebRuntimeStartEffect::Integrated {
-                config,
-                center,
-                render_distance,
-            },
-        )))
-    }
-
-    #[wasm_bindgen(js_name = completeRuntimeStart)]
-    pub fn complete_runtime_start(
-        &mut self,
-        start: &mut WebRuntimeStart,
-    ) -> Result<JsValue, JsValue> {
-        let (pending, outcome) = {
-            let mut state = start.state.borrow_mut();
-            let pending = state
-                .pending
-                .take()
-                .ok_or_else(|| JsValue::from_str("runtime start ticket was consumed"))?;
-            let outcome = state
-                .outcome
-                .take()
-                .ok_or_else(|| JsValue::from_str("runtime start ticket is not complete"))?;
-            (pending, outcome)
-        };
-        match outcome {
-            Ok(runtime) => self.complete_started_runtime(pending, runtime),
-            Err(error) => {
-                self.host_mut()?.fail_external_session_start(pending, error);
-                self.ui_report(false, None).map_err(JsValue::from)
-            }
-        }
-    }
-
-    #[wasm_bindgen(js_name = takeWorldCatalogExecution)]
-    pub fn take_world_catalog_execution(&mut self) -> Result<WebCatalogExecution, JsValue> {
-        let pending = self
-            .catalog_operations
-            .pop_front()
-            .ok_or_else(|| JsValue::from_str("no catalog request execution is pending"))?;
-        WebCatalogExecution::new(pending.token, pending.request, pending.active_world)
-            .map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = applyWorldCatalogExecution)]
-    pub fn apply_world_catalog_execution(
-        &mut self,
-        execution: &WebCatalogExecution,
-    ) -> Result<JsValue, JsValue> {
-        let response = execution.response().map_err(JsValue::from)?;
-        self.platform
-            .complete_catalog_operation(PlatformOperationCompletion {
-                token: execution.token().map_err(JsValue::from)?,
-                result: Ok(response),
-            });
-        let (device, queue) = (&self.context.device, &self.context.queue);
-        self.host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
-            .poll_external_catalog_operations(device, queue)
-            .map_err(js_error)?;
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = applyWorldCatalogError)]
-    pub fn apply_world_catalog_error(
-        &mut self,
-        execution: &WebCatalogExecution,
-        message: String,
-    ) -> Result<JsValue, JsValue> {
-        self.platform
-            .complete_catalog_operation(PlatformOperationCompletion {
-                token: execution.token().map_err(JsValue::from)?,
-                result: Err(WorldCatalogError::new(
-                    WorldCatalogErrorKind::StorageFailure,
-                    message,
-                )),
-            });
-        let (device, queue) = (&self.context.device, &self.context.queue);
-        self.host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?
-            .poll_external_catalog_operations(device, queue)
             .map_err(js_error)?;
         self.ui_report(false, None).map_err(JsValue::from)
     }
@@ -1885,101 +1812,144 @@ impl WebSceneHost {
         self.diagnostic_report(None, false, 0.0, false)
             .map_err(JsValue::from)
     }
+}
 
-    #[wasm_bindgen(js_name = takeAssetPackPreparation)]
-    pub fn take_asset_pack_preparation(&mut self) -> Result<WebAssetPackPreparation, JsValue> {
-        let pending = self
-            .host_ref()?
-            .pending_external_asset_pack_selection()
-            .cloned()
-            .ok_or_else(|| JsValue::from_str("no browser asset-pack selection is pending"))?;
-        if self.asset_pack_preparation_in_flight.is_some() {
-            return Err(JsValue::from_str(
-                "browser asset-pack preparation is already in flight",
-            ));
+fn lower_runtime_start(
+    pending: ExternalSceneSessionStart,
+    resources: WebRuntimeResources,
+) -> WebSceneOperationEffect {
+    let (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url) = resources;
+    let center = pending.scene.center();
+    let render_distance = pending.scene.render_distance;
+    let effect = match pending.descriptor.clone() {
+        ActiveSessionDescriptor::Remote { endpoint } => {
+            WebRuntimeStartEffect::Remote(endpoint.address)
         }
-        let authored_enabled = pending
+        ActiveSessionDescriptor::LocalWorld { seed, id, .. } => {
+            let observer_only = matches!(
+                &pending.target,
+                mclone_scene::ExternalSceneStartTarget::Lobby {
+                    role: mclone_app_runtime::scenario_content::LobbyWorldRole::Destination,
+                    ..
+                }
+            );
+            let mut config = WebIntegratedServerRunnerConfig::new(
+                seed,
+                worker_url,
+                job_worker_url,
+                bindgen_js_url,
+                bindgen_wasm_url,
+            )
+            .with_world_generation_profile(pending.scene.world_generation_profile)
+            .with_world_topology(pending.scene.world_topology)
+            .with_world_behavior_profile(pending.scene.world_behavior_profile)
+            .with_freeze_scheduled_fluid_ticks(pending.scene.freeze_scheduled_fluid_ticks)
+            .with_debug_passive_showcase(pending.scene.debug_passive_showcase)
+            .with_debug_auxiliary_player_script(pending.scene.debug_auxiliary_player_script)
+            .with_observer_only(observer_only);
+            config = match pending.storage_source.as_ref() {
+                Some(
+                    mclone_app_runtime::scenario_content::LobbyWorldSource::TransientAuthored(
+                        fixture,
+                    ),
+                ) => config.with_transient_authored_fixture(*fixture),
+                Some(source) => config.with_indexed_db_world(source.world_id(), false),
+                None if id.is_some() => {
+                    config.with_indexed_db_world(id.as_ref().unwrap().as_str(), false)
+                }
+                None => config,
+            };
+            WebRuntimeStartEffect::Integrated(config)
+        }
+    };
+    WebSceneOperationEffect::Runtime {
+        pending,
+        start: effect,
+        center,
+        render_distance,
+    }
+}
+
+fn take_asset_pack_preparation(
+    host: &mut WebSceneHost,
+) -> Result<WebSceneOperationEffect, JsValue> {
+    let pending = host
+        .host_ref()?
+        .pending_external_asset_pack_selection()
+        .cloned()
+        .ok_or_else(|| JsValue::from_str("no browser asset-pack selection is pending"))?;
+    if host.asset_pack_preparation_in_flight.is_some() {
+        return Err(JsValue::from_str(
+            "browser asset-pack preparation is already in flight",
+        ));
+    }
+    let enabled = |id| {
+        pending
             .kind
             .selection
-            .is_enabled(&mclone_assets::AssetPackId::new(
-                AUTHORED_FIRST_PARTY_PACK_ID,
-            ));
-        let reference_enabled =
-            pending
-                .kind
-                .selection
-                .is_enabled(&mclone_assets::AssetPackId::new(
-                    MINECRAFT_REFERENCE_PACK_ID,
-                ));
-        let authored = self.initial_asset_packs.authored.clone();
-        let reference = self.initial_asset_packs.reference.clone();
-        let fallback = self.initial_asset_packs.fallback.clone();
-        let selected_file_count = [
-            authored_enabled.then_some(authored.as_slice()),
-            reference_enabled.then_some(reference.as_slice()),
-            Some(fallback.as_slice()),
-        ]
-        .into_iter()
-        .flatten()
-        .map(|bytes| PackedAssetSource::from_bytes(bytes.to_vec()).map(|pack| pack.file_count()))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| JsValue::from_str(&format!("failed to inspect selected packs: {error}")))?
-        .into_iter()
-        .sum();
-        self.asset_pack_preparation_in_flight = Some(pending.token);
-        Ok(WebAssetPackPreparation {
-            effect: Some(WebAssetPackPreparationEffect {
-                content_generation: pending.kind.content_generation,
-                authored,
-                reference,
-                fallback,
-                authored_enabled,
-                reference_enabled,
-                render_worker: self.render_worker.clone(),
-            }),
-            state: Rc::new(RefCell::new(WebAssetPackPreparationState { outcome: None })),
-            token: pending.token,
+            .is_enabled(&mclone_assets::AssetPackId::new(id))
+    };
+    let authored_enabled = enabled(AUTHORED_FIRST_PARTY_PACK_ID);
+    let reference_enabled = enabled(MINECRAFT_REFERENCE_PACK_ID);
+    let authored = host.initial_asset_packs.authored.clone();
+    let reference = host.initial_asset_packs.reference.clone();
+    let fallback = host.initial_asset_packs.fallback.clone();
+    let selected_file_count = [
+        authored_enabled.then_some(authored.as_slice()),
+        reference_enabled.then_some(reference.as_slice()),
+        Some(fallback.as_slice()),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|bytes| PackedAssetSource::from_bytes(bytes.to_vec()).map(|pack| pack.file_count()))
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(|error| JsValue::from_str(&format!("failed to inspect selected packs: {error}")))?
+    .into_iter()
+    .sum();
+    host.asset_pack_preparation_in_flight = Some(pending.token);
+    Ok(WebSceneOperationEffect::Assets {
+        token: pending.token,
+        content_generation: pending.kind.content_generation,
+        selected_file_count,
+        effect: WebAssetPackPreparationEffect {
             content_generation: pending.kind.content_generation,
-            selected_file_count,
-        })
-    }
+            authored,
+            reference,
+            fallback,
+            authored_enabled,
+            reference_enabled,
+            render_worker: host.render_worker.clone(),
+        },
+    })
+}
 
-    #[wasm_bindgen(js_name = applyAssetPackPreparation)]
-    pub fn apply_asset_pack_preparation(
-        &mut self,
-        preparation: &mut WebAssetPackPreparation,
-    ) -> Result<JsValue, JsValue> {
-        if self.asset_pack_preparation_in_flight != Some(preparation.token) {
-            return Err(JsValue::from_str(
-                "asset preparation ticket does not match the in-flight request",
-            ));
-        }
-        let outcome = preparation
-            .state
-            .borrow_mut()
-            .outcome
-            .take()
-            .ok_or_else(|| JsValue::from_str("asset preparation ticket is not complete"))?;
-        self.asset_pack_preparation_in_flight = None;
-        let failure = outcome.as_ref().err().cloned();
-        let applied = self
-            .host_mut()?
-            .complete_external_asset_pack_preparation(preparation.token, outcome)
-            .map_err(js_error)?;
-        if !applied {
-            self.render_worker
-                .settle_asset_epoch(preparation.content_generation, false);
-            return self.ui_report(false, None).map_err(JsValue::from);
-        }
-        if let Some(error) = failure {
-            return Err(JsValue::from_str(&error));
-        }
-        self.pending_asset_pack_file_count = Some((
-            preparation.content_generation,
-            preparation.selected_file_count,
+fn apply_asset_pack_preparation(
+    host: &mut WebSceneHost,
+    token: PlatformOperationToken,
+    content_generation: u64,
+    selected_file_count: usize,
+    outcome: Result<PreparedSceneAssets, String>,
+) -> Result<JsValue, JsValue> {
+    if host.asset_pack_preparation_in_flight != Some(token) {
+        return Err(JsValue::from_str(
+            "asset preparation ticket does not match the in-flight request",
         ));
-        self.ui_report(false, None).map_err(JsValue::from)
     }
+    let succeeded = outcome.is_ok();
+    host.asset_pack_preparation_in_flight = None;
+    let applied = host
+        .host_mut()?
+        .complete_external_asset_pack_preparation(token, outcome)
+        .map_err(js_error)?;
+    if !applied {
+        host.render_worker
+            .settle_asset_epoch(content_generation, false);
+    }
+    if !applied || !succeeded {
+        return host.ui_report(false, None).map_err(JsValue::from);
+    }
+    host.pending_asset_pack_file_count = Some((content_generation, selected_file_count));
+    host.ui_report(false, None).map_err(JsValue::from)
 }
 
 #[wasm_bindgen]
@@ -2207,7 +2177,7 @@ async fn create_scene_host(
         update_count: 0,
         interaction_count: 0,
         mesh_build_count: 0,
-        catalog_operations: VecDeque::new(),
+        catalog_operation_in_flight: false,
         render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
@@ -2385,12 +2355,6 @@ impl WebSceneHost {
         self.refresh_mono_ui_context()
     }
 
-    fn take_pending_session_start(&mut self) -> Result<ExternalSceneSessionStart, JsValue> {
-        self.host_mut()?
-            .take_external_session_start()
-            .ok_or_else(|| JsValue::from_str("scene host has no pending session start"))
-    }
-
     fn complete_started_runtime(
         &mut self,
         pending: ExternalSceneSessionStart,
@@ -2546,15 +2510,6 @@ impl WebSceneHost {
         let value = self.operational_report(false, 0.0, false)?;
         let object: js_sys::Object = value.unchecked_into();
         report_set_bool(&object, "handled", handled)?;
-        if let Some(operation) = self.platform.take_catalog_operation() {
-            self.catalog_operations
-                .push_back(PendingWebCatalogOperation {
-                    token: operation.token,
-                    request: operation.kind.request.request,
-                    active_world: operation.kind.active_world,
-                });
-            report_set_bool(&object, "catalogRequest", true)?;
-        }
         Ok(object.into())
     }
 
@@ -2731,25 +2686,9 @@ impl WebSceneHost {
             report_set_bool(&object, "uiActive", ui_active)?;
             report_set_bool(
                 &object,
-                "sessionStartPending",
-                host.external_session_start_pending(),
-            )?;
-            report_set_bool(
-                &object,
                 "sessionActive",
                 matches!(host.session_state(), GameSessionState::Active { .. }),
             )?;
-            if let Some(pending) = host
-                .pending_external_asset_pack_selection()
-                .filter(|pending| self.asset_pack_preparation_in_flight != Some(pending.token))
-            {
-                report_set_bool(&object, "assetPackRequest", true)?;
-                report_set_number(
-                    &object,
-                    "assetPackRequestEpoch",
-                    pending.kind.content_generation as f64,
-                )?;
-            }
         }
         Ok(object.into())
     }
@@ -2761,29 +2700,15 @@ impl WebSceneHost {
         delta_seconds: f64,
         first_after_resume: bool,
     ) -> Result<JsValue, String> {
-        let object = js_sys::Object::new();
-        report_set_bool(&object, "ok", true)?;
+        let value = self.operational_report(rendered, delta_seconds, first_after_resume)?;
+        let object: js_sys::Object = value.unchecked_into();
         report_set_string(&object, "owner", "McloneSceneHost")?;
-        report_set_string(&object, "state", self.frame_policy.state().label())?;
-        if let WebSceneFrameState::RestartRequired { reason } = self.frame_policy.state() {
-            report_set_string(&object, "restartReason", reason)?;
-        }
-        report_set_bool(&object, "rendered", rendered)?;
-        report_set_bool(
-            &object,
-            "hostOwnedFrameAssembly",
-            summary.is_some() || self.rendered_frame_count > 0,
-        )?;
-        report_set_bool(&object, "audioCapabilityAbsent", true)?;
-        report_set_bool(&object, "teleportCapabilityAbsent", true)?;
         report_set_number(&object, "frameCount", self.frame_count as f64)?;
         report_set_number(
             &object,
             "renderedFrameCount",
             self.rendered_frame_count as f64,
         )?;
-        report_set_number(&object, "deltaSeconds", delta_seconds)?;
-        report_set_bool(&object, "firstAfterResume", first_after_resume)?;
         report_set_number(&object, "maxFrameGapMs", self.max_frame_gap_millis)?;
         report_set_number(
             &object,
@@ -2829,9 +2754,6 @@ impl WebSceneHost {
         )?;
         report_set_bool(&object, "pauseUiRendered", self.pause_ui_rendered)?;
         report_set_bool(&object, "resized", self.resized)?;
-        report_set_number(&object, "width", self.context.width as f64)?;
-        report_set_number(&object, "height", self.context.height as f64)?;
-        report_set_bool(&object, "shutdownComplete", self.shutdown_complete)?;
         report_set_bool(&object, "configured", true)?;
         report_set_bool(&object, "assetPackLoaded", self.asset_pack_file_count > 0)?;
         report_set_bool(&object, "textured", self.asset_pack_file_count > 0)?;
@@ -2841,16 +2763,8 @@ impl WebSceneHost {
             "assetPackFileCount",
             self.asset_pack_file_count as f64,
         )?;
-        report_set_number(&object, "assetPackParseCount", 1.0)?;
-        report_set_number(&object, "terrainAssetLoadCount", 1.0)?;
-        report_set_number(&object, "atlasUploadCount", 1.0)?;
         report_set_number(&object, "renderCount", self.rendered_frame_count as f64)?;
         report_set_number(&object, "interactionCount", self.interaction_count as f64)?;
-        report_set_bool(
-            &object,
-            "initialPresentationReady",
-            self.initial_presentation_stable_frames >= INITIAL_PRESENTATION_STABLE_FRAMES,
-        )?;
         self.write_common_counts(&object)?;
 
         if let Some(host) = self.host.as_ref() {
@@ -3651,37 +3565,6 @@ impl WebSceneHost {
                     report_set_string(&object, "assetReplacementError", message)?;
                 }
             }
-            if let Some(pending) = host
-                .pending_external_asset_pack_selection()
-                .filter(|pending| self.asset_pack_preparation_in_flight != Some(pending.token))
-            {
-                report_set_bool(&object, "assetPackRequest", true)?;
-                report_set_number(
-                    &object,
-                    "assetPackRequestEpoch",
-                    pending.kind.content_generation as f64,
-                )?;
-                report_set_bool(
-                    &object,
-                    "assetPackAuthoredEnabled",
-                    pending
-                        .kind
-                        .selection
-                        .is_enabled(&mclone_assets::AssetPackId::new(
-                            AUTHORED_FIRST_PARTY_PACK_ID,
-                        )),
-                )?;
-                report_set_bool(
-                    &object,
-                    "assetPackReferenceEnabled",
-                    pending
-                        .kind
-                        .selection
-                        .is_enabled(&mclone_assets::AssetPackId::new(
-                            MINECRAFT_REFERENCE_PACK_ID,
-                        )),
-                )?;
-            }
             let ui_state = host.mono_ui_render_state();
             let world_catalog = ui_state.world_catalog;
             report_set_bool(&object, "uiActive", host.mono_ui_is_active())?;
@@ -3816,11 +3699,6 @@ impl WebSceneHost {
                 report_set_string(&object, "inputPreferenceError", error)?;
             }
             write_session_state(&object, host.session_state())?;
-            report_set_bool(
-                &object,
-                "sessionStartPending",
-                host.external_session_start_pending(),
-            )?;
             let effective_status = if self.status_overlay.visible {
                 self.status_overlay.clone()
             } else {

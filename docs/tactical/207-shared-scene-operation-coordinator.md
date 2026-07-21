@@ -1,9 +1,10 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: implementation active. Slices 0–2 and the mandatory post-identity
-decision gate landed on 2026-07-21. The browser ABI cutover and one
-boundary-operation token family are live; the current pickup is one
-consolidated opaque browser-operation drain. The original proposal framed
+Status: implementation active. Slices 0–3 and the mandatory post-identity
+decision gate landed on 2026-07-21. The browser ABI cutover, one
+boundary-operation token family, and the consolidated opaque browser-operation
+drain are live; Slice 6 validation and closeout are the current pickup. The
+original proposal framed
 success as deleting the remaining named TypeScript pumps. The measured
 two-sided audit showed the complexity mass sits on the Rust side, so the plan
 now makes Rust-side consolidation the primary deliverable — one
@@ -283,44 +284,47 @@ now owns the session and asset ledgers; `mclone-app-runtime` remains 33,877.
 Exports remain 48, async mutable exports remain zero, and cfg counts remain
 71 / 110. Identity/staleness systems are 4 -> 1.
 
-### Product TypeScript coordination state
+### Slice 3 opaque-drain evidence
 
-`mclone-web-app.ts` currently owns:
+`WebSceneOperation` now hides runtime start, asset preparation, and catalog
+execution behind one `WebSceneHost::takeSceneOperation` /
+`completeSceneOperation` lifecycle. Product TypeScript has one drain and one
+physical Promise registry. The latter exists only so observer shutdown can
+wait for already-owned browser work; it does not admit operations or exclude
+ordinary host calls.
 
-- a generic `pendingSceneOperations` registry used only to let observer
-  shutdown await physical Promise quiescence;
-- `lobbyOperationDrainActive` and `worldCatalogOperationTail`, which serialize
-  two browser pumps outside Rust;
-- separate `dispatchSceneSessionOperation`, `dispatchWorldCatalogOperation`,
-  and `dispatchAssetPackOperation` branches;
-- separate take/start/complete loops over runtime-start, catalog, and asset
-  ticket classes; and
-- a warmup loop that reads `initialPresentationReady` and
-  `renderWorkerPendingRequestCount`.
+Rust retains the specialized owners and executors: runtime and asset work use
+the wrapper's Promise executor, while catalog work hands the same wrapper an
+opaque `WebCatalogExecution` for mechanical IndexedDB actions. Shared scene
+Rust selects the next active/lobby runtime start. Browser Rust controls catalog
+serialization and all three completion folds. TypeScript does not inspect the
+operation variant.
 
-The remaining coordination band is 259 authored lines. Rust already owns the
-pending semantic state behind it. The TypeScript state is a consequence of
-how that state is exposed, not an independent policy source.
+The cut deleted `lobbyOperationDrainActive`, `worldCatalogOperationTail`, the
+three named dispatchers, six named host take/complete exports, three report
+wakeups, and TypeScript's render-worker readiness reconstruction. The smoke
+observer receives only the generic completion report and owns its query-gated
+semantic receipt accounting.
 
-### Current Rust split
+The fixpoint is compiled and source-locked: a `TestOnlyRemote` coarse effect
+variant reuses the existing Promise capability, while TypeScript contains no
+corresponding name and `WebSceneHost` remains at 42 exports. The wasm test
+target compiles this variant and the native source lock asserts the unchanged
+adapter/export surface.
 
-- `GameSessionCoordinator` owns request meaning while active and lobby
-  runtime starts share the same `WebRuntimeStart` effect/completion type and
-  ledger-token acceptance rules.
-- Session, catalog, and asset operations all use the one
-  `PlatformOperationLedger` identity family. Catalog identity stays opaque in
-  `WebCatalogExecution`; asset `content_generation` remains solely a resource
-  compatibility invariant.
-- Browser Rust already computes complete initial-presentation readiness.
-- The three exported ticket classes contain about 218 lines, and ten
-  operation-specific wasm methods take, start, or complete them. The host
-  lowering for these paths is about 305 more lines outside smoke/shutdown.
-- The web lowering layer (`web_scene_host.rs` 4,399 lines,
-  `web_catalog_execution.rs` 1,518, `web_scene_protocol.rs` 242) exists to
-  turn shared operations into JS-drivable tickets; native has no equivalent.
-- `mclone-scene/src/session.rs` is 6,601 lines carrying 50 explicit non-wasm
-  cfg forks (71 across the crate) between direct native starts and web ticket
-  lowering.
+Clean-revision Slice 3 scoreboard values are 3,574 authored TypeScript lines,
+20,574 web-only Rust lines, and 24,148 combined lines. Relative to the
+`8a3e9b12` baseline those are -183, -3, and -186. Shared `mclone-scene` is
+24,731 lines, `mclone-app-runtime` remains 33,877, host exports are 48 -> 42,
+async mutable exports remain zero, the identity family count remains one, and
+cfg forks remain 71 / 110.
+
+Catalog, asset, and lobby-runtime semantic probes passed through the generic
+receipt path. Local, remote, mobile, and IndexedDB reload lanes reached their
+semantic assertions. The known transparent-black browser captures still fail
+their pixel gates, and the lobby lifecycle lane still times out during preview
+activation as it did at Slice 0. Those are explicit Slice 6 validation
+dispositions; they are not counted as pixel/lifecycle passes.
 
 The missing piece is not policy. It is one shared way to issue owned work,
 release the scene borrow, and fold a later platform completion back through a
@@ -589,7 +593,9 @@ providing no operation-lifecycle simplification.
 
 ### Slice 3: One opaque browser-operation drain
 
-Status: current pickup.
+Status: complete 2026-07-21. The generic wrapper/drain, shared runtime-start
+selection, Rust catalog serialization, readiness simplification, source locks,
+fixpoint variant, and clean net-negative scoreboard are recorded above.
 
 - Expose one opaque `WebSceneOperation` wrapper and one host take/complete
   path over runtime-start, catalog, and asset-preparation work. TypeScript
@@ -645,6 +651,8 @@ Exit: either the smaller domain-blind addressing runner lands with measured net
 deletion, or the retained platform mapping is documented as the cheaper owner.
 
 ### Slice 6: Cutover validation, deletion closeout, and ledger report
+
+Status: current pickup.
 
 - Delete superseded reports, exported methods, state fields, helpers, tests,
   and historical compatibility branches rather than retaining two paths.
