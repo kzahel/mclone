@@ -17,10 +17,16 @@ export interface AnimalCatalogFigure {
   materialCount: number;
   name: string;
   partCount: number;
+  runtimePromotion?: AnimalCatalogRuntimePromotion;
   semanticBytes: number;
   semanticSha256: string;
   textureCount: number;
   thumbnailPath: string;
+}
+
+export interface AnimalCatalogRuntimePromotion {
+  figureId: string;
+  jsonPath: string;
 }
 
 export interface AnimalCatalogDocument {
@@ -31,6 +37,7 @@ export interface AnimalCatalogDocument {
     canonicalFigures: number;
     clips: number;
     parts: number;
+    runtimePromotedFigures: number;
   };
 }
 
@@ -49,11 +56,32 @@ export function parseAnimalCatalog(value: unknown, sourceLabel: string): AnimalC
     );
   }
   const names = new Set<string>();
+  const runtimeFigureIds = new Set<string>();
+  const runtimePaths = new Set<string>();
   for (const figure of figures) {
     if (names.has(figure.name)) {
       throw new Error(`Animal catalogue '${sourceLabel}' contains duplicate figure '${figure.name}'`);
     }
     names.add(figure.name);
+    if (figure.runtimePromotion) {
+      if (runtimeFigureIds.has(figure.runtimePromotion.figureId)) {
+        throw new Error(
+          `Animal catalogue '${sourceLabel}' contains duplicate runtime figure ID '${figure.runtimePromotion.figureId}'`,
+        );
+      }
+      if (runtimePaths.has(figure.runtimePromotion.jsonPath)) {
+        throw new Error(
+          `Animal catalogue '${sourceLabel}' contains duplicate runtime path '${figure.runtimePromotion.jsonPath}'`,
+        );
+      }
+      runtimeFigureIds.add(figure.runtimePromotion.figureId);
+      runtimePaths.add(figure.runtimePromotion.jsonPath);
+    }
+  }
+  if (value.summary.runtimePromotedFigures !== runtimeFigureIds.size) {
+    throw new Error(
+      `Animal catalogue '${sourceLabel}' expected ${value.summary.runtimePromotedFigures} runtime-promoted figures but contains ${runtimeFigureIds.size}`,
+    );
   }
 
   return {
@@ -107,6 +135,9 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
   if (value.clipCount !== clips.length || !clips.some((clip) => clip.name === value.defaultClip)) {
     throw new Error(`Animal catalogue '${sourceLabel}' has inconsistent clips for '${value.name}'`);
   }
+  const runtimePromotion = value.runtimePromotion === undefined
+    ? undefined
+    : parseRuntimePromotion(value.runtimePromotion, sourceLabel, index);
   return {
     clipCount: value.clipCount,
     clips,
@@ -116,11 +147,32 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
     materialCount: value.materialCount,
     name: value.name,
     partCount: value.partCount,
+    ...(runtimePromotion === undefined ? {} : { runtimePromotion }),
     semanticBytes: value.semanticBytes,
     semanticSha256: value.semanticSha256,
     textureCount: value.textureCount,
     thumbnailPath: value.thumbnailPath,
   };
+}
+
+function parseRuntimePromotion(
+  value: unknown,
+  sourceLabel: string,
+  figureIndex: number,
+): AnimalCatalogRuntimePromotion {
+  if (
+    !isRecord(value)
+    || typeof value.figureId !== "string"
+    || !/^[a-z0-9._-]+:[a-z0-9._/-]+$/u.test(value.figureId)
+    || typeof value.jsonPath !== "string"
+    || !value.jsonPath.startsWith("assets/mclone/figures/")
+    || !isRelativeArtifactPath(value.jsonPath, ".figure.json")
+  ) {
+    throw new Error(
+      `Animal catalogue '${sourceLabel}' has invalid runtime promotion metadata at figure ${figureIndex}`,
+    );
+  }
+  return { figureId: value.figureId, jsonPath: value.jsonPath };
 }
 
 function parseCatalogClip(
@@ -156,7 +208,8 @@ function isCatalogSummary(value: unknown): value is AnimalCatalogDocument["summa
   return isRecord(value)
     && isNonnegativeInteger(value.canonicalFigures)
     && isNonnegativeInteger(value.clips)
-    && isNonnegativeInteger(value.parts);
+    && isNonnegativeInteger(value.parts)
+    && isNonnegativeInteger(value.runtimePromotedFigures);
 }
 
 function isLocomotionKind(value: unknown): value is LocomotionKind {

@@ -15,6 +15,7 @@ import {
 } from "./catalog-model";
 import { discoverCanonicalFigureSources } from "./discover-figures";
 import { assertBoxOnlyFigure } from "./dsl";
+import { FIRST_PARTY_FIGURES } from "./first-party-figures";
 import { loadFigureJsonDocument } from "./load";
 import { clipDuration } from "./scene";
 import { assetLabRoot } from "./vite-figure-path";
@@ -31,6 +32,9 @@ interface PreparedCatalogFigure {
 }
 
 const defaultOutRoot = path.join(assetLabRoot, "dist", "catalog-public");
+const firstPartyFiguresByName = new Map(
+  FIRST_PARTY_FIGURES.map((figure) => [figure.name, figure] as const),
+);
 
 export async function buildWebCatalog(
   options: BuildWebCatalogOptions = {},
@@ -69,6 +73,14 @@ export async function buildWebCatalog(
       throw new Error(`Canonical figure '${asset.name}' has no animation clips`);
     }
     const semanticSha256 = sha256(document.json);
+    const firstPartyFigure = firstPartyFiguresByName.get(asset.name);
+    const runtimePromotion = firstPartyFigure !== undefined
+      && path.resolve(sourcePath) === path.resolve(firstPartyFigure.sourcePath)
+      ? {
+          figureId: firstPartyFigure.runtimeFigureId,
+          jsonPath: firstPartyFigure.runtimePath,
+        }
+      : undefined;
     prepared.push({
       entry: {
         clipCount: clips.length,
@@ -79,6 +91,7 @@ export async function buildWebCatalog(
         materialCount: Object.keys(asset.materials).length,
         name: asset.name,
         partCount: asset.parts.length,
+        ...(runtimePromotion === undefined ? {} : { runtimePromotion }),
         semanticBytes: Buffer.byteLength(document.json),
         semanticSha256,
         textureCount: Object.keys(asset.textures).length,
@@ -90,7 +103,12 @@ export async function buildWebCatalog(
   prepared.sort((left, right) => left.entry.label.localeCompare(right.entry.label));
 
   const catalogSha256 = sha256(
-    prepared.map(({ entry }) => `${entry.name}\0${entry.semanticSha256}\n`).join(""),
+    prepared.map(({ entry }) => [
+      entry.name,
+      entry.semanticSha256,
+      entry.runtimePromotion?.figureId ?? "",
+      entry.runtimePromotion?.jsonPath ?? "",
+    ].join("\0")).join("\n"),
   );
   const catalog: AnimalCatalogDocument = {
     catalogSha256,
@@ -100,6 +118,7 @@ export async function buildWebCatalog(
       canonicalFigures: prepared.length,
       clips: prepared.reduce((total, { entry }) => total + entry.clipCount, 0),
       parts: prepared.reduce((total, { entry }) => total + entry.partCount, 0),
+      runtimePromotedFigures: prepared.filter(({ entry }) => entry.runtimePromotion !== undefined).length,
     },
   };
   parseAnimalCatalog(catalog, "generated catalogue");

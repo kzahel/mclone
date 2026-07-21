@@ -7,6 +7,7 @@ import test from "node:test";
 import { buildWebCatalog } from "../src/build-web-catalog";
 import { parseAnimalCatalog } from "../src/catalog-model";
 import { discoverCanonicalFigureSources } from "../src/discover-figures";
+import { FIRST_PARTY_FIGURES } from "../src/first-party-figures";
 import { assetLabRoot } from "../src/vite-figure-path";
 
 test("builds deterministic canonical JSON catalogue artifacts", async () => {
@@ -20,15 +21,35 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
     const catalog = await buildWebCatalog({ outRoot, sourcePaths, thumbnails: false });
     assert.equal(catalog.schemaVersion, 1);
     assert.equal(catalog.summary.canonicalFigures, 2);
+    assert.equal(catalog.summary.runtimePromotedFigures, 1);
     assert.deepEqual(catalog.figures.map((figure) => figure.name), ["chicken", "king_cobra"]);
     assert.equal(catalog.figures[0]?.defaultClip, "walk");
+    assert.deepEqual(catalog.figures[0]?.runtimePromotion, {
+      figureId: "mclone:chicken",
+      jsonPath: "assets/mclone/figures/chicken.figure.json",
+    });
     assert.equal(catalog.figures[1]?.defaultClip, "slither");
+    assert.equal(catalog.figures[1]?.runtimePromotion, undefined);
 
     const written = parseAnimalCatalog(
       JSON.parse(await fs.readFile(path.join(outRoot, "catalog/catalog.v1.json"), "utf8")),
       "test catalogue",
     );
     assert.deepEqual(written, catalog);
+    const inconsistentSummary = structuredClone(catalog);
+    inconsistentSummary.summary.runtimePromotedFigures = 0;
+    assert.throws(
+      () => parseAnimalCatalog(inconsistentSummary, "inconsistent catalogue"),
+      /expected 0 runtime-promoted figures but contains 1/,
+    );
+    const unsafeRuntimePath = structuredClone(catalog);
+    const chickenPromotion = unsafeRuntimePath.figures[0]?.runtimePromotion;
+    assert.ok(chickenPromotion);
+    chickenPromotion.jsonPath = "../chicken.figure.json";
+    assert.throws(
+      () => parseAnimalCatalog(unsafeRuntimePath, "unsafe catalogue"),
+      /invalid runtime promotion metadata/,
+    );
     for (const figure of catalog.figures) {
       const json = await fs.readFile(path.join(outRoot, figure.jsonPath), "utf8");
       assert.equal(Buffer.byteLength(json), figure.semanticBytes);
@@ -46,6 +67,13 @@ test("discovers canonical examples without the legacy rounded archive", async ()
   assert.ok(sources.every((source) => source.includes(`${path.sep}examples${path.sep}`)));
   assert.ok(sources.every((source) => !source.includes("legacy-examples")));
   assert.ok(sources.some((source) => source.endsWith(path.join("chicken", "figure.ts"))));
+  const sourceSet = new Set(sources.map((source) => path.resolve(source)));
+  assert.deepEqual(
+    FIRST_PARTY_FIGURES.filter((figure) => sourceSet.has(path.resolve(figure.sourcePath)))
+      .map((figure) => figure.name)
+      .sort(),
+    ["chicken", "player", "upright_bear"],
+  );
 });
 
 test("rejects duplicate canonical figure names", async () => {
