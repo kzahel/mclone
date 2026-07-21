@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/figure-json.test.ts tests/scene-animation.test.ts tests/catalog.test.ts && pnpm figures:check && pnpm geometry:check && pnpm surface:check",
+    "test": "tsx --test tests/figure-json.test.ts tests/scene-animation.test.ts tests/catalog.test.ts && pnpm figures:check && pnpm geometry:check && pnpm ground:check && pnpm surface:check",
     "catalog:build": "tsx src/build-web-catalog.ts",
     "web:dev": "pnpm catalog:build && vite --config src/web/vite.config.ts",
     "web:build": "pnpm catalog:build && vite build --config src/web/vite.config.ts",
@@ -13,6 +13,7 @@
     "web:test": "playwright test -c playwright.config.ts",
     "figures:check": "tsx src/sync-first-party.ts --check",
     "geometry:check": "tsx src/check-geometry.ts",
+    "ground:check": "tsx src/check-ground.ts",
     "surface:check": "tsx src/check-surfaces.ts",
     "figures:write": "tsx src/sync-first-party.ts --write",
     "preview": "vite --host 127.0.0.1",

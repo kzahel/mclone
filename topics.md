@@ -91,6 +91,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `figure-geometry-analysis` — rest-pose canonical figure connectivity,
   oriented-box component analysis, reasoned exact-component exceptions, and
   later sampled animation checks
+- `figure-ground-penetration` — sampled land-figure ground-plane analysis,
+  declared-contact exclusion, exact reasoned exceptions, ratcheted warning
+  inventory, and corrected Chameleon tail evidence
 - `animal-catalogue` — shared Asset Lab semantic viewer, generated canonical
   figure catalogue, and production `/animals/` deployment
 - `platform-boundary-convergence` — parent ledger for the shared/platform

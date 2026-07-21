@@ -152,6 +152,29 @@ changes the component. This keeps exceptions narrow, reviewed, and removable.
 The gate is an oriented-box rest-pose check, not collision detection or an
 animated-pose proof; visual sheet/video review remains required.
 
+Land figures also pass a sampled-pose ground-penetration gate. It evaluates
+rest, land locomotion, idle, and action poses; transforms every box corner; and
+reports non-contact parts more than `0.02` units below figure-space `y=0`.
+Swim/flight clips and exact boxes declared as locomotion contacts are excluded.
+Run `pnpm asset-lab:ground:check -- --verbose` to inspect the ratcheted catalog
+warning inventory as well as any failures.
+
+New penetrating parts fail. Existing exact figure/part findings live in
+`src/ground-baseline.ts` and become stale when corrected. An intentional new
+relationship must name exactly one part and explain why it crosses the ground:
+
+```ts
+geometryException({
+  rule: "ground-penetration",
+  parts: ["burrowing_claw"],
+  reason: "This action deliberately pushes the named claw into loose soil.",
+});
+```
+
+Do not declare a tail or decoration as a locomotion contact to hide a defect.
+Contacts are reserved for genuinely load-bearing pads; their own contact-depth
+quality remains a separate procedural-animation concern.
+
 Canonical figures also pass a sampled-pose surface-stability gate. It evaluates
 rest, clip keys, key midpoints, and a bounded uniform cadence; transforms every
 box face; and reports differently rendered, same-facing planes with meaningful

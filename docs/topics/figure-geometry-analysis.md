@@ -2,7 +2,7 @@
 
 Topic: `figure-geometry-analysis`
 
-Status: implemented as a required canonical Asset Lab gate. The 113-figure
+Status: implemented as a required canonical Asset Lab gate. The 119-figure
 baseline has zero unacknowledged and zero acknowledged disconnected components.
 
 ## Scope
@@ -10,7 +10,9 @@ baseline has zero unacknowledged and zero acknowledged disconnected components.
 This topic owns conspicuously disconnected box components in canonical Asset
 Lab figures and the narrow exception contract for intentionally floating
 geometry. Same-facing coplanar surfaces and animated depth instability remain
-owned by [`figure-surface-stability.md`](figure-surface-stability.md). General
+owned by [`figure-surface-stability.md`](figure-surface-stability.md), while
+sampled below-ground geometry is checked by
+[`figure-ground-penetration.md`](figure-ground-penetration.md). General
 collision, inverse kinematics, runtime physics, and curved legacy primitives
 are outside this check.
 
@@ -72,7 +74,7 @@ reviewers and future authoring agents see them.
   exact exception with a reason round-trips through JSON, a stale exception
   fails, and an empty reason fails.
 - The required scan currently reports zero unacknowledged and zero acknowledged
-  components across 113 canonical figures.
+  components across 119 canonical figures.
 
 ## Limits And Next Direction
 

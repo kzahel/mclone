@@ -152,6 +152,162 @@ test("canonical geometry requires reasoned disconnected-component exceptions", (
   );
 });
 
+test("land figures reject sampled non-contact ground penetration", () => {
+  assert.throws(
+    () => figure("grounded_tail_fixture", ({ box, clip, mat, part }) => {
+      mat("skin", "#667766");
+      part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "skin" }));
+      part("tail", box({
+        parent: "body",
+        at: [0, -0.36, 0],
+        size: [0.2, 0.24, 0.2],
+        material: "skin",
+      }));
+      clip("walk", {
+        role: "locomotion",
+        locomotion: {
+          kind: "quadruped-walk",
+          cycleDistance: 0.5,
+          direction: [0, 0, -1],
+          units: "figure",
+        },
+        keys: [
+          ["tail", 0, { at: [0, 0, 0] }],
+          ["tail", 1, { at: [0, -0.08, 0] }],
+        ],
+      });
+    }),
+    /ground-penetration part 'tail'.*clip 'walk' at 1\.000s.*geometryException/s,
+  );
+
+  const acknowledged = figure("acknowledged_ground_fixture", ({
+    box,
+    clip,
+    geometryException,
+    mat,
+    part,
+  }) => {
+    mat("skin", "#667766");
+    part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "skin" }));
+    part("tail", box({
+      parent: "body",
+      at: [0, -0.36, 0],
+      size: [0.2, 0.24, 0.2],
+      material: "skin",
+    }));
+    clip("walk", {
+      role: "locomotion",
+      locomotion: {
+        kind: "quadruped-walk",
+        cycleDistance: 0.5,
+        direction: [0, 0, -1],
+        units: "figure",
+      },
+      keys: [
+        ["tail", 0, { at: [0, 0, 0] }],
+        ["tail", 1, { at: [0, -0.08, 0] }],
+      ],
+    });
+    geometryException({
+      rule: "ground-penetration",
+      parts: ["tail"],
+      reason: "This fixture intentionally proves a reasoned ground exception.",
+    });
+  });
+  assert.deepEqual(
+    roundTripFigureAsset(acknowledged, "acknowledged ground source").asset,
+    acknowledged,
+  );
+
+  assert.throws(
+    () => figure("stale_ground_fixture", ({
+      box,
+      clip,
+      geometryException,
+      mat,
+      part,
+    }) => {
+      mat("skin", "#667766");
+      part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "skin" }));
+      part("tail", box({
+        parent: "body",
+        at: [0, -0.26, 0],
+        size: [0.2, 0.24, 0.2],
+        material: "skin",
+      }));
+      clip("walk", {
+        role: "locomotion",
+        locomotion: {
+          kind: "quadruped-walk",
+          cycleDistance: 0.5,
+          direction: [0, 0, -1],
+          units: "figure",
+        },
+        keys: [["tail", 0, { at: [0, 0, 0] }]],
+      });
+      geometryException({
+        rule: "ground-penetration",
+        parts: ["tail"],
+        reason: "This should become stale after the tail is raised.",
+      });
+    }),
+    /stale ground exception/,
+  );
+
+  assert.doesNotThrow(
+    () => figure("declared_contact_fixture", ({ box, clip, mat, part }) => {
+      mat("skin", "#667766");
+      part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "skin" }));
+      part("foot", box({
+        parent: "body",
+        at: [0, -0.44, 0],
+        size: [0.2, 0.24, 0.2],
+        material: "skin",
+      }));
+      clip("walk", {
+        role: "locomotion",
+        locomotion: {
+          kind: "quadruped-walk",
+          cycleDistance: 0.5,
+          direction: [0, 0, -1],
+          units: "figure",
+          contacts: [{
+            part: "foot",
+            phaseStart: 0,
+            phaseEnd: 0.6,
+            role: "front-left",
+            stanceRatio: 0.6,
+          }],
+        },
+        keys: [["foot", 0, { rot: [0, 0, 0] }]],
+      });
+    }),
+  );
+
+  assert.doesNotThrow(
+    () => figure("swimming_tail_fixture", ({ box, clip, mat, part }) => {
+      mat("skin", "#667766");
+      part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "skin" }));
+      part("tail", box({
+        parent: "body",
+        at: [0, -0.44, 0],
+        size: [0.2, 0.24, 0.2],
+        material: "skin",
+      }));
+      clip("swim", {
+        role: "locomotion",
+        locomotion: {
+          kind: "swim",
+          cycleDistance: 0.8,
+          direction: [0, 0, -1],
+          units: "figure",
+        },
+        keys: [["tail", 0, { rot: [0, 0, 0] }]],
+      });
+    }),
+  );
+});
+
 test("canonical surfaces require reasoned exact-face exceptions", () => {
   assert.throws(
     () => figure("coplanar_fixture", ({ box, mat, part }) => {
@@ -557,7 +713,7 @@ test("swim macro exports ordinary body tail fin keys and locomotion", () => {
 test("slither macro exports a phased segment wave and locomotion", () => {
   const asset = figure("slitherer", ({ mat, part, box, slither }) => {
     mat("skin", "#447744");
-    part("body", box({ size: [0.4, 0.3, 0.7], material: "skin" }));
+    part("body", box({ at: [0, 0.15, 0], size: [0.4, 0.3, 0.7], material: "skin" }));
     part("middle", box({ parent: "body", size: [0.3, 0.25, 0.6], material: "skin" }));
     part("tail", box({ parent: "middle", size: [0.2, 0.2, 0.5], material: "skin" }));
     slither("slither", {

@@ -120,7 +120,7 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Dog | P0 | ✅ | Q | breeds: shepherd, lab, husky, pug, dachshund, corgi; puppy | `examples/dog` — canonical 17-box broad dog with floppy ears, collar, wide paws, and raised tail; rounded A/B retained at `legacy-examples/dog_rounded` |
 | Cat | P0 | ✅ | Q | tabby, black, white, calico, orange, siamese; kitten | `examples/cat` — canonical 16-box tabby with pixel face/stripes and an attached two-piece cuboid tail; rounded A/B retained at `legacy-examples/cat_rounded` |
-| Hamster / Guinea pig | P3 | ☐ | Q | — | tiny, rounded |
+| Hamster / Guinea pig | P3 | ✅ | Q | — | `examples/hamster` — review candidate golden hamster with compact cheek-pouch silhouette, tiny pink paws, bead eyes, hidden tail, and fast scurry |
 | Parrot (pet) | P2 | ✅ | W | see Birds | `examples/parrot` — approved 15-box scarlet macaw; see Birds |
 
 ## Canids (wild)
@@ -140,7 +140,7 @@ reviewed rigs and then filling macro gaps.
 | Tiger | P1 | ✅ | Q | orange, white, cub | `examples/tiger` — canonical 20-box tiger with pixel-textured stripes; `legacy-examples/tiger_rounded` retains the rounded A/B |
 | Leopard / Jaguar | P2 | ✅ | Q | spotted, melanistic (black panther) | `examples/jaguar` — approved 23-box adult jaguar with heavy shoulder/hip masses, broad cheeks, short legs, and rosette-patterned coat faces |
 | Cheetah | P2 | ✅ | Q | — | `examples/cheetah` — approved 20-box narrow-waisted runner with tall legs, tear-marked face, spotted coat, and paired-leg sprint |
-| Lynx / Bobcat | P3 | ☐ | Q | ear tufts | scaled-up cat rig |
+| Lynx / Bobcat | P3 | ✅ | Q | ear tufts | `examples/lynx` — review candidate Eurasian lynx with high rump, long legs, snowshoe paws, cheek ruffs, black ear tufts, spotted coat, and short tail |
 
 ## Bears
 
@@ -250,18 +250,19 @@ reviewed rigs and then filling macro gaps.
 | Shrimp | P3 | ✅ | S | — | `examples/shrimp` — approved 41-box pink shrimp with pointed rostrum, stalked eyes, long antennae, six walking legs, ten swimmerets, curled plated abdomen, and paddle swim |
 | Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |
 | Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
+| Walrus | P2 | ✅ | S/Q | Atlantic, Pacific | `examples/walrus` — review candidate Atlantic walrus with massive wrinkled body, paired whisker pads and tusks, broad foreflippers, and split hind flippers |
 
 ## Reptiles & amphibians
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Snake | P2 | ✅ | SL | green, brown, cobra (hood), rattlesnake | `examples/king_cobra` — approved 15-box king cobra with raised patterned hood, forked tongue, and seven-stage slither chain |
-| Lizard / Gecko | P2 | ✅ | Q | gecko, iguana, chameleon | `examples/gecko` — approved 25-box Tokay gecko with orange-spotted blue-gray hide, raised eyes, four two-stage sprawled legs, adhesive toe pads, tapered tail, and lateral scuttle |
+| Lizard / Gecko | P2 | ✅ | Q | gecko, iguana, chameleon | `examples/gecko` is the approved Tokay gecko; `examples/chameleon` is a review candidate veiled chameleon with raised independent eyes, casque, grasping feet, angular coiled tail, careful creep, and tongue-strike action |
 | Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles |
 | Crocodile / Alligator | P2 | ✅ | Q | croc, gator | `examples/crocodile` — approved 24-box Nile crocodile with armored back, long jaw, sprawled walk, and articulated tail |
 | Komodo dragon | P3 | ✅ | Q | — | `examples/komodo_dragon` — approved 31-box adult monitor with scaled torso, muscular neck, forked tongue, four stout clawed limbs, and four-stage tail |
 | Frog | P2 | ✅ | H | green, tree-frog morphs, toad; tadpole | `examples/frog` — approved 19-box green frog with raised amber eyes, broad head, folded hind legs, toe pads, looping hop, and separate one-shot jump action |
-| Salamander / Newt | P3 | ☐ | Q | — | |
+| Salamander / Newt | P3 | ✅ | Q | — | `examples/salamander` — review candidate fire salamander with glossy warning-patterned body, broad low head, sprawled feet, and four-stage tail crawl |
 
 ## Insects & arthropods
 
@@ -275,6 +276,7 @@ reviewed rigs and then filling macro gaps.
 | Ant | P3 | ✅ | C | worker, soldier | `examples/ant` — approved 22-box carpenter ant with three distinct body sections, narrow petiole, paired mandibles, elbowed antennae, six two-stage legs, and alternating tripod march |
 | Beetle | P3 | ✅ | C | rhino/stag beetle | `examples/stag_beetle` — approved 27-box male stag beetle with split chestnut wing cases, broad thorax, branched mandibles, clubbed antennae, six two-stage legs, and alternating tripod crawl |
 | Grasshopper / Cricket | P3 | ✅ | H | — | `examples/grasshopper` — approved 24-box meadow grasshopper with folded wings, long antennae, four two-stage walking legs, oversized three-stage hind legs, and synchronized springing hop |
+| Praying mantis | P2 | ✅ | C | green, brown | `examples/praying_mantis` — review candidate European mantis with triangular head, long prothorax, folded spined forelegs, four-leg stalk, veined wings, and separate raptorial strike action |
 | Scorpion | P3 | ✅ | C | — | `examples/scorpion` — approved 36-box desert scorpion with broad pedipalps, eight two-stage legs, forward-curled seven-part tail, dark stinger, and alternating wave crawl |
 | Roly-poly / Pill bug | P2 | ✅ | C | — | `examples/roly_poly` — approved 27-box common pill bug with seven stepped shell bands, fourteen short legs, antennae, tail plate, separate crawl, and middle-rooted roll-up/unroll actions that tuck both ends below the shell |
 | Earwig (pincher bug) | P2 | ✅ | C | — | `examples/earwig` — approved 30-box common earwig with five raised abdomen bands, long antennae, six two-stage legs, paired three-part rear forceps, and tripod scuttle |

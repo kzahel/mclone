@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { assertFigureGeometry } from "./geometry-analysis";
+import { assertFigureGrounding } from "./ground-analysis";
 import { assertFigureSurfaces } from "./surface-analysis";
 
 export type Vec3 = readonly [number, number, number];
@@ -18,7 +19,7 @@ export interface FigureAsset {
 }
 
 export interface GeometryExceptionSpec {
-  rule: "disconnected-component";
+  rule: "disconnected-component" | "ground-penetration";
   parts: string[];
   reason: string;
 }
@@ -385,6 +386,7 @@ export function figure(name: string, build: (api: FigureApi) => void): FigureAss
   const asset = buildFigureAsset(name, build);
   assertBoxOnlyFigure(asset);
   assertFigureGeometry(asset);
+  assertFigureGrounding(asset);
   assertFigureSurfaces(asset);
   return asset;
 }
@@ -449,12 +451,18 @@ export function validateFigure(asset: FigureAsset): string[] {
     errors.push(`default clip references missing clip '${asset.defaultClip}'`);
   }
   for (const [index, exception] of (asset.geometryExceptions ?? []).entries()) {
-    if (exception.rule !== "disconnected-component") {
+    if (
+      exception.rule !== "disconnected-component"
+      && exception.rule !== "ground-penetration"
+    ) {
       errors.push(`geometry exception ${index} uses unknown rule '${String(exception.rule)}'`);
     }
     if (!Array.isArray(exception.parts) || exception.parts.length === 0) {
       errors.push(`geometry exception ${index} must name at least one part`);
     } else {
+      if (exception.rule === "ground-penetration" && exception.parts.length !== 1) {
+        errors.push(`ground-penetration exception ${index} must name exactly one part`);
+      }
       const uniqueParts = new Set(exception.parts);
       if (uniqueParts.size !== exception.parts.length) {
         errors.push(`geometry exception ${index} contains duplicate part names`);

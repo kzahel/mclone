@@ -156,7 +156,8 @@ export function analyzeFigureGeometry(
 
 export function evaluateFigureGeometry(asset: FigureAsset): FigureGeometryEvaluation {
   const issues = analyzeFigureGeometry(asset);
-  const remainingExceptions = [...(asset.geometryExceptions ?? [])];
+  const remainingExceptions = (asset.geometryExceptions ?? [])
+    .filter((exception) => exception.rule === DISCONNECTED_COMPONENT_RULE);
   const acknowledged: AcknowledgedFigureGeometryIssue[] = [];
   const unacknowledged: FigureGeometryIssue[] = [];
   for (const issue of issues) {
