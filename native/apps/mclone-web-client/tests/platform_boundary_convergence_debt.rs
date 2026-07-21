@@ -188,6 +188,13 @@ fn browser_smoke_uses_current_operation_outcomes() {
 #[test]
 fn test_only_coarse_operation_is_a_boundary_fixpoint() {
     assert!(WEB_SCENE_HOST.contains("TestOnlyRemote(String)"));
+    assert!(WEB_SCENE_HOST.contains("#[wasm_bindgen_test]"));
+    assert!(WEB_SCENE_HOST.contains("test_only_coarse_operation_runs_through_generic_drain"));
+    assert!(WEB_SCENE_HOST.contains("WebSceneOperationDrain::take_scene_operation(effect)"));
+    assert!(
+        WEB_SCENE_HOST.contains("WebSceneOperationDrain::complete_scene_operation(&mut operation)")
+    );
+    assert!(WEB_SCENE_HOST.contains("operation.start().expect(\"generic Promise start\")"));
     assert!(!WEB_APP.contains("TestOnlyRemote"));
 
     // These exact pins make sibling ABI growth a deliberate review event.

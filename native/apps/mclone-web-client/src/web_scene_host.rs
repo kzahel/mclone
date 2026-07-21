@@ -275,6 +275,27 @@ impl WebSceneOperation {
     }
 }
 
+/// The operation-type-blind part of the browser drain. The exported host
+/// selects admitted work and folds the returned completion into its shared
+/// owner; this core owns the unchanged take/complete vocabulary between them.
+struct WebSceneOperationDrain;
+
+impl WebSceneOperationDrain {
+    fn take_scene_operation(effect: WebSceneOperationEffect) -> WebSceneOperation {
+        WebSceneOperation::new(effect)
+    }
+
+    fn complete_scene_operation(
+        operation: &mut WebSceneOperation,
+    ) -> Result<WebSceneOperationCompletion, JsValue> {
+        operation
+            .completion
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| JsValue::from_str("scene operation was consumed"))
+    }
+}
+
 #[wasm_bindgen]
 impl WebSceneOperation {
     /// Start Worker/render preparation work without retaining a host borrow.
@@ -371,7 +392,7 @@ async fn execute_web_runtime_start(
         }
         #[cfg(test)]
         WebRuntimeStartEffect::TestOnlyRemote(url) => {
-            crate::WebRuntime::websocket_remote_at(url, center).await?
+            return Err(format!("test-only remote completion: {url}"));
         }
     };
     runtime.request_chunk_view_deferred(
@@ -1721,10 +1742,9 @@ impl WebSceneHost {
     ) -> Result<Option<WebSceneOperation>, JsValue> {
         let resources = (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url);
         if let Some(pending) = self.host_mut()?.take_external_session_start() {
-            return Ok(Some(WebSceneOperation::new(lower_runtime_start(
-                pending,
-                resources.clone(),
-            ))));
+            return Ok(Some(WebSceneOperationDrain::take_scene_operation(
+                lower_runtime_start(pending, resources.clone()),
+            )));
         }
         if self
             .host_ref()?
@@ -1732,12 +1752,12 @@ impl WebSceneHost {
             != 0
             && let Some(effect) = take_asset_pack_preparation(self)?
         {
-            return Ok(Some(WebSceneOperation::new(effect)));
+            return Ok(Some(WebSceneOperationDrain::take_scene_operation(effect)));
         }
         if let Some(pending) = self.host_mut()?.take_external_runtime_start() {
-            return Ok(Some(WebSceneOperation::new(lower_runtime_start(
-                pending, resources,
-            ))));
+            return Ok(Some(WebSceneOperationDrain::take_scene_operation(
+                lower_runtime_start(pending, resources),
+            )));
         }
         if self.host_ref()?.pending_external_catalog_operation_count() != 0
             && let Some(pending) = self.platform.take_catalog_operation()
@@ -1749,7 +1769,7 @@ impl WebSceneHost {
                 pending.kind.active_world,
             )
             .map_err(JsValue::from)?;
-            return Ok(Some(WebSceneOperation::new(
+            return Ok(Some(WebSceneOperationDrain::take_scene_operation(
                 WebSceneOperationEffect::IndexedDb(execution),
             )));
         }
@@ -1762,11 +1782,7 @@ impl WebSceneHost {
         &mut self,
         operation: &mut WebSceneOperation,
     ) -> Result<JsValue, JsValue> {
-        let completion = operation
-            .completion
-            .borrow_mut()
-            .take()
-            .ok_or_else(|| JsValue::from_str("scene operation was consumed"))?;
+        let completion = WebSceneOperationDrain::complete_scene_operation(operation)?;
         let (report, receipt, source) = match completion {
             WebSceneOperationCompletion::Runtime { pending, outcome } => {
                 let receipt = match &pending.target {
@@ -4312,4 +4328,69 @@ fn report_set_string(object: &js_sys::Object, key: &str, value: &str) -> Result<
 
 fn js_error(error: anyhow::Error) -> JsValue {
     JsValue::from_str(&format!("{error:#}"))
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod wasm_tests {
+    use super::*;
+    use mclone_app_runtime::platform_operation::{
+        PlatformOperationLedger, PlatformOperationResolution,
+    };
+    use wasm_bindgen_futures::JsFuture;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[wasm_bindgen_test]
+    async fn test_only_coarse_operation_runs_through_generic_drain() {
+        let instance_id = mclone_scene::WorldInstanceId::new(41);
+        let mut ledger = PlatformOperationLedger::new();
+        let issued = ledger.issue(instance_id, ());
+        let endpoint = RemoteSessionEndpoint::new("test-only.invalid:25565");
+        let request = SessionStartRequest::JoinRemote {
+            endpoint: endpoint.clone(),
+        };
+        let pending = ExternalSceneSessionStart {
+            target: mclone_scene::ExternalSceneStartTarget::ActiveSession {
+                token: issued.token,
+            },
+            instance_id,
+            storage_source: None,
+            request,
+            runtime_kind: mclone_app_runtime::session::SessionRuntimeKind::Remote,
+            scene: McloneSceneHostOptions::default(),
+            descriptor: ActiveSessionDescriptor::Remote { endpoint },
+            destination: None,
+        };
+        let effect = WebSceneOperationEffect::Runtime {
+            pending,
+            start: WebRuntimeStartEffect::TestOnlyRemote("new-operation-kind".to_owned()),
+            center: ChunkPos::new(0, 0),
+            render_distance: 1,
+        };
+
+        let mut operation = WebSceneOperationDrain::take_scene_operation(effect);
+        JsFuture::from(operation.start().expect("generic Promise start"))
+            .await
+            .expect("test-only operation settles through the Promise capability");
+        let completion = WebSceneOperationDrain::complete_scene_operation(&mut operation)
+            .expect("generic completion drain");
+
+        let WebSceneOperationCompletion::Runtime { pending, outcome } = completion else {
+            panic!("test-only remote changed operation capability");
+        };
+        let error = outcome.expect_err("test-only remote returns its deterministic result");
+        assert_eq!(error, "test-only remote completion: new-operation-kind");
+        assert!(matches!(
+            ledger.complete(PlatformOperationCompletion {
+                token: match pending.target {
+                    mclone_scene::ExternalSceneStartTarget::ActiveSession { token } => token,
+                    mclone_scene::ExternalSceneStartTarget::Lobby { .. } => {
+                        panic!("test-only remote changed completion target")
+                    }
+                },
+                result: Err::<(), _>(error),
+            }),
+            PlatformOperationResolution::Failed { kind, .. } if kind == instance_id
+        ));
+        assert!(ledger.is_empty());
+    }
 }

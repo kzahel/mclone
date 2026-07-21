@@ -49,6 +49,9 @@ web-sys = { workspace = true, features = [
   "Window",
 ] }
 
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test.workspace = true
+
 [lib]
 crate-type = ["cdylib", "rlib"]
 name = "mclone_web_client"

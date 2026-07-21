@@ -1,7 +1,9 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: active 2026-07-21. Slices 0–5 are implemented; Slice 6 is next. This
-is the implementation charter for the remaining work appended by the Phase 7 audit
+Status: active 2026-07-21. All mandatory implementation Slices 0–6 are
+complete; closeout measurement and the independent Phase 9 audit handoff are
+next. This is the implementation charter for the remaining work appended by
+the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
 It is a bounded cleanup series, not a new campaign: every slice below has
 a named target, a measured motivation from the audit, and its own exit
@@ -332,8 +334,12 @@ known separate actor-persistence fixture regenerated entity IDs and ages on
 world reopen, the same baseline debt recorded at Tactical 207 closeout. No
 TypeScript product behavior changed; the only browser-script addition is a
 focused smoke selector and failure-state diagnostic for this boundary.
+Web-only Rust is 19,576 → 19,555 (-21), while shared scene Rust is
+24,717 → 24,730 (+13) and app-runtime is 35,076 → 35,111 (+35) for the
+shared queries and ledger proof. Authored TypeScript remains 3,593, so the
+combined boundary is 23,169 → 23,148 (-21).
 
-## Slice 6: Behavioral fixpoint demonstration
+## Slice 6: Behavioral fixpoint demonstration — complete 2026-07-21
 
 Motivation: audit G1 — the closure protocol requires the fixpoint
 "demonstrated, not asserted", and the current proof is compile/grep
@@ -349,6 +355,34 @@ TypeScript involvement by construction. Keep the existing source locks.
 Exit gate: the runtime test exists and passes in the wasm test target;
 `platform_boundary_convergence_debt.rs` still pins the source facts.
 This is the evidence the Phase 9 audit will check first.
+
+Completion evidence: the production host's take and complete exports now
+delegate their operation-type-blind wrapping/consumption to
+`WebSceneOperationDrain`. A wasm-bindgen runtime test constructs a
+`TestOnlyRemote` runtime effect, takes it through that same core, awaits the
+ordinary `WebSceneOperation::start` Promise capability, completes it through
+the same core, and folds its deterministic result through the shared
+`PlatformOperationLedger`. The test asserts the expected failed resolution and
+an empty ledger. It passed under the pinned wasm-bindgen test runner:
+
+```bash
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=\
+native/target/wasm-bindgen-cli-0.2.125/bin/wasm-bindgen-test-runner \
+cargo test --manifest-path native/Cargo.toml \
+  --target wasm32-unknown-unknown -p mclone-web-client --lib \
+  test_only_coarse_operation_runs_through_generic_drain
+```
+
+The existing source lock now requires the runtime test and both shared drain
+calls while continuing to assert zero TypeScript references. No product wasm
+export was added; the widened exact export pins remain 37 / 3 / 6 / 6 / 8.
+The production wasm check and full 74-test web-client suite passed. A headed
+catalog smoke then exercised the refactored drain, reported a nonzero
+`frameRenderViewsMs`, and produced an inspected non-black/non-transparent
+world-list capture. This behavioral proof deliberately adds 81 lines of
+web-only Rust (19,555 → 19,636) and leaves TypeScript at 3,593, so the combined
+boundary is 23,148 → 23,229; the measured runtime evidence is the gain that
+justifies the local growth.
 
 ## Slice 7 (optional, mechanical): file split and micro-cleanup
 
