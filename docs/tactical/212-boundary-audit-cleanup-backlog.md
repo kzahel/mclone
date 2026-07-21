@@ -439,6 +439,16 @@ debt; it does not invalidate the operation-specific asset replacement,
 resource rebuild, cancellation, quiescence, or shutdown evidence. No legacy
 web-world migration or obsolete-schema accommodation remains or is planned.
 
+The final default-platform controls also passed after implementation stopped:
+the complete native workspace test suite, `pnpm native:thin-adapters:purity`,
+`pnpm native:web:build`, and `pnpm native:desktop-offscreen:smoke`. The desktop
+lane saved `/tmp/mclone-desktop-offscreen.png` at 2560x1600; inspection showed
+valid terrain, vegetation, and actor pixels with no black or transparent
+failure. Per `docs/platforms.md`, browser worker/ABI changes require web gates
+but not unrelated Android or headset device gates. This series did not change
+Android activity/package or OpenXR host/graphics/action mechanics, so those
+device lanes were not run.
+
 ## Ordering
 
 Slice 0 is complete. Continue 1 → 2 → 3 → 4 → 5 → 6 → 7. Slices 1–3 are

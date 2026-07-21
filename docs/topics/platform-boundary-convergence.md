@@ -10,7 +10,8 @@ same day and appended a bounded remaining-work backlog. Phase 8, Tactical
 [`212`](../tactical/212-boundary-audit-cleanup-backlog.md), completed its
 mandatory Slices 0–6 on 2026-07-21 and deliberately skipped its optional
 hygiene slice. The current pickup is the independent Phase 9 second fixpoint
-audit. This parent is
+audit, chartered as Tactical
+[`213`](../tactical/213-platform-boundary-second-fixpoint-audit.md). This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
 
@@ -40,10 +41,10 @@ The documents below it have narrower jobs:
   the completed Phase 7 audit record; its findings, verdicts, and evidence
   are authoritative over any implementing tactical's closing prose.
 - Tactical [`212`](../tactical/212-boundary-audit-cleanup-backlog.md) is the
-  executable plan for the current Phase 8 remediation workstream. Its slices
-  should land as separately reviewable commit series. A slice may move to a
-  child tactical if code reading reveals an independent risk or owner, but
-  it does not need a new tactical merely because it has several commits.
+  completed execution record for the Phase 8 remediation workstream.
+- Tactical [`213`](../tactical/213-platform-boundary-second-fixpoint-audit.md)
+  is the prepared Phase 9 audit handoff. Its implementation-session authorship
+  is not audit evidence; an independent reviewer must perform and record it.
 - The child topic documents own their durable subsystem contracts and evidence.
 - A standalone audit tactical, opened only after implementation stops, is
   the only document allowed to close this parent; the Phase 9 audit is the
@@ -233,7 +234,7 @@ remaining-work note.
 | 6. Implementation closeout | **complete 2026-07-21** | Delete old paths, validate every affected platform boundary, demonstrate extensibility, and report final deltas | Tactical 207 closed itself and appended its ledger row; headed Wayland pixel gates and native compile/render controls passed; the parent remains open |
 | 7. Independent fixpoint audit | **complete 2026-07-21** ([Tactical 211](../tactical/211-platform-boundary-fixpoint-audit.md)) | Fresh code review by a reviewer/agent outside the implementation series | Outcome (b) of the protocol: precise remaining work appended (fixpoint-evidence gaps G1/G2, findings F1–F6, decision D1) and implementation reopened as Phase 8 |
 | 8. Audit-remediation backlog | **complete 2026-07-21** ([Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md)) | Land the trailing 207 cleanup, fix the audit findings (catalog-plan hoist, apply-loop dedup, timing convergence, smoke-ABI split, rim-guard collapse), and upgrade the fixpoint to a behavioral demonstration with widened export pins | Mandatory Slices 0–6 closed with their gates; scoreboard column appended; combined boundary 24,121 → 23,229 |
-| 9. Second fixpoint audit | **next; independent pickup required** | Short re-audit against the closure protocol, first checking the behavioral fixpoint test and widened pins from 212 | Closure protocol passes and the parent closes under it, or precise remaining work is appended again |
+| 9. Second fixpoint audit | **next; independent pickup required** ([Tactical 213](../tactical/213-platform-boundary-second-fixpoint-audit.md)) | Short re-audit against the closure protocol, first checking the behavioral fixpoint test and widened pins from 212 | Closure protocol passes and the parent closes under it, or precise remaining work is appended again |
 
 ### Phase Boundaries
 
@@ -313,11 +314,13 @@ fork-site census including positive `wasm32` gates and `cfg_attr` is
 
 ## Immediate Next Workstream
 
-Open the Phase 9 second fixpoint audit in a separate session and commit series,
-performed by a reviewer or agent that implemented none of Tactical 212. Start
-with the passing wasm behavioral fixpoint test and the widened exact export
-pins, then freshly check the rest of the closure protocol. Only that audit may
-close this parent or append a new bounded backlog.
+Pick up
+[Tactical 213](../tactical/213-platform-boundary-second-fixpoint-audit.md) in a
+separate session and commit series, performed by a reviewer or agent that
+implemented none of Tactical 212. Start with the passing wasm behavioral
+fixpoint test and the widened exact export pins, then freshly check the rest of
+the closure protocol. Only that audit may close this parent or append a new
+bounded backlog.
 
 Tactical 212 resolved the `WORLD_DB_VERSION` orphan-store decision without a
 runtime migration because there are no web-world preservation consumers and
