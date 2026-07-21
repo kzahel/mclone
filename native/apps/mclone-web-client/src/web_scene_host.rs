@@ -57,6 +57,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
+use crate::web_bootstrap::{InitialAssetPacks, WebBootstrapResources};
 use crate::web_canvas::{
     WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, gui_key_from_label,
     prepare_web_scene_assets_from_pack, prepare_web_scene_assets_from_selection, ui_action_label,
@@ -288,6 +289,7 @@ pub struct WebSceneHost {
     max_resume_drop_backlog: usize,
     shutdown_complete: bool,
     render_worker: WebRenderWorkerCoordinator,
+    initial_asset_packs: InitialAssetPacks,
     asset_pack_file_count: usize,
     pending_asset_pack_file_count: Option<(u64, usize)>,
     status_overlay: StatusOverlay,
@@ -1717,12 +1719,7 @@ impl WebSceneHost {
     }
 
     #[wasm_bindgen(js_name = completeAssetPackSelection)]
-    pub async fn complete_asset_pack_selection(
-        &mut self,
-        authored_pack_bytes: js_sys::Uint8Array,
-        reference_pack_bytes: js_sys::Uint8Array,
-        fallback_pack_bytes: js_sys::Uint8Array,
-    ) -> Result<JsValue, JsValue> {
+    pub async fn complete_asset_pack_selection(&mut self) -> Result<JsValue, JsValue> {
         let pending = self
             .host_ref()?
             .pending_external_asset_pack_selection()
@@ -1738,9 +1735,9 @@ impl WebSceneHost {
             .is_enabled(&mclone_assets::AssetPackId::new(
                 MINECRAFT_REFERENCE_PACK_ID,
             ));
-        let authored = authored_pack_bytes.to_vec();
-        let reference = reference_pack_bytes.to_vec();
-        let fallback = fallback_pack_bytes.to_vec();
+        let authored = self.initial_asset_packs.authored.clone();
+        let reference = self.initial_asset_packs.reference.clone();
+        let fallback = self.initial_asset_packs.fallback.clone();
         let selected_file_count = [
             authored_enabled.then_some(authored.as_slice()),
             reference_enabled.then_some(reference.as_slice()),
@@ -1801,11 +1798,9 @@ impl WebSceneHost {
 }
 
 #[wasm_bindgen]
-pub async fn mclone_web_create_worker_scene_host_with_startup(
+pub async fn mclone_web_create_scene_host_with_startup(
     canvas: HtmlCanvasElement,
-    reference_pack_bytes: js_sys::Uint8Array,
-    authored_pack_bytes: js_sys::Uint8Array,
-    fallback_pack_bytes: js_sys::Uint8Array,
+    resources: WebBootstrapResources,
     startup: WebStartupConfig,
     server_worker_url: String,
     server_job_worker_url: String,
@@ -1813,30 +1808,51 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     bindgen_wasm_url: String,
     render_worker_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
+    let initial_asset_packs = resources.into_initial_asset_packs()?;
     let (options, storage) = startup.into_parts();
     let scene_startup = options.scene;
     let render_options = options.render_options;
     let center = ChunkPos::new(scene_startup.chunk_x, scene_startup.chunk_z);
-    let mut config = WebIntegratedServerRunnerConfig::new(
-        scene_startup.seed,
-        server_worker_url,
-        server_job_worker_url,
-        bindgen_js_url.clone(),
-        bindgen_wasm_url.clone(),
-    )
-    .with_world_generation_profile(scene_startup.world_generation_profile)
-    .with_world_topology(scene_startup.world_topology)
-    .with_debug_passive_showcase(scene_startup.debug_passive_showcase)
-    .with_debug_auxiliary_player_script(scene_startup.debug_auxiliary_player_script)
-    .with_light_status_batch_size(scene_startup.light_status_batch_size);
-    if storage.world_storage == "indexeddb" {
-        config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
-    } else if storage.world_storage != "transient" {
-        return Err(JsValue::from_str("unsupported browser world storage"));
-    }
-    let mut runtime = crate::WebRuntime::web_worker_integrated_at(config, center)
-        .await
-        .map_err(JsValue::from)?;
+    let (mut runtime, descriptor) = if let Some(websocket_url) = scene_startup.remote_addr.clone() {
+        let runtime = crate::WebRuntime::websocket_remote_at(websocket_url.clone(), center)
+            .await
+            .map_err(JsValue::from)?;
+        (
+            runtime,
+            ActiveSessionDescriptor::Remote {
+                endpoint: RemoteSessionEndpoint::new(websocket_url),
+            },
+        )
+    } else {
+        let mut config = WebIntegratedServerRunnerConfig::new(
+            scene_startup.seed,
+            server_worker_url,
+            server_job_worker_url,
+            bindgen_js_url.clone(),
+            bindgen_wasm_url.clone(),
+        )
+        .with_world_generation_profile(scene_startup.world_generation_profile)
+        .with_world_topology(scene_startup.world_topology)
+        .with_debug_passive_showcase(scene_startup.debug_passive_showcase)
+        .with_debug_auxiliary_player_script(scene_startup.debug_auxiliary_player_script)
+        .with_light_status_batch_size(scene_startup.light_status_batch_size);
+        if storage.world_storage == "indexeddb" {
+            config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
+        } else if storage.world_storage != "transient" {
+            return Err(JsValue::from_str("unsupported browser world storage"));
+        }
+        let runtime = crate::WebRuntime::web_worker_integrated_at(config, center)
+            .await
+            .map_err(JsValue::from)?;
+        (
+            runtime,
+            ActiveSessionDescriptor::LocalWorld {
+                seed: scene_startup.seed,
+                id: None,
+                display_name: None,
+            },
+        )
+    };
     runtime
         .request_chunk_view_deferred(
             center,
@@ -1844,11 +1860,6 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
             chunk_tracking_radius_for_render_distance(scene_startup.render_distance),
         )
         .map_err(JsValue::from)?;
-    let descriptor = ActiveSessionDescriptor::LocalWorld {
-        seed: scene_startup.seed,
-        id: None,
-        display_name: None,
-    };
     let scene = McloneSceneHostOptions {
         startup: scene_startup,
         use_initial_spawn_center: false,
@@ -1857,63 +1868,7 @@ pub async fn mclone_web_create_worker_scene_host_with_startup(
     };
     create_scene_host(
         canvas,
-        reference_pack_bytes.to_vec(),
-        authored_pack_bytes.to_vec(),
-        fallback_pack_bytes.to_vec(),
-        runtime,
-        descriptor,
-        scene,
-        render_options,
-        bindgen_js_url,
-        bindgen_wasm_url,
-        render_worker_transport_factory,
-    )
-    .await
-}
-
-#[wasm_bindgen]
-pub async fn mclone_web_create_remote_scene_host_with_startup(
-    canvas: HtmlCanvasElement,
-    reference_pack_bytes: js_sys::Uint8Array,
-    authored_pack_bytes: js_sys::Uint8Array,
-    fallback_pack_bytes: js_sys::Uint8Array,
-    startup: WebStartupConfig,
-    bindgen_js_url: String,
-    bindgen_wasm_url: String,
-    render_worker_transport_factory: js_sys::Function,
-) -> Result<WebSceneHost, JsValue> {
-    let (options, _storage) = startup.into_parts();
-    let scene_startup = options.scene;
-    let render_options = options.render_options;
-    let websocket_url = scene_startup
-        .remote_addr
-        .clone()
-        .ok_or_else(|| JsValue::from_str("remote browser startup requires remoteWebSocketUrl"))?;
-    let center = ChunkPos::new(scene_startup.chunk_x, scene_startup.chunk_z);
-    let mut runtime = crate::WebRuntime::websocket_remote_at(websocket_url.clone(), center)
-        .await
-        .map_err(JsValue::from)?;
-    runtime
-        .request_chunk_view_deferred(
-            center,
-            scene_startup.render_distance,
-            chunk_tracking_radius_for_render_distance(scene_startup.render_distance),
-        )
-        .map_err(JsValue::from)?;
-    let descriptor = ActiveSessionDescriptor::Remote {
-        endpoint: RemoteSessionEndpoint::new(websocket_url.clone()),
-    };
-    let scene = McloneSceneHostOptions {
-        startup: scene_startup,
-        use_initial_spawn_center: false,
-        startup_lod_prewarm: false,
-        ..McloneSceneHostOptions::default()
-    };
-    create_scene_host(
-        canvas,
-        reference_pack_bytes.to_vec(),
-        authored_pack_bytes.to_vec(),
-        fallback_pack_bytes.to_vec(),
+        initial_asset_packs,
         runtime,
         descriptor,
         scene,
@@ -1928,9 +1883,7 @@ pub async fn mclone_web_create_remote_scene_host_with_startup(
 #[allow(clippy::too_many_arguments)]
 async fn create_scene_host(
     canvas: HtmlCanvasElement,
-    reference_pack_bytes: Vec<u8>,
-    authored_pack_bytes: Vec<u8>,
-    fallback_pack_bytes: Vec<u8>,
+    initial_asset_packs: InitialAssetPacks,
     runtime: crate::WebRuntime,
     descriptor: ActiveSessionDescriptor,
     scene: McloneSceneHostOptions,
@@ -1952,24 +1905,25 @@ async fn create_scene_host(
                 (ClientInputPreferences::default(), Some(message))
             }
         };
-    let asset_pack_file_count = PackedAssetSource::from_bytes(reference_pack_bytes.clone())
-        .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
-        .file_count();
+    let asset_pack_file_count =
+        PackedAssetSource::from_bytes(initial_asset_packs.reference.clone())
+            .map_err(|error| JsValue::from_str(&format!("invalid browser asset pack: {error}")))?
+            .file_count();
     let render_worker = WebRenderWorkerCoordinator::new(
         render_worker_transport_factory,
         bindgen_js_url,
         bindgen_wasm_url,
-        reference_pack_bytes.clone(),
+        initial_asset_packs.reference.clone(),
     )
     .map_err(|error| JsValue::from_str(&error))?;
     let catalog = web_asset_pack_catalog(
-        authored_pack_bytes,
-        reference_pack_bytes.clone(),
-        fallback_pack_bytes,
+        initial_asset_packs.authored.clone(),
+        initial_asset_packs.reference.clone(),
+        initial_asset_packs.fallback.clone(),
     )
     .map_err(JsValue::from)?;
-    let active_assets =
-        prepare_web_scene_assets_from_pack(reference_pack_bytes).map_err(JsValue::from)?;
+    let active_assets = prepare_web_scene_assets_from_pack(initial_asset_packs.reference.clone())
+        .map_err(JsValue::from)?;
     let context = WebCanvasContext::new_with_color_profile(canvas, render_options.color_profile)
         .await
         .map_err(JsValue::from)?;
@@ -2040,6 +1994,7 @@ async fn create_scene_host(
         max_resume_drop_backlog: 0,
         shutdown_complete: false,
         render_worker,
+        initial_asset_packs,
         asset_pack_file_count,
         pending_asset_pack_file_count: None,
         status_overlay: StatusOverlay::hidden(),

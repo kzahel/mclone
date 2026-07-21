@@ -4,6 +4,7 @@ use web_sys::HtmlCanvasElement;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::rc::Rc;
 
+use crate::web_bootstrap::browser_resource_plan;
 use crate::web_catalog_execution::WEB_WORLD_BACKEND_LABEL;
 use crate::web_render_compiler_abi::*;
 use crate::web_render_worker::{WebRenderWorkerCoordinator, WebRenderWorkerWorldHandle};
@@ -155,41 +156,7 @@ pub struct WebStartupConfig {
 impl WebStartupConfig {
     #[wasm_bindgen(js_name = browserPlan)]
     pub fn browser_plan(&self) -> Result<JsValue, JsValue> {
-        let object = js_sys::Object::new();
-        set_number(
-            &object,
-            "renderDistance",
-            f64::from(self.options.scene.render_distance),
-        )
-        .map_err(JsValue::from)?;
-        set_bool(
-            &object,
-            "sectionOcclusionCulling",
-            self.options.render_options.section_occlusion_culling,
-        )
-        .map_err(JsValue::from)?;
-        set_bool(
-            &object,
-            "forceFullbright",
-            self.options.render_options.force_fullbright,
-        )
-        .map_err(JsValue::from)?;
-        set_string(
-            &object,
-            "renderColorProfile",
-            self.options.render_options.color_profile.as_str(),
-        )
-        .map_err(JsValue::from)?;
-        set_string(
-            &object,
-            "generationProfile",
-            self.options.scene.world_generation_profile.label(),
-        )
-        .map_err(JsValue::from)?;
-        if let Some(remote_addr) = &self.options.scene.remote_addr {
-            set_string(&object, "remoteWebSocketUrl", remote_addr).map_err(JsValue::from)?;
-        }
-        Ok(object.into())
+        browser_resource_plan()
     }
 }
 

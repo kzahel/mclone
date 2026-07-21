@@ -26,13 +26,13 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 // the boundary documents intent and keeps internal field reads consistent.
 type WasmReport = Record<string, any>;
 
-interface WebStartupPlan extends WasmReport {
-  renderDistance: number;
-  remoteWebSocketUrl?: string;
-  sectionOcclusionCulling: boolean;
-  forceFullbright: boolean;
-  renderColorProfile: string;
-  generationProfile: string;
+interface WebBootstrapResourceRequest {
+  requestId: number;
+  url: string;
+}
+
+interface WebBootstrapPlan extends WasmReport {
+  resources: WebBootstrapResourceRequest[];
 }
 
 type WebStartupConfig = ReturnType<WasmModule["mclone_web_startup_options_from_query"]>;
@@ -62,13 +62,6 @@ const BINDGEN_WASM_URL = versionedUrl("./pkg/mclone_web_client_bg.wasm");
 const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker.js");
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
-const ASSET_PACK_URL = versionedUrl("/reference/minecraft-1.17.1/extracted.zip");
-const AUTHORED_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-authored.pbp");
-const FALLBACK_ASSET_PACK_URL = versionedUrl("/first-party-packs/mclone-generated-fallback.pbp");
-
-const DEFAULT_RADIUS_CHUNKS = 1;
-const MIN_RADIUS_CHUNKS = 1;
-const MAX_RADIUS_CHUNKS = 16;
 const MAX_FRAME_DT_SECONDS = 0.05;
 
 const runtime: AppRuntime = {
@@ -77,13 +70,9 @@ const runtime: AppRuntime = {
     ok: false,
     ready: false,
     failed: false,
-    radiusChunks: DEFAULT_RADIUS_CHUNKS,
     width: 0,
     height: 0,
     pointerCaptureBlocked: false,
-    sectionOcclusionCulling: true,
-    forceFullbright: false,
-    renderColorProfile: "vanilla",
     frameCount: 0,
     lastFrameGapMs: 0,
     maxFrameGapMs: 0,
@@ -141,15 +130,9 @@ class WebFrameDriver {
   canvas: HTMLCanvasElement;
   module: WasmModule | null;
   session: WebSceneHost | null;
-  assetPack: Uint8Array | null;
-  authoredAssetPack: Uint8Array | null;
-  fallbackAssetPack: Uint8Array | null;
   touchControls: TouchControls | null;
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
-  radiusChunks: number;
-  sectionOcclusionCulling: boolean;
-  forceFullbright: boolean;
   animationFrame: number;
   lastFrameTime: number;
   tickFrameBusy: boolean;
@@ -164,15 +147,9 @@ class WebFrameDriver {
     this.canvas = document.getElementById("mclone-canvas") as HTMLCanvasElement;
     this.module = null;
     this.session = null;
-    this.assetPack = null;
-    this.authoredAssetPack = null;
-    this.fallbackAssetPack = null;
     this.touchControls = null;
     this.pointerDragging = false;
     this.pointerDown = null;
-    this.radiusChunks = DEFAULT_RADIUS_CHUNKS;
-    this.sectionOcclusionCulling = true;
-    this.forceFullbright = false;
     this.animationFrame = 0;
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
@@ -196,67 +173,35 @@ class WebFrameDriver {
     this.module = module;
     const requiredExports = [
       "mclone_web_startup_options_from_query",
-      "mclone_web_create_worker_scene_host_with_startup",
-      "mclone_web_create_remote_scene_host_with_startup",
+      "mclone_web_create_scene_host_with_startup",
+      "WebBootstrapResources",
     ];
     for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {
         throw new Error(`missing ${name} export`);
       }
     }
-    const { config: startup, plan: startupPlan } = startupOptionsFromLocation(module);
-    const remoteWebSocketUrl = startupRemoteWebSocketUrl(startupPlan);
-    this.radiusChunks = clampRadiusChunks(startupPlan.renderDistance);
-    this.sectionOcclusionCulling = Boolean(startupPlan.sectionOcclusionCulling);
-    this.forceFullbright = Boolean(startupPlan.forceFullbright);
-    runtime.state.radiusChunks = this.radiusChunks;
-    runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
-    runtime.state.forceFullbright = this.forceFullbright;
-    runtime.state.renderColorProfile = startupPlan.renderColorProfile;
+    const startup = startupOptionsFromLocation(module);
 
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
-    const [assetPack, authoredAssetPack, fallbackAssetPack] = await Promise.all([
-      fetchAssetPack(ASSET_PACK_URL),
-      fetchAssetPack(AUTHORED_ASSET_PACK_URL),
-      fetchAssetPack(FALLBACK_ASSET_PACK_URL),
-    ]);
-    this.assetPack = assetPack;
-    this.authoredAssetPack = authoredAssetPack;
-    this.fallbackAssetPack = fallbackAssetPack;
+    const resources = await fetchBootstrapResources(module, startup.browserPlan());
     const renderWorkerTransportFactory = () => new PolledWorkerTransport(
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-app",
     );
     runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
-    if (remoteWebSocketUrl) {
-      runtime.state.status = "connecting remote websocket";
-      publishRuntimeState(runtime.state);
-      this.session = await module.mclone_web_create_remote_scene_host_with_startup(
-        this.canvas,
-        assetPack,
-        authoredAssetPack,
-        fallbackAssetPack,
-        startup,
-        BINDGEN_JS_URL.href,
-        BINDGEN_WASM_URL.href,
-        renderWorkerTransportFactory,
-      );
-    } else {
-      this.session = await module.mclone_web_create_worker_scene_host_with_startup(
-        this.canvas,
-        assetPack,
-        authoredAssetPack,
-        fallbackAssetPack,
-        startup,
-        SERVER_WORKER_URL.href,
-        SERVER_JOB_WORKER_URL.href,
-        BINDGEN_JS_URL.href,
-        BINDGEN_WASM_URL.href,
-        renderWorkerTransportFactory,
-      );
-    }
+    this.session = await module.mclone_web_create_scene_host_with_startup(
+      this.canvas,
+      resources,
+      startup,
+      SERVER_WORKER_URL.href,
+      SERVER_JOB_WORKER_URL.href,
+      BINDGEN_JS_URL.href,
+      BINDGEN_WASM_URL.href,
+      renderWorkerTransportFactory,
+    );
     for (const name of [
       "renderFrame",
       "handleRawKey",
@@ -395,10 +340,6 @@ class WebFrameDriver {
 
   observerCanvasPoint(clientX: number, clientY: number): { x: number; y: number } {
     return this.canvasPixelPoint(clientX, clientY);
-  }
-
-  observerRenderRadius(): number {
-    return this.radiusChunks;
   }
 
   async shutdownForObserver(): Promise<WasmReport | null> {
@@ -600,21 +541,6 @@ class WebFrameDriver {
     smokeObserver?.observeReport(report);
     const wasPointerCaptureBlocked = runtime.state.pointerCaptureBlocked === true;
     runtime.state.pointerCaptureBlocked = Boolean(report.active ?? report.uiActive);
-    if (typeof report.sectionOcclusionCulling !== "undefined") {
-      this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
-    }
-    if (typeof report.forceFullbright !== "undefined") {
-      this.forceFullbright = Boolean(report.forceFullbright);
-    }
-    runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
-    runtime.state.forceFullbright = this.forceFullbright;
-    if (typeof report.renderColorProfile !== "undefined") {
-      runtime.state.renderColorProfile = String(report.renderColorProfile);
-    }
-    if (typeof report.renderDistance !== "undefined") {
-      this.radiusChunks = clampRadiusChunks(report.renderDistance);
-      runtime.state.radiusChunks = this.radiusChunks;
-    }
     if (runtime.state.pointerCaptureBlocked) {
       this.releasePointerLockForUi();
       if (!wasPointerCaptureBlocked) {
@@ -680,9 +606,6 @@ class WebFrameDriver {
   async completeAssetPackSelection(_report: WasmReport): Promise<void> {
     if (
       !this.session
-      || !this.assetPack
-      || !this.authoredAssetPack
-      || !this.fallbackAssetPack
       || this.sessionBusy
     ) {
       return;
@@ -690,11 +613,7 @@ class WebFrameDriver {
     this.sessionBusy = true;
     runtime.state.sessionBusy = true;
     try {
-      const completion = await this.session.completeAssetPackSelection(
-        this.authoredAssetPack,
-        this.assetPack,
-        this.fallbackAssetPack,
-      );
+      const completion = await this.session.completeAssetPackSelection();
       await nextAnimationFrame();
       this.applyNativeUiReport(completion);
       smokeObserver?.observeAssetPackCompletion();
@@ -1019,30 +938,36 @@ function defaultDebugOverlayVisible(): boolean {
 
 function startupOptionsFromLocation(
   module: WasmModule,
-): { config: WebStartupConfig; plan: WebStartupPlan } {
-  const config = module.mclone_web_startup_options_from_query(
+): WebStartupConfig {
+  return module.mclone_web_startup_options_from_query(
     globalThis.location.search,
   ) as WebStartupConfig;
-  const raw = config.browserPlan();
-  return {
-    config,
-    plan: {
-      ...raw,
-      renderDistance: clampRadiusChunks(raw.renderDistance),
-      sectionOcclusionCulling: Boolean(raw.sectionOcclusionCulling),
-      forceFullbright: Boolean(raw.forceFullbright),
-      renderColorProfile: String(raw.renderColorProfile ?? "vanilla"),
-      generationProfile: String(raw.generationProfile ?? "overworld"),
-    },
-  };
 }
 
-function startupRemoteWebSocketUrl(options: WebStartupPlan): string | null {
-  if (typeof options.remoteWebSocketUrl !== "string") {
-    return null;
+async function fetchBootstrapResources(
+  module: WasmModule,
+  rawPlan: unknown,
+): Promise<InstanceType<WasmModule["WebBootstrapResources"]>> {
+  const plan = rawPlan as WebBootstrapPlan;
+  if (!Array.isArray(plan?.resources)) {
+    throw new Error("browser bootstrap plan has no resource requests");
   }
-  const trimmed = options.remoteWebSocketUrl.trim();
-  return trimmed.length > 0 ? trimmed : null;
+  const responses = await Promise.all(plan.resources.map(async (request) => {
+    const requestId = Number(request?.requestId);
+    const url = typeof request?.url === "string" ? request.url : "";
+    if (!Number.isInteger(requestId) || requestId < 0 || url.length === 0) {
+      throw new Error("invalid browser bootstrap resource request");
+    }
+    return {
+      requestId,
+      bytes: await fetchAssetPack(versionedUrl(url)),
+    };
+  }));
+  const resources = new module.WebBootstrapResources();
+  for (const response of responses) {
+    resources.add(response.requestId, response.bytes);
+  }
+  return resources;
 }
 
 function finiteInteger(value: unknown, fallback: number): number {
@@ -1160,14 +1085,6 @@ function versionedUrl(path: string): URL {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
   }
   return url;
-}
-
-function clampRadiusChunks(value: unknown): number {
-  const radius = Math.round(Number(value));
-  if (!Number.isFinite(radius)) {
-    return DEFAULT_RADIUS_CHUNKS;
-  }
-  return Math.min(MAX_RADIUS_CHUNKS, Math.max(MIN_RADIUS_CHUNKS, radius));
 }
 
 function deferredUiReport(): WasmReport {

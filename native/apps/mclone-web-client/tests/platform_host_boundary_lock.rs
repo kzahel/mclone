@@ -1,4 +1,5 @@
 const WEB_SCENE_HOST: &str = include_str!("../src/web_scene_host.rs");
+const WEB_BOOTSTRAP: &str = include_str!("../src/web_bootstrap.rs");
 const WEB_APP: &str = include_str!("../www/mclone-web-app.ts");
 const WEB_INPUT: &str = include_str!("../www/mclone-web-input.ts");
 const WEB_SMOKE_OBSERVER: &str = include_str!("../www/mclone-web-smoke-observer.ts");
@@ -164,4 +165,64 @@ fn browser_input_preferences_have_one_rust_policy_owner() {
         }
     }
     assert!(WEB_TOUCH.contains("setTouchInputAvailable"));
+}
+
+#[test]
+fn browser_bootstrap_roles_and_host_selection_stay_in_rust() {
+    for required in [
+        "REFERENCE_PACK_REQUEST_ID",
+        "AUTHORED_PACK_REQUEST_ID",
+        "FALLBACK_PACK_REQUEST_ID",
+        "InitialAssetPacks",
+        "into_initial_asset_packs",
+    ] {
+        assert!(
+            WEB_BOOTSTRAP.contains(required),
+            "Rust bootstrap policy lost {required}"
+        );
+    }
+    for required in [
+        "mclone_web_create_scene_host_with_startup",
+        "scene_startup.remote_addr",
+        "WebRuntime::websocket_remote_at",
+        "WebRuntime::web_worker_integrated_at",
+    ] {
+        assert!(
+            WEB_SCENE_HOST.contains(required),
+            "Rust scene-host bootstrap lost {required}"
+        );
+    }
+    for required in [
+        "requestId",
+        "fetchBootstrapResources",
+        "WebBootstrapResources",
+        "resources.add(response.requestId, response.bytes)",
+        "completeAssetPackSelection()",
+    ] {
+        assert!(
+            WEB_APP.contains(required),
+            "browser machinery lost neutral bootstrap operation {required}"
+        );
+    }
+    for forbidden in [
+        "mclone_web_create_worker_scene_host_with_startup",
+        "mclone_web_create_remote_scene_host_with_startup",
+        "ASSET_PACK_URL",
+        "AUTHORED_ASSET_PACK_URL",
+        "FALLBACK_ASSET_PACK_URL",
+        "referencePack",
+        "authoredAssetPack",
+        "fallbackAssetPack",
+        "remoteWebSocketUrl",
+        "generationProfile",
+        "sectionOcclusionCulling",
+        "forceFullbright",
+        "renderColorProfile",
+        "clampRadiusChunks",
+    ] {
+        assert!(
+            !WEB_APP.contains(forbidden),
+            "production TypeScript regained bootstrap policy through {forbidden}"
+        );
+    }
 }

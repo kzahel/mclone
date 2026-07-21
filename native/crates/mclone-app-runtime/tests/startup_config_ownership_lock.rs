@@ -94,10 +94,7 @@ fn desktop_and_scene_host_retain_canonical_startup_config() {
 #[test]
 fn browser_startup_boundary_stays_opaque() {
     let rust = read("apps/mclone-web-client/src/web_scene_host.rs");
-    for function in [
-        "pub async fn mclone_web_create_worker_scene_host_with_startup",
-        "pub async fn mclone_web_create_remote_scene_host_with_startup",
-    ] {
+    for function in ["pub async fn mclone_web_create_scene_host_with_startup"] {
         let start = rust.find(function).expect("browser constructor present");
         let signature = &rust[start..rust[start..].find(") ->").expect("signature end") + start];
         assert!(
@@ -119,6 +116,9 @@ fn browser_startup_boundary_stays_opaque() {
     }
 
     let typescript = read("apps/mclone-web-client/www/mclone-web-app.ts");
+    assert!(!typescript.contains("mclone_web_create_worker_scene_host_with_startup"));
+    assert!(!typescript.contains("mclone_web_create_remote_scene_host_with_startup"));
+    assert!(typescript.contains("mclone_web_create_scene_host_with_startup"));
     for retired in [
         "movementSpeedMultiplier",
         "lightStatusBatchSize",

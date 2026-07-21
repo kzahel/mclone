@@ -75,7 +75,6 @@ interface SmokeBridge {
     operation: (session: WebSceneHost) => T | Promise<T>,
   ): Promise<Awaited<T> | null>;
   observerCanvasPoint(clientX: number, clientY: number): { x: number; y: number };
-  observerRenderRadius(): number;
   pauseRendering(): void;
   resumeRendering(): void;
   setNativeDebugOverlay(visible: boolean): WasmReport | null;
@@ -121,6 +120,10 @@ export function installWebSmokeObserver(
       lastInteraction: null,
       currentTarget: null,
     },
+  };
+  const observerRenderRadius = (): number => {
+    const radius = Math.round(Number(runtime.state.radiusChunks));
+    return Number.isFinite(radius) && radius >= 1 ? radius : 1;
   };
   const observer: WebSmokeObserver = {
     observePlatformState(platformRuntime): void {
@@ -305,7 +308,7 @@ export function installWebSmokeObserver(
     return apply((host) => host.syncOverviewRenderFrame(
       Number(camera.centerX) || 0,
       Number(camera.centerZ) || 0,
-      app.observerRenderRadius(),
+      observerRenderRadius(),
     ));
   };
   runtime.setDebugOverlay = (visible) => app.setNativeDebugOverlay(visible);
@@ -318,7 +321,7 @@ export function installWebSmokeObserver(
       (session) => session.handleUiPointerMove(
         point.x,
         point.y,
-        app.observerRenderRadius(),
+        observerRenderRadius(),
       ),
       { pointerType },
     );
@@ -329,7 +332,7 @@ export function installWebSmokeObserver(
       (session) => session.handleUiPointerDown(
         point.x,
         point.y,
-        app.observerRenderRadius(),
+        observerRenderRadius(),
       ),
       { pointerType },
     );
@@ -340,7 +343,7 @@ export function installWebSmokeObserver(
       (session) => session.handleUiPointerUp(
         point.x,
         point.y,
-        app.observerRenderRadius(),
+        observerRenderRadius(),
       ),
       { fromPointer: true, pointerType },
     );

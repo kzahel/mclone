@@ -30,9 +30,6 @@ const THREAD_WORKER_URL = new URL("./mclone-thread-smoke-worker.js", import.meta
 const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
 const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
 const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
-const ASSET_PACK_URL = new URL("/reference/minecraft-1.17.1/extracted.zip", import.meta.url);
-const AUTHORED_ASSET_PACK_URL = new URL("/first-party-packs/mclone-authored.pbp", import.meta.url);
-const FALLBACK_ASSET_PACK_URL = new URL("/first-party-packs/mclone-generated-fallback.pbp", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
 const SCENE_ADAPTER_CONTRACT_EXPORT = "mclone_web_scene_adapter_contract_report";
 const REMOTE_WS_URL = new URL(globalThis.location.href).searchParams.get("remoteWsUrl") ?? "";
@@ -352,6 +349,37 @@ async function readAdapterInfo(adapter) {
   return adapter.info ?? {};
 }
 
+/**
+ * Execute Rust-authored resource requests without assigning resource roles in
+ * the browser harness.
+ * @param {WasmModule} module
+ * @param {{ browserPlan: () => any }} startup
+ */
+async function fetchBootstrapResources(module, startup) {
+  const plan = startup.browserPlan();
+  if (!Array.isArray(plan?.resources)) {
+    throw new Error("browser bootstrap plan has no resource requests");
+  }
+  const fetched = await Promise.all(plan.resources.map(async (
+    /** @type {{ requestId?: unknown, url?: unknown }} */ request,
+  ) => {
+    const requestId = Number(request?.requestId);
+    const url = typeof request?.url === "string" ? request.url : "";
+    if (!Number.isInteger(requestId) || requestId < 0 || url.length === 0) {
+      throw new Error("invalid browser bootstrap resource request");
+    }
+    return {
+      requestId,
+      bytes: await fetchAssetPack(new URL(url, import.meta.url)),
+    };
+  }));
+  const resources = new module.WebBootstrapResources();
+  for (const response of fetched) {
+    resources.add(response.requestId, response.bytes);
+  }
+  return resources;
+}
+
 async function renderCanvas() {
   const canvas = document.getElementById("mclone-canvas");
   if (!(canvas instanceof HTMLCanvasElement)) {
@@ -366,21 +394,19 @@ async function renderCanvas() {
   try {
     const module = /** @type {WasmModule} */ (await import(BINDGEN_JS_URL.href));
     await module.default(BINDGEN_WASM_URL.href);
-    if (typeof module.mclone_web_create_worker_scene_host_with_startup !== "function") {
+    if (
+      typeof module.mclone_web_create_scene_host_with_startup !== "function"
+      || typeof module.WebBootstrapResources !== "function"
+    ) {
       return {
         ok: false,
         supported: true,
         status: "export-missing",
-        reason: "missing mclone_web_create_worker_scene_host_with_startup export",
+        reason: "missing unified browser bootstrap export",
         exports: Object.keys(module),
       };
     }
 
-    const [assetPack, authoredAssetPack, fallbackAssetPack] = await Promise.all([
-      fetchAssetPack(ASSET_PACK_URL),
-      fetchAssetPack(AUTHORED_ASSET_PACK_URL),
-      fetchAssetPack(FALLBACK_ASSET_PACK_URL),
-    ]);
     const renderWorkerTransportFactory = () => new PolledWorkerTransport(
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-smoke",
@@ -388,11 +414,10 @@ async function renderCanvas() {
     const startup = module.mclone_web_startup_options_from_query(
       "?renderDistance=1&movementMode=fly",
     );
-    const session = await module.mclone_web_create_worker_scene_host_with_startup(
+    const resources = await fetchBootstrapResources(module, startup);
+    const session = await module.mclone_web_create_scene_host_with_startup(
       canvas,
-      assetPack,
-      authoredAssetPack,
-      fallbackAssetPack,
+      resources,
       startup,
       SERVER_WORKER_URL.href,
       SERVER_JOB_WORKER_URL.href,
@@ -426,7 +451,6 @@ async function renderCanvas() {
       const shutdownReport = session.shutdown();
       const indexedDbPersistence = await runIndexedDbPersistenceSmoke(
         module,
-        assetPack,
         canvas,
       );
       const indexedDbCatalog = await runIndexedDbCatalogSmoke(module);
@@ -492,19 +516,18 @@ async function renderCanvas() {
 
 /**
  * @param {WasmModule} module
- * @param {Uint8Array} assetPack
  * @param {HTMLCanvasElement} canvas
  */
-async function runIndexedDbPersistenceSmoke(module, assetPack, canvas) {
-  if (typeof module.mclone_web_create_worker_scene_host_with_startup !== "function") {
+async function runIndexedDbPersistenceSmoke(module, canvas) {
+  if (typeof module.mclone_web_create_scene_host_with_startup !== "function") {
     return {
       ok: false,
-      reason: "missing mclone_web_create_worker_scene_host_with_startup export",
+      reason: "missing mclone_web_create_scene_host_with_startup export",
     };
   }
   const worldId = `smoke-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
   const first = await createIndexedDbSmokeSession(
-    module, assetPack, canvas, worldId, true,
+    module, canvas, worldId, true,
   );
   if (typeof first.shutdownAsync !== "function") {
     return {
@@ -517,7 +540,7 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas) {
     const firstShutdown = await first.shutdownAsync();
     const afterFirst = await waitForIndexedDbWorldRecords(worldId, 1);
     const second = await createIndexedDbSmokeSession(
-      module, assetPack, canvas, worldId, false,
+      module, canvas, worldId, false,
     );
     if (typeof second.shutdownAsync !== "function") {
       return {
@@ -560,26 +583,20 @@ async function runIndexedDbPersistenceSmoke(module, assetPack, canvas) {
 
 /**
  * @param {WasmModule} module
- * @param {Uint8Array} assetPack
  * @param {HTMLCanvasElement} canvas
  * @param {string} worldId
  * @param {boolean} clearWorldStorage
  */
 async function createIndexedDbSmokeSession(
-  module, assetPack, canvas, worldId, clearWorldStorage,
+  module, canvas, worldId, clearWorldStorage,
 ) {
-  const [authoredAssetPack, fallbackAssetPack] = await Promise.all([
-    fetchAssetPack(AUTHORED_ASSET_PACK_URL),
-    fetchAssetPack(FALLBACK_ASSET_PACK_URL),
-  ]);
   const startup = module.mclone_web_startup_options_from_query(
     `?seed=424242&renderDistance=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}&clearWorldStorage=${clearWorldStorage}`,
   );
-  return await module.mclone_web_create_worker_scene_host_with_startup(
+  const resources = await fetchBootstrapResources(module, startup);
+  return await module.mclone_web_create_scene_host_with_startup(
     canvas,
-    assetPack,
-    authoredAssetPack,
-    fallbackAssetPack,
+    resources,
     startup,
     SERVER_WORKER_URL.href,
     SERVER_JOB_WORKER_URL.href,
