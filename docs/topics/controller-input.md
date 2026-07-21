@@ -537,10 +537,16 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
    dead zones, layout override, preferred input, and schema-versioned bindings
    through shared preference codecs and platform storage executors.
 9. **Optional advanced backends.** Add Steam Input, haptics, exact glyph
-   origins, gyro/touchpads, accessibility extensions, and later source-to-player
-   assignment. Adopt the participant contract from
+   origins, gyro/touchpads, accessibility extensions, and durable
+   source-to-profile/participant association beyond the preliminary seat
+   reducer. Adopt the participant contract from
    [`local-couch-multiplayer.md`](local-couch-multiplayer.md) rather than
    introducing a controller-local player model.
+
+Tactical 215 completed the source identity/descriptor, canonical snapshot, and
+bounded scripted-assignment portions of Step 1. Semantic per-source action
+state, look-rate semantics, input contexts, UI navigation, and mixed-device
+arbitration remain the next shared-contract work before a physical collector.
 
 Do not wire a platform backend before Slices 1–3 provide the complete shared
 gameplay and UI destination. Otherwise the first platform will accidentally

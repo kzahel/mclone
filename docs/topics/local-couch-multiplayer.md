@@ -2,8 +2,8 @@
 
 Topic: `local-couch-multiplayer`
 
-Status: accepted product and architecture direction; preliminary foundation in
-progress as of 2026-07-21 through
+Status: accepted product and architecture direction; preliminary foundation
+completed on 2026-07-21 through
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md). Mclone should
 retain a credible path from one local participant to 1-4 local participants,
 including console-style split screen, useful single-player auxiliary panes,
@@ -126,26 +126,34 @@ target.
 
 ## Current Mclone State
 
-The server foundation is stronger than the current scene shape:
+The preliminary preservation foundation now spans authority, input, and
+presentation:
 
 - `RealmServer` starts without an implicit player and already supports
   ordinary concurrent players, per-player publication queues, source-owned
   player/observer views, and unioned residency/simulation ticketing.
 - local integrated play joins one ordinary player through `LocalRealmSession`;
   TCP and WebSocket hosts use the same player authority.
-- `mclone-input` already owns a reserved gamepad adapter, neutral binding
-  vocabulary, capability/prompt facts, and the accepted future
-  `InputSourceId` direction.
-- renderer and render-session contracts already accept explicit mono and XR
-  views, while offscreen synthetic stereo proves multiple related views.
+- a focused realm smoke proves one, two, and four co-located/separated
+  player/observer interest sources union and remove without stealing another
+  source's tickets;
+- `mclone-input` owns opaque session-local source IDs, neutral descriptors, a
+  normalized standard-gamepad snapshot, and deterministic four-seat scripted
+  assignment with disconnect clearing and bounded reconnect reservation;
+- renderer uniform identity admits four neutral presentation views while typed
+  stereo-eye identity remains XR-only; and
+- the scene admits one through four independent flat targets with one shared
+  preparation, and the inspected offscreen proof renders first-person plus
+  detached plan cameras in horizontal and vertical compositions.
 
 The client/presentation side remains singleton in the places couch play must
 change:
 
 - one `DrawableWorldSlot` retains one camera, interaction controller, and
   player model;
-- existing scene frame entry points address either one `Mono(view)` or one
-  participant's `Stereo([view; 2])` topology;
+- the preliminary multi-flat entry still targets complete textures rather than
+  viewport rectangles on one presentation surface, and rejects simultaneous
+  retained embedded-world preview composition;
 - `LocalIntegratedSceneRuntime` owns one `SingleViewRuntime` and one
   `IntegratedRunnerConnection`;
 - the local profile layer exposes one installation/browser-origin profile,
@@ -444,13 +452,16 @@ culls perfectly.
 
 The sequence is intentionally staged so each milestone is useful on its own:
 
-1. **Complete the controller foundation.** Implement source IDs/descriptors,
-   semantic action state, UI navigation, real desktop collection, and
-   deterministic scripted snapshots as owned by the controller topic.
-2. **Separate view from participant.** Add a bounded shared flat view/surface
-   plan while retaining one participant. Prove horizontal and vertical
-   auxiliary world-camera capture with prepare-once/render-many accounting and
-   an exact no-auxiliary fast path.
+1. **Complete the controller foundation.** Source IDs/descriptors, canonical
+   snapshots, deterministic scripted assignment, disconnect clearing, and
+   reconnect reservation are landed. Add semantic action state, look-rate
+   semantics, UI navigation, lifecycle clearing, and real desktop collection
+   as owned by the controller topic.
+2. **Promote the flat-view proof to surface layout.** View and participant are
+   already separate, and the horizontal/vertical auxiliary proof prepares once
+   and renders twice without changing mono. Add viewport/scissor rectangles,
+   safe areas, per-pane HUD policy, and retained-preview composition only when
+   a product or diagnostic consumer needs them.
 3. **Participantize singleton client-experience state.** Introduce a bounded
    local participant group while still enforcing cardinality one. Move camera,
    interaction, HUD/UI context, profile, prompt, and pose publication behind

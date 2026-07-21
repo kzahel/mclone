@@ -2302,6 +2302,16 @@ impl LocalGamepadAssignmentReducer {
         let Some(source) = self.sources.get_mut(&source_id) else {
             return Err(LocalInputAssignmentError::UnknownSource(source_id));
         };
+        if !source.descriptor.connected {
+            return Ok(SourceDisconnectReceipt {
+                source_id,
+                reserved_slot,
+                held_state_cleared: false,
+                reconnect_until: source
+                    .reconnect_until
+                    .expect("disconnected sources retain an expiry"),
+            });
+        }
         let held_state_cleared = source.snapshot.has_held_state();
         source.snapshot = StandardGamepadSnapshot::default();
         source.descriptor.connected = false;
@@ -3662,6 +3672,11 @@ mod tests {
             Some(StandardGamepadSnapshot::default())
         );
         assert!(!reducer.source_descriptor(reserved).unwrap().connected);
+        let repeated_disconnect = reducer
+            .disconnect_source(reserved, Duration::from_secs(12))
+            .expect("duplicate disconnect is idempotent");
+        assert_eq!(repeated_disconnect.reconnect_until, Duration::from_secs(15));
+        assert!(!repeated_disconnect.held_state_cleared);
 
         assert_eq!(
             reducer.connect_source(

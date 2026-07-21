@@ -1,6 +1,6 @@
 # Tactical 215: Preliminary Couch Readiness
 
-Status: active 2026-07-21.
+Status: completed 2026-07-21.
 
 Topics: [`local-couch-multiplayer`](../topics/local-couch-multiplayer.md) and
 [`controller-input`](../topics/controller-input.md).
@@ -21,7 +21,7 @@ building plan. Preserve the direct one-view path and do not introduce local
 profiles, second logical client endpoints, split-screen menus, or a couch-only
 authority.
 
-## Current Seams
+## Pre-Implementation Seams
 
 - `mclone-render::uniform::PerViewSlot` has generic naming but encodes two
   stereo eyes. Its frame ring uses two slots, and render preparation in terrain
@@ -254,13 +254,41 @@ edges by session-local source identity, rejects duplicate frame samples, and
 never assigns one source twice. Disconnect immediately clears snapshot-held
 state while reserving the source's existing seat for a session-monotonic
 five-second reconnect grace. Reconnect within that window preserves the seat;
-expiry releases it, and a late source cannot steal a newly occupied seat.
+repeated disconnect notifications cannot extend it, expiry releases it, and a
+late source cannot steal a newly occupied seat.
 
 The focused suite passes with five scripted sources whose display labels and
 sample order deliberately disagree with allocation order. Four sources retain
 stable assignments through reordered release/join samples, the fifth receives
 the explicit full result, disconnect clearing is observed, and reconnect both
 inside and outside the grace window is deterministic.
+
+### Slice 5 — closeout
+
+Completed on 2026-07-21. Formatting and every required native and Wasm gate
+pass. The first combined run found two existing composition source locks still
+attached to public wrappers after explicit actor-preparation helpers were
+introduced; the locks now verify wrapper delegation and retain their exact
+composition-selection and opaque/actor/translucent phase assertions on the
+shared implementation helpers.
+
+Final validation:
+
+- `mclone-input`: 27 tests pass;
+- `mclone-render`: 158 pass, with eight opt-in GPU characterization tests
+  ignored by the ordinary suite;
+- `mclone-scene`: 127 unit tests plus all contract suites pass, including the
+  three couch-readiness source locks and thirteen composition locks;
+- `mclone-server`: 536 tests pass, including the 1/2/4 interest-source smoke;
+- `mclone-input` and `mclone-scene` both check for
+  `wasm32-unknown-unknown`; and
+- the ignored four-view GPU uniform canary was run explicitly and passed.
+
+The accepted `/tmp` captures remain the rendered-output receipt. No product
+collector, participant/profile group, viewport layout, additional logical
+client, or couch join UI was enabled. This tactical therefore closes the
+preliminary preservation work while leaving real controller completion as the
+gate for product couch implementation.
 
 ## Explicit Deferrals
 
