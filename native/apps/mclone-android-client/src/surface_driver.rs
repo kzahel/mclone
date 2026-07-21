@@ -24,23 +24,22 @@ use mclone_audio::{AudioEngine, AudioSettings};
 use mclone_core::{CHUNK_WIDTH, Vec3d};
 use mclone_diagnostics::{FrameHostKind, FramePipelineReport};
 use mclone_input::{
-    FlatInputAction, FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind,
-    InputPreferences, KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection, PointerButton,
-    TouchControl, TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings,
+    FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences,
+    KeyboardKey, MouseWheelDirection, PointerButton, TouchControl, TouchControlsMode,
+    TouchInputAdapter, TouchInputEvent, TouchInputSettings,
 };
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_scene::{
-    HostEffects, McloneSceneHost, McloneSceneHostOptions, MonoSceneFrameSummary, MonoUiContext,
-    MonoUiPresentation, MonoWorldActionStatus, record_mono_frame_pipeline,
-    xr_frame_pipeline_accounting_config,
+    HostEffects, McloneSceneHost, McloneSceneHostOptions, MonoInputDisposition,
+    MonoInteractiveInputRouter, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation,
+    record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, GameHelpParent, GameTouchSettings, GameUiAction,
-    GameUiHost, GuiKey, GuiScale, Point, TouchJoystickOverlay, TouchOverlay,
-    touch_action_button_rects, touch_hotbar_slot_rects, touch_menu_button_rect,
-    touch_movement_zone_rect,
+    DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, GameTouchSettings, GameUiHost, GuiScale, Point,
+    TouchJoystickOverlay, TouchOverlay, touch_action_button_rects, touch_hotbar_slot_rects,
+    touch_menu_button_rect, touch_movement_zone_rect,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -326,7 +325,7 @@ struct AndroidGpuState {
     host: AndroidSceneHost,
     input_capabilities: InputCapabilityState,
     input_preferences: InputPreferences,
-    keyboard_mouse: KeyboardMouseInputAdapter,
+    interactive_input: MonoInteractiveInputRouter,
     touch: TouchInputAdapter,
     ui_touch_id: Option<u64>,
     frame_timing: FrameTimingStats,
@@ -473,7 +472,7 @@ impl AndroidGpuState {
                 ..InputCapabilities::NONE
             }),
             input_preferences: InputPreferences::AUTO,
-            keyboard_mouse: KeyboardMouseInputAdapter::new(),
+            interactive_input: MonoInteractiveInputRouter::new(),
             touch: TouchInputAdapter::new(),
             ui_touch_id: None,
             frame_timing: FrameTimingStats::default(),
@@ -775,12 +774,9 @@ impl AndroidGpuState {
     }
 
     fn drive_held_input(&mut self, dt_seconds: f64) -> Result<()> {
-        let mut frame = self.keyboard_mouse.held_frame().unwrap_or_default();
-        if let Some(touch) = self.touch.held_frame() {
-            frame.merge_from(touch);
-        }
-        self.host.advance_mono_input_frame(
-            frame,
+        self.interactive_input.advance_held_frame(
+            &mut self.host,
+            self.touch.held_frame(),
             dt_seconds.clamp(0.0, TOUCH_MOVEMENT_MAX_FRAME_SECONDS),
         )?;
         if !self.host.mono_ui_is_active() {
@@ -789,56 +785,16 @@ impl AndroidGpuState {
         Ok(())
     }
 
-    fn apply_flat_frame(&mut self, frame: FlatInputFrame) -> Result<AndroidInputOutcome> {
-        let mut outcome = AndroidInputOutcome {
-            handled: true,
-            exit: false,
-        };
-        if frame.open_menu {
-            self.host.open_mono_pause_menu();
-            self.clear_flat_gameplay_input();
-            return Ok(outcome);
-        }
-        if frame.open_block_palette {
-            self.host.open_mono_block_palette();
-            self.clear_flat_gameplay_input();
-            return Ok(outcome);
-        }
-        if frame.open_help {
-            return self.apply_ui_action(GameUiAction::OpenHelp(GameHelpParent::Game), false);
-        }
-        if frame.toggle_camera_view {
-            log::info!(
-                "camera view mode {}",
-                self.host.toggle_mono_camera_view().label()
-            );
-        }
-        if let Some(slot) = frame.selected_hotbar_slot {
-            self.host.select_mono_hotbar_slot(slot);
-        }
-        if frame.hotbar_step != 0 {
-            self.host.step_mono_hotbar_slot(frame.hotbar_step);
-        }
-        for (pressed, action) in [
-            (frame.attack, FlatInputAction::Attack),
-            (frame.use_item, FlatInputAction::Use),
-        ] {
-            if pressed
-                && let MonoWorldActionStatus::Submitted { target } =
-                    self.host.handle_mono_world_action(action)?
-            {
-                log::info!(
-                    "Android gameplay interaction {:?} submitted at ({}, {}, {})",
-                    action,
-                    target.hit.block_pos.x,
-                    target.hit.block_pos.y,
-                    target.hit.block_pos.z
-                );
-            }
-        }
-        self.host.apply_mono_look_frame(frame);
-        outcome.handled = frame != FlatInputFrame::default();
-        Ok(outcome)
+    fn route_flat_frame(&mut self, frame: FlatInputFrame) -> Result<AndroidInputOutcome> {
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_flat_frame(
+            &mut self.host,
+            frame,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn apply_touch_event(&mut self, event: TouchInputEvent) -> Result<AndroidInputOutcome> {
@@ -847,7 +803,10 @@ impl AndroidGpuState {
             exit: false,
         };
         if let Some(delta) = event.look_delta {
-            self.host.apply_mono_touch_look(delta);
+            let disposition = self
+                .interactive_input
+                .route_touch_look(&mut self.host, delta);
+            outcome.handled |= disposition.handled;
             log::info!(
                 "Mclone Android touch look moved: yaw={:.4} pitch={:.4}",
                 delta.yaw_radians,
@@ -855,37 +814,32 @@ impl AndroidGpuState {
             );
         }
         if let Some(frame) = event.frame {
-            outcome = self.apply_flat_frame(frame)?;
+            let routed = self.route_flat_frame(frame)?;
+            outcome.handled |= routed.handled;
+            outcome.exit |= routed.exit;
         }
         Ok(outcome)
     }
 
-    fn apply_ui_action(
+    fn finish_input_disposition(
         &mut self,
-        action: GameUiAction,
-        from_pointer_click: bool,
-    ) -> Result<AndroidInputOutcome> {
-        let mut effects = AndroidHostEffects::default();
-        let scene = self.host.apply_mono_ui_action(
-            action,
-            from_pointer_click,
-            &self.device,
-            &self.queue,
-            &mut effects,
-        )?;
-        if let GameUiAction::SetTouchLookSensitivity(value) = action {
-            self.touch.set_look_sensitivity(value);
-        }
+        disposition: MonoInputDisposition,
+        effects: AndroidHostEffects,
+    ) -> AndroidInputOutcome {
         if let Some(mode) = effects.outcome.touch_controls_mode {
             self.input_preferences.touch_controls = mode;
         }
-        if scene.clear_gameplay_input || effects.outcome.quit_to_title {
+        if let Some(settings) = self.host.mono_ui_render_state().touch_settings {
+            self.touch
+                .set_look_sensitivity(settings.clamped_look_sensitivity());
+        }
+        if disposition.clear_transient_input || effects.outcome.quit_to_title {
             self.clear_flat_gameplay_input();
         }
-        Ok(AndroidInputOutcome {
-            handled: true,
+        AndroidInputOutcome {
+            handled: disposition.handled,
             exit: effects.outcome.exit,
-        })
+        }
     }
 
     fn handle_keyboard_input(
@@ -896,49 +850,35 @@ impl AndroidGpuState {
     ) -> Result<AndroidInputOutcome> {
         self.input_capabilities
             .note_activity(InputDeviceKind::Keyboard);
-        if state == ElementState::Pressed
-            && let Some(gui_key) = gui_key_from_key_code(key_code)
-        {
-            let (handled, action) = self.host.mono_ui_key_pressed(gui_key);
-            if let Some(action) = action {
-                return self.apply_ui_action(action, false);
-            }
-            if handled {
-                return Ok(AndroidInputOutcome {
-                    handled: true,
-                    exit: false,
-                });
-            }
-        }
         let Some(key) = KeyboardKey::from_code_name(&format!("{key_code:?}")) else {
             return Ok(AndroidInputOutcome::default());
         };
-        let event = self
-            .keyboard_mouse
-            .handle_key(key, state == ElementState::Pressed, repeat);
-        event.frame.map_or_else(
-            || {
-                Ok(AndroidInputOutcome {
-                    handled: event.handled,
-                    exit: false,
-                })
-            },
-            |frame| self.apply_flat_frame(frame),
-        )
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_key(
+            &mut self.host,
+            key,
+            state == ElementState::Pressed,
+            repeat,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn handle_mouse_motion(&mut self, delta: (f64, f64)) -> Result<AndroidInputOutcome> {
         self.input_capabilities
             .note_activity(InputDeviceKind::Mouse);
-        if self.host.mono_ui_is_active() {
-            return Ok(AndroidInputOutcome::default());
-        }
-        self.keyboard_mouse
-            .mouse_motion_frame(delta.0 as f32, delta.1 as f32)
-            .map_or_else(
-                || Ok(AndroidInputOutcome::default()),
-                |frame| self.apply_flat_frame(frame),
-            )
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_mouse_motion(
+            &mut self.host,
+            delta.0 as f32,
+            delta.1 as f32,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn handle_cursor_move(
@@ -947,21 +887,16 @@ impl AndroidGpuState {
     ) -> Result<AndroidInputOutcome> {
         self.input_capabilities
             .note_activity(InputDeviceKind::Mouse);
-        if !self.host.mono_ui_is_active() {
-            return Ok(AndroidInputOutcome::default());
-        }
-        let (handled, action) = self
-            .host
-            .mono_ui_pointer_move(self.gui_scale().client_to_gui(position.x, position.y));
-        action.map_or_else(
-            || {
-                Ok(AndroidInputOutcome {
-                    handled,
-                    exit: false,
-                })
-            },
-            |action| self.apply_ui_action(action, true),
-        )
+        let point = self.gui_scale().client_to_gui(position.x, position.y);
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_pointer_move(
+            &mut self.host,
+            point,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn handle_mouse_input(
@@ -972,62 +907,36 @@ impl AndroidGpuState {
     ) -> Result<AndroidInputOutcome> {
         self.input_capabilities
             .note_activity(InputDeviceKind::Mouse);
-        if self.host.mono_ui_is_active()
-            && button == MouseButton::Left
-            && let Some(cursor) = cursor
-        {
-            let point = self.gui_scale().client_to_gui(cursor.x, cursor.y);
-            if state == ElementState::Pressed {
-                return Ok(AndroidInputOutcome {
-                    handled: self.host.mono_ui_pointer_down(point),
-                    exit: false,
-                });
-            }
-            let (handled, action) = self.host.mono_ui_pointer_up(point);
-            return action.map_or_else(
-                || {
-                    Ok(AndroidInputOutcome {
-                        handled,
-                        exit: false,
-                    })
-                },
-                |action| self.apply_ui_action(action, true),
-            );
-        }
         let Some(button) = pointer_button(button) else {
             return Ok(AndroidInputOutcome::default());
         };
-        let event = self
-            .keyboard_mouse
-            .handle_mouse_button(button, state == ElementState::Pressed);
-        event.frame.map_or_else(
-            || {
-                Ok(AndroidInputOutcome {
-                    handled: event.handled,
-                    exit: false,
-                })
-            },
-            |frame| self.apply_flat_frame(frame),
-        )
+        let point = cursor.map(|cursor| self.gui_scale().client_to_gui(cursor.x, cursor.y));
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_pointer_button(
+            &mut self.host,
+            button,
+            state == ElementState::Pressed,
+            point,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta) -> Result<AndroidInputOutcome> {
         self.input_capabilities
             .note_activity(InputDeviceKind::Mouse);
-        if self.host.mono_ui_is_active() {
-            return Ok(AndroidInputOutcome::default());
-        }
         let direction = mouse_wheel_direction(delta);
-        let event = self.keyboard_mouse.handle_mouse_wheel(direction);
-        event.frame.map_or_else(
-            || {
-                Ok(AndroidInputOutcome {
-                    handled: event.handled,
-                    exit: false,
-                })
-            },
-            |frame| self.apply_flat_frame(frame),
-        )
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_wheel(
+            &mut self.host,
+            direction,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn handle_touch(&mut self, touch: Touch) -> Result<AndroidInputOutcome> {
@@ -1040,30 +949,10 @@ impl AndroidGpuState {
             .set_viewport_size(Vec2::new(scale.width, scale.height));
         if self.ui_touch_id == Some(touch.id) {
             return match touch.phase {
-                TouchPhase::Moved => {
-                    let (handled, action) = self.host.mono_ui_pointer_move(point);
-                    action.map_or_else(
-                        || {
-                            Ok(AndroidInputOutcome {
-                                handled,
-                                exit: false,
-                            })
-                        },
-                        |action| self.apply_ui_action(action, true),
-                    )
-                }
+                TouchPhase::Moved => self.route_touch_pointer_move(point),
                 TouchPhase::Ended | TouchPhase::Cancelled => {
                     self.ui_touch_id = None;
-                    let (handled, action) = self.host.mono_ui_pointer_up(point);
-                    action.map_or_else(
-                        || {
-                            Ok(AndroidInputOutcome {
-                                handled,
-                                exit: false,
-                            })
-                        },
-                        |action| self.apply_ui_action(action, true),
-                    )
+                    self.route_touch_pointer_button(false, point)
                 }
                 TouchPhase::Started => Ok(AndroidInputOutcome {
                     handled: true,
@@ -1074,10 +963,7 @@ impl AndroidGpuState {
         match touch.phase {
             TouchPhase::Started if self.host.mono_ui_is_active() && self.ui_touch_id.is_none() => {
                 self.ui_touch_id = Some(touch.id);
-                Ok(AndroidInputOutcome {
-                    handled: self.host.mono_ui_pointer_down(point),
-                    exit: false,
-                })
+                self.route_touch_pointer_button(true, point)
             }
             TouchPhase::Started => {
                 let control = touch_control_at(scale, point);
@@ -1099,11 +985,41 @@ impl AndroidGpuState {
     }
 
     fn clear_flat_gameplay_input(&mut self) {
-        self.keyboard_mouse.clear_held();
+        self.interactive_input.clear_transient_input();
         self.touch.clear();
         self.ui_touch_id = None;
         self.host.clear_mono_camera_input();
         self.host.clear_mono_blink_debug();
+    }
+
+    fn route_touch_pointer_move(&mut self, point: Point) -> Result<AndroidInputOutcome> {
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_pointer_move(
+            &mut self.host,
+            point,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
+    }
+
+    fn route_touch_pointer_button(
+        &mut self,
+        pressed: bool,
+        point: Point,
+    ) -> Result<AndroidInputOutcome> {
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_pointer_button(
+            &mut self.host,
+            PointerButton::Primary,
+            pressed,
+            Some(point),
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn on_background(&mut self) -> Result<()> {
@@ -1311,14 +1227,6 @@ fn touch_control_at(scale: GuiScale, point: Point) -> TouchControl {
         TouchControl::MovementStick
     } else {
         TouchControl::LookDrag
-    }
-}
-
-fn gui_key_from_key_code(key_code: KeyCode) -> Option<GuiKey> {
-    match KeyboardKey::from_code_name(&format!("{key_code:?}")) {
-        Some(KeyboardKey::Escape) => Some(GuiKey::Escape),
-        Some(KeyboardKey::F1) => Some(GuiKey::F1),
-        _ => None,
     }
 }
 
