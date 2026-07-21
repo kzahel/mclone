@@ -31,8 +31,10 @@ the first drawable mesh and the production catalogue on desktop and mobile.
   first-party block visuals and compile the same textured terrain geometry used
   by production. It must not duplicate block-model interpretation in
   TypeScript.
-- `mclone-server::structure_lab` remains the temporary Rust-authored migration
-  oracle until external members pass exact equality and visual gates.
+- `mclone-server::structure_lab` keeps the typed family-selection API and
+  runtime gallery fixtures, but loads promoted members from checked canonical
+  JSON. The temporary Rust-authored migration oracles were removed after exact
+  equality and visual gates passed.
 - The website owns presentation only. It loads generated semantic facts and
   baked artifacts; it does not execute authoring TypeScript, resolve blocks, or
   initialize the game engine/WASM runtime.
@@ -195,10 +197,11 @@ single-canvas invariant.
 
 The existing `CottageVariant`, `BarnLength`, and `BarnVariant` APIs now select
 and load checked canonical JSON for every bounded member. Gallery themes also
-come from canonical default-theme records. The prior Rust builders are excluded
-from production compilation and retained temporarily under `cfg(test)` as
-independent migration oracles. The promoted paths pass the original gallery,
-family-size, placement, lighting, and SQLite-reopen suites unchanged.
+come from canonical default-theme records. The prior Rust builders first
+served as independent `cfg(test)` migration oracles; after exact equality was
+proved for all twelve records, those duplicate authoring bodies were deleted.
+The canonical-only paths pass the gallery, family-size, placement, lighting,
+and SQLite-reopen suites unchanged.
 
 ### Slice 5 Lab-native outbuilding
 

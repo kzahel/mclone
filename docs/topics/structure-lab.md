@@ -6,9 +6,9 @@ Status: **vertical slice active 2026-07-21. The TypeScript DSL and generated
 JSON drift gate, strict Rust loader, promoted cottage/barn families,
 Rust preview compiler, original first-party farmstead materials, and read-only
 Three.js catalogue are implemented. The first Structure-Lab-native outbuilding
-is implemented and visually accepted. Closeout gates and deletion of the
-temporary test-only Rust oracles remain. In-browser block editing is
-indefinitely deferred.**
+is implemented and visually accepted. The temporary Rust authoring oracles
+have been removed after exact parity. Aggregate deployment and final closeout
+gates remain. In-browser block editing is indefinitely deferred.**
 
 Last reconciled: **2026-07-21**.
 
@@ -30,8 +30,8 @@ Last reconciled: **2026-07-21**.
 - Twelve finite family members are externalized: all six cottage depth/entry
   combinations plus short, standard, and long barn cores and lean-tos. Every
   generated template matches its accepted Rust constructor exactly. The public
-  typed selectors now load these checked records; Rust constructors are
-  compiled only as temporary test oracles pending their final removal.
+  typed selectors now load these checked records. The duplicate Rust authoring
+  bodies were deleted after serving as independent migration oracles.
 - Shared-helper provenance hashes the complete local TypeScript import graph,
   so editing family vocabulary or DSL behavior invalidates generated JSON as
   reliably as editing a leaf `structure.ts` file.
