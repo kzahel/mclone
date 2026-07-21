@@ -190,6 +190,7 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Mouse / Rat | P2 | ✅ | Q | — | `examples/mouse` — approved 30-box field mouse with mottled body, stepped pink ears, pointed muzzle, six whiskers, tiny paws, four-stage tail, and quick scurry |
 | Squirrel | P2 | ✅ | Q/H | gray, red; flying squirrel | `examples/red_squirrel` — approved 18-box Eurasian red squirrel with synchronized bound, deep haunches, and three-stage plume tail |
+| Chinchilla | P3 | ✅ | Q/H | violet, ebony | `examples/chinchilla` — approved 25-box silver chinchilla with huge pink-lined ears, whiskered cream muzzle, broad hind paws, three-stage plume tail, quick highland hop, and separate grounded dust-bath shimmy |
 | Rabbit | P1 | ✅ | H | (see Farm) | `examples/rabbit`; rounded A/B in `legacy-examples/rabbit_rounded` |
 | Hedgehog | P3 | ✅ | Q | — | `examples/hedgehog` — approved 19-box low quadruped with pointed cream face, tiny legs, and four-step pixel-textured spine coat |
 | Porcupine | P3 | ✅ | Q | — | `examples/porcupine` — approved 21-box heavy adult with high pale-tipped quill mantle, small face, sturdy legs, and short thick tail |
@@ -245,6 +246,7 @@ reviewed rigs and then filling macro gaps.
 | Flamingo | P3 | ✅ | W | — | `examples/flamingo` — approved 17-box greater flamingo with angular S-neck, two-stage stilt legs, and slow planted walk |
 | Shoebill | P3 | ✅ | B | — | `examples/shoebill` — approved 22-box slate-gray shoebill with a short crest, long planted legs, oversized hooked bill, measured stalk, and separate abrupt bill-snap action |
 | Pelican | P3 | ✅ | W | great white, brown | `examples/pelican` — approved 18-box great white pelican with broad black-edged wings, long articulated neck, enormous orange bill and pouch, planted webbed feet, shore waddle, and separate pouch-scoop action |
+| Blue-footed booby | P3 | ✅ | B/W | juvenile | `examples/blue_footed_booby` — approved 13-box adult with brown patterned wings, white body, long slate bill, vivid cyan webbed feet, deliberate courtship walk, and separate sky-point display |
 | Songbird (robin/sparrow) | P3 | ✅ | W | color morphs | `examples/robin` — approved 16-box European robin with orange face and breast, fine wing bars, short beak, and quick flutter |
 | Peacock | P3 | ✅ | W | — | `examples/peacock` — approved 22-box Indian peacock with crest, patterned wings, and parented seven-feather tail fan |
 | Ostrich / Emu | P3 | ✅ | B | — | `examples/ostrich` — approved 21-box male ostrich with tiny white-edged wings, long bare neck, two-stage legs, broad feet, and fast run |
@@ -297,6 +299,7 @@ reviewed rigs and then filling macro gaps.
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Snake | P2 | ✅ | SL | green, brown, cobra (hood), rattlesnake | `examples/king_cobra` — approved 15-box king cobra with raised patterned hood, forked tongue, and seven-stage slither chain |
+| Gaboon viper | P3 | ✅ | SL | rhinoceros viper | `examples/gaboon_viper` — approved 15-box heavy viper with broad patterned head, paired nasal horns, fangs, eight-stage leaf-litter body, slow grounded slither, and separate contact-safe ambush strike |
 | Lizard / Gecko | P2 | ✅ | Q | gecko, iguana, chameleon | `examples/gecko` is the approved Tokay gecko; `examples/chameleon` is a review candidate veiled chameleon with raised independent eyes, casque, grasping feet, angular coiled tail, careful creep, and tongue-strike action |
 | Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles |
 | Crocodile / Alligator | P2 | ✅ | Q | croc, gator | `examples/crocodile` — approved 24-box Nile crocodile with armored back, long jaw, sprawled walk, and articulated tail |
