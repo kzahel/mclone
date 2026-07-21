@@ -1,8 +1,7 @@
 # Tactical 213: Platform Boundary Second Fixpoint Audit
 
-Status: ready for independent pickup; audit not started and no verdict
-recorded. This file is a handoff prepared by the Tactical 212 implementation
-session. It is not audit evidence and carries no authority to close the parent.
+Status: audit complete 2026-07-21; **pass**. The parent concern is closed as of
+that date under the Phase 9 scope defined here.
 
 Topic: `platform-boundary-convergence`
 
@@ -11,6 +10,10 @@ Parent concern:
 Audited implementation base: `6fc857af` (`Close boundary audit remediation
 backlog`). The commit adding this handoff may contain documentation only; the
 auditor must record the exact revision actually reviewed.
+
+Reviewed revision: `6b1881de` (`Prepare independent boundary fixpoint audit`).
+Its only changes from `6fc857af` are the audit handoff and associated
+documentation; the product code is exactly the Tactical 212 result.
 
 ## Independence Contract
 
@@ -126,3 +129,114 @@ The audit must choose exactly one evidence-backed outcome:
 
 Neither outcome is predetermined by this handoff. Do not use implementation
 closeout prose as a substitute for the fresh evidence above.
+
+## Independent Audit Result
+
+**Verdict: pass.** This audit ran in a separate session by an agent that
+implemented none of Tactical 212. The exact handoff revision was checked out
+in a detached temporary worktree, remained source-clean throughout the audit,
+and was read without relying on Tactical 212's conclusions. Ignored generated
+first-party packs and the pinned Minecraft 1.17.1 extracted archive were
+hydrated only as runtime prerequisites.
+
+Fresh reading established all of the following:
+
+- `TestOnlyRemote` is test-only, carries a token issued by
+  `PlatformOperationLedger`, is wrapped as an ordinary runtime effect, passes
+  through the same operation-type-blind `WebSceneOperationDrain` used by the
+  product host, starts through `WebSceneOperation::start`, completes through
+  that drain, and folds to `Failed` through the shared ledger. Commit
+  `5b6fce7f`, which introduced the proof, changed no TypeScript and added no
+  product ABI exports.
+- the product TypeScript has one generic mechanical scene-operation drain.
+  Query-gated smoke observation remains an explicit test client, and the
+  skipped physical IndexedDB schema mapping remains platform mechanics.
+- `PlatformOperationEpoch`, `PlatformOperationRequestId`, and
+  `PlatformOperationToken` are the one boundary-operation identity/staleness
+  family. Asset/content and render generations are compatibility facts only.
+  The browser-local catalog and asset in-flight guards remain absent.
+- catalog policy lives in `mclone-app-runtime`; browser Rust only lowers plans
+  to IndexedDB mechanics. Catalog effects use one shared application loop.
+  The only platform fork there constructs the platform-specific scene.
+- Tactical 212 changed no Android activity/package mechanics and no OpenXR,
+  XR graphics, or action mechanics. Per `docs/platforms.md`, Android and
+  headset validation lanes were therefore not required for this audit.
+
+The widened ABI lock passed with exact method counts of **37 / 3 / 6 / 6 /
+8** for `WebSceneHost`, `WebSceneOperation`, `WebCatalogExecution`,
+`WebSceneSmokeHarness`, and `WebCatalogSmokeExecution`. Source review and the
+lock both found zero exported `async fn(&mut self)` methods.
+
+## Re-derived Scoreboard
+
+Measured from `6b1881de` using Tactical 212's commands:
+
+| Metric | Audit 213 |
+|---|---:|
+| authored web TypeScript lines | 3,593 |
+| TypeScript gate lines / modules | 3,616 / 16 |
+| `mclone-web-client/src` Rust lines | 19,636 |
+| combined both-language boundary total | 23,229 |
+| shared `mclone-scene` Rust lines | 24,730 |
+| shared `mclone-app-runtime` Rust lines | 35,111 |
+| `WebSceneHost` exported methods | 37 |
+| async mutable wasm exports | 0 |
+| boundary-operation identity/staleness systems | 1; rim guards 0 |
+| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 70 / 98 |
+| active world pauses during coarse web ops | no; headed trace passed |
+| TS coordination residue | one opaque product drain; query-gated smoke observer; unchanged schema-table skip |
+
+There is no drift from Remediation 212 because the audited revision contains
+that exact product tree. The combined boundary remains 1,105 lines below the
+clean campaign baseline. Growth in `mclone-app-runtime` reflects catalog
+policy moving to its shared owner rather than new boundary code.
+
+## Behavioral and Render Evidence
+
+The wasm behavioral fixpoint and all four focused boundary locks passed. In
+the headed Wayland asset-replacement probe, the destination worker was held
+during active lobby warmup. The active lobby advanced frame, render, and input
+counters by **+2 / +2 / +2** with no scene-borrow exclusion. The operation
+completed exactly once, advanced the asset epoch **0 -> 1**, selected the
+authored pack, retired the reference pack, returned replacement state to
+`active`, and preserved active world instance `2` with the
+`protected-lobby` profile.
+
+The fresh captures were inspected, not merely generated:
+
+- `/tmp/mclone-native-web-catalog-ui-probe.png` and its canvas capture show
+  the coherent world-list result after create/open/delete operations.
+- `/tmp/mclone-native-web-lobby-lifecycle-asset-replacement.png` shows a live
+  authored-only lobby frame with HUD and debug state; its fallback/checker
+  surfaces are expected from the deliberately incomplete authored-only pack,
+  not a black or transparent capture.
+- the generic headed web page/canvas captures are non-black, opaque, and
+  internally consistent.
+- `/tmp/mclone-desktop-offscreen.png` shows the native control with textured
+  terrain, foliage, cow, and chicken.
+
+Validation passed:
+
+```text
+cargo test ... test_only_coarse_operation_runs_through_generic_drain
+cargo test ... --test platform_boundary_convergence_debt
+cargo test --manifest-path native/Cargo.toml
+pnpm native:web:typecheck
+pnpm --silent native:web:scene-adapters
+pnpm --silent native:web:worker-ownership
+pnpm --silent native:web:scene-host-adoption
+pnpm native:thin-adapters:purity
+pnpm native:web:build
+pnpm host:check
+pnpm native:web:catalog-smoke
+node .../browser-smoke.mjs --lobby-asset-replacement-probe
+pnpm native:desktop-offscreen:smoke
+```
+
+An initial workspace run executed concurrently with other heavy validation
+and exposed the unrelated server-test publication race in
+`sqlite_restart_restores_mclone_profile_before_unseen_generation`. The focused
+test and the entire workspace passed when rerun sequentially. Fresh reading
+found no causal connection to Tactical 212's boundary machinery, so it does
+not reopen this concern. The previously recorded actor-ID/age lifecycle
+fixture likewise remains separate baseline debt.
