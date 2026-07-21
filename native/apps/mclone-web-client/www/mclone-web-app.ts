@@ -4,12 +4,12 @@ import { bindInput } from "./mclone-web-input.js";
 import {
   clampLookSensitivity,
   DEFAULT_LOOK_SENSITIVITY,
-  formatInteractionStatus,
   loadStoredSettings,
   storeLookSensitivity,
   storeTouchControlsMode,
 } from "./mclone-web-settings.js";
 import type { TouchControlsMode } from "./mclone-web-settings.js";
+import type { WebSmokeObserver } from "./mclone-web-smoke-observer.js";
 import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
 import {
   executeIndexedDbCatalogExecution,
@@ -51,13 +51,8 @@ interface AppRuntimeState extends Record<string, any> {
   failed: boolean;
   status: string;
   frameCount: number;
-  renderCount: number;
   lastFrameGapMs: number;
   maxFrameGapMs: number;
-  compileTimingCount: number;
-  compileTimings: WasmReport[];
-  activeCompileTiming: WasmReport | null;
-  lastCompileTiming: WasmReport | null;
 }
 
 interface AppRuntime {
@@ -90,86 +85,10 @@ const runtime: AppRuntime = {
     ok: false,
     ready: false,
     failed: false,
-    centerX: 0,
-    centerZ: 0,
-    loadedCenterX: null,
-    loadedCenterZ: null,
     radiusChunks: DEFAULT_RADIUS_CHUNKS,
-    cameraX: 0,
-    cameraY: 0,
-    cameraZ: 0,
-    cameraYawRadians: 0,
-    cameraPitchRadians: 0,
-    cameraSpeedBlocksPerSecond: 0,
-    movementMode: "WALK",
-    onGround: false,
-    horizontalCollision: false,
-    verticalCollision: false,
-    selectedHotbarSlot: 0,
-    currentTarget: null,
-    interactionCount: 0,
-    interactionStatus: "idle",
-    lastInteraction: null,
     width: 0,
     height: 0,
-    dayTime: 0,
-    timeOfDay: 0,
-    playerJumpStatistic: 0,
-    playerSuccessfulBlockPlacementStatistic: 0,
-    skyRendered: false,
-    actorCount: 0,
-    drawnActorCount: 0,
-    loadedChunkCount: 0,
-    residentSectionCount: 0,
-    pendingCompileJobCount: 0,
-    renderPendingWork: false,
-    renderDirtyChunkCount: 0,
-    renderDirtySectionCount: 0,
-    renderInflightSectionCount: 0,
-    compileInFlight: false,
-    compileInFlightCount: 0,
-    compileFinalizingCount: 0,
-    streamingSettled: false,
-    startupReady: false,
-    startupProgressVisible: false,
-    startupProgressObserved: false,
-    startupProgressReadyChunks: 0,
-    startupProgressChunkCount: 0,
-    startupProgressPercent: 0,
-    startupHoldCameraY: null as number | null,
-    minimumPreStartupCameraY: null as number | null,
-    startupAdmissionFrame: null as number | null,
-    startupAdmissionCameraY: null as number | null,
-    compileQueued: false,
-    compileTargetX: null,
-    compileTargetZ: null,
-    queuedCompileTargetX: null,
-    queuedCompileTargetZ: null,
-    activeCompileTiming: null,
-    lastCompileTiming: null,
-    compileTimings: [],
-    compileTimingCount: 0,
-    renderCount: 0,
-    guiCommandCount: 0,
-    flatHudRetainedRebuilds: 0,
-    flatHudRetainedCacheHits: 0,
-    uiActive: false,
-    uiCoversWorld: false,
-    nativeUiScreen: "none",
-    nativeUiOptionsParent: null,
-    lastUiAction: null,
-    sessionState: "none",
-    sessionKind: "unknown",
-    sessionSeed: null,
-    sessionSeedText: null,
-    sessionRemoteEndpoint: null,
-    sessionFailureMessage: null,
-    sessionStatusVisible: false,
-    sessionStatusOk: true,
-    sessionStatusMessage: "",
-    statusOverlayVisible: false,
-    statusOverlayOk: true,
-    statusOverlayMessage: "",
+    pointerCaptureBlocked: false,
     sectionOcclusionCulling: true,
     forceFullbright: false,
     renderColorProfile: "vanilla",
@@ -182,36 +101,21 @@ const runtime: AppRuntime = {
     pointerLockFallback: false,
     tickFrameBusy: false,
     tickPhase: "idle",
-    runnerKind: "unknown",
-    runnerCommandQueueDepth: 0,
-    runnerUpdateQueueDepth: 0,
-    runnerPendingJobs: 0,
-    runnerPendingPublications: 0,
-    clientDeferredChunkDropBacklogItems: 0,
-    worldgenMailboxKind: "unknown",
-    lightStatusMailboxKind: "unknown",
-    worldgenMailboxPendingJobs: 0,
-    lightStatusMailboxPendingStatuses: 0,
-    runnerFrameMetrics: null,
-    worldgenJobFrameMetrics: null,
-    lightStatusJobFrameMetrics: null,
-    debugOverlayVisible: false,
     sessionBusy: false,
-    worldCatalogCompletionCount: 0,
     lookSensitivity: DEFAULT_LOOK_SENSITIVITY,
     touchControlsMode: "auto",
     touchLookSensitivityAvailable: false,
     touchControlsVisible: false,
-    clientHost: "worker-integrated",
-    remoteWebSocketUrl: null,
     status: "booting",
     bootstrapStatusRetired: false,
   },
 };
 
+let smokeObserver: WebSmokeObserver | null = null;
+
 installFirstTouchFullscreen(runtime.state);
 
-async function boot(): Promise<WasmReport> {
+async function boot(): Promise<void> {
   const app = new WebFrameDriver();
   await installSmokeObserverIfRequested(app);
   try {
@@ -221,9 +125,10 @@ async function boot(): Promise<WasmReport> {
     runtime.state.ok = true;
     runtime.state.failed = false;
     runtime.state.status = "ready";
+    publishRuntimeState(runtime.state);
     app.setNativeStatusOverlay("ready", true, false);
     app.start();
-    return snapshotState();
+    return;
   } catch (error) {
     runtime.ready = false;
     runtime.state.ok = false;
@@ -231,7 +136,6 @@ async function boot(): Promise<WasmReport> {
     runtime.state.status = stringifyError(error);
     app.setNativeStatusOverlay(runtime.state.status, false, true);
     publishRuntimeState(runtime.state);
-    return snapshotState();
   }
 }
 
@@ -241,7 +145,8 @@ async function installSmokeObserverIfRequested(app: WebFrameDriver): Promise<voi
     return;
   }
   const observer = await import("./mclone-web-smoke-observer.js");
-  observer.installWebSmokeObserver(runtime, app);
+  smokeObserver = observer.installWebSmokeObserver(app);
+  smokeObserver.observePlatformState(runtime);
 }
 
 class WebFrameDriver {
@@ -254,7 +159,6 @@ class WebFrameDriver {
   touchControls: TouchControls | null;
   lookSensitivity: number;
   touchControlsMode: TouchControlsMode;
-  loadedCenter: { centerX: number, centerZ: number } | null;
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
   radiusChunks: number;
@@ -266,7 +170,6 @@ class WebFrameDriver {
   sessionBusy: boolean;
   pendingLobbyRuntimeStarts: Set<Promise<void>>;
   lobbyOperationDrainActive: boolean;
-  lobbyRuntimeStartCount: number;
   worldCatalogOperationTail: Promise<void>;
 
   constructor() {
@@ -284,7 +187,6 @@ class WebFrameDriver {
     this.touchControlsMode = settings.touchControlsMode;
     runtime.state.lookSensitivity = this.lookSensitivity;
     runtime.state.touchControlsMode = this.touchControlsMode;
-    this.loadedCenter = null;
     this.pointerDragging = false;
     this.pointerDown = null;
     this.radiusChunks = DEFAULT_RADIUS_CHUNKS;
@@ -296,7 +198,6 @@ class WebFrameDriver {
     this.sessionBusy = false;
     this.pendingLobbyRuntimeStarts = new Set();
     this.lobbyOperationDrainActive = false;
-    this.lobbyRuntimeStartCount = 0;
     this.worldCatalogOperationTail = Promise.resolve();
   }
 
@@ -328,12 +229,9 @@ class WebFrameDriver {
     this.sectionOcclusionCulling = Boolean(startupPlan.sectionOcclusionCulling);
     this.forceFullbright = Boolean(startupPlan.forceFullbright);
     runtime.state.radiusChunks = this.radiusChunks;
-    runtime.state.clientHost = remoteWebSocketUrl ? "remote-dedicated" : "worker-integrated";
-    runtime.state.remoteWebSocketUrl = remoteWebSocketUrl;
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
     runtime.state.renderColorProfile = startupPlan.renderColorProfile;
-    runtime.state.generationProfile = startupPlan.generationProfile;
 
     runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
@@ -387,27 +285,8 @@ class WebFrameDriver {
       "handleRawWheel",
       "handleRawTouch",
       "clearRawInput",
-      "syncOverviewRenderFrame",
       "renderCompilerSharedSupported",
-      "cameraFrameState",
       "resizeCanvas",
-      "toggleMovementMode",
-      "selectHotbarSlot",
-      "previewBlockTarget",
-      "blockStateAt",
-      "interactBlock",
-      "frameEmbeddedPreview",
-      "frameInteractionSurface",
-      "rebuildRenderResourcesForSmoke",
-      "openTitleUi",
-      "openPauseUi",
-      "openHelpUi",
-      "closeUi",
-      "uiStatus",
-      "handleUiKey",
-      "handleUiPointerMove",
-      "handleUiPointerDown",
-      "handleUiPointerUp",
       "startPendingSession",
       "takeWorldCatalogExecution",
       "applyWorldCatalogExecution",
@@ -417,13 +296,8 @@ class WebFrameDriver {
       "setTouchLookSensitivity",
       "setTouchControlsMode",
       "setHidden",
-      "beginLobbySmoke",
       "takeLobbyRuntimeStart",
       "completeLobbyWorldStart",
-      "renderHalfSpaceTerrainProof",
-      "renderPreparedFigureProof",
-      "renderActorCompositionProof",
-      "shutdown",
     ]) {
       if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
         throw new Error(`missing WebSceneHost.${name} export`);
@@ -452,7 +326,7 @@ class WebFrameDriver {
           publishRuntimeState(runtime.state);
         });
     });
-    this.touchControls = new TouchControls(this, runtime.state);
+    this.touchControls = new TouchControls(this);
     this.setNativeTouchControlsMode(this.touchControlsMode, false);
     this.setNativeTouchLookSensitivity(
       this.lookSensitivity,
@@ -460,9 +334,6 @@ class WebFrameDriver {
       false,
     );
     this.syncCanvasSize();
-    this.applyCameraState(this.session.cameraFrameState());
-    this.applyTargetState(this.session.previewBlockTarget());
-
     runtime.state.status = "rendering";
     this.setNativeStatusOverlay(runtime.state.status, true, true);
     publishRuntimeState(runtime.state);
@@ -502,29 +373,27 @@ class WebFrameDriver {
     this.start();
   }
 
-  renderOverviewFrame(): WasmReport | null {
-    if (!this.session || this.sessionBusy || this.tickFrameBusy) {
-      return null;
-    }
-    const report = this.session.syncOverviewRenderFrame(
-      Number(runtime.state.centerX) || 0,
-      Number(runtime.state.centerZ) || 0,
-      this.radiusChunks,
-    );
-    this.handleSceneFrame(report);
-    return report;
+  sceneHostForObserver(): WebSceneHost | null {
+    return this.sessionBusy ? null : this.session;
   }
 
-  async renderOneFrameForSmoke(): Promise<WasmReport | null> {
-    this.pauseRendering();
+  async waitForObserverIdle(pauseFrames = false): Promise<void> {
+    if (pauseFrames) {
+      this.pauseRendering();
+    }
     while (this.tickFrameBusy || this.sessionBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+  }
+
+  async renderSingleObserverFrame(): Promise<WasmReport | null> {
+    await this.waitForObserverIdle(true);
     this.tickFrameBusy = true;
     runtime.state.tickFrameBusy = true;
     try {
-      await this.tickFrame(performance.now());
-      return runtime.state.lastReport ?? null;
+      const report = await this.renderHostFrame(performance.now());
+      this.handleSceneFrame(report);
+      return report;
     } finally {
       this.tickFrameBusy = false;
       runtime.state.tickFrameBusy = false;
@@ -533,76 +402,48 @@ class WebFrameDriver {
     }
   }
 
-  async renderHalfSpaceTerrainProof(): Promise<WasmReport | null> {
-    this.pauseRendering();
-    while (this.tickFrameBusy || this.sessionBusy) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    this.pauseRendering();
-    return this.session?.renderHalfSpaceTerrainProof() ?? null;
+  applyObserverReport(
+    report: WasmReport | null | undefined,
+    options: { fromPointer?: boolean; pointerType?: string } = {},
+  ): void {
+    this.applyNativeUiReport(report, options);
   }
 
-  async renderPreparedFigureProof(): Promise<WasmReport | null> {
-    this.pauseRendering();
-    while (this.tickFrameBusy || this.sessionBusy) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    this.pauseRendering();
-    return this.session?.renderPreparedFigureProof() ?? null;
-  }
-
-  async renderActorCompositionProof(): Promise<WasmReport | null> {
-    this.pauseRendering();
-    while (this.tickFrameBusy || this.sessionBusy) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    this.pauseRendering();
-    return this.session?.renderActorCompositionProof() ?? null;
-  }
-
-  rebuildRenderResourcesForSmoke(): WasmReport | null {
-    if (!this.session || this.sessionBusy || this.tickFrameBusy) {
+  async withObserverSceneHost<T>(
+    operation: (session: WebSceneHost) => T | Promise<T>,
+  ): Promise<Awaited<T> | null> {
+    if (!this.session) {
       return null;
     }
-    const report = this.session.rebuildRenderResourcesForSmoke();
-    this.applyNativeUiReport(report);
-    return report;
+    const session = this.session;
+    return this.withSessionAsync(() => operation(session));
   }
 
-  beginLobbySmoke(chunkSpan = 2): WasmReport | null {
-    if (!this.session || this.sessionBusy) {
-      return null;
-    }
-    const report = this.session.beginLobbySmokeWithChunkSpan(chunkSpan);
-    this.applyNativeUiReport(report);
-    this.drainLobbyOperations();
-    return report;
+  observerCanvasPoint(clientX: number, clientY: number): { x: number; y: number } {
+    return this.canvasPixelPoint(clientX, clientY);
   }
 
-  async shutdownForSmoke(): Promise<WasmReport | null> {
-    this.pauseRendering();
-    while (this.tickFrameBusy) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    await this.waitForSessionIdle();
+  observerRenderRadius(): number {
+    return this.radiusChunks;
+  }
+
+  async shutdownForObserver(): Promise<WasmReport | null> {
+    await this.waitForObserverIdle(true);
     await this.worldCatalogOperationTail;
     await Promise.allSettled([...this.pendingLobbyRuntimeStarts]);
     const report = this.session?.shutdown() ?? null;
-    if (report?.ok) {
-      runtime.state.shutdownComplete = Boolean(report.shutdownComplete);
-      publishRuntimeState(runtime.state);
-    }
+    smokeObserver?.observeReport(report);
+    publishRuntimeState(runtime.state);
     return report;
   }
 
-  backgroundSaveForSmoke(): WasmReport | null {
-    if (this.sessionBusy) {
+  backgroundCycleForObserver(): WasmReport | null {
+    if (!this.session || this.sessionBusy) {
       return null;
     }
-    const report = this.session?.setHidden(true) ?? null;
+    const report = this.session.setHidden(true);
     this.applyNativeUiReport(report);
-    const resumed = this.session?.setHidden(false) ?? null;
-    this.applyNativeUiReport(resumed);
+    this.applyNativeUiReport(this.session.setHidden(false));
     this.lastFrameTime = performance.now();
     return report;
   }
@@ -637,11 +478,10 @@ class WebFrameDriver {
 
   launchLobbyRuntime(start: WebLobbyRuntimeStart): void {
     if (!this.session) return;
-    this.lobbyRuntimeStartCount += 1;
-    runtime.state.lobbyRuntimeStartCount = this.lobbyRuntimeStartCount;
     const task = (async () => {
       try {
-        runtime.state.lastLobbyRuntimeStart = await start.start();
+        const result = await start.start();
+        smokeObserver?.observeLobbyRuntimeStart(result);
         await this.waitForSessionIdle();
         if (!this.session) return;
         const report = this.session.completeLobbyWorldStart(start);
@@ -660,15 +500,6 @@ class WebFrameDriver {
     void task.finally(() => this.pendingLobbyRuntimeStarts.delete(task));
   }
 
-  applyLobbyLifecycleReport(report: WasmReport): void {
-    if (typeof report.lobbyLaunchActive === "undefined") {
-      return;
-    }
-    const active = Boolean(report.lobbyLaunchActive);
-    runtime.state.lobbyLaunchActive = active;
-  }
-
-
   async tickFrame(now: number): Promise<void> {
     if (!this.session) {
       return;
@@ -683,9 +514,6 @@ class WebFrameDriver {
     runtime.state.tickPhase = "scene-host";
     const frame = await this.renderHostFrame(now);
     this.handleSceneFrame(frame);
-    if (!this.sessionBusy) {
-      this.applyTargetState(this.session.previewBlockTarget());
-    }
   }
 
   async warmUpStreamingToIdle(): Promise<void> {
@@ -738,22 +566,9 @@ class WebFrameDriver {
       publishRuntimeState(runtime.state);
       return;
     }
-    this.applyReport(frame);
+    smokeObserver?.observeReport(frame);
     if (frame.rendered) {
       hideBootstrapStatus();
-    }
-    const pendingJobs = Number(frame.pendingCompileJobCount) || 0;
-    const pendingWorkerRequests = Number(frame.renderWorkerPendingRequestCount) || 0;
-    const streamingSettled = Boolean(frame.streamingIdle);
-    runtime.state.pendingCompileJobCount = pendingJobs;
-    runtime.state.compileInFlight = pendingJobs > 0;
-    runtime.state.compileInFlightCount = pendingWorkerRequests;
-    runtime.state.compileFinalizingCount = 0;
-    runtime.state.streamingSettled = streamingSettled;
-    if (streamingSettled) {
-      this.loadedCenter = { centerX: Number(frame.centerX), centerZ: Number(frame.centerZ) };
-      runtime.state.loadedCenterX = Number(frame.centerX);
-      runtime.state.loadedCenterZ = Number(frame.centerZ);
     }
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(frame);
@@ -762,400 +577,7 @@ class WebFrameDriver {
     }
   }
 
-  applyCameraState(camera: WasmReport): void {
-    if (!camera?.ok) {
-      return;
-    }
-    runtime.state.centerX = Number(camera.centerX) || 0;
-    runtime.state.centerZ = Number(camera.centerZ) || 0;
-    runtime.state.cameraX = Number(camera.cameraX) || 0;
-    runtime.state.cameraY = Number(camera.cameraY) || 0;
-    runtime.state.cameraZ = Number(camera.cameraZ) || 0;
-    runtime.state.cameraYawRadians = Number(camera.cameraYawRadians) || 0;
-    runtime.state.cameraPitchRadians = Number(camera.cameraPitchRadians) || 0;
-    runtime.state.cameraSpeedBlocksPerSecond = Number(camera.cameraSpeedBlocksPerSecond) || 0;
-    runtime.state.movementMode = String(camera.movementMode || runtime.state.movementMode || "WALK");
-    runtime.state.onGround = Boolean(camera.onGround);
-    runtime.state.horizontalCollision = Boolean(camera.horizontalCollision);
-    runtime.state.verticalCollision = Boolean(camera.verticalCollision);
-    applyHotbarState(camera, runtime.state);
-  }
-
-  applyReport(report: WasmReport): void {
-    const wasStartupReady = runtime.state.startupReady === true;
-    this.applyCameraState(report);
-    runtime.state.startupReady = Boolean(report.startupReady);
-    runtime.state.startupProgressVisible = Boolean(report.startupProgressVisible);
-    runtime.state.startupProgressObserved ||= runtime.state.startupProgressVisible;
-    runtime.state.startupProgressReadyChunks = Number(report.startupProgressReadyChunks) || 0;
-    runtime.state.startupProgressChunkCount = Number(report.startupProgressChunkCount) || 0;
-    runtime.state.startupProgressPercent = Number(report.startupProgressPercent) || 0;
-    if (!runtime.state.startupReady) {
-      runtime.state.startupHoldCameraY ??= runtime.state.cameraY;
-      runtime.state.minimumPreStartupCameraY = Math.min(
-        runtime.state.minimumPreStartupCameraY ?? runtime.state.cameraY,
-        runtime.state.cameraY,
-      );
-    } else if (!wasStartupReady) {
-      runtime.state.startupAdmissionFrame = Number(report.frameCount);
-      runtime.state.startupAdmissionCameraY = runtime.state.cameraY;
-    }
-    runtime.state.ok = true;
-    runtime.state.radiusChunks = report.radiusChunks;
-    runtime.state.width = report.width;
-    runtime.state.height = report.height;
-    runtime.state.dayTime = report.dayTime;
-    runtime.state.timeOfDay = report.timeOfDay;
-    runtime.state.playerJumpStatistic = Number(report.playerJumpStatistic) || 0;
-    runtime.state.playerSuccessfulBlockPlacementStatistic = Number(
-      report.playerSuccessfulBlockPlacementStatistic,
-    ) || 0;
-    runtime.state.skyRendered = Boolean(report.skyRendered);
-    runtime.state.actorCount = report.actorCount;
-    runtime.state.drawnActorCount = report.drawnActorCount;
-    runtime.state.loadedChunkCount = report.loadedChunkCount;
-    runtime.state.residentSectionCount = report.residentSectionCount;
-    runtime.state.pendingCompileJobCount = report.pendingCompileJobCount;
-    runtime.state.renderPendingWork = Boolean(report.renderPendingWork);
-    runtime.state.renderDirtyChunkCount = Number(report.renderDirtyChunkCount) || 0;
-    runtime.state.renderDirtySectionCount = Number(report.renderDirtySectionCount) || 0;
-    runtime.state.renderInflightSectionCount = Number(report.renderInflightSectionCount) || 0;
-    runtime.state.runnerKind = report.runnerKind;
-    runtime.state.runnerCommandQueueDepth = report.runnerCommandQueueDepth;
-    runtime.state.runnerUpdateQueueDepth = report.runnerUpdateQueueDepth;
-    runtime.state.runnerPendingJobs = report.runnerPendingJobs;
-    runtime.state.runnerPendingPublications = report.runnerPendingPublications;
-    runtime.state.runnerPendingPersistenceLoads = report.runnerPendingPersistenceLoads;
-    runtime.state.runnerPendingPersistenceSaves = report.runnerPendingPersistenceSaves;
-    runtime.state.clientDeferredChunkDropBacklogItems = Number(
-      report.clientDeferredChunkDropBacklogItems,
-    ) || 0;
-    runtime.state.worldgenMailboxKind = report.worldgenMailboxKind;
-    runtime.state.lightStatusMailboxKind = report.lightStatusMailboxKind;
-    runtime.state.worldgenMailboxPendingJobs = report.worldgenMailboxPendingJobs;
-    runtime.state.lightStatusMailboxPendingStatuses = report.lightStatusMailboxPendingStatuses;
-    runtime.state.runnerFrameMetrics = report.runnerFrameMetrics ?? null;
-    runtime.state.worldgenJobFrameMetrics = report.worldgenJobFrameMetrics ?? null;
-    runtime.state.lightStatusJobFrameMetrics = report.lightStatusJobFrameMetrics ?? null;
-    runtime.state.renderCount = report.renderCount;
-    runtime.state.guiCommandCount = report.guiCommandCount;
-    runtime.state.flatHudRetainedRebuilds = Number(report.flatHudRetainedRebuilds) || 0;
-    runtime.state.flatHudRetainedCacheHits = Number(report.flatHudRetainedCacheHits) || 0;
-    runtime.state.uiActive = Boolean(report.uiActive);
-    runtime.state.uiCoversWorld = Boolean(report.uiCoversWorld);
-    runtime.state.nativeUiScreen = String(report.uiScreen ?? runtime.state.nativeUiScreen ?? "none");
-    runtime.state.nativeUiOptionsParent = report.uiOptionsParent ?? null;
-    applySessionReport(report, runtime.state);
-    this.applyLobbyLifecycleReport(report);
-    for (const key of ["backgroundSaveCount", "firstAfterResume"]) {
-      if (typeof report[key] !== "undefined") {
-        runtime.state[key] = report[key];
-      }
-    }
-    for (const key of [
-      "activeWorldInstanceId",
-      "activeWorldBehaviorProfile",
-      "activeWorldSeedText",
-      "standbyWorldPresent",
-      "standbyWorldInstanceId",
-      "standbyWorldPhase",
-      "standbyLoadedChunkCount",
-      "standbyCadenceApplied",
-      "standbyCameraReconciled",
-      "standbyQueuedUploadLifecycleItems",
-      "standbyEstimatedGpuTerrainBytes",
-      "standbyAtlasBaseBytes",
-      "standbyDuplicatedAtlasBaseBytes",
-      "standbySharedTerrainResourceOwnerCount",
-      "standbyActorStateMaterialized",
-      "standbySharedActorResourceOwnerCount",
-      "standbySharedActorKnownRetainedBytes",
-      "standbyActorStateAllocatedBytes",
-      "standbySwitchable",
-      "standbyWorldSeedText",
-      "lobbyLaunchActive",
-      "lobbyDestinationFailure",
-      "staleLobbyStartCompletionCount",
-      "renderResourceGeneration",
-      "embeddedPreviewWorldInstanceId",
-      "embeddedPreviewPhase",
-      "embeddedPreviewAnchorX",
-      "embeddedPreviewAnchorY",
-      "embeddedPreviewAnchorZ",
-      "embeddedPreviewScale",
-      "embeddedPreviewMinChunkX",
-      "embeddedPreviewMinChunkZ",
-      "embeddedPreviewMaxChunkX",
-      "embeddedPreviewMaxChunkZ",
-      "embeddedPreviewChunkWidth",
-      "embeddedPreviewChunkDepth",
-      "embeddedPreviewMinSectionY",
-      "embeddedPreviewMaxSectionY",
-      "embeddedPreviewBoundedSectionCount",
-      "embeddedPreviewDrawnSectionCount",
-      "embeddedPreviewDrawnIndexCount",
-      "embeddedPreviewPendingCompileJobs",
-      "embeddedPreviewQueuedUploadLifecycleItems",
-      "embeddedPreviewOutOfRegionSubmissionCount",
-      "embeddedPreviewActorEntityCount",
-      "embeddedPreviewActorRemotePlayerCount",
-      "embeddedPreviewActorSourceLocalPlayerCount",
-      "embeddedPreviewSubmittedActorCount",
-      "embeddedPreviewDrawnActorCount",
-      "embeddedPreviewSourceRejectedActorCount",
-      "embeddedPreviewClipRejectedActorCount",
-      "embeddedPreviewFrustumRejectedActorCount",
-      "embeddedPreviewActorMeshRebuildCount",
-      "embeddedPreviewActorMeshUploadCount",
-      "embeddedPreviewActorGpuCapacityBytes",
-      "embeddedPreviewPlacedActorPipelineCount",
-      "embeddedPreviewPlacedActorMultiviewPipelineCount",
-      "embeddedPreviewActorObservationCount",
-      "embeddedPreviewRemotePlayerObservationCount",
-      "embeddedPreviewFirstRemotePlayerId",
-      "embeddedPreviewFirstRemotePlayerModel",
-      "embeddedPreviewFirstRemotePlayerWalkDistance",
-      "embeddedPreviewFirstRemotePlayerSourcePackedLight",
-      "embeddedPreviewFirstRemotePlayerSourceX",
-      "embeddedPreviewFirstRemotePlayerSourceY",
-      "embeddedPreviewFirstRemotePlayerSourceZ",
-      "embeddedPreviewFirstRemotePlayerCompositionX",
-      "embeddedPreviewFirstRemotePlayerCompositionY",
-      "embeddedPreviewFirstRemotePlayerCompositionZ",
-      "embeddedPreviewFirstActorEntityId",
-      "embeddedPreviewFirstActorKind",
-      "embeddedPreviewFirstActorAgeTicks",
-      "embeddedPreviewFirstActorSourcePackedLight",
-      "embeddedPreviewSecondActorEntityId",
-      "embeddedPreviewSecondActorKind",
-      "embeddedPreviewSecondActorAgeTicks",
-      "embeddedPreviewSecondActorSourcePackedLight",
-      "embeddedPreviewActorMotionSequence",
-      "embeddedPreviewActorUpdateToVisibleMs",
-      "embeddedPreviewActorUpdateToVisibleFrameCount",
-      "embeddedPreviewActorMotionEntityId",
-      "embeddedPreviewActorMotionKind",
-      "embeddedPreviewActorMotionFromAgeTicks",
-      "embeddedPreviewActorMotionToAgeTicks",
-      "embeddedPreviewActorMotionSourcePackedLight",
-      "embeddedPreviewActorMotionFromSourceX",
-      "embeddedPreviewActorMotionFromSourceY",
-      "embeddedPreviewActorMotionFromSourceZ",
-      "embeddedPreviewActorMotionToSourceX",
-      "embeddedPreviewActorMotionToSourceY",
-      "embeddedPreviewActorMotionToSourceZ",
-      "embeddedPreviewActorMotionFromCompositionX",
-      "embeddedPreviewActorMotionFromCompositionY",
-      "embeddedPreviewActorMotionFromCompositionZ",
-      "embeddedPreviewActorMotionToCompositionX",
-      "embeddedPreviewActorMotionToCompositionY",
-      "embeddedPreviewActorMotionToCompositionZ",
-      "embeddedPreviewRemotePlayerMotionSequence",
-      "embeddedPreviewRemotePlayerUpdateToVisibleMs",
-      "embeddedPreviewRemotePlayerUpdateToVisibleFrameCount",
-      "embeddedPreviewRemotePlayerMotionId",
-      "embeddedPreviewRemotePlayerMotionModel",
-      "embeddedPreviewRemotePlayerMotionFromWalkDistance",
-      "embeddedPreviewRemotePlayerMotionToWalkDistance",
-      "embeddedPreviewRemotePlayerMotionSourcePackedLight",
-      "embeddedPreviewRemotePlayerMotionFromSourceX",
-      "embeddedPreviewRemotePlayerMotionFromSourceY",
-      "embeddedPreviewRemotePlayerMotionFromSourceZ",
-      "embeddedPreviewRemotePlayerMotionToSourceX",
-      "embeddedPreviewRemotePlayerMotionToSourceY",
-      "embeddedPreviewRemotePlayerMotionToSourceZ",
-      "embeddedPreviewRemotePlayerMotionFromCompositionX",
-      "embeddedPreviewRemotePlayerMotionFromCompositionY",
-      "embeddedPreviewRemotePlayerMotionFromCompositionZ",
-      "embeddedPreviewRemotePlayerMotionToCompositionX",
-      "embeddedPreviewRemotePlayerMotionToCompositionY",
-      "embeddedPreviewRemotePlayerMotionToCompositionZ",
-      "embeddedActivationPhase",
-      "embeddedActivationAlpha",
-      "embeddedActivationReady",
-      "embeddedActivationSequence",
-      "embeddedActivationSourceWorldInstanceId",
-      "embeddedActivationDestinationWorldInstanceId",
-      "embeddedActivationSwitchElapsedMs",
-      "embeddedActivationCoveredRenderedFrames",
-      "embeddedActivationFirstUncoveredFrame",
-      "embeddedActivationFirstUncoveredDrawnSectionCount",
-      "embeddedActivationFirstUncoveredUploadedSectionCount",
-      "embeddedActivationFirstUncoveredSubmittedCompileSectionCount",
-      "embeddedActivationFirstUncoveredAcceptedCompileResultCount",
-      "embeddedActivationFirstUncoveredEyeCount",
-      "embeddedActivationAcceptedEntryX",
-      "embeddedActivationAcceptedEntryY",
-      "embeddedActivationAcceptedEntryZ",
-      "embeddedActivationPostSwapX",
-      "embeddedActivationPostSwapY",
-      "embeddedActivationPostSwapZ",
-      "embeddedActivationPostSwapOnGround",
-      "embeddedActivationPostSwapBodyLoaded",
-      "embeddedActivationPostSwapBodyClear",
-      "embeddedActivationPostSwapSupportLoaded",
-      "embeddedActivationPostSwapSolidSupport",
-      "embeddedActivationPostSwapSupported",
-      "embeddedActivationFirstUncoveredX",
-      "embeddedActivationFirstUncoveredY",
-      "embeddedActivationFirstUncoveredZ",
-      "embeddedActivationFirstUncoveredOnGround",
-      "embeddedActivationFirstUncoveredBodyLoaded",
-      "embeddedActivationFirstUncoveredBodyClear",
-      "embeddedActivationFirstUncoveredSupportLoaded",
-      "embeddedActivationFirstUncoveredSolidSupport",
-      "embeddedActivationFirstUncoveredSupported",
-      "embeddedActivationStabilityFrame",
-      "embeddedActivationStabilityX",
-      "embeddedActivationStabilityY",
-      "embeddedActivationStabilityZ",
-      "embeddedActivationStabilityOnGround",
-      "embeddedActivationStabilityBodyLoaded",
-      "embeddedActivationStabilityBodyClear",
-      "embeddedActivationStabilitySupportLoaded",
-      "embeddedActivationStabilitySolidSupport",
-      "embeddedActivationStabilitySupported",
-      "embeddedActivationFailed",
-      "embeddedActivationFailure",
-      "warmWorldSwitchSequence",
-      "warmWorldSwitchUploadedSectionCount",
-      "warmWorldSwitchSubmittedCompileSectionCount",
-      "warmWorldSwitchAcceptedCompileResultCount",
-      "warmWorldSwitchMaterializedRenderer",
-    ]) {
-      if (typeof report[key] !== "undefined") {
-        runtime.state[key] = report[key];
-      }
-    }
-    if (typeof report.sectionOcclusionCulling !== "undefined") {
-      this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
-    }
-    if (typeof report.forceFullbright !== "undefined") {
-      this.forceFullbright = Boolean(report.forceFullbright);
-    }
-    runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
-    runtime.state.forceFullbright = this.forceFullbright;
-    if (typeof report.renderColorProfile !== "undefined") {
-      runtime.state.renderColorProfile = String(report.renderColorProfile);
-    }
-    if (typeof report.debugOverlayVisible !== "undefined") {
-      runtime.state.debugOverlayVisible = Boolean(report.debugOverlayVisible);
-    }
-    runtime.state.compileTimingCount = Number(report.compileTimingCount) || 0;
-    runtime.state.compileTimings = Array.isArray(report.compileTimings)
-      ? report.compileTimings
-      : [];
-    runtime.state.activeCompileTiming = report.activeCompileTiming ?? null;
-    runtime.state.lastCompileTiming = report.lastCompileTiming ?? null;
-    runtime.state.lastCompileReport = report.lastCompileReport ?? null;
-    runtime.state.renderWorkerGeneration = Number(report.renderWorkerGeneration) || 0;
-    runtime.state.renderWorkerStaleCompletionCount = Number(
-      report.renderWorkerStaleCompletionCount,
-    ) || 0;
-    runtime.state.status = "ready";
-    this.setNativeStatusOverlay("ready", true, false);
-    runtime.state.lastReport = report;
-  }
-
-  applyTargetState(target: WasmReport): void {
-    if (!target?.ok) {
-      return;
-    }
-    runtime.state.currentTarget = target;
-    applyHotbarState(target, runtime.state);
-  }
-
-  blockStateAt(x: number, y: number, z: number): WasmReport | null {
-    if (!this.session || this.sessionBusy) {
-      return null;
-    }
-    return this.session.blockStateAt(Math.trunc(x), Math.trunc(y), Math.trunc(z));
-  }
-
-  frameEmbeddedPreview(): WasmReport | null {
-    if (!this.session || this.sessionBusy) {
-      return null;
-    }
-    const report = this.session.frameEmbeddedPreview();
-    this.applyCameraState(report);
-    return report;
-  }
-
-  frameInteractionSurface(): WasmReport | null {
-    if (!this.session || this.sessionBusy) {
-      return null;
-    }
-    const report = this.session.frameInteractionSurface();
-    this.applyCameraState(report);
-    return report;
-  }
-
-  async interactBlock(action: string): Promise<WasmReport | null> {
-    if (!this.session) {
-      return null;
-    }
-    const session = this.session;
-    try {
-      await this.waitForSessionIdle();
-      const interaction = await this.withSessionAsync(() => session.interactBlock(action));
-      if (!interaction?.ok) {
-        return null;
-      }
-      runtime.state.interactionCount += 1;
-      runtime.state.lastInteraction = interaction;
-      runtime.state.interactionStatus = formatInteractionStatus(interaction);
-      applyHotbarState(interaction, runtime.state);
-      // 067 Stage 3: a block edit publishes a SectionBlockUpdates server update, which the
-      // streaming loop marks render-dirty on its next drain and recompiles automatically —
-      // no explicit compile request needed.
-      publishRuntimeState(runtime.state);
-      return interaction;
-    } catch (error) {
-      runtime.state.ok = false;
-      runtime.state.status = stringifyError(error);
-      this.setNativeStatusOverlay(runtime.state.status, false, true);
-      console.error(error);
-      publishRuntimeState(runtime.state);
-      return null;
-    }
-  }
-
-  selectHotbarSlot(slot: number): boolean {
-    if (!this.session) {
-      return false;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.selectHotbarSlot(slot), 0);
-      return true;
-    }
-    const hotbar = this.session.selectHotbarSlot(slot);
-    if (!hotbar?.ok) {
-      return false;
-    }
-    applyHotbarState(hotbar, runtime.state);
-    publishRuntimeState(runtime.state);
-    return true;
-  }
-
-  adjustCameraSpeed(amount: number): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.adjustCameraSpeed(amount), 0);
-      return null;
-    }
-    const camera = this.session.adjustCameraSpeed(amount);
-    if (!camera?.ok) {
-      return null;
-    }
-    this.applyCameraState(camera);
-    publishRuntimeState(runtime.state);
-    return camera;
-  }
-
   setNativeDebugOverlay(open: boolean): WasmReport | null {
-    runtime.state.debugOverlayVisible = Boolean(open);
     if (!this.session) {
       return null;
     }
@@ -1181,113 +603,6 @@ class WebFrameDriver {
     return report;
   }
 
-  openNativeTitleUi(): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.openNativeTitleUi(), 0);
-      return null;
-    }
-    const report = this.session.openTitleUi();
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  openNativePauseUi(): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.openNativePauseUi(), 0);
-      return null;
-    }
-    const report = this.session.openPauseUi();
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  openNativeHelpUi(): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.openNativeHelpUi(), 0);
-      return null;
-    }
-    const report = this.session.openHelpUi();
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  closeNativeUi(): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.closeNativeUi(), 0);
-      return null;
-    }
-    const report = this.session.closeUi();
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  handleNativeUiKey(key: string): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.handleNativeUiKey(key), 0);
-      return deferredUiReport();
-    }
-    const report = this.session.handleUiKey(key);
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  handleNativeUiPointerMove(clientX: number, clientY: number, pointerType = "mouse"): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    const point = this.canvasPixelPoint(clientX, clientY);
-    if (this.sessionBusy) {
-      setTimeout(() => this.handleNativeUiPointerMove(clientX, clientY, pointerType), 0);
-      return deferredUiReport();
-    }
-    const report = this.session.handleUiPointerMove(point.x, point.y, this.radiusChunks);
-    this.applyNativeUiReport(report, { pointerType });
-    return report;
-  }
-
-  handleNativeUiPointerDown(clientX: number, clientY: number, pointerType = "mouse"): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    const point = this.canvasPixelPoint(clientX, clientY);
-    if (this.sessionBusy) {
-      setTimeout(() => this.handleNativeUiPointerDown(clientX, clientY, pointerType), 0);
-      return deferredUiReport();
-    }
-    const report = this.session.handleUiPointerDown(point.x, point.y, this.radiusChunks);
-    this.applyNativeUiReport(report, { pointerType });
-    return report;
-  }
-
-  handleNativeUiPointerUp(clientX: number, clientY: number, pointerType = "mouse"): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    const point = this.canvasPixelPoint(clientX, clientY);
-    if (this.sessionBusy) {
-      setTimeout(() => this.handleNativeUiPointerUp(clientX, clientY, pointerType), 0);
-      return deferredUiReport();
-    }
-    const report = this.session.handleUiPointerUp(point.x, point.y, this.radiusChunks);
-    this.applyNativeUiReport(report, { fromPointer: true, pointerType });
-    return report;
-  }
-
   setNativeTouchLookSensitivity(
     value: number,
     available = Boolean(this.touchControls?.snapshot().visible),
@@ -1296,7 +611,6 @@ class WebFrameDriver {
     const clamped = clampLookSensitivity(value);
     this.lookSensitivity = clamped;
     runtime.state.lookSensitivity = clamped;
-    runtime.state.touchLookSensitivityAvailable = Boolean(available);
     if (persist) {
       storeLookSensitivity(clamped);
     }
@@ -1331,42 +645,32 @@ class WebFrameDriver {
     return report;
   }
 
-  applyNativeUiReport(report: WasmReport | null | undefined, options: { fromPointer?: boolean, pointerType?: string } = {}): void {
+  applyNativeUiReport(
+    report: WasmReport | null | undefined,
+    options: { fromPointer?: boolean; pointerType?: string } = {},
+  ): void {
     if (!report?.ok) {
       return;
     }
-    const wasUiActive = runtime.state.uiActive === true;
-    const previousLookSensitivity = this.lookSensitivity;
-    const previousTouchControlsMode = this.touchControlsMode;
-    runtime.state.uiActive = Boolean(report.active ?? report.uiActive);
-    runtime.state.uiCoversWorld = Boolean(report.coversWorld ?? report.uiCoversWorld);
-    runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
-    runtime.state.nativeUiOptionsParent = report.optionsParent ?? report.uiOptionsParent ?? null;
-    applySessionReport(report, runtime.state);
-    this.applyLobbyLifecycleReport(report);
-    for (const key of ["backgroundSaveCount", "firstAfterResume"]) {
-      if (typeof report[key] !== "undefined") {
-        runtime.state[key] = report[key];
-      }
+    smokeObserver?.observeReport(report);
+    const wasPointerCaptureBlocked = runtime.state.pointerCaptureBlocked === true;
+    runtime.state.pointerCaptureBlocked = Boolean(report.active ?? report.uiActive);
+    if (typeof report.sectionOcclusionCulling !== "undefined") {
+      this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
     }
-    this.sectionOcclusionCulling = Boolean(report.sectionOcclusionCulling);
-    this.forceFullbright = Boolean(report.forceFullbright);
+    if (typeof report.forceFullbright !== "undefined") {
+      this.forceFullbright = Boolean(report.forceFullbright);
+    }
     runtime.state.sectionOcclusionCulling = this.sectionOcclusionCulling;
     runtime.state.forceFullbright = this.forceFullbright;
     if (typeof report.renderColorProfile !== "undefined") {
       runtime.state.renderColorProfile = String(report.renderColorProfile);
     }
-    if (typeof report.touchLookSensitivityAvailable !== "undefined") {
-      runtime.state.touchLookSensitivityAvailable = Boolean(report.touchLookSensitivityAvailable);
-    }
-    if (typeof report.debugOverlayVisible !== "undefined") {
-      runtime.state.debugOverlayVisible = Boolean(report.debugOverlayVisible);
-    }
     if (typeof report.touchLookSensitivity !== "undefined") {
       const sensitivity = clampLookSensitivity(report.touchLookSensitivity);
-      this.lookSensitivity = sensitivity;
-      runtime.state.lookSensitivity = sensitivity;
-      if (sensitivity !== previousLookSensitivity) {
+      if (sensitivity !== this.lookSensitivity) {
+        this.lookSensitivity = sensitivity;
+        runtime.state.lookSensitivity = sensitivity;
         storeLookSensitivity(sensitivity);
       }
     }
@@ -1374,9 +678,9 @@ class WebFrameDriver {
       const mode = report.touchControlsMode === "on" || report.touchControlsMode === "off"
         ? report.touchControlsMode
         : "auto";
-      this.touchControlsMode = mode;
-      runtime.state.touchControlsMode = mode;
-      if (mode !== previousTouchControlsMode) {
+      if (mode !== this.touchControlsMode) {
+        this.touchControlsMode = mode;
+        runtime.state.touchControlsMode = mode;
         storeTouchControlsMode(mode);
         this.touchControls?.setVisible(mode === "on" || hasTouchInput());
       }
@@ -1385,20 +689,15 @@ class WebFrameDriver {
       this.radiusChunks = clampRadiusChunks(report.renderDistance);
       runtime.state.radiusChunks = this.radiusChunks;
     }
-    if (report.action) {
-      runtime.state.lastUiAction = report;
-    }
-    if (runtime.state.uiActive) {
+    if (runtime.state.pointerCaptureBlocked) {
       this.releasePointerLockForUi();
-      if (!wasUiActive) {
+      if (!wasPointerCaptureBlocked) {
         this.clearGameplayInput();
       }
     }
-    if (
-      (report.action === "startWorld" || report.action === "resume")
-      && options.fromPointer
-      && options.pointerType !== "touch"
-    ) {
+    if (report.releasePointerCapture === true) {
+      this.releasePointerLockForUi();
+    } else if (report.pointerCaptureDesired === true) {
       this.requestPointerLock();
     }
     publishRuntimeState(runtime.state);
@@ -1472,8 +771,7 @@ class WebFrameDriver {
       );
       await nextAnimationFrame();
       this.applyNativeUiReport(completion);
-      runtime.state.assetPackCompletionCount =
-        (Number(runtime.state.assetPackCompletionCount) || 0) + 1;
+      smokeObserver?.observeAssetPackCompletion();
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
@@ -1508,7 +806,7 @@ class WebFrameDriver {
       await executeIndexedDbCatalogExecution(db, execution);
       await this.waitForSessionIdle();
       const completion = session.applyWorldCatalogExecution(requestId, execution);
-      runtime.state.worldCatalogCompletionCount += 1;
+      smokeObserver?.observeWorldCatalogCompletion();
       this.applyNativeUiReport(completion, options);
     } catch (error) {
       const message = stringifyError(error);
@@ -1516,7 +814,7 @@ class WebFrameDriver {
       try {
         await this.waitForSessionIdle();
         const failure = session.applyWorldCatalogError(requestId, message);
-        runtime.state.worldCatalogCompletionCount += 1;
+        smokeObserver?.observeWorldCatalogCompletion();
         this.applyNativeUiReport(failure, options);
       } catch (completionError) {
         runtime.state.ok = false;
@@ -1575,12 +873,9 @@ class WebFrameDriver {
       return;
     }
 
-    this.applySessionHostMode(startReport);
     this.resetStreamingStateForSessionRestart();
     try {
       this.syncCanvasSize();
-      this.applyCameraState(this.session.cameraFrameState());
-      this.applyTargetState(this.session.previewBlockTarget());
       if (options.fromPointer && options.pointerType !== "touch") {
         this.requestPointerLock();
       }
@@ -1597,40 +892,8 @@ class WebFrameDriver {
     publishRuntimeState(runtime.state);
   }
 
-  applySessionHostMode(report: WasmReport): void {
-    if (report.sessionKind === "remote") {
-      runtime.state.clientHost = "remote-dedicated";
-      runtime.state.remoteWebSocketUrl = String(report.sessionRemoteEndpoint ?? "");
-    } else if (report.sessionKind === "localWorld") {
-      runtime.state.clientHost = "worker-integrated";
-      runtime.state.remoteWebSocketUrl = null;
-    }
-  }
-
   resetStreamingStateForSessionRestart(): void {
-    this.loadedCenter = null;
-    runtime.state.loadedCenterX = null;
-    runtime.state.loadedCenterZ = null;
-    runtime.state.pendingCompileJobCount = 0;
-    runtime.state.renderPendingWork = false;
-    runtime.state.renderDirtyChunkCount = 0;
-    runtime.state.renderDirtySectionCount = 0;
-    runtime.state.renderInflightSectionCount = 0;
-    runtime.state.compileInFlight = false;
-    runtime.state.compileInFlightCount = 0;
-    runtime.state.compileFinalizingCount = 0;
-    runtime.state.streamingSettled = false;
-    runtime.state.startupReady = false;
-    runtime.state.startupHoldCameraY = null;
-    runtime.state.minimumPreStartupCameraY = null;
-    runtime.state.startupAdmissionFrame = null;
-    runtime.state.startupAdmissionCameraY = null;
-    runtime.state.compileQueued = false;
-    runtime.state.compileTargetX = null;
-    runtime.state.compileTargetZ = null;
-    runtime.state.queuedCompileTargetX = null;
-    runtime.state.queuedCompileTargetZ = null;
-    runtime.state.activeCompileTiming = null;
+    smokeObserver?.resetForSessionRestart();
   }
 
   canvasPixelPoint(clientX: number, clientY: number): { x: number, y: number } {
@@ -1771,13 +1034,6 @@ class WebFrameDriver {
     this.applyNativeUiReport(report);
   }
 
-  currentCameraCenter(): { centerX: number, centerZ: number } {
-    return {
-      centerX: Number(runtime.state.centerX) || 0,
-      centerZ: Number(runtime.state.centerZ) || 0,
-    };
-  }
-
   recordFrameGap(frameGapMs: number): void {
     if (!Number.isFinite(frameGapMs)) {
       return;
@@ -1787,7 +1043,7 @@ class WebFrameDriver {
   }
 
   requestPointerLock(): void {
-    if (runtime.state.uiActive === true) {
+    if (runtime.state.pointerCaptureBlocked === true) {
       return;
     }
     runtime.state.pointerLockAttempted = true;
@@ -1868,84 +1124,8 @@ function finiteInteger(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
-function applySessionReport(report: WasmReport, state: AppRuntimeState): void {
-  if (typeof report.sessionState !== "undefined") {
-    state.sessionState = String(report.sessionState);
-  }
-  if (typeof report.sessionKind !== "undefined") {
-    const kind = String(report.sessionKind);
-    state.sessionKind = kind;
-    if (kind !== "localWorld") {
-      state.sessionSeed = null;
-      state.sessionSeedText = null;
-      state.sessionWorldId = null;
-    }
-    if (kind !== "remote") {
-      state.sessionRemoteEndpoint = null;
-    }
-  }
-  if (typeof report.sessionSeed !== "undefined") {
-    state.sessionSeed = Number(report.sessionSeed);
-  }
-  if (typeof report.sessionSeedText !== "undefined") {
-    state.sessionSeedText = String(report.sessionSeedText);
-  }
-  if (typeof report.sessionWorldId !== "undefined") {
-    state.sessionWorldId = String(report.sessionWorldId);
-  }
-  if (typeof report.sessionRemoteEndpoint !== "undefined") {
-    state.sessionRemoteEndpoint = String(report.sessionRemoteEndpoint);
-  }
-  if (typeof report.sessionFailureMessage !== "undefined") {
-    state.sessionFailureMessage = String(report.sessionFailureMessage);
-  } else if (report.sessionState !== "failed") {
-    state.sessionFailureMessage = null;
-  }
-  if (typeof report.sessionStatusVisible !== "undefined") {
-    state.sessionStatusVisible = Boolean(report.sessionStatusVisible);
-  }
-  if (typeof report.sessionStatusOk !== "undefined") {
-    state.sessionStatusOk = Boolean(report.sessionStatusOk);
-  }
-  if (typeof report.sessionStatusMessage !== "undefined") {
-    state.sessionStatusMessage = String(report.sessionStatusMessage);
-  } else if (report.sessionStatusVisible === false) {
-    state.sessionStatusMessage = "";
-  }
-  if (typeof report.statusOverlayVisible !== "undefined") {
-    state.statusOverlayVisible = Boolean(report.statusOverlayVisible);
-  }
-  if (typeof report.statusOverlayOk !== "undefined") {
-    state.statusOverlayOk = Boolean(report.statusOverlayOk);
-  }
-  if (typeof report.statusOverlayMessage !== "undefined") {
-    state.statusOverlayMessage = String(report.statusOverlayMessage);
-  } else if (report.statusOverlayVisible === false) {
-    state.statusOverlayMessage = "";
-  }
-  if (typeof report.worldCatalogPersistent !== "undefined") {
-    state.worldCatalogPersistent = Boolean(report.worldCatalogPersistent);
-  }
-  if (typeof report.worldCatalogLoading !== "undefined") {
-    state.worldCatalogLoading = Boolean(report.worldCatalogLoading);
-  }
-  if (typeof report.worldCatalogEntryCount !== "undefined") {
-    state.worldCatalogEntryCount = Number(report.worldCatalogEntryCount) || 0;
-  }
-  if (typeof report.worldCatalogStatusVisible !== "undefined") {
-    state.worldCatalogStatusVisible = Boolean(report.worldCatalogStatusVisible);
-  }
-  if (typeof report.worldCatalogStatusOk !== "undefined") {
-    state.worldCatalogStatusOk = Boolean(report.worldCatalogStatusOk);
-  }
-  if (typeof report.worldCatalogStatusMessage !== "undefined") {
-    state.worldCatalogStatusMessage = String(report.worldCatalogStatusMessage);
-  } else if (report.worldCatalogStatusVisible === false) {
-    state.worldCatalogStatusMessage = "";
-  }
-}
-
 function publishRuntimeState(state: AppRuntimeState): void {
+  smokeObserver?.observePlatformState(runtime);
   const status = document.getElementById("mclone-bootstrap-status");
   if (!status || status.dataset.retired === "true") {
     return;
@@ -2056,10 +1236,6 @@ function versionedUrl(path: string): URL {
   return url;
 }
 
-function snapshotState(): WasmReport {
-  return JSON.parse(JSON.stringify(runtime.state));
-}
-
 function clampRadiusChunks(value: unknown): number {
   const radius = Math.round(Number(value));
   if (!Number.isFinite(radius)) {
@@ -2071,25 +1247,9 @@ function clampRadiusChunks(value: unknown): number {
 function deferredUiReport(): WasmReport {
   return {
     ok: true,
-    handled: runtime.state.uiActive === true,
+    handled: runtime.state.pointerCaptureBlocked === true,
     deferred: true,
-    active: runtime.state.uiActive === true,
-    coversWorld: runtime.state.uiCoversWorld === true,
-    screen: runtime.state.nativeUiScreen ?? "none",
   };
-}
-
-function applyHotbarState(
-  value: WasmReport | null | undefined,
-  state: Record<string, any>,
-): void {
-  if (!value || typeof value.selectedHotbarSlot === "undefined") {
-    return;
-  }
-  const slot = Number(value.selectedHotbarSlot);
-  if (Number.isInteger(slot) && slot >= 0 && slot < 9) {
-    state.selectedHotbarSlot = slot;
-  }
 }
 
 function stringifyError(error: unknown): string {

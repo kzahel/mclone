@@ -88,4 +88,39 @@ fn semantic_smoke_registry_is_query_gated_outside_the_product_adapter() {
     assert!(WEB_SMOKE_OBSERVER.contains("globalThis.__mcloneWebApp = runtime"));
     assert!(WEB_SMOKE_OBSERVER.contains("runtime.interactBlock ="));
     assert!(WEB_SMOKE_OBSERVER.contains("runtime.openNativePauseUi ="));
+    assert!(WEB_SMOKE_OBSERVER.contains("Object.assign(runtime.state, report)"));
+    for forbidden in [
+        "lastReport",
+        "lastUiAction",
+        "movementMode",
+        "selectedHotbarSlot",
+        "playerJumpStatistic",
+        "currentTarget",
+        "nativeUiScreen",
+        "runtime.interactBlock =",
+        "openNativeTitleUi",
+        "handleNativeUiKey",
+        "renderHalfSpaceTerrainProof",
+    ] {
+        assert!(
+            !WEB_APP.contains(forbidden),
+            "production browser adapter regained diagnostic semantics through {forbidden}"
+        );
+    }
+    for removed_export in [
+        "js_name = toggleMovementMode",
+        "js_name = selectHotbarSlot",
+        "js_name = uiStatus",
+        "js_name = setTouchControlsOverlay",
+        "js_name = setPauseMenu",
+        "js_name = exerciseSettingsEffect",
+        "js_name = exerciseBlockInteraction",
+        "js_name = frameFirstActor",
+        "js_name = simulateSurfaceLoss",
+    ] {
+        assert!(
+            !WEB_SCENE_HOST.contains(removed_export),
+            "unused direct diagnostic export survived: {removed_export}"
+        );
+    }
 }

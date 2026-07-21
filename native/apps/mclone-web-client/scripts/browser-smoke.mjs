@@ -483,6 +483,17 @@ async function run() {
     }
 
     if (appLoop) {
+      const productBoundaryPage = await context.newPage();
+      await productBoundaryPage.goto(`${baseUrl}/app.html?observerAbsenceProbe=1`, {
+        waitUntil: "load",
+      });
+      const productObserverAbsent = await productBoundaryPage.evaluate(
+        () => typeof globalThis.__mcloneWebApp === "undefined",
+      );
+      await productBoundaryPage.close();
+      if (!productObserverAbsent) {
+        throw new Error("ordinary product page installed the smoke diagnostic observer");
+      }
       const indexedDbReloadWorldId = indexedDbReloadProbe
         ? `reload-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
         : "";

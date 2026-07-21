@@ -1140,17 +1140,6 @@ impl WebSceneHost {
         self.report(None, false, 0.0, false).map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = toggleMovementMode)]
-    pub fn toggle_movement_mode(&mut self) -> Result<JsValue, JsValue> {
-        let _ = self.host_mut()?.toggle_mono_movement_mode();
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = selectHotbarSlot)]
-    pub fn select_hotbar_slot(&mut self, slot: u8) -> Result<JsValue, JsValue> {
-        let _ = self.host_mut()?.select_mono_hotbar_slot(slot);
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
 
     #[wasm_bindgen(js_name = previewBlockTarget)]
     pub fn preview_block_target(&self) -> Result<JsValue, JsValue> {
@@ -1313,10 +1302,6 @@ impl WebSceneHost {
         self.report(None, false, 0.0, false).map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = uiStatus)]
-    pub fn ui_status(&mut self) -> Result<JsValue, JsValue> {
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
 
     #[wasm_bindgen(js_name = setDebugOverlayVisible)]
     pub fn set_debug_overlay_visible(&mut self, visible: bool) -> Result<JsValue, JsValue> {
@@ -1369,53 +1354,6 @@ impl WebSceneHost {
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = setTouchControlsOverlay)]
-    #[allow(clippy::too_many_arguments)]
-    pub fn set_touch_controls_overlay(
-        &mut self,
-        visible: bool,
-        movement_active: bool,
-        base_x: f64,
-        base_y: f64,
-        thumb_x: f64,
-        thumb_y: f64,
-        jump_pressed: bool,
-        attack_pressed: bool,
-        use_pressed: bool,
-        descend_pressed: bool,
-        menu_pressed: bool,
-    ) -> Result<JsValue, JsValue> {
-        let scale = GuiScale::from_pixels(self.context.width, self.context.height);
-        let point = |x: f64, y: f64| {
-            let point = scale.client_to_gui(x, y);
-            Point {
-                x: point.x.clamp(0.0, scale.width),
-                y: point.y.clamp(0.0, scale.height),
-            }
-        };
-        self.touch_overlay = TouchOverlay {
-            visible,
-            menu_pressed,
-            movement: TouchJoystickOverlay {
-                active: movement_active,
-                base: point(base_x, base_y),
-                thumb: point(thumb_x, thumb_y),
-            },
-            jump_pressed,
-            sprint_pressed: false,
-            sneak_pressed: false,
-            descend_pressed,
-            interaction_visible: true,
-            attack_pressed,
-            use_pressed,
-            hotbar_visible: false,
-            selected_hotbar_slot: self.host_ref()?.selected_mono_hotbar_slot(),
-            hotbar_pressed_slot: None,
-            hotbar_icons: mclone_ui::EMPTY_HOTBAR_ICONS,
-        };
-        self.refresh_mono_ui_context()?;
-        self.ui_report(false, None).map_err(JsValue::from)
-    }
 
     #[wasm_bindgen(js_name = openTitleUi)]
     pub fn open_title_ui(&mut self) -> Result<JsValue, JsValue> {
@@ -1541,10 +1479,6 @@ impl WebSceneHost {
         }
     }
 
-    #[wasm_bindgen(js_name = beginLobbySmoke)]
-    pub fn begin_lobby_smoke(&mut self) -> Result<JsValue, JsValue> {
-        self.begin_lobby_smoke_with_chunk_span(2)
-    }
 
     #[wasm_bindgen(js_name = beginLobbySmokeWithChunkSpan)]
     pub fn begin_lobby_smoke_with_chunk_span(
@@ -1724,91 +1658,6 @@ impl WebSceneHost {
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = setPauseMenu)]
-    pub fn set_pause_menu(&mut self, visible: bool) -> Result<JsValue, JsValue> {
-        let host = self
-            .host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?;
-        host.set_mono_ui_screen(visible.then_some(GameScreen::Pause));
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = exerciseSettingsEffect)]
-    pub fn exercise_settings_effect(&mut self) -> Result<JsValue, JsValue> {
-        let host = self
-            .host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?;
-        let mut effects = WebHostEffects::default();
-        let outcome = host
-            .apply_mono_ui_action(
-                GameUiAction::ToggleCrosshair,
-                false,
-                &self.context.device,
-                &self.context.queue,
-                &mut effects,
-            )
-            .map_err(js_error)?;
-        self.settings_effect_applied = !outcome.scene_replaced
-            && !outcome.session_start_requested
-            && outcome.clear_gameplay_input;
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = exerciseBlockInteraction)]
-    pub fn exercise_block_interaction(&mut self) -> Result<JsValue, JsValue> {
-        let host = self
-            .host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?;
-        let target = find_interaction_surface(host)
-            .ok_or_else(|| JsValue::from_str("no loaded surface for scene-host interaction"))?;
-        aim_host_at_block(host, target);
-        match host
-            .handle_mono_world_action(FlatInputAction::Attack)
-            .map_err(js_error)?
-        {
-            MonoWorldActionStatus::Submitted { .. } => {
-                self.interaction_sent = true;
-            }
-            status => {
-                let camera = host.camera_frame_state().camera;
-                return Err(JsValue::from_str(&format!(
-                    "scene-host interaction did not issue a command: {status:?}; target={target:?}; camera={camera:?}"
-                )));
-            }
-        }
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = frameFirstActor)]
-    pub fn frame_first_actor(&mut self) -> Result<JsValue, JsValue> {
-        let host = self
-            .host
-            .as_mut()
-            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?;
-        if let Some(actor) = host
-            .mono_client()
-            .and_then(|client| client.actor_presentations().first().copied())
-        {
-            let target = Vec3::new(
-                actor.feet_position.x as f32,
-                actor.feet_position.y as f32 + 1.0,
-                actor.feet_position.z as f32,
-            );
-            let eye = target + Vec3::new(-2.2, 1.4, -4.8);
-            set_host_camera_look_at(host, eye, target);
-        }
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
-
-    #[wasm_bindgen(js_name = simulateSurfaceLoss)]
-    pub fn simulate_surface_loss(&mut self) -> Result<JsValue, JsValue> {
-        self.frame_policy
-            .require_restart("simulated WebGPU surface loss; recreate scene host");
-        self.report(None, false, 0.0, false).map_err(JsValue::from)
-    }
 
     #[wasm_bindgen(js_name = shutdown)]
     pub fn shutdown(&mut self) -> Result<JsValue, JsValue> {
@@ -4080,15 +3929,6 @@ fn find_interaction_surface(host: &McloneSceneHost) -> Option<BlockPos> {
     None
 }
 
-fn aim_host_at_block(host: &mut McloneSceneHost, block: BlockPos) {
-    let target = Vec3::new(
-        block.x as f32 + 0.5,
-        block.y as f32 + 0.5,
-        block.z as f32 + 0.5,
-    );
-    let eye = target + Vec3::new(0.0, 1.8, -1.3);
-    set_host_camera_look_at(host, eye, target);
-}
 
 fn aim_player_host_at_block(host: &mut McloneSceneHost, block: BlockPos) {
     let target = Vec3::new(

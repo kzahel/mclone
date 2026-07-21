@@ -20,11 +20,6 @@ export interface TouchControlApp {
   ): Record<string, any> | null;
 }
 
-interface TouchRuntimeState extends Record<string, any> {
-  touchControlsVisible?: boolean;
-  touchPointerActiveCount?: number;
-}
-
 export interface TouchControlSnapshot {
   visible: boolean;
   activePointerCount: number;
@@ -32,15 +27,13 @@ export interface TouchControlSnapshot {
 
 export class TouchControls {
   private readonly app: TouchControlApp;
-  private readonly runtimeState: TouchRuntimeState;
   readonly canvas: HTMLCanvasElement;
   private visible: boolean;
   private readonly activePointerIds: Set<number>;
   private lastTouchAt: number;
 
-  constructor(app: TouchControlApp, runtimeState: TouchRuntimeState) {
+  constructor(app: TouchControlApp) {
     this.app = app;
-    this.runtimeState = runtimeState;
     this.canvas = app.canvas;
     this.visible = false;
     this.activePointerIds = new Set();
@@ -106,12 +99,10 @@ export class TouchControls {
     if (phase === "end" || phase === "cancel") {
       this.activePointerIds.delete(event.pointerId);
     }
-    this.updateRuntimeState();
   }
 
   clearAll(): void {
     this.activePointerIds.clear();
-    this.updateRuntimeState();
   }
 
   setVisible(visible: boolean): void {
@@ -121,7 +112,6 @@ export class TouchControls {
       this.visible,
       false,
     );
-    this.updateRuntimeState();
   }
 
   private markTouchEvent(): void {
@@ -130,11 +120,6 @@ export class TouchControls {
 
   shouldIgnoreMouseEvent(): boolean {
     return performance.now() - this.lastTouchAt < 800;
-  }
-
-  private updateRuntimeState(): void {
-    this.runtimeState.touchControlsVisible = this.visible;
-    this.runtimeState.touchPointerActiveCount = this.activePointerIds.size;
   }
 
   snapshot(): TouchControlSnapshot {
