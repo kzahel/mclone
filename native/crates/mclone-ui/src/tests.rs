@@ -735,6 +735,41 @@ fn touch_control_hit_rects_stay_inside_gui_space() {
 }
 
 #[test]
+fn shared_touch_hit_test_resolves_every_control_family() {
+    let scale = GuiScale::from_pixels(780, 1688);
+    let center = |rect: Rect| Point {
+        x: rect.x + rect.width * 0.5,
+        y: rect.y + rect.height * 0.5,
+    };
+    let actions = touch_action_button_rects(scale);
+
+    assert_eq!(
+        touch_control_at(scale, center(touch_menu_button_rect())),
+        TouchControl::MenuButton
+    );
+    assert_eq!(
+        touch_control_at(scale, center(actions.jump)),
+        TouchControl::JumpButton
+    );
+    assert_eq!(
+        touch_control_at(scale, center(actions.attack)),
+        TouchControl::AttackButton
+    );
+    assert_eq!(
+        touch_control_at(scale, center(touch_hotbar_slot_rects(scale)[8])),
+        TouchControl::HotbarSlot(8)
+    );
+    assert_eq!(
+        touch_control_at(scale, center(touch_movement_zone_rect(scale))),
+        TouchControl::MovementStick
+    );
+    assert_eq!(
+        touch_control_at(scale, Point { x: 390.0, y: 400.0 }),
+        TouchControl::LookDrag
+    );
+}
+
+#[test]
 fn server_cadence_cycles_only_emit_valid_cadences() {
     let cadence = GameSimulationCadence::new(20, 20, 60);
 

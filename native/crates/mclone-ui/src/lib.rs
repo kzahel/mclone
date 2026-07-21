@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
-use mclone_input::{FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControlsMode};
+use mclone_input::{
+    FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControl, TouchControlsMode,
+};
 
 mod frame_pipeline_overlay;
 mod v2;
@@ -3488,6 +3490,37 @@ pub fn touch_hotbar_slot_rects(scale: GuiScale) -> [Rect; 9] {
     let x0 = ((scale.width - total_width) * 0.5).max(4.0);
     let y = (scale.height - 98.0).max(58.0);
     std::array::from_fn(|index| Rect::new(x0 + index as f32 * (slot + gap), y, slot, slot))
+}
+
+/// Resolve one flat touch point through the shared game-control layout.
+///
+/// Platform adapters remain responsible for converting their native client or
+/// surface coordinates into GUI space before calling this helper.
+pub fn touch_control_at(scale: GuiScale, point: Point) -> TouchControl {
+    if touch_menu_button_rect().contains(point) {
+        return TouchControl::MenuButton;
+    }
+    let buttons = touch_action_button_rects(scale);
+    for (rect, control) in [
+        (buttons.jump, TouchControl::JumpButton),
+        (buttons.descend, TouchControl::DescendButton),
+        (buttons.attack, TouchControl::AttackButton),
+        (buttons.use_item, TouchControl::UseButton),
+    ] {
+        if rect.contains(point) {
+            return control;
+        }
+    }
+    for (slot, rect) in touch_hotbar_slot_rects(scale).into_iter().enumerate() {
+        if rect.contains(point) {
+            return TouchControl::HotbarSlot(slot as u8);
+        }
+    }
+    if touch_movement_zone_rect(scale).contains(point) {
+        TouchControl::MovementStick
+    } else {
+        TouchControl::LookDrag
+    }
 }
 
 pub fn flat_hotbar_slot_rects(scale: GuiScale) -> [Rect; 9] {

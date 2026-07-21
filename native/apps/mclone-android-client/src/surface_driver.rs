@@ -25,8 +25,8 @@ use mclone_core::{CHUNK_WIDTH, Vec3d};
 use mclone_diagnostics::{FrameHostKind, FramePipelineReport};
 use mclone_input::{
     FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences,
-    KeyboardKey, MouseWheelDirection, PointerButton, TouchControl, TouchControlsMode,
-    TouchInputAdapter, TouchInputEvent, TouchInputSettings,
+    KeyboardKey, MouseWheelDirection, PointerButton, TouchControlsMode, TouchInputAdapter,
+    TouchInputEvent, TouchInputSettings,
 };
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
@@ -38,8 +38,7 @@ use mclone_scene::{
 };
 use mclone_ui::{
     DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, GameTouchSettings, GameUiHost, GuiScale, Point,
-    TouchJoystickOverlay, TouchOverlay, touch_action_button_rects, touch_hotbar_slot_rects,
-    touch_menu_button_rect, touch_movement_zone_rect,
+    TouchJoystickOverlay, TouchOverlay, touch_control_at, touch_menu_button_rect,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -1201,33 +1200,6 @@ fn android_remote_runtime(
             endpoint.address
         )
     })
-}
-
-fn touch_control_at(scale: GuiScale, point: Point) -> TouchControl {
-    if touch_menu_button_rect().contains(point) {
-        return TouchControl::MenuButton;
-    }
-    let buttons = touch_action_button_rects(scale);
-    for (rect, control) in [
-        (buttons.jump, TouchControl::JumpButton),
-        (buttons.descend, TouchControl::DescendButton),
-        (buttons.attack, TouchControl::AttackButton),
-        (buttons.use_item, TouchControl::UseButton),
-    ] {
-        if rect.contains(point) {
-            return control;
-        }
-    }
-    for (slot, rect) in touch_hotbar_slot_rects(scale).into_iter().enumerate() {
-        if rect.contains(point) {
-            return TouchControl::HotbarSlot(slot as u8);
-        }
-    }
-    if touch_movement_zone_rect(scale).contains(point) {
-        TouchControl::MovementStick
-    } else {
-        TouchControl::LookDrag
-    }
 }
 
 fn pointer_button(button: MouseButton) -> Option<PointerButton> {
