@@ -2,11 +2,12 @@
 
 Topic: `platform-host-boundary`
 
-Status: direction accepted and current-state audit recorded 2026-07-21.
-Active Tactical
-[`203`](../tactical/203-shared-interactive-router-native-adoption.md) is
-establishing the shared synchronous interactive router on desktop and flat
-Android before the browser ABI changes. The existing shared scene, input,
+Status: direction accepted and implementation in progress 2026-07-21.
+Tactical
+[`203`](../tactical/203-shared-interactive-router-native-adoption.md) completed
+the shared synchronous interactive router and adopted it on desktop and flat
+Android. The next bounded slice is browser raw-input adoption from that landed
+API. The existing shared scene, input,
 actor/mailbox, rendering, and platform-operation contracts are the foundation;
 the remaining work is to converge the interactive host rim and isolate browser
 diagnostics without replacing those systems with a new universal framework.
@@ -210,8 +211,8 @@ translation and do not inspect its action mapping.
 |---|---|---|---|
 | Shared scene/client ownership | `McloneSceneHost` owns session, render admission, frame assembly, camera movement application, UI model, interaction, warm-world, and lifecycle policy | Healthy foundation | Keep; route all interactive hosts through it |
 | Shared input vocabulary | `mclone-input` owns keyboard keys, pointer buttons, bindings, `FlatInputIntent`, `FlatInputFrame`, keyboard/mouse held state, touch state, gamepad state, capabilities, and preferences | Healthy but incomplete outer boundary | Add/clarify neutral event ingestion and shared routing; avoid parallel final dispatch |
-| Desktop flat input | `winit` events use `DesktopFlatInputAdapter` and shared `KeyboardMouseInputAdapter`, but `app.rs` intercepts semantic debug/UI keys and dispatches `FlatInputFrame` fields itself | Partial convergence | Thin winit normalization plus shared input/context router |
-| Flat Android input | Uses shared keyboard/mouse and `TouchInputAdapter`, but `AndroidGpuState::apply_flat_frame` repeats menu, help, camera, hotbar, Attack, and Use dispatch | Partial convergence | Reuse the same shared router as desktop/web; retain Android lifecycle/surface mechanics |
+| Desktop flat input | `WinitFrameDriver` owns `MonoInteractiveInputRouter`; its leaf adapter normalizes winit facts and executes cursor/redraw mechanics while ordinary final UI/game dispatch is shared | Native route converged; desktop-only renderer/development shortcuts remain classified diagnostics | Keep the typed direct route and prevent app-local semantic dispatch from returning |
+| Flat Android input | The surface driver owns the same `MonoInteractiveInputRouter`; keyboard, pointer, touch frames, look, and held cadence use it while Android retains activity/surface/coordinate mechanics | Native route converged; touch hit testing remains at the Android rim pending cross-web touch work | Keep the typed route and converge the touch model during browser adoption |
 | XR input | `mclone-xr-host` converts OpenXR action state into neutral `XrControllerSnapshot`; `mclone-scene` owns locomotion, comfort, teleport, menu pointer, and action meaning | Strong precedent | Preserve modality-specific shared scene policy; do not force XR through a flat/browser event ABI |
 | Offscreen/test input | Scripts construct `FlatInputFrame`, `FlatInputAction`, and `GameUiAction` directly | Appropriate semantic test client | Keep; do not mistake tests for platform glue |
 | Web keyboard/mouse | TypeScript maps DOM codes to `forward`, `jump`, `sprint`, hotbar, pause/help/debug, break/place, and camera-speed behavior | Clear semantic duplication | TS forwards raw DOM facts; browser Rust normalizes; shared Rust resolves and routes |
@@ -256,10 +257,13 @@ dispatcher are another important foundation. Shared Rust already decides many
 UI/settings effects once, while native, Android, XR, and offscreen hosts supply
 mechanical implementations.
 
-The missing piece is a shared outer interactive router that accepts neutral
-events, resolves them using those existing components, routes them according to
-scene/UI context, and returns a mechanical disposition. Today the apps still
-perform that last dispatch themselves.
+The shared outer native router now exists as
+`mclone-scene::MonoInteractiveInputRouter`. It accepts neutral keyboard,
+pointer, wheel, touch-derived flat frames, and held cadence, resolves them
+using the existing input components, routes them according to scene/UI
+context, and returns a mechanical `MonoInputDisposition`. Desktop and flat
+Android have adopted it. The remaining interactive gap is the browser, whose
+TypeScript and web-only Rust paths still perform their own semantic dispatch.
 
 The current wheel behavior is a concrete example of why the outer route
 matters. Shared `KeyboardMouseBindings` maps wheel movement to hotbar stepping.
@@ -271,45 +275,46 @@ capability difference.
 
 ### Desktop Flat Audit
 
-The desktop path is closer to the target than the browser path:
+The desktop path now has the target native shape:
 
 ```text
 winit KeyCode / MouseButton
   -> DesktopFlatInputAdapter
   -> shared KeyboardKey / PointerButton
-  -> shared KeyboardMouseInputAdapter
-  -> FlatInputFrame
+  -> shared MonoInteractiveInputRouter
+  -> existing McloneSceneHost policy
+  -> mechanical MonoInputDisposition
 ```
 
-However, `mclone-native-client/src/app.rs` still owns:
+`mclone-native-client/src/app.rs` still owns desktop-only renderer and
+development shortcuts such as movement-mode/debug visualization toggles.
+Those are explicitly classified diagnostics rather than ordinary product
+bindings. It no longer owns:
 
-- special key constants and branches for movement mode, blink/debug behavior,
-  frame overlay, physics cube, occlusion, fullbright, and renderer rebuilds;
 - UI-active checks and direct `GuiKey` routing;
 - separate menu/help/block-palette/hotbar dispatch from `FlatInputFrame`;
 - separate Attack/Use dispatch;
-- pointer-lock desired state coupled to those semantic branches;
 - UI pointer routing and direct pause-menu/block-palette dispatch in
-  `WinitFrameDriver`, beyond its mechanical cursor/redraw role; and
-- held-input, focus clearing, cursor routing, and redraw decisions distributed
-  across `ChunkApp` and `WinitFrameDriver`.
+  `WinitFrameDriver`; or
+- held-input and focus-clearing policy distributed across parallel owners.
 
 Winit window creation, surface ownership, cursor-grab API calls, monitor/frame
 pacing, device events, and redraw scheduling are valid desktop responsibilities.
-The semantic branch cascade is not the desired common boundary.
+The remaining diagnostic shortcuts are not part of the ordinary input route.
 
 ### Flat Android Audit
 
-Flat Android is also partly converged. `surface_driver.rs` receives winit
-Android events and uses shared `KeyboardMouseInputAdapter` and
-`TouchInputAdapter`. That proves the browser does not need a separate
-TypeScript joystick/action implementation.
+Flat Android is now converged at the same final route. `surface_driver.rs`
+receives winit Android events, uses shared keyboard/mouse and touch adapters,
+and feeds their frames through `MonoInteractiveInputRouter`. Its former
+`apply_flat_frame` dispatcher for menu, block palette, help, camera view,
+hotbar selection, Attack, Use, and look is deleted. This proves the browser
+does not need a separate TypeScript joystick/action implementation.
 
-The Android app nevertheless contains its own `apply_flat_frame` dispatcher
-for menu, block palette, help, camera view, hotbar selection, Attack, Use, and
-look. It also performs UI-active routing separately from desktop. Touch-control
-hit testing (`touch_control_at`) remains app-local even though the stateful
-touch resolver is shared.
+Touch-control hit testing (`touch_control_at`) remains app-local even though
+the stateful touch resolver and final route are shared. The browser tactical
+must decide how to share the touch layout/model without forcing native through
+a DOM-shaped ABI.
 
 Android activity/window/surface recreation, lifecycle save calls, redraw
 cadence, audio-device construction, and conversion from winit touch coordinates
@@ -800,8 +805,8 @@ source code or transports.
 | Browser Escape/F1/debug/movement shortcuts | TS | shared input/UI/client-experience routing | No direct semantic UI/debug calls from DOM key handlers |
 | Browser wheel camera-speed policy | TS | shared binding/runtime shortcut policy | Wheel becomes neutral physical input |
 | Browser touch game model | `mclone-web-touch.ts` | shared input/UI model used with Android | No Jump/Attack/Use/Descend or movement-key vocabulary in TS |
-| Desktop final `FlatInputFrame` dispatch | `ChunkApp` | shared interactive router | Desktop app retains winit/cursor/redraw mechanics only |
-| Android final `FlatInputFrame` dispatch | `AndroidGpuState` | same shared interactive router | Android app retains lifecycle/surface/raw coordinate mechanics only |
+| Desktop final `FlatInputFrame` dispatch | **Closed in Tactical 203:** `MonoInteractiveInputRouter` | shared interactive router | Source lock rejects the deleted app-local final-dispatch methods |
+| Android final `FlatInputFrame` dispatch | **Closed in Tactical 203:** `MonoInteractiveInputRouter` | same shared interactive router | Source lock rejects the deleted app-local final-dispatch method |
 | Duplicated winit normalization | desktop and flat Android apps | small reusable winit adapter | Same key/button/focus conversion used by both without a winit dependency in engine crates |
 | UI active/pointer routing | native apps and TS around shared UI | shared scene router plus mechanical outcome | Platform code no longer names the target UI action/screen |
 | Pointer-lock policy leaks | desktop/web semantic branches | shared desired capture only where context-dependent; local mechanics otherwise | TS/native API code receives neutral desired state, or documents invariant autonomous capture |

@@ -1,7 +1,9 @@
 # Tactical 203: Shared Interactive Router And Native Adoption
 
-Status: active 2026-07-21. Contract and current-behavior inventory are being
-locked before implementation.
+Status: complete 2026-07-21. The shared synchronous router is implemented and
+adopted by desktop and flat Android; their parallel final semantic dispatch is
+deleted, the source/adoption locks pass, and affected native, XR, Android, and
+rendered-output lanes have been validated.
 
 Topic: `platform-host-boundary`
 
@@ -75,6 +77,8 @@ The remaining native duplication is the final route:
 
 ### Slice 0: Behavioral and ownership locks
 
+Status: complete 2026-07-21.
+
 - Freeze shared binding behavior separately from winit normalization.
 - Record desktop and Android handling for menu, help, camera view, hotbar,
   Attack/Use, look, held movement, UI-active keys/pointer, focus loss, and
@@ -86,6 +90,8 @@ The remaining native duplication is the final route:
 
 ### Slice 1: Shared scene router
 
+Status: complete 2026-07-21.
+
 - Add the smallest coherent scene-owned route for resolved flat frames and
   active mono UI input.
 - Reuse existing `McloneSceneHost` methods and `HostEffects`; do not create a
@@ -96,6 +102,8 @@ The remaining native duplication is the final route:
   shared Rust.
 
 ### Slice 2: Desktop adoption
+
+Status: complete 2026-07-21.
 
 - Make desktop winit normalization feed the shared route.
 - Delete `ChunkApp`'s parallel flat-frame semantic matches and corresponding
@@ -110,6 +118,8 @@ The remaining native duplication is the final route:
 
 ### Slice 3: Flat Android adoption
 
+Status: complete 2026-07-21.
+
 - Make keyboard, pointer, and touch frames use the same shared route.
 - Delete the semantic branches in `AndroidGpuState::apply_flat_frame`.
 - Preserve Android activity/window/surface lifecycle, coordinate conversion,
@@ -118,6 +128,8 @@ The remaining native duplication is the final route:
   browser or DOM-shaped interface.
 
 ### Slice 4: Closeout
+
+Status: complete 2026-07-21.
 
 - Run the shared input/scene/app-runtime test suites.
 - Run desktop window/offscreen input and UI validation and inspect a rendered
@@ -130,6 +142,71 @@ The remaining native duplication is the final route:
   contract, remaining browser gaps, and validation evidence.
 - Mark this tactical complete and create the browser raw-input tactical from
   the actual shared API.
+
+## Implementation Record
+
+`mclone-scene::MonoInteractiveInputRouter` now owns the final synchronous
+route from shared keyboard/mouse frames into active UI or gameplay context. It
+uses `KeyboardMouseInputAdapter` for bindings and held state, calls the
+existing `McloneSceneHost` policy methods for menu, help, camera, hotbar,
+world interaction, look, UI pointer, and frame advancement, and returns only
+`MonoInputDisposition` mechanical facts. It is neither an actor nor a new
+scene-policy owner.
+
+The desktop `WinitFrameDriver` and flat Android surface driver own one router
+each. Their leaf code still converts winit key, pointer, motion, wheel, and
+touch facts and executes cursor, redraw, activity, and surface mechanics, but
+no longer matches `FlatInputFrame` fields to select engine behavior. Desktop
+wheel input now follows the shared hotbar binding instead of retaining its
+old no-clip camera-speed exception. Desktop-only renderer and development
+shortcuts remain explicitly app-local diagnostics.
+
+Android retains coordinate conversion and touch-control hit testing around
+the existing shared `TouchInputAdapter`; it feeds the resulting neutral flat
+frames through the same scene route. Unifying the browser and Android touch
+layout/model remains a browser-tactical concern rather than a hidden
+requirement of this native extraction.
+
+The `platform_host_boundary_lock` test requires both native clients to adopt
+the router and rejects reintroduction of the deleted app-local final-dispatch
+methods. The thin-adapter gate now names `advance_held_frame` as the shared
+route expected at both native rims.
+
+## Validation Evidence
+
+Passed:
+
+- all `mclone-scene` library tests, including the shared router's UI-context
+  and held-state tests;
+- all `mclone-native-client` tests (168 unit tests plus three review tests);
+- `mclone-android-client` tests and compile check;
+- the focused platform-host-boundary source lock;
+- `pnpm native:thin-adapters:purity` and `pnpm native:xr:check`;
+- `pnpm native:desktop-offscreen:smoke`; its textured forest/actor capture at
+  `/tmp/mclone-desktop-offscreen.png` was inspected;
+- `pnpm native:xr-emulation:smoke`; its stereo terrain and world-space menu
+  capture at `/tmp/mclone-xr-emulation.png` was inspected;
+- `pnpm native:android:apk` and the dual-ABI AVD APK build; and
+- all three flat-Android AVD lanes: ordinary terrain/HUD, injected touch look,
+  and menu-to-new-world lifecycle. Captures at
+  `/tmp/mclone-android-avd-chunk.png`,
+  `/tmp/mclone-android-avd-touch.png`, and
+  `/tmp/mclone-android-avd-session.png` were inspected.
+
+The full workspace `cargo test --manifest-path native/Cargo.toml` control ran
+all affected router/native suites successfully but did not finish green: the
+unrelated server test
+`sqlite_restart_restores_mclone_profile_before_unseen_generation` failed, and
+failed again in isolation with a missing generated block assertion. This
+tactical does not touch server persistence, generation, or that test; the
+focused and affected-package gates above are green. The failure is recorded
+rather than repaired by expanding an input-boundary tactical.
+
+## Closeout
+
+Acceptance criteria 1-12 are satisfied. Browser TypeScript and the Wasm action
+ABI were deliberately unchanged, so the next tactical can be designed from
+the landed typed router rather than from a speculative browser abstraction.
 
 ## Acceptance Criteria
 
