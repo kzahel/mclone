@@ -1,0 +1,33 @@
+{
+  "name": "@mclone/structure-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/structure-json.test.ts && pnpm structures:check",
+    "structures:check": "tsx src/sync-first-party.ts --check",
+    "structures:write": "tsx src/sync-first-party.ts --write"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "three": "^0.178.0",
+    "zustand": "^5.0.14"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/three": "0.178.1",
+    "@vitejs/plugin-react": "^6.0.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.2",
+    "vite": "^8.1.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.1"
+}
