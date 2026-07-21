@@ -175,8 +175,8 @@ if (enforce) {
     }
     process.exitCode = 1;
   }
-  if (!sources.rust.text.includes(".advance_mono_input_frame(")) {
-    console.error("browser driver stopped advancing shared player-pose publication");
+  if (!sources.rust.text.includes(".advance_held_frame(")) {
+    console.error("browser driver stopped advancing the shared interactive router");
     process.exitCode = 1;
   }
 } else {

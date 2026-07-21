@@ -1,13 +1,6 @@
 import { fetchAssetPack } from "./mclone-render-compiler-shared.js";
 import { PolledWorkerTransport } from "./mclone-worker-transport.js";
-import {
-  INPUT_KEY_NAMES,
-  applyHotbarState,
-  bindInput,
-  defaultInputKeys,
-  defaultMovementImpulse,
-  sanitizeInputImpulse,
-} from "./mclone-web-input.js";
+import { bindInput } from "./mclone-web-input.js";
 import {
   clampLookSensitivity,
   DEFAULT_LOOK_SENSITIVITY,
@@ -18,7 +11,6 @@ import {
 } from "./mclone-web-settings.js";
 import type { TouchControlsMode } from "./mclone-web-settings.js";
 import { TouchControls, hasTouchInput } from "./mclone-web-touch.js";
-import type { TouchOverlayState } from "./mclone-web-touch.js";
 import {
   executeIndexedDbCatalogExecution,
   openWorldDb,
@@ -41,9 +33,6 @@ type WasmModule = typeof import("mclone-web-client-wasm");
 // serde shape), so these are read coercion-guarded (`Number(...)`/`Boolean(...)`/`?.ok`). Naming
 // the boundary documents intent and keeps internal field reads consistent.
 type WasmReport = Record<string, any>;
-
-type InputKeys = Record<string, boolean>;
-type TouchMovementImpulse = ReturnType<typeof defaultMovementImpulse>;
 
 interface WebStartupPlan extends WasmReport {
   renderDistance: number;
@@ -74,8 +63,6 @@ interface AppRuntimeState extends Record<string, any> {
 interface AppRuntime {
   ready: boolean;
   state: AppRuntimeState;
-  queueMouseDelta?: (dx: number, dy: number) => void;
-  setInputKey?: (name: string, down: boolean) => boolean;
   adjustCameraSpeed?: (amount: number) => WasmReport | null;
   previewBlockTarget?: () => WasmReport | null;
   blockStateAt?: (x: number, y: number, z: number) => WasmReport | null;
@@ -183,6 +170,7 @@ const runtime: AppRuntime = {
     startupHoldCameraY: null as number | null,
     minimumPreStartupCameraY: null as number | null,
     startupAdmissionFrame: null as number | null,
+    startupAdmissionCameraY: null as number | null,
     compileQueued: false,
     compileTargetX: null,
     compileTargetZ: null,
@@ -245,11 +233,6 @@ const runtime: AppRuntime = {
     touchControlsMode: "auto",
     touchLookSensitivityAvailable: false,
     touchControlsVisible: false,
-    touchJoystickActive: false,
-    touchMovementLeftImpulse: 0,
-    touchMovementForwardImpulse: 0,
-    touchLookActive: false,
-    touchButtonActiveCount: 0,
     clientHost: "worker-integrated",
     remoteWebSocketUrl: null,
     status: "booting",
@@ -262,8 +245,6 @@ installFirstTouchFullscreen(runtime.state);
 
 async function boot(): Promise<WasmReport> {
   const app = new WebFrameDriver();
-  runtime.queueMouseDelta = (dx: number, dy: number) => app.queueMouseDelta(dx, dy);
-  runtime.setInputKey = (name: string, down: boolean) => app.setInputKey(name, down);
   runtime.adjustCameraSpeed = (amount: number) => app.adjustCameraSpeed(amount);
   runtime.previewBlockTarget = () => runtime.state.currentTarget;
   runtime.blockStateAt = (x: number, y: number, z: number) => app.blockStateAt(x, y, z);
@@ -332,15 +313,9 @@ class WebFrameDriver {
   assetPack: Uint8Array | null;
   authoredAssetPack: Uint8Array | null;
   fallbackAssetPack: Uint8Array | null;
-  keys: InputKeys;
-  touchKeys: InputKeys;
-  touchMovementImpulse: TouchMovementImpulse;
   touchControls: TouchControls | null;
-  pendingTouchOverlay: TouchOverlayState | null;
   lookSensitivity: number;
   touchControlsMode: TouchControlsMode;
-  mouseDeltaX: number;
-  mouseDeltaY: number;
   loadedCenter: { centerX: number, centerZ: number } | null;
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
@@ -365,18 +340,12 @@ class WebFrameDriver {
     this.assetPack = null;
     this.authoredAssetPack = null;
     this.fallbackAssetPack = null;
-    this.keys = defaultInputKeys() as InputKeys;
-    this.touchKeys = defaultInputKeys() as InputKeys;
-    this.touchMovementImpulse = defaultMovementImpulse();
     this.touchControls = null;
-    this.pendingTouchOverlay = null;
     const settings = loadStoredSettings();
     this.lookSensitivity = settings.lookSensitivity;
     this.touchControlsMode = settings.touchControlsMode;
     runtime.state.lookSensitivity = this.lookSensitivity;
     runtime.state.touchControlsMode = this.touchControlsMode;
-    this.mouseDeltaX = 0;
-    this.mouseDeltaY = 0;
     this.loadedCenter = null;
     this.pointerDragging = false;
     this.pointerDown = null;
@@ -473,6 +442,13 @@ class WebFrameDriver {
     }
     for (const name of [
       "renderFrame",
+      "handleRawKey",
+      "handleRawPointerButton",
+      "handleRawPointerMove",
+      "handleRawMouseMotion",
+      "handleRawWheel",
+      "handleRawTouch",
+      "clearRawInput",
       "syncOverviewRenderFrame",
       "renderCompilerSharedSupported",
       "cameraFrameState",
@@ -502,7 +478,6 @@ class WebFrameDriver {
       "setStatusOverlay",
       "setTouchLookSensitivity",
       "setTouchControlsMode",
-      "setTouchControlsOverlay",
       "setHidden",
       "beginLobbySmoke",
       "takeLobbyRuntimeStart",
@@ -541,7 +516,6 @@ class WebFrameDriver {
     });
     this.touchControls = new TouchControls(this, runtime.state);
     this.setNativeTouchControlsMode(this.touchControlsMode, false);
-    this.flushNativeTouchControlsOverlay();
     this.setNativeTouchLookSensitivity(
       this.lookSensitivity,
       this.touchControls.snapshot().visible,
@@ -766,32 +740,10 @@ class WebFrameDriver {
       : 0;
     this.recordFrameGap(frameGapMs);
     this.lastFrameTime = now;
-    const uiActive = runtime.state.uiActive === true;
-    const mouseDeltaX = uiActive ? 0 : this.mouseDeltaX;
-    const mouseDeltaY = uiActive ? 0 : this.mouseDeltaY;
-    this.mouseDeltaX = 0;
-    this.mouseDeltaY = 0;
     this.syncCanvasSize();
-    const keys = uiActive ? (defaultInputKeys() as InputKeys) : this.currentInputKeys();
-    const movement = uiActive ? defaultMovementImpulse() : this.currentMovementImpulse();
     runtime.state.frameCount += 1;
     runtime.state.tickPhase = "scene-host";
-    const frame = await this.renderHostFrame(now, {
-      mouseDeltaX,
-      mouseDeltaY,
-      keyboardTurn: (keys.turnLeft ? 1 : 0) - (keys.turnRight ? 1 : 0),
-      forward: keys.forward,
-      backward: keys.backward,
-      left: keys.left,
-      right: keys.right,
-      jump: keys.jump,
-      descend: keys.descend,
-      sneak: keys.shift,
-      sprint: keys.sprint,
-      analogActive: movement.active,
-      analogLeft: movement.left,
-      analogForward: movement.forward,
-    });
+    const frame = await this.renderHostFrame(now);
     this.handleSceneFrame(frame);
     if (!this.sessionBusy) {
       this.applyTargetState(this.session.previewBlockTarget());
@@ -821,22 +773,7 @@ class WebFrameDriver {
     if (!this.session) {
       return true;
     }
-    const frame = await this.renderHostFrame(performance.now(), {
-      mouseDeltaX: 0,
-      mouseDeltaY: 0,
-      keyboardTurn: 0,
-      forward: false,
-      backward: false,
-      left: false,
-      right: false,
-      jump: false,
-      descend: false,
-      sneak: false,
-      sprint: false,
-      analogActive: false,
-      analogLeft: 0,
-      analogForward: 0,
-    });
+    const frame = await this.renderHostFrame(performance.now());
     this.handleSceneFrame(frame);
     if (options.awaitWorker && Number(frame.renderWorkerPendingRequestCount) > 0) {
       await nextAnimationFrame();
@@ -844,43 +781,9 @@ class WebFrameDriver {
     return Boolean(frame.initialPresentationReady);
   }
 
-  async renderHostFrame(
-    now: number,
-    input: {
-      mouseDeltaX: number;
-      mouseDeltaY: number;
-      keyboardTurn: number;
-      forward: boolean;
-      backward: boolean;
-      left: boolean;
-      right: boolean;
-      jump: boolean;
-      descend: boolean;
-      sneak: boolean;
-      sprint: boolean;
-      analogActive: boolean;
-      analogLeft: number;
-      analogForward: number;
-    },
-  ): Promise<WasmReport> {
+  async renderHostFrame(now: number): Promise<WasmReport> {
     const session = this.session as WebSceneHost;
-    return session.renderFrame(
-      now,
-      input.mouseDeltaX,
-      input.mouseDeltaY,
-      input.keyboardTurn,
-      input.forward,
-      input.backward,
-      input.left,
-      input.right,
-      input.jump,
-      input.descend,
-      input.sneak,
-      input.sprint,
-      input.analogActive,
-      input.analogLeft,
-      input.analogForward,
-    );
+    return session.renderFrame(now);
   }
 
   handleSceneFrame(frame: WasmReport): void {
@@ -957,6 +860,7 @@ class WebFrameDriver {
       );
     } else if (!wasStartupReady) {
       runtime.state.startupAdmissionFrame = Number(report.frameCount);
+      runtime.state.startupAdmissionCameraY = runtime.state.cameraY;
     }
     runtime.state.ok = true;
     runtime.state.radiusChunks = report.radiusChunks;
@@ -1489,40 +1393,13 @@ class WebFrameDriver {
     return report;
   }
 
-  setNativeTouchControlsOverlay(overlay: TouchOverlayState): WasmReport | null {
-    this.pendingTouchOverlay = overlay;
-    return this.flushNativeTouchControlsOverlay();
-  }
-
-  flushNativeTouchControlsOverlay(): WasmReport | null {
-    if (!this.session || !this.pendingTouchOverlay || this.sessionBusy) {
-      return null;
-    }
-    const overlay = this.pendingTouchOverlay;
-    const base = this.canvasLocalPointToPixel(overlay.movementBaseX, overlay.movementBaseY);
-    const thumb = this.canvasLocalPointToPixel(overlay.movementThumbX, overlay.movementThumbY);
-    const report = this.session.setTouchControlsOverlay(
-      overlay.visible,
-      overlay.movementActive,
-      base.x,
-      base.y,
-      thumb.x,
-      thumb.y,
-      overlay.jumpPressed,
-      overlay.attackPressed,
-      overlay.usePressed,
-      overlay.descendPressed,
-      overlay.menuPressed,
-    );
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
   applyNativeUiReport(report: WasmReport | null | undefined, options: { fromPointer?: boolean, pointerType?: string } = {}): void {
     if (!report?.ok) {
       return;
     }
     const wasUiActive = runtime.state.uiActive === true;
+    const previousLookSensitivity = this.lookSensitivity;
+    const previousTouchControlsMode = this.touchControlsMode;
     runtime.state.uiActive = Boolean(report.active ?? report.uiActive);
     runtime.state.uiCoversWorld = Boolean(report.coversWorld ?? report.uiCoversWorld);
     runtime.state.nativeUiScreen = String(report.screen ?? report.uiScreen ?? "none");
@@ -1551,7 +1428,7 @@ class WebFrameDriver {
       const sensitivity = clampLookSensitivity(report.touchLookSensitivity);
       this.lookSensitivity = sensitivity;
       runtime.state.lookSensitivity = sensitivity;
-      if (report.action === "setTouchLookSensitivity") {
+      if (sensitivity !== previousLookSensitivity) {
         storeLookSensitivity(sensitivity);
       }
     }
@@ -1561,7 +1438,7 @@ class WebFrameDriver {
         : "auto";
       this.touchControlsMode = mode;
       runtime.state.touchControlsMode = mode;
-      if (report.action === "setTouchControlsMode") {
+      if (mode !== previousTouchControlsMode) {
         storeTouchControlsMode(mode);
         this.touchControls?.setVisible(mode === "on" || hasTouchInput());
       }
@@ -1667,7 +1544,6 @@ class WebFrameDriver {
     } finally {
       this.sessionBusy = false;
       runtime.state.sessionBusy = false;
-      this.flushNativeTouchControlsOverlay();
     }
   }
 
@@ -1748,7 +1624,6 @@ class WebFrameDriver {
     } finally {
       this.sessionBusy = false;
       runtime.state.sessionBusy = false;
-      this.flushNativeTouchControlsOverlay();
     }
     if (!startReport?.ok) {
       this.setNativeStatusOverlay(runtime.state.status, false, true);
@@ -1811,6 +1686,7 @@ class WebFrameDriver {
     runtime.state.startupHoldCameraY = null;
     runtime.state.minimumPreStartupCameraY = null;
     runtime.state.startupAdmissionFrame = null;
+    runtime.state.startupAdmissionCameraY = null;
     runtime.state.compileQueued = false;
     runtime.state.compileTargetX = null;
     runtime.state.compileTargetZ = null;
@@ -1829,27 +1705,13 @@ class WebFrameDriver {
     };
   }
 
-  canvasLocalPointToPixel(localX: number, localY: number): { x: number, y: number } {
-    const rect = this.canvas.getBoundingClientRect();
-    const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
-    const scaleY = rect.height > 0 ? this.canvas.height / rect.height : 1;
-    return {
-      x: Number(localX) * scaleX,
-      y: Number(localY) * scaleY,
-    };
-  }
-
   clearGameplayInput(): void {
-    for (const name of INPUT_KEY_NAMES) {
-      this.keys[name] = false;
-      this.touchKeys[name] = false;
-    }
-    this.touchMovementImpulse = defaultMovementImpulse();
-    this.mouseDeltaX = 0;
-    this.mouseDeltaY = 0;
     this.pointerDragging = false;
     this.pointerDown = null;
     this.touchControls?.clearAll();
+    if (this.session && !this.sessionBusy) {
+      this.session.clearRawInput();
+    }
   }
 
   releasePointerLockForUi(): void {
@@ -1869,7 +1731,6 @@ class WebFrameDriver {
     } finally {
       this.sessionBusy = false;
       runtime.state.sessionBusy = false;
-      this.flushNativeTouchControlsOverlay();
     }
   }
 
@@ -1882,67 +1743,94 @@ class WebFrameDriver {
     }
   }
 
-  setInputKey(name: string, down: boolean): boolean {
-    if (!(name in this.keys)) {
-      return false;
-    }
-    this.keys[name] = Boolean(down);
-    return true;
+  handleRawKey(code: string, key: string, pressed: boolean, repeat: boolean): boolean {
+    return this.withRawInput((session) => session.handleRawKey(code, key, pressed, repeat));
   }
 
-  setTouchKey(name: string, down: boolean): boolean {
-    if (!(name in this.touchKeys)) {
-      return false;
-    }
-    this.touchKeys[name] = Boolean(down);
-    return true;
+  handleRawPointerButton(
+    button: number,
+    pressed: boolean,
+    click: boolean,
+    clientX: number,
+    clientY: number,
+  ): boolean {
+    const point = this.canvasPixelPoint(clientX, clientY);
+    return this.withRawInput((session) => session.handleRawPointerButton(
+      button,
+      pressed,
+      click,
+      point.x,
+      point.y,
+    ));
   }
 
-  setTouchKeys(keys: Record<string, boolean>): void {
-    for (const [name, down] of Object.entries(keys)) {
-      this.setTouchKey(name, down);
-    }
+  handleRawPointerMove(clientX: number, clientY: number): boolean {
+    const point = this.canvasPixelPoint(clientX, clientY);
+    return this.withRawInput((session) => session.handleRawPointerMove(point.x, point.y));
   }
 
-  setTouchMovementImpulse(left: number, forward: number, active: boolean): void {
-    this.touchMovementImpulse = {
-      active: Boolean(active),
-      left: sanitizeInputImpulse(left),
-      forward: sanitizeInputImpulse(forward),
-    };
+  handleRawMouseMotion(dx: number, dy: number): boolean {
+    return this.withRawInput((session) => session.handleRawMouseMotion(dx, dy));
   }
 
-  currentInputKeys(): InputKeys {
-    const keys = defaultInputKeys() as InputKeys;
-    for (const name of INPUT_KEY_NAMES) {
-      keys[name] = Boolean(this.keys[name] || this.touchKeys[name]);
-    }
-    return keys;
+  handleRawWheel(deltaY: number, deltaMode: number): boolean {
+    return this.withRawInput((session) => session.handleRawWheel(deltaY, deltaMode));
   }
 
-  currentMovementImpulse(): TouchMovementImpulse {
-    return { ...this.touchMovementImpulse };
+  handleRawTouch(
+    phase: "start" | "move" | "end" | "cancel",
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+  ): boolean {
+    const point = this.canvasPixelPoint(clientX, clientY);
+    return this.withRawInput((session) => session.handleRawTouch(
+      phase,
+      pointerId,
+      point.x,
+      point.y,
+    ));
   }
 
-  clearTouchKeys(names: readonly string[] = INPUT_KEY_NAMES): void {
-    for (const name of names) {
-      this.setTouchKey(name, false);
+  clearRawInput(): void {
+    this.pointerDragging = false;
+    this.pointerDown = null;
+    if (!this.session || this.sessionBusy) {
+      if (this.sessionBusy) {
+        setTimeout(() => this.clearRawInput(), 0);
+      }
+      return;
     }
+    this.applyRawInputReport(this.session.clearRawInput());
   }
 
-  queueMouseDelta(dx: number, dy: number): void {
-    const x = Number(dx);
-    const y = Number(dy);
-    if (Number.isFinite(x)) {
-      this.mouseDeltaX += x;
+  withRawInput(operation: (session: WebSceneHost) => WasmReport): boolean {
+    if (!this.session || this.sessionBusy) {
+      if (this.sessionBusy) {
+        setTimeout(() => this.withRawInput(operation), 0);
+      }
+      return true;
     }
-    if (Number.isFinite(y)) {
-      this.mouseDeltaY += y;
+    const report = operation(this.session);
+    this.applyRawInputReport(report);
+    return Boolean(report?.handled);
+  }
+
+  applyRawInputReport(report: WasmReport | null | undefined): void {
+    if (!report?.ok) {
+      return;
     }
-    if (this.pointerDown) {
-      this.pointerDown.movement += Math.abs(Number.isFinite(x) ? x : 0)
-        + Math.abs(Number.isFinite(y) ? y : 0);
+    if (report.clearTransientInput) {
+      this.pointerDragging = false;
+      this.pointerDown = null;
+      this.touchControls?.clearAll();
     }
+    if (report.releasePointerCapture) {
+      this.releasePointerLockForUi();
+    } else if (report.pointerCaptureDesired === true) {
+      this.requestPointerLock();
+    }
+    this.applyNativeUiReport(report);
   }
 
   currentCameraCenter(): { centerX: number, centerZ: number } {
@@ -2251,6 +2139,19 @@ function deferredUiReport(): WasmReport {
     coversWorld: runtime.state.uiCoversWorld === true,
     screen: runtime.state.nativeUiScreen ?? "none",
   };
+}
+
+function applyHotbarState(
+  value: WasmReport | null | undefined,
+  state: Record<string, any>,
+): void {
+  if (!value || typeof value.selectedHotbarSlot === "undefined") {
+    return;
+  }
+  const slot = Number(value.selectedHotbarSlot);
+  if (Number.isInteger(slot) && slot >= 0 && slot < 9) {
+    state.selectedHotbarSlot = slot;
+  }
 }
 
 function stringifyError(error: unknown): string {

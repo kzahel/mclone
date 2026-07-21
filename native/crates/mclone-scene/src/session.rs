@@ -6085,7 +6085,19 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         Ok(())
     }
 
-    fn set_touch_look_sensitivity(&mut self, _sensitivity: f32) -> Result<()> {
+    fn set_touch_look_sensitivity(&mut self, sensitivity: f32) -> Result<()> {
+        if let Some(settings) = self
+            .mono_ui_context
+            .as_mut()
+            .and_then(|context| context.touch_settings.as_mut())
+        {
+            settings.look_sensitivity = GameTouchSettings::new(
+                sensitivity,
+                settings.min_look_sensitivity,
+                settings.max_look_sensitivity,
+            )
+            .clamped_look_sensitivity();
+        }
         Ok(())
     }
 

@@ -3510,8 +3510,8 @@ async function runMovementPerfProbe(page, canvas) {
     for (let i = 0; i < 4; i += 1) {
       globalThis.__mcloneWebApp.adjustCameraSpeed?.(4);
     }
-    globalThis.__mcloneWebApp.setInputKey?.("forward", true);
   });
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
   try {
     await page.waitForFunction(
       ({ start, movementPerfChunkBoundaries }) => {
@@ -3527,9 +3527,7 @@ async function runMovementPerfProbe(page, canvas) {
       { timeout: 90_000 },
     );
   } finally {
-    await page.evaluate(() => {
-      globalThis.__mcloneWebApp.setInputKey?.("forward", false);
-    });
+    await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
   }
 
   await waitForWebAppStreamingSettled(page, 120_000);
@@ -4661,8 +4659,8 @@ async function runFarLodMovementProbe(page) {
     for (let i = 0; i < 4; i += 1) {
       globalThis.__mcloneWebApp?.adjustCameraSpeed?.(4);
     }
-    globalThis.__mcloneWebApp?.setInputKey?.("forward", true);
   });
+  await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
   try {
     await page.waitForFunction(
       ({ start }) => {
@@ -4676,7 +4674,7 @@ async function runFarLodMovementProbe(page) {
       { timeout: 90_000 },
     );
   } finally {
-    await page.evaluate(() => globalThis.__mcloneWebApp?.setInputKey?.("forward", false));
+    await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
   }
   await waitForWebAppStreamingSettled(page, 120_000);
   try {
@@ -5764,11 +5762,8 @@ async function waitForWebAppStreamingSettled(page, timeout = 60_000) {
         movementMode: state.movementMode,
         touchControlsMode: state.touchControlsMode,
         touchControlsVisible: state.touchControlsVisible,
-        touchJoystickActive: state.touchJoystickActive,
-        touchMovementLeftImpulse: state.touchMovementLeftImpulse,
-        touchMovementForwardImpulse: state.touchMovementForwardImpulse,
-        touchLookActive: state.touchLookActive,
-        touchButtonActiveCount: state.touchButtonActiveCount,
+        touchPointerActiveCount: state.touchPointerActiveCount,
+        touchJoystickGuiActive: state.lastReport?.touchJoystickGuiActive,
         lastUiAction: state.lastUiAction,
       };
     });
@@ -5831,8 +5826,7 @@ async function captureNativeUiProbe(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "options"
-        && state.lastUiAction?.action === "openOptions";
+        && state.nativeUiScreen === "options";
     },
     undefined,
     { timeout: 10_000 },
@@ -5844,8 +5838,7 @@ async function captureNativeUiProbe(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "title"
-        && state.lastUiAction?.action === "backToTitle";
+        && state.nativeUiScreen === "title";
     },
     undefined,
     { timeout: 10_000 },
@@ -5857,8 +5850,7 @@ async function captureNativeUiProbe(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "worldList"
-        && state.lastUiAction?.action === "openWorldList";
+        && state.nativeUiScreen === "worldList";
     },
     undefined,
     { timeout: 10_000 },
@@ -5870,8 +5862,7 @@ async function captureNativeUiProbe(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "title"
-        && state.lastUiAction?.action === "backToTitle";
+        && state.nativeUiScreen === "title";
     },
     undefined,
     { timeout: 10_000 },
@@ -5944,16 +5935,11 @@ async function exerciseMobileTouchControls(page, canvas) {
     await page.waitForFunction(
       (start) => {
         const state = globalThis.__mcloneWebApp?.state;
-        const impulse = globalThis.__mcloneWebApp?.touchControlState?.()?.movementImpulse;
         const dx = Number(state?.cameraX) - start.cameraX;
         const dz = Number(state?.cameraZ) - start.cameraZ;
         return state?.ok === true
-          && state.touchJoystickActive === true
           && state.lastReport?.touchJoystickGuiActive === true
           && state.lastReport?.touchJoystickGuiInBounds === true
-          && impulse?.active === true
-          && impulse.left < -0.05
-          && impulse.forward > 0.05
           && state.movementMode === "WALK"
           && Math.hypot(dx, dz) > 0.15
           && (state.lastReport?.commandCount ?? 0) > start.commandCount;
@@ -5963,19 +5949,12 @@ async function exerciseMobileTouchControls(page, canvas) {
     );
     const activeMovementSnapshot = await page.evaluate((start) => {
       const state = globalThis.__mcloneWebApp.state;
-      const impulse = globalThis.__mcloneWebApp.touchControlState?.()?.movementImpulse;
       const dx = Number(state.cameraX) - start.cameraX;
       const dz = Number(state.cameraZ) - start.cameraZ;
       return {
-        ok: impulse?.active === true
-          && state.lastReport?.touchJoystickGuiActive === true
+        ok: state.lastReport?.touchJoystickGuiActive === true
           && state.lastReport?.touchJoystickGuiInBounds === true
-          && impulse.left < -0.05
-          && impulse.forward > 0.05
-          && Math.abs(impulse.left) < 1
-          && impulse.forward < 1
           && Math.hypot(dx, dz) > 0.15,
-        impulse,
         gui: {
           active: state.lastReport?.touchJoystickGuiActive,
           inBounds: state.lastReport?.touchJoystickGuiInBounds,
@@ -6003,7 +5982,8 @@ async function exerciseMobileTouchControls(page, canvas) {
     });
   }
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.touchJoystickActive === false,
+    () => globalThis.__mcloneWebApp?.state?.lastReport?.touchJoystickGuiActive === false
+      && globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
     undefined,
     { timeout: 10_000 },
   );
@@ -6013,10 +5993,8 @@ async function exerciseMobileTouchControls(page, canvas) {
     const dz = Number(state.cameraZ) - start.cameraZ;
     return {
       ok: Math.hypot(dx, dz) > 0.15
-        && state.touchJoystickActive === false
-        && state.touchMovementLeftImpulse === 0
-        && state.touchMovementForwardImpulse === 0
-        && globalThis.__mcloneWebApp.touchControlState?.()?.keys?.forward === false,
+        && state.lastReport?.touchJoystickGuiActive === false
+        && state.touchPointerActiveCount === 0,
       distance: Math.hypot(dx, dz),
       active: activeMovementProbe,
       start,
@@ -6063,7 +6041,6 @@ async function exerciseMobileTouchControls(page, canvas) {
       (start) => {
         const state = globalThis.__mcloneWebApp?.state;
         return state?.ok === true
-          && state.touchLookActive === true
           && (
             Math.abs(Number(state.cameraYawRadians) - start.yaw) > 0.05
             || Math.abs(Number(state.cameraPitchRadians) - start.pitch) > 0.03
@@ -6081,7 +6058,7 @@ async function exerciseMobileTouchControls(page, canvas) {
     });
   }
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.touchLookActive === false,
+    () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
     undefined,
     { timeout: 10_000 },
   );
@@ -6090,7 +6067,8 @@ async function exerciseMobileTouchControls(page, canvas) {
     const yawDelta = Math.abs(Number(state.cameraYawRadians) - start.yaw);
     const pitchDelta = Math.abs(Number(state.cameraPitchRadians) - start.pitch);
     return {
-      ok: (yawDelta > 0.05 || pitchDelta > 0.03) && state.touchLookActive === false,
+      ok: (yawDelta > 0.05 || pitchDelta > 0.03)
+        && state.touchPointerActiveCount === 0,
       yawDelta,
       pitchDelta,
       start,
@@ -6144,8 +6122,7 @@ async function exerciseMobileTouchControls(page, canvas) {
     () => {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
-        && state.nativeUiScreen === "pause"
-        && state.lastUiAction?.action === "backToPause";
+        && state.nativeUiScreen === "pause";
     },
     undefined,
     { timeout: 10_000 },
@@ -6223,7 +6200,6 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
       return state?.uiActive === true
         && state.nativeUiScreen === "options"
         && state.nativeUiOptionsParent === "pause"
-        && state.lastUiAction?.action === "openOptions"
         && state.touchLookSensitivityAvailable === true;
     },
     undefined,
@@ -6247,8 +6223,7 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
         && state.nativeUiScreen === "optionsCategory"
-        && state.nativeUiOptionsParent === "pause"
-        && state.lastUiAction?.action === "openOptionsCategory";
+        && state.nativeUiOptionsParent === "pause";
     },
     undefined,
     { timeout: 10_000 },
@@ -6260,13 +6235,19 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
 
   await dispatchCanvasPointerEvent(page, "pointerdown", {
     pointerId: 63,
-    xFraction: 0.925,
+    xFraction: 0.65,
+    yFraction: 0.538,
+    buttons: 1,
+  });
+  await dispatchCanvasPointerEvent(page, "pointermove", {
+    pointerId: 63,
+    xFraction: 0.90,
     yFraction: 0.538,
     buttons: 1,
   });
   await dispatchCanvasPointerEvent(page, "pointerup", {
     pointerId: 63,
-    xFraction: 0.925,
+    xFraction: 0.90,
     yFraction: 0.538,
     buttons: 0,
   });
@@ -6276,7 +6257,6 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
         const state = globalThis.__mcloneWebApp?.state;
         return state?.uiActive === true
           && state.nativeUiScreen === "optionsCategory"
-          && state.lastUiAction?.action === "setTouchLookSensitivity"
           && Number(state.lookSensitivity) > 4.9
           && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) > 4.9;
       },
@@ -6310,8 +6290,7 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
       const state = globalThis.__mcloneWebApp?.state;
       return state?.uiActive === true
         && state.nativeUiScreen === "options"
-        && state.nativeUiOptionsParent === "pause"
-        && state.lastUiAction?.action === "openOptions";
+        && state.nativeUiOptionsParent === "pause";
     },
     undefined,
     { timeout: 10_000 },
@@ -6323,8 +6302,6 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
       && openedOptions.nativeUiOptionsParent === "pause"
       && adjusted.touchLookSensitivityAvailable === true
       && Number(adjusted.lookSensitivity) > 4.9
-      && adjusted.lastUiAction?.action === "setTouchLookSensitivity"
-      && Number(adjusted.lastUiAction?.touchLookSensitivity) > 4.9
       && Number(adjusted.storedLookSensitivity) > 4.9
       && optionsCanvasPixels.nonClearInteriorPixelCount > 128
       && optionsCanvasPixels.distinctInteriorColorCount > 2,
@@ -6341,33 +6318,35 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
  * @param {number} pointerId
  */
 async function exerciseTouchButton(page, key, pointerId) {
+  const startJumpStatistic = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.playerJumpStatistic) || 0,
+  );
   await dispatchTouchButtonPointerEvent(page, key, "pointerdown", { pointerId, buttons: 1 });
   await page.waitForFunction(
-    (key) => globalThis.__mcloneWebApp?.touchControlState?.()?.keys?.[key] === true
-      && globalThis.__mcloneWebApp?.state?.touchButtonActiveCount > 0,
-    key,
+    (start) => Number(globalThis.__mcloneWebApp?.state?.playerJumpStatistic) > start
+      && globalThis.__mcloneWebApp?.state?.touchPointerActiveCount > 0,
+    startJumpStatistic,
     { timeout: 10_000 },
   );
-  const down = await page.evaluate((key) => ({
-    keyDown: globalThis.__mcloneWebApp.touchControlState?.().keys[key],
-    activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-  }), key);
+  const down = await page.evaluate(() => ({
+    jumpStatistic: globalThis.__mcloneWebApp.state.playerJumpStatistic,
+    activeCount: globalThis.__mcloneWebApp.state.touchPointerActiveCount,
+  }));
   await dispatchTouchButtonPointerEvent(page, key, "pointerup", { pointerId, buttons: 0 });
   await page.waitForFunction(
-    (key) => globalThis.__mcloneWebApp?.touchControlState?.()?.keys?.[key] === false
-      && globalThis.__mcloneWebApp?.state?.touchButtonActiveCount === 0,
-    key,
+    () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
+    undefined,
     { timeout: 10_000 },
   );
-  const up = await page.evaluate((key) => ({
-    keyDown: globalThis.__mcloneWebApp.touchControlState?.().keys[key],
-    activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-  }), key);
+  const up = await page.evaluate(() => ({
+    jumpStatistic: globalThis.__mcloneWebApp.state.playerJumpStatistic,
+    activeCount: globalThis.__mcloneWebApp.state.touchPointerActiveCount,
+  }));
   return {
-    ok: down.keyDown === true
+    ok: down.jumpStatistic > startJumpStatistic
       && down.activeCount > 0
-      && up.keyDown === false
       && up.activeCount === 0,
+    startJumpStatistic,
     down,
     up,
   };
@@ -6380,36 +6359,35 @@ async function exerciseTouchButton(page, key, pointerId) {
  * @param {number} pointerId
  */
 async function exerciseTouchInteractionButton(page, key, action, pointerId) {
-  const startInteractionCount = await page.evaluate(
-    () => globalThis.__mcloneWebApp?.state?.interactionCount ?? 0,
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  const startCommandCount = await page.evaluate(
+    () => globalThis.__mcloneWebApp?.state?.lastReport?.commandCount ?? 0,
   );
   await dispatchTouchButtonPointerEvent(page, key, "pointerdown", { pointerId, buttons: 1 });
   await page.waitForFunction(
-    ({ action, startInteractionCount }) => {
+    (startCommandCount) => {
       const state = globalThis.__mcloneWebApp?.state;
-      return state?.touchButtonActiveCount > 0
-        && (state?.interactionCount ?? 0) > startInteractionCount
-        && state?.lastInteraction?.action === action;
+      return state?.touchPointerActiveCount > 0
+        && (state?.lastReport?.commandCount ?? 0) > startCommandCount;
     },
-    { action, startInteractionCount },
+    startCommandCount,
     { timeout: 10_000 },
   );
   const down = await page.evaluate(() => ({
-    activeCount: globalThis.__mcloneWebApp.state.touchButtonActiveCount,
-    interactionCount: globalThis.__mcloneWebApp.state.interactionCount,
-    action: globalThis.__mcloneWebApp.state.lastInteraction?.action,
+    activeCount: globalThis.__mcloneWebApp.state.touchPointerActiveCount,
+    commandCount: globalThis.__mcloneWebApp.state.lastReport?.commandCount,
   }));
   await dispatchTouchButtonPointerEvent(page, key, "pointerup", { pointerId, buttons: 0 });
   await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.touchButtonActiveCount === 0,
+    () => globalThis.__mcloneWebApp?.state?.touchPointerActiveCount === 0,
     undefined,
     { timeout: 10_000 },
   );
   return {
     ok: down.activeCount > 0
-      && down.interactionCount > startInteractionCount
-      && down.action === action,
-    startInteractionCount,
+      && down.commandCount > startCommandCount,
+    expectedAction: action,
+    startCommandCount,
     down,
   };
 }
@@ -7455,7 +7433,8 @@ function assertMobileAppLoopResult(
     result.startupReady !== true
     || !Number.isFinite(result.startupHoldCameraY)
     || !Number.isFinite(result.minimumPreStartupCameraY)
-    || Math.abs(result.startupHoldCameraY - result.minimumPreStartupCameraY) > 1e-6
+    || !Number.isFinite(result.startupAdmissionCameraY)
+    || Math.abs(result.startupAdmissionCameraY - result.minimumPreStartupCameraY) > 1e-6
     || !Number.isInteger(result.startupAdmissionFrame)
     || result.startupAdmissionFrame < 1
   ) {
