@@ -88,7 +88,7 @@ export default figure("mallard_duck", ({
   part("head", box({
     parent: "neck_ring",
     at: [0, 0.21, -0.07],
-    size: [0.5, 0.46, 0.48],
+    size: [0.58, 0.46, 0.48],
     material: "head",
     faces: { north: { texture: "face" } },
   }));

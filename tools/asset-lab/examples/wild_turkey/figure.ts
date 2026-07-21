@@ -140,18 +140,18 @@ export default figure("wild_turkey", ({
     material: "bronze_dark",
     joint: { pivot: [0, -0.13, -0.08], axis: [1, 0, 0] },
   }));
-  for (const [index, x, y, height, lean, material] of [
-    [1, -0.62, 0.42, 0.88, -22, "bronze"],
-    [2, -0.43, 0.5, 1.04, -15, "bronze_light"],
-    [3, -0.22, 0.56, 1.16, -8, "bronze"],
-    [4, 0, 0.59, 1.22, 0, "bronze_light"],
-    [5, 0.22, 0.56, 1.16, 8, "bronze"],
-    [6, 0.43, 0.5, 1.04, 15, "bronze_light"],
-    [7, 0.62, 0.42, 0.88, 22, "bronze"],
+  for (const [index, x, y, depth, height, lean, material] of [
+    [1, -0.62, 0.42, 0.09, 0.88, -22, "bronze"],
+    [2, -0.43, 0.5, 0.105, 1.04, -15, "bronze_light"],
+    [3, -0.22, 0.56, 0.12, 1.16, -8, "bronze"],
+    [4, 0, 0.59, 0.135, 1.22, 0, "bronze_light"],
+    [5, 0.22, 0.56, 0.12, 1.16, 8, "bronze"],
+    [6, 0.43, 0.5, 0.105, 1.04, 15, "bronze_light"],
+    [7, 0.62, 0.42, 0.09, 0.88, 22, "bronze"],
   ] as const) {
     part(`tail_feather_${index}`, box({
       parent: "tail_root",
-      at: [x, y, 0.13],
+      at: [x, y, depth],
       rot: [0, 0, lean],
       size: [0.23, height, 0.09],
       material,

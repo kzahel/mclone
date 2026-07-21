@@ -105,7 +105,7 @@ export default figure("moose", ({
     parent: "neck",
     at: [0, 0.51, -0.22],
     rot: [25, 0, 0],
-    size: [0.56, 0.5, 0.68],
+    size: [0.66, 0.5, 0.68],
     material: "coat",
     faces: { north: { texture: "face" } },
   }));

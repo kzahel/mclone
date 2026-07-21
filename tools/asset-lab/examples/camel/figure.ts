@@ -107,7 +107,7 @@ export default figure("camel", ({
     parent: "neck_upper",
     at: [0, 0.4, -0.18],
     rot: [14, 0, 0],
-    size: [0.42, 0.4, 0.58],
+    size: [0.44, 0.4, 0.58],
     material: "coat",
     faces: { north: { texture: "face" } },
   }));

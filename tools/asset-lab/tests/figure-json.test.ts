@@ -152,6 +152,216 @@ test("canonical geometry requires reasoned disconnected-component exceptions", (
   );
 });
 
+test("canonical surfaces require reasoned exact-face exceptions", () => {
+  assert.throws(
+    () => figure("coplanar_fixture", ({ box, mat, part }) => {
+      mat("skin", "#667766");
+      mat("accent", "#aa6655");
+      part("neck", box({ size: [1, 1, 1], material: "skin" }));
+      part("head", box({
+        parent: "neck",
+        at: [0, 0.75, 0],
+        size: [1, 1, 0.8],
+        material: "accent",
+        faces: { west: { material: "skin" } },
+      }));
+    }),
+    /coplanar-overlap head\.east \/ neck\.east.*surfaceException/s,
+  );
+
+  const acknowledged = figure("acknowledged_coplanar_fixture", ({
+    box,
+    mat,
+    part,
+    surfaceException,
+  }) => {
+    mat("skin", "#667766");
+    mat("accent", "#aa6655");
+    part("neck", box({ size: [1, 1, 1], material: "skin" }));
+    part("head", box({
+      parent: "neck",
+      at: [0, 0.75, 0],
+      size: [1, 1, 0.8],
+      material: "accent",
+      faces: { west: { material: "skin" } },
+    }));
+    surfaceException({
+      rule: "coplanar-overlap",
+      faces: [
+        { part: "neck", face: "east" },
+        { part: "head", face: "east" },
+      ],
+      reason: "The contrasting inset is intentionally flush on this side.",
+    });
+  });
+  assert.equal(acknowledged.surfaceExceptions?.[0]?.reason.includes("intentionally"), true);
+  assert.deepEqual(
+    roundTripFigureAsset(acknowledged, "acknowledged surface source").asset,
+    acknowledged,
+  );
+
+  assert.throws(
+    () => figure("stale_surface_exception", ({
+      box,
+      mat,
+      part,
+      surfaceException,
+    }) => {
+      mat("skin", "#667766");
+      mat("accent", "#aa6655");
+      part("neck", box({ size: [1, 1, 1], material: "skin" }));
+      part("head", box({
+        parent: "neck",
+        at: [0, 0.75, 0],
+        size: [0.9, 1, 0.8],
+        material: "accent",
+      }));
+      surfaceException({
+        rule: "coplanar-overlap",
+        faces: [
+          { part: "neck", face: "east" },
+          { part: "head", face: "east" },
+        ],
+        reason: "This exception should become stale after adding a side step.",
+      });
+    }),
+    /stale surface exception/,
+  );
+
+  assert.throws(
+    () => figure("missing_surface_reason", ({
+      box,
+      mat,
+      part,
+      surfaceException,
+    }) => {
+      mat("skin", "#667766");
+      mat("accent", "#aa6655");
+      part("neck", box({ size: [1, 1, 1], material: "skin" }));
+      part("head", box({
+        parent: "neck",
+        at: [0, 0.75, 0],
+        size: [1, 1, 0.8],
+        material: "accent",
+      }));
+      surfaceException({
+        rule: "coplanar-overlap",
+        faces: [
+          { part: "neck", face: "east" },
+          { part: "head", face: "east" },
+        ],
+        reason: "",
+      });
+    }),
+    /surface exception 0 requires a nonempty reason/,
+  );
+
+  assert.throws(
+    () => figure("animated_coplanar_fixture", ({ box, clip, mat, part }) => {
+      mat("skin", "#667766");
+      mat("accent", "#aa6655");
+      part("neck", box({ size: [1, 1, 1], material: "skin" }));
+      part("head", box({
+        parent: "neck",
+        at: [0.1, 0.75, 0],
+        size: [1, 1, 0.8],
+        material: "accent",
+        faces: { west: { material: "skin" } },
+      }));
+      clip("settle", {
+        loop: false,
+        keys: [
+          ["head", 0, { at: [0, 0, 0] }],
+          ["head", 1, { at: [-0.1, 0, 0] }],
+        ],
+      });
+    }),
+    /clip 'settle' at 1\.000s.*surfaceException/s,
+  );
+});
+
+test("animated head sockets require a stable lateral surface margin", () => {
+  assert.throws(
+    () => figure("narrow_head_socket", ({ box, clip, mat, part }) => {
+      mat("neck", "#665544");
+      mat("head", "#aa8866");
+      part("neck", box({ size: [1, 1, 1], material: "neck" }));
+      part("head", box({
+        parent: "neck",
+        at: [0, 0.75, 0],
+        size: [1.02, 1, 0.8],
+        material: "head",
+      }));
+      clip("nod", {
+        keys: [
+          ["head", 0, { rot: [0, 0, 0] }],
+          ["head", 1, { rot: [8, 0, 0] }],
+        ],
+      });
+    }),
+    /articulated-seam-margin head\.east \/ neck\.east.*margin 0\.010, required 0\.020/s,
+  );
+
+  assert.doesNotThrow(
+    () => figure("safe_head_socket", ({ box, clip, mat, part }) => {
+      mat("neck", "#665544");
+      mat("head", "#aa8866");
+      part("neck", box({ size: [1, 1, 1], material: "neck" }));
+      part("head", box({
+        parent: "neck",
+        at: [0, 0.75, 0],
+        size: [1.08, 1, 0.8],
+        material: "head",
+      }));
+      clip("nod", {
+        keys: [
+          ["head", 0, { rot: [0, 0, 0] }],
+          ["head", 1, { rot: [8, 0, 0] }],
+        ],
+      });
+    }),
+  );
+
+  const acknowledged = figure("acknowledged_head_socket", ({
+    box,
+    clip,
+    mat,
+    part,
+    surfaceException,
+  }) => {
+    mat("neck", "#665544");
+    mat("head", "#aa8866");
+    part("neck", box({ size: [1, 1, 1], material: "neck" }));
+    part("head", box({
+      parent: "neck",
+      at: [0, 0.75, 0],
+      size: [1.02, 1, 0.8],
+      material: "head",
+    }));
+    clip("nod", {
+      keys: [
+        ["head", 0, { rot: [0, 0, 0] }],
+        ["head", 1, { rot: [8, 0, 0] }],
+      ],
+    });
+    for (const face of ["east", "west"] as const) {
+      surfaceException({
+        rule: "articulated-seam-margin",
+        faces: [
+          { part: "head", face },
+          { part: "neck", face },
+        ],
+        reason: "This test fixture deliberately exercises a narrow animated socket.",
+      });
+    }
+  });
+  assert.equal(acknowledged.surfaceExceptions?.length, 2);
+  assert.deepEqual(
+    roundTripFigureAsset(acknowledged, "acknowledged head socket").asset,
+    acknowledged,
+  );
+});
+
 test("preserves named action presentation and default-clip metadata", () => {
   const asset = figure("action_figure", ({ box, clip, defaultClip, mat, part }) => {
     mat("shell", "#667766");

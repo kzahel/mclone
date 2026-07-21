@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { assertFigureGeometry } from "./geometry-analysis";
+import { assertFigureSurfaces } from "./surface-analysis";
 
 export type Vec3 = readonly [number, number, number];
 export type EulerDeg = Vec3;
@@ -9,6 +10,7 @@ export interface FigureAsset {
   name: string;
   defaultClip?: string;
   geometryExceptions?: GeometryExceptionSpec[];
+  surfaceExceptions?: SurfaceExceptionSpec[];
   materials: Record<string, MaterialSpec>;
   textures: Record<string, AsciiTextureSpec>;
   parts: PartSpec[];
@@ -18,6 +20,17 @@ export interface FigureAsset {
 export interface GeometryExceptionSpec {
   rule: "disconnected-component";
   parts: string[];
+  reason: string;
+}
+
+export interface SurfaceFaceSpec {
+  part: string;
+  face: BoxFaceName;
+}
+
+export interface SurfaceExceptionSpec {
+  rule: "coplanar-overlap" | "articulated-seam-margin";
+  faces: [SurfaceFaceSpec, SurfaceFaceSpec];
   reason: string;
 }
 
@@ -336,6 +349,7 @@ export interface SlitherSpec extends CycleTimingSpec {
 export interface FigureApi {
   defaultClip(name: string): void;
   geometryException(spec: GeometryExceptionSpec): void;
+  surfaceException(spec: SurfaceExceptionSpec): void;
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
   part(name: string, draft: PartDraft): void;
@@ -371,6 +385,7 @@ export function figure(name: string, build: (api: FigureApi) => void): FigureAss
   const asset = buildFigureAsset(name, build);
   assertBoxOnlyFigure(asset);
   assertFigureGeometry(asset);
+  assertFigureSurfaces(asset);
   return asset;
 }
 
@@ -452,6 +467,42 @@ export function validateFigure(asset: FigureAsset): string[] {
     }
     if (typeof exception.reason !== "string" || !exception.reason.trim()) {
       errors.push(`geometry exception ${index} requires a nonempty reason`);
+    }
+  }
+  const surfaceExceptionKeys = new Set<string>();
+  for (const [index, exception] of (asset.surfaceExceptions ?? []).entries()) {
+    if (
+      exception.rule !== "coplanar-overlap"
+      && exception.rule !== "articulated-seam-margin"
+    ) {
+      errors.push(`surface exception ${index} uses unknown rule '${String(exception.rule)}'`);
+    }
+    if (!Array.isArray(exception.faces) || exception.faces.length !== 2) {
+      errors.push(`surface exception ${index} must name exactly two faces`);
+    } else {
+      for (const [faceIndex, face] of exception.faces.entries()) {
+        const part = asset.parts.find((candidate) => candidate.name === face.part);
+        if (!part) {
+          errors.push(`surface exception ${index} face ${faceIndex} references missing part '${face.part}'`);
+        } else if (part.primitive.kind !== "box") {
+          errors.push(`surface exception ${index} face ${faceIndex} references non-box part '${face.part}'`);
+        }
+        if (!BOX_FACE_NAMES.includes(face.face)) {
+          errors.push(`surface exception ${index} face ${faceIndex} uses invalid face '${String(face.face)}'`);
+        }
+      }
+      const faceKeys = exception.faces.map((face) => `${face.part}.${face.face}`).sort();
+      if (faceKeys[0] === faceKeys[1]) {
+        errors.push(`surface exception ${index} must name two different faces`);
+      }
+      const exceptionKey = `${exception.rule}:${faceKeys.join("|")}`;
+      if (surfaceExceptionKeys.has(exceptionKey)) {
+        errors.push(`surface exception ${index} duplicates '${exceptionKey}'`);
+      }
+      surfaceExceptionKeys.add(exceptionKey);
+    }
+    if (typeof exception.reason !== "string" || !exception.reason.trim()) {
+      errors.push(`surface exception ${index} requires a nonempty reason`);
     }
   }
 
@@ -554,6 +605,7 @@ class FigureBuilder {
   private readonly parts: PartSpec[] = [];
   private readonly clips: Record<string, ClipSpec> = {};
   private readonly geometryExceptions: GeometryExceptionSpec[] = [];
+  private readonly surfaceExceptions: SurfaceExceptionSpec[] = [];
   private defaultClipName: string | undefined;
   readonly api: LegacyFigureApi;
 
@@ -561,6 +613,7 @@ class FigureBuilder {
     this.api = {
       defaultClip: (name) => this.defaultClip(name),
       geometryException: (spec) => this.geometryException(spec),
+      surfaceException: (spec) => this.surfaceException(spec),
       mat: (name, colorOrSpec) => this.mat(name, colorOrSpec),
       asciiTexture: (name, texture) => this.asciiTexture(name, texture),
       part: (name, draft) => this.part(name, draft),
@@ -590,6 +643,9 @@ class FigureBuilder {
       ...(this.geometryExceptions.length === 0
         ? {}
         : { geometryExceptions: this.geometryExceptions }),
+      ...(this.surfaceExceptions.length === 0
+        ? {}
+        : { surfaceExceptions: this.surfaceExceptions }),
       materials: this.materials,
       textures: this.textures,
       parts: this.parts,
@@ -608,6 +664,14 @@ class FigureBuilder {
     this.geometryExceptions.push({
       rule: spec.rule,
       parts: [...spec.parts],
+      reason: spec.reason,
+    });
+  }
+
+  private surfaceException(spec: SurfaceExceptionSpec): void {
+    this.surfaceExceptions.push({
+      rule: spec.rule,
+      faces: spec.faces.map((face) => ({ ...face })) as [SurfaceFaceSpec, SurfaceFaceSpec],
       reason: spec.reason,
     });
   }

@@ -86,7 +86,7 @@ export default figure("polar_bear", ({
     parent: "neck",
     at: [0, 0.08, -0.48],
     rot: [4, 0, 0],
-    size: [0.62, 0.52, 0.62],
+    size: [0.7, 0.52, 0.62],
     material: "fur",
     faces: { north: { texture: "face" } },
   }));

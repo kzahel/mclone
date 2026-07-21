@@ -17,6 +17,7 @@ pnpm asset-lab:typecheck
 pnpm asset-lab:test
 pnpm asset-lab:figures:check
 pnpm asset-lab:geometry:check
+pnpm asset-lab:surface:check
 pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
@@ -150,6 +151,40 @@ component, and an exception becomes an error when later geometry reconnects or
 changes the component. This keeps exceptions narrow, reviewed, and removable.
 The gate is an oriented-box rest-pose check, not collision detection or an
 animated-pose proof; visual sheet/video review remains required.
+
+Canonical figures also pass a sampled-pose surface-stability gate. It evaluates
+rest, clip keys, key midpoints, and a bounded uniform cadence; transforms every
+box face; and reports differently rendered, same-facing planes with meaningful
+projected overlap that is not immediately covered by another box. Animated
+heads also require a safe lateral margin from a `neck`, `neck_*`, `throat`, or
+`body` socket throughout the sampled motion. Run
+`pnpm asset-lab:surface:check -- --verbose` to see the retained catalog warning
+inventory as well as any failures.
+
+Existing findings are exact, ratcheted warnings in `src/surface-baseline.ts`,
+not accepted geometry. Newly authored face pairs fail. Removing an old finding
+makes its baseline key stale until the key is deleted, so cleanup cannot be
+silently forgotten. An intentional new relationship must name both exact faces
+and explain why it is acceptable:
+
+```ts
+surfaceException({
+  rule: "coplanar-overlap",
+  faces: [
+    { part: "glass_inset", face: "north" },
+    { part: "frame", face: "north" },
+  ],
+  reason: "The flush inset is intentional and uses the same final pixels.",
+});
+```
+
+Exceptions are order-independent, require a nonempty reason, and become stale
+when the pair no longer triggers. The animated socket rule uses
+`rule: "articulated-seam-margin"` with the same exact-face contract. Prefer a
+deliberate width, height, or depth step. Do not use draw order, polygon offset,
+or a whole-part suppression to hide a source-geometry conflict. General
+near-plane and between-sample crossing diagnostics remain future extensions,
+so sheet and video review are still required.
 
 Three.js remains the semantic preview implementation, not the source format.
 

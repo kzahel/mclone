@@ -79,7 +79,7 @@ export default figure("bear", ({
     parent: "neck",
     at: [0, 0.12, -0.42],
     rot: [8, 0, 0],
-    size: [0.7, 0.56, 0.56],
+    size: [0.74, 0.56, 0.56],
     material: "fur",
     faces: { north: { texture: "face" } },
   }));

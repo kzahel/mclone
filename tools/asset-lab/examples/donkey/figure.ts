@@ -107,7 +107,7 @@ export default figure("donkey", ({
     parent: "neck",
     at: [0, 0.46, -0.18],
     rot: [28, 0, 0],
-    size: [0.42, 0.46, 0.58],
+    size: [0.5, 0.46, 0.58],
     material: "coat",
     faces: { north: { texture: "face" } },
   }));

@@ -149,7 +149,7 @@ export default figure("jaguar", ({
     parent: "neck",
     at: [0, 0.08, -0.4],
     rot: [6, 0, 0],
-    size: [0.76, 0.58, 0.58],
+    size: [0.8, 0.58, 0.58],
     material: "coat",
     faces: { north: { texture: "face" } },
   }));

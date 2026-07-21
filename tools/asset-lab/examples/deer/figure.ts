@@ -94,7 +94,7 @@ export default figure("deer", ({
     parent: "neck",
     at: [0, 0.48, -0.18],
     rot: [29, 0, 0],
-    size: [0.4, 0.42, 0.52],
+    size: [0.48, 0.42, 0.52],
     material: "coat",
     faces: { north: { texture: "face" } },
   }));

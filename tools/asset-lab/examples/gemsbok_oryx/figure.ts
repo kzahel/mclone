@@ -115,7 +115,7 @@ export default figure("gemsbok_oryx", ({
     parent: "neck",
     at: [0, 0.45, -0.18],
     rot: [24, 0, 0],
-    size: [0.42, 0.46, 0.56],
+    size: [0.5, 0.46, 0.56],
     material: "white",
     faces: { north: { texture: "face_mask" } },
   }));

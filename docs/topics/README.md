@@ -185,10 +185,10 @@ series implements the same concern, normally reuse the document slug in its
   extensible clip contract for authored defaults, locomotion/idle/action roles,
   one-shot completion, catalogue action controls, and later general runtime
   clip requests beyond the hard-coded walk path.
-- [`figure-surface-stability.md`](figure-surface-stability.md): accepted
-  authoring contract for avoiding same-facing coplanar figure parts, the
-  corrected Batch 23 pigeon evidence, and a deferred sampled-pose surface
-  linter with a report-first catalog rollout.
+- [`figure-surface-stability.md`](figure-surface-stability.md): required
+  sampled-pose coplanar-face and animated head-socket margin gates, exact
+  reasoned exceptions, ratcheted legacy warning inventory, and corrected
+  catalog evidence.
 - [`figure-geometry-analysis.md`](figure-geometry-analysis.md): implemented
   rest-pose oriented-box connectivity gate for canonical Asset Lab figures,
   exact-component exceptions with mandatory reasons, current zero-warning

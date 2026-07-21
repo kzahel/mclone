@@ -84,7 +84,7 @@ export default figure("owl", ({
   part("head", box({
     parent: "body",
     at: [0, 0.43, -0.22],
-    size: [0.76, 0.58, 0.52],
+    size: [0.8, 0.58, 0.52],
     material: "disc",
     faces: { north: { texture: "face" } },
     joint: { pivot: [0, -0.22, 0.16], axis: [1, 0, 0] },

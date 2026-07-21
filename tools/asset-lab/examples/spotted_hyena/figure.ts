@@ -106,7 +106,7 @@ export default figure("spotted_hyena", ({
     parent: "shoulders",
     at: [0, 0.03, -0.48],
     rot: [14, 0, 0],
-    size: [0.58, 0.58, 0.48],
+    size: [0.52, 0.58, 0.48],
     material: "coat_shadow",
     joint: { pivot: [0, 0, 0.21], axis: [1, 0, 0] },
   }));

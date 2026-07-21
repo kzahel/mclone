@@ -85,8 +85,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   semantics, web-Rust string-action dispatch, and production smoke mirrors
   are the gaps to close
 - `figure-surface-stability` — same-facing coplanar and near-coplanar figure
-  surfaces, corrected pigeon evidence, authoring guidance, and a deferred
-  sampled-pose catalog linter
+  surfaces, sampled-pose exact-overlap and animated head-socket margin gates,
+  reasoned face-pair exceptions, ratcheted warning inventory, and corrected
+  catalog evidence
 - `figure-geometry-analysis` — rest-pose canonical figure connectivity,
   oriented-box component analysis, reasoned exact-component exceptions, and
   later sampled animation checks

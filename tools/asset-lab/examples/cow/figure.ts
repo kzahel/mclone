@@ -93,7 +93,7 @@ export default figure("cow", ({
   part("head", box({
     parent: "neck",
     at: [0, 0.12, -0.43],
-    size: [0.62, 0.56, 0.52],
+    size: [0.7, 0.56, 0.52],
     material: "hide",
     faces: { north: { texture: "face" } },
     joint: { pivot: [0, 0, 0.23], axis: [1, 0, 0] },

@@ -112,7 +112,7 @@ export default figure("giraffe", ({
     parent: "neck",
     at: [0, 0.91, -0.12],
     rot: [8, 0, 0],
-    size: [0.46, 0.42, 0.58],
+    size: [0.48, 0.42, 0.58],
     material: "coat_light",
     faces: { north: { texture: "face" } },
   }));

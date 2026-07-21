@@ -89,7 +89,7 @@ export default figure("robin", ({
   part("head", box({
     parent: "throat",
     at: [0, 0.22, -0.18],
-    size: [0.46, 0.44, 0.42],
+    size: [0.5, 0.44, 0.42],
     material: "brown",
     faces: { north: { texture: "face" } },
     joint: { pivot: [0, -0.18, 0.1], axis: [1, 0, 0] },

@@ -112,7 +112,7 @@ export default figure("llama", ({
     parent: "neck_upper",
     at: [0, 0.39, -0.15],
     rot: [8, 0, 0],
-    size: [0.44, 0.52, 0.5],
+    size: [0.48, 0.52, 0.5],
     material: "face",
     faces: { north: { texture: "face_mask" } },
   }));

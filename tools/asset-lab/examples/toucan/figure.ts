@@ -86,7 +86,7 @@ export default figure("toucan", ({
   part("head", box({
     parent: "throat",
     at: [0, 0.24, -0.15],
-    size: [0.52, 0.48, 0.46],
+    size: [0.56, 0.48, 0.46],
     material: "black_light",
     faces: { north: { texture: "face" } },
     joint: { pivot: [0, -0.2, 0.13], axis: [1, 0, 0] },

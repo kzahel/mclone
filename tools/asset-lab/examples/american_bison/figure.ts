@@ -116,7 +116,7 @@ export default figure("american_bison", ({
     parent: "neck",
     at: [0, 0.02, -0.46],
     rot: [2, 0, 0],
-    size: [0.76, 0.62, 0.58],
+    size: [0.86, 0.62, 0.58],
     material: "fur",
     faces: { north: { texture: "face" } },
   }));

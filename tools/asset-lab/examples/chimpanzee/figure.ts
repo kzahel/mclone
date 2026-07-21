@@ -86,7 +86,7 @@ export default figure("chimpanzee", ({
     parent: "neck",
     at: [0, 0.27, -0.15],
     rot: [7, 0, 0],
-    size: [0.52, 0.5, 0.46],
+    size: [0.56, 0.5, 0.46],
     material: "skin",
     faces: { north: { texture: "face" } },
   }));

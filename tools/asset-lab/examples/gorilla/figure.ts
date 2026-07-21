@@ -100,7 +100,7 @@ export default figure("gorilla", ({
     parent: "neck",
     at: [0, 0.33, -0.17],
     rot: [8, 0, 0],
-    size: [0.62, 0.58, 0.54],
+    size: [0.7, 0.58, 0.54],
     material: "skin",
     faces: { north: { texture: "face" } },
   }));
