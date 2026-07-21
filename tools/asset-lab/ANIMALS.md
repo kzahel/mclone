@@ -112,7 +112,7 @@ reviewed rigs and then filling macro gaps.
 | Donkey / Mule | P2 | ✅ | Q | donkey, mule | `examples/donkey` — approved 23-box adult with compact gray body, large four-box ears, upright mane, dorsal stripe, pale muzzle, and tasseled tail |
 | Duck | P2 | ✅ | W/S | mallard drake, hen, duckling | `examples/mallard_duck` — approved 14-box drake with low gray body, green head, white neck ring, blue wing speculum, yellow bill, and webbed-foot waddle |
 | Turkey | P2 | ✅ | W | tom (fanned tail), hen | `examples/wild_turkey` — approved 21-box strutting tom with bronze wings, bare blue-red neck, snood, wattle, and seven-feather display fan |
-| Llama / Alpaca | P2 | ☐ | Q | white, brown, gray | tall neck |
+| Llama / Alpaca | P2 | ✅ | Q | white, brown, gray | `examples/llama` — approved 27-box woolly llama with a deep fleece body, upright two-stage neck, long alert ears, slim two-stage legs, and curled tail |
 
 ## Domestic pets
 
@@ -165,8 +165,8 @@ reviewed rigs and then filling macro gaps.
 | Bison / Buffalo | P3 | ✅ | Q | — | `examples/american_bison` — approved 27-box bull with layered hump, compact rear, low shaggy head, short horns, and beard |
 | Antelope / Gazelle / Impala | P2 | ✅ | Q | horns; springbok, oryx | `examples/gemsbok_oryx` — approved 24-box gemsbok with black-white mask, flank stripe, leg stockings, and twin two-stage spear horns |
 | Wildebeest / Gnu | P3 | ✅ | Q | — | `examples/wildebeest` — approved 28-box blue wildebeest with massive dark shoulders, lowered long face, beard, sweeping three-stage horns, and black tail |
-| Tapir | P3 | ☐ | Q | — | short trunk; baby is striped |
-| Okapi | P3 | ☐ | Q | — | giraffe cousin, zebra legs |
+| Tapir | P3 | ✅ | Q | Malayan, lowland; striped baby | `examples/malayan_tapir` — approved 23-box adult with a massive pale saddle, black fore and rear masses, white-rimmed ears, broad feet, and short three-stage trunk |
+| Okapi | P3 | ✅ | Q | — | `examples/okapi` — approved 24-box adult with a deep chestnut body, shorter giraffe-like neck, huge ears, small ossicones, and white-barred rump and legs |
 | Warthog | P3 | ✅ | Q | — | `examples/warthog` — approved 30-box adult with a wide low head, cheek bosses, paired two-stage tusks, stiff dorsal mane, and raised tufted tail |
 
 ## Primates

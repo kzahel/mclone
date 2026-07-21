@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 95 |
-| total parts | 2,079 |
-| boxes | 1,874 |
+| figures | 98 |
+| total parts | 2,153 |
+| boxes | 1,948 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 295 |
-| parts with any texture reference | 474 |
-| individual texture applications | 744 |
+| ASCII textures | 308 |
+| parts with any texture reference | 493 |
+| individual texture applications | 780 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 77 | 1,537 | 1,537 | 0 / 0 / 0 |
+| canonical `examples/` | 80 | 1,611 | 1,611 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -588,7 +588,20 @@ under `/tmp/mclone-asset-lab/batch-19` and inspected for identity, grounding,
 attachment continuity, gait cadence, horn and tusk stability, secondary
 motion, and loop continuity, and approved by the user on 2026-07-21.
 
-All 744 applications target an explicit face of a box. They range from single
+The twentieth post-migration content batch adds Llama, Malayan Tapir, and Okapi
+as approved canonical box-only rigs. Llama is a 27-part tall strolling rig with
+a deep fleece body, upright two-stage neck, long alert ears, slim two-stage
+legs, and curled woolly tail; Malayan Tapir is a 23-part stocky walker with a
+massive pale saddle, black fore and rear masses, white-rimmed ears, broad feet,
+and a revised short three-stage trunk; and Okapi is a 24-part stepping rig with
+a deep chestnut body, shorter giraffe-like neck, huge ears, small paired
+ossicones, and white-barred rump and legs. All 74 parts are canonical boxes and
+use 13 combined pixel textures. Clean multi-angle sheets and four-cycle videos
+were rendered under `/tmp/mclone-asset-lab/batch-20` and inspected for identity,
+grounding, attachment continuity, gait cadence, neck and snout stability,
+secondary motion, and loop continuity, and approved by the user on 2026-07-21.
+
+All 780 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
