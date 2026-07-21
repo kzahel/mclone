@@ -97,7 +97,7 @@ multi-part groups, and arbitrary depth allowances cannot be suppressed.
   declared locomotion contacts are excluded, and swim-only figures are outside
   the land gate.
 - The required scan reports zero failures, zero acknowledged source
-  exceptions, and 36 baseline warnings across 143 canonical figures.
+  exceptions, and 36 baseline warnings across 146 canonical figures.
 - The 23-test semantic suite, connectivity and surface scans, typecheck, and
   production catalogue build pass.
 

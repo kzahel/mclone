@@ -207,6 +207,7 @@ reviewed rigs and then filling macro gaps.
 | Binturong | P3 | ✅ | Q | — | `examples/binturong` — approved 24-box adult with a shaggy charcoal coat, pale whiskers, plantigrade feet, slow canopy prowl, and separate five-stage prehensile-tail curl action |
 | Honey badger | P3 | ✅ | Q | — | `examples/honey_badger` — approved 21-box adult with a continuous pale mantle, black underbody, heavy clawed paws, determined trot, and separate alternating digging-swipe action |
 | Fossa | P3 | ✅ | Q | — | `examples/fossa` — approved 21-box adult with a long tawny body, low feline head, rounded ears, four-stage balancing tail, quiet forest prowl, and separate airborne pounce action |
+| Aye-aye | P3 | ✅ | Q | — | `examples/aye_aye` — approved 22-box aye-aye with huge pink ears, pale mask, amber eyes, elongated probing fingers, four-stage plume tail, careful branch creep, and separate tap-probe action |
 
 ## Marsupials & monotremes
 
@@ -244,12 +245,14 @@ reviewed rigs and then filling macro gaps.
 | Cassowary | P3 | ✅ | B | southern, northern | `examples/cassowary` — approved 23-box southern cassowary with black plumage, cobalt neck, red wattles, tall casque, forest run, and separate defensive kick action |
 | Kiwi | P3 | ✅ | W | brown kiwi, little spotted kiwi | `examples/kiwi` — approved 14-box brown kiwi with a low rounded body, tiny wings, long two-stage bill, planted feet, forage walk, and separate beak-probe action |
 | Secretary bird | P3 | ✅ | B | — | `examples/secretary_bird` — approved 26-box adult with swept black crest, orange face, gray-black plumage, long planted legs, grassland stalk, and separate abrupt stomp-strike action |
+| Marabou stork | P3 | ✅ | B | — | `examples/marabou_stork` — approved 19-box marabou with black-white plumage, bare pink head and neck, hanging throat pouch, long planted legs, wetland stalk, and separate broad wing-display action |
 
 ## Marine & aquatic
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Fish (generic) | P1 | ✅ | S | clownfish, tropical morphs, cod, salmon, pufferfish | `examples/fish` — approved 10-box blue/yellow tropical fish with a lateral two-stage tail |
+| Swordfish | P3 | ✅ | S | blue marlin | `examples/swordfish` — approved 16-box swordfish with cobalt-silver flanks, long three-stage rostrum, swept fins, crescent tail, fast swim, and separate lateral bill-slash action |
 | Pufferfish | P3 | ✅ | S | spotted, porcupinefish | `examples/pufferfish` — approved 18-box spotted puffer with a compact spiny body, puckered mouth, swim cycle, and separately selectable inflate and deflate actions |
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
 | Manta ray | P3 | ✅ | S | reef manta, oceanic manta | `examples/manta_ray` — approved 16-box reef manta with patterned diamond disc, paired cephalic fins, long four-stage tail, undulating wing swim, and separate full barrel-roll action |
