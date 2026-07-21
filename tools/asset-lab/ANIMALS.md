@@ -189,6 +189,7 @@ reviewed rigs and then filling macro gaps.
 | Hedgehog | P3 | ✅ | Q | — | `examples/hedgehog` — approved 19-box low quadruped with pointed cream face, tiny legs, and four-step pixel-textured spine coat |
 | Porcupine | P3 | ✅ | Q | — | `examples/porcupine` — approved 21-box heavy adult with high pale-tipped quill mantle, small face, sturdy legs, and short thick tail |
 | Raccoon | P2 | ✅ | Q | — | `examples/raccoon` — approved 18-box adult with broad face mask, dark paws, cautious walk, and four-stage ringed tail |
+| Skunk | P3 | ✅ | Q | striped, spotted | `examples/skunk` — approved striped skunk with a bold dorsal blaze, oversized four-stage plume, cautious amble, and separate foreleg warning-handstand action |
 | Beaver | P3 | ✅ | Q | — | `examples/beaver` — approved 19-box adult with blunt muzzle, orange incisors, compact legs, and broad crosshatched two-stage paddle tail |
 | Bat | P2 | ✅ | W | — | `examples/bat` — approved 19-box flying mammal with large stepped ears, broad three-stage membrane wings, tucked feet, and tail membrane |
 | Meerkat | P2 | ✅ | Q | — | `examples/meerkat` — approved 19-box upright sentry with striped torso, dark eye patches, folded forepaws, planted feet, balancing tail, and scanning cycle |
@@ -197,6 +198,7 @@ reviewed rigs and then filling macro gaps.
 | Sloth | P3 | ✅ | Q | two-toe, three-toe | `examples/sloth` — approved 20-box low quadruped with masked face, long two-stage forelimbs, bent hind limbs, hooked contact paws, and very slow crawl |
 | Capybara | P3 | ✅ | Q | — | `examples/capybara` — approved 16-box tailless barrel with high blunt head, tiny ears, short planted legs, and calm walk |
 | Anteater | P3 | ✅ | Q | giant, tamandua | `examples/giant_anteater` — approved 23-box giant anteater with a long three-stage snout, bold shoulder saddle, heavy clawed forefeet, and enormous four-stage plume tail |
+| Aardvark | P3 | ✅ | Q | — | `examples/aardvark` — approved aardvark with an arched mottled back, tall ears, long tapered snout, digging feet, and thick three-stage tail |
 | Armadillo | P3 | ✅ | Q | — | `examples/armadillo` — approved 23-box nine-banded adult with stepped armor, pointed head, upright ears, clawed feet, and three-stage plated tail; roll-up remains future work |
 | Pangolin | P3 | ✅ | Q | — | `examples/pangolin` — approved 23-box adult with five overlapping scale plates, earless pointed head, clawed feet, and four-stage armored tail; **roll-up** remains future work |
 | Mongoose | P3 | ✅ | Q | — | `examples/mongoose` — approved 19-box low runner with a narrow speckled body, pointed muzzle, small ears, dark feet, and three-stage tail |
@@ -249,6 +251,7 @@ reviewed rigs and then filling macro gaps.
 | Starfish | P3 | ✅ | ST | — | `examples/starfish` — approved 17-box ochre sea star with patterned central disc, five independently rooted three-stage arms, tube-foot markings, and slow traveling creep |
 | Lobster | P3 | ✅ | C | — | `examples/lobster` — approved 43-box American lobster with heavy mottled carapace, long antennae, articulated claws, eight walking legs, five abdomen plates, and broad tail fan |
 | Shrimp | P3 | ✅ | S | — | `examples/shrimp` — approved 41-box pink shrimp with pointed rostrum, stalked eyes, long antennae, six walking legs, ten swimmerets, curled plated abdomen, and paddle swim |
+| Mantis shrimp | P3 | ✅ | C/S | peacock, zebra | `examples/mantis_shrimp` — approved peacock mantis shrimp with vivid plated shell, stalked eyes, six walking legs, swimmerets, broad tail fan, and separate paired raptorial punch action |
 | Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |
 | Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
 | Walrus | P2 | ✅ | S/Q | Atlantic, Pacific | `examples/walrus` — review candidate Atlantic walrus with massive wrinkled body, paired whisker pads and tusks, broad foreflippers, and split hind flippers |
