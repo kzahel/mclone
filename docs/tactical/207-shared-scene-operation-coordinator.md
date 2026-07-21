@@ -1,14 +1,14 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: revised 2026-07-21 after a measured two-sided boundary audit; proposed
-for implementation. The original 2026-07-21 proposal framed success as
-deleting the remaining named TypeScript pumps. The audit showed the
-complexity mass sits on the Rust side, so this revision inverts the metric:
-the primary deliverable is Rust-side consolidation — one operation identity
-system, a poll-shaped browser ABI, a smaller web lowering layer — and the
-TypeScript deletions become the corollary that verifies it. The obsolete
-browser v5-to-v6 Overworld migration has been removed as a prerequisite
-decision; no coordinator cutover is implemented yet.
+Status: reviewed 2026-07-21 and ready for phased implementation; Slice 0 is
+next and no coordinator cutover has landed. The original proposal framed
+success as deleting the remaining named TypeScript pumps. The measured
+two-sided audit showed the complexity mass sits on the Rust side, so the plan
+now makes Rust-side consolidation the primary deliverable — one
+boundary-operation token family, a poll-shaped browser ABI, and a smaller web
+lowering layer — while TypeScript deletion is the corollary that verifies it.
+The obsolete browser v5-to-v6 Overworld migration is no longer a prerequisite
+decision.
 
 Topic: `cross-platform-operation-execution`
 
@@ -95,13 +95,16 @@ that change the plan:
   those borrows is live, rAF and raw input are excluded: coarse operations
   pause the active world on web only. This is the one user-visible defect in
   scope.
-- At least four overlapping identity/staleness systems exist in Rust: the
+- At least four overlapping operation identity/staleness systems exist in Rust: the
   generic `PlatformOperationLedger` token (catalog fully, lobby/web session
   partially), `ExternalSceneSessionStart` currentness plus a hand-rolled
   stale-completion counter, the independent asset-replacement epoch, and a
   catalog `String` request-id carried alongside its own ledger token — plus
   `asset_epoch` tags threaded through warm-world slots. Three predate the
   generic ledger; the consolidation onto it was started and never finished.
+  Some asset epochs also express real content-generation compatibility, so
+  the implementation must separate that invariant from operation identity
+  rather than deleting every field named `asset_epoch`.
 - Native scene code still starts work directly while web Rust lowers it into
   per-operation tickets TypeScript must recognize and return.
 
@@ -185,12 +188,15 @@ across an await.
 1. Shared Rust owns operation admission, identity, ordering, priority,
    cancellation, stale/duplicate rejection, retries, semantic failure, and
    final state installation.
-2. There is exactly **one** operation identity/staleness system at cutover:
-   the existing `PlatformOperationService`/`PlatformOperationLedger` family,
-   extended where needed. Session currentness, the asset-replacement epoch,
-   the catalog `String` request-id, and the hand-rolled stale counter are
-   merged into it and deleted — not wrapped by a facade that leaves them
-   alive underneath.
+2. There is exactly **one boundary-operation token/staleness family** at
+   cutover: the existing
+   `PlatformOperationService`/`PlatformOperationLedger` family, extended where
+   needed. Session currentness, asset-preparation request acceptance, the
+   catalog `String` request-id, and the hand-rolled stale counter are merged
+   into it and deleted — not wrapped by a facade that leaves them alive
+   underneath. Asset/content generations may remain where they prove resource
+   compatibility, but they do not cross the platform boundary as a second
+   operation identity.
 3. Long-running browser work does not retain a mutable `WebSceneHost` borrow.
    Issuing an effect is synchronous; an owned result returns later. At
    cutover, zero exported `async fn(&mut self)` methods remain.
@@ -206,9 +212,10 @@ across an await.
 7. Native uses the same logical request/completion owner with direct typed
    execution or existing worker threads. It does not adopt promises,
    `JsValue`, encoded browser frames, SABs, or extra hot-path allocation.
-8. Adding a new coarse operation type after cutover requires zero TypeScript
-   changes and zero new `WebSceneHost` exports. New operations are new Rust
-   request variants lowered to the existing mechanical effect vocabulary.
+8. Adding a new coarse operation type after cutover, when it uses the existing
+   mechanical capability vocabulary, requires zero TypeScript changes and zero
+   new `WebSceneHost` exports. New operations are new Rust request variants
+   lowered to those existing mechanical effects.
 9. Existing integrated-server, persistence, render-compiler, server-job, and
    remote-socket actors remain specialized. This tactical does not put every
    workload behind one universal actor or executor.
@@ -234,9 +241,10 @@ across an await.
     named completion receipts.
 17. Unsupported pre-release storage formats are rejected or reset; they are
     not migrated by production TypeScript.
-18. Every slice reports the parent-topic scoreboard rows it moved. The
-    combined both-language boundary total must trend net-negative across the
-    tactical.
+18. Every slice reports the parent-topic scoreboard rows it moved and explains
+   temporary growth. The completed tactical must be net-negative across
+   authored TypeScript plus web-only Rust unless a separately reviewed
+   behavioral gain changes that gate.
 
 ## Proposed Contract Shape
 
@@ -307,11 +315,13 @@ consolidation second because it is the large Rust deletion; convergence and
 addressing after a decision gate re-scopes them against what has already
 evaporated.
 
-### Slice 0: Exact traces, costs, and deletion locks
+### Slice 0: Exact traces, costs, and deletion ledger
 
 - Capture one native and browser trace for active local start, remote start,
   lobby primary/destination warmup, catalog create/open/delete, asset
   replacement, initial presentation, replacement, and shutdown.
+- Reuse existing smoke/lifecycle scenarios and prefer composite traces; do not
+  create a new cross-platform test matrix solely for this baseline.
 - Record which calls currently hold `&mut WebSceneHost` across an await,
   how long each borrow excludes rAF/input in practice, and which work can
   proceed concurrently with active rendering.
@@ -320,15 +330,23 @@ evaporated.
 - Record the parent-topic scoreboard baseline: authored TypeScript lines,
   `mclone-web-client/src` lines, `WebSceneHost` export count, async-borrow
   export count, identity-system count, and wasm cfg counts.
-- Add source locks for every named product-TypeScript field, report flag,
-  dispatch method, Rust stale counter, and parallel epoch targeted for
-  deletion.
+- Classify every request id, token, epoch, and generation named by the traced
+  operations as either boundary-operation identity or durable domain/content
+  version. Record the invariant for every version that should survive.
+- Add source-inventory locks with current non-increasing ceilings and explicit
+  zero cutover targets for every named product-TypeScript field, report flag,
+  dispatch method, Rust stale counter, and parallel operation identity. Lower
+  each ceiling as its owner is deleted; Phase 0 must still pass on the current
+  baseline.
 
 Exit: the refactor has exact behavioral and deletion evidence on both sides
 of the boundary rather than a TypeScript-line goal.
 
 ### Slice 1: Retire the async-borrow ABI
 
+- Use active-session start as the first end-to-end owned
+  issue/effect/completion proof; do not introduce the final coordinator type
+  merely to make that proof compile.
 - Replace `startPendingSession`, `shutdownAsync`,
   `completeAssetPackSelection`, and `WebLobbyRuntimeStart::start` with
   synchronous issue, take-effect, and submit-completion turns; long-running
@@ -351,14 +369,17 @@ active world no longer pauses during independent coarse operations.
 - Migrate session-start currentness onto `PlatformOperationLedger` tokens and
   delete `external_scene_start_is_current` duplication and the hand-rolled
   `stale_lobby_start_completion_count`.
-- Migrate asset-replacement acceptance onto the same tokens and delete the
-  independent epoch and `validate_replacement_epoch` machinery, preserving
-  the acceptance semantics as ledger policy.
+- Migrate asset-preparation request/completion acceptance onto the same tokens.
+  Delete uses of replacement epochs as ad hoc platform-operation identity.
+  Retain and clearly name asset/content generations where they prove that
+  prepared assets, meshes, render workers, active assets, and warm worlds are
+  compatible; `validate_replacement_epoch` may be narrowed to that invariant
+  instead of being deleted by name.
 - Delete the catalog `String` request-id; the ledger token is the only
   identity that crosses the boundary.
 - Rationalize the warm-world `asset_epoch` slot tags against the unified
-  identity where they duplicate it; keep them only where they express a
-  genuinely different invariant, with a comment stating which.
+  identity where they duplicate it; keep them where they express the distinct
+  content-generation invariant, with a comment stating which.
 - Reuse `PlatformOperationService`/`PlatformOperationLedger` rules; do not
   create a second token system, and do not leave the old ones compiled in.
 - Add shared tests for order, concurrency, cancellation, duplicate/unknown
@@ -374,8 +395,9 @@ completion without learning why the scene requested it.
 Re-measure the remaining named TypeScript pumps and the per-operation ticket
 types against the new ABI and identity system. If they have collapsed to
 trivial forwarding, shrink or drop Slices 3–5 accordingly and record that in
-this document. Do not execute the remaining slices merely because they were
-planned.
+this document. Decide separately whether storage-address lowering still has a
+net-deletion case; it is optional and must not block operation convergence. Do
+not execute the remaining slices merely because they were planned.
 
 ### Slice 3: Converge runtime startup
 
@@ -409,20 +431,31 @@ active-session identity, and native/web share the acceptance state machine.
 Exit: catalog and asset changes require no named branch in product
 TypeScript; the five dispatch branches are one generic loop.
 
-### Slice 5: Readiness, shutdown, and storage addressing
+### Slice 5: Readiness and shutdown
 
 - Return one Rust-authored frame/readiness disposition and stop reading
   render queue counts for product control flow.
 - Make shutdown poll one Rust quiescence barrier and let the browser adapter
   mechanically terminate or release the resources named by final effects.
-- Move catalog and record namespace-to-physical-address lowering into browser
-  Rust and reduce TypeScript to generic schema/transaction execution — gated
-  on net combined deletion per the addressing direction above.
 - Preserve the integrated-server Worker's adjacent IndexedDB path and its
   world writer lease.
 
 Exit: product TypeScript contains browser mechanics and operational error
-capture, but no mclone scene-operation or storage-family vocabulary.
+capture but no mclone scene-operation readiness or quiescence policy.
+
+### Optional Slice 5b: Storage addressing
+
+- Reassess the IndexedDB addressing direction after the operation cut has
+  landed; stable store/index mapping may be legitimate platform mechanics.
+- Move catalog or record namespace-to-physical-address lowering into browser
+  Rust only when the result removes semantic TypeScript vocabulary and makes
+  the combined authored-TypeScript-plus-web-Rust boundary net-smaller.
+- Do not merge catalog and opened-world continuation owners merely to share an
+  envelope, and do not delay Slice 6 if this optional cut lacks a deletion
+  case.
+
+Exit: either the smaller domain-blind addressing runner lands with measured net
+deletion, or the retained platform mapping is documented as the cheaper owner.
 
 ### Slice 6: Cutover validation, deletion closeout, and ledger report
 
@@ -450,9 +483,11 @@ capture, but no mclone scene-operation or storage-family vocabulary.
 
 Rust-side (primary):
 
-1. Exactly one operation identity/staleness system remains; the session
-   currentness duplication, hand-rolled stale counter, independent asset
-   epoch, and catalog `String` request-id are deleted from the codebase.
+1. Exactly one boundary-operation token/staleness family remains; the session
+   currentness duplication, hand-rolled stale counter, use of asset generation
+   as platform-operation identity, and catalog `String` request-id are deleted.
+   Any retained asset/content generation has a documented resource-
+   compatibility invariant and is not used to identify a platform completion.
 2. Zero exported `async fn(&mut self)` methods remain on `WebSceneHost` or
    its sibling exported classes.
 3. The `WebSceneHost` export count is materially reduced from 48 and the
@@ -460,8 +495,9 @@ Rust-side (primary):
 4. `mclone-web-client/src` ends net-smaller than its 20,577-line baseline,
    and the combined authored-TypeScript-plus-web-Rust total is net-negative
    for the tactical.
-5. Adding a new coarse operation type requires zero TypeScript changes and
-   zero new `WebSceneHost` exports, demonstrated in Slice 6.
+5. Adding a test-only coarse operation type that uses the established
+   mechanical capability vocabulary requires zero TypeScript changes and zero
+   new `WebSceneHost` exports, demonstrated in Slice 6.
 6. Native hot paths gain no browser serialization, promises, SAB envelopes,
    or unjustified allocations.
 7. Native and web execute the lifecycle through platform adapters without
@@ -487,8 +523,9 @@ TypeScript-side (corollary):
 13. Product TypeScript has no `sessionBusy`, `pendingLobbyRuntimeStarts`,
     `lobbyOperationDrainActive`, or `worldCatalogOperationTail` state.
 14. Catalog meaning remains in its Rust continuation; TypeScript executes
-    only generic IndexedDB actions, with no world-record-family switch or
-    dimension-specific compatibility policy.
+    only mechanical IndexedDB actions. Any retained physical store/index
+    mapping is classified as platform mechanics and contains no catalog flow,
+    record-family policy, or dimension-specific compatibility decision.
 15. Asset selection and preparation progress entirely through Rust-owned
     scene and render-actor state.
 16. Rust alone decides initial presentation readiness; TypeScript schedules
@@ -509,8 +546,9 @@ Process:
    case, what proves the old token systems are deleted rather than wrapped?
 2. Can active and standby runtime starts share one owned ticket type without
    retaining wgpu resources or coupling native to web construction details?
-3. Should the browser expose one generic effect queue or several capability
-   queues for Worker, IndexedDB, and fetch execution?
+3. What is the smallest set of capability queues needed for Worker, IndexedDB,
+   fetch, and scheduling mechanics while keeping domain operation variants out
+   of TypeScript?
 4. Does any operation truly require an async mutable scene borrow, or can all
    four current cases (session start, shutdown, asset selection, lobby
    warmup) become synchronous issue plus later completion?
