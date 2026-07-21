@@ -78,6 +78,80 @@ test("canonical figure rejects deprecated curved primitives", () => {
   assert.equal(legacy.parts[0]?.primitive.kind, "sphere");
 });
 
+test("canonical geometry requires reasoned disconnected-component exceptions", () => {
+  assert.throws(
+    () => figure("detached", ({ box, mat, part }) => {
+      mat("skin", "#667766");
+      part("body", box({ size: [1, 1, 1], material: "skin" }));
+      part("halo", box({ at: [0, 1.5, 0], size: [0.2, 0.2, 0.2], material: "skin" }));
+    }),
+    /disconnected-component.*geometryException/s,
+  );
+
+  const acknowledged = figure("acknowledged_detached", ({
+    box,
+    geometryException,
+    mat,
+    part,
+  }) => {
+    mat("skin", "#667766");
+    part("body", box({ size: [1, 1, 1], material: "skin" }));
+    part("halo", box({ at: [0, 1.5, 0], size: [0.2, 0.2, 0.2], material: "skin" }));
+    geometryException({
+      rule: "disconnected-component",
+      parts: ["halo"],
+      reason: "A magical halo intentionally floats above the body.",
+    });
+  });
+  assert.deepEqual(acknowledged.geometryExceptions, [{
+    rule: "disconnected-component",
+    parts: ["halo"],
+    reason: "A magical halo intentionally floats above the body.",
+  }]);
+  assert.deepEqual(
+    roundTripFigureAsset(acknowledged, "acknowledged source").asset,
+    acknowledged,
+  );
+
+  assert.throws(
+    () => figure("stale_geometry_exception", ({
+      box,
+      geometryException,
+      mat,
+      part,
+    }) => {
+      mat("skin", "#667766");
+      part("body", box({ size: [1, 1, 1], material: "skin" }));
+      part("halo", box({ at: [0, 0.55, 0], size: [0.2, 0.2, 0.2], material: "skin" }));
+      geometryException({
+        rule: "disconnected-component",
+        parts: ["halo"],
+        reason: "This exception should become stale after attachment.",
+      });
+    }),
+    /stale geometry exception/,
+  );
+
+  assert.throws(
+    () => figure("missing_geometry_reason", ({
+      box,
+      geometryException,
+      mat,
+      part,
+    }) => {
+      mat("skin", "#667766");
+      part("body", box({ size: [1, 1, 1], material: "skin" }));
+      part("halo", box({ at: [0, 1.5, 0], size: [0.2, 0.2, 0.2], material: "skin" }));
+      geometryException({
+        rule: "disconnected-component",
+        parts: ["halo"],
+        reason: "",
+      });
+    }),
+    /requires a nonempty reason/,
+  );
+});
+
 test("preserves named action presentation and default-clip metadata", () => {
   const asset = figure("action_figure", ({ box, clip, defaultClip, mat, part }) => {
     mat("shell", "#667766");

@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 128 |
-| total parts | 2,869 |
-| boxes | 2,664 |
+| figures | 131 |
+| total parts | 2,952 |
+| boxes | 2,747 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 408 |
-| parts with any texture reference | 743 |
-| individual texture applications | 1,253 |
+| ASCII textures | 417 |
+| parts with any texture reference | 760 |
+| individual texture applications | 1,274 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 110 | 2,327 | 2,327 | 0 / 0 / 0 |
+| canonical `examples/` | 113 | 2,410 | 2,410 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -796,7 +796,32 @@ typecheck, 19-test semantic suite, first-party figure drift gate, repository
 diff check, and 110-figure/115-clip web production build pass. The user
 approved the complete batch without further revision.
 
-All 1,253 applications target an explicit face of a box. They range from single
+The thirty-first post-migration content batch adds Capuchin Monkey, Wallaby,
+and Komodo Dragon as approved canonical box-only rigs. Capuchin Monkey is a
+28-part white-faced capuchin with a black cap, pale
+shoulder mantle, long grasping limbs, hand-walking cadence, and a seven-stage
+prehensile tail; Wallaby is a 24-part compact gray-brown hopper with deep
+haunches, long feet, small forearms, a three-stage balancing tail, and
+projected hind-foot contacts at the floor boundary; and Komodo Dragon is a
+31-part adult monitor with a heavy scaled torso, muscular stepped neck, blunt
+head, visible forked tongue, four stout clawed limbs, and a four-stage tapering
+tail. All 83 parts are canonical boxes and use nine combined pixel textures
+across 17 textured parts and 21 explicit box-face applications. Clean
+multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-31` and inspected for identity, attachment
+continuity, hand/foot cadence, tail silhouettes, projected Wallaby foot
+contacts, tongue separation, ground penetration, visible surface interference,
+and loop continuity. The Asset Lab typecheck, 20-test semantic suite,
+first-party figure drift gate, rest-pose geometry connectivity gate, repository
+diff check, and 113-figure/118-clip web production build pass. After user
+review exposed a detached Wallaby tail root, the source was reattached and the
+required connectivity gate
+recorded in [`figure-geometry-analysis.md`](figure-geometry-analysis.md). Its
+first full-catalog scan also exposed and corrected the Kangaroo tail, both Moose
+antler palms, and two pivot-shifted Starfish arms rather than suppressing them.
+The user approved the corrected complete batch and required gate.
+
+All 1,274 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

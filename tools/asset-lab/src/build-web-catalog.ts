@@ -16,6 +16,7 @@ import {
 } from "./catalog-model";
 import { discoverCanonicalFigureSources } from "./discover-figures";
 import { assertBoxOnlyFigure } from "./dsl";
+import { assertFigureGeometry } from "./geometry-analysis";
 import { FIRST_PARTY_FIGURES } from "./first-party-figures";
 import { loadFigureJsonDocument } from "./load";
 import { clipDuration } from "./scene";
@@ -53,6 +54,7 @@ export async function buildWebCatalog(
     const document = await loadFigureJsonDocument(sourcePath);
     const asset = document.asset;
     assertBoxOnlyFigure(asset);
+    assertFigureGeometry(asset);
     const directoryName = path.basename(path.dirname(sourcePath));
     if (asset.name !== directoryName) {
       throw new Error(

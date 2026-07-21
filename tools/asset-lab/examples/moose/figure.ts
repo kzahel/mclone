@@ -144,7 +144,7 @@ export default figure("moose", ({
     }));
     part(`antler_palm_${side}`, box({
       parent: "head",
-      at: [side === "l" ? -0.48 : 0.48, 0.61, 0.06],
+      at: [side === "l" ? -0.44 : 0.44, 0.58, 0.06],
       rot: [-10, 0, side === "l" ? -8 : 8],
       size: [0.58, 0.34, 0.12],
       material: "antler_light",

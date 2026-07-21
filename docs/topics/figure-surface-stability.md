@@ -68,7 +68,10 @@ originated in two part surfaces, not in a textured overlay.
 The current structural validation in
 [`dsl.ts`](../../tools/asset-lab/src/dsl.ts) checks references, finite
 transforms, primitive dimensions, clips, textures, and the canonical box-only
-policy. It does not compare world-space surfaces between parts. Ordinary part
+policy. The separate implemented
+[`figure-geometry-analysis.md`](figure-geometry-analysis.md) gate detects
+disconnected rest-pose oriented-box components, but it does not compare
+world-space faces or sample animation. Ordinary part
 interpenetration is common and necessary at joints, so a naive bounding-box
 overlap prohibition would reject most useful rigs without identifying the
 actual depth hazard.

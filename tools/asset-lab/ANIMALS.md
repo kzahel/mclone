@@ -173,7 +173,7 @@ reviewed rigs and then filling macro gaps.
 
 | Animal | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Monkey | P2 | ☐ | B/Q | generic, with baby | long tail; knuckle/upright ambiguity |
+| Monkey | P2 | ✅ | B/Q | generic, with baby | `examples/capuchin_monkey` — approved 28-box white-faced capuchin with black cap, pale shoulder mantle, grasping hands and feet, hand-walk, and seven-stage prehensile tail |
 | Gorilla | P2 | ✅ | B/Q | silverback, female, juvenile | `examples/gorilla` — approved 28-box silverback with gray saddle, long articulated arms, and grounded knuckle-walk |
 | Chimpanzee | P3 | ✅ | B/Q | — | `examples/chimpanzee` — approved 24-box agile knuckle-walker with pale ears, muzzle, and lighter proportions than the gorilla |
 | Orangutan | P3 | ✅ | B/Q | — | `examples/orangutan` — approved 27-box adult male with rust-orange shag, dark cheek flanges, and exceptionally long forelimbs |
@@ -207,7 +207,7 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Kangaroo | P2 | ✅ | H | adult, joey-in-pouch | `examples/kangaroo` — approved 24-box red kangaroo with synchronized hop, long feet, and two-stage balancing tail |
 | Koala | P3 | ✅ | Q | adult, joey | `examples/koala` — approved 21-box upright adult with oversized stepped ears, broad dark nose, pale belly, folded long arms, planted feet, and cling idle |
-| Wallaby | P3 | ☐ | H | — | smaller kangaroo rig |
+| Wallaby | P3 | ✅ | H | — | `examples/wallaby` — approved 24-box agile wallaby with compact gray-brown body, deep haunches, long feet, connected three-stage tail, projected hind-foot contacts, and bounding hop |
 | Wombat | P3 | ✅ | Q | — | `examples/wombat` — approved 17-box common wombat with broad head, low barrel, tiny ears, short powerful legs, wide clawed paws, and slow walk |
 | Opossum | P3 | ✅ | Q | — | `examples/opossum` — approved 24-box adult with white pointed face, black-pink ears, pink feet and nose, and six-stage bare prehensile tail |
 | Tasmanian devil | P3 | ✅ | Q | — | `examples/tasmanian_devil` — approved 23-box black adult with red inner ears, white chest and shoulder marks, oversized jaw, short strong legs, and thick tail |
@@ -259,7 +259,7 @@ reviewed rigs and then filling macro gaps.
 | Lizard / Gecko | P2 | ✅ | Q | gecko, iguana, chameleon | `examples/gecko` — approved 25-box Tokay gecko with orange-spotted blue-gray hide, raised eyes, four two-stage sprawled legs, adhesive toe pads, tapered tail, and lateral scuttle |
 | Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles |
 | Crocodile / Alligator | P2 | ✅ | Q | croc, gator | `examples/crocodile` — approved 24-box Nile crocodile with armored back, long jaw, sprawled walk, and articulated tail |
-| Komodo dragon | P3 | ☐ | Q | — | giant monitor lizard; zoo headliner |
+| Komodo dragon | P3 | ✅ | Q | — | `examples/komodo_dragon` — approved 31-box adult monitor with scaled torso, muscular neck, forked tongue, four stout clawed limbs, and four-stage tail |
 | Frog | P2 | ✅ | H | green, tree-frog morphs, toad; tadpole | `examples/frog` — approved 19-box green frog with raised amber eyes, broad head, folded hind legs, toe pads, looping hop, and separate one-shot jump action |
 | Salamander / Newt | P3 | ☐ | Q | — | |
 

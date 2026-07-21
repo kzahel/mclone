@@ -202,6 +202,7 @@
     "asset-lab:typecheck": "pnpm --dir ./tools/asset-lab typecheck",
     "asset-lab:test": "pnpm --dir ./tools/asset-lab test",
     "asset-lab:figures:check": "pnpm --dir ./tools/asset-lab figures:check",
+    "asset-lab:geometry:check": "pnpm --dir ./tools/asset-lab geometry:check",
     "asset-lab:figures:write": "pnpm --dir ./tools/asset-lab figures:write",
     "asset-lab:export": "pnpm --dir ./tools/asset-lab export",
     "asset-lab:smoke": "pnpm --dir ./tools/asset-lab smoke",

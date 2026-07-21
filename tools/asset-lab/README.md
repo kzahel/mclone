@@ -16,6 +16,7 @@ Common commands from the repo root:
 pnpm asset-lab:typecheck
 pnpm asset-lab:test
 pnpm asset-lab:figures:check
+pnpm asset-lab:geometry:check
 pnpm asset-lab:export
 pnpm asset-lab:smoke
 pnpm asset-lab:sheet
@@ -119,6 +120,36 @@ After a checked figure changes, refresh and verify the normal asset-pack lock.
 `asset-lab:test` also discovers and executes every Asset Lab example through
 the serialize/reparse boundary, including examples that are not promoted into
 checked runtime JSON.
+
+Canonical figures also pass a rest-pose geometry connectivity gate. The check
+transforms every box into figure space, expands pairs by a small `0.06`-unit
+attachment tolerance, builds connected components, and rejects every component
+outside the largest one. It runs while `figure()` constructs a canonical
+source, during catalogue builds, and from `asset-lab:test`; run it directly
+with `pnpm asset-lab:geometry:check` for a catalogue summary.
+
+Do not use a rig parent link as evidence that boxes touch. If a component is
+intentionally separate, acknowledge the exact current component and explain
+why:
+
+```ts
+figure("wisp", ({ box, geometryException, mat, part }) => {
+  mat("glow", "#88ccff");
+  part("body", box({ size: [0.5, 0.5, 0.5], material: "glow" }));
+  part("halo", box({ at: [0, 0.8, 0], size: [0.3, 0.05, 0.3], material: "glow" }));
+  geometryException({
+    rule: "disconnected-component",
+    parts: ["halo"],
+    reason: "The magical halo intentionally floats above the body.",
+  });
+});
+```
+
+The reason must be nonempty, the part set must exactly match the reported
+component, and an exception becomes an error when later geometry reconnects or
+changes the component. This keeps exceptions narrow, reviewed, and removable.
+The gate is an oriented-box rest-pose check, not collision detection or an
+animated-pose proof; visual sheet/video review remains required.
 
 Three.js remains the semantic preview implementation, not the source format.
 

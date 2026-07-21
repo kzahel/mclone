@@ -165,7 +165,7 @@ export default figure("kangaroo", ({
 
   part("tail", box({
     parent: "pelvis",
-    at: [0, -0.16, 0.52],
+    at: [0, -0.19, 0.35],
     rot: [-56, 0, 0],
     size: [0.3, 0.9, 0.3],
     material: "coat_dark",

@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { assertFigureGeometry } from "./geometry-analysis";
 
 export type Vec3 = readonly [number, number, number];
 export type EulerDeg = Vec3;
@@ -7,10 +8,17 @@ export interface FigureAsset {
   schemaVersion: 1;
   name: string;
   defaultClip?: string;
+  geometryExceptions?: GeometryExceptionSpec[];
   materials: Record<string, MaterialSpec>;
   textures: Record<string, AsciiTextureSpec>;
   parts: PartSpec[];
   clips: Record<string, ClipSpec>;
+}
+
+export interface GeometryExceptionSpec {
+  rule: "disconnected-component";
+  parts: string[];
+  reason: string;
 }
 
 export interface MaterialSpec {
@@ -327,6 +335,7 @@ export interface SlitherSpec extends CycleTimingSpec {
 
 export interface FigureApi {
   defaultClip(name: string): void;
+  geometryException(spec: GeometryExceptionSpec): void;
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
   part(name: string, draft: PartDraft): void;
@@ -361,6 +370,7 @@ export interface LegacyFigureApi extends FigureApi {
 export function figure(name: string, build: (api: FigureApi) => void): FigureAsset {
   const asset = buildFigureAsset(name, build);
   assertBoxOnlyFigure(asset);
+  assertFigureGeometry(asset);
   return asset;
 }
 
@@ -422,6 +432,27 @@ export function validateFigure(asset: FigureAsset): string[] {
   }
   if (asset.defaultClip !== undefined && !clipNames.has(asset.defaultClip)) {
     errors.push(`default clip references missing clip '${asset.defaultClip}'`);
+  }
+  for (const [index, exception] of (asset.geometryExceptions ?? []).entries()) {
+    if (exception.rule !== "disconnected-component") {
+      errors.push(`geometry exception ${index} uses unknown rule '${String(exception.rule)}'`);
+    }
+    if (!Array.isArray(exception.parts) || exception.parts.length === 0) {
+      errors.push(`geometry exception ${index} must name at least one part`);
+    } else {
+      const uniqueParts = new Set(exception.parts);
+      if (uniqueParts.size !== exception.parts.length) {
+        errors.push(`geometry exception ${index} contains duplicate part names`);
+      }
+      for (const partName of exception.parts) {
+        if (!partNames.has(partName)) {
+          errors.push(`geometry exception ${index} references missing part '${partName}'`);
+        }
+      }
+    }
+    if (typeof exception.reason !== "string" || !exception.reason.trim()) {
+      errors.push(`geometry exception ${index} requires a nonempty reason`);
+    }
   }
 
   for (const [name, material] of Object.entries(asset.materials)) {
@@ -522,12 +553,14 @@ class FigureBuilder {
   private readonly textures: Record<string, AsciiTextureSpec> = {};
   private readonly parts: PartSpec[] = [];
   private readonly clips: Record<string, ClipSpec> = {};
+  private readonly geometryExceptions: GeometryExceptionSpec[] = [];
   private defaultClipName: string | undefined;
   readonly api: LegacyFigureApi;
 
   constructor(private readonly name: string) {
     this.api = {
       defaultClip: (name) => this.defaultClip(name),
+      geometryException: (spec) => this.geometryException(spec),
       mat: (name, colorOrSpec) => this.mat(name, colorOrSpec),
       asciiTexture: (name, texture) => this.asciiTexture(name, texture),
       part: (name, draft) => this.part(name, draft),
@@ -554,6 +587,9 @@ class FigureBuilder {
       schemaVersion: 1,
       name: this.name,
       ...(this.defaultClipName === undefined ? {} : { defaultClip: this.defaultClipName }),
+      ...(this.geometryExceptions.length === 0
+        ? {}
+        : { geometryExceptions: this.geometryExceptions }),
       materials: this.materials,
       textures: this.textures,
       parts: this.parts,
@@ -566,6 +602,14 @@ class FigureBuilder {
       throw new Error(`Figure '${this.name}' already declares default clip '${this.defaultClipName}'`);
     }
     this.defaultClipName = name;
+  }
+
+  private geometryException(spec: GeometryExceptionSpec): void {
+    this.geometryExceptions.push({
+      rule: spec.rule,
+      parts: [...spec.parts],
+      reason: spec.reason,
+    });
   }
 
   private mat(name: string, colorOrSpec: string | MaterialSpec): void {

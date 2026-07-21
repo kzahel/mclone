@@ -92,7 +92,6 @@ export default figure("starfish", ({
         up: { texture: "arm_spots" },
         down: { texture: "tube_rows" },
       },
-      joint: { pivot: [0, 0, -0.23], axis: [0, 1, 0] },
     }));
     part(`${name}_mid`, box({
       parent: `${name}_root`,
