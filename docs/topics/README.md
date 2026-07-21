@@ -165,6 +165,11 @@ series implements the same concern, normally reuse the document slug in its
   architecture — standard gamepad snapshots, semantic action/context state,
   shared UI navigation and prompts, thin desktop/web/Android collectors,
   tracked XR extensions, and the later native Steam Input path.
+- [`local-couch-multiplayer.md`](local-couch-multiplayer.md): accepted 1-4
+  local-participant and multi-presentation direction — ordinary realm player
+  endpoints, shared unioned residency with per-view culling, single-player
+  auxiliary panes, helper/builder roles, Bedrock study plan, and mixed
+  XR-plus-flat couch play.
 - [`platform-boundary-convergence.md`](platform-boundary-convergence.md):
   parent record for the shared/platform code-split campaign — the
   sixteen-pass ledger, the 2026-07-21 two-sided measured audit, the

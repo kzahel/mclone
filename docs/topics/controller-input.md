@@ -60,7 +60,9 @@ UI navigation, prompt selection, or game behavior.
 - Deterministic scripted/offscreen input and conformance tests using the same
   canonical snapshots and action frames as product hosts.
 - A future path for haptics, controller-specific prompts, accessibility
-  devices, and local multiplayer without replacing the foundation.
+  devices, and 1-4-player local multiplayer without replacing the foundation.
+  Participant, view, and couch-session policy lives in
+  [`local-couch-multiplayer.md`](local-couch-multiplayer.md).
 
 ## Non-Goals
 
@@ -74,6 +76,8 @@ UI navigation, prompt selection, or game behavior.
 - Native Steam Input in the first gamepad slice.
 - Local multiplayer in the first gamepad slice. Source identity and assignment
   must permit it later, but one local player remains the current product shape.
+  The accepted downstream cardinality and assignment consumer are recorded in
+  [`local-couch-multiplayer.md`](local-couch-multiplayer.md).
 
 ## Current State And Gaps
 
@@ -221,6 +225,14 @@ most recently meaningfully active gamepad rather than summing unrelated
 controllers. Digital edges may be accepted from any connected assigned
 gamepad. Future player assignment extends this policy using `InputSourceId`
 without changing snapshots or bindings.
+
+The accepted couch path assigns one `InputSourceId` to at most one
+session-local participant. An unassigned gamepad may contribute a deliberate
+join edge, but backend device IDs are never persisted as player identity.
+Keyboard/mouse normally form one composite participant source; controller-only
+player-one boot and independent per-participant input contexts/prompts are
+required. Exact join, reconnect, guest/profile, and participant policy belongs
+to the couch topic rather than platform collectors.
 
 Axis noise below the configured dead zone is not activity and must not switch
 the active prompt. Disconnect or lifecycle loss clears held state so a missing
@@ -516,7 +528,9 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
    through shared preference codecs and platform storage executors.
 9. **Optional advanced backends.** Add Steam Input, haptics, exact glyph
    origins, gyro/touchpads, accessibility extensions, and later source-to-player
-   assignment.
+   assignment. Adopt the participant contract from
+   [`local-couch-multiplayer.md`](local-couch-multiplayer.md) rather than
+   introducing a controller-local player model.
 
 Do not wire a platform backend before Slices 1–3 provide the complete shared
 gameplay and UI destination. Otherwise the first platform will accidentally
@@ -628,6 +642,9 @@ layouts require device testing.
 - [`platform-parity.md`](platform-parity.md) and
   [`../platforms.md`](../platforms.md) — platform matrix, shared owner, and
   validation routing.
+- [`local-couch-multiplayer.md`](local-couch-multiplayer.md) — accepted 1-4
+  local-participant assignment, split/auxiliary view, helper, and mixed
+  XR-plus-flat consumer of this input foundation.
 - [`../tactical/098-flat-input-capability-convergence.md`](../tactical/098-flat-input-capability-convergence.md)
   — existing flat capability/gamepad foundation and bounded execution record.
 
