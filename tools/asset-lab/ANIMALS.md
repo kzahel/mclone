@@ -212,6 +212,7 @@ reviewed rigs and then filling macro gaps.
 | Fossa | P3 | ✅ | Q | — | `examples/fossa` — approved 21-box adult with a long tawny body, low feline head, rounded ears, four-stage balancing tail, quiet forest prowl, and separate airborne pounce action |
 | Aye-aye | P3 | ✅ | Q | — | `examples/aye_aye` — approved 22-box aye-aye with huge pink ears, pale mask, amber eyes, elongated probing fingers, four-stage plume tail, careful branch creep, and separate tap-probe action |
 | White-nosed coati | P3 | ✅ | Q | South American coati | `examples/white_nosed_coati` — approved 22-box adult with a cream mask and long nose, dark paws, five-stage upright ringed tail, foraging walk, and separate scent-probe action |
+| Kinkajou | P3 | ✅ | Q | juvenile | `examples/kinkajou` — approved 21-box golden canopy mammal with huge dark eyes, rounded ears, grasping paws, five-stage prehensile tail, slow prowl, and separate grounded tail-hook action |
 
 ## Marsupials & monotremes
 
@@ -266,6 +267,7 @@ reviewed rigs and then filling macro gaps.
 | Pufferfish | P3 | ✅ | S | spotted, porcupinefish | `examples/pufferfish` — approved 18-box spotted puffer with a compact spiny body, puckered mouth, swim cycle, and separately selectable inflate and deflate actions |
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
 | Hammerhead shark | P3 | ✅ | S | scalloped, great | `examples/hammerhead_shark` — approved 19-box scalloped hammerhead with stepped cephalofoil, end-set eyes, gill markings, swept fins, vertical caudal tail, cruising swim, and separate sensor-sweep action |
+| Whale shark | P3 | ✅ | S | juvenile | `examples/whale_shark` — approved 16-box giant with broad spotted head and body, paired dorsal ridges, pale belly, sweeping fins, crescent tail, slow cruise, and separate filter-feeding action |
 | Manta ray | P3 | ✅ | S | reef manta, oceanic manta | `examples/manta_ray` — approved 16-box reef manta with patterned diamond disc, paired cephalic fins, long four-stage tail, undulating wing swim, and separate full barrel-roll action |
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
@@ -303,6 +305,7 @@ reviewed rigs and then filling macro gaps.
 | Salamander / Newt | P3 | ✅ | Q | — | `examples/salamander` — review candidate fire salamander with glossy warning-patterned body, broad low head, sprawled feet, and four-stage tail crawl |
 | Axolotl | P3 | ✅ | Q/S | leucistic, wild, golden | `examples/axolotl` — approved leucistic axolotl with a broad smiling head, six branched external gills, tiny paddle feet, and a tall four-stage swimming tail |
 | Frilled-neck lizard | P3 | ✅ | Q | — | `examples/frilled_neck_lizard` — approved 30-box Australian frilled-neck lizard with long banded tail, sprawled limbs, low sand scuttle, and separate expanding frill-display action |
+| Texas horned lizard | P3 | ✅ | Q | desert horned lizard | `examples/texas_horned_lizard` — approved 27-box low desert reptile with mottled plate, six side spines, paired brow and crown horns, sprawled scuttle, and separate defensive body-puff action |
 
 ## Insects & arthropods
 
