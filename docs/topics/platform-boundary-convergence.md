@@ -4,8 +4,8 @@ Topic: `platform-boundary-convergence`
 
 Status: open master tracker. No coordinator cutover has landed. Tactical
 [`207`](../tactical/207-shared-scene-operation-coordinator.md) is the active
-implementation workstream; Phase 0 evidence is complete and Phase 1 retirement
-of the async mutable-borrow browser ABI is the current pickup. This parent is
+implementation workstream; Phases 0 and 1 are complete and Phase 2 unification
+of boundary-operation identity is the current pickup. This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
 
@@ -210,8 +210,8 @@ remaining-work note.
 | Phase | Status | Purpose | Required exit |
 |---|---|---|---|
 | 0. Evidence and deletion ledger | **complete 2026-07-21** | Re-capture a clean-revision baseline, trace the native and browser operation lifecycles, measure frame/input exclusion, and pin non-increasing counts for named duplicate paths | Baseline `8a3e9b12`; repeatable scoreboard and monotonic debt test; measured catalog/asset exclusion and lobby/native controls recorded in Tactical 207. Existing web pixel-capture and lifecycle-smoke failures remain explicit cutover validation issues. |
-| 1. Borrow-free browser ABI | **next** | Replace every exported async mutable borrow with synchronous issue/take and later completion submission over owned values | Zero exported `async fn(&mut self)` methods; `sessionBusy`, idle spin loops, retries, and ordinary frame/input guards are deleted; trace proves the active world continues during independent work |
-| 2. One boundary-operation token family | pending on Phase 1 | Re-key session, lobby, catalog, and asset-preparation completions onto `PlatformOperationService`/`PlatformOperationLedger` and delete parallel request identities | A boundary completion crosses with one operation token; duplicate/unknown/late results have shared tests; content epochs that remain have documented non-identity invariants |
+| 1. Borrow-free browser ABI | **complete 2026-07-21** | Replace every exported async mutable borrow with synchronous issue/take and later completion submission over owned values | Four async mutable exports and the global busy policy are gone. Catalog start advanced frame/render/input +4/+4/+4 during its sample; asset preparation +3/+3/+3; lobby warmup +6/+6/+6. |
+| 2. One boundary-operation token family | **next** | Re-key session, lobby, catalog, and asset-preparation completions onto `PlatformOperationService`/`PlatformOperationLedger` and delete parallel request identities | A boundary completion crosses with one operation token; duplicate/unknown/late results have shared tests; content epochs that remain have documented non-identity invariants |
 | Gate A. Fresh inventory and re-scope | mandatory after Phase 2 | Measure what the first two phases already deleted and choose the smallest remaining cut | Tactical 207 is revised before more implementation; unnecessary later phases are dropped or narrowed |
 | 3. Runtime-start convergence | candidate after Gate A | Give active, lobby-primary, and lobby-destination starts one shared logical request/completion lifecycle while preserving target/priority policy in Rust | TypeScript constructs only opaque Worker/runtime machinery; lobby and active-session start exports and acceptance paths no longer differ semantically |
 | 4. Domain-blind effect driving | candidate after Phase 3 | Remove named catalog and asset branches from the product browser driver; retain distinct mechanical executors where browser APIs require them | No product TypeScript state machine or branch names lobby, catalog, asset selection, or scene target; Rust controls admission and concurrency |
@@ -240,17 +240,18 @@ all rows. The 2026-07-21 values are the immutable campaign baseline. Phase 0
 must also record a clean-revision start baseline because unrelated work may
 have changed the live counts since the audit.
 
-| Metric | Baseline (2026-07-21) |
-|---|---|
-| authored web TypeScript lines | 3,757 (gate: 3,736/16 modules) |
-| `mclone-web-client/src` Rust lines | 20,577 |
-| combined both-language boundary total | report every phase; Tactical 207 cumulative result must be net-negative unless a reviewed behavioral gain changes the gate |
-| `WebSceneHost` exported methods | 48 |
-| `async fn(&mut self)` wasm exports | 3 + `WebLobbyRuntimeStart::start` |
-| boundary-operation identity/staleness systems | 4; separately classify warm-world/render `asset_epoch` generation tags |
-| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 |
-| active world pauses during coarse web ops | yes (`sessionBusy` since 2026-06-24) |
-| TS coordination residue in `mclone-web-app.ts` | ~300–360 lines + ~20 guard sites |
+| Metric | Clean baseline | Phase 0 | Phase 1 |
+|---|---:|---:|---:|
+| authored web TypeScript lines | 3,757 | 3,759 | 3,685 |
+| TypeScript gate lines / modules | 3,780 / 16 | 3,782 / 16 | 3,708 / 16 |
+| `mclone-web-client/src` Rust lines | 20,577 | 20,577 | 20,702 |
+| combined both-language boundary total | 24,334 | 24,336 | 24,387 (+53 cumulative; phase-local behavioral gain recorded, final gate remains net-negative) |
+| `WebSceneHost` exported methods | 48 | 48 | 48 |
+| async mutable wasm exports | 4 | 4 | **0** |
+| boundary-operation identity/staleness systems | 4 | 4, classified | 4; Phase 2 next |
+| wasm cfg forks (`mclone-scene` / `mclone-app-runtime`) | 71 / 110 | 71 / 110 | 71 / 110 |
+| active world pauses during coarse web ops | yes | measured yes | **no borrow exclusion; measured progress** |
+| TS coordination residue | ~300–360 lines + ~20 guard sites | pinned | `sessionBusy`, idle spin, retry and guard sites deleted; named dispatch remains |
 
 ## Closure Protocol
 
@@ -285,18 +286,20 @@ have changed the live counts since the audit.
 ## Immediate Next Workstream
 
 Continue Tactical [`207`](../tactical/207-shared-scene-operation-coordinator.md)
-at Phase 1; do not begin by creating the final `SceneOperationCoordinator`
+at Phase 2; do not begin by creating the final `SceneOperationCoordinator`
 type.
 
 The current implementation work packet is:
 
-1. use active-session start as the first owned issue/completion vertical proof;
-2. migrate the remaining async exports without holding `WebSceneHost` or an
-   exported sibling mutably across an await;
-3. delete the global `sessionBusy` policy, idle waits, and retry guards;
-4. lower every affected source-debt ceiling to zero; and
-5. repeat the Phase 0 traces to prove frame, render, and input progress while
-   independent work remains pending.
+1. re-key external session start acceptance and stale completion onto the
+   existing platform-operation ledger;
+2. re-key asset-preparation acceptance onto the same token while retaining a
+   separately named content generation;
+3. remove the catalog string request identity from the boundary;
+4. add shared duplicate, unknown, late, cancellation, and shutdown tests for
+   the one token family; and
+5. lower the remaining identity source ceilings before Gate A re-inventories
+   the workstream.
 
 Phase 0 should be evidence-only. Reuse existing smoke/lifecycle scenarios and
 capture a small number of composite traces; do not create a new platform test

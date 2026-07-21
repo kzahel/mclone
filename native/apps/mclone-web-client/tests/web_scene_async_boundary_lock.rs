@@ -30,8 +30,15 @@ fn active_session_dispatch_is_rust_owned() {
     assert!(!WEB_APP.contains("operationKind === \"localWorld\""));
     assert!(!WEB_APP.contains("session.startIndexedDbLocalWorld("));
     assert!(!WEB_APP.contains("session.joinRemoteWebSocket("));
-    assert!(WEB_APP.contains("session.startPendingSession("));
-    assert!(WEB_SCENE_HOST.contains("pub async fn start_pending_session"));
+    assert!(WEB_APP.contains("session.takePendingSessionStart("));
+    assert!(WEB_APP.contains("session.completeRuntimeStart(start)"));
+    assert!(WEB_SCENE_HOST.contains("pub fn take_pending_runtime_start"));
+    assert!(!WEB_SCENE_HOST.contains("pub async fn start_pending_session"));
+    assert!(!WEB_SCENE_HOST.contains("pub async fn shutdown_async"));
+    assert!(!WEB_SCENE_HOST.contains("pub async fn complete_asset_pack_selection"));
+    assert!(!WEB_SCENE_HOST.contains("pub async fn start(&mut self)"));
+    assert!(!WEB_APP.contains("sessionBusy"));
+    assert!(!WEB_APP.contains("waitForSessionIdle"));
     assert!(!WEB_SCENE_HOST.contains("fn write_external_session_start"));
 }
 
@@ -41,6 +48,7 @@ fn lobby_runtime_start_is_an_opaque_rust_ticket() {
     assert!(!WEB_APP.contains("session.prepareLobbyWorldStart("));
     assert!(!WEB_APP.contains("operation.requestId"));
     assert!(WEB_APP.contains("session.takeLobbyRuntimeStart("));
+    assert!(WEB_APP.contains("session.completeRuntimeStart(start)"));
 
     assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_runtime_start"));
     assert!(!WEB_SCENE_HOST.contains("pub fn take_lobby_operation"));

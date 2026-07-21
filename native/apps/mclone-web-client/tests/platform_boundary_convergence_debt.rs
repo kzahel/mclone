@@ -29,9 +29,9 @@ fn assert_at_most(label: &str, source: &str, needle: &str, ceiling: usize) {
 #[test]
 fn typescript_scene_operation_coordination_debt_only_decreases() {
     for (label, needle, ceiling) in [
-        ("global scene borrow guard", "sessionBusy", 36),
-        ("scene borrow spin helper", "waitForSessionIdle", 6),
-        ("lobby promise registry", "pendingLobbyRuntimeStarts", 5),
+        ("global scene borrow guard", "sessionBusy", 0),
+        ("scene borrow spin helper", "waitForSessionIdle", 0),
+        ("lobby promise registry", "pendingLobbyRuntimeStarts", 0),
         ("lobby drain guard", "lobbyOperationDrainActive", 5),
         ("catalog promise tail", "worldCatalogOperationTail", 5),
         ("session dispatch branch", "dispatchSceneSessionOperation", 3),
@@ -57,25 +57,25 @@ fn rust_boundary_identity_and_async_export_debt_only_decreases() {
             "active-session async mutable borrow",
             WEB_SCENE_HOST,
             "pub async fn start_pending_session(",
-            1,
+            0,
         ),
         (
             "shutdown async mutable borrow",
             WEB_SCENE_HOST,
             "pub async fn shutdown_async(",
-            1,
+            0,
         ),
         (
             "asset async mutable borrow",
             WEB_SCENE_HOST,
             "pub async fn complete_asset_pack_selection(",
-            1,
+            0,
         ),
         (
             "lobby-ticket async mutable borrow",
             WEB_SCENE_HOST,
             "pub async fn start(&mut self)",
-            1,
+            0,
         ),
         (
             "browser-local stale completion counter",

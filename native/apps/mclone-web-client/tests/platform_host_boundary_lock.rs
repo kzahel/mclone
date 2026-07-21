@@ -220,7 +220,7 @@ fn browser_bootstrap_roles_and_host_selection_stay_in_rust() {
         "fetchBootstrapResources",
         "WebBootstrapResources",
         "resources.add(response.requestId, response.bytes)",
-        "completeAssetPackSelection()",
+        "takeAssetPackPreparation()",
     ] {
         assert!(
             WEB_APP.contains(required),

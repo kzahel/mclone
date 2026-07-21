@@ -28,6 +28,14 @@ const WEB_APP: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-web-app.ts"
 ));
+const WEB_SMOKE_OBSERVER: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/www/mclone-web-smoke-observer.ts"
+));
+const BROWSER_SMOKE: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/scripts/browser-smoke.mjs"
+));
 const WEB_WORLD_CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/www/mclone-web-world-catalog.ts"
@@ -107,6 +115,7 @@ fn browser_auxiliary_player_control_only_enables_the_shared_rust_script() {
     assert!(WEB_SERVER_WORKER.contains("self.config.debug_auxiliary_player_script"));
     assert!(WEB_INTEGRATED_SERVER_STARTUP.contains("debug_auxiliary_player_script: bool"));
     assert!(!INTEGRATED_SERVER_WORKER.contains("debugAuxiliaryPlayerScript"));
+    assert!(WEB_SMOKE_OBSERVER.contains("Object.assign(runtime.state, report)"));
     for forwarded_fact in [
         "embeddedPreviewRemotePlayerObservationCount",
         "embeddedPreviewFirstRemotePlayerId",
@@ -116,8 +125,8 @@ fn browser_auxiliary_player_control_only_enables_the_shared_rust_script() {
         "embeddedPreviewRemotePlayerMotionToCompositionX",
     ] {
         assert!(
-            WEB_APP.contains(forwarded_fact),
-            "browser app must forward shared Rust receipt {forwarded_fact}"
+            BROWSER_SMOKE.contains(forwarded_fact),
+            "browser smoke must consume shared Rust receipt {forwarded_fact}"
         );
     }
     for forbidden in [
@@ -253,7 +262,8 @@ fn stale_browser_starts_are_rejected_before_slot_installation() {
     assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_runtime_start"));
     assert!(!WEB_SCENE_HOST.contains("discardLobbyOperations"));
     assert!(!WEB_APP.contains("discardLobbyOperations"));
-    assert!(WEB_APP.contains("pendingLobbyRuntimeStarts"));
+    assert!(WEB_APP.contains("pendingSceneOperations"));
+    assert!(!WEB_APP.contains("pendingLobbyRuntimeStarts"));
     assert!(!WEB_APP.contains("lobbyLaunchObservedActive"));
 }
 

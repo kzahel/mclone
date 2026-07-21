@@ -531,28 +531,28 @@ async function runIndexedDbPersistenceSmoke(module, canvas) {
   const first = await createIndexedDbSmokeSession(
     module, canvas, worldId, true,
   );
-  if (typeof first.shutdownAsync !== "function") {
+  if (typeof first.shutdown !== "function") {
     return {
       ok: false,
-      reason: "missing WebSceneHost.shutdownAsync export",
+      reason: "missing WebSceneHost.shutdown export",
     };
   }
   try {
     const firstCenter = await streamOverviewToIdle(first, 0, 0, 1);
-    const firstShutdown = await first.shutdownAsync();
+    const firstShutdown = first.shutdown();
     const afterFirst = await waitForIndexedDbWorldRecords(worldId, 1);
     const second = await createIndexedDbSmokeSession(
       module, canvas, worldId, false,
     );
-    if (typeof second.shutdownAsync !== "function") {
+    if (typeof second.shutdown !== "function") {
       return {
         ok: false,
-        reason: "missing WebSceneHost.shutdownAsync export on restart",
+        reason: "missing WebSceneHost.shutdown export on restart",
       };
     }
     try {
       const secondCenter = await streamOverviewToIdle(second, 0, 0, 1);
-      const secondShutdown = await second.shutdownAsync();
+      const secondShutdown = second.shutdown();
       const afterSecond = await waitForIndexedDbWorldRecords(worldId, afterFirst.chunks);
       return {
         ok: Boolean(

@@ -1,7 +1,8 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: implementation active. Slice 0 landed on 2026-07-21; Slice 1 is next
-and no coordinator cutover has landed. The original proposal framed
+Status: implementation active. Slices 0 and 1 landed on 2026-07-21; Slice 2
+identity consolidation is next. The browser ABI cutover is live, while the
+parallel operation identities have not yet been merged. The original proposal framed
 success as deleting the remaining named TypeScript pumps. The measured
 two-sided audit showed the complexity mass sits on the Rust side, so the plan
 now makes Rust-side consolidation the primary deliverable — one
@@ -198,6 +199,48 @@ rendered-output gate.
 coordination fields/branches and the targeted Rust async/identity paths to
 non-increasing source ceilings. Every deletion slice must lower the relevant
 ceilings; zero remains the cutover target.
+
+### Slice 1 cutover evidence
+
+All long-running starts and asset preparation now use owned, Promise-backed
+Rust tickets. Calling `start()` synchronously moves the effect into a
+Promise-owned future; only later does a synchronous `completeRuntimeStart` or
+`applyAssetPackPreparation` call fold the owned result back into the host.
+Active local, active remote, lobby-primary, and lobby-destination starts use
+the same `WebRuntimeStart` implementation. Asset preparation retains its
+specialized render-worker effect and content-generation checks.
+
+The cut deleted every exported async mutable borrow, `shutdownAsync`, the
+TypeScript `sessionBusy` mutex, `waitForSessionIdle`, the animation-frame and
+raw-input exclusions, and their setTimeout retry loops. A generic set of
+outstanding scene-operation promises remains solely so observer shutdown can
+wait for quiescence; it does not gate ordinary host calls. Catalog execution
+no longer waits for an unrelated host mutex.
+
+The same query-gated traces that measured exclusion now report:
+
+| Operation | Sample | Scene callable | Frame / render / input progress |
+|---|---:|---:|---:|
+| catalog-created active local session | 116.5 ms | yes throughout | +4 / +4 / +4 |
+| asset-pack preparation | 55.8 ms | yes throughout | +3 / +3 / +3 |
+| lobby primary/destination warmup | 164.0 ms | yes throughout | +6 / +6 / +6 |
+
+The base web smoke, threading/worker checks, synchronous shutdown path, lobby
+runtime semantic probe, catalog semantic probe, asset replacement/reload
+semantic probe, and IndexedDB reload semantics passed. The remote-session
+smoke also reached its semantic result and stopped only at the same
+transparent-black app screenshot gate. Catalog, asset, and IndexedDB headed
+lanes likewise retain that pre-existing capture failure; no such pixel result
+is counted as a pass.
+
+Relative to the clean `8a3e9b12` baseline, authored TypeScript is 3,685 lines
+(-72), web-only Rust is 20,702 (+125), and the combined boundary is 24,387
+(+53). Relative to the Phase 0 evidence commit, the cut is -74 TypeScript,
++125 Rust, and +51 combined. The temporary Rust growth is the two owned ticket
+states and their Promise-owned effect runners; the measured behavior gain
+permits this phase-local increase, but Tactical 207 still owes a net-negative
+combined closeout. `WebSceneHost` remains at 48 exports; async mutable exports
+are 4 -> 0, and the wasm cfg counts remain 71 / 110.
 
 ### Product TypeScript coordination state
 
@@ -420,6 +463,12 @@ Exit: the refactor has exact behavioral and deletion evidence on both sides
 of the boundary rather than a TypeScript-line goal.
 
 ### Slice 1: Retire the async-borrow ABI
+
+Status: complete 2026-07-21. Owned Promise-backed runtime and asset tickets
+are live; the source ceilings for all four async mutable exports,
+`sessionBusy`, `waitForSessionIdle`, and the lobby-specific promise registry
+are zero. The measured active-world progress and validation evidence are
+recorded above.
 
 - Use active-session start as the first end-to-end owned
   issue/effect/completion proof; do not introduce the final coordinator type

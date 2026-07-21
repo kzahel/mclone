@@ -2164,8 +2164,7 @@ async function applyBrowserAssetSelectionWithoutReload(page) {
       return Number(state?.assetPackCompletionCount) > completionCount
         && Number(report?.activeAssetEpoch) === epoch
         && report?.assetReplacementState === "active"
-        && state?.lobbyLaunchActive === false
-        && state?.sessionBusy === false;
+        && state?.lobbyLaunchActive === false;
     },
     { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
     { timeout: 120_000 },
@@ -4388,7 +4387,7 @@ async function runCatalogUiProbe(page, canvas) {
   const openCreateReport = await clickWorldListFooterButton(page, 1);
   await waitForNativeUiScreen(page, "worldCreate", { openCreateReport });
   const firstProfileReport = await clickWorldCreateProfile(page);
-  const firstSessionBorrowTrace = await traceExclusiveSceneBorrow(
+  const firstSessionProgressTrace = await traceSceneProgressDuringOperation(
     page,
     () => clickWorldCreateCreate(page),
   );
@@ -4452,11 +4451,11 @@ async function runCatalogUiProbe(page, canvas) {
       && firstWorldId.length > 0
       && secondWorldId.length > 0
       && firstWorldId !== secondWorldId
-      && firstSessionBorrowTrace.observedBusy
-      && firstSessionBorrowTrace.busyFrameCountDelta === 0
-      && firstSessionBorrowTrace.busyRenderCountDelta === 0
-      && firstSessionBorrowTrace.busyInputFrameCountDelta === 0
-      && firstSessionBorrowTrace.settledInputFrameCountDelta >= 2
+      && firstSessionProgressTrace.operationStart.sceneBorrowExcluded === false
+      && firstSessionProgressTrace.operationSample.sceneBorrowExcluded === false
+      && firstSessionProgressTrace.operationFrameCountDelta > 0
+      && firstSessionProgressTrace.operationRenderCountDelta > 0
+      && firstSessionProgressTrace.operationInputFrameCountDelta >= 2
       && firstProfileReport?.action === "cycleWorldGenerationProfile"
       && secondProfileReport?.action === "cycleWorldGenerationProfile"
       && afterFirstCreate.some((/** @type {any} */ world) => (
@@ -4479,7 +4478,7 @@ async function runCatalogUiProbe(page, canvas) {
     firstWorldId,
     secondWorldId,
     firstProfileReport,
-    firstSessionBorrowTrace,
+    firstSessionProgressTrace,
     secondProfileReport,
     firstSession,
     secondSession,
@@ -4862,18 +4861,20 @@ async function runAssetPackUiProbe(page, canvas) {
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
   let applyReport = null;
-  const exclusiveBorrowTrace = await traceExclusiveSceneBorrow(page, async () => {
+  const operationProgressTrace = await traceSceneProgressDuringOperation(page, async () => {
     applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
   });
   await page.waitForFunction(
     ({ epoch, completionCount }) => {
       const state = globalThis.__mcloneWebApp?.state;
       const report = state?.lastReport;
+      const compiler = state?.lastCompileReport;
       return Number(state?.assetPackCompletionCount) > completionCount
         && Number(report?.activeAssetEpoch) === epoch
         && report?.assetReplacementState === "active"
         && state?.streamingSettled === true
-        && state?.sessionBusy === false;
+        && Number(compiler?.assetEpoch) === epoch
+        && Number(compiler?.workerAssetLoadCount) === 3;
     },
     { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
     { timeout: 120_000 },
@@ -4919,8 +4920,7 @@ async function runAssetPackUiProbe(page, canvas) {
           && report?.assetPackActiveReference === false
           && report?.assetPackPreferredIds === "mclone-authored"
           && !report?.assetPackPreferenceError
-          && state?.streamingSettled === true
-          && state?.sessionBusy === false;
+          && state?.streamingSettled === true;
       },
       undefined,
       { timeout: 120_000 },
@@ -4968,11 +4968,11 @@ async function runAssetPackUiProbe(page, canvas) {
   return {
     ok: after.activeAssetEpoch === before.activeAssetEpoch + 1
       && after.assetReplacementState === "active"
-      && exclusiveBorrowTrace.observedBusy
-      && exclusiveBorrowTrace.busyFrameCountDelta === 0
-      && exclusiveBorrowTrace.busyRenderCountDelta === 0
-      && exclusiveBorrowTrace.busyInputFrameCountDelta === 0
-      && exclusiveBorrowTrace.settledInputFrameCountDelta >= 2
+      && operationProgressTrace.operationStart.sceneBorrowExcluded === false
+      && operationProgressTrace.operationSample.sceneBorrowExcluded === false
+      && operationProgressTrace.operationFrameCountDelta > 0
+      && operationProgressTrace.operationRenderCountDelta > 0
+      && operationProgressTrace.operationInputFrameCountDelta >= 2
       && after.completionCount > before.completionCount
       && after.sessionKind === before.sessionKind
       && after.sessionState === "active"
@@ -5000,7 +5000,7 @@ async function runAssetPackUiProbe(page, canvas) {
       && Number(restored.compiler?.assetEpoch) === restored.activeAssetEpoch,
     before,
     applyReport,
-    exclusiveBorrowTrace,
+    operationProgressTrace,
     after,
     persistedJson,
     restored,
@@ -5101,22 +5101,17 @@ async function sceneProgressSnapshot(page) {
 }
 
 /**
- * Measure the legacy wasm-bindgen async mutable-borrow exclusion. The unknown
- * key is a neutral raw-input fact: it increments ingress accounting without
- * selecting gameplay behavior.
+ * Measure scene progress immediately after a coarse operation is issued. The
+ * unknown key is a neutral raw-input fact: it increments ingress accounting
+ * without selecting gameplay behavior.
  *
  * @param {Page} page
  * @param {() => Promise<unknown>} trigger
  */
-async function traceExclusiveSceneBorrow(page, trigger) {
+async function traceSceneProgressDuringOperation(page, trigger) {
   const before = await sceneProgressSnapshot(page);
   await trigger();
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.sceneBorrowExcluded?.() === true,
-    undefined,
-    { timeout: 10_000 },
-  );
-  const busyStart = await sceneProgressSnapshot(page);
+  const operationStart = await sceneProgressSnapshot(page);
   await dispatchKeyboardEvent(page, "keydown", {
     code: "McloneDebtProbe",
     key: "",
@@ -5125,36 +5120,29 @@ async function traceExclusiveSceneBorrow(page, trigger) {
     code: "McloneDebtProbe",
     key: "",
   });
-  await page.waitForTimeout(25);
-  const busySample = await sceneProgressSnapshot(page);
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.sceneBorrowExcluded?.() !== true,
-    undefined,
-    { timeout: 120_000 },
-  );
+  await page.waitForTimeout(50);
+  const operationSample = await sceneProgressSnapshot(page);
   await page.waitForFunction(
     (minimum) => Number(
       globalThis.__mcloneWebApp?.state?.lastReport?.domInputFrameCount,
     ) >= minimum,
-    busyStart.domInputFrameCount + 2,
+    operationStart.domInputFrameCount + 2,
     { timeout: 10_000 },
   );
   const settled = await sceneProgressSnapshot(page);
   return {
-    observedBusy: busyStart.sceneBorrowExcluded,
     before,
-    busyStart,
-    busySample,
+    operationStart,
+    operationSample,
     settled,
-    sampledBusyMs: busySample.nowMs - busyStart.nowMs,
-    totalBorrowMs: settled.nowMs - busyStart.nowMs,
-    busyFrameCountDelta: busySample.frameCount - busyStart.frameCount,
-    busyRenderCountDelta: busySample.renderCount - busyStart.renderCount,
-    busyInputFrameCountDelta:
-      busySample.domInputFrameCount - busyStart.domInputFrameCount,
+    sampledOperationMs: operationSample.nowMs - operationStart.nowMs,
+    operationFrameCountDelta: operationSample.frameCount - operationStart.frameCount,
+    operationRenderCountDelta: operationSample.renderCount - operationStart.renderCount,
+    operationInputFrameCountDelta:
+      operationSample.domInputFrameCount - operationStart.domInputFrameCount,
     settledInputFrameCountDelta:
-      settled.domInputFrameCount - busyStart.domInputFrameCount,
-    preBorrowFrameCountDelta: busyStart.frameCount - before.frameCount,
+      settled.domInputFrameCount - operationStart.domInputFrameCount,
+    preOperationFrameCountDelta: operationStart.frameCount - before.frameCount,
   };
 }
 

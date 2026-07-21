@@ -8,8 +8,9 @@ import {
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
 import type {
+  WebAssetPackPreparation,
   WebCatalogExecution,
-  WebLobbyRuntimeStart,
+  WebRuntimeStart,
   WebSceneHost,
 } from "mclone-web-client-wasm";
 
@@ -82,7 +83,6 @@ const runtime: AppRuntime = {
     pointerLockFallback: false,
     tickFrameBusy: false,
     tickPhase: "idle",
-    sessionBusy: false,
     status: "booting",
     bootstrapStatusRetired: false,
   },
@@ -135,8 +135,7 @@ class WebFrameDriver {
   animationFrame: number;
   lastFrameTime: number;
   tickFrameBusy: boolean;
-  sessionBusy: boolean;
-  pendingLobbyRuntimeStarts: Set<Promise<void>>;
+  pendingSceneOperations: Set<Promise<void>>;
   lobbyOperationDrainActive: boolean;
   worldCatalogOperationTail: Promise<void>;
 
@@ -152,8 +151,7 @@ class WebFrameDriver {
     this.animationFrame = 0;
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
-    this.sessionBusy = false;
-    this.pendingLobbyRuntimeStarts = new Set();
+    this.pendingSceneOperations = new Set();
     this.lobbyOperationDrainActive = false;
     this.worldCatalogOperationTail = Promise.resolve();
   }
@@ -212,19 +210,18 @@ class WebFrameDriver {
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     document.addEventListener("visibilitychange", () => {
       const hidden = document.visibilityState === "hidden";
-      void this.withSessionAsync(() => this.session?.setHidden(hidden) ?? null)
-        .then((report) => {
-          if (!hidden) {
-            this.lastFrameTime = performance.now();
-          }
-          this.applyNativeUiReport(report);
-        })
-        .catch((error) => {
-          runtime.state.ok = false;
-          runtime.state.status = stringifyError(error);
-          console.error(error);
-          publishRuntimeState(runtime.state);
-        });
+      try {
+        const report = this.session?.setHidden(hidden) ?? null;
+        if (!hidden) {
+          this.lastFrameTime = performance.now();
+        }
+        this.applyNativeUiReport(report);
+      } catch (error) {
+        runtime.state.ok = false;
+        runtime.state.status = stringifyError(error);
+        console.error(error);
+        publishRuntimeState(runtime.state);
+      }
     });
     this.touchControls = new TouchControls(this);
     this.syncCanvasSize();
@@ -240,7 +237,7 @@ class WebFrameDriver {
     }
     this.lastFrameTime = performance.now();
     const frame = (now: number) => {
-      if (!this.tickFrameBusy && !this.sessionBusy) {
+      if (!this.tickFrameBusy) {
         this.tickFrameBusy = true;
         runtime.state.tickFrameBusy = true;
         void this.tickFrame(now).finally(() => {
@@ -267,13 +264,13 @@ class WebFrameDriver {
   }
 
   sceneHostForObserver(): WebSceneHost | null {
-    return this.sessionBusy ? null : this.session;
+    return this.session;
   }
 
   observerSnapshot(
     operation: WasmReport | null | undefined,
   ): WasmReport | null {
-    if (!this.session || this.sessionBusy) {
+    if (!this.session) {
       return operation ?? null;
     }
     const snapshot = this.session.diagnosticSnapshot() as WasmReport;
@@ -284,7 +281,7 @@ class WebFrameDriver {
     if (pauseFrames) {
       this.pauseRendering();
     }
-    while (this.tickFrameBusy || this.sessionBusy) {
+    while (this.tickFrameBusy) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
   }
@@ -318,8 +315,7 @@ class WebFrameDriver {
     if (!this.session) {
       return null;
     }
-    const session = this.session;
-    return this.withSessionAsync(() => operation(session));
+    return await operation(this.session);
   }
 
   observerCanvasPoint(clientX: number, clientY: number): { x: number; y: number } {
@@ -329,7 +325,9 @@ class WebFrameDriver {
   async shutdownForObserver(): Promise<WasmReport | null> {
     await this.waitForObserverIdle(true);
     await this.worldCatalogOperationTail;
-    await Promise.allSettled([...this.pendingLobbyRuntimeStarts]);
+    while (this.pendingSceneOperations.size > 0) {
+      await Promise.allSettled([...this.pendingSceneOperations]);
+    }
     const report = this.session?.shutdown() ?? null;
     smokeObserver?.observeReport(report);
     publishRuntimeState(runtime.state);
@@ -337,7 +335,7 @@ class WebFrameDriver {
   }
 
   backgroundCycleForObserver(): WasmReport | null {
-    if (!this.session || this.sessionBusy) {
+    if (!this.session) {
       return null;
     }
     const report = this.session.setHidden(true);
@@ -348,7 +346,7 @@ class WebFrameDriver {
   }
 
   drainLobbyOperations(): void {
-    if (!this.session || this.sessionBusy || this.lobbyOperationDrainActive) {
+    if (!this.session || this.lobbyOperationDrainActive) {
       return;
     }
     this.lobbyOperationDrainActive = true;
@@ -375,15 +373,14 @@ class WebFrameDriver {
     }
   }
 
-  launchLobbyRuntime(start: WebLobbyRuntimeStart): void {
+  launchLobbyRuntime(start: WebRuntimeStart): void {
     if (!this.session) return;
     const task = (async () => {
       try {
         const result = await start.start();
         smokeObserver?.observeLobbyRuntimeStart(result);
-        await this.waitForSessionIdle();
         if (!this.session) return;
-        const report = this.session.completeLobbyWorldStart(start);
+        const report = this.session.completeRuntimeStart(start);
         this.applyNativeUiReport(report);
         this.drainLobbyOperations();
       } catch (error) {
@@ -395,8 +392,7 @@ class WebFrameDriver {
         start.free();
       }
     })();
-    this.pendingLobbyRuntimeStarts.add(task);
-    void task.finally(() => this.pendingLobbyRuntimeStarts.delete(task));
+    this.trackSceneOperation(task);
   }
 
   async tickFrame(now: number): Promise<void> {
@@ -422,10 +418,6 @@ class WebFrameDriver {
     // failure bound.
     const deadline = performance.now() + 60_000;
     while (performance.now() < deadline) {
-      if (this.sessionBusy) {
-        await nextAnimationFrame();
-        continue;
-      }
       if (await this.streamFrameOnce({ awaitWorker: true })) {
         return;
       }
@@ -472,17 +464,11 @@ class WebFrameDriver {
     publishRuntimeState(runtime.state);
     this.dispatchSceneSessionOperation(frame);
     this.dispatchAssetPackOperation(frame);
-    if (!this.sessionBusy) {
-      this.drainLobbyOperations();
-    }
+    this.drainLobbyOperations();
   }
 
   reportHostFailure(message: string): WasmReport | null {
     if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.reportHostFailure(message), 0);
       return null;
     }
     const report = this.session.reportHostFailure(String(message ?? ""));
@@ -493,10 +479,6 @@ class WebFrameDriver {
   setTouchInputAvailable(available: boolean): WasmReport | null {
     if (!this.session) {
       return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.setTouchInputAvailable(available), 0);
-      return deferredUiReport();
     }
     const report = this.session.setTouchInputAvailable(Boolean(available));
     this.applyNativeUiReport(report);
@@ -528,9 +510,7 @@ class WebFrameDriver {
     this.dispatchSceneSessionOperation(report, options);
     this.dispatchWorldCatalogOperation(report, options);
     this.dispatchAssetPackOperation(report);
-    if (!this.sessionBusy) {
-      this.drainLobbyOperations();
-    }
+    this.drainLobbyOperations();
   }
 
   dispatchSceneSessionOperation(
@@ -540,15 +520,7 @@ class WebFrameDriver {
     if (report.sessionStartPending !== true) {
       return;
     }
-    void this.completeSceneSessionStart(
-      (session) => session.startPendingSession(
-        SERVER_WORKER_URL.href,
-        SERVER_JOB_WORKER_URL.href,
-        BINDGEN_JS_URL.href,
-        BINDGEN_WASM_URL.href,
-      ),
-      options,
-    );
+    this.trackSceneOperation(this.completeSceneSessionStart(options));
   }
 
   dispatchWorldCatalogOperation(
@@ -569,24 +541,22 @@ class WebFrameDriver {
   }
 
   dispatchAssetPackOperation(report: WasmReport): void {
-    if (report.assetPackRequest !== true || this.sessionBusy) {
+    if (report.assetPackRequest !== true) {
       return;
     }
-    void this.completeAssetPackSelection(report);
+    this.trackSceneOperation(this.completeAssetPackSelection(report));
   }
 
   async completeAssetPackSelection(_report: WasmReport): Promise<void> {
-    if (
-      !this.session
-      || this.sessionBusy
-    ) {
+    if (!this.session) {
       return;
     }
-    this.sessionBusy = true;
-    runtime.state.sessionBusy = true;
+    const session = this.session;
+    let preparation: WebAssetPackPreparation | null = null;
     try {
-      const completion = await this.session.completeAssetPackSelection();
-      await nextAnimationFrame();
+      preparation = session.takeAssetPackPreparation();
+      await preparation.start();
+      const completion = session.applyAssetPackPreparation(preparation);
       this.applyNativeUiReport(completion);
       smokeObserver?.observeAssetPackCompletion();
     } catch (error) {
@@ -595,8 +565,7 @@ class WebFrameDriver {
       console.error(error);
       publishRuntimeState(runtime.state);
     } finally {
-      this.sessionBusy = false;
-      runtime.state.sessionBusy = false;
+      preparation?.free();
     }
   }
 
@@ -613,15 +582,9 @@ class WebFrameDriver {
     let execution: WebCatalogExecution | null = null;
     try {
       db = await openWorldDb();
-      // Asset replacement and session startup keep wasm-bindgen's mutable host
-      // borrow alive across their promises. A catalog request can be queued by
-      // the same UI report, so wait until those operations release the host
-      // before taking its synchronous catalog execution ticket.
-      await this.waitForSessionIdle();
       execution = session.takeWorldCatalogExecution(requestId);
       await execution.awaitWriterRetirements();
       await executeIndexedDbCatalogExecution(db, execution);
-      await this.waitForSessionIdle();
       const completion = session.applyWorldCatalogExecution(requestId, execution);
       smokeObserver?.observeWorldCatalogCompletion();
       this.applyNativeUiReport(completion, options);
@@ -629,7 +592,6 @@ class WebFrameDriver {
       const message = stringifyError(error);
       console.error(error);
       try {
-        await this.waitForSessionIdle();
         const failure = session.applyWorldCatalogError(requestId, message);
         smokeObserver?.observeWorldCatalogCompletion();
         this.applyNativeUiReport(failure, options);
@@ -646,37 +608,31 @@ class WebFrameDriver {
   }
 
   async completeSceneSessionStart(
-    start: (session: WebSceneHost) => Promise<WasmReport>,
     options: { fromPointer?: boolean, pointerType?: string } = {},
   ): Promise<void> {
     if (!this.session) {
       return;
     }
-    // Reserve the wasm host synchronously. A catalog completion can race the
-    // rAF render lock; leaving the pending start on the Rust host lets the next
-    // frame retry instead of starving behind continuously scheduled frames.
-    if (this.sessionBusy) {
-      return;
-    }
-    this.sessionBusy = true;
-    runtime.state.sessionBusy = true;
     const session = this.session;
     this.clearGameplayInput();
     this.releasePointerLockForUi();
+    let start: WebRuntimeStart | null = null;
     let startReport: WasmReport | null = null;
     try {
-      startReport = await start(session);
-      // wasm-bindgen keeps the exported async `&mut WebSceneHost` borrow until
-      // its promise reaction has fully unwound. Resume host calls on the next
-      // macrotask so replacement warm-up cannot recursively reborrow it.
-      await nextAnimationFrame();
+      start = session.takePendingSessionStart(
+        SERVER_WORKER_URL.href,
+        SERVER_JOB_WORKER_URL.href,
+        BINDGEN_JS_URL.href,
+        BINDGEN_WASM_URL.href,
+      );
+      await start.start();
+      startReport = session.completeRuntimeStart(start);
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
       console.error(error);
     } finally {
-      this.sessionBusy = false;
-      runtime.state.sessionBusy = false;
+      start?.free();
     }
     if (!startReport?.ok) {
       this.reportHostFailure(runtime.state.status);
@@ -712,6 +668,11 @@ class WebFrameDriver {
     smokeObserver?.resetForSessionRestart();
   }
 
+  trackSceneOperation(task: Promise<void>): void {
+    this.pendingSceneOperations.add(task);
+    void task.finally(() => this.pendingSceneOperations.delete(task));
+  }
+
   canvasPixelPoint(clientX: number, clientY: number): { x: number, y: number } {
     const rect = this.canvas.getBoundingClientRect();
     const scaleX = rect.width > 0 ? this.canvas.width / rect.width : 1;
@@ -726,7 +687,7 @@ class WebFrameDriver {
     this.pointerDragging = false;
     this.pointerDown = null;
     this.touchControls?.clearAll();
-    if (this.session && !this.sessionBusy) {
+    if (this.session) {
       this.session.clearRawInput();
     }
   }
@@ -737,27 +698,6 @@ class WebFrameDriver {
     }
     runtime.state.pointerLocked = false;
     runtime.state.pointerLockFallback = false;
-  }
-
-  async withSessionAsync<T>(operation: () => T | Promise<T>): Promise<Awaited<T>> {
-    await this.waitForSessionIdle();
-    this.sessionBusy = true;
-    runtime.state.sessionBusy = true;
-    try {
-      return await operation();
-    } finally {
-      this.sessionBusy = false;
-      runtime.state.sessionBusy = false;
-    }
-  }
-
-  async waitForSessionIdle(): Promise<void> {
-    for (let attempt = 0; this.sessionBusy && attempt < 10_000; attempt += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
-    }
-    if (this.sessionBusy) {
-      throw new Error("timed out waiting for WebSceneHost async operation");
-    }
   }
 
   handleRawKey(code: string, key: string, pressed: boolean, repeat: boolean): boolean {
@@ -812,20 +752,14 @@ class WebFrameDriver {
   clearRawInput(): void {
     this.pointerDragging = false;
     this.pointerDown = null;
-    if (!this.session || this.sessionBusy) {
-      if (this.sessionBusy) {
-        setTimeout(() => this.clearRawInput(), 0);
-      }
+    if (!this.session) {
       return;
     }
     this.applyRawInputReport(this.session.clearRawInput());
   }
 
   withRawInput(operation: (session: WebSceneHost) => WasmReport): boolean {
-    if (!this.session || this.sessionBusy) {
-      if (this.sessionBusy) {
-        setTimeout(() => this.withRawInput(operation), 0);
-      }
+    if (!this.session) {
       return true;
     }
     const report = operation(this.session);
@@ -1037,14 +971,6 @@ function versionedUrl(path: string): URL {
     url.searchParams.set("v", DEPLOY_ASSET_VERSION);
   }
   return url;
-}
-
-function deferredUiReport(): WasmReport {
-  return {
-    ok: true,
-    handled: runtime.state.pointerCaptureBlocked === true,
-    deferred: true,
-  };
 }
 
 function stringifyError(error: unknown): string {
