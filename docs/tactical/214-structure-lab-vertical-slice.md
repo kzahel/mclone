@@ -145,3 +145,31 @@ Stop and record evidence rather than hiding a divergence if:
   materially change the public contract; or
 - a visual capture is black, transparent, materially corrupt, or obtained only
   through the known-invalid Linux headless WebGPU lane.
+
+## Progress Evidence
+
+### Slices 1–3 and catalogue drawable milestone
+
+Implemented and inspected on 2026-07-21:
+
+```text
+TypeScript discovery, semantic validation, write/check drift gate
+  5 tests passed; promoted standard cottage current
+Rust JSON loader and accepted-template equality canary
+  native and wasm checks passed
+Rust preview compiler
+  923 blocks; 3,539 faces; 14,156 vertices; 21,234 indices
+  599,400-byte GLB; 1024x256 atlas with 143 sprites
+Public preview provenance
+  first-party=18; generated=126; Minecraft-reference=0; unknown=0
+Structure Lab web unit/browser suites
+  5 semantic tests and 2 Playwright tests passed
+```
+
+The first drawable screenshot exposed conspicuous generated-fallback material
+tiles. Ten original farmstead runtime textures were therefore authored through
+Texture Lab, packed through the ordinary first-party pipeline, and rebaked by
+Rust before catalogue acceptance. Their block review sheets and the complete
+desktop, sliced dark-mode desktop, and 390-pixel mobile catalogue captures were
+inspected under `/tmp`. The mobile proof also caught and fixed absent URL layer
+state incorrectly coercing to layer zero.

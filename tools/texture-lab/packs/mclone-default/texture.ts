@@ -2,6 +2,7 @@ import { texturePack } from "../../src/dsl";
 import { defineDirtTextures } from "./block/dirt";
 import { defineDirectionalCubeTextures } from "./block/directional-cubes";
 import { defineFarLodTerrainMaterialTextures } from "./block/far-lod-materials";
+import { defineFarmsteadMaterialTextures } from "./block/farmstead-materials";
 import { defineGrassBlockTextures } from "./block/grass-block";
 import { definePartialShapeTextures } from "./block/partial-shapes";
 import { definePlantAndFlatTextures } from "./block/plants-and-flats";
@@ -15,4 +16,5 @@ export default texturePack("mclone-default", (api) => {
   definePlantAndFlatTextures(api);
   definePartialShapeTextures(api);
   defineFarLodTerrainMaterialTextures(api);
+  defineFarmsteadMaterialTextures(api);
 });

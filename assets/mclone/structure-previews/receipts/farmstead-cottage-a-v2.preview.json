@@ -271,9 +271,9 @@
   },
   "artifacts": {
     "meshPath": "meshes/farmstead-cottage-a-v2.glb",
-    "meshSha256": "d01454b782e71c15fff86ebd9577118b1dd00f755406e07b379f62d6dafd1f5f",
-    "atlasPath": "atlases/terrain-a9e5b639cffb8aac9d78eed71e04cfb8fa64d181d79f0439c0a331dbb3592651.png",
-    "atlasSha256": "a9e5b639cffb8aac9d78eed71e04cfb8fa64d181d79f0439c0a331dbb3592651",
+    "meshSha256": "c85f96a46d47df9295cf0f528f4f1b5ee8e7c6db0f8d1e8635e81dc69e83a46f",
+    "atlasPath": "atlases/terrain-42dd4d69c8ead3a3442ee205d22ac30228e1f3c8d5e892eb8bfa0a0795638f6d.png",
+    "atlasSha256": "42dd4d69c8ead3a3442ee205d22ac30228e1f3c8d5e892eb8bfa0a0795638f6d",
     "atlasWidth": 1024,
     "atlasHeight": 256,
     "atlasSpriteCount": 143
@@ -292,8 +292,8 @@
     {
       "id": "mclone-authored",
       "origin": "first_party",
-      "contentFingerprint": "sha256:5163575cf87c239a519963340f172e589fcd851575ed7dac680052f91c6e4f1d",
-      "sha256": "7a0012e5856b9029648e716c0b211d17b8b3090f91a2c3db0d42dc5ee8fb2f1f"
+      "contentFingerprint": "sha256:ad0f3f8e3d83ee68edc70f5f3f82aa04d00dc64895d4a8dae58e639f5068a95f",
+      "sha256": "b637de6cc13d884ee61b8c7912b697a1af389c54cb742fa4b1a8a72f9bb0d2b9"
     },
     {
       "id": "mclone-generated-fallback",
@@ -303,8 +303,8 @@
     }
   ],
   "assetProvenance": {
-    "firstParty": 8,
-    "generated": 136,
+    "firstParty": 18,
+    "generated": 126,
     "minecraftReference": 0,
     "unknown": 0,
     "missing": 1

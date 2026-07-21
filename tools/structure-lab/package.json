@@ -4,12 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:catalog": "tsx src/build-web-catalog.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/structure-json.test.ts && pnpm structures:check",
+    "test": "tsx --test tests/*.test.ts && pnpm structures:check && pnpm previews:check",
     "previews:check": "tsx src/sync-previews.ts --check",
     "previews:write": "tsx src/sync-previews.ts --write",
     "structures:check": "tsx src/sync-first-party.ts --check",
-    "structures:write": "tsx src/sync-first-party.ts --write"
+    "structures:write": "tsx src/sync-first-party.ts --write",
+    "web:build": "pnpm build:catalog && vite build --config src/web/vite.config.ts",
+    "web:dev": "pnpm build:catalog && vite --config src/web/vite.config.ts",
+    "web:test": "playwright test"
   },
   "dependencies": {
     "react": "^19.2.7",

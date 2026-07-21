@@ -2,14 +2,37 @@
 
 Topic: `structure-lab`
 
-Status: **product and pipeline direction accepted 2026-07-21; documentation
-only. Implementation has not begun. The selected direction is an agent-authored
-TypeScript DSL, generated canonical structure JSON with mandatory drift gates,
-Rust build-time mesh and review artifact generation, and a high-quality
-read-only Three.js catalogue. In-browser block editing is indefinitely
-deferred.**
+Status: **vertical slice active 2026-07-21. The TypeScript DSL and generated
+JSON drift gate, strict Rust loader, exact standard-cottage parity canary, Rust
+preview compiler, original first-party farmstead materials, and read-only
+Three.js catalogue are implemented. Family migration and the first
+Structure-Lab-native outbuilding remain. In-browser block editing is
+indefinitely deferred.**
 
 Last reconciled: **2026-07-21**.
+
+## Current Implementation
+
+- `tools/structure-lab/examples/cottage_standard/structure.ts` is the sole
+  editable source for the promoted standard cottage. Its generated JSON is
+  checked byte-for-byte under `assets/mclone/structures/`.
+- `mclone-worldgen::structure_json` reparses and strictly validates canonical
+  records. The current canary matches the accepted Rust template exactly.
+- `mclone-structure-compiler` meshes canonical records through the production
+  first-party visual catalogue and terrain mesher into deterministic GLB,
+  shared-atlas, and receipt artifacts.
+- The initial cottage artifact contains 923 placed blocks, 3,539 visible
+  faces, 14,156 vertices, 21,234 indices, 15 build layers, and seven named
+  component groups. The 599,400-byte GLB references one 1024x256 shared atlas.
+- The public receipt resolves 18 first-party and 126 generated asset paths,
+  one optional missing path, and zero Minecraft-reference or unknown paths.
+- The catalogue shell uses React, Zustand, Vite, Three.js, one retained canvas,
+  stable URL state, build-layer clipping, component/marker/bounds controls,
+  material and provenance facts, and responsive light/dark layouts.
+- The original farmstead texture recipes cover the cottage's plaster, stone,
+  mossy stone, oak log, oak and spruce planks, brick, flowers, and wall torch.
+  Texture Lab review sheets and full desktop/mobile catalogue captures were
+  inspected before accepting the presentation baseline.
 
 ## Scope
 
