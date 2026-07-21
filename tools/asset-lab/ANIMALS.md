@@ -240,11 +240,11 @@ reviewed rigs and then filling macro gaps.
 | Shark | P1 | ✅ | S | great white, hammerhead | `examples/shark` — approved 16-box great white with gills, dorsal/pectoral fins, and a two-lobe lateral tail |
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
-| Octopus | P2 | ☐ | S | — | 8 articulated cuboid tentacles |
+| Octopus | P2 | ✅ | S | — | `examples/octopus` — approved 32-box common octopus with mottled mantle, raised eyes, visible sucker rows, eight three-stage tentacles, and coordinated jet swim |
 | Crab | P2 | ✅ | C | — | `examples/crab` — approved 31-box red rock crab with patterned broad carapace, raised eyes, articulated chelae, eight two-stage legs, and explicit sideways scuttle |
 | Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
-| Seahorse | P3 | ☐ | S | — | |
-| Jellyfish | P3 | ☐ | S | — | pulse animation |
+| Seahorse | P3 | ✅ | S | — | `examples/seahorse` — approved 21-box common seahorse with long snout, raised coronet, plated trunk, fluttering fins, and five-stage curled tail |
+| Jellyfish | P3 | ✅ | S | — | `examples/jellyfish` — approved 32-box moon jellyfish with stepped bell, four two-stage oral arms, eight two-stage tentacles, and asymmetric pulse animation |
 | Starfish | P3 | ☐ | ST | — | nearly static |
 | Lobster / Shrimp | P3 | ☐ | C/S | — | |
 | Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |

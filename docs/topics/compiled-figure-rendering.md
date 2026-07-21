@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 122 |
-| total parts | 2,683 |
-| boxes | 2,478 |
+| figures | 125 |
+| total parts | 2,768 |
+| boxes | 2,563 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 388 |
-| parts with any texture reference | 646 |
-| individual texture applications | 1,060 |
+| ASCII textures | 398 |
+| parts with any texture reference | 695 |
+| individual texture applications | 1,164 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 104 | 2,141 | 2,141 | 0 / 0 / 0 |
+| canonical `examples/` | 107 | 2,226 | 2,226 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -760,7 +760,25 @@ visible surface interference. The user approved the complete batch after the
 Frog's procedural landing changed from scalar clamping to transformed pad
 projection with hinge correction and pad counter-rotation.
 
-All 1,060 applications target an explicit face of a box. They range from single
+The twenty-ninth post-migration content batch adds Octopus, Seahorse, and
+Jellyfish as approved canonical box-only rigs. Octopus is a 32-part common
+octopus with a mottled mantle, raised eyes, visible sucker
+rows, eight independently rooted three-stage tentacles, and a coordinated jet
+swim; Seahorse is a 21-part upright swimmer with a long snout, raised coronet,
+plated trunk, fluttering dorsal and pectoral fins, and a five-stage curled
+tail; and Jellyfish is a 32-part moon jelly with a stepped contracting bell,
+four two-stage oral arms, eight two-stage outer tentacles, and an asymmetric
+propulsion pulse. All 85 parts are canonical boxes and use ten combined pixel
+textures across 49 textured parts and 104 explicit box-face applications.
+Clean multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-29` and inspected for identity, attachment
+continuity, arm separation, tail silhouette, bell contraction, trailing-chain
+motion, and loop continuity. The Asset Lab typecheck, 19-test semantic suite,
+first-party figure drift gate, repository diff check, and 107-figure/112-clip
+web production build pass. The user approved the complete batch without
+further revision.
+
+All 1,164 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
