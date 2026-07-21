@@ -8,6 +8,7 @@ import { createServer } from "vite";
 import {
   chooseDefaultClip,
   formatFigureLabel,
+  inferClipRole,
   parseAnimalCatalog,
   type AnimalCatalogClip,
   type AnimalCatalogDocument,
@@ -73,6 +74,9 @@ export async function buildWebCatalog(
       throw new Error(`Canonical figure '${asset.name}' has no animation clips`);
     }
     const semanticSha256 = sha256(document.json);
+    const continuousClips = clips.filter((clip) => clip.role !== "action");
+    const defaultClip = asset.defaultClip
+      ?? chooseDefaultClip((continuousClips.length > 0 ? continuousClips : clips).map((clip) => clip.name));
     const firstPartyFigure = firstPartyFiguresByName.get(asset.name);
     const runtimePromotion = firstPartyFigure !== undefined
       && path.resolve(sourcePath) === path.resolve(firstPartyFigure.sourcePath)
@@ -85,7 +89,7 @@ export async function buildWebCatalog(
       entry: {
         clipCount: clips.length,
         clips,
-        defaultClip: chooseDefaultClip(clips.map((clip) => clip.name)),
+        defaultClip,
         jsonPath: `catalog/figures/${asset.name}.figure.json`,
         label: formatFigureLabel(asset.name),
         materialCount: Object.keys(asset.materials).length,
@@ -149,9 +153,12 @@ function catalogClip(name: string, clip: Parameters<typeof clipDuration>[0] & ob
   return {
     durationSeconds,
     ...(clip.fps === undefined ? {} : { fps: clip.fps }),
+    label: clip.label ?? formatFigureLabel(name),
     ...(clip.locomotion === undefined ? {} : { locomotionKind: clip.locomotion.kind }),
     loop: clip.loop === true,
     name,
+    ...(clip.nextClip === undefined ? {} : { nextClip: clip.nextClip }),
+    role: clip.role ?? inferClipRole(name, clip.locomotion?.kind),
   };
 }
 

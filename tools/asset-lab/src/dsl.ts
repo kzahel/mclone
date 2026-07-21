@@ -4,6 +4,7 @@ export type EulerDeg = Vec3;
 export interface FigureAsset {
   schemaVersion: 1;
   name: string;
+  defaultClip?: string;
   materials: Record<string, MaterialSpec>;
   textures: Record<string, AsciiTextureSpec>;
   parts: PartSpec[];
@@ -105,6 +106,13 @@ export interface TransformKey {
 export type ClipKey = readonly [part: string, time: number, transform: TransformKey];
 
 export type LocomotionKind = "biped-walk" | "quadruped-walk" | "slither" | "swim" | "wing-flap";
+export type ClipRole = "locomotion" | "idle" | "action";
+
+export interface ClipPresentationSpec {
+  label?: string;
+  role?: ClipRole;
+  nextClip?: string;
+}
 
 export interface LocomotionContactSpec {
   part: string;
@@ -123,7 +131,7 @@ export interface ClipLocomotionSpec {
   units?: "figure";
 }
 
-export interface ClipSpec {
+export interface ClipSpec extends ClipPresentationSpec {
   fps?: number;
   loop?: boolean;
   locomotion?: ClipLocomotionSpec;
@@ -169,7 +177,7 @@ export type CycleTrack =
   | ({ kind: "bob"; part: string } & BobOptions)
   | ({ kind: "followThrough"; part: string } & FollowThroughOptions);
 
-export interface WalkCycleSpec {
+export interface WalkCycleSpec extends ClipPresentationSpec {
   duration?: number;
   fps?: number;
   locomotion?: ClipLocomotionSpec;
@@ -178,7 +186,7 @@ export interface WalkCycleSpec {
   tracks: CycleTrack[];
 }
 
-export interface CycleTimingSpec {
+export interface CycleTimingSpec extends ClipPresentationSpec {
   duration?: number;
   fps?: number;
   loop?: boolean;
@@ -294,6 +302,7 @@ export interface SlitherSpec extends CycleTimingSpec {
 }
 
 export interface FigureApi {
+  defaultClip(name: string): void;
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
   asciiTexture(name: string, texture: AsciiTextureSpec): void;
   part(name: string, draft: PartDraft): void;
@@ -382,9 +391,13 @@ export function validateBoxOnlyFigure(asset: FigureAsset): string[] {
 export function validateFigure(asset: FigureAsset): string[] {
   const errors: string[] = [];
   const partNames = new Set(asset.parts.map((part) => part.name));
+  const clipNames = new Set(Object.keys(asset.clips));
 
   if (!asset.name.trim()) {
     errors.push("figure name is required");
+  }
+  if (asset.defaultClip !== undefined && !clipNames.has(asset.defaultClip)) {
+    errors.push(`default clip references missing clip '${asset.defaultClip}'`);
   }
 
   for (const [name, material] of Object.entries(asset.materials)) {
@@ -435,6 +448,26 @@ export function validateFigure(asset: FigureAsset): string[] {
   }
 
   for (const [clipName, clip] of Object.entries(asset.clips)) {
+    if (clip.label !== undefined && (typeof clip.label !== "string" || !clip.label.trim())) {
+      errors.push(`clip '${clipName}' label must be a nonempty string`);
+    }
+    if (clip.role !== undefined && !["locomotion", "idle", "action"].includes(clip.role)) {
+      errors.push(`clip '${clipName}' role '${clip.role}' is invalid`);
+    }
+    if (clip.nextClip !== undefined) {
+      if (!clipNames.has(clip.nextClip)) {
+        errors.push(`clip '${clipName}' nextClip references missing clip '${clip.nextClip}'`);
+      }
+      if (clip.loop === true) {
+        errors.push(`looping clip '${clipName}' cannot declare nextClip`);
+      }
+    }
+    if (clip.role === "locomotion" && clip.locomotion === undefined) {
+      errors.push(`locomotion clip '${clipName}' requires locomotion metadata`);
+    }
+    if (clip.role !== undefined && clip.role !== "locomotion" && clip.locomotion !== undefined) {
+      errors.push(`clip '${clipName}' with locomotion metadata must use role 'locomotion'`);
+    }
     for (const [partName, time, transform] of clip.keys) {
       if (!partNames.has(partName)) {
         errors.push(`clip '${clipName}' references missing part '${partName}'`);
@@ -465,10 +498,12 @@ class FigureBuilder {
   private readonly textures: Record<string, AsciiTextureSpec> = {};
   private readonly parts: PartSpec[] = [];
   private readonly clips: Record<string, ClipSpec> = {};
+  private defaultClipName: string | undefined;
   readonly api: LegacyFigureApi;
 
   constructor(private readonly name: string) {
     this.api = {
+      defaultClip: (name) => this.defaultClip(name),
       mat: (name, colorOrSpec) => this.mat(name, colorOrSpec),
       asciiTexture: (name, texture) => this.asciiTexture(name, texture),
       part: (name, draft) => this.part(name, draft),
@@ -494,11 +529,19 @@ class FigureBuilder {
     return {
       schemaVersion: 1,
       name: this.name,
+      ...(this.defaultClipName === undefined ? {} : { defaultClip: this.defaultClipName }),
       materials: this.materials,
       textures: this.textures,
       parts: this.parts,
       clips: this.clips,
     };
+  }
+
+  private defaultClip(name: string): void {
+    if (this.defaultClipName !== undefined && this.defaultClipName !== name) {
+      throw new Error(`Figure '${this.name}' already declares default clip '${this.defaultClipName}'`);
+    }
+    this.defaultClipName = name;
   }
 
   private mat(name: string, colorOrSpec: string | MaterialSpec): void {
@@ -964,6 +1007,15 @@ function cycleSpecFromTiming(
   if (timing.samples !== undefined) {
     spec.samples = timing.samples;
   }
+  if (timing.label !== undefined) {
+    spec.label = timing.label;
+  }
+  if (timing.role !== undefined) {
+    spec.role = timing.role;
+  }
+  if (timing.nextClip !== undefined) {
+    spec.nextClip = timing.nextClip;
+  }
   if (locomotion) {
     spec.locomotion = locomotion;
   }
@@ -1078,6 +1130,15 @@ function buildWalkCycleClip(spec: WalkCycleSpec): ClipSpec {
   }
   if (spec.locomotion) {
     clip.locomotion = completeLocomotion(spec.locomotion, duration);
+  }
+  if (spec.label !== undefined) {
+    clip.label = spec.label;
+  }
+  if (spec.role !== undefined) {
+    clip.role = spec.role;
+  }
+  if (spec.nextClip !== undefined) {
+    clip.nextClip = spec.nextClip;
   }
   return clip;
 }

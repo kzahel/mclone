@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 113 |
-| total parts | 2,423 |
-| boxes | 2,218 |
+| figures | 116 |
+| total parts | 2,516 |
+| boxes | 2,311 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 363 |
-| parts with any texture reference | 582 |
-| individual texture applications | 944 |
+| ASCII textures | 371 |
+| parts with any texture reference | 610 |
+| individual texture applications | 998 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 95 | 1,881 | 1,881 | 0 / 0 / 0 |
+| canonical `examples/` | 98 | 1,974 | 1,974 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -694,7 +694,31 @@ replaced with four articulated walking legs and a recognizable hind-leg chain
 from raised femur through descending tibia to a short grounded foot. No shared
 gait macro or surface checker changed.
 
-All 944 applications target an explicit face of a box. They range from single
+The twenty-sixth post-migration content batch adds Scorpion, Roly-poly, and
+Earwig as approved canonical box-only rigs. Scorpion is a 36-part wave crawler
+with broad articulated pedipalps, eight two-stage legs,
+and a seven-part tail curling forward to a dark stinger; Roly-poly is a
+27-part common pill bug with seven stepped shell bands, fourteen short legs,
+antennae, a tail plate, a separate wave crawl, and non-looping roll-up/unroll
+actions; and Earwig is a 30-part alternating-tripod crawler with five raised
+abdomen bands, long
+antennae, six two-stage legs, and paired three-part rear forceps. All 93 parts
+are canonical boxes and use eight combined pixel textures across 28 textured
+parts and 54 explicit box-face applications. Typechecking, the Asset Lab test
+suite, the first-party figure drift check, and the repository diff check pass.
+Clean multi-angle sheets and four-cycle videos were rendered under
+`/tmp/mclone-asset-lab/batch-26` and inspected for identity, grounding,
+attachment continuity, six- or eight-leg cadence, claw and forceps motion,
+tail stability, shell-band separation, and loop continuity. The corrected
+Roly-poly action sheets and videos under
+`/tmp/mclone-asset-lab/roly-actions` prove that middle-rooted front and rear
+chains close downward together into a compact rectangular ring, hold at the
+end of `roll_up`, and reverse cleanly before returning to `crawl`. This batch
+also establishes the additive clip role/default/completion contract recorded
+in [`figure-animation-actions.md`](figure-animation-actions.md). No shared
+roll-up helper, N-leg gait macro, or surface checker changed.
+
+All 998 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

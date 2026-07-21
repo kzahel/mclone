@@ -4,7 +4,9 @@ use std::fmt;
 
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 
-use crate::{AssetError, AssetPath, AssetResult, AssetSource, FigureAsset, FigurePart};
+use crate::{
+    AssetError, AssetPath, AssetResult, AssetSource, FigureAsset, FigureClipRole, FigurePart,
+};
 
 pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-cuboid-proxy-v1";
 
@@ -17,6 +19,7 @@ const PREPARED_VERTEX_BYTE_LEN: usize = 52;
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedFigure {
     pub name: String,
+    pub default_clip: Option<String>,
     pub vertices: Vec<PreparedFigureVertex>,
     pub indices: Vec<u16>,
     pub parts: Vec<PreparedFigurePart>,
@@ -82,6 +85,9 @@ pub struct PreparedFigureClip {
     pub duration_seconds: f32,
     pub source_fps: Option<f32>,
     pub looped: bool,
+    pub label: Option<String>,
+    pub role: Option<FigureClipRole>,
+    pub next_clip: Option<String>,
     pub tracks: BTreeMap<u16, Vec<PreparedFigureClipKey>>,
     pub locomotion: Option<PreparedFigureClipLocomotion>,
 }
@@ -585,6 +591,7 @@ fn prepare_figure_asset_with_crc(
 
     Ok(PreparedFigure {
         name: asset.name.clone(),
+        default_clip: asset.default_clip.clone(),
         vertices,
         indices,
         parts,
@@ -619,6 +626,14 @@ fn validate_asset_header(asset: &FigureAsset) -> Result<(), FigurePrepareError> 
             MAX_PARTS
         )));
     }
+    if let Some(default_clip) = &asset.default_clip
+        && !asset.clips.contains_key(default_clip)
+    {
+        return Err(FigurePrepareError::new(format!(
+            "figure '{}' defaultClip references unknown clip '{}'",
+            asset.name, default_clip
+        )));
+    }
     Ok(())
 }
 
@@ -643,6 +658,46 @@ fn validate_clips(
     part_names: &HashMap<&str, usize>,
 ) -> Result<(), FigurePrepareError> {
     for (clip_name, clip) in &asset.clips {
+        if clip
+            .label
+            .as_ref()
+            .is_some_and(|label| label.trim().is_empty())
+        {
+            return Err(FigurePrepareError::new(format!(
+                "figure '{}' clip '{}' has an empty label",
+                asset.name, clip_name
+            )));
+        }
+        if let Some(next_clip) = &clip.next_clip {
+            if !asset.clips.contains_key(next_clip) {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' clip '{}' nextClip references unknown clip '{}'",
+                    asset.name, clip_name, next_clip
+                )));
+            }
+            if clip.r#loop {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' looping clip '{}' cannot declare nextClip",
+                    asset.name, clip_name
+                )));
+            }
+        }
+        if clip.role == Some(FigureClipRole::Locomotion) && clip.locomotion.is_none() {
+            return Err(FigurePrepareError::new(format!(
+                "figure '{}' locomotion clip '{}' requires locomotion metadata",
+                asset.name, clip_name
+            )));
+        }
+        if matches!(
+            clip.role,
+            Some(FigureClipRole::Idle | FigureClipRole::Action)
+        ) && clip.locomotion.is_some()
+        {
+            return Err(FigurePrepareError::new(format!(
+                "figure '{}' clip '{}' with locomotion metadata must use role 'locomotion'",
+                asset.name, clip_name
+            )));
+        }
         if let Some(fps) = clip.fps
             && (!fps.is_finite() || fps <= 0.0)
         {
@@ -797,6 +852,9 @@ fn prepare_clips(
                 duration_seconds,
                 source_fps: clip.fps,
                 looped: clip.r#loop,
+                label: clip.label.clone(),
+                role: clip.role,
+                next_clip: clip.next_clip.clone(),
                 tracks,
                 locomotion,
             },
@@ -811,6 +869,8 @@ fn prepared_clip_bytes(clips: &BTreeMap<String, PreparedFigureClip>) -> usize {
         .map(|(name, clip)| {
             name.len()
                 + std::mem::size_of::<PreparedFigureClip>()
+                + clip.label.as_ref().map_or(0, String::len)
+                + clip.next_clip.as_ref().map_or(0, String::len)
                 + clip
                     .tracks
                     .values()
@@ -1663,6 +1723,52 @@ mod tests {
             1
         );
         assert!(prepared.clips.contains_key("walk"));
+    }
+
+    #[test]
+    fn prepares_named_animation_action_metadata() {
+        let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1,
+            "name": "action-figure",
+            "defaultClip": "roll_up",
+            "materials": { "shell": { "color": "#667766" } },
+            "parts": [{
+                "name": "body",
+                "material": "shell",
+                "primitive": { "kind": "box", "size": [1, 1, 1] }
+            }],
+            "clips": {
+                "roll_up": {
+                    "label": "Roll up",
+                    "role": "action",
+                    "loop": false,
+                    "keys": [
+                        ["body", 0, { "rot": [0, 0, 0] }],
+                        ["body", 0.5, { "rot": [90, 0, 0] }]
+                    ]
+                },
+                "unroll": {
+                    "label": "Unroll",
+                    "role": "action",
+                    "nextClip": "roll_up",
+                    "loop": false,
+                    "keys": [
+                        ["body", 0, { "rot": [90, 0, 0] }],
+                        ["body", 0.5, { "rot": [0, 0, 0] }]
+                    ]
+                }
+            }
+        }))
+        .unwrap();
+
+        let prepared = prepare_figure_asset(&asset).unwrap();
+        assert_eq!(prepared.default_clip.as_deref(), Some("roll_up"));
+        let roll_up = prepared.clips.get("roll_up").unwrap();
+        assert_eq!(roll_up.label.as_deref(), Some("Roll up"));
+        assert_eq!(roll_up.role, Some(FigureClipRole::Action));
+        assert_eq!(roll_up.next_clip, None);
+        let unroll = prepared.clips.get("unroll").unwrap();
+        assert_eq!(unroll.next_clip.as_deref(), Some("roll_up"));
     }
 
     #[test]

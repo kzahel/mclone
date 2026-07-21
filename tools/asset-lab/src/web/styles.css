@@ -167,7 +167,8 @@ h3 {
 .siteLink,
 .themeButton,
 .cameraActions button,
-.playButton {
+.playButton,
+.actionButton {
   min-height: 36px;
   display: inline-flex;
   align-items: center;
@@ -183,7 +184,8 @@ h3 {
 .siteLink:hover,
 .themeButton:hover,
 .cameraActions button:hover,
-.playButton:hover {
+.playButton:hover,
+.actionButton:hover {
   border-color: var(--accent-border);
   background: var(--accent-soft);
 }
@@ -456,6 +458,27 @@ h3 {
 
 .playButton {
   min-width: 70px;
+}
+
+.actionControls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 13px;
+  border-top: 1px solid var(--border-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.actionButton {
+  min-height: 32px;
+}
+
+.actionButton.active {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
 }
 
 .clipSelect,

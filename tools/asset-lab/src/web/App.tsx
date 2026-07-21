@@ -16,6 +16,7 @@ const motionOptions: Array<{ label: string; value: MotionFilter }> = [
   { label: "Flying", value: "wing-flap" },
   { label: "Swimming", value: "swim" },
   { label: "Slithering", value: "slither" },
+  { label: "Special actions", value: "action" },
   { label: "Other rigs", value: "other" },
 ];
 
@@ -223,10 +224,13 @@ function FigureInspector({
         <h3>Active animation</h3>
         <dl>
           <div><dt>Clip</dt><dd>{clip?.name ?? "—"}</dd></div>
+          <div><dt>Label</dt><dd>{clip?.label ?? "—"}</dd></div>
+          <div><dt>Role</dt><dd>{clip?.role ?? "—"}</dd></div>
           <div><dt>Duration</dt><dd>{clip ? `${clip.durationSeconds.toFixed(2)}s` : "—"}</dd></div>
           <div><dt>Authored FPS</dt><dd>{clip?.fps ?? "—"}</dd></div>
           <div><dt>Loop</dt><dd>{clip?.loop ? "yes" : "no"}</dd></div>
           <div><dt>Motion</dt><dd>{clip?.locomotionKind ?? "custom"}</dd></div>
+          <div><dt>After</dt><dd>{clip?.nextClip ?? (clip?.loop ? "repeat" : "hold final pose")}</dd></div>
         </dl>
       </section>
       <section className="inspectorSection">
@@ -281,8 +285,13 @@ function filterFigures(
     const motionKinds = new Set(figure.clips.flatMap((clip) =>
       clip.locomotionKind === undefined ? [] : [clip.locomotionKind]
     ));
+    const hasAction = figure.clips.some((clip) => clip.role === "action");
     const matchesMotion = motionFilter === "all"
-      || (motionFilter === "other" ? motionKinds.size === 0 : motionKinds.has(motionFilter));
+      || (motionFilter === "action"
+        ? hasAction
+        : motionFilter === "other"
+          ? motionKinds.size === 0
+          : motionKinds.has(motionFilter));
     const matchesPromotion = promotionFilter === "all"
       || (promotionFilter === "runtime"
         ? figure.runtimePromotion !== undefined
@@ -297,6 +306,9 @@ function filterFigures(
       figure.label,
       figure.name,
       ...figure.clips.map((clip) => clip.name),
+      ...figure.clips.map((clip) => clip.label),
+      ...figure.clips.map((clip) => clip.role),
+      ...figure.clips.flatMap((clip) => clip.nextClip === undefined ? [] : [clip.nextClip]),
       ...motionKinds,
       ...(figure.runtimePromotion
         ? ["runtime", "promoted", figure.runtimePromotion.figureId, figure.runtimePromotion.jsonPath]

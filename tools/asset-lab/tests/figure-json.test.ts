@@ -78,6 +78,39 @@ test("canonical figure rejects deprecated curved primitives", () => {
   assert.equal(legacy.parts[0]?.primitive.kind, "sphere");
 });
 
+test("preserves named action presentation and default-clip metadata", () => {
+  const asset = figure("action_figure", ({ box, clip, defaultClip, mat, part }) => {
+    mat("shell", "#667766");
+    part("body", box({ size: [1, 1, 1], material: "shell" }));
+    clip("roll_up", {
+      label: "Roll up",
+      role: "action",
+      loop: false,
+      keys: [
+        ["body", 0, { rot: [0, 0, 0] }],
+        ["body", 0.5, { rot: [90, 0, 0] }],
+      ],
+    });
+    clip("unroll", {
+      label: "Unroll",
+      role: "action",
+      nextClip: "roll_up",
+      loop: false,
+      keys: [
+        ["body", 0, { rot: [90, 0, 0] }],
+        ["body", 0.5, { rot: [0, 0, 0] }],
+      ],
+    });
+    defaultClip("roll_up");
+  });
+
+  const parsed = roundTripFigureAsset(asset, "action source").asset;
+  assert.equal(parsed.defaultClip, "roll_up");
+  assert.equal(parsed.clips.roll_up?.label, "Roll up");
+  assert.equal(parsed.clips.roll_up?.role, "action");
+  assert.equal(parsed.clips.unroll?.nextClip, "roll_up");
+});
+
 test("swim macro exports ordinary body tail fin keys and locomotion", () => {
   const asset = figure("swimmer", ({ mat, part, box, swim }) => {
     mat("skin", "#447799");

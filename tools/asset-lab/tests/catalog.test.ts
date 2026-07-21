@@ -16,13 +16,17 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
   const sourcePaths = [
     path.join(assetLabRoot, "examples/chicken/figure.ts"),
     path.join(assetLabRoot, "examples/king_cobra/figure.ts"),
+    path.join(assetLabRoot, "examples/roly_poly/figure.ts"),
   ];
   try {
     const catalog = await buildWebCatalog({ outRoot, sourcePaths, thumbnails: false });
     assert.equal(catalog.schemaVersion, 1);
-    assert.equal(catalog.summary.canonicalFigures, 2);
+    assert.equal(catalog.summary.canonicalFigures, 3);
     assert.equal(catalog.summary.runtimePromotedFigures, 1);
-    assert.deepEqual(catalog.figures.map((figure) => figure.name), ["chicken", "king_cobra"]);
+    assert.deepEqual(
+      catalog.figures.map((figure) => figure.name),
+      ["chicken", "king_cobra", "roly_poly"],
+    );
     assert.equal(catalog.figures[0]?.defaultClip, "walk");
     assert.deepEqual(catalog.figures[0]?.runtimePromotion, {
       figureId: "mclone:chicken",
@@ -30,6 +34,20 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
     });
     assert.equal(catalog.figures[1]?.defaultClip, "slither");
     assert.equal(catalog.figures[1]?.runtimePromotion, undefined);
+    assert.equal(catalog.figures[2]?.defaultClip, "crawl");
+    assert.deepEqual(
+      catalog.figures[2]?.clips.map(({ label, name, nextClip, role }) => ({
+        label,
+        name,
+        nextClip,
+        role,
+      })),
+      [
+        { label: "Crawl", name: "crawl", nextClip: undefined, role: "locomotion" },
+        { label: "Roll up", name: "roll_up", nextClip: undefined, role: "action" },
+        { label: "Unroll", name: "unroll", nextClip: "crawl", role: "action" },
+      ],
+    );
 
     const written = parseAnimalCatalog(
       JSON.parse(await fs.readFile(path.join(outRoot, "catalog/catalog.v1.json"), "utf8")),

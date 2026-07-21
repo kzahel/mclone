@@ -274,14 +274,15 @@ reviewed rigs and then filling macro gaps.
 | Ant | P3 | ✅ | C | worker, soldier | `examples/ant` — approved 22-box carpenter ant with three distinct body sections, narrow petiole, paired mandibles, elbowed antennae, six two-stage legs, and alternating tripod march |
 | Beetle | P3 | ✅ | C | rhino/stag beetle | `examples/stag_beetle` — approved 27-box male stag beetle with split chestnut wing cases, broad thorax, branched mandibles, clubbed antennae, six two-stage legs, and alternating tripod crawl |
 | Grasshopper / Cricket | P3 | ✅ | H | — | `examples/grasshopper` — approved 24-box meadow grasshopper with folded wings, long antennae, four two-stage walking legs, oversized three-stage hind legs, and synchronized springing hop |
-| Scorpion | P3 | ☐ | C | — | claws + tail |
-| Roly-poly / Pill bug | P2 | ☐ | C | — | isopod; **roll-up** ball pose is the whole gag |
-| Earwig (pincher bug) | P2 | ☐ | C | — | rear pincers (cerci) |
+| Scorpion | P3 | ✅ | C | — | `examples/scorpion` — approved 36-box desert scorpion with broad pedipalps, eight two-stage legs, forward-curled seven-part tail, dark stinger, and alternating wave crawl |
+| Roly-poly / Pill bug | P2 | ✅ | C | — | `examples/roly_poly` — approved 27-box common pill bug with seven stepped shell bands, fourteen short legs, antennae, tail plate, separate crawl, and middle-rooted roll-up/unroll actions that tuck both ends below the shell |
+| Earwig (pincher bug) | P2 | ✅ | C | — | `examples/earwig` — approved 30-box common earwig with five raised abdomen bands, long antennae, six two-stage legs, paired three-part rear forceps, and tripod scuttle |
 | Centipede / Millipede | P3 | ☐ | C/SL | — | many legs; segment chain |
 | Snail | P3 | ☐ | SL | — | shell; very slow |
 
-> **Shared "roll-up" pose:** roly-poly, armadillo, and pangolin all curl into a
-> ball. Worth authoring one curl/uncurl helper and reusing it across all three.
+> **Shared "roll-up" pose:** Roly-poly is the first corrected action proof.
+> Give Armadillo and Pangolin independent authored actions next, then extract a
+> curl/uncurl helper only if those three rigs reveal a stable common shape.
 
 ## Polar / Arctic set (cross-listed)
 

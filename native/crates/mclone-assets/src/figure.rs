@@ -34,6 +34,8 @@ pub struct FigureAsset {
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
     pub name: String,
+    #[serde(rename = "defaultClip")]
+    pub default_clip: Option<String>,
     #[serde(default)]
     pub materials: HashMap<String, FigureMaterial>,
     #[serde(default)]
@@ -106,9 +108,21 @@ pub struct FigureClip {
     pub fps: Option<f32>,
     #[serde(default)]
     pub r#loop: bool,
+    pub label: Option<String>,
+    pub role: Option<FigureClipRole>,
+    #[serde(rename = "nextClip")]
+    pub next_clip: Option<String>,
     pub locomotion: Option<FigureClipLocomotion>,
     #[serde(default)]
     pub keys: Vec<FigureClipKey>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FigureClipRole {
+    Locomotion,
+    Idle,
+    Action,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

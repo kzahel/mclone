@@ -22,6 +22,7 @@ export function FigureViewer({
   const viewportRef = useRef<FigureViewportController | null>(null);
   const loadedFigureRef = useRef<string | null>(null);
   const [duration, setDuration] = useState(clipDurationFromManifest(figure, clipName));
+  const [completedClip, setCompletedClip] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadStatus, setLoadStatus] = useState<"loading" | "ready" | "error">("loading");
   const [playing, setPlaying] = useState(true);
@@ -35,6 +36,7 @@ export function FigureViewer({
     }
     const viewport = new FigureViewportController(host, {
       background: viewportBackground(themeMode),
+      onClipComplete: setCompletedClip,
       onTimeChange: setTime,
     });
     viewport.setPlaybackSpeed(speed);
@@ -87,13 +89,27 @@ export function FigureViewer({
       return;
     }
     const viewport = viewportRef.current;
-    viewport?.setClip(clipName);
+    if (viewport?.getClipName() !== clipName) {
+      viewport?.setClip(clipName);
+    }
     if (viewport) {
       setDuration(viewport.getDuration());
       setTime(0);
       viewport.setPlaying(playing);
     }
   }, [clipName, figure.name]);
+
+  useEffect(() => {
+    if (completedClip === null) {
+      return;
+    }
+    const completed = figure.clips.find((clip) => clip.name === completedClip);
+    setCompletedClip(null);
+    setPlaying(false);
+    if (completed?.nextClip !== undefined) {
+      activateClip(completed.nextClip, true);
+    }
+  }, [completedClip, figure.name]);
 
   const togglePlayback = (): void => {
     const next = !playing;
@@ -116,6 +132,24 @@ export function FigureViewer({
   const setCamera = (preset: CameraPreset): void => {
     viewportRef.current?.setCameraPreset(preset);
   };
+
+  const activateClip = (nextClipName: string, shouldPlay: boolean): void => {
+    onSelectClip(nextClipName);
+    const viewport = viewportRef.current;
+    if (loadedFigureRef.current !== figure.name || !viewport) {
+      setPlaying(shouldPlay);
+      return;
+    }
+    viewport.setClip(nextClipName);
+    viewport.setPlaying(shouldPlay);
+    setDuration(viewport.getDuration());
+    setTime(0);
+    setPlaying(shouldPlay);
+  };
+
+  const locomotionClips = figure.clips.filter((clip) => clip.role === "locomotion");
+  const idleClips = figure.clips.filter((clip) => clip.role === "idle");
+  const actionClips = figure.clips.filter((clip) => clip.role === "action");
 
   return (
     <section className="viewerPanel" aria-label={`${figure.label} interactive viewer`}>
@@ -152,10 +186,28 @@ export function FigureViewer({
         </button>
         <label className="clipSelect">
           <span>Clip</span>
-          <select value={clipName} onChange={(event) => onSelectClip(event.target.value)}>
-            {figure.clips.map((clip) => (
-              <option key={clip.name} value={clip.name}>{clip.name}</option>
-            ))}
+          <select value={clipName} onChange={(event) => activateClip(event.target.value, playing)}>
+            {locomotionClips.length > 0 ? (
+              <optgroup label="Locomotion">
+                {locomotionClips.map((clip) => (
+                  <option key={clip.name} value={clip.name}>{clip.label}</option>
+                ))}
+              </optgroup>
+            ) : null}
+            {idleClips.length > 0 ? (
+              <optgroup label="Idle">
+                {idleClips.map((clip) => (
+                  <option key={clip.name} value={clip.name}>{clip.label}</option>
+                ))}
+              </optgroup>
+            ) : null}
+            {actionClips.length > 0 ? (
+              <optgroup label="Actions">
+                {actionClips.map((clip) => (
+                  <option key={clip.name} value={clip.name}>{clip.label}</option>
+                ))}
+              </optgroup>
+            ) : null}
           </select>
         </label>
         <label className="timeline">
@@ -185,6 +237,23 @@ export function FigureViewer({
           </select>
         </label>
       </div>
+      {actionClips.length > 0 ? (
+        <div className="actionControls" aria-label="Special animation actions">
+          <span>Actions</span>
+          {actionClips.map((clip) => (
+            <button
+              className={clip.name === clipName ? "actionButton active" : "actionButton"}
+              type="button"
+              key={clip.name}
+              disabled={loadStatus !== "ready"}
+              aria-pressed={clip.name === clipName}
+              onClick={() => activateClip(clip.name, true)}
+            >
+              {clip.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

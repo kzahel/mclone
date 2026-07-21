@@ -31,6 +31,9 @@ preparation remain owned by
   authored clip, play or pause continuous animation, scrub presentation time,
   adjust playback speed, orbit, pan, zoom, reset framing, and choose standard
   camera views.
+- Clip selectors group locomotion, idle, and action roles. Named action buttons
+  restart one-shot clips, hold their final pose when no continuation is
+  authored, and automatically play an optional `nextClip` when they complete.
 - Visitors can distinguish runtime-promoted figures from Asset Lab-only
   examples, filter by that status, and inspect the promoted runtime figure ID
   and packed semantic JSON path.
@@ -87,7 +90,8 @@ The manifest records at least:
 - stable figure name and artifact URL;
 - semantic SHA-256 and byte length;
 - part, material, texture, and clip counts;
-- clip names, duration, loop state, authored fps, and locomotion kind; and
+- clip names, labels, roles, duration, loop state, authored fps, locomotion
+  kind, and optional next-clip behavior;
 - a deterministic default clip and thumbnail URL;
 - the total runtime-promoted figure count; and
 - for promoted entries, the runtime figure ID and packed semantic JSON path.
@@ -155,6 +159,8 @@ occur.
    validate it in the catalogue contract, and display summary, filter, badge,
    and inspector states.
 7. [x] Publish and live-verify the runtime promotion follow-up.
+8. [x] Add authored defaults and action-aware grouped controls, completion,
+   filtering, inspector facts, and shareable selection.
 
 ## Local Acceptance Evidence
 
@@ -196,6 +202,14 @@ three-entry runtime filter, all three promoted names, exclusion by the Asset
 Lab-only filter, row metadata, the Chicken runtime ID and packed path, and the
 existing one-canvas interaction contract. The focused promoted capture at
 `/tmp/mclone-animal-catalogue-runtime-filter.png` was inspected.
+
+The animation-action follow-up retains the existing gates and adds semantic
+default/label/role/`nextClip` validation to the generated manifest. Local
+production output contains 98 figures, 100 clips, and 1,974 parts. Playwright
+proves grouped Roly-poly clips, the Special actions filter, repeated action
+restart, non-looping final-pose hold, automatic return from `unroll` to
+`crawl`, URL synchronization, and clean browser/page errors. The held action
+capture at `/tmp/mclone-roly-poly-action-catalogue.png` was inspected.
 
 ## Live Acceptance Evidence
 

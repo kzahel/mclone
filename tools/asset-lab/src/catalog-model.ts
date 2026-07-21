@@ -1,11 +1,14 @@
-import type { LocomotionKind } from "./dsl";
+import type { ClipRole, LocomotionKind } from "./dsl";
 
 export interface AnimalCatalogClip {
   durationSeconds: number;
   fps?: number;
+  label: string;
   locomotionKind?: LocomotionKind;
   loop: boolean;
   name: string;
+  nextClip?: string;
+  role: ClipRole;
 }
 
 export interface AnimalCatalogFigure {
@@ -135,6 +138,17 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
   if (value.clipCount !== clips.length || !clips.some((clip) => clip.name === value.defaultClip)) {
     throw new Error(`Animal catalogue '${sourceLabel}' has inconsistent clips for '${value.name}'`);
   }
+  const clipNames = new Set(clips.map((clip) => clip.name));
+  for (const clip of clips) {
+    if (clip.nextClip !== undefined && !clipNames.has(clip.nextClip)) {
+      throw new Error(
+        `Animal catalogue '${sourceLabel}' clip '${clip.name}' references missing next clip '${clip.nextClip}'`,
+      );
+    }
+    if (clip.nextClip !== undefined && clip.loop) {
+      throw new Error(`Animal catalogue '${sourceLabel}' looping clip '${clip.name}' declares nextClip`);
+    }
+  }
   const runtimePromotion = value.runtimePromotion === undefined
     ? undefined
     : parseRuntimePromotion(value.runtimePromotion, sourceLabel, index);
@@ -190,18 +204,38 @@ function parseCatalogClip(
     || value.durationSeconds <= 0
     || (value.fps !== undefined && (typeof value.fps !== "number" || !Number.isFinite(value.fps) || value.fps <= 0))
     || (value.locomotionKind !== undefined && !isLocomotionKind(value.locomotionKind))
+    || (value.label !== undefined && (typeof value.label !== "string" || value.label.trim() === ""))
+    || (value.role !== undefined && !isClipRole(value.role))
+    || (value.nextClip !== undefined && !isSafeName(value.nextClip))
   ) {
     throw new Error(
       `Animal catalogue '${sourceLabel}' has an invalid clip at figure ${figureIndex}, clip ${clipIndex}`,
     );
   }
+  const locomotionKind = value.locomotionKind as LocomotionKind | undefined;
+  const role = isClipRole(value.role)
+    ? value.role
+    : inferClipRole(value.name, locomotionKind);
+  const label = typeof value.label === "string" && value.label.trim()
+    ? value.label
+    : formatFigureLabel(value.name);
   return {
     durationSeconds: value.durationSeconds,
     ...(value.fps === undefined ? {} : { fps: value.fps }),
-    ...(value.locomotionKind === undefined ? {} : { locomotionKind: value.locomotionKind }),
+    label,
+    ...(locomotionKind === undefined ? {} : { locomotionKind }),
     loop: value.loop,
     name: value.name,
+    ...(value.nextClip === undefined ? {} : { nextClip: value.nextClip as string }),
+    role,
   };
+}
+
+export function inferClipRole(name: string, locomotionKind?: LocomotionKind): ClipRole {
+  if (locomotionKind !== undefined) {
+    return "locomotion";
+  }
+  return name === "idle" || name.startsWith("idle_") ? "idle" : "action";
 }
 
 function isCatalogSummary(value: unknown): value is AnimalCatalogDocument["summary"] {
@@ -218,6 +252,10 @@ function isLocomotionKind(value: unknown): value is LocomotionKind {
     || value === "slither"
     || value === "swim"
     || value === "wing-flap";
+}
+
+function isClipRole(value: unknown): value is ClipRole {
+  return value === "locomotion" || value === "idle" || value === "action";
 }
 
 function isSafeName(value: unknown): value is string {

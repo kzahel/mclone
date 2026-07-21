@@ -14,6 +14,7 @@ export type CameraPreset =
 
 export interface FigureViewportOptions {
   background?: string;
+  onClipComplete?: (clipName: string) => void;
   onTimeChange?: (timeSeconds: number) => void;
   pixelRatioCap?: number;
   showFloor?: boolean;
@@ -28,6 +29,7 @@ export class FigureViewportController {
   private readonly resizeObserver: ResizeObserver;
   private readonly scene = new THREE.Scene();
   private readonly onTimeChange: ((timeSeconds: number) => void) | undefined;
+  private readonly onClipComplete: ((clipName: string) => void) | undefined;
   private readonly showFloor: boolean;
   private animationFrame = 0;
   private asset: FigureAsset | undefined;
@@ -45,6 +47,7 @@ export class FigureViewportController {
   private timeSeconds = 0;
 
   constructor(private readonly container: HTMLElement, options: FigureViewportOptions = {}) {
+    this.onClipComplete = options.onClipComplete;
     this.onTimeChange = options.onTimeChange;
     this.showFloor = options.showFloor ?? true;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -151,6 +154,10 @@ export class FigureViewportController {
     return this.durationSeconds;
   }
 
+  getClipName(): string | undefined {
+    return this.clipName;
+  }
+
   fit(): void {
     if (!this.bounds) {
       return;
@@ -208,16 +215,21 @@ export class FigureViewportController {
     if (this.playing && previous !== undefined && this.durationSeconds > 0) {
       const elapsed = Math.min((milliseconds - previous) / 1000, 0.1) * this.playbackSpeed;
       const nextTime = this.timeSeconds + elapsed;
+      let completedClip: string | undefined;
       if (this.clip?.loop) {
         this.timeSeconds = nextTime % this.durationSeconds;
       } else if (nextTime >= this.durationSeconds) {
         this.timeSeconds = this.durationSeconds;
+        completedClip = this.clipName;
         this.setPlaying(false);
       } else {
         this.timeSeconds = nextTime;
       }
       this.updatePose();
       this.notifyTime(false, milliseconds);
+      if (completedClip !== undefined) {
+        this.onClipComplete?.(completedClip);
+      }
     }
 
     this.controls.update();

@@ -168,6 +168,10 @@ series implements the same concern, normally reuse the document slug in its
   and cross-platform validation. Tactical
   [`181`](../tactical/181-compiled-figure-static-box-proof.md) owns the first
   bounded static-box/UV artifact proof.
+- [`figure-animation-actions.md`](figure-animation-actions.md): accepted
+  extensible clip contract for authored defaults, locomotion/idle/action roles,
+  one-shot completion, catalogue action controls, and later general runtime
+  clip requests beyond the hard-coded walk path.
 - [`figure-surface-stability.md`](figure-surface-stability.md): accepted
   authoring contract for avoiding same-facing coplanar figure parts, the
   corrected Batch 23 pigeon evidence, and a deferred sampled-pose surface

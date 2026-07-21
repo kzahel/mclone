@@ -39,6 +39,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `compiled-figure-rendering` — compiled figure artifact, static local-space
   GPU geometry, presentation-rate rigid-part animation, instancing, and
   generated figure LOD direction; Tactical 181 static-box proof
+- `figure-animation-actions` — authored default clips, locomotion/idle/action
+  roles, one-shot completion, catalogue action controls, and the path beyond
+  runtime's hard-coded walk selection
 - `realm-dimension-runtime` — unified integrated/dedicated realm server,
   concurrent dimension ownership, realm-scoped players/statistics,
   dimension-local persistence and interest, observer previews, and warm

@@ -13,6 +13,7 @@ export type MotionFilter =
   | "wing-flap"
   | "swim"
   | "slither"
+  | "action"
   | "other";
 export type PromotionFilter = "all" | "runtime" | "asset-lab";
 export type ThemeMode = "light" | "dark";
