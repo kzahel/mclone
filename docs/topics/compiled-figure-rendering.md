@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 89 |
-| total parts | 1,935 |
-| boxes | 1,730 |
+| figures | 92 |
+| total parts | 2,000 |
+| boxes | 1,795 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 269 |
-| parts with any texture reference | 416 |
-| individual texture applications | 655 |
+| ASCII textures | 283 |
+| parts with any texture reference | 450 |
+| individual texture applications | 707 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 71 | 1,393 | 1,393 | 0 / 0 / 0 |
+| canonical `examples/` | 74 | 1,458 | 1,458 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -562,7 +562,20 @@ posture, attachment continuity, flap or crawl cadence, segmented-tail and
 articulated-limb follow-through, secondary motion, and loop continuity, and
 approved by the user on 2026-07-21.
 
-All 655 applications target an explicit face of a box. They range from single
+The eighteenth post-migration content batch adds Giant Anteater, Pangolin, and
+Mongoose as approved canonical box-only rigs. Giant Anteater is a 23-part slow
+quadruped with a long three-stage snout, bold black-and-white shoulder saddle,
+heavy clawed forefeet, and an enormous four-stage plume tail; Pangolin is a
+23-part scuttling rig with five overlapping scale plates, an earless pointed
+head, broad clawed feet, and a four-stage armored tail; and Mongoose is a
+19-part low runner with a narrow speckled body, pointed muzzle, small ears,
+dark feet, and a three-stage tail. All 65 parts are canonical boxes and use 14
+combined pixel textures. Clean multi-angle sheets and four-cycle videos were
+rendered under `/tmp/mclone-asset-lab/batch-18` and inspected for identity,
+grounding, attachment continuity, gait cadence, scale or plume behavior, tail
+follow-through, and loop continuity, and approved by the user on 2026-07-21.
+
+All 707 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

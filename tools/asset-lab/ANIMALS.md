@@ -196,10 +196,10 @@ reviewed rigs and then filling macro gaps.
 | Red panda | P2 | ✅ | Q | — | `examples/red_panda` — approved 21-box adult with rust coat, white mask and ruff, dark legs, and plush six-section ringed tail |
 | Sloth | P3 | ✅ | Q | two-toe, three-toe | `examples/sloth` — approved 20-box low quadruped with masked face, long two-stage forelimbs, bent hind limbs, hooked contact paws, and very slow crawl |
 | Capybara | P3 | ✅ | Q | — | `examples/capybara` — approved 16-box tailless barrel with high blunt head, tiny ears, short planted legs, and calm walk |
-| Anteater | P3 | ☐ | Q | giant, tamandua | long snout + tongue |
+| Anteater | P3 | ✅ | Q | giant, tamandua | `examples/giant_anteater` — approved 23-box giant anteater with a long three-stage snout, bold shoulder saddle, heavy clawed forefeet, and enormous four-stage plume tail |
 | Armadillo | P3 | ✅ | Q | — | `examples/armadillo` — approved 23-box nine-banded adult with stepped armor, pointed head, upright ears, clawed feet, and three-stage plated tail; roll-up remains future work |
-| Pangolin | P3 | ☐ | Q | — | scale texture; **roll-up** ball pose |
-| Mongoose | P3 | ☐ | Q | — | meerkat-class rig |
+| Pangolin | P3 | ✅ | Q | — | `examples/pangolin` — approved 23-box adult with five overlapping scale plates, earless pointed head, clawed feet, and four-stage armored tail; **roll-up** remains future work |
+| Mongoose | P3 | ✅ | Q | — | `examples/mongoose` — approved 19-box low runner with a narrow speckled body, pointed muzzle, small ears, dark feet, and three-stage tail |
 
 ## Marsupials & monotremes
 
