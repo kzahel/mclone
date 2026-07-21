@@ -175,6 +175,21 @@ For any slice that produces pixels, **capture a screenshot and look at it before
 
 If a required offscreen render or screenshot fails because `wgpu` cannot see a GPU adapter, rerun the same command with elevation before treating GPU validation as blocked.
 
+Before browser/WebGPU capture on Linux, run `pnpm host:check`. On this host an
+agent shell can have no `WAYLAND_DISPLAY` even though the live
+`$XDG_RUNTIME_DIR/wayland-0` socket is available. The `native:web:*` browser
+runner detects that socket and automatically launches headed Chrome through
+Wayland with `--ozone-platform=wayland`; its log must identify headed Wayland
+and the selected display. `pnpm host:check -- --probe-browser-webgpu` is the
+smallest proof that the launch path and captured WebGPU pixels work.
+
+Do not use a black or transparent capture from headless Chrome on this machine
+as renderer evidence, and do not declare browser validation blocked from that
+result. Headless Chrome is a known-invalid WebGPU capture lane here; retry the
+headed Wayland probe/runner and inspect its image first. Set
+`MCLONE_NATIVE_WEB_FORCE_HEADLESS=1` only when deliberately diagnosing the
+headless-browser behavior, never for pixel acceptance.
+
 Use the current default and platform-specific validation commands in [`docs/platforms.md`](docs/platforms.md#validation-policy) rather than duplicating the command matrix here.
 
 For rendered-output validation, use the smallest capture path that exercises the affected target contract and save debug, smoke, and probe screenshots to `/tmp` (for example `/tmp/mclone-debug.png`). Never write screenshots into the repo, into `test-results/`, or anywhere that risks getting committed.

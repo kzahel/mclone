@@ -6,6 +6,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 import { inflateSync } from "node:zlib";
+import { resolveBrowserWebGpuLaunch } from "../../../../scripts/browser-webgpu-env.mjs";
 import { buildWebGlue, stagedWebRoot } from "./build-web-glue.mjs";
 
 /**
@@ -282,6 +283,7 @@ async function run() {
   }
   const server = await startServer(webRoot);
   const remoteServer = remoteWebSocket ? await startNativeWebSocketServer() : null;
+  const browserLaunch = resolveBrowserWebGpuLaunch();
   /** @type {import("@playwright/test").Browser | undefined} */
   let browser;
   try {
@@ -292,16 +294,25 @@ async function run() {
       await serveUntilStopped(baseUrl, remoteServer);
       return;
     }
+    if (browserLaunch.useWayland) {
+      console.log(
+        `browser launch: ${browserLaunch.autoConfiguredWayland ? "auto-selected" : "using"} `
+          + `headed Wayland (${browserLaunch.waylandDisplay}); `
+          + "set MCLONE_NATIVE_WEB_FORCE_HEADLESS=1 only for an intentional headless diagnostic",
+      );
+    }
     browser = await chromium.launch({
       channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome",
-      headless: process.env.HEADED === "1" ? false : true,
+      headless: browserLaunch.headless,
       args: [
         "--enable-unsafe-webgpu",
         ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
-        ...(process.env.MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS
-          ?.split(/\s+/)
-          .filter(Boolean) ?? []),
+        ...browserLaunch.chromeArgs,
       ],
+      env: {
+        ...process.env,
+        ...browserLaunch.browserEnv,
+      },
     });
     const context = await browser.newContext(mobileViewport
       ? {

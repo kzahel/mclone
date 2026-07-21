@@ -74,6 +74,29 @@ parity port.
 
 ## Local Commands
 
+### Browser capture environment
+
+Run `pnpm host:check` before browser/WebGPU capture on an unfamiliar Linux
+shell. On the current Linux host, agent shells commonly omit
+`WAYLAND_DISPLAY` while `$XDG_RUNTIME_DIR/wayland-0` is live. The
+`native:web:*` browser runner detects that socket and automatically supplies a
+headed Wayland Chrome launch, including `--ozone-platform=wayland`; it prints
+the selected display before Chrome starts. Plain commands below therefore use
+the validated capture lane without copying environment variables by hand.
+
+Confirm the host path independently with:
+
+```bash
+pnpm host:check -- --probe-browser-webgpu
+```
+
+The probe must report an opaque WebGPU canvas pixel and write an inspectable
+screenshot under `/tmp`. Headless Chrome on this machine can return black or
+transparent WebGPU captures even when the product renders correctly. Such a
+capture is invalid runner evidence, not a renderer failure or a reason to give
+up on browser validation. `MCLONE_NATIVE_WEB_FORCE_HEADLESS=1` is available
+only for intentional headless diagnostics.
+
 ```bash
 # Build and serve the Rust/WASM app locally with the headers required for
 # SharedArrayBuffer/Web Workers. The command prints the local app URL.

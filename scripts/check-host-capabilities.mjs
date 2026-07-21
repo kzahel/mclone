@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
+import { resolveBrowserWebGpuLaunch } from "./browser-webgpu-env.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(SCRIPT_DIR, "..");
@@ -62,8 +63,9 @@ function readHostFacts() {
   };
   const hasDisplay = Object.values(displayVars).some((value) => value.length > 0);
   const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR ?? "";
-  const waylandSockets = findWaylandSockets(xdgRuntimeDir);
-  const inferredWaylandDisplay = displayVars.WAYLAND_DISPLAY || waylandSockets[0] || "";
+  const browserLaunch = resolveBrowserWebGpuLaunch();
+  const waylandSockets = browserLaunch.waylandSockets;
+  const inferredWaylandDisplay = browserLaunch.waylandDisplay;
   const driPath = "/dev/dri";
   const driDevices = existsSync(driPath)
     ? readdirSync(driPath).filter((entry) => entry !== "." && entry !== "..").sort()
@@ -80,37 +82,10 @@ function readHostFacts() {
     xdgSessionType: process.env.XDG_SESSION_TYPE ?? "",
     waylandSockets,
     inferredWaylandDisplay,
-    suggestedWaylandBrowserEnv: createSuggestedWaylandBrowserEnv(inferredWaylandDisplay),
+    suggestedWaylandBrowserEnv: browserLaunch.suggestedWaylandBrowserEnv,
     driPathExists: existsSync(driPath),
     driDevices,
     likelyHeadless: process.platform === "linux" && !hasDisplay,
-  };
-}
-
-function findWaylandSockets(xdgRuntimeDir) {
-  if (!xdgRuntimeDir || !existsSync(xdgRuntimeDir)) {
-    return [];
-  }
-
-  try {
-    return readdirSync(xdgRuntimeDir)
-      .filter((entry) => /^wayland-\d+$/u.test(entry))
-      .sort();
-  } catch {
-    return [];
-  }
-}
-
-function createSuggestedWaylandBrowserEnv(waylandDisplay) {
-  if (!waylandDisplay) {
-    return undefined;
-  }
-  return {
-    CI: "1",
-    HEADED: "1",
-    WAYLAND_DISPLAY: waylandDisplay,
-    XDG_SESSION_TYPE: "wayland",
-    MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS: "--ozone-platform=wayland",
   };
 }
 
@@ -266,14 +241,14 @@ function classifyCapabilities(checks) {
       ? "available: pnpm test, pnpm typecheck, and native cargo tests are host-display independent"
       : "blocked: pnpm is not available on PATH",
     playwrightChromeWebGpu: headless && hasWaylandSocket && hasChrome && hasPlaywright
-      ? "candidate via headed Wayland: WAYLAND_DISPLAY is not exported, but a Wayland socket was detected; use the recommended env command below"
+      ? "available via headed Wayland: WAYLAND_DISPLAY is not exported, but the browser runner automatically uses the detected socket"
       : headless
       ? "expected unavailable on this host: no DISPLAY/WAYLAND display was detected, so Chrome/WebGPU Playwright failures are expected"
       : hasChrome && hasPlaywright
         ? "candidate: a display is present and Chrome plus @playwright/test were found; confirm with pnpm host:check -- --probe-browser-webgpu"
         : "blocked or incomplete: display is present, but Chrome or @playwright/test was not found",
     browserScreenshotsAndProbes: headless && hasWaylandSocket && hasChrome && hasPlaywright
-      ? "candidate via headed Wayland: run Playwright with --headed and the recommended WAYLAND_DISPLAY env"
+      ? "available via headed Wayland: native:web runners automatically use the detected display"
       : headless
       ? "skip here: run native web browser smokes only on a host with a working Chrome GPU/browser path"
       : "candidate: run pnpm native:web:app-smoke and inspect screenshots under /tmp",
@@ -305,15 +280,20 @@ async function probeBrowserWebGpu() {
 }
 
 function createBrowserProbeLaunchCandidates() {
-  const args = createBrowserWebGpuLaunchArgs();
-  const headless = process.env.HEADED === "1" ? false : true;
+  const browserLaunch = resolveBrowserWebGpuLaunch();
+  const args = createBrowserWebGpuLaunchArgs(browserLaunch);
+  const launchEnvironment = {
+    ...process.env,
+    ...browserLaunch.browserEnv,
+  };
   const candidates = [
     {
       launchLabel: "chrome-channel",
       launchOptions: {
         channel: "chrome",
-        headless,
+        headless: browserLaunch.headless,
         args,
+        env: launchEnvironment,
         timeout: 15_000,
       },
     },
@@ -323,8 +303,9 @@ function createBrowserProbeLaunchCandidates() {
     candidates.push({
       launchLabel: "bundled-chromium-angle-metal",
       launchOptions: {
-        headless,
+        headless: browserLaunch.headless,
         args,
+        env: launchEnvironment,
         timeout: 15_000,
       },
     });
@@ -333,8 +314,9 @@ function createBrowserProbeLaunchCandidates() {
   candidates.push({
     launchLabel: "bundled-chromium",
     launchOptions: {
-      headless,
+      headless: browserLaunch.headless,
       args,
+      env: launchEnvironment,
       timeout: 15_000,
     },
   });
@@ -342,13 +324,11 @@ function createBrowserProbeLaunchCandidates() {
   return candidates;
 }
 
-function createBrowserWebGpuLaunchArgs() {
+function createBrowserWebGpuLaunchArgs(browserLaunch = resolveBrowserWebGpuLaunch()) {
   return [
     "--enable-unsafe-webgpu",
     ...(process.platform === "darwin" ? ["--use-angle=metal"] : []),
-    ...(process.env.MCLONE_NATIVE_WEB_EXTRA_CHROME_ARGS
-      ?.split(/\s+/u)
-      .filter(Boolean) ?? []),
+    ...browserLaunch.chromeArgs,
   ];
 }
 
@@ -673,6 +653,13 @@ function printReport(checks) {
   }
   console.log(`  /dev/dri: ${host.driPathExists ? host.driDevices.join(", ") || "(empty)" : "(missing)"}`);
   console.log(`  likely headless: ${host.likelyHeadless ? "yes" : "no"}`);
+  if (
+    host.suggestedWaylandBrowserEnv
+    && !process.env.HEADED
+    && process.env.MCLONE_NATIVE_WEB_FORCE_HEADLESS !== "1"
+  ) {
+    console.log("  browser runner: auto-selects headed Wayland on this host");
+  }
   console.log("");
 
   console.log("Commands");
@@ -699,31 +686,11 @@ function printReport(checks) {
   console.log("");
   console.log("Recommended lanes");
   if (host.suggestedWaylandBrowserEnv) {
-    console.log(
-      `  run browser WebGPU on Wayland: ${
-        formatEnvCommand(
-          host.suggestedWaylandBrowserEnv,
-          "pnpm native:web:app-smoke",
-        )
-      }`,
-    );
-    console.log(
-      `  run mobile browser WebGPU on Wayland: ${
-        formatEnvCommand(
-          host.suggestedWaylandBrowserEnv,
-          "pnpm native:web:mobile-smoke",
-        )
-      }`,
-    );
-    console.log(
-      `  run canvas/chunk browser smoke on Wayland: ${
-        formatEnvCommand(
-          host.suggestedWaylandBrowserEnv,
-          "pnpm native:web:chunk-smoke",
-        )
-      }`,
-    );
-    console.log("  note: headed Wayland is the browser GPU lane validated on this host; headless Chrome may fail even when browser WebGPU is otherwise available");
+    console.log(`  detected headed Wayland display: ${host.inferredWaylandDisplay}`);
+    console.log("  run browser WebGPU on Wayland: pnpm native:web:app-smoke");
+    console.log("  run mobile browser WebGPU on Wayland: pnpm native:web:mobile-smoke");
+    console.log("  run canvas/chunk browser smoke on Wayland: pnpm native:web:chunk-smoke");
+    console.log("  note: native:web browser runners auto-select this headed Wayland environment; headless Chrome may fail even when browser WebGPU is otherwise available");
   } else if (host.likelyHeadless) {
     console.log("  run: pnpm test, pnpm typecheck, pnpm native:web:build");
     console.log("  skip here: native web browser smokes that require a working Chrome GPU/browser path");
@@ -734,14 +701,7 @@ function printReport(checks) {
   if (host.platform === "darwin") {
     console.log("  macOS browser screenshots: use Chrome channel with --enable-unsafe-webgpu and --use-angle=metal; bundled headless Chromium can present WebGPU canvases as black without ANGLE Metal");
   }
-  const probeCommand = "pnpm host:check -- --probe-browser-webgpu";
-  console.log(
-    `  verify Chrome WebGPU canvas capture now: ${
-      host.suggestedWaylandBrowserEnv
-        ? formatEnvCommand(host.suggestedWaylandBrowserEnv, probeCommand)
-        : probeCommand
-    }`,
-  );
+  console.log("  verify Chrome WebGPU canvas capture now: pnpm host:check -- --probe-browser-webgpu");
 }
 
 function printCommandLine(label, result) {
@@ -774,21 +734,6 @@ function formatDisplayVars(displayVars) {
     .filter(([, value]) => value.length > 0)
     .map(([key, value]) => `${key}=${value}`);
   return populated.length > 0 ? ` (${populated.join(", ")})` : " (DISPLAY/WAYLAND_DISPLAY unset)";
-}
-
-function formatEnvCommand(env, command) {
-  const envPrefix = Object.entries(env)
-    .map(([key, value]) => `${key}=${shellWord(value)}`)
-    .join(" ");
-  return `env ${envPrefix} ${command}`;
-}
-
-function shellWord(value) {
-  const text = String(value);
-  if (/^[A-Za-z0-9_./:=-]+$/u.test(text)) {
-    return text;
-  }
-  return `'${text.replace(/'/gu, "'\\''")}'`;
 }
 
 function firstLine(value) {
