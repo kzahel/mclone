@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 110 |
-| total parts | 2,350 |
-| boxes | 2,145 |
+| figures | 113 |
+| total parts | 2,423 |
+| boxes | 2,218 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 354 |
-| parts with any texture reference | 571 |
-| individual texture applications | 921 |
+| ASCII textures | 363 |
+| parts with any texture reference | 582 |
+| individual texture applications | 944 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 92 | 1,808 | 1,808 | 0 / 0 / 0 |
+| canonical `examples/` | 95 | 1,881 | 1,881 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -673,7 +673,28 @@ four-wing motion, deliberate shell and body surface steps, and loop
 continuity, and approved by the user on 2026-07-21. No shared gait macro or
 surface checker changed.
 
-All 921 applications target an explicit face of a box. They range from single
+The twenty-fifth post-migration content batch adds Ant, Stag Beetle, and
+Grasshopper as approved canonical box-only rigs. Ant is a
+22-part alternating-tripod marcher with three distinct body sections, a narrow
+petiole, paired mandibles, elbowed antennae, and six two-stage legs; Stag
+Beetle is a 27-part alternating-tripod crawler with separated chestnut wing
+cases, a broad thorax, paired branched mandibles, clubbed antennae, and six
+two-stage legs; and Grasshopper is a 24-part springing hopper with a green
+segmented body, folded wings, long antennae, four two-stage walking legs, and
+two oversized three-stage hind legs. All 73 parts are canonical boxes and use
+nine combined pixel textures across 11 textured parts and 23 explicit box-face
+applications. Typechecking, the Asset Lab test suite, the first-party figure
+drift check, and the repository diff check pass. Clean multi-angle sheets and
+four-cycle videos were rendered under `/tmp/mclone-asset-lab/batch-25` and
+inspected for identity, grounding, attachment continuity, six-leg alternating
+tripod cadence, synchronized hind-leg compression and extension, deliberate
+shell and body surface steps, and loop continuity. The user approved the batch
+on 2026-07-21 after the grasshopper's original rear-prong silhouette was
+replaced with four articulated walking legs and a recognizable hind-leg chain
+from raised femur through descending tibia to a short grounded foot. No shared
+gait macro or surface checker changed.
+
+All 944 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.

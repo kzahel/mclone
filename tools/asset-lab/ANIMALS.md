@@ -271,9 +271,9 @@ reviewed rigs and then filling macro gaps.
 | Ladybug | P2 | ✅ | C/W | — | `examples/ladybug` — approved 13-box seven-spotted adult with stepped wing cases, patterned pronotum, six legs, and alternating tripod crawl |
 | Dragonfly | P2 | ✅ | W | — | `examples/dragonfly` — approved 18-box blue dasher with huge eyes, four-stage abdomen, four independent wings, and darting flight |
 | Spider | P2 | ✅ | C | small, large, color morphs | `examples/spider` — approved 23-box garden spider with patterned abdomen, eight eyes, fangs, spinnerets, eight two-stage legs, and wave crawl |
-| Ant | P3 | ☐ | C | worker, soldier | 6 legs |
-| Beetle | P3 | ☐ | C | rhino/stag beetle | |
-| Grasshopper / Cricket | P3 | ☐ | H | — | |
+| Ant | P3 | ✅ | C | worker, soldier | `examples/ant` — approved 22-box carpenter ant with three distinct body sections, narrow petiole, paired mandibles, elbowed antennae, six two-stage legs, and alternating tripod march |
+| Beetle | P3 | ✅ | C | rhino/stag beetle | `examples/stag_beetle` — approved 27-box male stag beetle with split chestnut wing cases, broad thorax, branched mandibles, clubbed antennae, six two-stage legs, and alternating tripod crawl |
+| Grasshopper / Cricket | P3 | ✅ | H | — | `examples/grasshopper` — approved 24-box meadow grasshopper with folded wings, long antennae, four two-stage walking legs, oversized three-stage hind legs, and synchronized springing hop |
 | Scorpion | P3 | ☐ | C | — | claws + tail |
 | Roly-poly / Pill bug | P2 | ☐ | C | — | isopod; **roll-up** ball pose is the whole gag |
 | Earwig (pincher bug) | P2 | ☐ | C | — | rear pincers (cerci) |
