@@ -17,6 +17,7 @@
     "src/**/*.tsx",
     "examples/**/*.ts",
     "tests/**/*.ts",
+    "playwright.config.ts",
     "vite.config.ts"
   ]
 }

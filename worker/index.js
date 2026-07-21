@@ -23,11 +23,12 @@ export default {
       headers.set("Cache-Control", "no-cache, max-age=0, must-revalidate");
     } else if (versioned && isVersionedRuntimeAsset(key)) {
       headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (isHashedViteAsset(key)) {
+      headers.set("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (key.startsWith("animals/catalog/")) {
+      headers.set("Cache-Control", "no-cache, max-age=0, must-revalidate");
     } else if (key.endsWith(".js") || key.endsWith(".wasm") || key.endsWith(".zip.json")) {
       headers.set("Cache-Control", "no-cache, max-age=0, must-revalidate");
-    } else if (key.startsWith("assets/")) {
-      // Vite hashes these filenames; safe to cache forever.
-      headers.set("Cache-Control", "public, max-age=31536000, immutable");
     } else if (key.endsWith(".zip")) {
       headers.set("Cache-Control", "public, max-age=3600");
     } else {
@@ -46,4 +47,8 @@ function setCrossOriginIsolationHeaders(headers) {
 
 function isVersionedRuntimeAsset(key) {
   return key.endsWith(".js") || key.endsWith(".wasm") || key.endsWith(".zip");
+}
+
+function isHashedViteAsset(key) {
+  return key.startsWith("assets/") || key.includes("/assets/");
 }

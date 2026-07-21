@@ -87,6 +87,7 @@
     "native:web:build": "cargo build --manifest-path native/Cargo.toml -p mclone-web-client --target wasm32-unknown-unknown",
     "native:web:bundle": "bash ./scripts/deploy-native-web.sh --bundle-only",
     "native:web:deploy": "bash ./scripts/deploy-native-web.sh",
+    "native:web:worker:test": "node --test worker/index.test.mjs",
     "native:web:serve": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --serve --app-loop",
     "native:web:smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs",
     "native:web:scene-adapters": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --skip-threading",

@@ -124,6 +124,10 @@ pnpm native:web:lobby-scenario-lifecycle-smoke
 # Build the exact deploy bundle into dist-native-web/ without uploading.
 pnpm native:web:bundle
 
+# Build and test the read-only Asset Lab animal catalogue served at /animals/.
+pnpm asset-lab:web:build
+pnpm asset-lab:web:test
+
 # Build, upload the native web bundle and asset pack to the mclone R2 bucket,
 # deploy the Cloudflare Worker, and make it available at mclone.kzahel.com.
 pnpm deploy
@@ -141,6 +145,7 @@ The deploy path packages:
 
 - `native/apps/mclone-web-client/www`
 - wasm-bindgen output under `/pkg/`
+- the validated Asset Lab animal catalogue under `/animals/`
 - `reference/minecraft-1.17.1/extracted.zip`
 - deterministic authored/fallback packs and sidecars under
   `/first-party-packs/`

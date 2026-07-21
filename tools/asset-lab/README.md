@@ -25,6 +25,38 @@ pnpm asset-lab:preview
 pnpm asset-lab:compare
 ```
 
+## Interactive web catalogue
+
+The production-quality, read-only animal catalogue is another Asset Lab
+display path. It discovers every canonical `examples/*/figure.ts`, crosses the
+same serialize/reparse validation boundary as preview and review commands, and
+generates semantic JSON, SHA-256 metadata, and deterministic thumbnails before
+building the React/Three.js application.
+
+```sh
+pnpm asset-lab:web
+pnpm asset-lab:web:build
+pnpm asset-lab:web:test
+```
+
+The local development command serves `/animals/`. The production build writes
+to the ignored `tools/asset-lab/dist/web/` directory with a Vite base of
+`/animals/`; the normal native-web bundle copies that exact subtree into the
+deployed site. The live entry point is:
+
+```text
+https://mclone.kzahel.com/animals/
+```
+
+The catalogue browser never imports `figure.ts`. TypeScript sources execute on
+the build host, while visitors fetch parsed, validated, hash-checked semantic
+JSON. Deprecated rounded sources under `legacy-examples/` are excluded, and
+catalogue presence does not imply promotion into the runtime asset pack.
+
+The development preview and catalogue both use `src/viewport.ts` over the same
+`src/scene.ts` semantic renderer. React owns navigation and controls only; it
+does not create geometry or reinterpret animation keys.
+
 The smoke command writes screenshots under `/tmp/mclone-asset-lab/` by default.
 The exported figure JSON is also written under `/tmp` unless `--out` is passed.
 The sheet command writes a larger review image with front, side,
