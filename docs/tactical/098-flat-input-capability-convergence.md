@@ -10,6 +10,11 @@ session-local until Slice 7 adds broader platform preference persistence. This
 splits the remaining flat Android input/HUD parity work out of
 [`090-flat-android-client-parity.md`](090-flat-android-client-parity.md) into a
 shared flat-client capability contract for desktop, flat Android, and web.
+The durable all-target controller architecture, including shared semantic
+action state, menu navigation, Android backend ownership, XR convergence, and
+future Steam Input support, lives in
+[`../topics/controller-input.md`](../topics/controller-input.md). This tactical
+remains the bounded execution record for the existing flat-input slices.
 
 ## Purpose
 

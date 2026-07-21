@@ -154,6 +154,10 @@ series implements the same concern, normally reuse the document slug in its
   preferences/bootstrap/status; operational-only product reports; and an
   explicit semantic test observer while autonomous platform mechanics remain
   local.
+- [`controller-input.md`](controller-input.md): accepted all-target controller
+  architecture — standard gamepad snapshots, semantic action/context state,
+  shared UI navigation and prompts, thin desktop/web/Android collectors,
+  tracked XR extensions, and the later native Steam Input path.
 - [`platform-boundary-convergence.md`](platform-boundary-convergence.md):
   parent record for the shared/platform code-split campaign — the
   sixteen-pass ledger, the 2026-07-21 two-sided measured audit, the

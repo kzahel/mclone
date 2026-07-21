@@ -104,3 +104,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   Tactical 208 begins implementation with the cottage-and-barn lab
 - `structure-lab` — source-first authored structure DSL, generated-JSON drift
   gates, Rust-baked review artifacts, and a read-only public catalogue
+- `controller-input` — all-target ordinary gamepad collection, shared semantic
+  action/context resolution, controller-accessible UI, tracked XR convergence,
+  and the later native Steam Input path
