@@ -1,6 +1,6 @@
 # Tactical 214: Structure Lab Vertical Slice
 
-Status: active 2026-07-21; implementation started from `6b1881de`.
+Status: complete 2026-07-21; implemented from `6b1881de` through `e9515f27`.
 
 Topic: `structure-lab`
 
@@ -212,3 +212,36 @@ timber run, east-yard socket, and chicken realization marker. Its checked Rust
 preview contains 346 placed blocks, 1,641 faces, 6,564 vertices, and 9,846
 indices. The inspected browser capture shows the complete recipe at 1440x1000
 with the intended `Lab only` status and no diagnostic fallback materials.
+
+### Slice 6 closeout
+
+The committed `e9515f27` tree passed the full source, Rust, browser, WebGPU,
+provenance, and aggregate deployment matrix on 2026-07-21. The final catalogue
+contains thirteen recipes in three families, 10,715 placed blocks, twelve
+runtime-promoted members, and one Lab-only coop. Five TypeScript semantic tests,
+six worldgen template tests, seven canonical-only server gallery tests, two
+compiler tests, and four Playwright scenarios passed. The Rust loader also
+compiled for `wasm32-unknown-unknown`.
+
+The exact clean-worktree `pnpm native:web:bundle` output contains a
+9,497,407-byte `/structures/` subtree. Its 94,406-byte catalogue binds thirteen
+meshes, thirteen thumbnails, thirteen receipts, and one shared atlas. The
+closeout audit rehashed all thirteen mesh and atlas references (26 checks),
+found zero Minecraft-reference or unknown provenance records, and found zero
+shipped `.ts` or `.tsx` source files. The frontend JavaScript is 801.63 KB
+minified and 214.70 KB gzip; the measured Three.js-dominated bundle warning is
+accepted for this read-only first slice and remains a future optimization
+input, not hidden correctness debt.
+
+`pnpm host:check -- --probe-browser-webgpu` used headed Wayland and observed an
+opaque WebGPU pixel. Accepted captures remain outside the repository:
+
+- `/tmp/mclone-structure-lab-desktop-default.png`
+- `/tmp/mclone-structure-lab-desktop.png`
+- `/tmp/mclone-structure-lab-mobile.png`
+- `/tmp/mclone-structure-lab-barn.png`
+- `/tmp/mclone-structure-lab-coop.png`
+
+Terrain placement, structure starts/references/pieces, settlement composition,
+entities, and browser editing remain deliberately outside this completed
+tactical.

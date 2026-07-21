@@ -2,13 +2,14 @@
 
 Topic: `structure-lab`
 
-Status: **vertical slice active 2026-07-21. The TypeScript DSL and generated
+Status: **vertical slice complete 2026-07-21. The TypeScript DSL and generated
 JSON drift gate, strict Rust loader, promoted cottage/barn families,
 Rust preview compiler, original first-party farmstead materials, and read-only
 Three.js catalogue are implemented. The first Structure-Lab-native outbuilding
 is implemented and visually accepted. The temporary Rust authoring oracles
-have been removed after exact parity. Aggregate deployment and final closeout
-gates remain. In-browser block editing is indefinitely deferred.**
+have been removed after exact parity. The aggregate deployment stages the
+catalogue under `/structures/`, and all closeout gates pass. In-browser block
+editing is indefinitely deferred.**
 
 Last reconciled: **2026-07-21**.
 
@@ -25,7 +26,8 @@ Last reconciled: **2026-07-21**.
 - The initial cottage artifact contains 923 placed blocks, 3,539 visible
   faces, 14,156 vertices, 21,234 indices, 15 build layers, and seven named
   component groups. The 599,400-byte GLB references one 1024x256 shared atlas.
-- The public receipt resolves 18 first-party and 126 generated asset paths,
+- The public preview receipts resolve 22 first-party and 122 generated asset
+  paths,
   one optional missing path, and zero Minecraft-reference or unknown paths.
 - Twelve finite family members are externalized: all six cottage depth/entry
   combinations plus short, standard, and long barn cores and lean-tos. Every
@@ -47,10 +49,17 @@ Last reconciled: **2026-07-21**.
   clay, bound hay, flowers, and wall torch.
   Texture Lab review sheets and full desktop/mobile catalogue captures were
   inspected before accepting the presentation baseline.
+- The final catalogue contains thirteen recipes, three families, 10,715 placed
+  blocks, and twelve runtime-promoted members. Its clean deployed subtree is
+  9,497,407 bytes; the 801.63 KB JavaScript bundle is 214.70 KB gzip.
+- The aggregate native-web build stages the production-base Vite output under
+  `/structures/`. A clean committed-tree bundle audit verified all 26 mesh and
+  atlas hashes and found no shipped authoring TypeScript or forbidden
+  provenance.
 
 ## Scope
 
-This topic owns the proposed **Mclone Structure Lab**: the source-authoring
+This topic owns **Mclone Structure Lab**: the source-authoring
 contract for reusable authored structures, initially buildings; its canonical
 generated records; build-time preview compilation; the public structure
 catalogue and build-guide experience; promotion into runtime structure
@@ -66,8 +75,8 @@ with [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md),
 Use **Structure Lab** for the tool and public product. It matches the engine
 and file-format noun while retaining the established Asset Lab relationship:
 
-- `tools/structure-lab/` — proposed authoring and catalogue package;
-- `/structures/` — proposed public route;
+- `tools/structure-lab/` — authoring and catalogue package;
+- `/structures/` — public deployment route;
 - `StructureTemplate` — engine object;
 - `*.structure.json` — generated canonical semantic record; and
 - structure palette, block, marker, socket, transform, and placement receipts.
@@ -252,7 +261,7 @@ textures are a fallback, not the assumed steady state.
 
 ## Read-Only Website Contract
 
-The proposed `/structures/` application should provide:
+The `/structures/` application provides:
 
 - searchable structure and family navigation;
 - deterministic lazy thumbnails and one retained live Three.js canvas;
@@ -278,7 +287,7 @@ Catalogue rows use static thumbnails and lazy loading. They must not allocate
 one WebGL/WebGPU context per card. The selected mesh and its shared atlas are
 loaded on demand and disposed or cached under an explicit bounded policy.
 
-The likely deployment shape mirrors `/animals/`: Vite produces the exact
+The deployment shape mirrors `/animals/`: Vite produces the exact
 `/structures/` subtree, the aggregate native-web bundle stages it, and the
 existing worker/deploy path serves it with correct subpath URLs and cache
 headers. A separate site, bucket, deployment worker, or authentication system
@@ -286,9 +295,10 @@ is not justified initially.
 
 ## Runtime And Farmstead Relationship
 
-Tacticals 208–210 currently define the accepted cottage and barn families in
-Rust and prove ordinary persisted galleries. They are migration oracles for
-Structure Lab, not content to discard immediately.
+Tacticals 208–210 established the accepted cottage and barn families in Rust
+and proved ordinary persisted galleries. Tactical 214 used those bodies as
+temporary migration oracles, proved all twelve external records exactly, then
+removed the duplicate Rust authoring bodies.
 
 Migration should proceed member by member:
 
@@ -372,9 +382,9 @@ its bundle or architecture.
 - Initial-load, selected-mesh, shared-atlas, JavaScript gzip, and GPU resource
   sizes are recorded before adding more catalogue complexity.
 
-## Implementation Direction
+## Landed Vertical Slice
 
-No tactical number is reserved by this topic. The recommended sequence is:
+Tactical 214 completed the sequence on 2026-07-21:
 
 1. **Canonical-source proof:** scaffold `tools/structure-lab`, define the typed
    DSL and schema-v1 JSON, implement `write` and mandatory `check` commands,
@@ -394,26 +404,23 @@ No tactical number is reserved by this topic. The recommended sequence is:
 6. **First new Lab-native building:** author and review a chicken coop, shed,
    or similarly bounded outbuilding entirely through the source-first pipeline.
 
-The first implementation tactical should remain narrow enough to reject the
-architecture cheaply: one cottage, one canonical record, one Rust load/equality
-gate, and one baked static mesh. A general editor and the complete catalogue
-are not acceptance conditions for that proof.
+The work retained a cheap rejection point at the first cottage and baked mesh,
+then expanded only after source, loader, visual, and provenance gates passed.
+Future content should reuse this pipeline rather than reopening its completed
+vertical-slice architecture without measured pressure.
 
-## Open Decisions For The First Proof
+## Resolved Decisions From The First Proof
 
-- Whether glTF with an external shared atlas is sufficient, or a compact
-  custom mesh container is measurably preferable.
-- Whether fixed preview lighting should be baked directly into vertex color or
-  preserve compact block/sky-light channels for a tiny Three.js shader.
-- The smallest shared engine boundary for build-time structure mesh
-  compilation without depending on a live server/session.
-- Whether named layer/component groups fit glTF cleanly without excessive
-  primitive count or draw overhead.
-- Which accepted cottage member is the best migration canary; the standard
-  member has the strongest visual baseline, while the snug stoop is smaller.
-
-Resolve these through the first vertical proof rather than speculative generic
-infrastructure.
+- GLB plus one external content-addressed shared atlas is sufficient for the
+  current catalogue. Reconsider a custom container only with measured pressure.
+- Fixed preview illumination and production AO are baked into vertex color;
+  the website needs no custom block-light shader.
+- `mclone-structure-compiler` is the narrow native build-time boundary over
+  `mclone-assets`, `mclone-mesh`, and `mclone-worldgen`.
+- Named component and vertical-layer groups fit the GLB proof and catalogue
+  interaction contract at the current family sizes.
+- The standard canopy cottage was the migration canary because it had the
+  strongest accepted visual baseline.
 
 ## Code And Documentation Map
 

@@ -43,3 +43,8 @@ catalogue consumes.
 The current catalogue contains promoted cottage and barn families plus the
 lab-only Rosehip Chicken Coop. The coop is the first structure authored wholly
 through this workflow without a Rust constructor.
+
+`pnpm native:web:bundle` builds this package and stages its production Vite
+output under `dist-native-web/structures/`. The public application is read-only
+and ships baked meshes, the shared atlas, receipts, thumbnails, and catalogue
+facts; it never ships or executes the TypeScript authoring sources.

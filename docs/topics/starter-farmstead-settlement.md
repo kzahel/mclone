@@ -7,7 +7,9 @@ prove the standalone building loop, human-directed charm iteration, and first
 bounded building families: named cottage depth/entry plans and barn
 length/lean-to compositions over shared templates, themes, transforms, a small
 full-cube plus glass/stair/slab palette, normal persisted chunks, SQLite reopen,
-and inspected production renders. Full settlement placement remains staged
+and inspected production renders. Tactical 214 externalizes those families
+through the completed Structure Lab and adds a Lab-native coop. Full settlement
+placement remains staged
 behind its own structure, overlay, site-plan, and content work. Original terrain
 and hydrology are quality upgrades, not blockers for continued standalone
 building art.**
@@ -758,18 +760,18 @@ series actually begins, not for this documentation-only planning phase.
 
 ## Next Work
 
-Tactical 210 is complete. The accepted standard cottage and barn now sit inside
-bounded authored families rather than becoming arbitrary numeric extrusions:
+Tactical 214 is complete. The accepted cottage and barn now sit inside
+source-first, bounded authored families rather than arbitrary numeric extrusions:
 cottages select `snug`, `standard`, or `deep` plans plus a stoop or canopy
 porch; barns select `short`, `standard`, or `long` structural bays and compose
-the east lean-to independently. The accepted next standalone-authoring
-direction now lives in [`structure-lab.md`](structure-lab.md): agent-authored
-TypeScript DSL sources generate drift-checked canonical JSON and Rust-baked
-static preview meshes for a polished read-only catalogue. In-browser editing is
-indefinitely deferred. This lane can pause while `FS-04` proves the true
-structure lifecycle. If the next composition slice needs enclosures first,
-resume `FS-02` with the fence/gate family; do not add doors, props, crops, and
-fences as one undirected content batch.
+the east lean-to independently. [`structure-lab.md`](structure-lab.md) now owns
+the proven authoring path: agent-authored TypeScript DSL sources generate
+drift-checked canonical JSON and Rust-baked static preview meshes for a polished
+read-only catalogue. The Rosehip coop proves new content needs no Rust authoring
+body. In-browser editing is indefinitely deferred. This lane can pause while
+`FS-04` proves the true structure lifecycle. If the next composition slice
+needs enclosures first, resume `FS-02` with the fence/gate family; do not add
+doors, props, crops, and fences as one undirected content batch.
 
 `FS-04`, the true cross-chunk structure lifecycle, remains the first hard
 blocker for materializing the eventual settlement during normal generation. It
