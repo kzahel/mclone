@@ -2,10 +2,9 @@
 
 Topic: `animal-catalogue`
 
-Status: initial catalogue complete and live-accepted 2026-07-21. Runtime
-promotion metadata and filtering are locally accepted; follow-up production
-publication and live verification remain. The read-only, production-built
-Asset Lab catalogue is available at
+Status: complete and live-accepted 2026-07-21, including runtime promotion
+metadata and filtering. The read-only, production-built Asset Lab catalogue is
+available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
 
@@ -155,7 +154,7 @@ occur.
 6. [x] Derive runtime promotion metadata from the checked first-party registry,
    validate it in the catalogue contract, and display summary, filter, badge,
    and inspector states.
-7. [ ] Publish and live-verify the runtime promotion follow-up.
+7. [x] Publish and live-verify the runtime promotion follow-up.
 
 ## Local Acceptance Evidence
 
@@ -185,7 +184,7 @@ and found one manifest, one JSON and one PNG per local canonical source. The
 local inventory can include uncommitted sources; production inventory is
 deliberately generated from the pushed deploy worktree.
 
-The current application JavaScript is about 745 KB minified and 200 KB gzip,
+The current application JavaScript is about 748 KB minified and 201 KB gzip,
 dominated by the one Three.js viewport plus React. Figure JSON is fetched lazily
 per selection and catalogue thumbnails use native lazy loading. Further code
 splitting is measurement-gated rather than required for first publication.
@@ -229,6 +228,34 @@ locked Vite package. The bundle now installs that package with a frozen
 lockfile when absent, and the successful production build ran from the clean
 deploy worktree rather than the active checkout.
 
+### Runtime Promotion Follow-up
+
+Commit `cd40e3eb212481b6d0bc019bbaae4cc65a357ebe` deployed through the clean
+worktree on 2026-07-21 as Cloudflare Worker version
+`81c9da3d-5b92-41b4-a672-5bea6dec5950`. The clean aggregate bundle passed,
+including the native web-glue build, 95-figure catalogue generation, and new
+hashed assets `index-9j2fmTha.js` and `index-DdxD-7mf.css`.
+
+The live manifest revalidated with SHA-256
+`feb640c947b6f6806493996669e4bb72c2883e4a82efff593d046f226e3bef5b` and
+reported 95 figures, 95 clips, 1,881 parts, and three runtime promotions. Those
+records are exactly:
+
+- `chicken` → `mclone:chicken` →
+  `assets/mclone/figures/chicken.figure.json`;
+- `player` → `mclone:player` →
+  `assets/mclone/figures/player.figure.json`; and
+- `upright_bear` → `mclone:upright_bear` →
+  `assets/mclone/figures/upright_bear.figure.json`.
+
+Live Playwright acceptance proved the runtime summary, the exact three-row
+Runtime-only result, all three badges, Chicken's displayed ID and packed path,
+Chicken animation advance, Chicken exclusion from the Lab-only filter, King
+Cobra's Asset Lab-only inspector state, one-canvas ownership, and 390px layout
+without horizontal overflow. No failed requests, console errors, or page
+errors occurred. The fully loaded production capture at
+`/tmp/mclone-animal-catalogue-promotion-live-loaded.png` was inspected.
+
 ## Code And Documentation Map
 
 - Asset Lab contract and commands:
@@ -264,8 +291,7 @@ deploy worktree rather than the active checkout.
 
 ## Recommended Next Work
 
-Publish and live-verify the runtime-promotion follow-up. After that, reconsider
-a workspace package only when a consumer outside `tools/asset-lab` needs the
-TypeScript viewer contract. Treat further bundle splitting or upload batching
-as measurement-led deployment improvements rather than catalogue correctness
-work.
+No acceptance work remains. Reconsider a workspace package only when a
+consumer outside `tools/asset-lab` needs the TypeScript viewer contract. Treat
+further bundle splitting or upload batching as measurement-led deployment
+improvements rather than catalogue correctness work.
