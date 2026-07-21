@@ -25,8 +25,6 @@ enum StorageStore {
     Catalog,
     DimensionChunks,
     DimensionEntityChunks,
-    LegacyChunks,
-    LegacyEntityChunks,
     Dimensions,
     Players,
     WorldMetadata,
@@ -40,8 +38,6 @@ impl StorageStore {
             Self::Catalog => "catalog",
             Self::DimensionChunks => "dimension-chunks",
             Self::DimensionEntityChunks => "dimension-entity-chunks",
-            Self::LegacyChunks => "legacy-chunks",
-            Self::LegacyEntityChunks => "legacy-entity-chunks",
             Self::Dimensions => "dimensions",
             Self::Players => "players",
             Self::WorldMetadata => "world-metadata",
@@ -50,22 +46,18 @@ impl StorageStore {
     }
 }
 
-const ORDINARY_WORLD_RECORD_STORES: [StorageStore; 7] = [
+const ORDINARY_WORLD_RECORD_STORES: [StorageStore; 5] = [
     StorageStore::DimensionChunks,
     StorageStore::DimensionEntityChunks,
-    StorageStore::LegacyChunks,
-    StorageStore::LegacyEntityChunks,
     StorageStore::Dimensions,
     StorageStore::Players,
     StorageStore::WorldMetadata,
 ];
 
-const FACTORY_RESET_STORES: [StorageStore; 8] = [
+const FACTORY_RESET_STORES: [StorageStore; 6] = [
     StorageStore::ManagedWorldMetadata,
     StorageStore::DimensionChunks,
     StorageStore::DimensionEntityChunks,
-    StorageStore::LegacyChunks,
-    StorageStore::LegacyEntityChunks,
     StorageStore::Dimensions,
     StorageStore::Players,
     StorageStore::WorldMetadata,

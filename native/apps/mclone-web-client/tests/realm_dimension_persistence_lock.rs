@@ -1,5 +1,4 @@
-//! Tactical 185 Slice 3 lock for dimension-qualified IndexedDB records and
-//! the explicit v5-to-v6 Overworld migration.
+//! Dimension-qualified IndexedDB record and ownership locks.
 
 const WORLD_CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -19,13 +18,23 @@ const SERVER_WORKER: &str = include_str!(concat!(
 ));
 
 #[test]
-fn indexed_db_v6_qualifies_dimension_records_and_migrates_v5_to_overworld() {
+fn indexed_db_v6_qualifies_dimension_records_without_runtime_migration() {
     assert!(WORLD_CATALOG.contains("export const WORLD_DB_VERSION = 6;"));
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"dimensionKey\", \"x\", \"z\"]"));
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"dimensionKey\"]"));
     assert!(WORLD_CATALOG.contains("keyPath: [\"worldId\", \"playerKey\"]"));
-    assert!(WORLD_CATALOG.contains("dimensionKey: \"minecraft:overworld\""));
-    assert!(WORLD_CATALOG.contains("migrateLegacyWorldRecordsToOverworld"));
+    for forbidden in [
+        "migrateLegacyWorldRecordsToOverworld",
+        "migrateLegacyWorldRecordStore",
+        "minecraft:overworld",
+        "legacy-chunks",
+        "legacy-entity-chunks",
+    ] {
+        assert!(
+            !WORLD_CATALOG.contains(forbidden),
+            "browser storage adapter regained obsolete compatibility policy through {forbidden}"
+        );
+    }
 
     assert!(RECORD_EXECUTOR.contains("store: WORLD_DIMENSION_STORE"));
     assert!(RECORD_EXECUTOR.contains("valueFields: [\"dimensionKey\", \"x\", \"z\"]"));

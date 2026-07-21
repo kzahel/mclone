@@ -72,7 +72,7 @@ fn browser_session_lifecycle_is_not_mirrored() {
 
 #[test]
 fn readiness_and_ready_envelopes_are_rust_authored() {
-    assert!(!WEB_APP.contains("const streamingSettled ="));
+    assert!(!WEB_APP.contains("frame.streamingIdle"));
     assert!(WEB_APP.contains("return Boolean(frame.initialPresentationReady)"));
     assert!(!WEB_APP.contains("frame.renderWorkerPendingRequestCount"));
     assert!(!WEB_APP.contains("const runnerSettled ="));
@@ -91,12 +91,17 @@ fn readiness_and_ready_envelopes_are_rust_authored() {
 }
 
 #[test]
-fn accepted_legacy_migration_remains_one_explicit_exception() {
-    assert_eq!(
-        WORLD_CATALOG
-            .matches("migrateLegacyWorldRecordsToOverworld")
-            .count(),
-        2,
-    );
-    assert_eq!(WORLD_CATALOG.matches("minecraft:overworld").count(), 1);
+fn browser_adapter_contains_no_runtime_dimension_migration() {
+    for forbidden in [
+        "migrateLegacyWorldRecordsToOverworld",
+        "migrateLegacyWorldRecordStore",
+        "minecraft:overworld",
+        "legacy-chunks",
+        "legacy-entity-chunks",
+    ] {
+        assert!(
+            !WORLD_CATALOG.contains(forbidden),
+            "browser adapter regained obsolete compatibility policy through {forbidden}"
+        );
+    }
 }

@@ -3,8 +3,6 @@ export const WORLD_DB_VERSION = 6;
 export const WORLD_CATALOG_STORE = "worlds";
 export const WORLD_CHUNK_STORE = "dimensionChunks";
 export const WORLD_ENTITY_CHUNK_STORE = "dimensionEntityChunks";
-export const LEGACY_WORLD_CHUNK_STORE = "chunks";
-export const LEGACY_WORLD_ENTITY_CHUNK_STORE = "entityChunks";
 export const WORLD_DIMENSION_STORE = "dimensions";
 export const WORLD_PLAYER_STORE = "players";
 export const WORLD_METADATA_STORE = "worldMetadata";
@@ -56,7 +54,6 @@ export function openWorldDb(): Promise<IDBDatabase> {
       ensureWorldMetadataStore(db, request.transaction);
       ensureWorldCatalogStore(db);
       ensureManagedWorldMetadataStore(db);
-      migrateLegacyWorldRecordsToOverworld(db, request.transaction);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("failed to open IndexedDB world store"));
@@ -234,8 +231,6 @@ function catalogBrowserStoreName(stableName: string): string {
     case "catalog": return WORLD_CATALOG_STORE;
     case "dimension-chunks": return WORLD_CHUNK_STORE;
     case "dimension-entity-chunks": return WORLD_ENTITY_CHUNK_STORE;
-    case "legacy-chunks": return LEGACY_WORLD_CHUNK_STORE;
-    case "legacy-entity-chunks": return LEGACY_WORLD_ENTITY_CHUNK_STORE;
     case "dimensions": return WORLD_DIMENSION_STORE;
     case "players": return WORLD_PLAYER_STORE;
     case "world-metadata": return WORLD_METADATA_STORE;
@@ -256,8 +251,6 @@ export async function clearIndexedDbWorldRecords(
   await Promise.all([
     clearIndexedDbStoreForWorld(db, WORLD_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
-    clearIndexedDbStoreForWorld(db, LEGACY_WORLD_CHUNK_STORE, worldId),
-    clearIndexedDbStoreForWorld(db, LEGACY_WORLD_ENTITY_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_DIMENSION_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_PLAYER_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_METADATA_STORE, worldId),
@@ -297,43 +290,6 @@ function ensureWorldDimensionStore(
     keyPath: ["worldId", "dimensionKey"],
   });
   store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
-}
-
-function migrateLegacyWorldRecordsToOverworld(
-  db: IDBDatabase,
-  transaction: IDBTransaction | null,
-): void {
-  if (!transaction) return;
-  migrateLegacyWorldRecordStore(
-    db,
-    transaction,
-    LEGACY_WORLD_CHUNK_STORE,
-    WORLD_CHUNK_STORE,
-  );
-  migrateLegacyWorldRecordStore(
-    db,
-    transaction,
-    LEGACY_WORLD_ENTITY_CHUNK_STORE,
-    WORLD_ENTITY_CHUNK_STORE,
-  );
-}
-
-function migrateLegacyWorldRecordStore(
-  db: IDBDatabase,
-  transaction: IDBTransaction,
-  legacyStoreName: string,
-  destinationStoreName: string,
-): void {
-  if (!db.objectStoreNames.contains(legacyStoreName)) return;
-  const destination = transaction.objectStore(destinationStoreName);
-  const request = transaction.objectStore(legacyStoreName).openCursor();
-  request.onsuccess = () => {
-    const cursor = request.result;
-    if (!cursor) return;
-    const value = (cursor.value ?? {}) as Record<string, unknown>;
-    destination.put({ ...value, dimensionKey: "minecraft:overworld" });
-    cursor.continue();
-  };
 }
 
 function ensureWorldPlayerStore(
