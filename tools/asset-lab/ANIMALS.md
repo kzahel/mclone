@@ -245,8 +245,9 @@ reviewed rigs and then filling macro gaps.
 | Sea turtle | P2 | ☐ | S | adult, hatchling | also Reptiles |
 | Seahorse | P3 | ✅ | S | — | `examples/seahorse` — approved 21-box common seahorse with long snout, raised coronet, plated trunk, fluttering fins, and five-stage curled tail |
 | Jellyfish | P3 | ✅ | S | — | `examples/jellyfish` — approved 32-box moon jellyfish with stepped bell, four two-stage oral arms, eight two-stage tentacles, and asymmetric pulse animation |
-| Starfish | P3 | ☐ | ST | — | nearly static |
-| Lobster / Shrimp | P3 | ☐ | C/S | — | |
+| Starfish | P3 | ✅ | ST | — | `examples/starfish` — approved 17-box ochre sea star with patterned central disc, five independently rooted three-stage arms, tube-foot markings, and slow traveling creep |
+| Lobster | P3 | ✅ | C | — | `examples/lobster` — approved 43-box American lobster with heavy mottled carapace, long antennae, articulated claws, eight walking legs, five abdomen plates, and broad tail fan |
+| Shrimp | P3 | ✅ | S | — | `examples/shrimp` — approved 41-box pink shrimp with pointed rostrum, stalked eyes, long antennae, six walking legs, ten swimmerets, curled plated abdomen, and paddle swim |
 | Seal / Sea lion | P3 | ✅ | S/Q | harbor seal, sea lion | `examples/harbor_seal` — approved 12-box harbor seal with a tapered spotted body, earless head, pale whiskered muzzle, short foreflippers, and paired hind flippers |
 | Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
 

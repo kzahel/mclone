@@ -340,20 +340,20 @@ An inventory taken on 2026-07-21 from both source roots found:
 
 | Fact | Count |
 |---|---:|
-| figures | 125 |
-| total parts | 2,768 |
-| boxes | 2,563 |
+| figures | 128 |
+| total parts | 2,869 |
+| boxes | 2,664 |
 | spheres / capsules / cylinders | 80 / 98 / 27 |
-| ASCII textures | 398 |
-| parts with any texture reference | 695 |
-| individual texture applications | 1,164 |
+| ASCII textures | 408 |
+| parts with any texture reference | 743 |
+| individual texture applications | 1,253 |
 | texture applications on curved primitives | 0 |
 
 The policy split within that combined inventory is:
 
 | Source class | Figures | Parts | Boxes | Spheres / capsules / cylinders |
 |---|---:|---:|---:|---:|
-| canonical `examples/` | 107 | 2,226 | 2,226 | 0 / 0 / 0 |
+| canonical `examples/` | 110 | 2,327 | 2,327 | 0 / 0 / 0 |
 | deprecated `legacy-examples/` | 18 | 542 | 337 | 80 / 98 / 27 |
 
 The first post-migration content batch adds three approved canonical box-only
@@ -778,7 +778,25 @@ first-party figure drift gate, repository diff check, and 107-figure/112-clip
 web production build pass. The user approved the complete batch without
 further revision.
 
-All 1,164 applications target an explicit face of a box. They range from single
+The thirtieth post-migration content batch adds Starfish, Lobster, and Shrimp
+as approved canonical box-only rigs. Starfish is a 17-part ochre sea star with
+a patterned central disc, five independently
+rooted three-stage arms, visible tube-foot rows, and a restrained traveling
+creep; Lobster is a 43-part American lobster with a heavy mottled carapace,
+long antennae, oversized articulated claws, eight two-stage walking legs, five
+abdomen plates, and a broad tail fan; and Shrimp is a 41-part pink swimmer with
+a pointed rostrum, stalked eyes, long antennae, six two-stage walking legs, ten
+swimmerets, a curled five-stage abdomen, and a paddle swim. All 101 parts are
+canonical boxes and use ten combined pixel textures across 48 textured parts
+and 89 explicit box-face applications. Clean multi-angle sheets and multi-cycle
+videos were rendered under `/tmp/mclone-asset-lab/batch-30` and inspected for
+identity, attachment continuity, five-arm separation, claw and leg cadence,
+abdomen silhouettes, swimmeret motion, and loop continuity. The Asset Lab
+typecheck, 19-test semantic suite, first-party figure drift gate, repository
+diff check, and 110-figure/115-clip web production build pass. The user
+approved the complete batch without further revision.
+
+All 1,253 applications target an explicit face of a box. They range from single
 front/north faces for eyes and muzzles to the butterfly wings and the blocky
 tiger's body, leg, paw, and tail patterns. No part uses a whole-primitive
 texture, and all 205 curved primitives currently use solid materials.
