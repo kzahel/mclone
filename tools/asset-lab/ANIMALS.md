@@ -206,6 +206,7 @@ reviewed rigs and then filling macro gaps.
 | Mongoose | P3 | ✅ | Q | — | `examples/mongoose` — approved 19-box low runner with a narrow speckled body, pointed muzzle, small ears, dark feet, and three-stage tail |
 | Binturong | P3 | ✅ | Q | — | `examples/binturong` — approved 24-box adult with a shaggy charcoal coat, pale whiskers, plantigrade feet, slow canopy prowl, and separate five-stage prehensile-tail curl action |
 | Honey badger | P3 | ✅ | Q | — | `examples/honey_badger` — approved 21-box adult with a continuous pale mantle, black underbody, heavy clawed paws, determined trot, and separate alternating digging-swipe action |
+| Fossa | P3 | ✅ | Q | — | `examples/fossa` — approved 21-box adult with a long tawny body, low feline head, rounded ears, four-stage balancing tail, quiet forest prowl, and separate airborne pounce action |
 
 ## Marsupials & monotremes
 
@@ -226,6 +227,7 @@ reviewed rigs and then filling macro gaps.
 |---|---|---|---|---|---|
 | Chicken | P0 | ✅ | W | (see Farm) | `examples/chicken`; rounded A/B in `legacy-examples/chicken_rounded` |
 | Toucan | P3 | ✅ | W | — | `examples/toucan` — approved 16-box toco toucan with enormous multicolor bill, white throat, blue eye ring, layered wings, and fast flap |
+| Great hornbill | P3 | ✅ | W | rhinoceros hornbill | `examples/great_hornbill` — approved 19-box great hornbill with black-white plumage, enormous yellow-orange bill and casque, broad forest flight, long banded tail, and separate double beak-clack action |
 | Owl | P1 | ✅ | W | brown, snowy (white) | `examples/owl` — approved 15-box great horned owl with facial disc, layered wings, and tucked talons |
 | Parrot | P1 | ✅ | W | red, green, blue, yellow morphs | `examples/parrot` — approved 15-box scarlet macaw with hooked beak, saturated wing bands, and long tail |
 | Eagle / Hawk | P2 | ✅ | W | bald eagle (white head), hawk | `examples/eagle` — approved 15-box bald eagle with broad wings, white head/tail, hooked beak, and talons |
@@ -269,6 +271,7 @@ reviewed rigs and then filling macro gaps.
 | Walrus | P2 | ✅ | S/Q | Atlantic, Pacific | `examples/walrus` — review candidate Atlantic walrus with massive wrinkled body, paired whisker pads and tusks, broad foreflippers, and split hind flippers |
 | Anglerfish | P3 | ✅ | S | deep-sea anglerfish | `examples/anglerfish` — approved 25-box deep-sea anglerfish with oversized toothed jaw, paired fins, articulated lure, tail hover, and separate jaw-snap action |
 | Leafy seadragon | P3 | ✅ | S | weedy seadragon | `examples/leafy_seadragon` — approved 26-box leafy seadragon with plated narrow trunk, horse-like head, five-stage tail, layered camouflage appendages, hover-swim, and separate leaf-fan action |
+| Moray eel | P3 | ✅ | S | giant, snowflake | `examples/moray_eel` — approved 19-box giant moray with mottled seven-stage body, exposed teeth, traveling ribbon swim, and separate forward jaw-lunge action |
 
 ## Reptiles & amphibians
 
