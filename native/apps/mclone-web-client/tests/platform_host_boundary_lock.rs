@@ -226,3 +226,46 @@ fn browser_bootstrap_roles_and_host_selection_stay_in_rust() {
         );
     }
 }
+
+#[test]
+fn browser_capability_and_post_wasm_status_policy_stay_in_rust() {
+    for required in [
+        "pub struct WebHostCapabilities",
+        "initial_debug_overlay_visible",
+        "viewport_width_css_pixels >= 681.0",
+    ] {
+        assert!(
+            WEB_BOOTSTRAP.contains(required),
+            "Rust browser capability policy lost {required}"
+        );
+    }
+    for required in [
+        "StatusOverlay::new(\"Generating world...\", true)",
+        "startup_status_visible",
+        "js_name = reportHostFailure",
+    ] {
+        assert!(
+            WEB_SCENE_HOST.contains(required),
+            "Rust browser status policy lost {required}"
+        );
+    }
+    for forbidden in [
+        "defaultDebugOverlayVisible",
+        "startupStatusLabel",
+        "setNativeDebugOverlay",
+        "setNativeStatusOverlay",
+        "setStatusOverlay",
+        "(min-width: 681px)",
+        "Loading engine",
+        "Loading assets",
+        "Preparing renderer",
+        "Generating world",
+    ] {
+        assert!(
+            !WEB_APP.contains(forbidden),
+            "production TypeScript regained capability/status policy through {forbidden}"
+        );
+    }
+    assert!(WEB_APP.contains("new module.WebHostCapabilities("));
+    assert!(WEB_APP.contains(": \"Starting mclone…\""));
+}

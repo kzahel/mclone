@@ -57,7 +57,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
-use crate::web_bootstrap::{InitialAssetPacks, WebBootstrapResources};
+use crate::web_bootstrap::{InitialAssetPacks, WebBootstrapResources, WebHostCapabilities};
 use crate::web_canvas::{
     WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, gui_key_from_label,
     prepare_web_scene_assets_from_pack, prepare_web_scene_assets_from_selection, ui_action_label,
@@ -275,6 +275,7 @@ pub struct WebSceneHost {
     frame_count: u64,
     rendered_frame_count: u64,
     initial_presentation_stable_frames: u8,
+    startup_status_visible: bool,
     last_visible_frame_millis: Option<f64>,
     max_frame_gap_millis: f64,
     movement_input_applied: bool,
@@ -821,6 +822,12 @@ impl WebSceneHost {
             }
         }
         self.observe_initial_presentation_frame();
+        if self.startup_status_visible
+            && self.initial_presentation_stable_frames >= INITIAL_PRESENTATION_STABLE_FRAMES
+        {
+            self.startup_status_visible = false;
+            self.status_overlay = StatusOverlay::hidden();
+        }
         self.report(Some(&summary), true, delta_seconds, first_after_resume)
             .map_err(JsValue::from)
     }
@@ -1342,18 +1349,10 @@ impl WebSceneHost {
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = setStatusOverlay)]
-    pub fn set_status_overlay(
-        &mut self,
-        message: &str,
-        ok: bool,
-        visible: bool,
-    ) -> Result<JsValue, JsValue> {
-        self.status_overlay = if visible {
-            StatusOverlay::new(message, ok)
-        } else {
-            StatusOverlay::hidden()
-        };
+    #[wasm_bindgen(js_name = reportHostFailure)]
+    pub fn report_host_failure(&mut self, message: &str) -> Result<JsValue, JsValue> {
+        self.startup_status_visible = false;
+        self.status_overlay = StatusOverlay::new(format!("Browser host failure: {message}"), false);
         self.ui_report(false, None).map_err(JsValue::from)
     }
 
@@ -1801,6 +1800,7 @@ impl WebSceneHost {
 pub async fn mclone_web_create_scene_host_with_startup(
     canvas: HtmlCanvasElement,
     resources: WebBootstrapResources,
+    capabilities: WebHostCapabilities,
     startup: WebStartupConfig,
     server_worker_url: String,
     server_job_worker_url: String,
@@ -1869,6 +1869,7 @@ pub async fn mclone_web_create_scene_host_with_startup(
     create_scene_host(
         canvas,
         initial_asset_packs,
+        capabilities,
         runtime,
         descriptor,
         scene,
@@ -1884,6 +1885,7 @@ pub async fn mclone_web_create_scene_host_with_startup(
 async fn create_scene_host(
     canvas: HtmlCanvasElement,
     initial_asset_packs: InitialAssetPacks,
+    capabilities: WebHostCapabilities,
     runtime: crate::WebRuntime,
     descriptor: ActiveSessionDescriptor,
     scene: McloneSceneHostOptions,
@@ -1953,6 +1955,7 @@ async fn create_scene_host(
     .map_err(js_error)?;
     host.set_mono_ui_context(MonoUiContext::default());
     host.set_mono_ui_screen(None);
+    host.set_mono_debug_diagnostics_visible(capabilities.initial_debug_overlay_visible());
     host.configure_external_asset_pack_catalog(
         catalog,
         mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
@@ -1980,6 +1983,7 @@ async fn create_scene_host(
         frame_count: 0,
         rendered_frame_count: 0,
         initial_presentation_stable_frames: 0,
+        startup_status_visible: true,
         last_visible_frame_millis: None,
         max_frame_gap_millis: 0.0,
         movement_input_applied: false,
@@ -1997,9 +2001,9 @@ async fn create_scene_host(
         initial_asset_packs,
         asset_pack_file_count,
         pending_asset_pack_file_count: None,
-        status_overlay: StatusOverlay::hidden(),
+        status_overlay: StatusOverlay::new("Generating world...", true),
         touch_look_sensitivity: input_preferences.touch_look_sensitivity,
-        touch_settings_available: false,
+        touch_settings_available: capabilities.touch_input_available(),
         touch_controls_mode: input_preferences.touch_controls_mode,
         input_preferences,
         input_preference_error,

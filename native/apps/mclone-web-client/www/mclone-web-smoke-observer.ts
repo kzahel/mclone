@@ -77,7 +77,6 @@ interface SmokeBridge {
   observerCanvasPoint(clientX: number, clientY: number): { x: number; y: number };
   pauseRendering(): void;
   resumeRendering(): void;
-  setNativeDebugOverlay(visible: boolean): WasmReport | null;
   touchControls: { snapshot(): WasmReport } | null;
   drainLobbyOperations(): void;
   backgroundCycleForObserver(): WasmReport | null;
@@ -311,7 +310,9 @@ export function installWebSmokeObserver(
       observerRenderRadius(),
     ));
   };
-  runtime.setDebugOverlay = (visible) => app.setNativeDebugOverlay(visible);
+  runtime.setDebugOverlay = (visible) => apply(
+    (session) => session.setDebugOverlayVisible(visible),
+  );
   runtime.openNativeHelpUi = () => apply((session) => session.openHelpUi());
   runtime.closeNativeUi = () => apply((session) => session.closeUi());
   runtime.handleNativeUiKey = (key) => apply((session) => session.handleUiKey(key));

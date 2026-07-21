@@ -30,7 +30,6 @@ export class TouchControls {
     this.activePointerIds = new Set();
     this.lastTouchAt = 0;
 
-    this.app.setTouchInputAvailable(hasTouchInput());
     this.bindCanvas();
     window.addEventListener("blur", () => this.clearAll());
   }

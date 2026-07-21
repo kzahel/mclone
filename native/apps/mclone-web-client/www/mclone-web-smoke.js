@@ -397,6 +397,7 @@ async function renderCanvas() {
     if (
       typeof module.mclone_web_create_scene_host_with_startup !== "function"
       || typeof module.WebBootstrapResources !== "function"
+      || typeof module.WebHostCapabilities !== "function"
     ) {
       return {
         ok: false,
@@ -418,6 +419,7 @@ async function renderCanvas() {
     const session = await module.mclone_web_create_scene_host_with_startup(
       canvas,
       resources,
+      browserHostCapabilities(module, canvas),
       startup,
       SERVER_WORKER_URL.href,
       SERVER_JOB_WORKER_URL.href,
@@ -597,6 +599,7 @@ async function createIndexedDbSmokeSession(
   return await module.mclone_web_create_scene_host_with_startup(
     canvas,
     resources,
+    browserHostCapabilities(module, canvas),
     startup,
     SERVER_WORKER_URL.href,
     SERVER_JOB_WORKER_URL.href,
@@ -606,6 +609,19 @@ async function createIndexedDbSmokeSession(
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-indexeddb-smoke",
     ),
+  );
+}
+
+/**
+ * @param {WasmModule} module
+ * @param {HTMLCanvasElement} canvas
+ */
+function browserHostCapabilities(module, canvas) {
+  const touchInputAvailable = navigator.maxTouchPoints > 0
+    || window.matchMedia("(pointer: coarse)").matches;
+  return new module.WebHostCapabilities(
+    touchInputAvailable,
+    canvas.getBoundingClientRect().width,
   );
 }
 

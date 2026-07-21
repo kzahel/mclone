@@ -103,7 +103,6 @@ async function boot(): Promise<void> {
     runtime.state.failed = false;
     runtime.state.status = "ready";
     publishRuntimeState(runtime.state);
-    app.setNativeStatusOverlay("ready", true, false);
     app.start();
     return;
   } catch (error) {
@@ -111,7 +110,7 @@ async function boot(): Promise<void> {
     runtime.state.ok = false;
     runtime.state.failed = true;
     runtime.state.status = stringifyError(error);
-    app.setNativeStatusOverlay(runtime.state.status, false, true);
+    app.reportHostFailure(runtime.state.status);
     publishRuntimeState(runtime.state);
   }
 }
@@ -166,7 +165,6 @@ class WebFrameDriver {
     runtime.state.pointerLockSupported = typeof this.canvas.requestPointerLock === "function";
     this.canvas.focus();
 
-    runtime.state.status = "loading wasm";
     publishRuntimeState(runtime.state);
     const module = await import(BINDGEN_JS_URL.href) as WasmModule;
     await module.default(BINDGEN_WASM_URL.href);
@@ -175,6 +173,7 @@ class WebFrameDriver {
       "mclone_web_startup_options_from_query",
       "mclone_web_create_scene_host_with_startup",
       "WebBootstrapResources",
+      "WebHostCapabilities",
     ];
     for (const name of requiredExports) {
       if (typeof (module as Record<string, any>)[name] !== "function") {
@@ -183,18 +182,21 @@ class WebFrameDriver {
     }
     const startup = startupOptionsFromLocation(module);
 
-    runtime.state.status = "loading assets";
     publishRuntimeState(runtime.state);
     const resources = await fetchBootstrapResources(module, startup.browserPlan());
     const renderWorkerTransportFactory = () => new PolledWorkerTransport(
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-app",
     );
-    runtime.state.status = "initializing webgpu";
     publishRuntimeState(runtime.state);
+    const capabilities = new module.WebHostCapabilities(
+      hasTouchInput(),
+      this.canvas.getBoundingClientRect().width,
+    );
     this.session = await module.mclone_web_create_scene_host_with_startup(
       this.canvas,
       resources,
+      capabilities,
       startup,
       SERVER_WORKER_URL.href,
       SERVER_JOB_WORKER_URL.href,
@@ -202,38 +204,11 @@ class WebFrameDriver {
       BINDGEN_WASM_URL.href,
       renderWorkerTransportFactory,
     );
-    for (const name of [
-      "renderFrame",
-      "handleRawKey",
-      "handleRawPointerButton",
-      "handleRawPointerMove",
-      "handleRawMouseMotion",
-      "handleRawWheel",
-      "handleRawTouch",
-      "clearRawInput",
-      "renderCompilerSharedSupported",
-      "resizeCanvas",
-      "startPendingSession",
-      "takeWorldCatalogExecution",
-      "applyWorldCatalogExecution",
-      "applyWorldCatalogError",
-      "setDebugOverlayVisible",
-      "setStatusOverlay",
-      "setTouchInputAvailable",
-      "setHidden",
-      "takeLobbyRuntimeStart",
-      "completeLobbyWorldStart",
-    ]) {
-      if (typeof (this.session as unknown as Record<string, any>)[name] !== "function") {
-        throw new Error(`missing WebSceneHost.${name} export`);
-      }
-    }
     if (!this.session.renderCompilerSharedSupported()) {
       throw new Error(
         "cross-origin isolation (SharedArrayBuffer/Atomics) is required for the streaming render loop",
       );
     }
-    this.setNativeDebugOverlay(defaultDebugOverlayVisible());
     bindInput(this, runtime.state, () => publishRuntimeState(runtime.state));
     document.addEventListener("visibilitychange", () => {
       const hidden = document.visibilityState === "hidden";
@@ -253,8 +228,6 @@ class WebFrameDriver {
     });
     this.touchControls = new TouchControls(this);
     this.syncCanvasSize();
-    runtime.state.status = "rendering";
-    this.setNativeStatusOverlay(runtime.state.status, true, true);
     publishRuntimeState(runtime.state);
     // 067 Stage 3: warm up the streaming loop to idle so the first presented frame has
     // terrain (the web analog of desktop's pre-render `sync_all_render_sections`).
@@ -477,7 +450,7 @@ class WebFrameDriver {
     if (frame.state === "restart-required") {
       runtime.state.ok = false;
       runtime.state.status = frame.restartReason ?? "WebGPU restart required";
-      this.setNativeStatusOverlay(runtime.state.status, false, true);
+      this.reportHostFailure(runtime.state.status);
       publishRuntimeState(runtime.state);
       return;
     }
@@ -492,28 +465,15 @@ class WebFrameDriver {
     }
   }
 
-  setNativeDebugOverlay(open: boolean): WasmReport | null {
+  reportHostFailure(message: string): WasmReport | null {
     if (!this.session) {
       return null;
     }
     if (this.sessionBusy) {
-      setTimeout(() => this.setNativeDebugOverlay(open), 0);
+      setTimeout(() => this.reportHostFailure(message), 0);
       return null;
     }
-    const report = this.session.setDebugOverlayVisible(Boolean(open));
-    this.applyNativeUiReport(report);
-    return report;
-  }
-
-  setNativeStatusOverlay(message: string, ok = true, visible = true): WasmReport | null {
-    if (!this.session) {
-      return null;
-    }
-    if (this.sessionBusy) {
-      setTimeout(() => this.setNativeStatusOverlay(message, ok, visible), 0);
-      return null;
-    }
-    const report = this.session.setStatusOverlay(String(message ?? ""), Boolean(ok), Boolean(visible));
+    const report = this.session.reportHostFailure(String(message ?? ""));
     this.applyNativeUiReport(report);
     return report;
   }
@@ -707,7 +667,7 @@ class WebFrameDriver {
       runtime.state.sessionBusy = false;
     }
     if (!startReport?.ok) {
-      this.setNativeStatusOverlay(runtime.state.status, false, true);
+      this.reportHostFailure(runtime.state.status);
       publishRuntimeState(runtime.state);
       return;
     }
@@ -727,13 +687,12 @@ class WebFrameDriver {
     } catch (error) {
       runtime.state.ok = false;
       runtime.state.status = stringifyError(error);
-      this.setNativeStatusOverlay(runtime.state.status, false, true);
+      this.reportHostFailure(runtime.state.status);
       console.error(error);
       publishRuntimeState(runtime.state);
       return;
     }
     runtime.state.status = "session ready";
-    this.setNativeStatusOverlay("ready", true, false);
     publishRuntimeState(runtime.state);
   }
 
@@ -932,10 +891,6 @@ class WebFrameDriver {
   }
 }
 
-function defaultDebugOverlayVisible(): boolean {
-  return !hasTouchInput() && window.matchMedia("(min-width: 681px)").matches;
-}
-
 function startupOptionsFromLocation(
   module: WasmModule,
 ): WebStartupConfig {
@@ -981,7 +936,9 @@ function publishRuntimeState(state: AppRuntimeState): void {
   if (!status || status.dataset.retired === "true") {
     return;
   }
-  status.textContent = startupStatusLabel(state.status);
+  status.textContent = state.failed
+    ? String(state.status || "mclone failed to start")
+    : "Starting mclone…";
 }
 
 function hideBootstrapStatus(): void {
@@ -992,23 +949,6 @@ function hideBootstrapStatus(): void {
   status.dataset.retired = "true";
   status.hidden = true;
   runtime.state.bootstrapStatusRetired = true;
-}
-
-function startupStatusLabel(status: unknown): string {
-  switch (status) {
-    case "loading wasm":
-      return "Loading engine…";
-    case "loading assets":
-      return "Loading assets…";
-    case "initializing webgpu":
-      return "Preparing renderer…";
-    case "connecting remote websocket":
-      return "Connecting to server…";
-    case "rendering":
-      return "Generating world…";
-    default:
-      return typeof status === "string" && status.length > 0 ? status : "Starting mclone…";
-  }
 }
 
 function installFirstTouchFullscreen(state: AppRuntimeState): void {

@@ -35,7 +35,7 @@ mod web_world_catalog_descriptor;
 #[cfg(target_arch = "wasm32")]
 mod web_bootstrap;
 #[cfg(target_arch = "wasm32")]
-pub use web_bootstrap::WebBootstrapResources;
+pub use web_bootstrap::{WebBootstrapResources, WebHostCapabilities};
 #[cfg(target_arch = "wasm32")]
 mod web_canvas;
 #[cfg(any(target_arch = "wasm32", test))]

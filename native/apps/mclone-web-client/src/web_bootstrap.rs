@@ -28,6 +28,37 @@ pub(crate) struct InitialAssetPacks {
     pub fallback: Vec<u8>,
 }
 
+/// Raw browser facts used by Rust-owned initial presentation policy.
+///
+/// The browser adapter probes its environment; it does not decide which
+/// engine UI or diagnostic surface those facts should enable.
+#[wasm_bindgen]
+pub struct WebHostCapabilities {
+    touch_input_available: bool,
+    viewport_width_css_pixels: f64,
+}
+
+#[wasm_bindgen]
+impl WebHostCapabilities {
+    #[wasm_bindgen(constructor)]
+    pub fn new(touch_input_available: bool, viewport_width_css_pixels: f64) -> Self {
+        Self {
+            touch_input_available,
+            viewport_width_css_pixels: viewport_width_css_pixels.max(0.0),
+        }
+    }
+}
+
+impl WebHostCapabilities {
+    pub(crate) fn touch_input_available(&self) -> bool {
+        self.touch_input_available
+    }
+
+    pub(crate) fn initial_debug_overlay_visible(&self) -> bool {
+        !self.touch_input_available && self.viewport_width_css_pixels >= 681.0
+    }
+}
+
 /// Opaque response bag for Rust-authored browser bootstrap resource requests.
 ///
 /// TypeScript creates this bag and fills it with fetched bytes by request ID;
