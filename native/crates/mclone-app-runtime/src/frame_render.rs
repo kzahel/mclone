@@ -22,7 +22,7 @@ use mclone_render::screen_effect::{ScreenEffectsRenderer, UnderwaterOverlay};
 use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRenderer};
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
-use mclone_render::uniform::{PerViewSlot, SINGLE_VIEW_SLOT};
+use mclone_render::uniform::{PerViewSlot, SINGLE_VIEW_SLOT, StereoEye};
 use mclone_render_session::RenderSectionCacheUpdate;
 use mclone_ui::{GuiDrawList, UiDrawCacheStats};
 
@@ -2335,18 +2335,32 @@ where
         }
         if !actor_instances.is_empty() {
             let actor_start = composition_timing_start(timing_clock, timing.is_some());
-            actor_stats = actors
-                .context("actor instances requested without actor draw resources")?
-                .render_in_slot(
-                    frame.device,
-                    frame.queue,
-                    frame.encoder,
-                    frame.target.with_depth(&depth.view),
-                    render_view,
-                    render_options,
-                    actor_instances,
-                    view_slot,
-                )?;
+            let actors =
+                actors.context("actor instances requested without actor draw resources")?;
+            actor_stats =
+                if reuses_stereo_actor_preparation(prepared_stereo_draw.is_some(), view_slot) {
+                    actors.render_reusing_prepared_in_slot(
+                        frame.device,
+                        frame.queue,
+                        frame.encoder,
+                        frame.target.with_depth(&depth.view),
+                        render_view,
+                        render_options,
+                        actor_instances,
+                        view_slot,
+                    )?
+                } else {
+                    actors.render_in_slot(
+                        frame.device,
+                        frame.queue,
+                        frame.encoder,
+                        frame.target.with_depth(&depth.view),
+                        render_view,
+                        render_options,
+                        actor_instances,
+                        view_slot,
+                    )?
+                };
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
                 timing.actor_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
@@ -2357,17 +2371,32 @@ where
             && !placed.instances.is_empty()
         {
             let actor_start = composition_timing_start(timing_clock, timing.is_some());
-            placed_actor_stats = placed.draw.render_composed_in_slot(
-                frame.device,
-                frame.queue,
-                frame.encoder,
-                frame.target.with_depth(&depth.view),
-                render_view,
-                placed.render_options,
-                placed.instances,
-                placed.context,
-                view_slot,
-            )?;
+            placed_actor_stats =
+                if reuses_stereo_actor_preparation(prepared_stereo_draw.is_some(), view_slot) {
+                    placed.draw.render_composed_reusing_prepared_in_slot(
+                        frame.device,
+                        frame.queue,
+                        frame.encoder,
+                        frame.target.with_depth(&depth.view),
+                        render_view,
+                        placed.render_options,
+                        placed.instances,
+                        placed.context,
+                        view_slot,
+                    )?
+                } else {
+                    placed.draw.render_composed_in_slot(
+                        frame.device,
+                        frame.queue,
+                        frame.encoder,
+                        frame.target.with_depth(&depth.view),
+                        render_view,
+                        placed.render_options,
+                        placed.instances,
+                        placed.context,
+                        view_slot,
+                    )?
+                };
             if let (Some(timing), Some(start)) = (timing.as_deref_mut(), actor_start) {
                 timing.placed_actor_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
             }
@@ -2491,6 +2520,10 @@ where
     })
 }
 
+fn reuses_stereo_actor_preparation(has_prepared_stereo_draw: bool, view_slot: PerViewSlot) -> bool {
+    has_prepared_stereo_draw && view_slot.view() == StereoEye::Right.view()
+}
+
 fn render_full_frame_gui<BuildGuiDraw>(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -2585,6 +2618,18 @@ fn clear_frame_color(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_render::uniform::{PresentationViewIndex, RIGHT_EYE_VIEW_SLOT};
+
+    #[test]
+    fn actor_preparation_reuse_requires_explicit_stereo_right_eye_context() {
+        assert!(!reuses_stereo_actor_preparation(false, RIGHT_EYE_VIEW_SLOT));
+        assert!(!reuses_stereo_actor_preparation(true, SINGLE_VIEW_SLOT));
+        assert!(reuses_stereo_actor_preparation(true, RIGHT_EYE_VIEW_SLOT));
+        assert!(!reuses_stereo_actor_preparation(
+            true,
+            PerViewSlot::for_view(PresentationViewIndex::new(2))
+        ));
+    }
 
     #[test]
     fn flat_render_resources_accept_default_supported_config() {

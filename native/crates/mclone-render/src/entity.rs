@@ -560,10 +560,64 @@ impl ActorDrawResources {
         actors: &[ActorInstance],
         view_slot: PerViewSlot,
     ) -> Result<ActorRenderStats> {
+        self.render_in_slot_with_preparation(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            render_options,
+            actors,
+            view_slot,
+            true,
+        )
+    }
+
+    /// Draw another view from actor inputs prepared earlier in the same shared
+    /// frame. A count mismatch safely refreshes preparation rather than drawing
+    /// stale storage.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_reusing_prepared_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        view_slot: PerViewSlot,
+    ) -> Result<ActorRenderStats> {
+        self.render_in_slot_with_preparation(
+            device,
+            queue,
+            encoder,
+            target,
+            render_view,
+            render_options,
+            actors,
+            view_slot,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_in_slot_with_preparation(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        view_slot: PerViewSlot,
+        refresh_prepared: bool,
+    ) -> Result<ActorRenderStats> {
         if actors.is_empty() {
             return Ok(ActorRenderStats::default());
         }
-        if !view_slot.is_right_eye() || self.prepared.prepared_input_count() != actors.len() {
+        if refresh_prepared || self.prepared.prepared_input_count() != actors.len() {
             self.prepared
                 .prepare(device, queue, &self.shared.prepared, actors);
         }
@@ -682,6 +736,63 @@ impl ActorDrawResources {
         context: WorldCompositionContext,
         view_slot: PerViewSlot,
     ) -> Result<ActorRenderStats> {
+        self.render_composed_in_slot_with_preparation(
+            device,
+            queue,
+            encoder,
+            target,
+            physical_render_view,
+            render_options,
+            actors,
+            context,
+            view_slot,
+            true,
+        )
+    }
+
+    /// Draw another composed view from actor inputs prepared earlier in the
+    /// same shared frame.
+    #[allow(clippy::too_many_arguments)]
+    pub fn render_composed_reusing_prepared_in_slot(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        context: WorldCompositionContext,
+        view_slot: PerViewSlot,
+    ) -> Result<ActorRenderStats> {
+        self.render_composed_in_slot_with_preparation(
+            device,
+            queue,
+            encoder,
+            target,
+            physical_render_view,
+            render_options,
+            actors,
+            context,
+            view_slot,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn render_composed_in_slot_with_preparation(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderFrameTarget<'_>,
+        physical_render_view: ChunkRenderView,
+        render_options: TexturedSectionRenderOptions,
+        actors: &[ActorInstance],
+        context: WorldCompositionContext,
+        view_slot: PerViewSlot,
+        refresh_prepared: bool,
+    ) -> Result<ActorRenderStats> {
         if actors.is_empty() {
             return Ok(ActorRenderStats::default());
         }
@@ -695,7 +806,7 @@ impl ActorDrawResources {
         if self.composed_actor_scratch.is_empty() {
             return Ok(stats);
         }
-        if !view_slot.is_right_eye()
+        if refresh_prepared
             || self.prepared.prepared_input_count() != self.composed_actor_scratch.len()
         {
             self.prepared.prepare(

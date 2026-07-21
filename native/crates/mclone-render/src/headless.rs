@@ -1393,8 +1393,8 @@ mod tests {
     use super::*;
     use crate::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
     use crate::uniform::{
-        LEFT_EYE_VIEW_SLOT, PerViewUniformBuffer, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
-        STEREO_VIEW_SLOT_COUNT,
+        LEFT_EYE_VIEW_SLOT, MAX_PRESENTATION_VIEW_COUNT, PerViewSlot, PerViewUniformBuffer,
+        PresentationViewIndex, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
     };
     use glam::Vec3;
     use mclone_core::{ChunkPos, Vec3d};
@@ -1409,7 +1409,7 @@ mod tests {
 
     #[test]
     #[ignore = "GPU validation proof for 107 Slice D; run on hosts with a wgpu adapter"]
-    fn one_submit_keeps_distinct_per_view_uniform_slots_live() -> Result<()> {
+    fn one_submit_keeps_four_presentation_view_uniforms_live() -> Result<()> {
         const SHADER: &str = r#"
 @group(0) @binding(0)
 var<uniform> color: vec4<f32>;
@@ -1436,13 +1436,14 @@ fn fs_main() -> @location(0) vec4<f32> {
 }
 "#;
         let (device, queue) = create_headless_device()?;
-        let left = OffscreenTarget::new(&device, 8, 8, HEADLESS_FORMAT);
-        let right = OffscreenTarget::new(&device, 8, 8, HEADLESS_FORMAT);
+        let targets = (0..MAX_PRESENTATION_VIEW_COUNT)
+            .map(|_| OffscreenTarget::new(&device, 8, 8, HEADLESS_FORMAT))
+            .collect::<Vec<_>>();
         let uniforms = PerViewUniformBuffer::new(
             &device,
             "mclone_test_per_view_uniforms",
             16,
-            STEREO_VIEW_SLOT_COUNT,
+            MAX_PRESENTATION_VIEW_COUNT,
         );
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_test_per_view_uniform_layout"),
@@ -1491,13 +1492,19 @@ fn fs_main() -> @location(0) vec4<f32> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_test_per_view_uniform_encoder"),
         });
-        let left_color = color_bytes([1.0, 0.0, 0.0, 1.0]);
-        let left_offset = uniforms.write_slot(&queue, LEFT_EYE_VIEW_SLOT, &left_color);
-        {
+        let colors = [
+            [1.0, 0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0, 1.0],
+            [0.0, 0.0, 1.0, 1.0],
+            [1.0, 1.0, 0.0, 1.0],
+        ];
+        for (view_index, (target, color)) in targets.iter().zip(colors).enumerate() {
+            let slot = PerViewSlot::for_view(PresentationViewIndex::new(view_index as u32));
+            let offset = uniforms.write_slot(&queue, slot, &color_bytes(color));
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("mclone_test_per_view_uniform_left_pass"),
+                label: Some("mclone_test_per_view_uniform_pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &left.view,
+                    view: &target.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -1507,34 +1514,20 @@ fn fs_main() -> @location(0) vec4<f32> {
                 ..Default::default()
             });
             pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &bind_group, &[left_offset]);
-            pass.draw(0..3, 0..1);
-        }
-        let right_color = color_bytes([0.0, 1.0, 0.0, 1.0]);
-        let right_offset = uniforms.write_slot(&queue, RIGHT_EYE_VIEW_SLOT, &right_color);
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("mclone_test_per_view_uniform_right_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &right.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&pipeline);
-            pass.set_bind_group(0, &bind_group, &[right_offset]);
+            pass.set_bind_group(0, &bind_group, &[offset]);
             pass.draw(0..3, 0..1);
         }
         queue.submit(std::iter::once(encoder.finish()));
-        let left_pixels = read_rgba8(&device, &queue, &left.texture, 8, 8)?;
-        let right_pixels = read_rgba8(&device, &queue, &right.texture, 8, 8)?;
-
-        assert_eq!(left_pixels.get(0..4), Some(&[255, 0, 0, 255][..]));
-        assert_eq!(right_pixels.get(0..4), Some(&[0, 255, 0, 255][..]));
+        let expected = [
+            [255, 0, 0, 255],
+            [0, 255, 0, 255],
+            [0, 0, 255, 255],
+            [255, 255, 0, 255],
+        ];
+        for (target, expected) in targets.iter().zip(expected) {
+            let pixels = read_rgba8(&device, &queue, &target.texture, 8, 8)?;
+            assert_eq!(pixels.get(0..4), Some(&expected[..]));
+        }
         Ok(())
     }
 

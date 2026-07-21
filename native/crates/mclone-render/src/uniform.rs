@@ -1,24 +1,65 @@
 use std::num::NonZeroU64;
 use std::ops::Range;
 
+/// Stable identity for one independently posed presentation view in a flat or
+/// XR frame. XR eye meaning is deliberately kept in [`StereoEye`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct PresentationViewIndex(u32);
+
+impl PresentationViewIndex {
+    pub const PRIMARY: Self = Self(0);
+
+    pub const fn new(index: u32) -> Self {
+        assert!(
+            index < MAX_PRESENTATION_VIEW_COUNT,
+            "presentation view index is outside the supported view count"
+        );
+        Self(index)
+    }
+
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+/// Typed identity for the two views that belong to one stereo XR
+/// presentation. Flat presentation code must use [`PresentationViewIndex`]
+/// directly instead of assigning eye meaning to indices zero and one.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum StereoEye {
+    Left,
+    Right,
+}
+
+impl StereoEye {
+    pub const fn view(self) -> PresentationViewIndex {
+        match self {
+            Self::Left => PresentationViewIndex::new(0),
+            Self::Right => PresentationViewIndex::new(1),
+        }
+    }
+
+    pub const fn slot(self) -> PerViewSlot {
+        PerViewSlot::for_view(self.view())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PerViewSlot(u32);
 
 impl PerViewSlot {
-    pub const SINGLE: Self = Self(0);
-    pub const LEFT_EYE: Self = Self(0);
-    pub const RIGHT_EYE: Self = Self(1);
+    pub const SINGLE: Self = Self::for_view(PresentationViewIndex::PRIMARY);
+
+    pub const fn for_view(view: PresentationViewIndex) -> Self {
+        Self(view.get())
+    }
 
     pub const fn index(self) -> u32 {
         self.0
     }
 
-    pub const fn view_index(self) -> u32 {
-        self.0 % STEREO_VIEW_SLOT_COUNT
-    }
-
-    pub const fn is_right_eye(self) -> bool {
-        self.view_index() == Self::RIGHT_EYE.view_index()
+    pub const fn view(self) -> PresentationViewIndex {
+        PresentationViewIndex::new(self.0 % MAX_PRESENTATION_VIEW_COUNT)
     }
 
     pub fn in_uniform_frame(self, frame_index: u32) -> Self {
@@ -26,7 +67,7 @@ impl PerViewSlot {
             frame_index < PER_VIEW_UNIFORM_FRAME_COUNT,
             "uniform frame {frame_index} is outside frame ring count {PER_VIEW_UNIFORM_FRAME_COUNT}"
         );
-        Self(frame_index * STEREO_VIEW_SLOT_COUNT + self.view_index())
+        Self(frame_index * MAX_PRESENTATION_VIEW_COUNT + self.view().get())
     }
 
     pub fn byte_range(self, slot_size: wgpu::BufferAddress) -> Range<wgpu::BufferAddress> {
@@ -47,11 +88,13 @@ impl PerViewSlot {
 }
 
 pub const SINGLE_VIEW_SLOT: PerViewSlot = PerViewSlot::SINGLE;
-pub const LEFT_EYE_VIEW_SLOT: PerViewSlot = PerViewSlot::LEFT_EYE;
-pub const RIGHT_EYE_VIEW_SLOT: PerViewSlot = PerViewSlot::RIGHT_EYE;
+pub const LEFT_EYE_VIEW_SLOT: PerViewSlot = StereoEye::Left.slot();
+pub const RIGHT_EYE_VIEW_SLOT: PerViewSlot = StereoEye::Right.slot();
 pub const STEREO_VIEW_SLOT_COUNT: u32 = 2;
+pub const MAX_PRESENTATION_VIEW_COUNT: u32 = 4;
 pub const PER_VIEW_UNIFORM_FRAME_COUNT: u32 = 3;
-pub const PER_VIEW_UNIFORM_SLOT_COUNT: u32 = STEREO_VIEW_SLOT_COUNT * PER_VIEW_UNIFORM_FRAME_COUNT;
+pub const PER_VIEW_UNIFORM_SLOT_COUNT: u32 =
+    MAX_PRESENTATION_VIEW_COUNT * PER_VIEW_UNIFORM_FRAME_COUNT;
 
 /// Uniform buffer storage for per-view data that may need multiple live copies
 /// inside one GPU submission.
@@ -183,22 +226,23 @@ mod tests {
     }
 
     #[test]
-    fn per_view_slot_maps_view_into_uniform_frame() {
+    fn per_view_slot_maps_four_views_into_uniform_frame() {
         let left = LEFT_EYE_VIEW_SLOT.in_uniform_frame(2);
         let right = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(2);
-        assert_eq!(left.index(), 4);
-        assert_eq!(right.index(), 5);
-        assert_eq!(left.view_index(), 0);
-        assert_eq!(right.view_index(), 1);
-        assert!(!left.is_right_eye());
-        assert!(right.is_right_eye());
+        let fourth = PerViewSlot::for_view(PresentationViewIndex::new(3)).in_uniform_frame(2);
+        assert_eq!(left.index(), 8);
+        assert_eq!(right.index(), 9);
+        assert_eq!(fourth.index(), 11);
+        assert_eq!(left.view(), PresentationViewIndex::new(0));
+        assert_eq!(right.view(), PresentationViewIndex::new(1));
+        assert_eq!(fourth.view(), PresentationViewIndex::new(3));
     }
 
     #[test]
     fn per_view_slot_byte_range_uses_raw_slot_index() {
         let right = RIGHT_EYE_VIEW_SLOT.in_uniform_frame(1);
-        assert_eq!(right.index(), 3);
-        assert_eq!(right.byte_range(64), 192..256);
+        assert_eq!(right.index(), 5);
+        assert_eq!(right.byte_range(64), 320..384);
     }
 
     #[test]

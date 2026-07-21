@@ -167,6 +167,24 @@ the visual slice proceeds.
 - Topic docs state exactly what is foundation-ready and what remains blocked on
   real gamepad and participant/client product work.
 
+## Progress Evidence
+
+### Slice 1 — neutral presentation-view identity
+
+Implemented on 2026-07-21. `PresentationViewIndex` now admits four neutral
+views, the three-generation uniform ring has twelve disjoint slots, and
+`StereoEye` is the only left/right identity. Terrain stereo masks convert only
+inside explicitly stereo draw code. Actor preparation reuse is an explicit
+prepared-frame operation; generic `PerViewSlot` no longer exposes
+`is_right_eye()`.
+
+The ring-size audit found only bounded uniform buffers, small dynamic vertex
+buffers, lazy world-panel texture entries, and renderer bookkeeping. No terrain
+mesh, atlas, actor geometry, or depth/color target is multiplied by the ring
+constant. The focused Rust suites passed, and the ignored GPU canary rendered
+red, green, blue, and yellow from four distinct uniform slots in one
+submission.
+
 ## Explicit Deferrals
 
 - Native, web, Android, OpenXR, or Steam Input gamepad collectors.

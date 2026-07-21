@@ -31,7 +31,7 @@ use crate::placement::{
 use crate::target::RenderFrameTarget;
 use crate::texture_mips::generate_rgba_mip_chain;
 use crate::uniform::{
-    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT,
+    PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer, SINGLE_VIEW_SLOT, StereoEye,
 };
 
 pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -989,11 +989,10 @@ impl StereoDrawMask {
     const LEFT: Self = Self(0b01);
     const RIGHT: Self = Self(0b10);
 
-    fn for_slot(view_slot: PerViewSlot) -> Self {
-        if view_slot.is_right_eye() {
-            Self::RIGHT
-        } else {
-            Self::LEFT
+    fn for_eye(eye: StereoEye) -> Self {
+        match eye {
+            StereoEye::Left => Self::LEFT,
+            StereoEye::Right => Self::RIGHT,
         }
     }
 
@@ -1024,18 +1023,17 @@ impl PreparedTexturedSectionStereoDraw {
         self.union_stats
     }
 
-    fn stats_for_slot(&self, view_slot: PerViewSlot) -> TexturedSectionRenderStats {
-        if view_slot.is_right_eye() {
-            self.eye_stats[1]
-        } else {
-            self.eye_stats[0]
+    fn stats_for_eye(&self, eye: StereoEye) -> TexturedSectionRenderStats {
+        match eye {
+            StereoEye::Left => self.eye_stats[0],
+            StereoEye::Right => self.eye_stats[1],
         }
     }
 
-    fn draws_in_slot(&self, key: RenderSectionKey, view_slot: PerViewSlot) -> bool {
+    fn draws_in_eye(&self, key: RenderSectionKey, eye: StereoEye) -> bool {
         self.draw_masks
             .get(&key)
-            .is_some_and(|mask| mask.contains(StereoDrawMask::for_slot(view_slot)))
+            .is_some_and(|mask| mask.contains(StereoDrawMask::for_eye(eye)))
     }
 
     /// Visible translucent sections from the stereo union, expressed in the
@@ -1051,6 +1049,16 @@ impl PreparedTexturedSectionStereoDraw {
             .copied()
             .map(|key| textured_section_translucent_record(key, placement))
             .collect()
+    }
+}
+
+/// Convert the uniform slot chosen by an explicitly stereo render API into its
+/// typed eye. Generic flat-view code never calls this conversion.
+fn stereo_eye_for_slot(view_slot: PerViewSlot) -> StereoEye {
+    match view_slot.view().get() {
+        0 => StereoEye::Left,
+        1 => StereoEye::Right,
+        index => panic!("stereo draw received presentation view index {index}"),
     }
 }
 
@@ -4660,18 +4668,18 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             pass.set_pipeline(selected.solid_pipeline());
             for (key, mesh) in &self.sections {
-                if prepared_draw.draws_in_slot(*key, view_slot) {
+                if prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                     draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
                 }
             }
             pass.set_pipeline(selected.cutout_pipeline());
             for (key, mesh) in &self.sections {
-                if prepared_draw.draws_in_slot(*key, view_slot) {
+                if prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                     draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
                 }
             }
         }
-        Ok(prepared_draw.stats_for_slot(view_slot))
+        Ok(prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot)))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -4822,8 +4830,9 @@ impl TexturedSectionDrawResources {
         pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_pipeline(&self.shared.renderer.translucent_pipeline);
         for key in keys {
-            if prepared_stereo_draw.is_some_and(|prepared| !prepared.draws_in_slot(*key, view_slot))
-            {
+            if prepared_stereo_draw.is_some_and(|prepared| {
+                !prepared.draws_in_eye(*key, stereo_eye_for_slot(view_slot))
+            }) {
                 continue;
             }
             if let Some(mesh) = self.sections.get(key) {
@@ -4888,8 +4897,9 @@ impl TexturedSectionDrawResources {
         pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
         pass.set_pipeline(selected.translucent_pipeline());
         for key in keys {
-            if prepared_stereo_draw.is_some_and(|prepared| !prepared.draws_in_slot(*key, view_slot))
-            {
+            if prepared_stereo_draw.is_some_and(|prepared| {
+                !prepared.draws_in_eye(*key, stereo_eye_for_slot(view_slot))
+            }) {
                 continue;
             }
             if let Some(mesh) = self.sections.get(key) {
@@ -5355,14 +5365,14 @@ impl TexturedSectionDrawResources {
             if phase.draws_opaque() {
                 pass.set_pipeline(&self.shared.renderer.solid_pipeline);
                 for (key, mesh) in &self.sections {
-                    if !prepared_draw.draws_in_slot(*key, view_slot) {
+                    if !prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                         continue;
                     }
                     draw_textured_mesh_range(&mut pass, mesh, mesh.solid_index_range());
                 }
                 pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
                 for (key, mesh) in &self.sections {
-                    if !prepared_draw.draws_in_slot(*key, view_slot) {
+                    if !prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                         continue;
                     }
                     draw_textured_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
@@ -5371,7 +5381,7 @@ impl TexturedSectionDrawResources {
             if phase.draws_translucent() {
                 pass.set_pipeline(&self.shared.renderer.translucent_pipeline);
                 for key in &prepared_draw.translucent_keys {
-                    if !prepared_draw.draws_in_slot(*key, view_slot) {
+                    if !prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                         continue;
                     }
                     if let Some(mesh) = self.sections.get(key) {
@@ -5383,7 +5393,7 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
             timing.encode_ms = timing_elapsed_ms(encode_start);
         }
-        Ok(prepared_draw.stats_for_slot(view_slot))
+        Ok(prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot)))
     }
 
     fn build_prepared_records(&self) -> PreparedTexturedSectionRecords {
