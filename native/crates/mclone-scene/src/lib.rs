@@ -1,9 +1,11 @@
 #![forbid(unsafe_code)]
 
 mod far_lod_settle;
+mod interactive_input;
 mod pose_sync;
 
 pub use far_lod_settle::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
+pub use interactive_input::{MonoInputDisposition, MonoInteractiveInputRouter};
 
 use std::path::PathBuf;
 use std::sync::Arc;
