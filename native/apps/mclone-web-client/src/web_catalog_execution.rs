@@ -5,6 +5,8 @@
 //! executes browser requests, and synchronously returns read results. No Rust
 //! borrow or JavaScript view survives an asynchronous gap.
 
+#[cfg(target_arch = "wasm32")]
+use mclone_app_runtime::platform_operation::PlatformOperationToken;
 use mclone_app_runtime::world_catalog::{
     LocalWorldCreateOptions, LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities,
     WorldCatalogError, WorldCatalogErrorKind, WorldCatalogRequest, WorldCatalogResponse,
@@ -887,17 +889,25 @@ mod wasm {
 
     #[wasm_bindgen]
     pub struct WebCatalogExecution {
+        token: Option<PlatformOperationToken>,
         core: CatalogExecutionCore,
     }
 
     impl WebCatalogExecution {
         pub(crate) fn new(
+            token: PlatformOperationToken,
             request: WorldCatalogRequest,
             active_world: Option<LocalWorldId>,
         ) -> Result<Self, String> {
             Ok(Self {
+                token: Some(token),
                 core: CatalogExecutionCore::new(request, active_world)?,
             })
+        }
+
+        pub(crate) fn token(&self) -> Result<PlatformOperationToken, String> {
+            self.token
+                .ok_or_else(|| "catalog smoke execution has no platform-operation token".to_owned())
         }
 
         pub(crate) fn response(&self) -> Result<WorldCatalogResponse, String> {
@@ -1052,7 +1062,11 @@ mod wasm {
                     .map_err(|error| JsValue::from_str(&error.message))?,
             )
         };
-        WebCatalogExecution::new(request, active_world).map_err(|error| JsValue::from_str(&error))
+        Ok(WebCatalogExecution {
+            token: None,
+            core: CatalogExecutionCore::new(request, active_world)
+                .map_err(|error| JsValue::from_str(&error))?,
+        })
     }
 
     fn encode_storage_step(step: StorageStep) -> Result<JsValue, String> {

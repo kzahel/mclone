@@ -64,6 +64,7 @@ use mclone_app_runtime::native_service_assembly::{
     LocalIntegratedStartupStep, NativeSceneServices, NativeSessionServices,
     NativeSessionStartupCompletion, NativeSessionStartupPump, native_world_catalog_operations,
 };
+use mclone_app_runtime::platform_operation::{PlatformOperation, PlatformOperationLedger};
 use mclone_app_runtime::prepared_assets::{AssetPackSourceRegistry, PreparedSceneAssets};
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_app_runtime::scene_session_runtime::SceneSessionRuntime;
@@ -361,6 +362,8 @@ struct DrawableWorldSlot {
     descriptor: Option<ActiveSessionDescriptor>,
     storage: WorldSlotStorage,
     lifecycle: WorldSlotLifecycle,
+    /// Content generation shared by this slot's CPU, compiler, and GPU
+    /// resources. Platform-operation completion is keyed separately.
     asset_epoch: u64,
     scene: McloneSceneHostOptions,
     runtime: Option<SceneSessionRuntime>,
@@ -391,6 +394,8 @@ struct DrawableWorldSlotInstall {
     id: WorldInstanceId,
     descriptor: Option<ActiveSessionDescriptor>,
     lifecycle: WorldSlotLifecycle,
+    /// Content generation to install with the complete slot resource cluster;
+    /// never used as platform-operation identity.
     asset_epoch: u64,
     scene: McloneSceneHostOptions,
     runtime: Option<SceneSessionRuntime>,
@@ -598,8 +603,10 @@ pub struct McloneSceneHost {
     asset_pack_preference_error: Option<String>,
     pending_restored_asset_pack_selection: Option<AssetPackSelection>,
     external_asset_pack_preparation: bool,
-    pending_external_asset_pack_selection: Option<ExternalAssetPackSelection>,
+    pending_external_asset_pack_selection: Option<PlatformOperation<ExternalAssetPackSelection>>,
+    external_asset_pack_operations: PlatformOperationLedger<ExternalAssetPackSelection, ()>,
     session: GameSessionCoordinator<ScenePendingSessionStart>,
+    active_session_start_operations: PlatformOperationLedger<WorldInstanceId, SessionStartRequest>,
     #[cfg(not(target_arch = "wasm32"))]
     session_runtime_factory: Option<Box<dyn SceneSessionRuntimeFactory>>,
     client_experience: ClientExperienceController,

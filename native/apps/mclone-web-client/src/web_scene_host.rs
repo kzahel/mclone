@@ -6,7 +6,7 @@
 //! and asset epochs remain in `McloneSceneHost`.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use anyhow::Result;
@@ -289,7 +289,7 @@ impl WebRuntimeStart {
 }
 
 struct WebAssetPackPreparationEffect {
-    epoch: u64,
+    content_generation: u64,
     authored: Vec<u8>,
     reference: Vec<u8>,
     fallback: Vec<u8>,
@@ -308,7 +308,8 @@ struct WebAssetPackPreparationState {
 pub struct WebAssetPackPreparation {
     effect: Option<WebAssetPackPreparationEffect>,
     state: Rc<RefCell<WebAssetPackPreparationState>>,
-    epoch: u64,
+    token: PlatformOperationToken,
+    content_generation: u64,
     selected_file_count: usize,
 }
 
@@ -371,7 +372,7 @@ async fn execute_web_asset_pack_preparation(
     effect: WebAssetPackPreparationEffect,
 ) -> Result<PreparedSceneAssets, String> {
     let WebAssetPackPreparationEffect {
-        epoch,
+        content_generation,
         authored,
         reference,
         fallback,
@@ -381,7 +382,7 @@ async fn execute_web_asset_pack_preparation(
     } = effect;
     render_worker
         .prepare_asset_candidate(
-            epoch,
+            content_generation,
             authored.clone(),
             reference.clone(),
             fallback.clone(),
@@ -390,14 +391,14 @@ async fn execute_web_asset_pack_preparation(
         )
         .await?;
     prepare_web_scene_assets_from_selection(
-        epoch,
+        content_generation,
         authored,
         reference,
         fallback,
         authored_enabled,
         reference_enabled,
     )
-    .inspect_err(|_| render_worker.settle_asset_epoch(epoch, false))
+    .inspect_err(|_| render_worker.settle_asset_epoch(content_generation, false))
 }
 
 /// Browser resource/presentation rim around the one shared scene-policy owner.
@@ -428,7 +429,7 @@ pub struct WebSceneHost {
     render_worker: WebRenderWorkerCoordinator,
     initial_asset_packs: InitialAssetPacks,
     asset_pack_file_count: usize,
-    asset_pack_preparation_in_flight: Option<u64>,
+    asset_pack_preparation_in_flight: Option<PlatformOperationToken>,
     pending_asset_pack_file_count: Option<(u64, usize)>,
     status_overlay: StatusOverlay,
     touch_look_sensitivity: f32,
@@ -446,8 +447,7 @@ pub struct WebSceneHost {
     update_count: usize,
     interaction_count: usize,
     mesh_build_count: usize,
-    catalog_operations: HashMap<String, PendingWebCatalogOperation>,
-    stale_lobby_start_completion_count: usize,
+    catalog_operations: VecDeque<PendingWebCatalogOperation>,
     render_resource_generation: u64,
     render_color_profile: String,
     last_runner_kind: String,
@@ -456,7 +456,7 @@ pub struct WebSceneHost {
 #[derive(Debug)]
 struct PendingWebCatalogOperation {
     token: PlatformOperationToken,
-    request: Option<WorldCatalogRequest>,
+    request: WorldCatalogRequest,
     active_world: Option<LocalWorldId>,
 }
 
@@ -1733,7 +1733,7 @@ impl WebSceneHost {
         };
         if matches!(
             &pending.target,
-            mclone_scene::ExternalSceneStartTarget::ActiveSession
+            mclone_scene::ExternalSceneStartTarget::ActiveSession { .. }
         ) {
             return Err(JsValue::from_str(
                 "lobby queue produced an active-session start",
@@ -1803,12 +1803,6 @@ impl WebSceneHost {
                 .ok_or_else(|| JsValue::from_str("runtime start ticket is not complete"))?;
             (pending, outcome)
         };
-        if !self.host_ref()?.external_scene_start_is_current(&pending) {
-            self.stale_lobby_start_completion_count =
-                self.stale_lobby_start_completion_count.saturating_add(1);
-            drop(outcome);
-            return self.ui_report(false, None).map_err(JsValue::from);
-        }
         match outcome {
             Ok(runtime) => self.complete_started_runtime(pending, runtime),
             Err(error) => {
@@ -1819,35 +1813,24 @@ impl WebSceneHost {
     }
 
     #[wasm_bindgen(js_name = takeWorldCatalogExecution)]
-    pub fn take_world_catalog_execution(
-        &mut self,
-        request_id: String,
-    ) -> Result<WebCatalogExecution, JsValue> {
+    pub fn take_world_catalog_execution(&mut self) -> Result<WebCatalogExecution, JsValue> {
         let pending = self
             .catalog_operations
-            .get_mut(&request_id)
-            .ok_or_else(|| JsValue::from_str("unknown catalog request execution"))?;
-        let request = pending
-            .request
-            .take()
-            .ok_or_else(|| JsValue::from_str("catalog request execution was already taken"))?;
-        WebCatalogExecution::new(request, pending.active_world.clone()).map_err(JsValue::from)
+            .pop_front()
+            .ok_or_else(|| JsValue::from_str("no catalog request execution is pending"))?;
+        WebCatalogExecution::new(pending.token, pending.request, pending.active_world)
+            .map_err(JsValue::from)
     }
 
     #[wasm_bindgen(js_name = applyWorldCatalogExecution)]
     pub fn apply_world_catalog_execution(
         &mut self,
-        request_id: String,
         execution: &WebCatalogExecution,
     ) -> Result<JsValue, JsValue> {
         let response = execution.response().map_err(JsValue::from)?;
-        let pending = self
-            .catalog_operations
-            .remove(&request_id)
-            .ok_or_else(|| JsValue::from_str("unknown catalog request completion"))?;
         self.platform
             .complete_catalog_operation(PlatformOperationCompletion {
-                token: pending.token,
+                token: execution.token().map_err(JsValue::from)?,
                 result: Ok(response),
             });
         let (device, queue) = (&self.context.device, &self.context.queue);
@@ -1862,16 +1845,12 @@ impl WebSceneHost {
     #[wasm_bindgen(js_name = applyWorldCatalogError)]
     pub fn apply_world_catalog_error(
         &mut self,
-        request_id: String,
+        execution: &WebCatalogExecution,
         message: String,
     ) -> Result<JsValue, JsValue> {
-        let pending = self
-            .catalog_operations
-            .remove(&request_id)
-            .ok_or_else(|| JsValue::from_str("unknown catalog request failure"))?;
         self.platform
             .complete_catalog_operation(PlatformOperationCompletion {
-                token: pending.token,
+                token: execution.token().map_err(JsValue::from)?,
                 result: Err(WorldCatalogError::new(
                     WorldCatalogErrorKind::StorageFailure,
                     message,
@@ -1920,15 +1899,18 @@ impl WebSceneHost {
             ));
         }
         let authored_enabled = pending
+            .kind
             .selection
             .is_enabled(&mclone_assets::AssetPackId::new(
                 AUTHORED_FIRST_PARTY_PACK_ID,
             ));
-        let reference_enabled = pending
-            .selection
-            .is_enabled(&mclone_assets::AssetPackId::new(
-                MINECRAFT_REFERENCE_PACK_ID,
-            ));
+        let reference_enabled =
+            pending
+                .kind
+                .selection
+                .is_enabled(&mclone_assets::AssetPackId::new(
+                    MINECRAFT_REFERENCE_PACK_ID,
+                ));
         let authored = self.initial_asset_packs.authored.clone();
         let reference = self.initial_asset_packs.reference.clone();
         let fallback = self.initial_asset_packs.fallback.clone();
@@ -1944,10 +1926,10 @@ impl WebSceneHost {
         .map_err(|error| JsValue::from_str(&format!("failed to inspect selected packs: {error}")))?
         .into_iter()
         .sum();
-        self.asset_pack_preparation_in_flight = Some(pending.epoch);
+        self.asset_pack_preparation_in_flight = Some(pending.token);
         Ok(WebAssetPackPreparation {
             effect: Some(WebAssetPackPreparationEffect {
-                epoch: pending.epoch,
+                content_generation: pending.kind.content_generation,
                 authored,
                 reference,
                 fallback,
@@ -1956,7 +1938,8 @@ impl WebSceneHost {
                 render_worker: self.render_worker.clone(),
             }),
             state: Rc::new(RefCell::new(WebAssetPackPreparationState { outcome: None })),
-            epoch: pending.epoch,
+            token: pending.token,
+            content_generation: pending.kind.content_generation,
             selected_file_count,
         })
     }
@@ -1966,7 +1949,7 @@ impl WebSceneHost {
         &mut self,
         preparation: &mut WebAssetPackPreparation,
     ) -> Result<JsValue, JsValue> {
-        if self.asset_pack_preparation_in_flight != Some(preparation.epoch) {
+        if self.asset_pack_preparation_in_flight != Some(preparation.token) {
             return Err(JsValue::from_str(
                 "asset preparation ticket does not match the in-flight request",
             ));
@@ -1978,27 +1961,23 @@ impl WebSceneHost {
             .take()
             .ok_or_else(|| JsValue::from_str("asset preparation ticket is not complete"))?;
         self.asset_pack_preparation_in_flight = None;
-        let assets = match outcome {
-            Ok(assets) => assets,
-            Err(error) => {
-                self.host_mut()?
-                    .fail_external_asset_pack_preparation(error.clone());
-                return Err(JsValue::from_str(&error));
-            }
-        };
-        if let Err(error) = self
+        let failure = outcome.as_ref().err().cloned();
+        let applied = self
             .host_mut()?
-            .complete_external_asset_pack_preparation(assets)
-        {
-            let message = format!("failed to complete browser asset replacement: {error:#}");
+            .complete_external_asset_pack_preparation(preparation.token, outcome)
+            .map_err(js_error)?;
+        if !applied {
             self.render_worker
-                .settle_asset_epoch(preparation.epoch, false);
-            self.host_mut()?
-                .fail_external_asset_pack_preparation(message.clone());
-            return Err(JsValue::from_str(&message));
+                .settle_asset_epoch(preparation.content_generation, false);
+            return self.ui_report(false, None).map_err(JsValue::from);
         }
-        self.pending_asset_pack_file_count =
-            Some((preparation.epoch, preparation.selected_file_count));
+        if let Some(error) = failure {
+            return Err(JsValue::from_str(&error));
+        }
+        self.pending_asset_pack_file_count = Some((
+            preparation.content_generation,
+            preparation.selected_file_count,
+        ));
         self.ui_report(false, None).map_err(JsValue::from)
     }
 }
@@ -2228,8 +2207,7 @@ async fn create_scene_host(
         update_count: 0,
         interaction_count: 0,
         mesh_build_count: 0,
-        catalog_operations: HashMap::new(),
-        stale_lobby_start_completion_count: 0,
+        catalog_operations: VecDeque::new(),
         render_resource_generation: 1,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
@@ -2429,7 +2407,7 @@ impl WebSceneHost {
             self.platform.clock_handle(),
             pending.instance_id.get(),
             match &pending.target {
-                mclone_scene::ExternalSceneStartTarget::ActiveSession
+                mclone_scene::ExternalSceneStartTarget::ActiveSession { .. }
                 | mclone_scene::ExternalSceneStartTarget::Lobby {
                     role: mclone_app_runtime::scenario_content::LobbyWorldRole::Primary,
                     ..
@@ -2443,7 +2421,7 @@ impl WebSceneHost {
         .into_scene_session_runtime(descriptor.clone());
         let resets_active_presentation = matches!(
             pending.target,
-            mclone_scene::ExternalSceneStartTarget::ActiveSession
+            mclone_scene::ExternalSceneStartTarget::ActiveSession { .. }
                 | mclone_scene::ExternalSceneStartTarget::Lobby {
                     role: mclone_app_runtime::scenario_content::LobbyWorldRole::Primary,
                     ..
@@ -2569,17 +2547,13 @@ impl WebSceneHost {
         let object: js_sys::Object = value.unchecked_into();
         report_set_bool(&object, "handled", handled)?;
         if let Some(operation) = self.platform.take_catalog_operation() {
-            let request_id = operation.kind.request.id.0.to_string();
-            self.catalog_operations.insert(
-                request_id.clone(),
-                PendingWebCatalogOperation {
+            self.catalog_operations
+                .push_back(PendingWebCatalogOperation {
                     token: operation.token,
-                    request: Some(operation.kind.request.request),
+                    request: operation.kind.request.request,
                     active_world: operation.kind.active_world,
-                },
-            );
+                });
             report_set_bool(&object, "catalogRequest", true)?;
-            report_set_string(&object, "catalogRequestId", &request_id)?;
         }
         Ok(object.into())
     }
@@ -2758,7 +2732,7 @@ impl WebSceneHost {
             report_set_bool(
                 &object,
                 "sessionStartPending",
-                host.external_session_start_snapshot().is_some(),
+                host.external_session_start_pending(),
             )?;
             report_set_bool(
                 &object,
@@ -2767,10 +2741,14 @@ impl WebSceneHost {
             )?;
             if let Some(pending) = host
                 .pending_external_asset_pack_selection()
-                .filter(|pending| self.asset_pack_preparation_in_flight != Some(pending.epoch))
+                .filter(|pending| self.asset_pack_preparation_in_flight != Some(pending.token))
             {
                 report_set_bool(&object, "assetPackRequest", true)?;
-                report_set_number(&object, "assetPackRequestEpoch", pending.epoch as f64)?;
+                report_set_number(
+                    &object,
+                    "assetPackRequestEpoch",
+                    pending.kind.content_generation as f64,
+                )?;
             }
         }
         Ok(object.into())
@@ -2877,11 +2855,6 @@ impl WebSceneHost {
 
         if let Some(host) = self.host.as_ref() {
             report_set_bool(&object, "lobbyLaunchActive", host.lobby_launch_active())?;
-            report_set_number(
-                &object,
-                "staleLobbyStartCompletionCount",
-                self.stale_lobby_start_completion_count as f64,
-            )?;
             report_set_number(
                 &object,
                 "renderResourceGeneration",
@@ -3680,14 +3653,19 @@ impl WebSceneHost {
             }
             if let Some(pending) = host
                 .pending_external_asset_pack_selection()
-                .filter(|pending| self.asset_pack_preparation_in_flight != Some(pending.epoch))
+                .filter(|pending| self.asset_pack_preparation_in_flight != Some(pending.token))
             {
                 report_set_bool(&object, "assetPackRequest", true)?;
-                report_set_number(&object, "assetPackRequestEpoch", pending.epoch as f64)?;
+                report_set_number(
+                    &object,
+                    "assetPackRequestEpoch",
+                    pending.kind.content_generation as f64,
+                )?;
                 report_set_bool(
                     &object,
                     "assetPackAuthoredEnabled",
                     pending
+                        .kind
                         .selection
                         .is_enabled(&mclone_assets::AssetPackId::new(
                             AUTHORED_FIRST_PARTY_PACK_ID,
@@ -3697,6 +3675,7 @@ impl WebSceneHost {
                     &object,
                     "assetPackReferenceEnabled",
                     pending
+                        .kind
                         .selection
                         .is_enabled(&mclone_assets::AssetPackId::new(
                             MINECRAFT_REFERENCE_PACK_ID,
@@ -3840,7 +3819,7 @@ impl WebSceneHost {
             report_set_bool(
                 &object,
                 "sessionStartPending",
-                host.external_session_start_snapshot().is_some(),
+                host.external_session_start_pending(),
             )?;
             let effective_status = if self.status_overlay.visible {
                 self.status_overlay.clone()

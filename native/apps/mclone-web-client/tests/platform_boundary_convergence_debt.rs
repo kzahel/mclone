@@ -17,6 +17,10 @@ const SCENE_SESSION: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../crates/mclone-scene/src/session.rs"
 ));
+const SCENE_ASSET_REPLACEMENT: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../crates/mclone-scene/src/asset_replacement.rs"
+));
 
 fn assert_at_most(label: &str, source: &str, needle: &str, ceiling: usize) {
     let count = source.matches(needle).count();
@@ -34,10 +38,18 @@ fn typescript_scene_operation_coordination_debt_only_decreases() {
         ("lobby promise registry", "pendingLobbyRuntimeStarts", 0),
         ("lobby drain guard", "lobbyOperationDrainActive", 5),
         ("catalog promise tail", "worldCatalogOperationTail", 5),
-        ("session dispatch branch", "dispatchSceneSessionOperation", 3),
-        ("catalog dispatch branch", "dispatchWorldCatalogOperation", 2),
+        (
+            "session dispatch branch",
+            "dispatchSceneSessionOperation",
+            3,
+        ),
+        (
+            "catalog dispatch branch",
+            "dispatchWorldCatalogOperation",
+            2,
+        ),
         ("asset dispatch branch", "dispatchAssetPackOperation", 3),
-        ("catalog string identity", "catalogRequestId", 1),
+        ("catalog string identity", "catalogRequestId", 0),
         ("session report wakeup", "sessionStartPending", 1),
         ("asset report wakeup", "assetPackRequest", 1),
         (
@@ -81,13 +93,31 @@ fn rust_boundary_identity_and_async_export_debt_only_decreases() {
             "browser-local stale completion counter",
             WEB_SCENE_HOST,
             "stale_lobby_start_completion_count",
-            5,
+            0,
         ),
         (
             "parallel session currentness check",
             SCENE_SESSION,
             "external_scene_start_is_current",
-            2,
+            0,
+        ),
+        (
+            "catalog string completion parameter",
+            WEB_SCENE_HOST,
+            "request_id: String",
+            0,
+        ),
+        (
+            "asset generation used as browser completion identity",
+            WEB_SCENE_HOST,
+            "asset_pack_preparation_in_flight: Option<u64>",
+            0,
+        ),
+        (
+            "asset epoch used as external operation identity",
+            SCENE_ASSET_REPLACEMENT,
+            "ExternalAssetPackSelection {\n    pub epoch",
+            0,
         ),
     ] {
         assert_at_most(label, source, needle, ceiling);

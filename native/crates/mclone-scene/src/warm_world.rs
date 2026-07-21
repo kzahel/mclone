@@ -302,17 +302,6 @@ impl LobbyLaunchState {
         self.start_operations.complete(completion)
     }
 
-    pub(crate) fn owns_start(
-        &self,
-        token: PlatformOperationToken,
-        role: LobbyWorldRole,
-        instance_id: WorldInstanceId,
-    ) -> bool {
-        self.start_operations
-            .pending_kind(token)
-            .is_some_and(|start| start.role == role && start.instance_id == instance_id)
-    }
-
     pub(crate) fn cancel(&mut self) -> usize {
         let count = self.start_operations.pending_len();
         self.pending_start_requests.clear();
@@ -554,6 +543,7 @@ pub struct EmbeddedWorldPreviewSnapshot {
     pub source_world: WorldInstanceId,
     pub region: EmbeddedChunkRegion,
     pub placement: WorldPlacement,
+    /// Content generation proving preview resources match their source slot.
     pub asset_epoch: u64,
     pub phase: EmbeddedWorldPreviewPhase,
     pub renderer_topology_ready: bool,
@@ -775,6 +765,7 @@ pub(crate) struct EmbeddedWorldPreview {
     pub context: WorldCompositionContext,
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     pub return_context: WorldCompositionContext,
+    /// Content generation proving renderer resources match both retained slots.
     pub asset_epoch: u64,
     pub phase: EmbeddedWorldPreviewPhase,
     pub renderer: PlacedTexturedSectionRenderer,
@@ -1387,6 +1378,7 @@ pub struct WarmWorldStandbySnapshot {
     pub shared_actor_resource_owner_count: usize,
     pub shared_actor_known_retained_bytes: usize,
     pub standby_actor_state_allocated_bytes: u64,
+    /// Content generation retained for standby/active compatibility checks.
     pub asset_epoch: u64,
     pub standby_cadence: SimulationCadenceConfig,
     pub standby_cadence_applied: bool,
@@ -1546,6 +1538,7 @@ pub(crate) struct WarmWorldStandbyState {
     pub shared_actor_resource_owner_count: usize,
     pub shared_actor_known_retained_bytes: usize,
     pub standby_actor_state_allocated_bytes: u64,
+    /// Content generation retained for standby/active compatibility checks.
     pub asset_epoch: u64,
     pub standby_cadence: SimulationCadenceConfig,
     pub standby_cadence_applied: bool,
@@ -1901,10 +1894,16 @@ mod tests {
         assert_eq!(operation.token, token);
         assert_eq!(operation.kind.instance_id, WorldInstanceId::new(41));
         assert_eq!(operation.kind.role, LobbyWorldRole::Primary);
-        assert!(launch.owns_start(token, LobbyWorldRole::Primary, WorldInstanceId::new(41),));
-        assert!(!launch.owns_start(token, LobbyWorldRole::Destination, WorldInstanceId::new(41),));
-        assert_eq!(launch.cancel(), 1);
-        assert!(!launch.owns_start(token, LobbyWorldRole::Primary, WorldInstanceId::new(41),));
+        assert!(matches!(
+            launch.complete_start(PlatformOperationCompletion {
+                token,
+                result: Ok::<(), String>(()),
+            }),
+            PlatformOperationResolution::Applied { kind, .. }
+                if kind.role == LobbyWorldRole::Primary
+                    && kind.instance_id == WorldInstanceId::new(41)
+        ));
+        assert_eq!(launch.cancel(), 0);
     }
 
     fn flat_pose() -> WorldEntryPose {

@@ -15,6 +15,9 @@ fn ordinary_catalog_policy_is_rust_owned() {
 
     assert!(app.contains("takeWorldCatalogExecution"));
     assert!(app.contains("applyWorldCatalogExecution"));
+    assert!(app.contains("session.takeWorldCatalogExecution()"));
+    assert!(app.contains("session.applyWorldCatalogExecution(execution)"));
+    assert!(!app.contains("catalogRequestId"));
     assert!(!app.contains("catalogOperation"));
     assert!(!app.contains("catalogGenerationProfile"));
     assert!(!app.contains("catalogRequestedId"));

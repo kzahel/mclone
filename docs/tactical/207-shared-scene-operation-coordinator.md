@@ -1,8 +1,8 @@
 # Tactical 207: Shared Scene Operation Coordinator
 
-Status: implementation active. Slices 0 and 1 landed on 2026-07-21; Slice 2
-identity consolidation is next. The browser ABI cutover is live, while the
-parallel operation identities have not yet been merged. The original proposal framed
+Status: implementation active. Slices 0–2 landed on 2026-07-21; the mandatory
+post-identity decision gate is next. The browser ABI cutover and one
+boundary-operation token family are live. The original proposal framed
 success as deleting the remaining named TypeScript pumps. The measured
 two-sided audit showed the complexity mass sits on the Rust side, so the plan
 now makes Rust-side consolidation the primary deliverable — one
@@ -241,6 +241,46 @@ states and their Promise-owned effect runners; the measured behavior gain
 permits this phase-local increase, but Tactical 207 still owes a net-negative
 combined closeout. `WebSceneHost` remains at 48 exports; async mutable exports
 are 4 -> 0, and the wasm cfg counts remain 71 / 110.
+
+### Slice 2 identity evidence
+
+Active-session and lobby runtime starts now carry opaque
+`PlatformOperationToken` values and are accepted through shared-ledger
+resolution before either world slot can be installed. The parallel
+`external_scene_start_is_current` predicate and browser-only
+`stale_lobby_start_completion_count` are deleted. Replacement and teardown
+advance the ledger epoch, so late runtimes and failures resolve as stale.
+
+External asset preparation now has the same issue/completion identity. Its
+opaque ticket retains the operation token while `content_generation` names
+the distinct resource invariant passed to prepared assets and the render
+worker. Retained warm-world `asset_epoch` fields are documented as content-
+generation compatibility checks across CPU, compiler, GPU, active, standby,
+and preview resources; none identify a platform completion.
+
+Catalog execution no longer reports or accepts a string request ID. The
+ledger token remains inside the opaque `WebCatalogExecution` ticket, so
+TypeScript submits an exact success or failure without inspecting identity or
+relying on FIFO completion order. Generic shared-ledger tests cover unique
+ordering, concurrent out-of-order completion, duplicate and unknown results,
+failure restoration, cancellation, executor replacement, teardown, and late
+completion. Scene ownership locks prove ledger acceptance precedes active or
+standby slot installation and world teardown cancels session-start and asset-
+preparation work.
+
+The catalog, asset-pack, and lobby runtime semantic probes passed. Their held-
+operation traces still showed +4/+4/+4, +3/+3/+3, and +6/+6/+6 frame/render/
+input progress respectively. The catalog probe again failed only its existing
+transparent-black canvas pixel gate; the asset and lobby screenshots were
+also inspected as black even where their commands accepted semantic results.
+
+Relative to Phase 1, authored TypeScript is 3,686 lines (+1), web-only Rust is
+20,695 (-7), and their combined boundary is 24,381 (-6). Relative to the
+clean baseline the combined boundary remains +47, so later deletion is still
+required. Shared `mclone-scene` is 24,720 lines (+88 in this slice) because it
+now owns the session and asset ledgers; `mclone-app-runtime` remains 33,877.
+Exports remain 48, async mutable exports remain zero, and cfg counts remain
+71 / 110. Identity/staleness systems are 4 -> 1.
 
 ### Product TypeScript coordination state
 
@@ -492,6 +532,11 @@ active world no longer pauses during independent coarse operations.
 
 ### Slice 2: Consolidate operation identity onto the ledger
 
+Status: complete 2026-07-21. Session, lobby, asset, and catalog completions
+use opaque `PlatformOperationToken` values; the former currentness predicate,
+stale counter, asset-generation completion identity, and catalog string ID
+are deleted. Retained asset epochs are documented content generations.
+
 - Migrate session-start currentness onto `PlatformOperationLedger` tokens and
   delete `external_scene_start_is_current` duplication and the hand-rolled
   `stale_lobby_start_completion_count`.
@@ -517,6 +562,9 @@ scoreboard reads 4 → 1; a platform adapter can take work and return
 completion without learning why the scene requested it.
 
 ### Decision gate after Slice 2
+
+Status: next. No Slice 3 implementation begins until the remaining pumps,
+ticket types, exports, and combined line cost are freshly inventoried below.
 
 Re-measure the remaining named TypeScript pumps and the per-operation ticket
 types against the new ABI and identity system. If they have collapsed to

@@ -229,7 +229,7 @@ fn live_identity_moves_with_the_complete_world_slot() {
 #[test]
 fn primary_and_destination_start_operations_are_independent() {
     assert!(WARM_WORLD.contains("LobbyWorldRole::Primary,"));
-    assert!(WARM_WORLD.contains("LobbyWorldRole::Destination,"));
+    assert!(SCENE_SESSION.contains("LobbyWorldRole::Destination =>"));
     assert!(WARM_WORLD.contains("start_operations.issue("));
     assert!(!SCENE_SESSION.contains("provision_request"));
     assert!(SCENE_SESSION.contains("take_lobby_world_start"));
@@ -246,8 +246,8 @@ fn stale_browser_starts_are_rejected_before_slot_installation() {
         .next()
         .expect("completion precedes failure handling");
     let guard = completion
-        .find("if !self.external_scene_start_is_current(&pending)")
-        .expect("shared operation-epoch guard exists");
+        .find("if !self.accept_external_scene_start(&pending)")
+        .expect("shared operation-ledger acceptance exists");
     let active_install = completion
         .find("self.active_world.install(DrawableWorldSlotInstall {")
         .expect("active-slot installation remains explicit");
@@ -257,8 +257,11 @@ fn stale_browser_starts_are_rejected_before_slot_installation() {
     assert!(guard < active_install);
     assert!(guard < standby_install);
 
-    assert!(WEB_SCENE_HOST.contains("external_scene_start_is_current(&pending)"));
-    assert!(WEB_SCENE_HOST.contains("stale_lobby_start_completion_count"));
+    assert!(SCENE_SESSION.contains("active_session_start_operations.complete("));
+    assert!(SCENE_SESSION.contains("launch.complete_start("));
+    assert!(!SCENE_SESSION.contains("external_scene_start_is_current"));
+    assert!(!WEB_SCENE_HOST.contains("external_scene_start_is_current"));
+    assert!(!WEB_SCENE_HOST.contains("stale_lobby_start_completion_count"));
     assert!(WEB_SCENE_HOST.contains("pub fn take_lobby_runtime_start"));
     assert!(!WEB_SCENE_HOST.contains("discardLobbyOperations"));
     assert!(!WEB_APP.contains("discardLobbyOperations"));

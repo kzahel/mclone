@@ -44,7 +44,9 @@ pub struct AssetPackRuntimeDiagnostics {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExternalAssetPackSelection {
-    pub epoch: u64,
+    /// Resource-compatibility generation for the prepared asset bundle. This
+    /// is not platform-operation identity; the surrounding operation token is.
+    pub content_generation: u64,
     pub selection: mclone_assets::AssetPackSelection,
 }
 
@@ -101,6 +103,7 @@ impl McloneSceneHost {
         self.asset_pack_preference = AssetPackPreference::from_selection(&active_selection);
         self.external_asset_pack_preparation = false;
         self.pending_external_asset_pack_selection = None;
+        let _ = self.external_asset_pack_operations.teardown();
         self.pending_restored_asset_pack_selection = None;
         Ok(())
     }
@@ -130,11 +133,14 @@ impl McloneSceneHost {
         self.asset_pack_preference = AssetPackPreference::from_selection(&active_selection);
         self.external_asset_pack_preparation = true;
         self.pending_external_asset_pack_selection = None;
+        let _ = self.external_asset_pack_operations.teardown();
         self.pending_restored_asset_pack_selection = None;
         Ok(())
     }
 
-    pub fn pending_external_asset_pack_selection(&self) -> Option<&ExternalAssetPackSelection> {
+    pub fn pending_external_asset_pack_selection(
+        &self,
+    ) -> Option<&PlatformOperation<ExternalAssetPackSelection>> {
         self.pending_external_asset_pack_selection.as_ref()
     }
 
@@ -204,20 +210,40 @@ impl McloneSceneHost {
     /// keeps the same transactional frame-boundary commit contract.
     pub fn complete_external_asset_pack_preparation(
         &mut self,
-        assets: PreparedSceneAssets,
-    ) -> Result<()> {
-        let pending = self
-            .pending_external_asset_pack_selection
-            .as_ref()
-            .context("no external asset-pack preparation is pending")?;
-        if assets.epoch != pending.epoch || assets.selection != pending.selection {
-            bail!(
+        token: mclone_app_runtime::platform_operation::PlatformOperationToken,
+        result: Result<PreparedSceneAssets, String>,
+    ) -> Result<bool> {
+        let resolution = self.external_asset_pack_operations.complete(
+            mclone_app_runtime::platform_operation::PlatformOperationCompletion { token, result },
+        );
+        let (pending, assets) = match resolution {
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                kind,
+                value,
+                ..
+            } => (kind, value),
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed {
+                error,
+                ..
+            } => {
+                self.pending_external_asset_pack_selection = None;
+                self.fail_asset_replacement(error);
+                return Ok(true);
+            }
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Stale(_)
+            | mclone_app_runtime::platform_operation::PlatformOperationResolution::Duplicate(_)
+            | mclone_app_runtime::platform_operation::PlatformOperationResolution::Unknown(_) => {
+                return Ok(false);
+            }
+        };
+        self.pending_external_asset_pack_selection = None;
+        if assets.epoch != pending.content_generation || assets.selection != pending.selection {
+            let message = format!(
                 "external asset preparation mismatch: expected epoch {} selection {:?}, got epoch {} selection {:?}",
-                pending.epoch,
-                pending.selection,
-                assets.epoch,
-                assets.selection
+                pending.content_generation, pending.selection, assets.epoch, assets.selection
             );
+            self.fail_asset_replacement(message.clone());
+            bail!(message);
         }
         self.asset_replacement_assets_ready_at = Some(self.services.clock.now());
         let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
@@ -228,7 +254,6 @@ impl McloneSceneHost {
             self.current_biome_zoom_seed(),
         )?;
         let epoch = replacement.assets.epoch;
-        self.pending_external_asset_pack_selection = None;
         self.asset_replacement = Some(SceneAssetReplacementPending::Meshes(
             PreparedAssetReplacementRequest::ready(replacement),
         ));
@@ -236,12 +261,7 @@ impl McloneSceneHost {
         self.client_experience
             .asset_packs_mut()
             .mark_preparing_meshes();
-        Ok(())
-    }
-
-    pub fn fail_external_asset_pack_preparation(&mut self, message: impl Into<String>) {
-        self.pending_external_asset_pack_selection = None;
-        self.fail_asset_replacement(message.into());
+        Ok(true)
     }
 
     pub(crate) fn apply_asset_pack_effects(&mut self, effects: Vec<ClientAssetPackEffect>) {
@@ -264,8 +284,17 @@ impl McloneSceneHost {
         self.asset_replacement_started_at = Some(self.services.clock.now());
         self.asset_replacement_assets_ready_at = None;
         if self.external_asset_pack_preparation {
-            self.pending_external_asset_pack_selection =
-                Some(ExternalAssetPackSelection { epoch, selection });
+            if !self.external_asset_pack_operations.is_empty() {
+                let _ = self.external_asset_pack_operations.teardown();
+            }
+            let operation = self.external_asset_pack_operations.issue(
+                ExternalAssetPackSelection {
+                    content_generation: epoch,
+                    selection,
+                },
+                (),
+            );
+            self.pending_external_asset_pack_selection = Some(operation);
             self.asset_replacement_status = AssetReplacementStatus::PreparingAssets { epoch };
             return Ok(());
         }

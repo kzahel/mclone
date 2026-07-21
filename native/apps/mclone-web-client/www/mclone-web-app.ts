@@ -531,7 +531,7 @@ class WebFrameDriver {
       return;
     }
     this.worldCatalogOperationTail = this.worldCatalogOperationTail
-      .then(() => this.completeWorldCatalogRequest(report, options))
+      .then(() => this.completeWorldCatalogRequest(options))
       .catch((error: unknown) => {
         runtime.state.ok = false;
         runtime.state.status = stringifyError(error);
@@ -570,29 +570,30 @@ class WebFrameDriver {
   }
 
   async completeWorldCatalogRequest(
-    report: WasmReport,
     options: { fromPointer?: boolean, pointerType?: string } = {},
   ): Promise<void> {
     if (!this.session) {
       return;
     }
     const session = this.session;
-    const requestId = String(report.catalogRequestId ?? "").trim();
     let db: IDBDatabase | null = null;
     let execution: WebCatalogExecution | null = null;
     try {
+      execution = session.takeWorldCatalogExecution();
       db = await openWorldDb();
-      execution = session.takeWorldCatalogExecution(requestId);
       await execution.awaitWriterRetirements();
       await executeIndexedDbCatalogExecution(db, execution);
-      const completion = session.applyWorldCatalogExecution(requestId, execution);
+      const completion = session.applyWorldCatalogExecution(execution);
       smokeObserver?.observeWorldCatalogCompletion();
       this.applyNativeUiReport(completion, options);
     } catch (error) {
       const message = stringifyError(error);
       console.error(error);
       try {
-        const failure = session.applyWorldCatalogError(requestId, message);
+        if (!execution) {
+          throw error;
+        }
+        const failure = session.applyWorldCatalogError(execution, message);
         smokeObserver?.observeWorldCatalogCompletion();
         this.applyNativeUiReport(failure, options);
       } catch (completionError) {

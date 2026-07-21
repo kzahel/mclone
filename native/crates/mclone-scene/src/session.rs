@@ -198,7 +198,9 @@ pub(crate) type ScenePendingSessionStart = SessionStartPayload<McloneSceneHostOp
 /// complete it back into the same scene host.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ExternalSceneStartTarget {
-    ActiveSession,
+    ActiveSession {
+        token: mclone_app_runtime::platform_operation::PlatformOperationToken,
+    },
     Lobby {
         token: mclone_app_runtime::platform_operation::PlatformOperationToken,
         role: mclone_app_runtime::scenario_content::LobbyWorldRole,
@@ -408,7 +410,9 @@ impl McloneSceneHost {
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
+            external_asset_pack_operations: PlatformOperationLedger::new(),
             session,
+            active_session_start_operations: PlatformOperationLedger::new(),
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(
                 xr_native_client_experience_profile(),
@@ -603,7 +607,9 @@ impl McloneSceneHost {
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
+            external_asset_pack_operations: PlatformOperationLedger::new(),
             session,
+            active_session_start_operations: PlatformOperationLedger::new(),
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(
                 xr_native_client_experience_profile(),
@@ -803,7 +809,9 @@ impl McloneSceneHost {
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
+            external_asset_pack_operations: PlatformOperationLedger::new(),
             session,
+            active_session_start_operations: PlatformOperationLedger::new(),
             #[cfg(not(target_arch = "wasm32"))]
             session_runtime_factory: None,
             client_experience: ClientExperienceController::new(client_experience_profile),
@@ -996,9 +1004,22 @@ impl McloneSceneHost {
     /// state until completion or failure is submitted.
     pub fn take_external_session_start(&mut self) -> Option<ExternalSceneSessionStart> {
         let pending = self.session.take_pending_start()?;
+        let instance_id = self.allocate_world_instance_id();
+        if !self.active_session_start_operations.is_empty() {
+            let cancelled = self.active_session_start_operations.teardown();
+            log::info!(
+                "superseded {} active-session platform operation(s)",
+                cancelled.len()
+            );
+        }
+        let operation = self
+            .active_session_start_operations
+            .issue(instance_id, pending.request.clone());
         Some(ExternalSceneSessionStart {
-            target: ExternalSceneStartTarget::ActiveSession,
-            instance_id: self.allocate_world_instance_id(),
+            target: ExternalSceneStartTarget::ActiveSession {
+                token: operation.token,
+            },
+            instance_id,
             storage_source: None,
             request: pending.request,
             runtime_kind: pending.payload.runtime_kind,
@@ -1008,18 +1029,8 @@ impl McloneSceneHost {
         })
     }
 
-    pub fn external_session_start_snapshot(&self) -> Option<ExternalSceneSessionStart> {
-        let pending = self.session.pending_start()?;
-        Some(ExternalSceneSessionStart {
-            target: ExternalSceneStartTarget::ActiveSession,
-            instance_id: WorldInstanceId::new(self.next_world_instance_id),
-            storage_source: None,
-            request: pending.request.clone(),
-            runtime_kind: pending.payload.runtime_kind,
-            scene: pending.payload.options.clone(),
-            descriptor: pending.payload.descriptor.clone(),
-            destination: None,
-        })
+    pub fn external_session_start_pending(&self) -> bool {
+        self.session.pending_start().is_some()
     }
 
     pub const fn lobby_launch_active(&self) -> bool {
@@ -1032,20 +1043,6 @@ impl McloneSceneHost {
             .and_then(|launch| launch.destination_failure.as_deref())
     }
 
-    /// True only while a taken asynchronous start still belongs to the live
-    /// shared scenario operation epoch. A platform adapter may finish Worker
-    /// construction after Back, Quit, asset replacement, or resource rebuild;
-    /// such a runtime must be dropped before it can replace either world slot.
-    pub fn external_scene_start_is_current(&self, pending: &ExternalSceneSessionStart) -> bool {
-        match &pending.target {
-            ExternalSceneStartTarget::ActiveSession => true,
-            ExternalSceneStartTarget::Lobby { token, role } => self
-                .lobby_launch
-                .as_ref()
-                .is_some_and(|launch| launch.owns_start(*token, *role, pending.instance_id)),
-        }
-    }
-
     /// Install an asynchronously constructed neutral runtime without moving
     /// session, render, UI, or camera policy into the platform adapter.
     pub fn complete_external_session_start(
@@ -1055,9 +1052,9 @@ impl McloneSceneHost {
         pending: ExternalSceneSessionStart,
         runtime: SceneSessionRuntime,
     ) -> Result<()> {
-        if !self.external_scene_start_is_current(&pending) {
+        if !self.accept_external_scene_start(&pending) {
             log::info!(
-                "dropping stale external scene start instance={} target={:?}",
+                "dropping non-current external scene start instance={} target={:?}",
                 pending.instance_id.get(),
                 pending.target,
             );
@@ -1084,7 +1081,7 @@ impl McloneSceneHost {
 
         let completion_target = pending.target.clone();
         match completion_target {
-            ExternalSceneStartTarget::ActiveSession
+            ExternalSceneStartTarget::ActiveSession { .. }
             | ExternalSceneStartTarget::Lobby {
                 role: mclone_app_runtime::scenario_content::LobbyWorldRole::Primary,
                 ..
@@ -1176,15 +1173,50 @@ impl McloneSceneHost {
                 )?;
             }
         }
-        if let ExternalSceneStartTarget::Lobby { token, role } = completion_target {
-            self.complete_lobby_world_start(token, role, pending.instance_id, device, queue)?;
+        if let ExternalSceneStartTarget::Lobby { role, .. } = completion_target {
+            self.finish_lobby_world_start(role, pending.instance_id, device, queue)?;
         }
         Ok(())
     }
 
-    fn complete_lobby_world_start(
+    fn accept_external_scene_start(&mut self, pending: &ExternalSceneSessionStart) -> bool {
+        let (token, role) = match pending.target {
+            ExternalSceneStartTarget::ActiveSession { token } => {
+                return matches!(
+                    self.active_session_start_operations.complete(
+                        mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                            token,
+                            result: Ok::<(), String>(()),
+                        },
+                    ),
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                        kind,
+                        ..
+                    } if kind == pending.instance_id
+                );
+            }
+            ExternalSceneStartTarget::Lobby { token, role } => (token, role),
+        };
+        let Some(launch) = self.lobby_launch.as_mut() else {
+            return false;
+        };
+        let resolution = launch.complete_start(
+            mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                token,
+                result: Ok(()),
+            },
+        );
+        matches!(
+            resolution,
+            mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
+                kind,
+                ..
+            } if kind.role == role && kind.instance_id == pending.instance_id
+        )
+    }
+
+    fn finish_lobby_world_start(
         &mut self,
-        token: mclone_app_runtime::platform_operation::PlatformOperationToken,
         role: mclone_app_runtime::scenario_content::LobbyWorldRole,
         instance_id: WorldInstanceId,
         device: &wgpu::Device,
@@ -1193,30 +1225,28 @@ impl McloneSceneHost {
         let Some(mut launch) = self.lobby_launch.take() else {
             bail!("lobby world completion has no active launch");
         };
-        match launch.complete_start(
-            mclone_app_runtime::platform_operation::PlatformOperationCompletion {
-                token,
-                result: Ok(()),
-            },
-        ) {
-            mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
-                kind,
-                ..
-            } if kind.role == role && kind.instance_id == instance_id => match role {
-                mclone_app_runtime::scenario_content::LobbyWorldRole::Primary => {
-                    launch.primary_start_token = None;
-                    launch.phase = LobbyLaunchPhase::PrimaryPlayable;
-                    self.try_issue_lobby_destination_start(&mut launch, device, queue)?;
-                }
-                mclone_app_runtime::scenario_content::LobbyWorldRole::Destination => {
-                    launch.destination_start_token = None;
-                }
-            },
-            resolution => {
-                self.lobby_launch = Some(launch);
-                bail!("lobby world completion was not applicable: {resolution:?}");
+        match role {
+            mclone_app_runtime::scenario_content::LobbyWorldRole::Primary => {
+                launch.primary_start_token = None;
+                launch.phase = LobbyLaunchPhase::PrimaryPlayable;
+                self.try_issue_lobby_destination_start(&mut launch, device, queue)?;
+            }
+            mclone_app_runtime::scenario_content::LobbyWorldRole::Destination => {
+                launch.destination_start_token = None;
             }
         }
+        debug_assert!(
+            match role {
+                mclone_app_runtime::scenario_content::LobbyWorldRole::Primary => {
+                    self.active_world.id == instance_id
+                }
+                mclone_app_runtime::scenario_content::LobbyWorldRole::Destination => self
+                    .standby_world
+                    .as_ref()
+                    .is_some_and(|world| world.id == instance_id),
+            },
+            "accepted lobby world was not installed in its target slot"
+        );
         self.lobby_launch = Some(launch);
         Ok(())
     }
@@ -1227,9 +1257,28 @@ impl McloneSceneHost {
         error: impl Into<String>,
     ) {
         let message = error.into();
-        if let ExternalSceneStartTarget::Lobby { token, .. } = pending.target {
-            self.fail_lobby_world_start(token, message);
-            return;
+        match pending.target {
+            ExternalSceneStartTarget::Lobby { token, .. } => {
+                self.fail_lobby_world_start(token, message);
+                return;
+            }
+            ExternalSceneStartTarget::ActiveSession { token } => {
+                if !matches!(
+                    self.active_session_start_operations.complete(
+                        mclone_app_runtime::platform_operation::PlatformOperationCompletion {
+                            token,
+                            result: Err::<(), _>(message.clone()),
+                        },
+                    ),
+                    mclone_app_runtime::platform_operation::PlatformOperationResolution::Failed { .. }
+                ) {
+                    log::info!(
+                        "ignored non-current active-session failure instance={}",
+                        pending.instance_id.get()
+                    );
+                    return;
+                }
+            }
         }
         log::error!(
             "failed to start external scene session {:?}: {}",
@@ -5371,6 +5420,16 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
+        let cancelled_session_starts = self.active_session_start_operations.teardown().len();
+        let cancelled_asset_preparations = self.external_asset_pack_operations.teardown().len();
+        self.pending_external_asset_pack_selection = None;
+        if cancelled_session_starts != 0 || cancelled_asset_preparations != 0 {
+            log::info!(
+                "cancelled platform operations during world teardown session_starts={} asset_preparations={}",
+                cancelled_session_starts,
+                cancelled_asset_preparations,
+            );
+        }
         self.cancel_warm_world_standby("active world teardown");
         if let Some(operations) = self.services.catalog_operations.as_mut() {
             for request in operations.begin_epoch() {
