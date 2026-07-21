@@ -10,6 +10,8 @@ same day: the 207 claims verified under fresh code reading, but the fixpoint
 evidence is only partially met and a bounded remaining-work backlog was
 appended. The current pickup is Phase 8, the audit-remediation backlog
 ([`212`](../tactical/212-boundary-audit-cleanup-backlog.md)).
+Slice 0 resolved the orphan-store decision without a runtime migration because
+there are no web-world preservation consumers; Slice 1 is the current pickup.
 This parent is
 deliberately **not closeable by an implementing tactical**, including one that
 completes every phase it planned. See the closure protocol below.
@@ -313,9 +315,10 @@ fork-site census including positive `wasm32` gates and `cfg_attr` is
 ## Immediate Next Workstream
 
 Execute [Tactical 212](../tactical/212-boundary-audit-cleanup-backlog.md),
-the Phase 8 audit-remediation backlog, starting with Slice 0 (resolve the
-`WORLD_DB_VERSION` orphan-store decision left open when the trailing
-cleanup landed as `5bf2ffa2`). The Phase 7 audit
+the Phase 8 audit-remediation backlog, starting with Slice 1. Slice 0 resolved
+the `WORLD_DB_VERSION` orphan-store decision without runtime migration: there
+are no web-world preservation consumers, version 6 is only the current schema
+identifier, and obsolete development profiles are disposable. The Phase 7 audit
 ([Tactical 211](../tactical/211-platform-boundary-fixpoint-audit.md))
 verified the 207 claims by fresh code reading and held the parent open on
 two evidence gaps (the fixpoint is compile/source-lock only; the export pin

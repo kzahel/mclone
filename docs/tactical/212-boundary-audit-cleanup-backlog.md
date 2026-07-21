@@ -1,6 +1,7 @@
 # Tactical 212: Boundary Audit Cleanup Backlog
 
-Status: planned, not started. This is the implementation charter for the
+Status: active 2026-07-21. Slice 0 is resolved as an explicit no-migration
+decision; Slice 1 is next. This is the implementation charter for the
 remaining work appended by the Phase 7 audit
 ([`211-platform-boundary-fixpoint-audit.md`](211-platform-boundary-fixpoint-audit.md)).
 It is a bounded cleanup series, not a new campaign: every slice below has
@@ -68,7 +69,7 @@ grep -rE 'cfg\(not\(target_arch = "wasm32"\)\)' \
 # native/apps/mclone-web-client/tests/platform_boundary_convergence_debt.rs
 ```
 
-## Slice 0: Resolve the DB-version decision (D1)
+## Slice 0: Resolve the DB-version decision (D1) — complete 2026-07-21
 
 Tactical 207's trailing cleanup — deletion of the legacy IndexedDB
 stores and the v5-to-v6 Overworld migration
@@ -77,16 +78,23 @@ two lock tests) — landed after the audit as commit `5bf2ffa2`
 (`Topic: world-dimension-storage-layout`), together with the
 headed-Wayland capture guidance. That commit did **not** resolve D1:
 
-`WORLD_DB_VERSION` is still 6, so existing dev-browser databases keep
-orphaned `chunks`/`entityChunks` object stores, and factory reset no
-longer clears them. Preferred resolution: bump to 7 and delete the
-orphan stores in `onupgradeneeded` (`deleteObjectStore` guarded by
-`objectStoreNames.contains`), with a lock-test update. Acceptable
-alternative: record explicit acceptance under the
-disposable-internal-worlds ledger in the commit message.
+`WORLD_DB_VERSION` is still 6, so a browser profile that opened the old
+internal schema may retain empty or disposable `chunks`/`entityChunks`
+object stores. This is accepted deliberately: the product is unreleased,
+there are no known web-world preservation consumers, and the compatibility
+safety ledger classifies internal worlds as disposable unless a concrete
+consumer is recorded. Commit `5bf2ffa2` intentionally deleted the runtime
+migration and added source locks preventing the legacy store vocabulary from
+returning. Bumping to 7 solely to delete stores from obsolete development
+profiles would recreate a one-off legacy accommodation with no product
+benefit. Developers with an old profile may clear site data.
 
-Exit gate: D1 resolved explicitly in code or commit message; lock tests
-green.
+This decision introduces no runtime code and leaves version 6 as the current
+schema identifier, not as a promise to support any earlier schema.
+
+Exit gate: D1 resolved explicitly here and in the Slice 0 commit message; the
+existing lock tests continue to reject legacy migration/store policy. No code
+or lock-test update is required.
 
 ## Slice 1: Deduplicate the catalog effect apply loop
 
@@ -282,10 +290,10 @@ suites green; counts reported.
 
 ## Ordering
 
-0 → 1 → 2 → 3 → 4 → 5 → 6 → 7. Slices 1–3 are independent of 4–6 and may
-be reordered among themselves; Slice 5's `render_resource_generation`
-item and Slice 4's smoke surface interact, so land 4 before 5 or combine
-those two commits. Slice 7 is optional and last.
+Slice 0 is complete. Continue 1 → 2 → 3 → 4 → 5 → 6 → 7. Slices 1–3 are
+independent of 4–6 and may be reordered among themselves; Slice 5's
+`render_resource_generation` item and Slice 4's smoke surface interact, so
+land 4 before 5 or combine those two commits. Slice 7 is optional and last.
 
 ## Validation Matrix
 
