@@ -2,7 +2,7 @@
 
 Topic: `figure-geometry-analysis`
 
-Status: implemented as a required canonical Asset Lab gate. The 146-figure
+Status: implemented as a required canonical Asset Lab gate. The 149-figure
 baseline has zero unacknowledged and zero acknowledged disconnected components.
 
 ## Scope
@@ -74,7 +74,7 @@ reviewers and future authoring agents see them.
   exact exception with a reason round-trips through JSON, a stale exception
   fails, and an empty reason fails.
 - The required scan currently reports zero unacknowledged and zero acknowledged
-  components across 146 canonical figures.
+  components across 149 canonical figures.
 
 ## Limits And Next Direction
 

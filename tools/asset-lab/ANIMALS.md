@@ -208,6 +208,7 @@ reviewed rigs and then filling macro gaps.
 | Honey badger | P3 | ✅ | Q | — | `examples/honey_badger` — approved 21-box adult with a continuous pale mantle, black underbody, heavy clawed paws, determined trot, and separate alternating digging-swipe action |
 | Fossa | P3 | ✅ | Q | — | `examples/fossa` — approved 21-box adult with a long tawny body, low feline head, rounded ears, four-stage balancing tail, quiet forest prowl, and separate airborne pounce action |
 | Aye-aye | P3 | ✅ | Q | — | `examples/aye_aye` — approved 22-box aye-aye with huge pink ears, pale mask, amber eyes, elongated probing fingers, four-stage plume tail, careful branch creep, and separate tap-probe action |
+| White-nosed coati | P3 | ✅ | Q | South American coati | `examples/white_nosed_coati` — approved 22-box adult with a cream mask and long nose, dark paws, five-stage upright ringed tail, foraging walk, and separate scent-probe action |
 
 ## Marsupials & monotremes
 
@@ -246,6 +247,7 @@ reviewed rigs and then filling macro gaps.
 | Kiwi | P3 | ✅ | W | brown kiwi, little spotted kiwi | `examples/kiwi` — approved 14-box brown kiwi with a low rounded body, tiny wings, long two-stage bill, planted feet, forage walk, and separate beak-probe action |
 | Secretary bird | P3 | ✅ | B | — | `examples/secretary_bird` — approved 26-box adult with swept black crest, orange face, gray-black plumage, long planted legs, grassland stalk, and separate abrupt stomp-strike action |
 | Marabou stork | P3 | ✅ | B | — | `examples/marabou_stork` — approved 19-box marabou with black-white plumage, bare pink head and neck, hanging throat pouch, long planted legs, wetland stalk, and separate broad wing-display action |
+| Kakapo | P3 | ✅ | B | — | `examples/kakapo` — approved 12-box moss-green flightless parrot with owl-like facial disc, tiny patterned wings, stout planted feet, slow waddle, and separate inflated booming display |
 
 ## Marine & aquatic
 
@@ -258,6 +260,7 @@ reviewed rigs and then filling macro gaps.
 | Manta ray | P3 | ✅ | S | reef manta, oceanic manta | `examples/manta_ray` — approved 16-box reef manta with patterned diamond disc, paired cephalic fins, long four-stage tail, undulating wing swim, and separate full barrel-roll action |
 | Dolphin | P1 | ✅ | S | — | `examples/dolphin` — approved 13-box bottlenose dolphin with vertical propulsion and horizontal flukes |
 | Whale | P2 | ✅ | S | orca, humpback, blue | `examples/orca` — approved 15-box adult orca with bright eye and saddle patches, continuous white underside, tall dorsal fin, rear-swept pectorals, and horizontal flukes |
+| Narwhal | P3 | ✅ | S | female, calf | `examples/narwhal` — approved 14-box mottled adult male with pale belly, long three-stage spiral tusk, compact flippers, horizontal flukes, arctic swim, and separate tusk-spar action |
 | Octopus | P2 | ✅ | S | — | `examples/octopus` — approved 32-box common octopus with mottled mantle, raised eyes, visible sucker rows, eight three-stage tentacles, and coordinated jet swim |
 | Cuttlefish | P3 | ✅ | S | common, flamboyant | `examples/cuttlefish` — approved common cuttlefish with a patterned broad mantle, traveling lateral-fin wave, large W-pupil eyes, eight arms, and a separate paired feeding-tentacle strike |
 | Crab | P2 | ✅ | C | — | `examples/crab` — approved 31-box red rock crab with patterned broad carapace, raised eyes, articulated chelae, eight two-stage legs, and explicit sideways scuttle |
