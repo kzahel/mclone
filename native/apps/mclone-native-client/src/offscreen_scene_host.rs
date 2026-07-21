@@ -16,9 +16,10 @@ use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget, TexturedSectionRenderO
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render_session::XrView;
 use mclone_scene::{
-    HostEffects, MonoSceneFrameSummary, MonoUiContext, MonoUiPresentation, MonoWorldActionStatus,
-    WarmWorldStandbyPhase, WarmWorldStandbySnapshot, XrStartupViewPose, XrTerrainEyeTarget,
-    XrTerrainFrameSummary, record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
+    FlatPresentationFrameSummary, FlatPresentationView, HostEffects, MonoSceneFrameSummary,
+    MonoUiContext, MonoUiPresentation, MonoWorldActionStatus, WarmWorldStandbyPhase,
+    WarmWorldStandbySnapshot, XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary,
+    record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point};
 
@@ -42,6 +43,7 @@ pub(crate) struct OffscreenFrameClock {
 enum OffscreenViewTopology {
     #[default]
     Mono,
+    FlatAuxiliary,
     Stereo,
 }
 
@@ -134,11 +136,11 @@ pub(crate) struct OffscreenDriver {
     right_depth: Option<ChunkDepthTarget>,
     color_format: wgpu::TextureFormat,
     size: [u32; 2],
+    view_topology: OffscreenViewTopology,
     clock: OffscreenFrameClock,
     frame_timing: FrameTimingStats,
     frame_pipeline_accounting: FramePipelineAccountant,
     last_summary: Option<MonoSceneFrameSummary>,
-    captured: Vec<MonoSceneFrameSummary>,
 }
 
 impl OffscreenDriver {
@@ -198,7 +200,7 @@ impl OffscreenDriver {
                 freeze_scheduled_fluid_ticks: options.freeze_scheduled_fluid_ticks,
             },
         )?;
-        if options.view_topology == OffscreenViewTopology::Mono {
+        if options.view_topology != OffscreenViewTopology::Stereo {
             let mut ui = GameUiHost::new_ingame();
             ui.set_join_remote_addr(
                 scene
@@ -216,23 +218,23 @@ impl OffscreenDriver {
             set_host_camera(&mut host, camera);
         }
         let size = [size[0].max(1), size[1].max(1)];
-        if options.view_topology == OffscreenViewTopology::Mono {
+        if options.view_topology != OffscreenViewTopology::Stereo {
             host.set_mono_ui_scale(GuiScale::from_pixels(size[0], size[1]));
         }
         Ok(Self {
             host,
             depth: ChunkDepthTarget::new(device, size[0], size[1]),
-            right_depth: (options.view_topology == OffscreenViewTopology::Stereo)
+            right_depth: (options.view_topology != OffscreenViewTopology::Mono)
                 .then(|| ChunkDepthTarget::new(device, size[0], size[1])),
             color_format,
             size,
+            view_topology: options.view_topology,
             clock: OffscreenFrameClock::default(),
             frame_timing: FrameTimingStats::default(),
             frame_pipeline_accounting: FramePipelineAccountant::new(
                 xr_frame_pipeline_accounting_config(None),
             ),
             last_summary: None,
-            captured: Vec::new(),
         })
     }
 
@@ -259,6 +261,34 @@ impl OffscreenDriver {
             None,
             OffscreenDriverOptions {
                 view_topology: OffscreenViewTopology::Stereo,
+                ..OffscreenDriverOptions::default()
+            },
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_flat_auxiliary(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        size: [u32; 2],
+        scene: &SceneOptions,
+        render_options: TexturedSectionRenderOptions,
+        assets: &WindowSceneAssets,
+        asset_source: &impl mclone_assets::AssetSource,
+    ) -> Result<Self> {
+        Self::new_with_options(
+            device,
+            queue,
+            color_format,
+            size,
+            scene,
+            render_options,
+            assets,
+            asset_source,
+            None,
+            OffscreenDriverOptions {
+                view_topology: OffscreenViewTopology::FlatAuxiliary,
                 ..OffscreenDriverOptions::default()
             },
         )
@@ -296,10 +326,6 @@ impl OffscreenDriver {
         self.host
             .mono_far_lod_settle_snapshot(render_view)
             .context("offscreen far LOD settle snapshot requires an active runtime")
-    }
-
-    pub(crate) fn captured(&self) -> &[MonoSceneFrameSummary] {
-        &self.captured
     }
 
     pub(crate) fn set_camera(&mut self, camera: &SpectatorCamera) {
@@ -359,6 +385,69 @@ impl OffscreenDriver {
                 size: self.size,
             },
         )
+    }
+
+    pub(crate) fn render_flat_auxiliary_pair_frozen(
+        &mut self,
+        frame: RenderFrameContext<'_>,
+        auxiliary_color_view: &wgpu::TextureView,
+        auxiliary_camera: ChunkCamera,
+        primary_ui: MonoUiPresentation,
+        hud_visible: bool,
+    ) -> Result<FlatPresentationFrameSummary> {
+        let auxiliary_depth = self
+            .right_depth
+            .as_ref()
+            .context("flat auxiliary render requested from a mono offscreen driver")?;
+        self.frame_timing
+            .begin_frame(self.clock.frame_ms, self.clock.target_frame_ms);
+        self.host.set_mono_ui_context(MonoUiContext {
+            frame_pacing: FramePacingUiState::default(),
+            pacing_debug: FramePacingDebugStats {
+                target_frame_ms: self.clock.target_frame_ms,
+                ..FramePacingDebugStats::default()
+            },
+            frame_timing: self.frame_timing,
+            render_scale: 1.0,
+            hud_visible,
+            ..MonoUiContext::default()
+        });
+        let RenderFrameContext {
+            device,
+            queue,
+            encoder,
+            target,
+        } = frame;
+        let primary_render_view = self.host.mono_render_view(target.size)?;
+        let auxiliary_render_view = auxiliary_camera.render_view(target.size[0], target.size[1]);
+        let views = [
+            FlatPresentationView::new(target, &self.depth, primary_render_view, primary_ui),
+            FlatPresentationView::new(
+                RenderFrameTarget::color(auxiliary_color_view, target.size),
+                auxiliary_depth,
+                auxiliary_render_view,
+                MonoUiPresentation::None,
+            ),
+        ];
+        let frame_start = Instant::now();
+        let summary = self
+            .host
+            .render_flat_presentation_frame_frozen(device, queue, encoder, &views)?;
+        let frame_ms = frame_start.elapsed().as_secs_f64() * 1_000.0;
+        self.frame_timing
+            .record_runtime_poll(summary.timing.runtime_poll_ms);
+        self.frame_timing.record_remesh_upload(
+            summary.timing.runtime_sync_ms,
+            summary.timing.runtime_gpu_upload_ms,
+        );
+        self.frame_timing.record_surface_frame(
+            summary.timing.render_views_ms,
+            0.0,
+            frame_ms,
+            0.0,
+            0.0,
+        );
+        Ok(summary)
     }
 
     pub(crate) fn render_stereo_frozen(
@@ -618,7 +707,6 @@ impl OffscreenDriver {
         self.set_camera(&spectator);
         let view = camera.render_view(frame.target.size[0], frame.target.size[1]);
         let summary = self.render_view_inner(frame, view, ui, true, true)?;
-        self.captured.push(summary.clone());
         Ok(summary)
     }
 
@@ -633,7 +721,6 @@ impl OffscreenDriver {
     ) -> Result<MonoSceneFrameSummary> {
         let view = camera.render_view(frame.target.size[0], frame.target.size[1]);
         let summary = self.render_view_inner(frame, view, ui, false, true)?;
-        self.captured.push(summary.clone());
         Ok(summary)
     }
 
@@ -911,7 +998,8 @@ impl OffscreenDriver {
         self.depth = ChunkDepthTarget::new(device, self.size[0], self.size[1]);
         if self.right_depth.is_some() {
             self.right_depth = Some(ChunkDepthTarget::new(device, self.size[0], self.size[1]));
-        } else {
+        }
+        if self.view_topology != OffscreenViewTopology::Stereo {
             self.host
                 .set_mono_ui_scale(GuiScale::from_pixels(self.size[0], self.size[1]));
         }

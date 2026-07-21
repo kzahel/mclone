@@ -14,11 +14,15 @@ use mclone_client::ActorInterpolationState;
 use mclone_core::Vec3d;
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, TexturedSectionRenderOptions, TexturedSectionUploadReport,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderView, TexturedSectionRenderOptions,
+    TexturedSectionUploadReport,
 };
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::entity::{ActorDrawResources, ActorInstance, ActorRenderStats};
-use mclone_render::headless::{HeadlessFrameLoopOptions, run_headless_capture_loop, save_rgba_png};
+use mclone_render::headless::{
+    HeadlessFrameLoopOptions, read_headless_rgba8_texture, run_headless_capture_loop,
+    run_headless_capture_loop_with_aux, save_rgba_png,
+};
 use mclone_render::screen_effect::UnderwaterOverlay;
 use mclone_render_session::actor_instances_from_presentations_near_observer;
 use mclone_ui::{GameUiHost, GuiDrawList, GuiScale};
@@ -70,6 +74,9 @@ pub(crate) struct HeadlessDualViewReport {
     pub(crate) index_count: u32,
     pub(crate) drawn_index_count: u32,
     pub(crate) gui_command_count: usize,
+    pub(crate) shared_preparation_count: u32,
+    pub(crate) rendered_view_count: u32,
+    pub(crate) paired_pixel_difference_count: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -791,12 +798,6 @@ pub(crate) fn write_headless_dual_view(
         )
     })?;
 
-    let base_camera = ChunkCamera::overview_for_chunk_area(
-        options.scene.chunk_x,
-        options.scene.chunk_z,
-        i32::try_from(options.scene.render_distance).context("render distance exceeds i32")?,
-    );
-    let cameras = dual_view_cameras(base_camera);
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let assets = WindowSceneAssets::load()?;
@@ -807,93 +808,233 @@ pub(crate) fn write_headless_dual_view(
         mclone_scene::MonoUiPresentation::None
     };
 
-    // Drive the shared scene host's mono (flat) view topology (tactical 168
-    // Slice 3): the host owns the session runtime, budgeted section streaming,
-    // and sky/time/sun/far-LOD frame-input assembly. Two capture frames render
-    // the offset stereo-preview cameras with the runtime frozen after warmup.
-    let (loop_report, frame_pixels, host) = run_headless_capture_loop(
-        HeadlessFrameLoopOptions {
-            width: options.width,
-            height: options.height,
-            frame_count: cameras.len(),
-            pace_frame_duration: None,
-        },
-        move |device, queue, format, size| {
-            let mut host = OffscreenDriver::new(
-                device,
-                queue,
-                format,
-                size,
-                &scene,
-                render_options,
-                &assets,
-                &asset_source,
-                None,
-            )?;
-            host.drive_until_streamed(device, queue)?;
-            Ok(host)
-        },
-        |index, frame, host| {
-            host.render_chunk_camera_frozen(frame, cameras[index].1, ui)?;
-            Ok(())
-        },
-    )?;
+    // Render the active player view and a detached overhead/build-plan view in
+    // one shared scene frame. The second target has independent color/depth;
+    // post-submit composition is evidence tooling, not product layout policy.
+    let (loop_report, primary_frames, auxiliary_frames, state) =
+        run_headless_capture_loop_with_aux(
+            HeadlessFrameLoopOptions {
+                width: options.width,
+                height: options.height,
+                frame_count: 1,
+                pace_frame_duration: None,
+            },
+            move |device, queue, format, size| {
+                let mut driver = OffscreenDriver::new_flat_auxiliary(
+                    device,
+                    queue,
+                    format,
+                    size,
+                    &scene,
+                    render_options,
+                    &assets,
+                    &asset_source,
+                )?;
+                driver.drive_until_streamed(device, queue)?;
+                let auxiliary_camera =
+                    auxiliary_build_camera(driver.host().mono_render_view(size)?);
+                let auxiliary_texture = device.create_texture(&wgpu::TextureDescriptor {
+                    label: Some("mclone_flat_auxiliary_capture_target"),
+                    size: wgpu::Extent3d {
+                        width: size[0],
+                        height: size[1],
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let auxiliary_view =
+                    auxiliary_texture.create_view(&wgpu::TextureViewDescriptor::default());
+                Ok(HeadlessAuxiliaryViewState {
+                    driver,
+                    auxiliary_texture,
+                    auxiliary_view,
+                    auxiliary_camera,
+                    summary: None,
+                })
+            },
+            |_index, frame, state| {
+                let summary = state.driver.render_flat_auxiliary_pair_frozen(
+                    frame,
+                    &state.auxiliary_view,
+                    state.auxiliary_camera,
+                    ui,
+                    options.hud,
+                )?;
+                if summary.shared_preparation_count != 1 || summary.rendered_view_count != 2 {
+                    bail!(
+                        "flat auxiliary frame receipt was shared={} views={}",
+                        summary.shared_preparation_count,
+                        summary.rendered_view_count
+                    );
+                }
+                state.summary = Some(summary);
+                Ok(())
+            },
+            |_index, device, queue, state| {
+                read_headless_rgba8_texture(
+                    device,
+                    queue,
+                    &state.auxiliary_texture,
+                    options.width,
+                    options.height,
+                )
+            },
+        )?;
 
-    let summaries = host.captured();
+    let summary = state
+        .summary
+        .context("flat auxiliary capture recorded no frame receipt")?;
+    let primary_pixels = primary_frames
+        .first()
+        .context("flat auxiliary capture produced no primary pixels")?;
+    let auxiliary_pixels = auxiliary_frames
+        .first()
+        .context("flat auxiliary capture produced no auxiliary pixels")?;
+    let paired_pixel_difference_count = primary_pixels
+        .chunks_exact(4)
+        .zip(auxiliary_pixels.chunks_exact(4))
+        .filter(|(left, right)| left != right)
+        .count();
+    if paired_pixel_difference_count == 0 {
+        bail!("primary and auxiliary captures are pixel-identical");
+    }
+    let horizontal_pixels = compose_rgba_horizontal(
+        primary_pixels,
+        auxiliary_pixels,
+        options.width,
+        options.height,
+    )?;
+    let vertical_pixels = compose_rgba_vertical(
+        primary_pixels,
+        auxiliary_pixels,
+        options.width,
+        options.height,
+    )?;
+    let horizontal_width = options
+        .width
+        .checked_mul(2)
+        .context("horizontal auxiliary card width overflow")?;
+    let vertical_height = options
+        .height
+        .checked_mul(2)
+        .context("vertical auxiliary card height overflow")?;
+    let outputs = [
+        (
+            "main",
+            options.directory.join("main.png"),
+            options.width,
+            options.height,
+            primary_pixels.as_slice(),
+            &summary.views[0].render,
+        ),
+        (
+            "auxiliary",
+            options.directory.join("auxiliary.png"),
+            options.width,
+            options.height,
+            auxiliary_pixels.as_slice(),
+            &summary.views[1].render,
+        ),
+        (
+            "horizontal",
+            options.directory.join("horizontal.png"),
+            horizontal_width,
+            options.height,
+            horizontal_pixels.as_slice(),
+            &summary.views[0].render,
+        ),
+        (
+            "vertical",
+            options.directory.join("vertical.png"),
+            options.width,
+            vertical_height,
+            vertical_pixels.as_slice(),
+            &summary.views[0].render,
+        ),
+    ];
     let mut reports = Vec::new();
-    for (index, (view_name, _camera)) in cameras.iter().enumerate() {
-        let pixels = frame_pixels
-            .get(index)
-            .with_context(|| format!("dual-view {view_name} capture produced no frame"))?;
+    for (view_name, path, width, height, pixels, render) in outputs {
         let non_clear_rgb_pixel_count = non_clear_rgb_pixel_count(pixels);
         if non_clear_rgb_pixel_count == 0 {
             bail!(
                 "headless dual-view {view_name} capture had no world pixels over the clear background"
             );
         }
-        let path = options.directory.join(format!("{view_name}.png"));
-        save_rgba_png(&path, loop_report.width, loop_report.height, pixels)?;
-        let summary = summaries
-            .get(index)
-            .with_context(|| format!("dual-view {view_name} capture recorded no summary"))?
-            .render;
-        if options.hud && summary.gui_command_count == 0 {
+        save_rgba_png(&path, width, height, pixels)?;
+        if options.hud && view_name == "main" && render.gui_command_count == 0 {
             bail!("headless dual-view {view_name} HUD capture emitted no GUI commands");
         }
         reports.push(HeadlessDualViewReport {
             view_name,
             path,
-            width: loop_report.width,
-            height: loop_report.height,
+            width,
+            height,
             byte_len: pixels.len(),
             non_clear_rgb_pixel_count,
-            section_count: summary.section_count,
-            drawn_section_count: summary.drawn_section_count,
-            index_count: summary.index_count,
-            drawn_index_count: summary.drawn_index_count,
-            gui_command_count: summary.gui_command_count,
+            section_count: render.section_count,
+            drawn_section_count: render.drawn_section_count,
+            index_count: render.index_count,
+            drawn_index_count: render.drawn_index_count,
+            gui_command_count: render.gui_command_count,
+            shared_preparation_count: summary.shared_preparation_count,
+            rendered_view_count: summary.rendered_view_count,
+            paired_pixel_difference_count,
         });
     }
+    debug_assert_eq!(loop_report.frame_count, 1);
     Ok(reports)
 }
 
-fn dual_view_cameras(base: ChunkCamera) -> [(&'static str, ChunkCamera); 2] {
-    let eye = Vec3::from_array(base.eye);
-    let target = Vec3::from_array(base.target);
-    let up = Vec3::from_array(base.up);
-    let forward = (target - eye).normalize_or_zero();
-    let right = forward.cross(up).normalize_or_zero();
-    let separation = 1.2_f32;
-    [
-        ("left", offset_camera(base, right * -separation * 0.5)),
-        ("right", offset_camera(base, right * separation * 0.5)),
-    ]
+struct HeadlessAuxiliaryViewState {
+    driver: OffscreenDriver,
+    auxiliary_texture: wgpu::Texture,
+    auxiliary_view: wgpu::TextureView,
+    auxiliary_camera: ChunkCamera,
+    summary: Option<mclone_scene::FlatPresentationFrameSummary>,
 }
 
-fn offset_camera(mut camera: ChunkCamera, offset: Vec3) -> ChunkCamera {
-    camera.eye = (Vec3::from_array(camera.eye) + offset).to_array();
-    camera.target = (Vec3::from_array(camera.target) + offset).to_array();
-    camera
+fn auxiliary_build_camera(primary: ChunkRenderView) -> ChunkCamera {
+    let target = primary.camera_position + primary.camera_forward * 8.0;
+    ChunkCamera {
+        eye: (target + Vec3::new(34.0, 54.0, -34.0)).to_array(),
+        target: target.to_array(),
+        up: Vec3::Y.to_array(),
+        fov_y_radians: 58.0_f32.to_radians(),
+        z_near: 0.1,
+        z_far: 384.0,
+    }
+}
+
+fn compose_rgba_horizontal(left: &[u8], right: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    let row_bytes = width as usize * 4;
+    let expected = row_bytes * height as usize;
+    if left.len() != expected || right.len() != expected {
+        bail!("horizontal auxiliary card received malformed RGBA views");
+    }
+    let mut composed = Vec::with_capacity(expected * 2);
+    for row in 0..height as usize {
+        let start = row * row_bytes;
+        let end = start + row_bytes;
+        composed.extend_from_slice(&left[start..end]);
+        composed.extend_from_slice(&right[start..end]);
+    }
+    Ok(composed)
+}
+
+fn compose_rgba_vertical(top: &[u8], bottom: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
+    let expected = width as usize * height as usize * 4;
+    if top.len() != expected || bottom.len() != expected {
+        bail!("vertical auxiliary card received malformed RGBA views");
+    }
+    let mut composed = Vec::with_capacity(expected * 2);
+    composed.extend_from_slice(top);
+    composed.extend_from_slice(bottom);
+    Ok(composed)
 }
 
 pub(crate) fn run_renderer_rebuild_smoke(
@@ -1256,6 +1397,23 @@ pub(crate) fn run_headless_screenshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auxiliary_cards_preserve_view_order_in_both_layouts() {
+        let primary = vec![255, 0, 0, 255, 250, 0, 0, 255];
+        let auxiliary = vec![0, 0, 255, 255, 0, 0, 250, 255];
+
+        assert_eq!(
+            compose_rgba_horizontal(&primary, &auxiliary, 1, 2).unwrap(),
+            vec![
+                255, 0, 0, 255, 0, 0, 255, 255, 250, 0, 0, 255, 0, 0, 250, 255
+            ]
+        );
+        assert_eq!(
+            compose_rgba_vertical(&primary, &auxiliary, 1, 2).unwrap(),
+            [primary, auxiliary].concat()
+        );
+    }
 
     #[test]
     fn actor_review_views_include_front_side_and_three_quarter() {

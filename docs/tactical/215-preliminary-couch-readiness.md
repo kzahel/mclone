@@ -207,6 +207,29 @@ preview rather than silently drawing it incorrectly. Extending composition to
 prepared multi-flat records is follow-up work; the direct mono and existing
 stereo/multiview composition paths are unchanged.
 
+### Slice 3 — single-player auxiliary-view evidence
+
+Implemented and inspected on 2026-07-21. The existing
+`--headless-dual-view` diagnostic now renders the active first-person camera
+and a detached oblique plan camera into independent color/depth textures in one
+frozen flat frame. It saves the two source views plus horizontal and vertical
+composites; the compositor has a deterministic row-order test. The auxiliary
+camera is derived from the live primary pose and does not move the player or
+add interest.
+
+The accepted 640x360-per-pane seed-12345 proof reported one shared preparation,
+two rendered views, 209,870 differing paired pixels, four primary drawn
+sections, and twelve auxiliary drawn sections. The visible boundary in the
+plan pane is expected evidence that an auxiliary camera only sees resident
+facts. Both composites and the ordinary mono control were inspected:
+
+- `/tmp/mclone-couch-foundation-20260721/horizontal.png`
+- `/tmp/mclone-couch-foundation-20260721/vertical.png`
+- `/tmp/mclone-couch-foundation-20260721/mono-control.png`
+
+The mono control remained a normal full-frame capture with eleven drawn
+sections, two drawn actors, and no auxiliary allocation or presentation call.
+
 ## Explicit Deferrals
 
 - Native, web, Android, OpenXR, or Steam Input gamepad collectors.

@@ -218,7 +218,7 @@ fn main() -> Result<()> {
             let reports = write_headless_dual_view(&options)?;
             for report in reports {
                 println!(
-                    "headless dual-view {} saved to {} ({}x{}, {} bytes, {} non-clear RGB pixels, {} sections, {} drawn sections, {} indices, {} drawn indices, {} GUI commands)",
+                    "headless dual-view {} saved to {} ({}x{}, {} bytes, {} non-clear RGB pixels, {} sections, {} drawn sections, {} indices, {} drawn indices, {} GUI commands, shared preparations={}, rendered views={}, paired differing pixels={})",
                     report.view_name,
                     report.path.display(),
                     report.width,
@@ -229,7 +229,10 @@ fn main() -> Result<()> {
                     report.drawn_section_count,
                     report.index_count,
                     report.drawn_index_count,
-                    report.gui_command_count
+                    report.gui_command_count,
+                    report.shared_preparation_count,
+                    report.rendered_view_count,
+                    report.paired_pixel_difference_count,
                 );
             }
             Ok(())

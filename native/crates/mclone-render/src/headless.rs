@@ -1203,6 +1203,19 @@ fn read_rgba8(
     read_rgba8_layer(device, queue, texture, width, height, 0)
 }
 
+/// Read one caller-owned RGBA8 offscreen texture after submission. Product
+/// render paths never call this; diagnostic hosts use it to collect auxiliary
+/// targets produced in the same frame as the primary capture.
+pub fn read_headless_rgba8_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    width: u32,
+    height: u32,
+) -> Result<Vec<u8>> {
+    read_rgba8(device, queue, texture, width.max(1), height.max(1))
+}
+
 /// Read a single-sample `Depth32Float` target in row-major pixel order.
 /// Reversed-Z terrain targets clear to `0.0`, so callers can distinguish
 /// untouched pixels from any real or synthetic geometry without consulting
