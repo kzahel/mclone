@@ -124,11 +124,13 @@ fn half_space_clipping_is_an_opt_in_shared_renderer_topology() {
 
     let fixture = read("../mclone-render/src/composition_fixture.rs");
     let web = read("../../apps/mclone-web-client/src/web_scene_host.rs");
-    let web_proof = braced_item(&web, "pub fn render_half_space_terrain_proof(");
+    let web_proof = braced_item(&web, "fn render_half_space_terrain_proof(");
+    let smoke_export = braced_item(&web, "pub fn render_half_space_terrain_proof(");
     assert!(fixture.contains("pub struct ComplementaryHalfSpaceTerrainFixture"));
     assert!(web_proof.contains("ComplementaryHalfSpaceTerrainFixture::new"));
     assert!(!web_proof.contains("CompositionHalfSpace"));
     assert!(!web_proof.contains("CompositionClip"));
+    assert!(smoke_export.contains("host.render_half_space_terrain_proof()"));
 }
 
 #[test]
@@ -229,7 +231,8 @@ fn actor_composition_is_opt_in_shared_and_portable() {
 
     let fixture = read("../mclone-render/src/actor_composition_fixture.rs");
     let web = read("../../apps/mclone-web-client/src/web_scene_host.rs");
-    let web_proof = braced_item(&web, "pub fn render_actor_composition_proof(");
+    let web_proof = braced_item(&web, "fn render_actor_composition_proof(");
+    let smoke_export = braced_item(&web, "pub fn render_actor_composition_proof(");
     assert!(fixture.contains("pub struct ActorCompositionFixture"));
     assert!(fixture.contains("ActorInstance::cow_model"));
     assert!(fixture.contains("chicken_figure_id()"));
@@ -242,6 +245,7 @@ fn actor_composition_is_opt_in_shared_and_portable() {
     assert!(!web_proof.contains("ActorInstance"));
     assert!(!web_proof.contains("WorldCompositionContext"));
     assert!(!web_proof.contains("CompositionHalfSpace"));
+    assert!(smoke_export.contains("host.render_actor_composition_proof()"));
 }
 
 #[test]
