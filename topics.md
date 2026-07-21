@@ -89,3 +89,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   sampled-pose catalog linter
 - `animal-catalogue` — shared Asset Lab semantic viewer, generated canonical
   figure catalogue, and production `/animals/` deployment
+- `platform-boundary-convergence` — parent ledger for the shared/platform
+  code-split campaign: both-language scoreboard, pass history, and the
+  standalone-audit closure protocol above the child boundary topics

@@ -1,0 +1,561 @@
+# Tactical 207: Shared Scene Operation Coordinator
+
+Status: revised 2026-07-21 after a measured two-sided boundary audit; proposed
+for implementation. The original 2026-07-21 proposal framed success as
+deleting the remaining named TypeScript pumps. The audit showed the
+complexity mass sits on the Rust side, so this revision inverts the metric:
+the primary deliverable is Rust-side consolidation — one operation identity
+system, a poll-shaped browser ABI, a smaller web lowering layer — and the
+TypeScript deletions become the corollary that verifies it. The obsolete
+browser v5-to-v6 Overworld migration has been removed as a prerequisite
+decision; no coordinator cutover is implemented yet.
+
+Topic: `cross-platform-operation-execution`
+
+Parent concern:
+[`../topics/platform-boundary-convergence.md`](../topics/platform-boundary-convergence.md)
+owns the campaign-wide pass ledger, the both-language scoreboard, and the
+closure protocol. This tactical may close itself; it must not declare the
+parent concern done, and its closeout must append a scoreboard row there.
+
+Related topics:
+
+- [`../topics/cross-platform-operation-execution.md`](../topics/cross-platform-operation-execution.md)
+- [`../topics/platform-host-boundary.md`](../topics/platform-host-boundary.md)
+- [`../topics/unified-persistence-interface.md`](../topics/unified-persistence-interface.md)
+
+Predecessors:
+
+- [`201-lobby-content-simplification.md`](201-lobby-content-simplification.md)
+- [`202-web-scene-async-boundary-cleanup.md`](202-web-scene-async-boundary-cleanup.md)
+- [`206-browser-preferences-and-bootstrap-policy.md`](206-browser-preferences-and-bootstrap-policy.md)
+
+## Top-Level Goal
+
+Make shared Rust own the sequencing and lifetime of coarse scene operations
+through **one** identity/completion lifecycle, expose it through a
+**poll-shaped** browser ABI that never suspends a mutable scene borrow, and
+delete the parallel Rust owners and per-operation lowering that currently
+compensate for both. TypeScript supplies only reusable browser machinery.
+
+```text
+shared McloneSceneHost operation coordinator
+  owns admission, order, identity, cancellation, stale results, and completion
+        |
+        v
+small platform effect ports
+  native adapter                 browser-Rust adapter
+  direct typed work              lowers to mechanical browser effects
+        |                                  |
+        v                                  v
+thread/direct completion          domain-blind TypeScript executors
+                                  Worker / IndexedDB / fetch / scheduling
+        |                                  |
+        +---------------+------------------+
+                        v
+              typed Rust completion
+```
+
+Browser promises and callbacks are a physical suspension mechanism, not an
+alternate engine coordinator. TypeScript may await a Worker, transaction, or
+fetch, but it must not know whether the work starts a lobby, replaces the
+active world, updates the catalog, changes an asset selection, or satisfies a
+scene readiness phase.
+
+Success is measured by deletion **on both sides of the boundary**: fewer Rust
+identity systems, fewer exported methods, a net-smaller
+`mclone-web-client/src`, and the removal of the named TypeScript dispatch,
+state, and reports. A cut that shrinks TypeScript while growing web-only Rust
+by more is a failure of this tactical, not a partial success.
+
+## Why The Original Framing Was Inverted
+
+Tactical 202 correctly removed TypeScript selection of local versus remote
+sessions, clear lobby descriptors, duplicated readiness predicates, and the
+browser-only session lifecycle mirror. It stopped at opaque Rust tickets and
+concluded no replacement provisioning actor was justified. A stricter audit
+then observed that the surviving named pumps still form a platform-specific
+operation scheduler even though Rust owns each individual decision.
+
+The 2026-07-21 measured audit (recorded in the parent topic) added the facts
+that change the plan:
+
+- Over the 2026-07-18 → 07-21 campaign week, authored web TypeScript fell
+  3,637 lines while web-only Rust grew 5,598. The TypeScript-only metric hid
+  a cost shift into the web lowering layer, which is now larger than the
+  TypeScript it replaced.
+- The TypeScript coordination residue is ~300–360 dedicated lines plus a
+  `sessionBusy` guard threaded through ~20 call sites — all of it mirroring
+  Rust-owned state. It is derivative, not a source.
+- Exactly 3 `async fn(&mut WebSceneHost)` exports (`startPendingSession`,
+  `shutdownAsync`, `completeAssetPackSelection`) plus
+  `WebLobbyRuntimeStart::start`, out of 48 exported methods, force the entire
+  `sessionBusy`/spin/take-apply structure into existence. `sessionBusy` dates
+  to 2026-06-24 and has been preserved by every pass since. While one of
+  those borrows is live, rAF and raw input are excluded: coarse operations
+  pause the active world on web only. This is the one user-visible defect in
+  scope.
+- At least four overlapping identity/staleness systems exist in Rust: the
+  generic `PlatformOperationLedger` token (catalog fully, lobby/web session
+  partially), `ExternalSceneSessionStart` currentness plus a hand-rolled
+  stale-completion counter, the independent asset-replacement epoch, and a
+  catalog `String` request-id carried alongside its own ledger token — plus
+  `asset_epoch` tags threaded through warm-world slots. Three predate the
+  generic ledger; the consolidation onto it was started and never finished.
+- Native scene code still starts work directly while web Rust lowers it into
+  per-operation tickets TypeScript must recognize and return.
+
+The revised conclusion: finish the consolidation that already began. Merge
+the parallel identity systems into the existing ledger — do not facade over
+them — reshape the ABI so no operation suspends the scene borrow, and let the
+TypeScript pumps collapse into one generic drain loop as a consequence.
+
+## Prerequisite Compatibility Decision
+
+Old internal worlds are not a compatibility requirement. The browser
+v5-to-v6 cursor copy, legacy store labels, and hard-coded
+`minecraft:overworld` assignment have been deleted. Source locks now reject
+their return.
+
+This tactical must not add replacement runtime migration machinery. If a
+future shipped format needs conversion, it requires a separate pre-admission
+or offline design. New schema work may intentionally reject or reset
+unsupported internal formats.
+
+## Measured Baseline (2026-07-21)
+
+### Product TypeScript coordination state
+
+`mclone-web-app.ts` currently owns:
+
+- `sessionBusy`, which excludes rAF, raw input, resize, and other host calls
+  while a wasm-bindgen `async &mut WebSceneHost` borrow is alive, and is
+  threaded through ~20 otherwise-ordinary call sites;
+- `pendingLobbyRuntimeStarts`, `lobbyOperationDrainActive`, and
+  `worldCatalogOperationTail`;
+- separate `dispatchSceneSessionOperation`, `dispatchWorldCatalogOperation`,
+  and `dispatchAssetPackOperation` branches;
+- a lobby-specific take/start/complete/free loop; and
+- a warmup loop that reads `initialPresentationReady` and
+  `renderWorkerPendingRequestCount`.
+
+Rust already owns the pending semantic state behind all of those fields. The
+TypeScript state is a consequence of how that state is exposed.
+
+### Current Rust split
+
+- `GameSessionCoordinator` and `ExternalSceneSessionStart` own session request
+  meaning and pending state, with their own currentness check and a
+  hand-rolled `stale_lobby_start_completion_count`.
+- The lobby launch state and `PlatformOperationLedger` own role, slot, epoch,
+  cancellation, and stale completion rejection.
+- `WorldCatalogExecutor` uses `PlatformOperationService` and a Rust-owned
+  IndexedDB continuation, but each web catalog operation carries a second
+  `String` request identity across the JS boundary.
+- Asset replacement owns a third independent epoch and acceptance state.
+- Browser Rust already computes complete initial-presentation readiness.
+- The web lowering layer (`web_scene_host.rs` 4,295 lines,
+  `web_catalog_execution.rs` 1,496, `web_scene_protocol.rs` 242) exists to
+  turn shared operations into JS-drivable tickets; native has no equivalent.
+- `mclone-scene/src/session.rs` is 6,542 lines carrying ~60 wasm-related cfg
+  forks between direct native starts and web ticket lowering.
+
+The missing piece is not policy. It is one shared way to issue owned work,
+release the scene borrow, and fold a later platform completion back through a
+single identity system.
+
+### Genuine browser constraints
+
+The design must preserve these facts:
+
+- the browser main thread cannot block;
+- IndexedDB and Worker startup complete through browser callbacks/promises;
+- independent Web Workers have private Wasm heaps;
+- a wasm-bindgen `async fn(&mut WebSceneHost)` prevents safe re-entry until
+  its promise settles; and
+- rAF, DOM events, Worker construction, IndexedDB transactions, fetch, and
+  presentation remain browser-owned mechanics.
+
+None of those constraints requires TypeScript to know an operation's engine
+meaning, and none requires any exported operation to hold the scene borrow
+across an await.
+
+## Fixed Contracts
+
+1. Shared Rust owns operation admission, identity, ordering, priority,
+   cancellation, stale/duplicate rejection, retries, semantic failure, and
+   final state installation.
+2. There is exactly **one** operation identity/staleness system at cutover:
+   the existing `PlatformOperationService`/`PlatformOperationLedger` family,
+   extended where needed. Session currentness, the asset-replacement epoch,
+   the catalog `String` request-id, and the hand-rolled stale counter are
+   merged into it and deleted — not wrapped by a facade that leaves them
+   alive underneath.
+3. Long-running browser work does not retain a mutable `WebSceneHost` borrow.
+   Issuing an effect is synchronous; an owned result returns later. At
+   cutover, zero exported `async fn(&mut self)` methods remain.
+4. Active-session and lobby starts use one logical runtime-start lifecycle.
+   Active, primary, destination, standby, or preview placement remains Rust
+   target state and never enters TypeScript.
+5. TypeScript may retain a generic in-flight registry only when browser API
+   mechanics require it. It may not maintain separate scene, lobby, catalog,
+   or asset state machines.
+6. Browser effect executors see only mechanical capability vocabulary such as
+   Worker construction, opaque frames, byte fetch, IndexedDB transactions,
+   transfer lists, request IDs, and generic failures.
+7. Native uses the same logical request/completion owner with direct typed
+   execution or existing worker threads. It does not adopt promises,
+   `JsValue`, encoded browser frames, SABs, or extra hot-path allocation.
+8. Adding a new coarse operation type after cutover requires zero TypeScript
+   changes and zero new `WebSceneHost` exports. New operations are new Rust
+   request variants lowered to the existing mechanical effect vocabulary.
+9. Existing integrated-server, persistence, render-compiler, server-job, and
+   remote-socket actors remain specialized. This tactical does not put every
+   workload behind one universal actor or executor.
+10. Opened-world persistence remains adjacent to the integrated-server actor.
+    High-frequency record traffic does not round-trip through the browser
+    main thread or the coarse scene-operation coordinator.
+11. Catalog storage meaning and continuation remain Rust-owned. TypeScript
+    may execute a mechanical IndexedDB plan but may not own a
+    catalog-specific promise tail or read-dependent policy.
+12. Asset selection, generation, preparation state, and acceptance remain
+    Rust-owned. TypeScript must not call a named asset-selection completion
+    solely to wake Rust.
+13. Rust supplies one readiness disposition. TypeScript may schedule another
+    animation frame but may not reconstruct readiness from queue counts.
+14. Shutdown and replacement have one Rust-owned quiescence barrier covering
+    every issued operation. Physical Worker abort/termination remains
+    best-effort adapter behavior.
+15. Ordinary rendering and raw input remain available while independent
+    standby work is in flight. Removing the global `sessionBusy` policy must
+    not pause the active world.
+16. The query-gated smoke observer remains an explicit semantic test client,
+    but product operation execution must not depend on observer callbacks or
+    named completion receipts.
+17. Unsupported pre-release storage formats are rejected or reset; they are
+    not migrated by production TypeScript.
+18. Every slice reports the parent-topic scoreboard rows it moved. The
+    combined both-language boundary total must trend net-negative across the
+    tactical.
+
+## Proposed Contract Shape
+
+The exact names are reviewable, but the ownership should resemble:
+
+```rust
+struct SceneOperationCoordinator {
+    // The existing session, lobby, catalog, and asset operation owners,
+    // re-keyed onto PlatformOperationLedger identity — their private
+    // token/epoch systems deleted, not delegated to.
+}
+
+enum SceneOperationRequest {
+    StartRuntime(OwnedRuntimeStart),
+    ExecuteCatalog(OwnedCatalogExecution),
+    PrepareAssets(OwnedAssetPreparation),
+}
+
+struct SceneOperationCompletion {
+    token: PlatformOperationToken,
+    result: Result<OwnedPlatformResult, PlatformOperationError>,
+}
+```
+
+This sketch does **not** mean TypeScript receives `SceneOperationRequest` or
+its variants. Platform Rust consumes the semantic request:
+
+- native Rust executes it directly or submits typed work to the existing
+  runtime/catalog/render facilities;
+- browser Rust lowers it to a capability-specific mechanical effect; and
+- TypeScript executes that effect and returns its opaque token/result.
+
+The browser ABI should prefer generated wasm-bindgen classes or opaque owned
+frames over `Record<string, any>` flags. A small browser pump may drain
+several independent effects, but Rust determines concurrency and backpressure
+before they are issued.
+
+## IndexedDB Addressing Direction
+
+The current browser executors contain two mclone-specific addressing schemes:
+
+- catalog string labels mapped to physical stores and indexes; and
+- numeric persistence namespaces mapped to store/key/value layouts.
+
+That is more engine awareness than a reusable IndexedDB executor needs. The
+recommended direction is:
+
+1. browser Rust owns the mapping from shared domain address to a physical web
+   storage plan;
+2. TypeScript receives physical store/index names, keys, transaction modes,
+   and opaque values directly in a mechanical plan;
+3. a Rust-authored physical schema descriptor is available before opening the
+   database so `onupgradeneeded` can create stores synchronously; and
+4. TypeScript contains no switches over `dimension-chunks`, players, managed
+   worlds, or numeric namespace meanings.
+
+This lowering is gated on net deletion: land it only if the combined
+TypeScript-plus-browser-Rust line count decreases. Do not merge catalog and
+opened-world continuations merely to make their envelopes look alike. They
+may share the last-mile IndexedDB action runner while retaining separate Rust
+owners.
+
+## Implementation Slices
+
+Slices are ordered by leverage: the ABI reshape first because four methods
+cause most of the glue and the only user-visible defect; identity
+consolidation second because it is the large Rust deletion; convergence and
+addressing after a decision gate re-scopes them against what has already
+evaporated.
+
+### Slice 0: Exact traces, costs, and deletion locks
+
+- Capture one native and browser trace for active local start, remote start,
+  lobby primary/destination warmup, catalog create/open/delete, asset
+  replacement, initial presentation, replacement, and shutdown.
+- Record which calls currently hold `&mut WebSceneHost` across an await,
+  how long each borrow excludes rAF/input in practice, and which work can
+  proceed concurrently with active rendering.
+- Measure ordinary frame overhead, Worker count, startup time, lobby warmup,
+  catalog latency, and asset replacement before changing the ABI.
+- Record the parent-topic scoreboard baseline: authored TypeScript lines,
+  `mclone-web-client/src` lines, `WebSceneHost` export count, async-borrow
+  export count, identity-system count, and wasm cfg counts.
+- Add source locks for every named product-TypeScript field, report flag,
+  dispatch method, Rust stale counter, and parallel epoch targeted for
+  deletion.
+
+Exit: the refactor has exact behavioral and deletion evidence on both sides
+of the boundary rather than a TypeScript-line goal.
+
+### Slice 1: Retire the async-borrow ABI
+
+- Replace `startPendingSession`, `shutdownAsync`,
+  `completeAssetPackSelection`, and `WebLobbyRuntimeStart::start` with
+  synchronous issue, take-effect, and submit-completion turns; long-running
+  work suspends in platform code holding owned values, never the scene
+  borrow.
+- Delete `sessionBusy`, `waitForSessionIdle`, the setTimeout retry loops, and
+  the busy-mirroring into observer state — all ~20 guard sites.
+- Preserve wasm-bindgen re-entry safety by construction: exported operations
+  are synchronous, so no borrow can span an await.
+- Prove with the Slice 0 trace that rAF and raw input continue during lobby
+  warmup, asset replacement, and session start, and that shutdown still
+  quiesces correctly.
+
+Exit: zero exported `async fn(&mut self)` methods; ordinary input/render
+calls are never excluded by a promise borrowing the whole scene host; the
+active world no longer pauses during independent coarse operations.
+
+### Slice 2: Consolidate operation identity onto the ledger
+
+- Migrate session-start currentness onto `PlatformOperationLedger` tokens and
+  delete `external_scene_start_is_current` duplication and the hand-rolled
+  `stale_lobby_start_completion_count`.
+- Migrate asset-replacement acceptance onto the same tokens and delete the
+  independent epoch and `validate_replacement_epoch` machinery, preserving
+  the acceptance semantics as ledger policy.
+- Delete the catalog `String` request-id; the ledger token is the only
+  identity that crosses the boundary.
+- Rationalize the warm-world `asset_epoch` slot tags against the unified
+  identity where they duplicate it; keep them only where they express a
+  genuinely different invariant, with a comment stating which.
+- Reuse `PlatformOperationService`/`PlatformOperationLedger` rules; do not
+  create a second token system, and do not leave the old ones compiled in.
+- Add shared tests for order, concurrency, cancellation, duplicate/unknown
+  completion, replacement, failure restoration, and shutdown against the one
+  identity system.
+
+Exit: one identity/staleness vocabulary; the deleted-systems count on the
+scoreboard reads 4 → 1; a platform adapter can take work and return
+completion without learning why the scene requested it.
+
+### Decision gate after Slice 2
+
+Re-measure the remaining named TypeScript pumps and the per-operation ticket
+types against the new ABI and identity system. If they have collapsed to
+trivial forwarding, shrink or drop Slices 3–5 accordingly and record that in
+this document. Do not execute the remaining slices merely because they were
+planned.
+
+### Slice 3: Converge runtime startup
+
+- Route active, lobby-primary, and lobby-destination starts through the same
+  shared request lifecycle.
+- Move native direct-start and browser ticket lowering behind platform Rust
+  executors of that lifecycle.
+- Preserve independent standby warmup while the active world continues to
+  render.
+- Delete `WebLobbyRuntimeStart`, `takeLobbyRuntimeStart`,
+  `completeLobbyWorldStart`, and the separate active-session start ABI once
+  the shared completion path is live.
+
+Exit: TypeScript can start opaque Worker machinery without knowing lobby or
+active-session identity, and native/web share the acceptance state machine.
+
+### Slice 4: Adopt catalog and asset operations; one browser drain loop
+
+- Feed the existing Rust catalog continuation through the same outer
+  operation pump while keeping its specialized transaction semantics.
+- Remove `catalogRequest`, `catalogRequestId`, and the product app's catalog
+  promise tail; make the IndexedDB executor own only transaction mechanics.
+- Submit asset preparation through the existing render-actor mailbox and poll
+  its typed completion from Rust; remove `assetPackRequest` and the named
+  TypeScript `completeAssetPackSelection` wakeup.
+- Implement the smallest capability-specific TypeScript executors and one
+  generic drain/wakeup loop; delete `pendingLobbyRuntimeStarts`,
+  `lobbyOperationDrainActive`, and `worldCatalogOperationTail`.
+- Let independent effects run concurrently only when Rust admission permits.
+
+Exit: catalog and asset changes require no named branch in product
+TypeScript; the five dispatch branches are one generic loop.
+
+### Slice 5: Readiness, shutdown, and storage addressing
+
+- Return one Rust-authored frame/readiness disposition and stop reading
+  render queue counts for product control flow.
+- Make shutdown poll one Rust quiescence barrier and let the browser adapter
+  mechanically terminate or release the resources named by final effects.
+- Move catalog and record namespace-to-physical-address lowering into browser
+  Rust and reduce TypeScript to generic schema/transaction execution — gated
+  on net combined deletion per the addressing direction above.
+- Preserve the integrated-server Worker's adjacent IndexedDB path and its
+  world writer lease.
+
+Exit: product TypeScript contains browser mechanics and operational error
+capture, but no mclone scene-operation or storage-family vocabulary.
+
+### Slice 6: Cutover validation, deletion closeout, and ledger report
+
+- Delete superseded reports, exported methods, state fields, helpers, tests,
+  and historical compatibility branches rather than retaining two paths.
+- Run the shared scene/app-runtime/session/persistence/render tests.
+- Run native desktop, flat Android, Android XR, desktop OpenXR, and offscreen
+  compile/control gates affected by shared types.
+- Run Wasm checks, generated bindings, authored TypeScript typecheck, Worker
+  ownership, thin-adapter, scene-host adoption, and source locks.
+- Run headed local, remote, mobile, lobby, catalog, asset replacement,
+  IndexedDB reload, lifecycle, and shutdown browser smokes and inspect their
+  screenshots.
+- Compare startup, steady-frame, lobby warmup, Worker count, memory/copy, and
+  shutdown measurements with Slice 0.
+- Demonstrate the fixpoint: add a trivial test-only coarse operation variant
+  and show it requires zero TypeScript changes and zero new exports.
+- Refresh the operation, host-boundary, persistence, platform-parity, and
+  tactical records, and append the pass-ledger row with full scoreboard
+  deltas and an honest "what remains" to
+  [`platform-boundary-convergence.md`](../topics/platform-boundary-convergence.md).
+  This tactical does not declare the parent concern complete.
+
+## Acceptance Criteria
+
+Rust-side (primary):
+
+1. Exactly one operation identity/staleness system remains; the session
+   currentness duplication, hand-rolled stale counter, independent asset
+   epoch, and catalog `String` request-id are deleted from the codebase.
+2. Zero exported `async fn(&mut self)` methods remain on `WebSceneHost` or
+   its sibling exported classes.
+3. The `WebSceneHost` export count is materially reduced from 48 and the
+   final count is reported.
+4. `mclone-web-client/src` ends net-smaller than its 20,577-line baseline,
+   and the combined authored-TypeScript-plus-web-Rust total is net-negative
+   for the tactical.
+5. Adding a new coarse operation type requires zero TypeScript changes and
+   zero new `WebSceneHost` exports, demonstrated in Slice 6.
+6. Native hot paths gain no browser serialization, promises, SAB envelopes,
+   or unjustified allocations.
+7. Native and web execute the lifecycle through platform adapters without
+   duplicating role, retry, acceptance, or completion decisions.
+
+Behavioral:
+
+8. Active rendering and input continue while permitted standby work is in
+   flight; the active world never pauses for an independent coarse
+   operation, proven by trace against the Slice 0 baseline.
+9. Shutdown, replacement, cancellation, late completion, duplicate
+   completion, and Worker failure are deterministic shared tests.
+10. Opened-world persistence remains Worker-local and does not gain a
+    browser main-thread round trip.
+
+TypeScript-side (corollary):
+
+11. Product TypeScript contains no lobby-specific runtime type,
+    take/start/complete loop, pending set, or completion receipt.
+12. Product TypeScript does not inspect `sessionStartPending`,
+    `catalogRequest`, `catalogRequestId`, `assetPackRequest`, or
+    `renderWorkerPendingRequestCount` for control flow.
+13. Product TypeScript has no `sessionBusy`, `pendingLobbyRuntimeStarts`,
+    `lobbyOperationDrainActive`, or `worldCatalogOperationTail` state.
+14. Catalog meaning remains in its Rust continuation; TypeScript executes
+    only generic IndexedDB actions, with no world-record-family switch or
+    dimension-specific compatibility policy.
+15. Asset selection and preparation progress entirely through Rust-owned
+    scene and render-actor state.
+16. Rust alone decides initial presentation readiness; TypeScript schedules
+    rAF according to a bounded mechanical disposition.
+17. No production TypeScript contains `minecraft:overworld`, legacy chunk
+    store labels, or runtime record migration code.
+
+Process:
+
+18. All affected product lanes and headed browser pixel gates pass.
+19. The parent-topic pass ledger receives a row with before/after scoreboard
+    values and an explicit "what remains."
+
+## Questions For Independent Review
+
+1. Should the scene facade extend `PlatformOperationService` directly, or use
+   a small scene-specific enum over several existing services — and in either
+   case, what proves the old token systems are deleted rather than wrapped?
+2. Can active and standby runtime starts share one owned ticket type without
+   retaining wgpu resources or coupling native to web construction details?
+3. Should the browser expose one generic effect queue or several capability
+   queues for Worker, IndexedDB, and fetch execution?
+4. Does any operation truly require an async mutable scene borrow, or can all
+   four current cases (session start, shutdown, asset selection, lobby
+   warmup) become synchronous issue plus later completion?
+5. Can asset preparation be completed entirely by polling the existing render
+   coordinator, eliminating a browser effect altogether?
+6. Should browser Rust emit direct physical IndexedDB names or opaque store
+   IDs accompanied by one schema descriptor?
+7. What is the smallest generic observer hook that removes named
+   lobby/catalog/asset completion callbacks from the product driver without
+   weakening integration tests?
+8. Which current native `cfg(not(wasm32))` scene branches are semantic forks
+   that should disappear, and which are legitimate direct effect adapters?
+9. Which warm-world `asset_epoch` slot tags express a real invariant distinct
+   from the unified identity, and which are duplication?
+
+## Stop Conditions
+
+Stop for renewed review if:
+
+- the proposed coordinator becomes a universal actor for persistence,
+  rendering, sockets, compute, input, and unrelated workloads;
+- the consolidation turns into a facade: the old identity systems remain
+  compiled in behind delegation rather than being deleted;
+- a slice completes with a combined both-language line increase and no
+  measured behavioral gain;
+- native must serialize or allocate browser-shaped requests on a frame hot
+  path;
+- the design pauses active rendering while an independent standby operation
+  is in flight;
+- browser storage records or semantic operation variants must enter
+  TypeScript to make progress;
+- a physical IndexedDB change would silently preserve, migrate, or destroy a
+  format not already declared disposable; or
+- the cutover would retain old and new operation paths indefinitely.
+
+## Non-Goals
+
+- Restoring managed lobby installation, versioning, publication, or repair.
+- One physical Worker or one byte ABI for every actor.
+- Moving all DOM, rAF, Worker, IndexedDB, WebSocket, fetch, or promise calls
+  into Rust merely to reduce TypeScript line count.
+- Forcing XR pose/input or presentation sequencing through this coarse
+  operation path.
+- Changing lobby product behavior, world-generation behavior, asset content,
+  or catalog UI semantics.
+- Preserving unsupported pre-release worlds.
+- Declaring the parent `platform-boundary-convergence` concern complete; only
+  its standalone audit protocol may do that.
