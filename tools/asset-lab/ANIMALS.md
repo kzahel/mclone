@@ -204,6 +204,7 @@ reviewed rigs and then filling macro gaps.
 | Armadillo | P3 | ✅ | Q | — | `examples/armadillo` — approved 23-box nine-banded adult with stepped armor, pointed head, upright ears, clawed feet, and three-stage plated tail; roll-up remains future work |
 | Pangolin | P3 | ✅ | Q | — | `examples/pangolin` — approved 23-box adult with five overlapping scale plates, earless pointed head, clawed feet, and four-stage armored tail; **roll-up** remains future work |
 | Mongoose | P3 | ✅ | Q | — | `examples/mongoose` — approved 19-box low runner with a narrow speckled body, pointed muzzle, small ears, dark feet, and three-stage tail |
+| Binturong | P3 | ✅ | Q | — | `examples/binturong` — approved 24-box adult with a shaggy charcoal coat, pale whiskers, plantigrade feet, slow canopy prowl, and separate five-stage prehensile-tail curl action |
 
 ## Marsupials & monotremes
 
@@ -238,6 +239,7 @@ reviewed rigs and then filling macro gaps.
 | Ostrich / Emu | P3 | ✅ | B | — | `examples/ostrich` — approved 21-box male ostrich with tiny white-edged wings, long bare neck, two-stage legs, broad feet, and fast run |
 | Cassowary | P3 | ✅ | B | southern, northern | `examples/cassowary` — approved 23-box southern cassowary with black plumage, cobalt neck, red wattles, tall casque, forest run, and separate defensive kick action |
 | Kiwi | P3 | ✅ | W | brown kiwi, little spotted kiwi | `examples/kiwi` — approved 14-box brown kiwi with a low rounded body, tiny wings, long two-stage bill, planted feet, forage walk, and separate beak-probe action |
+| Secretary bird | P3 | ✅ | B | — | `examples/secretary_bird` — approved 26-box adult with swept black crest, orange face, gray-black plumage, long planted legs, grassland stalk, and separate abrupt stomp-strike action |
 
 ## Marine & aquatic
 
@@ -263,6 +265,7 @@ reviewed rigs and then filling macro gaps.
 | Manatee / Dugong | P3 | ✅ | S | West Indian manatee, dugong | `examples/manatee` — approved 11-box West Indian manatee with a massive stepped body, blunt whiskered muzzle, paddle flippers, and broad horizontal spoon tail |
 | Walrus | P2 | ✅ | S/Q | Atlantic, Pacific | `examples/walrus` — review candidate Atlantic walrus with massive wrinkled body, paired whisker pads and tusks, broad foreflippers, and split hind flippers |
 | Anglerfish | P3 | ✅ | S | deep-sea anglerfish | `examples/anglerfish` — approved 25-box deep-sea anglerfish with oversized toothed jaw, paired fins, articulated lure, tail hover, and separate jaw-snap action |
+| Leafy seadragon | P3 | ✅ | S | weedy seadragon | `examples/leafy_seadragon` — approved 26-box leafy seadragon with plated narrow trunk, horse-like head, five-stage tail, layered camouflage appendages, hover-swim, and separate leaf-fan action |
 
 ## Reptiles & amphibians
 
