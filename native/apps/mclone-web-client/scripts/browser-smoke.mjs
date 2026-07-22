@@ -810,7 +810,7 @@ async function run() {
         if (
           preparedFigureProbeResult?.ok !== true
           || preparedFigureProbeResult?.backend !== "browser-webgpu"
-          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-cuboid-proxy-v1"
+          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-cuboid-proxy-v2"
           || Number(preparedFigureProbeResult?.partCount) !== 12
           || Number(preparedFigureProbeResult?.vertexCount) !== 288
           || Number(preparedFigureProbeResult?.indexCount) !== 432
@@ -818,6 +818,7 @@ async function run() {
           || Number(preparedFigureProbeResult?.atlasWidth) !== 13
           || Number(preparedFigureProbeResult?.atlasHeight) !== 10
           || Number(preparedFigureProbeResult?.drawCount) !== 1
+          || Number(preparedFigureProbeResult?.pipelineCount) !== 6
           || Number(preparedFigureProbeResult?.immutableUploadCount) !== 4
           || Number(preparedFigureProbeResult?.viewUniformWriteCount) !== 1
           || pixels.figurePixelCount <= 1_000

@@ -412,7 +412,7 @@ should be a high-value early wave for a Minecraft-style mob set.
 | Slime / blob | P2 | ✅ | ST | small, medium, large; magma/acid | `examples/slime` — grounded restless ooze plus separate airborne acid-slam action |
 | Creeper-like crawler | P2 | ☐ | Q | — | legless/4-stub silent stalker |
 | Giant spider | P2 | ☐ | C | normal, cave (small) | hostile build of Spider; needs N-leg crawl |
-| Ghost / wraith | P2 | ☐ | ST | — | floats (no gait); semi-transparent |
+| Ghost / wraith | P2 | ✅ | ST | dithered, smoothly blended | `examples/ghost_dither` and `examples/ghost_translucent` share one 15-box spectral rig and motion set; the pair proves depth-writing screen-door coverage against a depth-prepass blend with additive highlights |
 | Golem | P2 | ☐ | B | stone, iron, clay | heavy biped; can be friendly too |
 | Gargoyle | P3 | ✅ | W/B | — | `examples/gargoyle` — 27-box stone biped with horns, raised two-stage wings, shortened tucked arms, barbed tail, grounded stalk, glide, and awakening action |
 | Bat swarm | P3 | ☐ | W | — | hostile build of Bat (`wingFlap`) |
@@ -432,12 +432,15 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures:** 174 sources and 234 clips after the binary
-  cutout Skeleton follow-up.
+- **Canonical box-only figures:** 176 sources and 238 clips after the paired
+  dithered and smoothly blended Ghost transparency proofs.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
   its rib gaps entirely with explicit transparent palette texels.
+- **Fractional-alpha proofs:** paired Ghosts share geometry and motion while
+  contrasting stable depth-writing dither with smooth depth-prepass blending
+  and additive accents.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live

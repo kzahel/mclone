@@ -111,7 +111,7 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const groupFilter = page.getByRole("combobox", { name: "Group" });
   await groupFilter.selectOption("monster");
-  await expect(page.locator(".resultCount")).toHaveText("4 figures");
+  await expect(page.locator(".resultCount")).toHaveText("6 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
@@ -137,13 +137,13 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const dispositionFilter = page.getByRole("combobox", { name: "Disposition" });
   await dispositionFilter.selectOption("hostile");
-  await expect(page.locator(".resultCount")).toHaveText("4 figures");
+  await expect(page.locator(".resultCount")).toHaveText("6 figures");
   await dispositionFilter.selectOption("all");
   await groupFilter.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search" });
   await search.fill("undead");
-  await expect(page.locator(".resultCount")).toHaveText("2 figures");
+  await expect(page.locator(".resultCount")).toHaveText("4 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
 
@@ -156,6 +156,24 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
     path: "/tmp/mclone-creature-catalogue-alpha-cutout.png",
     fullPage: true,
   });
+
+  await search.fill("alpha-blend");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await page.locator("[data-catalog-name='ghost_translucent']").click();
+  await expect(page.locator("canvas[data-figure='ghost_translucent']")).toBeVisible();
+  const rendering = page.locator(".renderingSection");
+  await expect(rendering).toContainText("Blend");
+  await expect(rendering).toContainText("Additive");
+  await page.screenshot({
+    path: "/tmp/mclone-creature-catalogue-alpha-blend.png",
+    fullPage: true,
+  });
+
+  await search.fill("alpha-dither");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await page.locator("[data-catalog-name='ghost_dither']").click();
+  await expect(page.locator("canvas[data-figure='ghost_dither']")).toBeVisible();
+  await expect(rendering).toContainText("Mask");
   expect(browserErrors).toEqual([]);
 });
 

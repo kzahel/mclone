@@ -709,6 +709,7 @@ impl WebSceneHost {
             ("atlasWidth", u64::from(figure.atlas.width)),
             ("atlasHeight", u64::from(figure.atlas.height)),
             ("drawCount", u64::from(stats.draw_count)),
+            ("pipelineCount", gpu.pipeline_count),
             ("immutableUploadCount", gpu.immutable_upload_count),
             ("viewUniformWriteCount", gpu.view_uniform_write_count),
             ("multiviewPipelineCount", gpu.multiview_pipeline_count),

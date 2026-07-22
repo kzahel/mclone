@@ -33,6 +33,7 @@ pub struct PreparedFigureRenderStats {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct PreparedFigureGpuSnapshot {
+    pub pipeline_count: u64,
     pub immutable_upload_count: u64,
     pub immutable_vertex_bytes: u64,
     pub immutable_index_bytes: u64,
@@ -49,8 +50,7 @@ pub struct PreparedFigureGpuSnapshot {
 ///
 /// This proof renderer intentionally draws one resident figure and one final
 /// part palette. Ordinary stereo uses distinct live uniform slots; full-frame
-/// stereo uses one two-view uniform and a multiview pipeline. Actor records,
-/// instancing, and GPU clip evaluation remain later contracts.
+/// stereo uses one two-view uniform and a matching multiview pipeline set.
 pub struct PreparedFigureDrawResources {
     pipelines: PreparedFigurePipelines,
     view_uniforms: PerViewUniformBuffer,
@@ -345,6 +345,7 @@ impl PreparedFigureDrawResources {
             index_count: figure.indices.len() as u32,
             part_count: figure.parts.len(),
             snapshot: PreparedFigureGpuSnapshot {
+                pipeline_count: 6,
                 immutable_upload_count: 4,
                 immutable_vertex_bytes: vertex_bytes.len() as u64,
                 immutable_index_bytes: index_bytes.len() as u64,
