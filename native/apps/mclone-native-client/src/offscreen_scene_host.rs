@@ -387,18 +387,17 @@ impl OffscreenDriver {
         )
     }
 
-    pub(crate) fn render_flat_auxiliary_pair_frozen(
+    pub(crate) fn render_flat_views_frozen(
         &mut self,
-        frame: RenderFrameContext<'_>,
-        auxiliary_color_view: &wgpu::TextureView,
-        auxiliary_camera: ChunkCamera,
-        primary_ui: MonoUiPresentation,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        views: &[FlatPresentationView<'_>],
         hud_visible: bool,
     ) -> Result<FlatPresentationFrameSummary> {
-        let auxiliary_depth = self
-            .right_depth
-            .as_ref()
-            .context("flat auxiliary render requested from a mono offscreen driver")?;
+        if self.view_topology != OffscreenViewTopology::FlatAuxiliary {
+            bail!("flat presentation render requested from a non-flat driver");
+        }
         self.frame_timing
             .begin_frame(self.clock.frame_ms, self.clock.target_frame_ms);
         self.host.set_mono_ui_context(MonoUiContext {
@@ -412,24 +411,14 @@ impl OffscreenDriver {
             hud_visible,
             ..MonoUiContext::default()
         });
-        let RenderFrameContext {
-            device,
-            queue,
-            encoder,
-            target,
-        } = frame;
-        let primary_render_view = self.host.mono_render_view(target.size)?;
-        let auxiliary_render_view = auxiliary_camera.render_view(target.size[0], target.size[1]);
-        let views = [
-            FlatPresentationView::new(target, &self.depth, primary_render_view, primary_ui),
-            FlatPresentationView::new(
-                RenderFrameTarget::color(auxiliary_color_view, target.size),
-                auxiliary_depth,
-                auxiliary_render_view,
-                MonoUiPresentation::None,
-            ),
-        ];
+        let primary_size = views
+            .first()
+            .context("flat presentation render requires at least one view")?
+            .target
+            .size;
         let frame_start = Instant::now();
+        self.host
+            .set_mono_ui_scale(GuiScale::from_pixels(primary_size[0], primary_size[1]));
         let summary = self
             .host
             .render_flat_presentation_frame_frozen(device, queue, encoder, &views)?;

@@ -1,17 +1,22 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, bail};
-use glam::{Vec3, Vec4};
+use glam::{Quat, Vec3, Vec4};
 use mclone_app_runtime::frame_render::{
     FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
     record_render_section_update_stats,
 };
+use mclone_app_runtime::local_participant_input::LocalParticipantInputGroup;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
 use mclone_app_runtime::native_service_assembly::NativeSceneServices;
 use mclone_client::ActorInterpolationState;
 use mclone_core::Vec3d;
+use mclone_input::{
+    InputSourceDescriptor, InputSourceIdAllocator, PlayerActionFrame, StandardGamepadButtonState,
+    StandardGamepadButtons, StandardGamepadSnapshot,
+};
 use mclone_mesh::quad_face_count_from_indices;
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderView, TexturedSectionRenderOptions,
@@ -24,7 +29,12 @@ use mclone_render::headless::{
     run_headless_capture_loop_with_aux, save_rgba_png,
 };
 use mclone_render::screen_effect::UnderwaterOverlay;
-use mclone_render_session::actor_instances_from_presentations_near_observer;
+use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
+use mclone_render_session::{
+    FlatSurfaceLayout, PixelExtent, SafeAreaInsets,
+    actor_instances_from_presentations_near_observer,
+};
+use mclone_scene::{FlatPresentationFrameSummary, FlatPresentationView, MonoSceneFrameSummary};
 use mclone_ui::{GameUiHost, GuiDrawList, GuiScale};
 
 use crate::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
@@ -808,157 +818,183 @@ pub(crate) fn write_headless_dual_view(
         mclone_scene::MonoUiPresentation::None
     };
 
-    // Render the active player view and a detached overhead/build-plan view in
-    // one shared scene frame. The second target has independent color/depth;
-    // post-submit composition is evidence tooling, not product layout policy.
-    let (loop_report, primary_frames, auxiliary_frames, state) =
-        run_headless_capture_loop_with_aux(
-            HeadlessFrameLoopOptions {
-                width: options.width,
-                height: options.height,
-                frame_count: 1,
-                pace_frame_duration: None,
-            },
-            move |device, queue, format, size| {
-                let mut driver = OffscreenDriver::new_flat_auxiliary(
-                    device,
-                    queue,
-                    format,
-                    size,
-                    &scene,
-                    render_options,
-                    &assets,
-                    &asset_source,
-                )?;
-                driver.drive_until_streamed(device, queue)?;
-                let auxiliary_camera =
-                    auxiliary_build_camera(driver.host().mono_render_view(size)?);
-                let auxiliary_texture = device.create_texture(&wgpu::TextureDescriptor {
-                    label: Some("mclone_flat_auxiliary_capture_target"),
-                    size: wgpu::Extent3d {
-                        width: size[0],
-                        height: size[1],
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-                    view_formats: &[],
-                });
-                let auxiliary_view =
-                    auxiliary_texture.create_view(&wgpu::TextureViewDescriptor::default());
-                Ok(HeadlessAuxiliaryViewState {
-                    driver,
-                    auxiliary_texture,
-                    auxiliary_view,
-                    auxiliary_camera,
-                    summary: None,
-                })
-            },
-            |_index, frame, state| {
-                let summary = state.driver.render_flat_auxiliary_pair_frozen(
-                    frame,
-                    &state.auxiliary_view,
-                    state.auxiliary_camera,
-                    ui,
-                    options.hud,
-                )?;
-                if summary.shared_preparation_count != 1 || summary.rendered_view_count != 2 {
-                    bail!(
-                        "flat auxiliary frame receipt was shared={} views={}",
-                        summary.shared_preparation_count,
-                        summary.rendered_view_count
-                    );
-                }
-                state.summary = Some(summary);
-                Ok(())
-            },
-            |_index, device, queue, state| {
-                read_headless_rgba8_texture(
-                    device,
-                    queue,
-                    &state.auxiliary_texture,
-                    options.width,
-                    options.height,
-                )
-            },
-        )?;
+    let surface = PixelExtent::new(options.width.max(2), options.height.max(2));
+    let horizontal_layout = FlatSurfaceLayout::two_horizontal(surface, SafeAreaInsets::NONE)?;
+    let vertical_layout = FlatSurfaceLayout::two_vertical(surface, SafeAreaInsets::NONE)?;
+    let horizontal_target_layout = horizontal_layout.clone();
+    let vertical_target_layout = vertical_layout.clone();
 
-    let summary = state
-        .summary
-        .context("flat auxiliary capture recorded no frame receipt")?;
-    let primary_pixels = primary_frames
+    // Render a mono control and two independently sized split plans over one
+    // warmed resident scene. Each split plan is one prepare-once/render-twice
+    // frame; the CPU compositor only places the already-rendered panes.
+    let (loop_report, mono_frames, split_frames, state) = run_headless_capture_loop_with_aux(
+        HeadlessFrameLoopOptions {
+            width: surface.width,
+            height: surface.height,
+            frame_count: 1,
+            pace_frame_duration: None,
+        },
+        move |device, queue, format, size| {
+            let mut driver = OffscreenDriver::new_flat_auxiliary(
+                device,
+                queue,
+                format,
+                size,
+                &scene,
+                render_options,
+                &assets,
+                &asset_source,
+            )?;
+            driver.drive_until_streamed(device, queue)?;
+            let actions = scripted_participant_actions()?;
+            let cameras =
+                scripted_participant_cameras(driver.host().mono_render_view(size)?, &actions);
+            Ok(HeadlessSplitPresentationState {
+                driver,
+                cameras,
+                horizontal_targets: pane_targets(device, format, &horizontal_target_layout),
+                vertical_targets: pane_targets(device, format, &vertical_target_layout),
+                mono_summary: None,
+                horizontal_summary: None,
+                vertical_summary: None,
+            })
+        },
+        |_index, frame, state| {
+            let RenderFrameContext {
+                device,
+                queue,
+                encoder,
+                target,
+            } = frame;
+            state.mono_summary = Some(state.driver.render_detached_chunk_camera_frozen(
+                RenderFrameContext::new(device, queue, encoder, target),
+                state.cameras[0],
+                ui,
+            )?);
+            state.horizontal_summary = Some(render_split_plan(
+                &mut state.driver,
+                device,
+                queue,
+                encoder,
+                &state.horizontal_targets,
+                state.cameras,
+                ui,
+                options.hud,
+            )?);
+            state.vertical_summary = Some(render_split_plan(
+                &mut state.driver,
+                device,
+                queue,
+                encoder,
+                &state.vertical_targets,
+                state.cameras,
+                ui,
+                options.hud,
+            )?);
+            Ok(())
+        },
+        |_index, device, queue, state| {
+            Ok(HeadlessSplitPixels {
+                horizontal: read_pane_targets(device, queue, &state.horizontal_targets)?,
+                vertical: read_pane_targets(device, queue, &state.vertical_targets)?,
+            })
+        },
+    )?;
+
+    let mono_summary = state
+        .mono_summary
+        .context("split presentation capture recorded no mono control")?;
+    let horizontal_summary = state
+        .horizontal_summary
+        .context("split presentation capture recorded no horizontal receipt")?;
+    let vertical_summary = state
+        .vertical_summary
+        .context("split presentation capture recorded no vertical receipt")?;
+    for (name, summary) in [
+        ("horizontal", &horizontal_summary),
+        ("vertical", &vertical_summary),
+    ] {
+        if summary.shared_preparation_count != 1 || summary.rendered_view_count != 2 {
+            bail!(
+                "{name} split frame receipt was shared={} views={}",
+                summary.shared_preparation_count,
+                summary.rendered_view_count
+            );
+        }
+    }
+    let mono_pixels = mono_frames
         .first()
-        .context("flat auxiliary capture produced no primary pixels")?;
-    let auxiliary_pixels = auxiliary_frames
+        .context("split presentation capture produced no mono pixels")?;
+    let split_pixels = split_frames
         .first()
-        .context("flat auxiliary capture produced no auxiliary pixels")?;
-    let paired_pixel_difference_count = primary_pixels
+        .context("split presentation capture produced no pane pixels")?;
+    let paired_pixel_difference_count = split_pixels.horizontal[0]
         .chunks_exact(4)
-        .zip(auxiliary_pixels.chunks_exact(4))
+        .zip(split_pixels.horizontal[1].chunks_exact(4))
         .filter(|(left, right)| left != right)
         .count();
     if paired_pixel_difference_count == 0 {
-        bail!("primary and auxiliary captures are pixel-identical");
+        bail!("scripted participant captures are pixel-identical");
     }
-    let horizontal_pixels = compose_rgba_horizontal(
-        primary_pixels,
-        auxiliary_pixels,
-        options.width,
-        options.height,
+    let horizontal_pixels = compose_rgba_layout(
+        &horizontal_layout,
+        &[
+            split_pixels.horizontal[0].as_slice(),
+            split_pixels.horizontal[1].as_slice(),
+        ],
     )?;
-    let vertical_pixels = compose_rgba_vertical(
-        primary_pixels,
-        auxiliary_pixels,
-        options.width,
-        options.height,
+    let vertical_pixels = compose_rgba_layout(
+        &vertical_layout,
+        &[
+            split_pixels.vertical[0].as_slice(),
+            split_pixels.vertical[1].as_slice(),
+        ],
     )?;
-    let horizontal_width = options
-        .width
-        .checked_mul(2)
-        .context("horizontal auxiliary card width overflow")?;
-    let vertical_height = options
-        .height
-        .checked_mul(2)
-        .context("vertical auxiliary card height overflow")?;
+    let auxiliary_rect = horizontal_layout.panes()[1];
     let outputs = [
         (
             "main",
             options.directory.join("main.png"),
-            options.width,
-            options.height,
-            primary_pixels.as_slice(),
-            &summary.views[0].render,
+            surface.width,
+            surface.height,
+            mono_pixels.as_slice(),
+            &mono_summary.render,
+            1,
+            1,
         ),
         (
             "auxiliary",
             options.directory.join("auxiliary.png"),
-            options.width,
-            options.height,
-            auxiliary_pixels.as_slice(),
-            &summary.views[1].render,
+            auxiliary_rect.width,
+            auxiliary_rect.height,
+            split_pixels.horizontal[1].as_slice(),
+            &horizontal_summary.views[1].render,
+            horizontal_summary.shared_preparation_count,
+            horizontal_summary.rendered_view_count,
         ),
         (
             "horizontal",
             options.directory.join("horizontal.png"),
-            horizontal_width,
-            options.height,
+            surface.width,
+            surface.height,
             horizontal_pixels.as_slice(),
-            &summary.views[0].render,
+            &horizontal_summary.views[0].render,
+            horizontal_summary.shared_preparation_count,
+            horizontal_summary.rendered_view_count,
         ),
         (
             "vertical",
             options.directory.join("vertical.png"),
-            options.width,
-            vertical_height,
+            surface.width,
+            surface.height,
             vertical_pixels.as_slice(),
-            &summary.views[0].render,
+            &vertical_summary.views[0].render,
+            vertical_summary.shared_preparation_count,
+            vertical_summary.rendered_view_count,
         ),
     ];
     let mut reports = Vec::new();
-    for (view_name, path, width, height, pixels, render) in outputs {
+    for (view_name, path, width, height, pixels, render, preparation_count, view_count) in outputs {
         let non_clear_rgb_pixel_count = non_clear_rgb_pixel_count(pixels);
         if non_clear_rgb_pixel_count == 0 {
             bail!(
@@ -981,8 +1017,8 @@ pub(crate) fn write_headless_dual_view(
             index_count: render.index_count,
             drawn_index_count: render.drawn_index_count,
             gui_command_count: render.gui_command_count,
-            shared_preparation_count: summary.shared_preparation_count,
-            rendered_view_count: summary.rendered_view_count,
+            shared_preparation_count: preparation_count,
+            rendered_view_count: view_count,
             paired_pixel_difference_count,
         });
     }
@@ -990,50 +1026,233 @@ pub(crate) fn write_headless_dual_view(
     Ok(reports)
 }
 
-struct HeadlessAuxiliaryViewState {
+struct HeadlessSplitPresentationState {
     driver: OffscreenDriver,
-    auxiliary_texture: wgpu::Texture,
-    auxiliary_view: wgpu::TextureView,
-    auxiliary_camera: ChunkCamera,
-    summary: Option<mclone_scene::FlatPresentationFrameSummary>,
+    cameras: [ChunkCamera; 2],
+    horizontal_targets: Vec<HeadlessPaneTarget>,
+    vertical_targets: Vec<HeadlessPaneTarget>,
+    mono_summary: Option<MonoSceneFrameSummary>,
+    horizontal_summary: Option<FlatPresentationFrameSummary>,
+    vertical_summary: Option<FlatPresentationFrameSummary>,
 }
 
-fn auxiliary_build_camera(primary: ChunkRenderView) -> ChunkCamera {
-    let target = primary.camera_position + primary.camera_forward * 8.0;
-    ChunkCamera {
-        eye: (target + Vec3::new(34.0, 54.0, -34.0)).to_array(),
-        target: target.to_array(),
-        up: Vec3::Y.to_array(),
-        fov_y_radians: 58.0_f32.to_radians(),
-        z_near: 0.1,
-        z_far: 384.0,
+struct HeadlessPaneTarget {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    depth: ChunkDepthTarget,
+    size: [u32; 2],
+}
+
+impl HeadlessPaneTarget {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, extent: PixelExtent) -> Self {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_split_presentation_pane"),
+            size: wgpu::Extent3d {
+                width: extent.width,
+                height: extent.height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        Self {
+            texture,
+            view,
+            depth: ChunkDepthTarget::new(device, extent.width, extent.height),
+            size: [extent.width, extent.height],
+        }
+    }
+
+    fn render_target(&self) -> RenderFrameTarget<'_> {
+        RenderFrameTarget::color(&self.view, self.size)
     }
 }
 
-fn compose_rgba_horizontal(left: &[u8], right: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-    let row_bytes = width as usize * 4;
-    let expected = row_bytes * height as usize;
-    if left.len() != expected || right.len() != expected {
-        bail!("horizontal auxiliary card received malformed RGBA views");
-    }
-    let mut composed = Vec::with_capacity(expected * 2);
-    for row in 0..height as usize {
-        let start = row * row_bytes;
-        let end = start + row_bytes;
-        composed.extend_from_slice(&left[start..end]);
-        composed.extend_from_slice(&right[start..end]);
-    }
-    Ok(composed)
+struct HeadlessSplitPixels {
+    horizontal: [Vec<u8>; 2],
+    vertical: [Vec<u8>; 2],
 }
 
-fn compose_rgba_vertical(top: &[u8], bottom: &[u8], width: u32, height: u32) -> Result<Vec<u8>> {
-    let expected = width as usize * height as usize * 4;
-    if top.len() != expected || bottom.len() != expected {
-        bail!("vertical auxiliary card received malformed RGBA views");
+fn pane_targets(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    layout: &FlatSurfaceLayout,
+) -> Vec<HeadlessPaneTarget> {
+    layout
+        .panes()
+        .iter()
+        .map(|rect| HeadlessPaneTarget::new(device, format, rect.extent()))
+        .collect()
+}
+
+fn render_split_plan(
+    driver: &mut OffscreenDriver,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    encoder: &mut wgpu::CommandEncoder,
+    targets: &[HeadlessPaneTarget],
+    cameras: [ChunkCamera; 2],
+    primary_ui: mclone_scene::MonoUiPresentation,
+    hud_visible: bool,
+) -> Result<FlatPresentationFrameSummary> {
+    let [first, second] = targets else {
+        bail!("scripted split presentation requires exactly two panes");
+    };
+    let views = [
+        FlatPresentationView::new(
+            first.render_target(),
+            &first.depth,
+            cameras[0].render_view(first.size[0], first.size[1]),
+            primary_ui,
+        ),
+        FlatPresentationView::new(
+            second.render_target(),
+            &second.depth,
+            cameras[1].render_view(second.size[0], second.size[1]),
+            mclone_scene::MonoUiPresentation::None,
+        ),
+    ];
+    driver.render_flat_views_frozen(device, queue, encoder, &views, hud_visible)
+}
+
+fn read_pane_targets(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    targets: &[HeadlessPaneTarget],
+) -> Result<[Vec<u8>; 2]> {
+    let [first, second] = targets else {
+        bail!("scripted split presentation requires exactly two pane readbacks");
+    };
+    Ok([
+        read_headless_rgba8_texture(device, queue, &first.texture, first.size[0], first.size[1])?,
+        read_headless_rgba8_texture(
+            device,
+            queue,
+            &second.texture,
+            second.size[0],
+            second.size[1],
+        )?,
+    ])
+}
+
+fn scripted_participant_actions() -> Result<[PlayerActionFrame; 2]> {
+    let mut input = LocalParticipantInputGroup::default();
+    let mut ids = InputSourceIdAllocator::new();
+    let sources = [ids.allocate().unwrap(), ids.allocate().unwrap()];
+    for (index, source) in sources.into_iter().enumerate() {
+        input.connect_source(
+            source,
+            InputSourceDescriptor::scripted_gamepad(format!("split participant {}", index + 1)),
+            Duration::ZERO,
+        )?;
     }
-    let mut composed = Vec::with_capacity(expected * 2);
-    composed.extend_from_slice(top);
-    composed.extend_from_slice(bottom);
+    let join = StandardGamepadSnapshot {
+        buttons: StandardGamepadButtons {
+            start: StandardGamepadButtonState::pressed(),
+            ..StandardGamepadButtons::default()
+        },
+        ..StandardGamepadSnapshot::default()
+    };
+    input.sample_frame(Duration::ZERO, sources.map(|source| (source, join)))?;
+    input.sample_frame(
+        Duration::from_millis(1),
+        sources.map(|source| (source, StandardGamepadSnapshot::default())),
+    )?;
+    let frame = input.sample_frame(
+        Duration::from_millis(2),
+        [
+            (
+                sources[0],
+                StandardGamepadSnapshot {
+                    left_stick: glam::Vec2::new(0.55, 0.75),
+                    right_stick: glam::Vec2::new(0.2, -0.1),
+                    ..StandardGamepadSnapshot::default()
+                },
+            ),
+            (
+                sources[1],
+                StandardGamepadSnapshot {
+                    left_stick: glam::Vec2::new(-0.65, 0.2),
+                    right_stick: glam::Vec2::new(-0.7, 0.25),
+                    ..StandardGamepadSnapshot::default()
+                },
+            ),
+        ],
+    )?;
+    let mut actions = frame
+        .participant_actions
+        .into_iter()
+        .map(|participant| (participant.participant.slot.index(), participant.actions))
+        .collect::<Vec<_>>();
+    actions.sort_by_key(|(slot, _)| *slot);
+    let [first, second] = actions.as_slice() else {
+        bail!("scripted split input did not produce two participant actions");
+    };
+    Ok([first.1.clone(), second.1.clone()])
+}
+
+fn scripted_participant_cameras(
+    primary: ChunkRenderView,
+    actions: &[PlayerActionFrame; 2],
+) -> [ChunkCamera; 2] {
+    let focus = primary.camera_position + primary.camera_forward * 8.0;
+    let overview_eye = focus + Vec3::new(34.0, 54.0, -34.0);
+    let overview_forward = (focus - overview_eye).normalize();
+    let overview_right = overview_forward.cross(Vec3::Y).normalize_or_zero();
+    std::array::from_fn(|index| {
+        let actions = &actions[index];
+        let yaw = -actions.look_rate.x / 480.0 * 35.0_f32.to_radians();
+        let pitch = -actions.look_rate.y / 480.0 * 22.0_f32.to_radians();
+        let yawed = Quat::from_axis_angle(Vec3::Y, yaw) * overview_forward;
+        let right = yawed.cross(Vec3::Y).normalize_or_zero();
+        let forward = (Quat::from_axis_angle(right, pitch) * yawed).normalize_or_zero();
+        let horizontal_forward = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
+        let eye = overview_eye
+            + overview_right * (-actions.movement.left * 12.0)
+            + horizontal_forward * (actions.movement.forward * 9.0);
+        ChunkCamera {
+            eye: eye.to_array(),
+            target: (eye + forward * 12.0).to_array(),
+            up: Vec3::Y.to_array(),
+            fov_y_radians: 58.0_f32.to_radians(),
+            z_near: 0.1,
+            z_far: 384.0,
+        }
+    })
+}
+
+fn compose_rgba_layout(layout: &FlatSurfaceLayout, panes: &[&[u8]]) -> Result<Vec<u8>> {
+    if panes.len() != layout.panes().len() {
+        bail!(
+            "flat compositor received {} panes for a {}-pane layout",
+            panes.len(),
+            layout.panes().len()
+        );
+    }
+    let surface = layout.surface();
+    let surface_row_bytes = surface.width as usize * 4;
+    let mut composed = vec![0; surface_row_bytes * surface.height as usize];
+    for pixel in composed.chunks_exact_mut(4) {
+        pixel[3] = 255;
+    }
+    for (index, (rect, pixels)) in layout.panes().iter().zip(panes).enumerate() {
+        let pane_row_bytes = rect.width as usize * 4;
+        let expected = pane_row_bytes * rect.height as usize;
+        if pixels.len() != expected {
+            bail!("flat compositor pane {index} has malformed RGBA pixels");
+        }
+        for row in 0..rect.height as usize {
+            let source_start = row * pane_row_bytes;
+            let target_start = (rect.y as usize + row) * surface_row_bytes + rect.x as usize * 4;
+            composed[target_start..target_start + pane_row_bytes]
+                .copy_from_slice(&pixels[source_start..source_start + pane_row_bytes]);
+        }
+    }
     Ok(composed)
 }
 
@@ -1400,18 +1619,24 @@ mod tests {
 
     #[test]
     fn auxiliary_cards_preserve_view_order_in_both_layouts() {
-        let primary = vec![255, 0, 0, 255, 250, 0, 0, 255];
-        let auxiliary = vec![0, 0, 255, 255, 0, 0, 250, 255];
+        let surface = PixelExtent::new(2, 2);
+        let horizontal = FlatSurfaceLayout::two_horizontal(surface, SafeAreaInsets::NONE).unwrap();
+        let vertical = FlatSurfaceLayout::two_vertical(surface, SafeAreaInsets::NONE).unwrap();
+        let horizontal_primary = vec![255, 0, 0, 255, 250, 0, 0, 255];
+        let horizontal_auxiliary = vec![0, 0, 255, 255, 0, 0, 250, 255];
+        let vertical_primary = vec![255, 0, 0, 255, 250, 0, 0, 255];
+        let vertical_auxiliary = vec![0, 0, 255, 255, 0, 0, 250, 255];
 
         assert_eq!(
-            compose_rgba_horizontal(&primary, &auxiliary, 1, 2).unwrap(),
+            compose_rgba_layout(&horizontal, &[&horizontal_primary, &horizontal_auxiliary])
+                .unwrap(),
             vec![
                 255, 0, 0, 255, 0, 0, 255, 255, 250, 0, 0, 255, 0, 0, 250, 255
             ]
         );
         assert_eq!(
-            compose_rgba_vertical(&primary, &auxiliary, 1, 2).unwrap(),
-            [primary, auxiliary].concat()
+            compose_rgba_layout(&vertical, &[&vertical_primary, &vertical_auxiliary]).unwrap(),
+            [vertical_primary, vertical_auxiliary].concat()
         );
     }
 

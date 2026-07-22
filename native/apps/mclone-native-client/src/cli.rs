@@ -349,7 +349,9 @@ pub(crate) struct LobbyScenarioSmokeOptions {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct HeadlessDualViewOptions {
     pub(crate) directory: PathBuf,
+    /// Final surface width; split panes receive aspect-correct subtargets.
     pub(crate) width: u32,
+    /// Final surface height; split panes receive aspect-correct subtargets.
     pub(crate) height: u32,
     pub(crate) scene: SceneOptions,
     pub(crate) render_options: TexturedSectionRenderOptions,

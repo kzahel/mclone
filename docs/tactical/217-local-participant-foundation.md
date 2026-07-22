@@ -239,6 +239,35 @@ owns its public profile-ID projection and `RealmServer` exposes the selected
 hotbar slot for neutral ownership evidence. The focused app-runtime tests and
 all 536 `mclone-server` tests pass.
 
+### Slice 4 — validated surface layout and scripted pixels
+
+Implemented and inspected on 2026-07-22. `mclone-render-session` now owns a
+target-neutral `FlatSurfaceLayout` with pixel extents/rectangles, safe-area
+insets, exact 1-4 cardinality, bounds/overflow/empty/overlap validation, and
+explicit left-to-right horizontal and top-to-bottom vertical two-pane
+constructors. Odd dimensions have deterministic coverage; neither constructor
+is selected as a product default.
+
+The native offscreen compositor now consumes that layout. On a fixed 960x640
+surface it renders horizontal 480x640 panes and vertical 960x320 panes, each
+with its own aspect-correct color/depth target. Two scripted sources pass
+through `LocalParticipantInputGroup`; their independent semantic movement/look
+frames derive two distinct diagnostic cameras. Each composite uses one resident
+scene, reports one shared preparation and two view renders, and does not connect
+the Slice 3 client replicas or grant the second camera authority.
+
+The accepted seed-12345, render-distance-2 capture reported 63 resident
+sections, 27/26 horizontally culled drawn sections, and 213,217 differing
+paired pixels. The mono cardinality-one control and both layouts were inspected
+and are legible; an earlier unreconciled first-person framing was discarded
+rather than accepted:
+
+- `/tmp/mclone-couch-foundation-20260722/main.png`
+- `/tmp/mclone-couch-foundation-20260722/horizontal.png`
+- `/tmp/mclone-couch-foundation-20260722/vertical.png`
+
+Focused layout/compositor tests pass, as does the affected scene Wasm check.
+
 ## Stop Conditions
 
 Stop and ask for direction if implementation requires choosing:
