@@ -1128,7 +1128,7 @@ impl McloneSceneHost {
         };
         runtime
             .send_gameplay_command(set_player_appearance_command_for_ui_model(
-                self.active_world.player_model,
+                self.active_world.local_participant.player_model,
             ))
             .map(|_| true)
             .context("failed to sync XR player appearance to server")

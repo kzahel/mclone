@@ -178,6 +178,26 @@ the first drawable milestone.
 - No physical collector, product join flow, default layout, guest policy, or
   unreviewed shared-cache architecture is added.
 
+## Progress Evidence
+
+### Slice 1 — bounded participant and cardinality-one migration
+
+Implemented on 2026-07-22. `mclone-app-runtime` now owns opaque
+`LocalParticipantId` allocation and a generic `LocalParticipantGroup<T>` with
+explicit stable slots, 1-4 admission, non-renumbering removal, and no
+serialization or constructor from neighboring identity types. Focused tests
+prove all four seats, replacement without ID reuse, and duplicate-slot/full
+rejection.
+
+The current scene camera, interaction controller, and player model now live in
+one `LocalParticipantPresentation` envelope inside each drawable world slot.
+The cardinality-one compatibility dereference preserves all existing behavior;
+conflicting runtime/camera borrows use the explicit nested owner. Updated
+one-world locks prove the fields no longer sit directly on `DrawableWorldSlot`,
+and collector locks keep participant and join policy out of desktop, browser,
+and Android physical adapters. Focused app-runtime and complete scene unit tests
+pass, as do the affected scene ownership/composition contract suites.
+
 ## Stop Conditions
 
 Stop and ask for direction if implementation requires choosing:

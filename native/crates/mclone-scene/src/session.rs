@@ -2955,11 +2955,11 @@ impl McloneSceneHost {
         runtime
             .poll_with_update_budget(RuntimeUpdatePumpBudget::unlimited())
             .context("poll promoted embedded-world destination")?;
-        let before = standby.camera.snapshot();
-        let before_feet = standby.camera.feet_position();
+        let before = standby.local_participant.camera.snapshot();
+        let before_feet = standby.local_participant.camera.feet_position();
         let accepted = mclone_app_runtime::apply_pending_engine_camera_position_updates(
             runtime,
-            &mut standby.camera,
+            &mut standby.local_participant.camera,
             XR_CAMERA_COMMIT_CONTEXT,
         )?;
         if !accepted {
@@ -3625,6 +3625,7 @@ impl McloneSceneHost {
                 .as_ref()
                 .expect("mapped warm-world destination retains its runtime");
             standby
+                .local_participant
                 .camera
                 .probe_ground(runtime.client(), WARM_WORLD_ENTRY_GROUND_PROBE_DISTANCE);
         }
@@ -3825,7 +3826,7 @@ impl McloneSceneHost {
             .context("warm-world camera reconcile requires a runtime")?;
         let changed = mclone_app_runtime::commit_engine_camera_player_pose(
             runtime,
-            &mut slot.camera,
+            &mut slot.local_participant.camera,
             XR_CAMERA_COMMIT_CONTEXT,
             clock,
             None,
@@ -4434,7 +4435,11 @@ impl McloneSceneHost {
                 state.presentation,
                 WarmWorldPresentationRequest::Diorama { .. }
             ) || slot.runtime.as_ref().is_some_and(|runtime| {
-                reconcile_observer_preview_entry(&slot.scene, runtime.client(), &mut slot.camera)
+                reconcile_observer_preview_entry(
+                    &slot.scene,
+                    runtime.client(),
+                    &mut slot.local_participant.camera,
+                )
             });
             if runtime_ready && observer_entry_ready {
                 slot.external_runtime_startup_pending = false;
@@ -4859,7 +4864,7 @@ impl McloneSceneHost {
                 .expect("GPU-warming standby owns a runtime");
             match mclone_app_runtime::apply_pending_engine_camera_position_updates(
                 runtime,
-                &mut slot.camera,
+                &mut slot.local_participant.camera,
                 XR_CAMERA_COMMIT_CONTEXT,
             ) {
                 Ok(changed) => changed,

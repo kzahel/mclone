@@ -590,6 +590,7 @@ impl McloneSceneHost {
             .as_ref()
             .expect("runtime presence checked");
         self.active_world
+            .local_participant
             .camera
             .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
@@ -659,6 +660,7 @@ impl McloneSceneHost {
             .as_ref()
             .expect("runtime presence checked");
         self.active_world
+            .local_participant
             .camera
             .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
@@ -710,6 +712,7 @@ impl McloneSceneHost {
             .as_ref()
             .expect("runtime presence checked");
         self.active_world
+            .local_participant
             .camera
             .apply_movement_input(runtime.client(), input);
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));

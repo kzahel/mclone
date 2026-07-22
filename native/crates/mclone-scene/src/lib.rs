@@ -360,6 +360,12 @@ struct WorldPreparationPolicy {
 /// Tactical 174 Slice 2 deliberately retains exactly one of these. Keeping the
 /// leaf concrete and directly addressed preserves the ordinary one-world frame
 /// path while allowing one explicitly requested detached standby beside it.
+struct LocalParticipantPresentation {
+    camera: EngineCameraController,
+    interaction: ClientInteractionController,
+    player_model: GamePlayerModel,
+}
+
 struct DrawableWorldSlot {
     id: WorldInstanceId,
     descriptor: Option<ActiveSessionDescriptor>,
@@ -374,9 +380,11 @@ struct DrawableWorldSlot {
     /// A connected runtime may still be waiting for authoritative spawn/view
     /// admission. Keep gameplay frozen until that slot-local evidence is ready.
     external_runtime_startup_pending: bool,
-    camera: EngineCameraController,
-    interaction: ClientInteractionController,
-    player_model: GamePlayerModel,
+    /// Cardinality-one compatibility envelope for participant-private scene
+    /// state. The temporary `Deref` below preserves existing call sites while
+    /// making ownership explicit before the bounded participant group admits
+    /// more than one presentation state.
+    local_participant: LocalParticipantPresentation,
     draw: TexturedSectionDrawResources,
     actors: Option<ActorDrawResources>,
     actor_interpolation: ActorInterpolationState,
@@ -388,6 +396,20 @@ struct DrawableWorldSlot {
     render_admission_policy: RenderAdmissionPolicy,
     accepted_entry_pose: Option<WorldEntryPose>,
     pending_startup_sections: Vec<TexturedRenderSectionMesh>,
+}
+
+impl std::ops::Deref for DrawableWorldSlot {
+    type Target = LocalParticipantPresentation;
+
+    fn deref(&self) -> &Self::Target {
+        &self.local_participant
+    }
+}
+
+impl std::ops::DerefMut for DrawableWorldSlot {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.local_participant
+    }
 }
 
 /// Target-neutral prepared state for constructing or replacing the runtime
@@ -479,9 +501,11 @@ impl DrawableWorldSlot {
             runtime: install.runtime,
             local_startup: install.local_startup,
             external_runtime_startup_pending: install.external_runtime_startup_pending,
-            camera: install.camera,
-            interaction: ClientInteractionController::new(),
-            player_model: GamePlayerModel::default(),
+            local_participant: LocalParticipantPresentation {
+                camera: install.camera,
+                interaction: ClientInteractionController::new(),
+                player_model: GamePlayerModel::default(),
+            },
             draw: install.draw,
             actors: install.actors,
             actor_interpolation: ActorInterpolationState::new(),
@@ -1794,7 +1818,7 @@ impl McloneSceneHost {
             };
             match mclone_app_runtime::apply_pending_engine_camera_position_updates(
                 runtime,
-                &mut self.active_world.camera,
+                &mut self.active_world.local_participant.camera,
                 XR_CAMERA_COMMIT_CONTEXT,
             ) {
                 Ok(changed) => changed,
@@ -4375,7 +4399,7 @@ impl McloneSceneHost {
         let mut timing = EngineCameraCommitTiming::default();
         let changed = mclone_app_runtime::commit_engine_camera_player_pose(
             runtime,
-            &mut self.active_world.camera,
+            &mut self.active_world.local_participant.camera,
             XR_CAMERA_COMMIT_CONTEXT,
             &self.services.clock,
             Some(&mut timing),

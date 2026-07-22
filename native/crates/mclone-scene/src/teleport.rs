@@ -443,6 +443,7 @@ impl McloneSceneHost {
         );
         if let Some(runtime) = self.active_world.runtime.as_ref() {
             self.active_world
+                .local_participant
                 .camera
                 .probe_ground(runtime.client(), XR_BLINK_TELEPORT_GROUND_PROBE_DISTANCE);
         }

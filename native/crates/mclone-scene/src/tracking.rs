@@ -341,10 +341,14 @@ impl McloneSceneHost {
         let Some(runtime) = self.active_world.runtime.as_ref() else {
             return Ok(transform);
         };
-        let reconciliation = self.active_world.camera.reconcile_room_scale_headset(
-            runtime.client(),
-            vec3d_from_glam(headset_world_position),
-        );
+        let reconciliation = self
+            .active_world
+            .local_participant
+            .camera
+            .reconcile_room_scale_headset(
+                runtime.client(),
+                vec3d_from_glam(headset_world_position),
+            );
         let consumed_world = glam_vec3_from_vec3d(reconciliation.consumed_body_movement);
         let origin = origin.consume_world_movement(consumed_world, transform);
         self.tracking_origin = Some(origin);

@@ -572,7 +572,7 @@ impl McloneSceneHost {
             .as_mut()
             .context("asset replacement requires an active runtime")?;
         let session_before = self.session.state().clone();
-        let camera_before = self.active_world.camera.snapshot();
+        let camera_before = self.active_world.local_participant.camera.snapshot();
         let command_count_before = runtime.core().command_count();
         let update_count_before = runtime.core().update_count();
 
@@ -646,7 +646,8 @@ impl McloneSceneHost {
             epoch: self.active_assets.epoch,
             section_count: sections.sections.len(),
             session_preserved: self.session.state() == &session_before,
-            camera_preserved: self.active_world.camera.snapshot() == camera_before,
+            camera_preserved: self.active_world.local_participant.camera.snapshot()
+                == camera_before,
             command_count_unchanged: runtime.core().command_count() == command_count_before,
             update_count_unchanged: runtime.core().update_count() == update_count_before,
             preparation_ms: assets_ready_at

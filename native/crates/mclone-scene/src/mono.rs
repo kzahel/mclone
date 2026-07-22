@@ -650,6 +650,7 @@ impl McloneSceneHost {
         let before = self.active_world.camera.snapshot();
         let after = self
             .active_world
+            .local_participant
             .camera
             .apply_movement_input(runtime.client(), input);
         self.play_landing_events();
@@ -748,6 +749,7 @@ impl McloneSceneHost {
         );
         if let Some(runtime) = self.active_world.runtime.as_ref() {
             self.active_world
+                .local_participant
                 .camera
                 .probe_ground(runtime.client(), MONO_GROUND_PROBE_DISTANCE);
         }

@@ -65,9 +65,7 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "runtime",
     "local_startup",
     "external_runtime_startup_pending",
-    "camera",
-    "interaction",
-    "player_model",
+    "local_participant",
     "draw",
     "actors",
     "actor_interpolation",
@@ -177,7 +175,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 23);
+    assert_eq!(slot_fields.len(), 21);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
     assert_eq!(host_fields.len(), 85);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
@@ -201,6 +199,22 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
             "Slice 3 must retain exactly one optional standby, not `{collection}`"
         );
     }
+}
+
+#[test]
+fn participant_private_scene_state_has_a_cardinality_one_envelope() {
+    let source = read("src/lib.rs");
+    let participant = braced_item(&source, "struct LocalParticipantPresentation {");
+    let slot = braced_item(&source, "struct DrawableWorldSlot {");
+
+    assert_eq!(
+        field_names(participant),
+        ["camera", "interaction", "player_model"]
+    );
+    assert!(slot.contains("local_participant: LocalParticipantPresentation"));
+    assert!(!slot.contains("camera: EngineCameraController"));
+    assert!(!slot.contains("interaction: ClientInteractionController"));
+    assert!(!slot.contains("player_model: GamePlayerModel"));
 }
 
 #[test]
@@ -675,7 +689,7 @@ fn asset_replacement_during_standby_warm_cancels_without_mixing_epochs() {
 
     for snapshot in [
         "let session_before = self.session.state().clone();",
-        "let camera_before = self.active_world.camera.snapshot();",
+        "let camera_before = self.active_world.local_participant.camera.snapshot();",
         "let command_count_before = runtime.core().command_count();",
         "let update_count_before = runtime.core().update_count();",
     ] {
