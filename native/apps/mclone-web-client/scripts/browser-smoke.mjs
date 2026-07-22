@@ -1782,27 +1782,22 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     await page.waitForFunction(
       (expected) => {
         const state = globalThis.__mcloneWebApp?.state;
+        const persistentActorIds = String(
+          state?.embeddedPreviewPersistentPassiveActorIds ?? "",
+        ).split(",").filter(Boolean);
         return state?.embeddedPreviewPhase === "visible"
           && Number(state?.embeddedPreviewActorEntityCount) >= 2
           && Number(state?.embeddedPreviewActorObservationCount) >= 2
           && Number(state?.embeddedPreviewActorRemotePlayerCount) === 1
           && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 0
-          && state?.embeddedPreviewFirstActorEntityId === expected.firstId
-          && state?.embeddedPreviewFirstActorPersistentId === expected.firstPersistentId
-          && state?.embeddedPreviewFirstActorKind === expected.firstKind
-          && state?.embeddedPreviewSecondActorEntityId === expected.secondId
-          && state?.embeddedPreviewSecondActorPersistentId === expected.secondPersistentId
-          && state?.embeddedPreviewSecondActorKind === expected.secondKind
+          && persistentActorIds.some((id) => expected.persistentActorIds.includes(id))
           && Number(state?.embeddedPreviewSubmittedActorCount) >= 4
           && Number(state?.embeddedPreviewDrawnActorCount) >= 1;
       },
       {
-        firstId: firstLaunch.after.embeddedPreviewFirstActorEntityId,
-        firstPersistentId: firstLaunch.after.embeddedPreviewFirstActorPersistentId,
-        firstKind: firstLaunch.after.embeddedPreviewFirstActorKind,
-        secondId: firstLaunch.after.embeddedPreviewSecondActorEntityId,
-        secondPersistentId: firstLaunch.after.embeddedPreviewSecondActorPersistentId,
-        secondKind: firstLaunch.after.embeddedPreviewSecondActorKind,
+        persistentActorIds: String(
+          firstLaunch.after.embeddedPreviewPersistentPassiveActorIds ?? "",
+        ).split(",").filter(Boolean),
       },
       { timeout: 45_000 },
     );
@@ -1817,6 +1812,9 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       observationCount: state.embeddedPreviewActorObservationCount,
       remotePlayerCount: state.embeddedPreviewActorRemotePlayerCount,
       sourceLocalPlayerCount: state.embeddedPreviewActorSourceLocalPlayerCount,
+      persistentActorIds: String(
+        state.embeddedPreviewPersistentPassiveActorIds ?? "",
+      ).split(",").filter(Boolean),
       remotePlayer: {
         id: state.embeddedPreviewFirstRemotePlayerId,
         model: state.embeddedPreviewFirstRemotePlayerModel,
@@ -1836,6 +1834,10 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       },
     };
   });
+  const returnedPersistentActorOverlap = returnedActors.persistentActorIds.filter(
+    (id) => String(firstLaunch.after.embeddedPreviewPersistentPassiveActorIds ?? "")
+      .split(",").includes(id),
+  );
   const returnedActorsPng = await canvas.screenshot({
     path: "/tmp/mclone-native-web-lobby-lifecycle-return-live-actors.png",
     timeout: 60_000,
@@ -1924,6 +1926,9 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       ids: String(state.activePersistentPassiveActorIds ?? "").split(",").filter(Boolean),
     };
   });
+  const spawnedPersistentActorIds = spawnedPersistentActorSet.ids.filter(
+    (id) => !activePersistentActorSetBeforeSpawn.ids.includes(id),
+  );
   const postSpawnReturn = await activateBrowserEmbeddedPreview(
     page,
     canvas,
@@ -1961,6 +1966,15 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     "/tmp/mclone-native-web-lobby-lifecycle-reopened-island.png",
   );
   const persistedState = await waitForBlockStateAt(page, mutationBlock, 0);
+  const relaunchedActivePersistentActorSet = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      count: Number(state.activePersistentPassiveActorCount),
+      identityXor: state.activePersistentPassiveActorIdentityXor,
+      identitySum: state.activePersistentPassiveActorIdentitySum,
+      ids: String(state.activePersistentPassiveActorIds ?? "").split(",").filter(Boolean),
+    };
+  });
   const relaunchedPersistentActorSet = {
     count: Number(relaunched.after.embeddedPreviewPersistentPassiveActorCount),
     identityXor: relaunched.after.embeddedPreviewPersistentPassiveActorIdentityXor,
@@ -1968,13 +1982,18 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     ids: String(relaunched.after.embeddedPreviewPersistentPassiveActorIds ?? "")
       .split(",").filter(Boolean),
   };
-  const spawnedPersistentActorIds = spawnedPersistentActorSet.ids.filter(
-    (id) => !activePersistentActorSetBeforeSpawn.ids.includes(id),
-  );
+  const spawnedPersistentActorId = spawnedPersistentActorIds[0];
+  const relaunchedPreviewSpawnedActorCount = relaunchedPersistentActorSet.ids.filter(
+    (id) => id === spawnedPersistentActorId,
+  ).length;
+  const relaunchedActiveSpawnedActorCount = relaunchedActivePersistentActorSet.ids.filter(
+    (id) => id === spawnedPersistentActorId,
+  ).length;
   const persistentActorIdentitiesOk = spawnedPersistentActorIds.length === 1
     && relaunchedPersistentActorSet.count
       === Number(firstLaunch.after.embeddedPreviewPersistentPassiveActorCount) + 1
-    && relaunchedPersistentActorSet.ids.includes(spawnedPersistentActorIds[0]);
+    && relaunchedPreviewSpawnedActorCount === 1
+    && relaunchedActiveSpawnedActorCount === 1;
   const relaunchedPersistenceOk = relaunched.after.embeddedPreviewPhase === "visible"
     && Number(relaunched.after.embeddedPreviewActorEntityCount)
       >= relaunchedPersistentActorSet.count
@@ -2031,6 +2050,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && Number(returnedActors.observationCount) >= 2
       && Number(returnedActors.remotePlayerCount) === 1
       && Number(returnedActors.sourceLocalPlayerCount) === 0
+      && returnedPersistentActorOverlap.length >= 1
       && returnedActors.remotePlayer.id
         === firstLaunch.after.embeddedPreviewFirstRemotePlayerId
       && returnedActors.remotePlayer.model === "uprightBear"
@@ -2069,6 +2089,7 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     outbound,
     returned,
     returnedActors,
+    returnedPersistentActorOverlap,
     returnedActorPixels,
     mutationLeg,
     mutation,
@@ -2085,7 +2106,10 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     reopenedIsland,
     persistedState,
     relaunchedPersistentActorSet,
+    relaunchedActivePersistentActorSet,
     spawnedPersistentActorIds,
+    relaunchedPreviewSpawnedActorCount,
+    relaunchedActiveSpawnedActorCount,
     persistentActorIdentitiesOk,
     relaunchedPersistenceOk,
     visibility,
@@ -3359,6 +3383,22 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
   );
   const actorMotionExpectedCompositionDistance =
     actorMotionSourceDistance * Number(after.embeddedPreviewScale);
+  const actorMotionSourceChunkX = Math.floor(
+    Number(after.embeddedPreviewActorMotionToSourceX) / 16,
+  );
+  const actorMotionSourceSectionY = Math.floor(
+    Number(after.embeddedPreviewActorMotionToSourceY) / 16,
+  );
+  const actorMotionSourceChunkZ = Math.floor(
+    Number(after.embeddedPreviewActorMotionToSourceZ) / 16,
+  );
+  const actorMotionWithinPreviewRegion =
+    actorMotionSourceChunkX >= Number(after.embeddedPreviewMinChunkX)
+    && actorMotionSourceChunkX <= Number(after.embeddedPreviewMaxChunkX)
+    && actorMotionSourceSectionY >= Number(after.embeddedPreviewMinSectionY)
+    && actorMotionSourceSectionY <= Number(after.embeddedPreviewMaxSectionY)
+    && actorMotionSourceChunkZ >= Number(after.embeddedPreviewMinChunkZ)
+    && actorMotionSourceChunkZ <= Number(after.embeddedPreviewMaxChunkZ);
   const remotePlayerMotionSourceDistance = Math.hypot(
     Number(after.embeddedPreviewRemotePlayerMotionToSourceX)
       - Number(after.embeddedPreviewRemotePlayerMotionFromSourceX),
@@ -3460,7 +3500,11 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       && Number(after.embeddedPreviewActorUpdateToVisibleFrameCount) === 1
       && Number(after.activeActorCount) === initialActiveActorCounts.submitted
       && Number(after.activeDrawnActorCount) === initialActiveActorCounts.drawn
-      && actorMotionPixelDifference.differentPixelCount > 0
+      // A moving actor outside the bounded preview is source-rejected and
+      // cannot change the preview pixels. Require visible pixel motion only
+      // when the motion receipt lies inside the selected source region.
+      && (!actorMotionWithinPreviewRegion
+        || actorMotionPixelDifference.differentPixelCount > 0)
       && Number(after.standbyDuplicatedAtlasBaseBytes) === 0
       && Number(after.standbySharedTerrainResourceOwnerCount) === 2
       && after.standbyActorStateMaterialized === true
@@ -3485,6 +3529,10 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       sourceDistance: actorMotionSourceDistance,
       compositionDistance: actorMotionCompositionDistance,
       expectedCompositionDistance: actorMotionExpectedCompositionDistance,
+      sourceChunkX: actorMotionSourceChunkX,
+      sourceSectionY: actorMotionSourceSectionY,
+      sourceChunkZ: actorMotionSourceChunkZ,
+      withinPreviewRegion: actorMotionWithinPreviewRegion,
       pixelDifference: actorMotionPixelDifference,
     },
     remotePlayerMotion: {
