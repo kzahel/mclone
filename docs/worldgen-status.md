@@ -80,8 +80,9 @@ Landed native coverage:
   field revision 6 replaces it with periodic-ready 32/8-block gradient detail,
   gentle independent domain warps, and a 0.70/0.30 band balance. The full RD16
   matrix removes the repeated chevrons while preserving the exact lowland
-  control and is the current human-review candidate. A local structure-tensor
-  metric now supplements, but does not replace, pixel review.
+  control. Human Review 3 accepted the result as more natural and less
+  geometric, and production browser Worker closeout passed. A local
+  structure-tensor metric supplements, but does not replace, pixel review.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second

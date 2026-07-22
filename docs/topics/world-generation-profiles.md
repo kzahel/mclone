@@ -150,7 +150,8 @@ world-generation change is safe. Review it before preserving an algorithm,
 adding a new versioned profile, changing a fixture, or migrating a stored
 world.
 
-- **Reviewed:** 2026-07-18
+- **Reviewed:** 2026-07-22 after Mclone field revision 6 acceptance; no freeze
+  trigger or preservation consumer was added
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none
 - **Default fixture meaning:** refactor and determinism regression guard, not a

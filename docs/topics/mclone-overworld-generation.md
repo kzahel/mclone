@@ -2,7 +2,7 @@
 
 Topic: `mclone-overworld-generation`
 
-Status: the first continuous-terrain caller, two visual/distribution reviews,
+Status: the first continuous-terrain caller, three visual/distribution reviews,
 the first biome/surface/decoration language, two reuse checkpoints, and full
 host/persistence closeout completed 2026-07-18 as the separate
 internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
@@ -17,8 +17,8 @@ large-scale. A measurement-only terrain-characteristics checkpoint confirms
 that finding against exact undecorated Minecraft Java 1.17.1 terrain. Field
 revision 5 closed much of the scale gap but human review rejected its aligned
 diagonal terrace pattern. Field revision 6 replaces it with periodic-ready
-warped gradient detail and is the current human-review candidate before
-host-equivalence closeout. The shared
+warped gradient detail; Human Review 3 accepted its more natural, less
+geometric result and production browser Worker closeout passed. The shared
 Flat Grass cylinder proof is complete;
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
 first accepted Tactical 192 field set and before rivers, climate breadth, or
@@ -690,8 +690,8 @@ detrended roughness, `1.192x` for lag-64 change, and `0.915x` for fine-detail
 energy share. The first warped-gradient weighting overshot the latter at
 `1.977x`; shifting the 32/8 weights from `0.55/0.45` to `0.70/0.30` removed
 uniform fine bustle while retaining varied local peaks. The exact lowland
-control is unchanged. The full RD16 matrix removes the repeated chevrons and
-is now awaiting human review.
+control is unchanged. The full RD16 matrix removes the repeated chevrons, and
+Human Review 3 accepted the result as more natural and less geometric.
 
 ## Acceptance Themes
 
@@ -708,11 +708,7 @@ is now awaiting human review.
 
 ## Next Work
 
-Review Tactical 192 field revision 6's warped-gradient maximum-view-distance
-matrix. If human review accepts it, complete native/browser Worker equivalence
-and unchanged-host-contract closeout. Do not
-fold rivers, climate breadth, caves, or structures into that tactical. After
-its field set and terrain language are accepted, execute
+Execute
 [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
 re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus

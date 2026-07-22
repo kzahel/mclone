@@ -1,18 +1,14 @@
 # Tactical 192: Mclone Overworld Mountains And Valleys
 
-Status: Slice 1, the human-requested shorter-traversal tune, Slice 2's
-terrain-language response, and the dedicated no-extraction checkpoint landed
-2026-07-22. Human Review 1 accepted the revised geometry before surface rules
-changed. Production maps and the maximum-view-distance Review 2 matrix now
-show open valleys and transitional shoulders, grass below coherent rocky high
-ground, and an unchanged wooded lowland control. Human Review 2 rejected the
-current geometry as too smooth and too large-scale. A production-backed
-terrain-characteristics checkpoint now measures that finding against exact
-Minecraft Java 1.17.1 terrain. Field revision 5 applies the first bounded
-multiscale response, but human pixel review rejected its strong diagonal
-terrace pattern. Field revision 6 replaces that aligned detail with warped
-gradient noise and is the current human-review candidate. Host-equivalence
-closeout remains before Tactical 196.
+Status: **complete 2026-07-22.** Slice 1's human-requested shorter-traversal
+tune, Slice 2's terrain-language response, and the dedicated no-extraction
+checkpoint landed. Human Review 1 accepted the revised geometry before surface
+rules changed. Human Review 2 rejected the result as too smooth and
+large-scale, then rejected field revision 5's stronger detail because it
+formed diagonal terraces. The production-backed characteristic analyzer and
+field revision 6's warped gradient detail answered both findings. Human Review
+3 accepted revision 6 as more natural and less geometric. The production
+browser Worker closeout passes, so Tactical 196 is now the active boundary.
 
 Topic: `mclone-overworld-generation`
 
@@ -321,10 +317,10 @@ boundaries.
   matrix because of its coherent diagonal terrace artifact.
 - [x] Replace aligned value-noise detail with directionally varied,
   periodic-ready detail and repeat characteristic and pixel review.
-- [ ] Prove native thread and production browser Worker equivalence.
-- [ ] Re-run SQLite/IndexedDB only if identity, persistence, or startup behavior
+- [x] Prove native thread and production browser Worker equivalence.
+- [x] Re-run SQLite/IndexedDB only if identity, persistence, or startup behavior
   changed; otherwise cite Tactical 188's unchanged host contract.
-- [ ] Update the topic, safety ledger, worldgen status, tactical execution
+- [x] Update the topic, safety ledger, worldgen status, tactical execution
   record, accepted defects, and next content decision.
 
 Gate: the range/valley family is accepted and Tactical 196 can freeze the live
@@ -534,15 +530,20 @@ The full inspected matrix is under
 Every card uses render distance 16 and 800-by-500 source panels. The repeated
 chevrons are absent across both seeds; mountain interiors have varied local
 peaks, the valley remains open, the range edge has no wall, and the lowland
-control is visually and numerically unchanged. This is ready for human review,
-not yet human acceptance.
+control is visually and numerically unchanged. Human Review 3 accepted this
+result as more natural and less geometric.
 
 On the same three-iteration release lane, revision 6 measured 3,127.978
 surface chunks/s, 515.157 cold decorated targets/s, and 4,693.731 warm
 decorated targets/s. Those are 18.5, 18.1, and 4.0 percent below revision 5,
 respectively, and remain inside the existing 25 percent review threshold.
-The shared worldgen/server/app-runtime suites and browser WASM build pass;
-native-thread versus production browser-Worker equivalence remains open.
+The shared worldgen/server/app-runtime suites and browser WASM build pass. The
+headed-Wayland production browser app smoke also starts
+`mclone-overworld-v1`, exercises the shared worldgen job Worker with real
+traffic, settles its queues, and captures valid WebGPU pixels. No field,
+identity, persistence, or startup contract changed after Tactical 188's
+SQLite/IndexedDB closeout, so that persistence matrix was cited rather than
+repeated.
 
 This remains a two-dimensional heightfield correction. Gradient direction and
 coordinate warping removed the demonstrated planar lattice signature;

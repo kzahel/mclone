@@ -1,10 +1,10 @@
 # Tactical 196: Periodic Mclone Terrain Fields
 
-Status: planned after the first accepted Tactical 192 mountain/valley field
-set. Tactical 195's cylinder runtime contract is complete; Mclone Overworld
-remains explicitly unsupported on periodic topology until this tactical lands.
-This is the selected enabling phase between mountain/valley acceptance and the
-first river/wetland field.
+Status: active after Human Review 3 accepted Tactical 192's field revision 6
+on 2026-07-22. Tactical 195's cylinder runtime contract is complete; Mclone
+Overworld remains explicitly unsupported on periodic topology until this
+tactical lands. This is the selected enabling phase between mountain/valley
+acceptance and the first river/wetland field.
 
 Topic: `bounded-world-topology`
 
