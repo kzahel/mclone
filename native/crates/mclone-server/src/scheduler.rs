@@ -5321,6 +5321,86 @@ mod tests {
     }
 
     #[test]
+    fn periodic_mclone_scheduler_publishes_the_topology_aware_payload() {
+        let seed = -98_765;
+        let topology = HorizontalTopology::cylinder_x(0, 384);
+        let sampling_topology =
+            mclone_worldgen::levelgen::McloneOverworldSamplingTopology::PeriodicX;
+        let center = ChunkPos::new(383, 0);
+        let mut scheduler = ChunkScheduler::new(seed);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .unwrap();
+        scheduler.set_topology(topology).unwrap();
+        scheduler.set_lighting_enabled(false);
+        scheduler
+            .apply_interest(ChunkView {
+                center,
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+
+        let mut ready = None;
+        for _ in 0..100 {
+            for event in scheduler.poll().unwrap() {
+                if let ChunkSchedulerEvent::SnapshotReady(snapshot) = event {
+                    ready = Some(snapshot);
+                }
+            }
+            if ready.is_some() {
+                break;
+            }
+            if scheduler.worldgen_mailbox_pending_count() > 0 {
+                assert!(scheduler.wait_for_worldgen_completion(Duration::from_secs(5)));
+            }
+            std::thread::yield_now();
+        }
+
+        let snapshot = ready.expect("periodic Mclone chunk should publish through the scheduler");
+        let expected = mclone_worldgen::levelgen::generate_mclone_overworld_chunk_with_topology(
+            seed,
+            sampling_topology,
+            center.x,
+            center.z,
+        );
+        assert_eq!(snapshot.pos, center);
+        assert_eq!(snapshot.status, ChunkStatus::Features);
+        assert_eq!(snapshot.biomes, expected.biomes());
+        for local_z in 0..16 {
+            for local_x in 0..16 {
+                for y in expected.min_y..expected.min_y + expected.height {
+                    assert_eq!(
+                        scheduler.block_at_world(WorldBlockPos::new(
+                            center.min_block_x() + local_x,
+                            y,
+                            center.min_block_z() + local_z,
+                        )),
+                        Some(expected.block_at_y(local_x, y, local_z).0),
+                        "payload mismatch at local ({local_x}, {y}, {local_z})",
+                    );
+                }
+            }
+        }
+
+        let job = scheduler
+            .jobs()
+            .next()
+            .expect("periodic Mclone generation job");
+        assert_eq!(
+            job.generation_descriptor,
+            WorldGenerationDescriptor::with_topology(
+                WorldGenerationProfile::McloneOverworldV1,
+                seed,
+                topology,
+            )
+        );
+        assert!(job.dependency_requirements.iter().all(|requirement| {
+            topology.canonicalize_chunk(requirement.pos) == Some(requirement.pos)
+        }));
+    }
+
+    #[test]
     fn generation_profile_cannot_change_after_chunk_scheduling_begins() {
         let mut scheduler = ChunkScheduler::new(12_345);
         scheduler

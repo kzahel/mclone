@@ -70,7 +70,8 @@ use crate::player_lifecycle::player_body_touches_lava;
 use crate::players::{ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
 use crate::spawn::{
-    SpawnColumnOrder, find_safe_surface_spawn_with_column_order, initial_spawn_center_for_profile,
+    SpawnColumnOrder, find_safe_surface_spawn_with_column_order,
+    initial_spawn_center_for_descriptor,
 };
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 
@@ -858,9 +859,10 @@ impl RealmServer {
             .generation_profile
             .validate_topology(record.definition.topology)
             .map_err(ChunkStoreError::InvalidData)?;
-        let spawn_center = initial_spawn_center_for_profile(
+        let spawn_center = initial_spawn_center_for_descriptor(
             record.definition.seed,
             record.definition.generation_profile,
+            record.definition.topology,
         );
         if record
             .definition
@@ -2967,9 +2969,10 @@ impl RealmServer {
                     "realm primary Overworld dimension is not registered".to_owned(),
                 )
             })?;
-        let spawn_center = initial_spawn_center_for_profile(
+        let spawn_center = initial_spawn_center_for_descriptor(
             destination_definition.seed,
             destination_definition.generation_profile,
+            destination_definition.topology,
         );
         // Match the ordinary dimension-transfer invariant: prove the
         // destination runtime can be activated before detaching source

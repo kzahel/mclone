@@ -1,10 +1,11 @@
-use mclone_core::{BlockPos, ChunkPos, Vec3d};
+use mclone_core::{BlockPos, ChunkPos, HorizontalTopology, Vec3d};
 use mclone_worldgen::biome::{BiomeDefinition, OverworldBiomeSource, get_layered_biome_by_id};
 use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
 use mclone_worldgen::levelgen::{
-    beta_biome_id, mclone_overworld_biome_id, mclone_overworld_spawn_chunk,
+    McloneOverworldSamplingTopology, beta_biome_id, mclone_overworld_biome_id_with_topology,
+    mclone_overworld_spawn_chunk_with_topology,
 };
 use mclone_worldgen::surface::overworld_surface_top_material;
 
@@ -22,9 +23,21 @@ pub fn initial_spawn_center_for_seed(seed: i64) -> ChunkPos {
 }
 
 pub fn initial_spawn_center_for_profile(seed: i64, profile: WorldGenerationProfile) -> ChunkPos {
+    initial_spawn_center_for_descriptor(seed, profile, HorizontalTopology::UNBOUNDED)
+}
+
+pub fn initial_spawn_center_for_descriptor(
+    seed: i64,
+    profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
+) -> ChunkPos {
     match profile {
         WorldGenerationProfile::Overworld => initial_spawn_center_for_seed(seed),
-        WorldGenerationProfile::McloneOverworldV1 => mclone_overworld_spawn_chunk(seed),
+        WorldGenerationProfile::McloneOverworldV1 => mclone_overworld_spawn_chunk_with_topology(
+            seed,
+            McloneOverworldSamplingTopology::from_horizontal_topology(topology)
+                .expect("Mclone spawn topology must pass profile admission"),
+        ),
         WorldGenerationProfile::FlatGrassV1
         | WorldGenerationProfile::SmallIslandV1
         | WorldGenerationProfile::AlphaV1 { .. }
@@ -44,6 +57,24 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
     block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
     chunk_ready: impl FnMut(ChunkPos) -> bool,
 ) -> Option<Vec3d> {
+    find_safe_surface_spawn_for_loaded_descriptor(
+        seed,
+        profile,
+        HorizontalTopology::UNBOUNDED,
+        center,
+        block_at,
+        chunk_ready,
+    )
+}
+
+pub fn find_safe_surface_spawn_for_loaded_descriptor(
+    seed: i64,
+    profile: WorldGenerationProfile,
+    topology: HorizontalTopology,
+    center: ChunkPos,
+    block_at: impl FnMut(BlockPos) -> Option<RawBlockId>,
+    chunk_ready: impl FnMut(ChunkPos) -> bool,
+) -> Option<Vec3d> {
     let column_order = if matches!(
         profile,
         WorldGenerationProfile::FlatGrassV1
@@ -57,6 +88,11 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
     } else {
         SpawnColumnOrder::Scan
     };
+    let mclone_sampling_topology = matches!(profile, WorldGenerationProfile::McloneOverworldV1)
+        .then(|| {
+            McloneOverworldSamplingTopology::from_horizontal_topology(topology)
+                .expect("Mclone spawn topology must pass profile admission")
+        });
     let biome_source = OverworldBiomeSource::new(seed, false, false);
     find_safe_surface_spawn_with_column_order(
         center,
@@ -66,7 +102,12 @@ pub fn find_safe_surface_spawn_for_loaded_profile(
             | WorldGenerationProfile::SmallIslandV1
             | WorldGenerationProfile::AlphaV1 { .. } => get_layered_biome_by_id(1),
             WorldGenerationProfile::McloneOverworldV1 => {
-                get_layered_biome_by_id(mclone_overworld_biome_id(seed, x, z))
+                get_layered_biome_by_id(mclone_overworld_biome_id_with_topology(
+                    seed,
+                    mclone_sampling_topology.expect("Mclone topology initialized above"),
+                    x,
+                    z,
+                ))
             }
             WorldGenerationProfile::BetaV1 => get_layered_biome_by_id(beta_biome_id(seed, x, z)),
             WorldGenerationProfile::Overworld | WorldGenerationProfile::AuthoredOnly { .. } => {
@@ -293,8 +334,10 @@ mod tests {
 
     use mclone_worldgen::biome::get_layered_biome_by_id;
     use mclone_worldgen::block::{AIR, GRASS_BLOCK, OAK_LEAVES, STONE, WATER};
-    use mclone_worldgen::levelgen::generate_mclone_overworld_chunk;
     use mclone_worldgen::levelgen::{generate_alpha_chunk, generate_beta_chunk};
+    use mclone_worldgen::levelgen::{
+        generate_mclone_overworld_chunk, generate_mclone_overworld_chunk_with_topology,
+    };
 
     use super::*;
 
@@ -385,6 +428,60 @@ mod tests {
                 GRASS_BLOCK
             );
         }
+    }
+
+    #[test]
+    fn periodic_mclone_spawn_uses_the_periodic_surface_contract() {
+        let seed = -98_765;
+        let profile = WorldGenerationProfile::McloneOverworldV1;
+        let topology = HorizontalTopology::cylinder_x(0, 384);
+        let sampling_topology =
+            McloneOverworldSamplingTopology::from_horizontal_topology(topology).unwrap();
+        let center = initial_spawn_center_for_descriptor(seed, profile, topology);
+        assert_eq!(topology.canonicalize_chunk(center), Some(center));
+
+        let chunk = generate_mclone_overworld_chunk_with_topology(
+            seed,
+            sampling_topology,
+            center.x,
+            center.z,
+        );
+        let spawn = find_safe_surface_spawn_for_loaded_descriptor(
+            seed,
+            profile,
+            topology,
+            center,
+            |pos| {
+                (pos.chunk_pos() == center).then(|| {
+                    chunk
+                        .block_at_y(
+                            pos.x - center.min_block_x(),
+                            pos.y,
+                            pos.z - center.min_block_z(),
+                        )
+                        .0
+                })
+            },
+            |pos| pos == center,
+        )
+        .expect("periodic Mclone spawn chunk should contain a dry spawn");
+
+        let floor = BlockPos::new(
+            spawn.x.floor() as i32,
+            spawn.y.floor() as i32 - 1,
+            spawn.z.floor() as i32,
+        );
+        assert_eq!(floor.chunk_pos(), center);
+        assert_eq!(
+            chunk
+                .block_at_y(
+                    floor.x - center.min_block_x(),
+                    floor.y,
+                    floor.z - center.min_block_z(),
+                )
+                .0,
+            GRASS_BLOCK
+        );
     }
 
     #[test]

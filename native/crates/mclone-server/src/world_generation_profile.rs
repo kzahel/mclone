@@ -1,6 +1,7 @@
 use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology, LiftedChunkPos};
 use mclone_worldgen::levelgen::{
-    ChunkGenerationPlan, ChunkStatusRequirement, MutableChunkBlockBuffer,
+    ChunkGenerationPlan, ChunkStatusRequirement, McloneOverworldSamplingTopology,
+    MutableChunkBlockBuffer,
 };
 use serde::{Deserialize, Serialize};
 
@@ -96,7 +97,10 @@ impl WorldGenerationProfile {
         topology
             .validate()
             .map_err(|error| format!("invalid dimension topology: {error}"))?;
-        if topology.is_unbounded() || matches!(self, Self::FlatGrassV1 | Self::AuthoredOnly { .. })
+        if topology.is_unbounded()
+            || matches!(self, Self::FlatGrassV1 | Self::AuthoredOnly { .. })
+            || matches!(self, Self::McloneOverworldV1)
+                && McloneOverworldSamplingTopology::from_horizontal_topology(topology).is_ok()
         {
             Ok(())
         } else {
@@ -522,10 +526,22 @@ mod tests {
                 .validate_topology(cylinder)
                 .is_ok()
         );
+        assert!(
+            WorldGenerationProfile::McloneOverworldV1
+                .validate_topology(HorizontalTopology::cylinder_x(
+                    0,
+                    mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS,
+                ))
+                .is_ok()
+        );
+        assert!(
+            WorldGenerationProfile::McloneOverworldV1
+                .validate_topology(cylinder)
+                .is_err()
+        );
         for profile in [
             WorldGenerationProfile::Overworld,
             WorldGenerationProfile::SmallIslandV1,
-            WorldGenerationProfile::McloneOverworldV1,
             WorldGenerationProfile::alpha_v1(false),
             WorldGenerationProfile::BetaV1,
         ] {
@@ -538,6 +554,16 @@ mod tests {
                 "{profile:?}"
             );
         }
+        assert!(
+            WorldGenerationProfile::McloneOverworldV1
+                .validate_topology(finite)
+                .is_err()
+        );
+        assert!(
+            WorldGenerationProfile::McloneOverworldV1
+                .validate_topology(HorizontalTopology::UNBOUNDED)
+                .is_ok()
+        );
     }
 
     #[test]

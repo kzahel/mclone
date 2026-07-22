@@ -123,7 +123,8 @@ pub use scheduler::{
     ChunkStatusJob, DEFAULT_LIGHT_STATUS_BATCH_SIZE, FluidTickPhaseReport, TopologyChunkState,
 };
 pub use spawn::{
-    find_safe_surface_spawn_for_loaded_profile, initial_spawn_center_for_profile,
+    find_safe_surface_spawn_for_loaded_descriptor, find_safe_surface_spawn_for_loaded_profile,
+    initial_spawn_center_for_descriptor, initial_spawn_center_for_profile,
     initial_spawn_center_for_seed,
 };
 pub use structure_lab::{

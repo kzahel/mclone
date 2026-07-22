@@ -467,6 +467,133 @@ fn periodic_lap_blocks_player_and_actor_survive_sqlite_restart() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn periodic_mclone_seam_chunks_and_edits_survive_sqlite_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "mclone-periodic-overworld-restart-{}-{}",
+        std::process::id(),
+        current_unix_millis()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let seed = -98_765;
+    let mut definition =
+        crate::DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    definition.topology = HorizontalTopology::cylinder_x(0, 384);
+    let seam_west = BlockPos::new(6_143, 200, 8);
+    let seam_west_negative_lift = BlockPos::new(-1, 200, 8);
+    let seam_east = BlockPos::new(0, 200, 9);
+    let seam_east_positive_lift = BlockPos::new(6_144, 200, 9);
+
+    {
+        let mut server = LocalRealmSession::
+            try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        server.initialize_world_metadata_blocking().unwrap();
+        server.set_debug_passive_showcase_enabled(false);
+        load_chunk_view(&mut server, ChunkPos::new(383, 0));
+        load_chunk_view(&mut server, ChunkPos::new(0, 0));
+
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(seam_west_negative_lift, STONE)
+        );
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(seam_east_positive_lift, DIRT)
+        );
+        assert_eq!(server.scheduler().block_at_world(seam_west), Some(STONE));
+        assert_eq!(server.scheduler().block_at_world(seam_east), Some(DIRT));
+        server.scheduler_mut().flush_persistence().unwrap();
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut store = crate::SqliteWorldStore::open_world_dir(&root).unwrap();
+        let stored = store
+            .load_dimension(&DimensionKey::overworld())
+            .unwrap()
+            .expect("stored periodic Mclone dimension definition");
+        assert_eq!(stored.definition, definition);
+        let overworld = DimensionKey::overworld();
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(383, 0))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(0, 0))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(-1, 0))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(384, 0))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    {
+        let mut reopened = LocalRealmSession::
+            try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        reopened.initialize_world_metadata_blocking().unwrap();
+        reopened.set_debug_passive_showcase_enabled(false);
+        load_chunk_view(&mut reopened, ChunkPos::new(383, 0));
+        load_chunk_view(&mut reopened, ChunkPos::new(0, 0));
+
+        assert_eq!(reopened.definition(), &definition);
+        assert_eq!(reopened.scheduler().block_at_world(seam_west), Some(STONE));
+        assert_eq!(
+            reopened.scheduler().block_at_world(seam_west_negative_lift),
+            Some(STONE)
+        );
+        assert_eq!(reopened.scheduler().block_at_world(seam_east), Some(DIRT));
+        assert_eq!(
+            reopened.scheduler().block_at_world(seam_east_positive_lift),
+            Some(DIRT)
+        );
+        assert_eq!(
+            reopened
+                .scheduler()
+                .topology_chunk_state(ChunkPos::new(-1, 0)),
+            TopologyChunkState::Loaded {
+                canonical: ChunkPos::new(383, 0),
+            }
+        );
+        assert_eq!(
+            reopened
+                .scheduler()
+                .topology_chunk_state(ChunkPos::new(384, 0)),
+            TopologyChunkState::Loaded {
+                canonical: ChunkPos::new(0, 0),
+            }
+        );
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[test]
 fn periodic_fluid_tick_spreads_into_the_canonical_seam_neighbor() {
     let mut definition =

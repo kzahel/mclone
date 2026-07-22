@@ -6447,9 +6447,10 @@ fn reconcile_observer_preview_entry(
     camera: &mut EngineCameraController,
 ) -> bool {
     let snapshot = camera.snapshot();
-    let Some(feet_position) = mclone_server::find_safe_surface_spawn_for_loaded_profile(
+    let Some(feet_position) = mclone_server::find_safe_surface_spawn_for_loaded_descriptor(
         scene.seed,
         scene.world_generation_profile,
+        scene.world_topology,
         snapshot.chunk_pos,
         |pos| {
             client

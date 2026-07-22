@@ -29,7 +29,7 @@ use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
     NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
     ServerRunnerDiagnostics, SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile,
-    host_tick_interval_for_rate_hz, initial_spawn_center_for_profile,
+    host_tick_interval_for_rate_hz, initial_spawn_center_for_descriptor,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -241,7 +241,11 @@ impl LocalIntegratedSceneOptions {
     }
 
     pub fn with_initial_spawn_center(mut self) -> Self {
-        self.center = initial_spawn_center_for_profile(self.seed, self.world_generation_profile);
+        self.center = initial_spawn_center_for_descriptor(
+            self.seed,
+            self.world_generation_profile,
+            self.world_topology,
+        );
         self
     }
 
@@ -3876,7 +3880,11 @@ mod tests {
 
         assert_eq!(
             options.center,
-            initial_spawn_center_for_profile(12345, WorldGenerationProfile::Overworld)
+            initial_spawn_center_for_descriptor(
+                12345,
+                WorldGenerationProfile::Overworld,
+                HorizontalTopology::UNBOUNDED,
+            )
         );
     }
 
@@ -3887,6 +3895,28 @@ mod tests {
             .with_initial_spawn_center();
 
         assert_eq!(options.center, ChunkPos::new(0, 0));
+    }
+
+    #[test]
+    fn local_integrated_scene_options_apply_topology_to_mclone_spawn() {
+        let topology = HorizontalTopology::cylinder_x(0, 384);
+        let options = LocalIntegratedSceneOptions::new(-98_765, ChunkPos::new(19, -20), 2)
+            .with_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+            .with_world_topology(topology)
+            .with_initial_spawn_center();
+
+        assert_eq!(
+            options.center,
+            initial_spawn_center_for_descriptor(
+                -98_765,
+                WorldGenerationProfile::McloneOverworldV1,
+                topology,
+            )
+        );
+        assert_eq!(
+            topology.canonicalize_chunk(options.center),
+            Some(options.center)
+        );
     }
 
     #[test]

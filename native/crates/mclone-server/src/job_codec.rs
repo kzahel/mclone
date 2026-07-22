@@ -11,8 +11,8 @@ use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
 use mclone_worldgen::levelgen::{
     AlphaFeatureDependencyCache, AlphaFeatureDependencyCacheReport, BetaFeatureDependencyCache,
     BetaFeatureDependencyCacheReport, GeneratedChunk, McloneOverworldFeatureDependencyCache,
-    McloneOverworldFeatureDependencyCacheReport, MutableChunkBlockBuffer,
-    OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
+    McloneOverworldFeatureDependencyCacheReport, McloneOverworldSamplingTopology,
+    MutableChunkBlockBuffer, OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, ScheduledTick,
     SmallIslandFeatureDependencyCache, SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming,
     generate_flat_grass_chunk,
@@ -389,10 +389,13 @@ impl WorldGenerationExecutor {
                 })
             }
             WorldGenerationProfile::McloneOverworldV1 => {
+                let topology =
+                    McloneOverworldSamplingTopology::from_horizontal_topology(descriptor.topology)?;
                 let result = self
                     .mclone_overworld_cache
-                    .generate_features_chunks_with_dependencies(
+                    .generate_features_chunks_with_topology_and_dependencies(
                         descriptor.seed,
+                        topology,
                         targets.iter().copied(),
                         dependencies,
                     );
@@ -2170,6 +2173,61 @@ mod tests {
             .and_then(|frame| decode_worldgen_response(&frame))
             .unwrap();
         assert_ne!(batch.generated_chunks, changed.generated_chunks);
+    }
+
+    #[test]
+    fn periodic_mclone_frames_deduplicate_lifts_and_match_partitions() {
+        let descriptor = WorldGenerationDescriptor::with_topology(
+            WorldGenerationProfile::McloneOverworldV1,
+            -98_765,
+            HorizontalTopology::cylinder_x(
+                0,
+                mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS,
+            ),
+        );
+        let last_x = mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS as i32 - 1;
+        let targets = [ChunkPos::new(last_x, 0), ChunkPos::new(0, 0)];
+        let batch = full_worldgen_frame(ChunkJobId(40), descriptor, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        let reversed = full_worldgen_frame(ChunkJobId(41), descriptor, &[targets[1], targets[0]])
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap();
+        let partitioned = targets
+            .iter()
+            .copied()
+            .enumerate()
+            .flat_map(|(index, target)| {
+                full_worldgen_frame(ChunkJobId(index as u64 + 42), descriptor, &[target])
+                    .and_then(|frame| compute_worldgen_job_frame(&frame))
+                    .and_then(|frame| decode_worldgen_response(&frame))
+                    .unwrap()
+                    .generated_chunks
+            })
+            .collect::<BTreeMap<_, _>>();
+        let repeated_zero = full_worldgen_frame(
+            ChunkJobId(44),
+            descriptor,
+            &[ChunkPos::new(
+                mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS as i32,
+                0,
+            )],
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+
+        assert_eq!(batch.generated_chunks, reversed.generated_chunks);
+        assert_eq!(batch.generated_chunks, partitioned);
+        assert_eq!(
+            repeated_zero.generated_chunks.get(&ChunkPos::new(0, 0)),
+            batch.generated_chunks.get(&ChunkPos::new(0, 0))
+        );
+        assert!(batch.retained_dependency_positions.iter().all(|pos| {
+            (0..mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS as i32).contains(&pos.x)
+        }));
     }
 
     #[test]
