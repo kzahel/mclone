@@ -641,7 +641,7 @@ pub struct EmbeddedWorldPreviewActorObservation {
     pub kind: EntityKind,
     pub source_feet_position: Vec3d,
     pub composition_feet_position: Vec3d,
-    pub age_ticks: u64,
+    pub tick_count: u64,
     pub source_packed_light: u32,
 }
 
@@ -691,7 +691,7 @@ impl EmbeddedWorldPreviewActorObservation {
             kind: snapshot.kind,
             source_feet_position: snapshot.position,
             composition_feet_position: context.source_to_composition(snapshot.position),
-            age_ticks: snapshot.age_ticks,
+            tick_count: snapshot.tick_count,
             source_packed_light,
         }
     }
@@ -885,7 +885,7 @@ impl EmbeddedWorldPreview {
             && observations.iter().any(|observation| {
                 observation.entity_id == pending.to.entity_id
                     && observation.source_feet_position == pending.to.source_feet_position
-                    && observation.age_ticks >= pending.to.age_ticks
+                    && observation.tick_count >= pending.to.tick_count
             })
         {
             self.render.actor_motion_sequence = self.render.actor_motion_sequence.saturating_add(1);

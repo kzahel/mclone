@@ -188,7 +188,7 @@ impl ServerEntityStore {
         y_rot_degrees: f32,
         x_rot_degrees: f32,
         rotation: EntityRotation,
-        age_ticks: u64,
+        tick_count: u64,
     ) -> DebugPhysicsCubeEntitySpawn {
         let removed = self
             .debug_physics_cube_id
@@ -203,7 +203,7 @@ impl ServerEntityStore {
             y_rot_degrees,
             x_rot_degrees,
             rotation,
-            age_ticks,
+            tick_count,
         );
         DebugPhysicsCubeEntitySpawn { removed, current }
     }
@@ -215,7 +215,7 @@ impl ServerEntityStore {
         y_rot_degrees: f32,
         x_rot_degrees: f32,
         rotation: EntityRotation,
-        age_ticks: u64,
+        tick_count: u64,
     ) -> ServerEntityState {
         let position = self
             .topology
@@ -234,12 +234,12 @@ impl ServerEntityStore {
                 y_rot_degrees,
                 x_rot_degrees,
                 rotation,
-                age_ticks,
+                tick_count,
             );
             self.entities.insert(id, state);
             return state;
         }
-        self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, rotation, age_ticks)
+        self.insert_debug_physics_cube(position, y_rot_degrees, x_rot_degrees, rotation, tick_count)
     }
 
     #[cfg(feature = "physics-engine")]
@@ -249,7 +249,7 @@ impl ServerEntityStore {
         y_rot_degrees: f32,
         x_rot_degrees: f32,
         rotation: EntityRotation,
-        age_ticks: u64,
+        tick_count: u64,
     ) -> ServerEntityState {
         let position = self
             .topology
@@ -265,7 +265,7 @@ impl ServerEntityStore {
             y_rot_degrees,
             x_rot_degrees,
             rotation,
-            age_ticks,
+            tick_count,
         );
         self.entities.insert(id, state);
         state
@@ -526,14 +526,14 @@ impl ServerEntityStore {
                     item.tick_entity(entity, &block_state_at);
                     item_block_changed = BlockPos::containing(previous_position)
                         != BlockPos::containing(entity.position);
-                    let next_age = entity.age_ticks.saturating_add(1);
-                    if next_age >= ITEM_ENTITY_LIFETIME_TICKS {
+                    if item.age() >= ITEM_ENTITY_LIFETIME_TICKS {
                         entity.alive = false;
                         removed_ids.push(id);
                     }
                 }
-                entity.age_ticks = entity.age_ticks.saturating_add(1);
-                if is_item && entity.alive && item_merge_due(entity.age_ticks, item_block_changed) {
+                entity.tick_count = entity.tick_count.saturating_add(1);
+                if is_item && entity.alive && item_merge_due(entity.tick_count, item_block_changed)
+                {
                     merge_due_ids.push(id);
                 }
                 if entity.alive {
@@ -688,13 +688,12 @@ impl ServerEntityStore {
             };
         let (merged_stack, pickup_delay) = target_item.merged_with(&source_item)?;
 
-        let source_age = self.entities.get(&source_id)?.age_ticks;
         let target_entity = self.entities.get_mut(&target_id)?;
-        target_entity.age_ticks = target_entity.age_ticks.min(source_age);
         target_entity.item_stack = Some(merged_stack);
         let target_update = *target_entity;
 
         let target_runtime = self.items.get_mut(&target_id)?;
+        target_runtime.set_age(target_item.age().min(source_item.age()));
         target_runtime.replace_stack(merged_stack);
         target_runtime.set_pickup_delay(pickup_delay);
 
@@ -854,11 +853,17 @@ impl ServerEntityStore {
                 "minecraft:item",
                 EntitySavePayload::Item {
                     stack,
+                    age,
                     pickup_delay,
                 },
-            ) => {
-                self.insert_saved_item_entity(id, saved, canonical_position, stack, *pickup_delay)?
-            }
+            ) => self.insert_saved_item_entity(
+                id,
+                saved,
+                canonical_position,
+                stack,
+                *age,
+                *pickup_delay,
+            )?,
             (kind, payload) => {
                 return Err(ChunkStoreError::InvalidData(format!(
                     "entity {:?} had incompatible kind {kind:?} and payload {payload:?}",
@@ -884,7 +889,7 @@ impl ServerEntityStore {
         let metadata = EntityMetadata::for_kind(kind).ok_or_else(|| {
             ChunkStoreError::InvalidData(format!("entity kind {kind:?} has no metadata"))
         })?;
-        let mut state = ServerEntityState::from_metadata(
+        let state = ServerEntityState::from_metadata(
             id,
             saved.persistent_id,
             metadata,
@@ -894,7 +899,6 @@ impl ServerEntityStore {
             saved.rotation,
             saved.on_ground,
         );
-        state.age_ticks = saved.age_ticks;
         let mob = MobRuntimeState::from_saved(
             id,
             metadata,
@@ -914,6 +918,7 @@ impl ServerEntityStore {
         saved: &EntitySaveRecord,
         position: Vec3d,
         stack: &ItemStackSaveRecord,
+        age: u64,
         pickup_delay: i32,
     ) -> ChunkStoreResult<ServerEntityState> {
         let stack = item_stack_snapshot_from_save(stack)?;
@@ -928,9 +933,9 @@ impl ServerEntityStore {
             saved.rotation,
             saved.on_ground,
         );
-        state.age_ticks = saved.age_ticks;
         state.item_stack = Some(stack);
-        let item = ItemEntityRuntimeState::from_saved(stack, saved.delta_movement, pickup_delay);
+        let item =
+            ItemEntityRuntimeState::from_saved(stack, saved.delta_movement, age, pickup_delay);
         self.items.insert(id, item);
         self.entities.insert(id, state);
         Ok(state)
@@ -961,6 +966,7 @@ impl ServerEntityStore {
             EntityKind::Mannequin => EntitySavePayload::Mannequin,
             EntityKind::Item => EntitySavePayload::Item {
                 stack: entity.item_stack.map(ItemStackSaveRecord::from)?,
+                age: self.items.get(&entity.id)?.age(),
                 pickup_delay: self.items.get(&entity.id)?.pickup_delay(),
             },
             EntityKind::DebugCube => return None,
@@ -974,7 +980,6 @@ impl ServerEntityStore {
             x_rot_degrees: entity.x_rot_degrees,
             rotation: entity.rotation,
             on_ground: entity.on_ground,
-            age_ticks: entity.age_ticks,
             payload,
         })
     }
@@ -1015,7 +1020,7 @@ fn debug_physics_cube_state(
     y_rot_degrees: f32,
     x_rot_degrees: f32,
     rotation: EntityRotation,
-    age_ticks: u64,
+    tick_count: u64,
 ) -> ServerEntityState {
     ServerEntityState {
         id,
@@ -1029,7 +1034,7 @@ fn debug_physics_cube_state(
         on_ground: false,
         width: 1.0,
         height: 1.0,
-        age_ticks,
+        tick_count,
         alive: true,
     }
 }
@@ -1099,13 +1104,13 @@ fn player_pickup_box(position: Vec3d) -> Aabb {
     )
 }
 
-fn item_merge_due(age_ticks: u64, block_position_changed: bool) -> bool {
+fn item_merge_due(tick_count: u64, block_position_changed: bool) -> bool {
     let interval = if block_position_changed {
         ITEM_MOVED_BLOCK_MERGE_INTERVAL_TICKS
     } else {
         ITEM_STATIONARY_MERGE_INTERVAL_TICKS
     };
-    age_ticks % interval == 0
+    tick_count % interval == 0
 }
 
 fn entity_kind_code(kind: EntityKind) -> Option<&'static str> {
@@ -1385,8 +1390,9 @@ mod tests {
             Vec3d::new(6.5, 64.0, 4.5),
             90.0,
         );
-        store.entities.get_mut(&chicken_id).unwrap().age_ticks = 20;
-        store.entities.get_mut(&item_id).unwrap().age_ticks = 30;
+        store.entities.get_mut(&chicken_id).unwrap().tick_count = 20;
+        store.entities.get_mut(&item_id).unwrap().tick_count = 30;
+        store.items.get_mut(&item_id).unwrap().set_age(30);
         store
             .mobs
             .get_mut(&chicken_id)
@@ -1417,6 +1423,7 @@ mod tests {
             item_record.payload,
             EntitySavePayload::Item {
                 stack: ItemStackSaveRecord::new("minecraft:egg", 2),
+                age: 30,
                 pickup_delay: 3,
             }
         );
@@ -1472,6 +1479,10 @@ mod tests {
             Some(1234)
         );
         assert_eq!(loaded.item_state(loaded_item.id).unwrap().pickup_delay(), 3);
+        assert_eq!(loaded.item_state(loaded_item.id).unwrap().age(), 30);
+        assert_eq!(loaded_chicken.tick_count, 0);
+        assert_eq!(loaded_item.tick_count, 0);
+        assert_eq!(loaded_mannequin.tick_count, 0);
 
         let resaved = loaded.entity_chunk_record(chunk, 8);
         let resaved_chicken = resaved
@@ -1526,7 +1537,7 @@ mod tests {
             .expect("item should tick in entity ticking chunk");
 
         assert_ne!(item.position, start.position);
-        assert_eq!(item.age_ticks, 1);
+        assert_eq!(item.tick_count, 1);
         assert_eq!(store.item_state(id).unwrap().pickup_delay(), 9);
     }
 
@@ -1540,7 +1551,11 @@ mod tests {
             },
             Vec3d::new(4.0, 64.0, 4.0),
         );
-        store.entities.get_mut(&id).unwrap().age_ticks = ITEM_ENTITY_LIFETIME_TICKS - 1;
+        store
+            .items
+            .get_mut(&id)
+            .unwrap()
+            .set_age(ITEM_ENTITY_LIFETIME_TICKS - 1);
 
         let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], no_blocks);
         let removed = updated
@@ -1651,10 +1666,12 @@ mod tests {
             },
             Vec3d::new(4.1, 64.0, 4.0),
         );
-        store.entities.get_mut(&first).unwrap().age_ticks =
+        store.entities.get_mut(&first).unwrap().tick_count =
             ITEM_STATIONARY_MERGE_INTERVAL_TICKS - 1;
-        store.entities.get_mut(&second).unwrap().age_ticks =
+        store.entities.get_mut(&second).unwrap().tick_count =
             ITEM_STATIONARY_MERGE_INTERVAL_TICKS - 1;
+        store.items.get_mut(&first).unwrap().set_age(10);
+        store.items.get_mut(&second).unwrap().set_age(20);
 
         let updated = store.tick_stationary(&[ChunkPos::new(0, 0)], &[], no_blocks);
         let surviving_items = store
@@ -1681,6 +1698,11 @@ mod tests {
                 && entity.alive
                 && entity.item_stack == surviving_items[0].item_stack
         }));
+        assert_eq!(
+            store.item_state(surviving_items[0].id).unwrap().age(),
+            11,
+            "merged item keeps the younger semantic age after both items tick"
+        );
     }
 
     #[test]
@@ -1721,7 +1743,7 @@ mod tests {
     }
 
     #[test]
-    fn entity_tick_advances_age_in_entity_ticking_chunks() {
+    fn entity_tick_advances_tick_count_in_entity_ticking_chunks() {
         let mut store = ServerEntityStore::default();
         let id =
             store.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true)[0];
@@ -1731,7 +1753,7 @@ mod tests {
                 .tick_stationary(&[ChunkPos::new(1, 0)], &[], flat_ground)
                 .is_empty()
         );
-        assert_eq!(store.state(id).unwrap().age_ticks, 0);
+        assert_eq!(store.state(id).unwrap().tick_count, 0);
         assert_eq!(
             store.diagnostics(),
             ServerEntityStoreDiagnostics {
@@ -1747,7 +1769,7 @@ mod tests {
             .iter()
             .find(|entity| entity.id == id)
             .expect("showcase cow should update");
-        assert_eq!(updated.age_ticks, 1);
+        assert_eq!(updated.tick_count, 1);
         assert_eq!(
             store.diagnostics(),
             ServerEntityStoreDiagnostics {
@@ -1767,7 +1789,7 @@ mod tests {
         let updated = store.tick_stationary(&[], &[], flat_ground);
 
         assert!(updated.is_empty());
-        assert_eq!(store.state(id).unwrap().age_ticks, 1);
+        assert_eq!(store.state(id).unwrap().tick_count, 1);
         assert_eq!(
             store.diagnostics(),
             ServerEntityStoreDiagnostics {
@@ -1798,7 +1820,7 @@ mod tests {
         }
 
         let moved = moved.expect("cow passive AI should choose a stroll target");
-        assert!(moved.age_ticks > start.age_ticks);
+        assert!(moved.tick_count > start.tick_count);
         assert!(moved.position.distance_to_sqr(start.position) > 0.0);
         let mob = store.mob_state(id).expect("starter cow mob state");
         assert!(mob.running_goal_count() > 0);
@@ -1825,7 +1847,7 @@ mod tests {
         }
 
         let moved = moved.expect("chicken passive AI should choose a stroll target");
-        assert!(moved.age_ticks > start.age_ticks);
+        assert!(moved.tick_count > start.tick_count);
         assert!(moved.position.distance_to_sqr(start.position) > 0.0);
         let mob = store.mob_state(id).expect("starter chicken mob state");
         assert!(mob.running_goal_count() > 0);

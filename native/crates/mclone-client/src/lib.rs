@@ -644,7 +644,7 @@ impl ClientRuntime {
             snapshot.x_rot_degrees = update.x_rot_degrees;
             snapshot.rotation = update.rotation;
             snapshot.on_ground = update.on_ground;
-            snapshot.age_ticks = update.age_ticks;
+            snapshot.tick_count = update.tick_count;
             entity_chunk_pos(snapshot)
         };
         self.set_entity_chunk(update.id, new_chunk);
@@ -1086,7 +1086,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 0,
+            tick_count: 0,
         }));
         runtime.apply_update(ServerUpdate::PlayerExperience {
             total_experience: 37,
@@ -1365,7 +1365,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 0,
+            tick_count: 0,
         }));
         runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
             id,
@@ -1375,7 +1375,7 @@ mod tests {
             x_rot_degrees: 0.0,
             rotation: None,
             on_ground: true,
-            age_ticks: 1,
+            tick_count: 1,
         }));
 
         assert_eq!(runtime.entity_seam_crossing_count(id), 1);
@@ -1398,7 +1398,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 12,
+            tick_count: 12,
         };
         let moved = EntityUpdate {
             id,
@@ -1413,7 +1413,7 @@ mod tests {
                 w: 0.923_879_5,
             }),
             on_ground: false,
-            age_ticks: 13,
+            tick_count: 13,
         };
 
         runtime.apply_update(ServerUpdate::EntitySnapshot(initial));
@@ -1428,7 +1428,7 @@ mod tests {
         assert_eq!(updated.x_rot_degrees, moved.x_rot_degrees);
         assert_eq!(updated.rotation, moved.rotation);
         assert_eq!(updated.on_ground, moved.on_ground);
-        assert_eq!(updated.age_ticks, moved.age_ticks);
+        assert_eq!(updated.tick_count, moved.tick_count);
         assert_eq!(updated.kind, initial.kind);
         assert_eq!(updated.persistent_id, initial.persistent_id);
         assert_eq!(updated.item_stack, initial.item_stack);
@@ -1511,7 +1511,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 0,
+            tick_count: 0,
         };
 
         runtime.apply_update(ServerUpdate::EntitySnapshot(snapshot));
@@ -1555,7 +1555,7 @@ mod tests {
             on_ground: false,
             width: 0.25,
             height: 0.25,
-            age_ticks: 0,
+            tick_count: 0,
         };
 
         runtime.apply_update(ServerUpdate::EntitySnapshot(snapshot));
@@ -1653,7 +1653,7 @@ mod tests {
             on_ground: true,
             width: 0.25,
             height: 0.25,
-            age_ticks: 1,
+            tick_count: 1,
         }));
 
         runtime.apply_update(ServerUpdate::EntityUpdate(EntityUpdate {
@@ -1667,7 +1667,7 @@ mod tests {
             x_rot_degrees: 0.0,
             rotation: None,
             on_ground: true,
-            age_ticks: 2,
+            tick_count: 2,
         }));
 
         assert_eq!(

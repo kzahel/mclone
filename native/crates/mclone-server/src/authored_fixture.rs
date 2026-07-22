@@ -455,7 +455,6 @@ fn authored_lobby_island_entities() -> EntityChunkRecord {
                 x_rot_degrees: 0.0,
                 rotation: Some(EntityRotation::IDENTITY),
                 on_ground: true,
-                age_ticks: 0,
                 payload: EntitySavePayload::Cow,
             },
             EntitySaveRecord {
@@ -467,7 +466,6 @@ fn authored_lobby_island_entities() -> EntityChunkRecord {
                 x_rot_degrees: 0.0,
                 rotation: Some(EntityRotation::IDENTITY),
                 on_ground: true,
-                age_ticks: 0,
                 payload: EntitySavePayload::Chicken { egg_time: 6_000 },
             },
         ],
@@ -890,7 +888,7 @@ mod tests {
                             entities.iter_mut().find(|entity| entity.id == update.id)
                     {
                         entity.position = update.position;
-                        entity.age_ticks = update.age_ticks;
+                        entity.tick_count = update.tick_count;
                         moved |= initial_positions[&update.id] != update.position;
                     }
                 }
@@ -902,7 +900,7 @@ mod tests {
                 moved,
                 "an authored passive actor should move through ordinary AI"
             );
-            assert!(entities.iter().all(|entity| entity.age_ticks > 0));
+            assert!(entities.iter().all(|entity| entity.tick_count > 0));
             let positions = entities
                 .iter()
                 .map(|entity| (entity.kind, entity.position))

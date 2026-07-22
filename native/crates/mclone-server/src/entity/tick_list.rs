@@ -72,7 +72,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 0,
+            tick_count: 0,
             alive,
         }
     }

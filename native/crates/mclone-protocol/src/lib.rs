@@ -599,7 +599,7 @@ pub struct EntitySnapshot {
     pub on_ground: bool,
     pub width: f32,
     pub height: f32,
-    pub age_ticks: u64,
+    pub tick_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -611,7 +611,7 @@ pub struct EntityUpdate {
     pub x_rot_degrees: f32,
     pub rotation: Option<EntityRotation>,
     pub on_ground: bool,
-    pub age_ticks: u64,
+    pub tick_count: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1204,7 +1204,7 @@ fn validate_entity_snapshot(snapshot: &EntitySnapshot) -> ProtocolCodecResult<()
         x_rot_degrees: snapshot.x_rot_degrees,
         rotation: snapshot.rotation,
         on_ground: snapshot.on_ground,
-        age_ticks: snapshot.age_ticks,
+        tick_count: snapshot.tick_count,
     })?;
     if !snapshot.width.is_finite()
         || !snapshot.height.is_finite()
@@ -1650,7 +1650,7 @@ impl ByteWriter {
         self.write_bool(snapshot.on_ground);
         self.write_f32(snapshot.width);
         self.write_f32(snapshot.height);
-        self.write_u64(snapshot.age_ticks);
+        self.write_u64(snapshot.tick_count);
     }
 
     fn write_optional_item_stack_snapshot(&mut self, stack: Option<ItemStackSnapshot>) {
@@ -1671,7 +1671,7 @@ impl ByteWriter {
         self.write_f32(update.x_rot_degrees);
         self.write_optional_entity_rotation(update.rotation);
         self.write_bool(update.on_ground);
-        self.write_u64(update.age_ticks);
+        self.write_u64(update.tick_count);
     }
 
     fn write_optional_entity_rotation(&mut self, rotation: Option<EntityRotation>) {
@@ -2211,7 +2211,7 @@ impl<'a> ByteReader<'a> {
             on_ground: self.read_bool()?,
             width: self.read_f32()?,
             height: self.read_f32()?,
-            age_ticks: self.read_u64()?,
+            tick_count: self.read_u64()?,
         };
         validate_entity_snapshot(&snapshot)?;
         Ok(snapshot)
@@ -2240,7 +2240,7 @@ impl<'a> ByteReader<'a> {
             x_rot_degrees: self.read_f32()?,
             rotation: self.read_optional_entity_rotation()?,
             on_ground: self.read_bool()?,
-            age_ticks: self.read_u64()?,
+            tick_count: self.read_u64()?,
         };
         validate_entity_update(&update)?;
         Ok(update)
@@ -2709,7 +2709,7 @@ mod tests {
             on_ground: true,
             width: 1.0,
             height: 1.0,
-            age_ticks: 12,
+            tick_count: 12,
         };
         let update = EntityUpdate {
             id: snapshot.id,
@@ -2724,7 +2724,7 @@ mod tests {
                 w: 0.923_879_5,
             }),
             on_ground: true,
-            age_ticks: 13,
+            tick_count: 13,
         };
 
         for server_update in [
@@ -2762,7 +2762,7 @@ mod tests {
             on_ground: false,
             width: 0.25,
             height: 0.25,
-            age_ticks: 0,
+            tick_count: 0,
         };
         let update = ServerUpdate::EntitySnapshot(snapshot);
         let bytes = encode_server_update(&update).unwrap();
@@ -2780,7 +2780,7 @@ mod tests {
             x_rot_degrees: snapshot.x_rot_degrees,
             rotation: snapshot.rotation,
             on_ground: true,
-            age_ticks: 1,
+            tick_count: 1,
         });
         let bytes = encode_server_update(&update).unwrap();
 
@@ -2816,7 +2816,7 @@ mod tests {
             x_rot_degrees: -15.0,
             rotation: None,
             on_ground: true,
-            age_ticks: 1,
+            tick_count: 1,
         });
         assert_eq!(
             encode_server_update(&non_finite),
@@ -2837,7 +2837,7 @@ mod tests {
             on_ground: true,
             width: 0.0,
             height: 0.7,
-            age_ticks: 1,
+            tick_count: 1,
         });
         assert_eq!(
             encode_server_update(&invalid_dimensions),
@@ -2858,7 +2858,7 @@ mod tests {
             on_ground: true,
             width: 0.25,
             height: 0.25,
-            age_ticks: 1,
+            tick_count: 1,
         });
         assert_eq!(
             encode_server_update(&missing_item_stack),
@@ -2882,7 +2882,7 @@ mod tests {
             on_ground: true,
             width: 0.4,
             height: 0.7,
-            age_ticks: 1,
+            tick_count: 1,
         });
         assert_eq!(
             encode_server_update(&misplaced_item_stack),
@@ -2904,7 +2904,7 @@ mod tests {
                 w: 0.0,
             }),
             on_ground: true,
-            age_ticks: 1,
+            tick_count: 1,
         });
         assert_eq!(
             encode_server_update(&invalid_rotation),

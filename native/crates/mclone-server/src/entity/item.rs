@@ -21,6 +21,7 @@ const ITEM_COLLISION_EPSILON: f64 = 1.0e-7;
 pub(crate) struct ItemEntityRuntimeState {
     stack: ItemStackSnapshot,
     delta_movement: Vec3d,
+    age: u64,
     pickup_delay: i32,
 }
 
@@ -34,6 +35,7 @@ impl ItemEntityRuntimeState {
                 0.2,
                 random.next_double() * 0.2 - 0.1,
             ),
+            age: 0,
             pickup_delay: ITEM_DEFAULT_PICKUP_DELAY,
         }
     }
@@ -42,11 +44,13 @@ impl ItemEntityRuntimeState {
     pub(crate) fn from_saved(
         stack: ItemStackSnapshot,
         delta_movement: Vec3d,
+        age: u64,
         pickup_delay: i32,
     ) -> Self {
         Self {
             stack,
             delta_movement,
+            age,
             pickup_delay,
         }
     }
@@ -66,7 +70,7 @@ impl ItemEntityRuntimeState {
     pub(crate) fn is_mergeable(&self, entity: ServerEntityState) -> bool {
         entity.alive
             && self.pickup_delay != ITEM_INFINITE_PICKUP_DELAY
-            && entity.age_ticks < ITEM_ENTITY_LIFETIME_TICKS
+            && self.age < ITEM_ENTITY_LIFETIME_TICKS
             && item_stack_has_room(self.stack)
     }
 
@@ -78,6 +82,14 @@ impl ItemEntityRuntimeState {
     #[allow(dead_code)]
     pub(crate) fn delta_movement(&self) -> Vec3d {
         self.delta_movement
+    }
+
+    pub(crate) fn age(&self) -> u64 {
+        self.age
+    }
+
+    pub(crate) fn set_age(&mut self, age: u64) {
+        self.age = age;
     }
 
     #[cfg(test)]
@@ -140,6 +152,7 @@ impl ItemEntityRuntimeState {
                 self.delta_movement.z,
             );
         }
+        self.age = self.age.saturating_add(1);
     }
 }
 
@@ -184,7 +197,7 @@ mod tests {
             on_ground: false,
             width: 0.25,
             height: 0.25,
-            age_ticks: 0,
+            tick_count: 0,
             alive: true,
         }
     }
@@ -212,6 +225,7 @@ mod tests {
         let mut item = ItemEntityRuntimeState {
             stack: entity.item_stack.unwrap(),
             delta_movement: Vec3d::new(0.0, 0.0, 0.0),
+            age: 0,
             pickup_delay: ITEM_DEFAULT_PICKUP_DELAY,
         };
 
@@ -220,6 +234,7 @@ mod tests {
         assert!(entity.position.y < 64.0);
         assert!(!entity.on_ground);
         assert!(item.delta_movement().y < 0.0);
+        assert_eq!(item.age(), 1);
         assert_eq!(item.pickup_delay(), ITEM_DEFAULT_PICKUP_DELAY - 1);
     }
 
@@ -229,6 +244,7 @@ mod tests {
         let mut item = ItemEntityRuntimeState {
             stack: entity.item_stack.unwrap(),
             delta_movement: Vec3d::new(0.0, -0.2, 0.0),
+            age: 0,
             pickup_delay: 0,
         };
 
@@ -240,14 +256,14 @@ mod tests {
 
     #[test]
     fn item_entity_merges_same_stack_when_capacity_allows() {
-        let mut entity = item_state();
-        entity.age_ticks = 12;
+        let entity = item_state();
         let mut left = ItemEntityRuntimeState {
             stack: ItemStackSnapshot {
                 kind: ItemKind::Egg,
                 count: 1,
             },
             delta_movement: Vec3d::ZERO,
+            age: 12,
             pickup_delay: 2,
         };
         let right = ItemEntityRuntimeState {
@@ -256,6 +272,7 @@ mod tests {
                 count: 3,
             },
             delta_movement: Vec3d::ZERO,
+            age: 34,
             pickup_delay: 7,
         };
 
@@ -282,6 +299,7 @@ mod tests {
                 count: crate::item_stack::EGG_MAX_STACK_SIZE,
             },
             delta_movement: Vec3d::ZERO,
+            age: 0,
             pickup_delay: 0,
         };
         let right = ItemEntityRuntimeState {
@@ -290,6 +308,7 @@ mod tests {
                 count: 1,
             },
             delta_movement: Vec3d::ZERO,
+            age: 0,
             pickup_delay: 0,
         };
 

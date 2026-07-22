@@ -3651,7 +3651,7 @@ impl RealmServer {
     #[cfg(feature = "physics-engine")]
     fn spawn_debug_physics_cube_entity(
         &mut self,
-        age_ticks: u64,
+        tick_count: u64,
         physics: ServerPhysicsTickDiagnostics,
     ) -> Option<crate::entity::DebugPhysicsCubeEntitySpawn> {
         let pose = self.physics.debug_cube_pose()?;
@@ -3663,14 +3663,14 @@ impl RealmServer {
             y_rot_degrees,
             x_rot_degrees,
             rotation,
-            age_ticks,
+            tick_count,
         ))
     }
 
     #[cfg(feature = "physics-engine")]
     fn sync_debug_physics_cube_entity(
         &mut self,
-        age_ticks: u64,
+        tick_count: u64,
         physics: ServerPhysicsTickDiagnostics,
     ) -> Option<ServerEntityState> {
         let pose = self.physics.debug_cube_pose()?;
@@ -3682,7 +3682,7 @@ impl RealmServer {
             y_rot_degrees,
             x_rot_degrees,
             rotation,
-            age_ticks,
+            tick_count,
         ))
     }
 

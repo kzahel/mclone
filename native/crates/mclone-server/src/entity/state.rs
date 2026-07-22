@@ -19,7 +19,7 @@ pub(crate) struct ServerEntityState {
     pub(crate) on_ground: bool,
     pub(crate) width: f32,
     pub(crate) height: f32,
-    pub(crate) age_ticks: u64,
+    pub(crate) tick_count: u64,
     pub(crate) alive: bool,
 }
 
@@ -46,7 +46,7 @@ impl ServerEntityState {
             on_ground,
             width: metadata.dimensions.width,
             height: metadata.dimensions.height,
-            age_ticks: 0,
+            tick_count: 0,
             alive: true,
         }
     }
@@ -68,7 +68,7 @@ impl ServerEntityState {
             on_ground: self.on_ground,
             width: self.width,
             height: self.height,
-            age_ticks: self.age_ticks,
+            tick_count: self.tick_count,
         }
     }
 
@@ -81,7 +81,7 @@ impl ServerEntityState {
             x_rot_degrees: self.x_rot_degrees,
             rotation: self.rotation,
             on_ground: self.on_ground,
-            age_ticks: self.age_ticks,
+            tick_count: self.tick_count,
         }
     }
 }

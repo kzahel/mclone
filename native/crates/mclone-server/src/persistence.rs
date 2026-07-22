@@ -63,7 +63,7 @@ pub const WORLD_WRITER_LOCK_FILE: &str = "world.writer.lock";
 const WORLD_ADMISSION_LOCK_FILE: &str = ".mclone-world-admission.lock";
 
 pub const CHUNK_LIGHT_ALGORITHM_VERSION: u32 = 1;
-pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 1;
+pub const ENTITY_CHUNK_RECORD_VERSION: u32 = 2;
 const LEGACY_PLAYER_RECORD_VERSION: u32 = 1;
 const STATISTICS_PLAYER_RECORD_VERSION: u32 = 2;
 pub const PLAYER_RECORD_VERSION: u32 = 3;
@@ -381,7 +381,6 @@ pub struct EntitySaveRecord {
     pub x_rot_degrees: f32,
     pub rotation: Option<EntityRotation>,
     pub on_ground: bool,
-    pub age_ticks: u64,
     pub payload: EntitySavePayload,
 }
 
@@ -394,6 +393,7 @@ pub enum EntitySavePayload {
     },
     Item {
         stack: ItemStackSaveRecord,
+        age: u64,
         pickup_delay: i32,
     },
 }
@@ -4957,7 +4957,6 @@ fn write_entity_save_record(
     write_f32(writer, record.x_rot_degrees)?;
     write_optional_rotation(writer, record.rotation)?;
     write_bool(writer, record.on_ground)?;
-    write_u64(writer, record.age_ticks)?;
     write_entity_save_payload(writer, &record.payload)
 }
 
@@ -4970,7 +4969,6 @@ fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySav
     let x_rot_degrees = read_f32(reader)?;
     let rotation = read_optional_rotation(reader)?;
     let on_ground = read_bool(reader)?;
-    let age_ticks = read_u64(reader)?;
     let payload = read_entity_save_payload(reader)?;
     Ok(EntitySaveRecord {
         persistent_id,
@@ -4981,7 +4979,6 @@ fn read_entity_save_record(reader: &mut impl Read) -> ChunkStoreResult<EntitySav
         x_rot_degrees,
         rotation,
         on_ground,
-        age_ticks,
         payload,
     })
 }
@@ -4999,10 +4996,12 @@ fn write_entity_save_payload(
         }
         EntitySavePayload::Item {
             stack,
+            age,
             pickup_delay,
         } => {
             write_u8(writer, 2)?;
             write_item_stack_save_record(writer, stack)?;
+            write_u64(writer, *age)?;
             write_i32(writer, *pickup_delay)
         }
     }
@@ -5016,6 +5015,7 @@ fn read_entity_save_payload(reader: &mut impl Read) -> ChunkStoreResult<EntitySa
         }),
         2 => Ok(EntitySavePayload::Item {
             stack: read_item_stack_save_record(reader)?,
+            age: read_u64(reader)?,
             pickup_delay: read_i32(reader)?,
         }),
         3 => Ok(EntitySavePayload::Mannequin),
@@ -5475,7 +5475,6 @@ mod tests {
                         w: 0.8660254,
                     }),
                     on_ground: false,
-                    age_ticks: 77,
                     payload: EntitySavePayload::Chicken { egg_time: 1234 },
                 },
                 EntitySaveRecord {
@@ -5487,7 +5486,6 @@ mod tests {
                     x_rot_degrees: 0.0,
                     rotation: None,
                     on_ground: true,
-                    age_ticks: 12,
                     payload: EntitySavePayload::Mannequin,
                 },
             ],
@@ -6742,9 +6740,9 @@ mod tests {
             x_rot_degrees: 0.0,
             rotation: None,
             on_ground: true,
-            age_ticks: 12,
             payload: EntitySavePayload::Item {
                 stack: ItemStackSaveRecord::new("minecraft:egg", 3),
+                age: 12,
                 pickup_delay: 7,
             },
         }

@@ -2848,7 +2848,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                         if !preview_actor_observations(preview.render).any(|observation| {
                             observation.entity_id == moved.entity_id
                                 && observation.kind == moved.kind
-                                && observation.age_ticks >= moved.age_ticks
+                                && observation.tick_count >= moved.tick_count
                         }) {
                             bail!(
                                 "A-to-B-to-A return duplicated or reset the moving actor: {:?}",
@@ -2934,7 +2934,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                             .context("reopened lobby has no retained actor witness")?;
                         if !preview_actor_observations(preview.render).any(|observation| {
                             observation.kind == moved.kind
-                                && observation.age_ticks >= moved.age_ticks
+                                && observation.tick_count >= moved.tick_count
                         }) {
                             bail!(
                                 "reopened authored actor reset instead of loading persisted state: {:?}",
@@ -3096,8 +3096,8 @@ pub(crate) fn run_lobby_scenario_smoke(
                     "entityId": to.entity_id.0.to_string(),
                     "persistentId": to.persistent_id.to_string(),
                     "kind": format!("{:?}", to.kind),
-                    "fromAgeTicks": from.age_ticks.to_string(),
-                    "toAgeTicks": to.age_ticks.to_string(),
+                    "fromTickCount": from.tick_count.to_string(),
+                    "toTickCount": to.tick_count.to_string(),
                     "fromSource": [from.source_feet_position.x, from.source_feet_position.y, from.source_feet_position.z],
                     "toSource": [to.source_feet_position.x, to.source_feet_position.y, to.source_feet_position.z],
                     "fromComposition": [from.composition_feet_position.x, from.composition_feet_position.y, from.composition_feet_position.z],

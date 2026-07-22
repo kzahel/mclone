@@ -3818,7 +3818,7 @@ impl McloneSceneHost {
                     kind: snapshot.kind,
                     source_feet_position: snapshot.position,
                     composition_feet_position: context.source_to_composition(snapshot.position),
-                    age_ticks: snapshot.age_ticks,
+                    tick_count: snapshot.tick_count,
                     source_packed_light: instance.packed_light,
                 })
             })
@@ -4478,7 +4478,7 @@ mod tests {
 
     #[test]
     fn authoritative_entity_motion_requires_one_stable_id_and_changed_position() {
-        let snapshot = |id, position, age_ticks| EntitySnapshot {
+        let snapshot = |id, position, tick_count| EntitySnapshot {
             id: mclone_protocol::EntityId(id),
             persistent_id: mclone_protocol::EntityPersistentId::new(0, id),
             kind: mclone_protocol::EntityKind::Cow,
@@ -4490,7 +4490,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks,
+            tick_count,
         };
         let from = snapshot(7, Vec3d::new(6.5, 66.0, 8.5), 117);
         let stationary = snapshot(7, from.position, 118);

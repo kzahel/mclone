@@ -3296,8 +3296,8 @@ impl WebSceneHost {
                     )?;
                     report_set_string(
                         &object,
-                        &format!("embeddedPreview{prefix}ActorAgeTicks"),
-                        &observation.age_ticks.to_string(),
+                        &format!("embeddedPreview{prefix}ActorTickCount"),
+                        &observation.tick_count.to_string(),
                     )?;
                     report_set_number(
                         &object,
@@ -3381,13 +3381,13 @@ impl WebSceneHost {
                     )?;
                     report_set_string(
                         &object,
-                        "embeddedPreviewActorMotionFromAgeTicks",
-                        &from.age_ticks.to_string(),
+                        "embeddedPreviewActorMotionFromTickCount",
+                        &from.tick_count.to_string(),
                     )?;
                     report_set_string(
                         &object,
-                        "embeddedPreviewActorMotionToAgeTicks",
-                        &to.age_ticks.to_string(),
+                        "embeddedPreviewActorMotionToTickCount",
+                        &to.tick_count.to_string(),
                     )?;
                     report_set_number(
                         &object,

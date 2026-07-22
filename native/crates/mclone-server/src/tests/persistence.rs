@@ -172,7 +172,7 @@ fn loaded_entity_chunk_record_hydrates_entities() {
             count: 3,
         })
     );
-    assert_eq!(entity.age_ticks, 37);
+    assert_eq!(entity.tick_count, 0);
 }
 
 #[test]

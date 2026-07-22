@@ -166,3 +166,19 @@ and the native offscreen motion receipt records the same canonical value. The
 protocol codec/format tests, all 126 client tests, all 536 server tests, all 127
 scene tests plus scene contract suites, and the web-client Wasm check pass. The
 Wasm check retains only pre-existing target-conditional warnings.
+
+### Slice 2 — vanilla timer ownership
+
+Implemented on 2026-07-22. The generic entity counter is now named
+`tick_count` end to end and is no longer part of `EntitySaveRecord`. Hydrating
+any saved actor starts a fresh runtime counter at zero. Dropped items now own a
+separate `age` in `ItemEntityRuntimeState`; that value controls item merge and
+despawn behavior and round-trips in the item save payload beside the existing
+stack and pickup delay. Chicken egg time remains in the chicken payload.
+
+The entity-chunk codec is version 2 with no legacy reader, as authorized for
+this unshipped format. Store tests prove fresh runtime IDs and zero generic
+tick counts after hydration while durable IDs, item age, item pickup delay, and
+chicken egg time survive. Item tests prove semantic age advances, expires, and
+selects the younger merge age independently of the generic counter. All 47
+protocol tests, 126 client tests, 536 server tests, and 127 scene tests pass.

@@ -531,7 +531,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 12,
+            tick_count: 12,
         };
 
         assert_eq!(

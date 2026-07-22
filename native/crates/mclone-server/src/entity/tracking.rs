@@ -132,7 +132,7 @@ mod tests {
             on_ground: true,
             width: 0.9,
             height: 1.4,
-            age_ticks: 0,
+            tick_count: 0,
             alive: true,
         }
     }
@@ -186,7 +186,7 @@ mod tests {
         tracking.reconcile_subject(initial, [observer], |_, _| true, false);
         let moved = ServerEntityState {
             position: Vec3d::new(9.0, 64.0, 8.0),
-            age_ticks: 2,
+            tick_count: 2,
             ..initial
         };
 

@@ -342,7 +342,7 @@ fn debug_passive_showcase_can_be_disabled() {
 }
 
 #[test]
-fn debug_passive_showcase_entity_updates_age_on_simulation_tick() {
+fn debug_passive_showcase_entity_updates_tick_count_on_simulation_tick() {
     let mut server = LocalRealmSession::new(12_345);
     server.set_lighting_enabled(false);
     let player = server.add_player();
@@ -352,11 +352,12 @@ fn debug_passive_showcase_entity_updates_age_on_simulation_tick() {
     let report = server
         .try_simulation_tick_report_for_player(player)
         .expect("tick dedicated player");
-    let update = first_entity_update(&report.updates, snapshot.id).expect("entity age update");
+    let update =
+        first_entity_update(&report.updates, snapshot.id).expect("entity tick-count update");
 
     assert_eq!(update.id, snapshot.id);
     assert!(update.position.is_finite());
-    assert!(update.age_ticks > snapshot.age_ticks);
+    assert!(update.tick_count > snapshot.tick_count);
 }
 
 #[test]

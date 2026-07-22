@@ -344,9 +344,9 @@ pub(super) fn stored_egg_item_entity_record(
             x_rot_degrees: 0.0,
             rotation: None,
             on_ground: true,
-            age_ticks: 37,
             payload: EntitySavePayload::Item {
                 stack: ItemStackSaveRecord::new("minecraft:egg", 3),
+                age: 37,
                 pickup_delay: 20,
             },
         }],
