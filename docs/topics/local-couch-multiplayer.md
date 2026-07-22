@@ -7,8 +7,14 @@ completed on 2026-07-21 through
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md). Mclone should
 retain a credible path from one local participant to 1-4 local participants,
 including console-style split screen, useful single-player auxiliary panes,
-helper/builder participation, and a mixed XR-plus-flat session. Tactical 215
-stops before product local participants and physical gamepad collection.
+helper/builder participation, and a mixed XR-plus-flat session.
+[`Tactical 216`](../tactical/216-controller-input-foundation.md) subsequently
+completed shared semantic controller sessions, controller-complete UI,
+desktop/browser/Android collectors, XR convergence, and automated platform
+gates; real-device acceptance remains open. Active
+[`Tactical 217`](../tactical/217-local-participant-foundation.md) owns the
+judgment-free participant/input/client/layout foundation while stopping before
+product couch enablement and unresolved profile/cache policy.
 
 This topic owns local participant cardinality, participant-to-input assignment,
 participant-versus-view separation, shared split-screen presentation policy,
@@ -140,6 +146,10 @@ presentation:
 - `mclone-input` owns opaque session-local source IDs, neutral descriptors, a
   normalized standard-gamepad snapshot, and deterministic four-seat scripted
   assignment with disconnect clearing and bounded reconnect reservation;
+- the shared controller pipeline now also owns semantic per-source actions,
+  controller-complete menu navigation, preferences, and physical collectors
+  for desktop, browser, Android, and both XR hosts, with hardware acceptance
+  still outstanding;
 - renderer uniform identity admits four neutral presentation views while typed
   stereo-eye identity remains XR-only; and
 - the scene admits one through four independent flat targets with one shared
@@ -159,8 +169,8 @@ change:
 - the local profile layer exposes one installation/browser-origin profile,
   not a local participant/profile group;
 - flat screen-space HUD/menu state is assembled for one mono view; and
-- no desktop, browser, or Android adapter currently polls a real ordinary
-  gamepad.
+- product hosts still arbitrate multiple ordinary controllers into one local
+  player's semantic input session rather than assigning them to participants.
 
 These are explicit refactor points, not permission to stage the feature in
 `mclone-native-client`.
@@ -452,20 +462,20 @@ culls perfectly.
 
 The sequence is intentionally staged so each milestone is useful on its own:
 
-1. **Complete the controller foundation.** Source IDs/descriptors, canonical
-   snapshots, deterministic scripted assignment, disconnect clearing, and
-   reconnect reservation are landed. Add semantic action state, look-rate
-   semantics, UI navigation, lifecycle clearing, and real desktop collection
-   as owned by the controller topic.
+1. **Complete the controller foundation.** Completed by Tactical 216 through
+   semantic action state, look-rate semantics, UI navigation, lifecycle
+   clearing, physical collectors, XR convergence, preferences, and automated
+   validation. Real-device acceptance remains an explicit hardware gate.
 2. **Promote the flat-view proof to surface layout.** View and participant are
    already separate, and the horizontal/vertical auxiliary proof prepares once
    and renders twice without changing mono. Add viewport/scissor rectangles,
    safe areas, per-pane HUD policy, and retained-preview composition only when
    a product or diagnostic consumer needs them.
-3. **Participantize singleton client-experience state.** Introduce a bounded
-   local participant group while still enforcing cardinality one. Move camera,
-   interaction, HUD/UI context, profile, prompt, and pose publication behind
-   participant identity without growing app crates.
+3. **Participantize singleton client-experience state.** Active in Tactical
+   217: introduce a bounded local participant group, first migrate the current
+   camera/interaction/player-model envelope at cardinality one, and integrate
+   scripted source assignment with participant-local semantic input. Durable
+   profile and unresolved global UI policy remain outside that tactical.
 4. **Add a local client group.** Join two distinct ordinary identities to one
    integrated realm through independent logical endpoints; prove owner-only
    updates, overlapping and separated interest, join/leave, save/reopen, death,
