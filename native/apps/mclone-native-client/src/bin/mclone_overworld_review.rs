@@ -9,12 +9,12 @@ use anyhow::{Context, Result, bail};
 use image::RgbaImage;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
-    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
-    McloneOverworldLandformSample, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample,
-    OCEAN_BIOME_ID, PLAINS_BIOME_ID, mclone_overworld_biome_id_for_sample,
-    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
-    mclone_overworld_surface_recipe,
+    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_PERIOD_BLOCKS,
+    MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample,
+    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
+    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
+    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -85,7 +85,7 @@ fn run() -> Result<()> {
         .collect::<Vec<_>>();
     let landform_elapsed_ms = landform_start.elapsed().as_secs_f64() * 1_000.0;
     let facts = RegionFacts::from_samples(&landforms, request.width, request.depth);
-    let review_sites = select_review_sites(&landforms, request);
+    let review_sites = select_review_sites(&landforms, request, config.topology);
     let center_sample = sampler.sample_landform(center_x, center_z);
     let spawn_chunk = match config.topology {
         McloneOverworldSamplingTopology::Unbounded => mclone_overworld_spawn_chunk(config.seed),
@@ -384,6 +384,7 @@ fn run() -> Result<()> {
 fn select_review_sites(
     samples: &[McloneOverworldLandformSample],
     request: McloneOverworldSampleRegionRequest,
+    topology: McloneOverworldSamplingTopology,
 ) -> serde_json::Value {
     let highest = samples
         .iter()
@@ -483,6 +484,21 @@ fn select_review_sites(
                 .total_cmp(&right.terrain.watercourse.wetland_pool_influence)
         })
         .map(|(index, _)| index);
+    let seam_river = if topology == McloneOverworldSamplingTopology::PeriodicX {
+        samples
+            .iter()
+            .enumerate()
+            .filter(|(_, sample)| sample.terrain.watercourse.is_channel())
+            .min_by_key(|(index, _)| {
+                let offset_x = *index % request.width as usize;
+                let world_x = request.min_x + offset_x as i32 * request.step as i32;
+                let canonical_x = world_x.rem_euclid(MCLONE_OVERWORLD_PERIOD_BLOCKS);
+                canonical_x.min(MCLONE_OVERWORLD_PERIOD_BLOCKS - canonical_x)
+            })
+            .map(|(index, _)| index)
+    } else {
+        None
+    };
 
     serde_json::json!({
         "rangeInterior": review_site_json(highest, samples, request),
@@ -494,6 +510,7 @@ fn select_review_sites(
         "coastalRiver": review_site_json(coastal_river, samples, request),
         "wetland": review_site_json(wetland, samples, request),
         "wetlandPool": review_site_json(wetland_pool, samples, request),
+        "periodicSeamRiver": review_site_json(seam_river, samples, request),
     })
 }
 
