@@ -24,6 +24,7 @@ const CARD_HEADER_HEIGHT: u32 = 82;
 const CARD_LABEL_HEIGHT: u32 = 38;
 const CARD_PANEL_GAP: u32 = 14;
 const CARD_PANEL_BORDER: u32 = 2;
+const MIN_EYE_CLEARANCE_BLOCKS: f32 = 24.0;
 
 const CARD_BACKGROUND: [u8; 4] = [14, 20, 27, 255];
 const CARD_PANEL_BACKGROUND: [u8; 4] = [27, 36, 46, 255];
@@ -38,6 +39,7 @@ struct WorldgenShowcaseView {
     label: &'static str,
     eye: Vec3,
     target: Vec3,
+    eye_highest_non_air_y: f32,
     fov_y_degrees: f32,
 }
 
@@ -140,13 +142,24 @@ pub(crate) fn run_worldgen_showcase(
                 host.force_day_time(day_time);
             }
             let readiness = validate_showcase_readiness(&host, &scene, &warmup)?;
-            let surface_y = host
-                .scene_host()
-                .mono_highest_non_air_block_y_at_world(center_x as i32, center_z as i32)
-                .unwrap_or(64) as f32;
+            let center_surface_y = highest_non_air_y(&host, center_x, center_z)?;
+            let coverage_radius = scene.render_distance.saturating_mul(16) as f32;
+            let landscape_distance = (coverage_radius * 0.625).clamp(128.0, 240.0);
+            let elevated_distance = (coverage_radius * 0.73).clamp(160.0, 280.0);
+            let landscape_surface_y =
+                highest_non_air_y(&host, center_x, center_z - landscape_distance)?;
+            let elevated_surface_y =
+                highest_non_air_y(&host, center_x + elevated_distance, center_z)?;
             Ok(WorldgenShowcaseCaptureState {
                 host,
-                views: showcase_views(center_x, surface_y, center_z),
+                views: showcase_views(
+                    center_x,
+                    center_surface_y,
+                    center_z,
+                    landscape_surface_y,
+                    elevated_surface_y,
+                    scene.render_distance,
+                ),
                 drawn_section_counts: Vec::with_capacity(SHOWCASE_VIEW_COUNT),
                 readiness,
             })
@@ -257,7 +270,7 @@ pub(crate) fn run_worldgen_showcase(
         serde_json::json!({ "kind": "unbounded" })
     };
     let receipt = serde_json::json!({
-        "schema": 4,
+        "schema": 5,
         "profile": profile,
         "commit": commit,
         "dirty": dirty,
@@ -297,6 +310,8 @@ pub(crate) fn run_worldgen_showcase(
             "path": panel.path,
             "eye": view.eye.to_array(),
             "target": view.target.to_array(),
+            "eyeHighestNonAirY": view.eye_highest_non_air_y,
+            "eyeClearanceBlocks": view.eye.y - view.eye_highest_non_air_y,
             "fovYDegrees": view.fov_y_degrees,
             "drawnSectionCount": panel.drawn_section_count,
         })).collect::<Vec<_>>(),
@@ -317,27 +332,64 @@ pub(crate) fn run_worldgen_showcase(
     })
 }
 
-fn showcase_views(center_x: f32, surface_y: f32, center_z: f32) -> [WorldgenShowcaseView; 3] {
+fn highest_non_air_y(host: &OffscreenFlatClientHost, world_x: f32, world_z: f32) -> Result<f32> {
+    host.scene_host()
+        .mono_highest_non_air_block_y_at_world(world_x.round() as i32, world_z.round() as i32)
+        .map(|value| value as f32)
+        .with_context(|| {
+            format!(
+                "worldgen showcase has no loaded terrain beneath eye ({world_x:.1}, {world_z:.1})"
+            )
+        })
+}
+
+fn showcase_views(
+    center_x: f32,
+    center_surface_y: f32,
+    center_z: f32,
+    landscape_surface_y: f32,
+    elevated_surface_y: f32,
+    render_distance: u32,
+) -> [WorldgenShowcaseView; 3] {
+    let coverage_radius = render_distance.saturating_mul(16) as f32;
+    let landscape_distance = (coverage_radius * 0.625).clamp(128.0, 240.0);
+    let elevated_distance = (coverage_radius * 0.73).clamp(160.0, 280.0);
+    let top_height = (coverage_radius * 0.95).max(315.0);
     [
         WorldgenShowcaseView {
             slug: "top",
             label: "TOP DOWN",
-            eye: Vec3::new(center_x + 0.35, surface_y + 315.0, center_z - 0.35),
-            target: Vec3::new(center_x - 0.35, surface_y, center_z + 0.35),
+            eye: Vec3::new(
+                center_x + 0.35,
+                center_surface_y + top_height,
+                center_z - 0.35,
+            ),
+            target: Vec3::new(center_x - 0.35, center_surface_y, center_z + 0.35),
+            eye_highest_non_air_y: center_surface_y,
             fov_y_degrees: 42.0,
         },
         WorldgenShowcaseView {
             slug: "landscape",
-            label: "LOW LANDSCAPE",
-            eye: Vec3::new(center_x, surface_y + 8.0, center_z - 200.0),
-            target: Vec3::new(center_x, surface_y - 6.0, center_z),
+            label: "LANDSCAPE",
+            eye: Vec3::new(
+                center_x,
+                landscape_surface_y + MIN_EYE_CLEARANCE_BLOCKS,
+                center_z - landscape_distance,
+            ),
+            target: Vec3::new(center_x, center_surface_y + 10.0, center_z),
+            eye_highest_non_air_y: landscape_surface_y,
             fov_y_degrees: 48.0,
         },
         WorldgenShowcaseView {
             slug: "elevated",
             label: "ELEVATED",
-            eye: Vec3::new(center_x + 196.0, surface_y + 100.0, center_z),
-            target: Vec3::new(center_x, surface_y - 30.0, center_z),
+            eye: Vec3::new(
+                center_x + elevated_distance,
+                elevated_surface_y + 128.0,
+                center_z,
+            ),
+            target: Vec3::new(center_x, center_surface_y + 10.0, center_z),
+            eye_highest_non_air_y: elevated_surface_y,
             fov_y_degrees: 38.0,
         },
     ]
@@ -361,6 +413,13 @@ fn git_state() -> (Option<String>, Option<bool>) {
 }
 
 fn showcase_chunk_camera(view: &WorldgenShowcaseView, render_distance: u32) -> Result<ChunkCamera> {
+    let clearance = view.eye.y - view.eye_highest_non_air_y;
+    if clearance < MIN_EYE_CLEARANCE_BLOCKS {
+        bail!(
+            "worldgen showcase `{}` eye clearance is {clearance:.1} blocks, minimum is {MIN_EYE_CLEARANCE_BLOCKS:.1}",
+            view.label
+        );
+    }
     let direction = (view.target - view.eye)
         .try_normalize()
         .context("worldgen showcase view has identical eye and target")?;
@@ -779,7 +838,7 @@ mod tests {
             .into_iter()
             .map(|color| color.repeat((width * height) as usize))
             .collect::<Vec<_>>();
-        let views = showcase_views(0.0, 64.0, 0.0);
+        let views = showcase_views(0.0, 64.0, 0.0, 70.0, 72.0, 16);
 
         let (card_width, card_height, card) = compose_showcase_card(
             &panels,
@@ -814,19 +873,22 @@ mod tests {
 
     #[test]
     fn showcase_views_include_near_vertical_and_two_landscape_angles() {
-        let views = showcase_views(32.0, 70.0, -16.0);
+        let views = showcase_views(32.0, 70.0, -16.0, 82.0, 91.0, 24);
         assert_eq!(
             views.map(|view| view.slug),
             ["top", "landscape", "elevated"]
         );
         assert!(views[0].eye.y - views[0].target.y > 300.0);
-        assert!(views[1].eye.y - views[1].target.y < 30.0);
+        assert!(views[1].eye.y - views[1].target.y > 20.0);
         assert!(views[2].eye.y - views[2].target.y > 100.0);
         assert_eq!(views.map(|view| view.fov_y_degrees), [42.0, 48.0, 38.0]);
         for view in &views[1..] {
             let offset = view.eye - view.target;
             let horizontal_distance = offset.x.hypot(offset.z);
             assert!(horizontal_distance > SMALL_ISLAND_SUPPORT_RADIUS as f32);
+        }
+        for view in views {
+            assert!(view.eye.y - view.eye_highest_non_air_y >= MIN_EYE_CLEARANCE_BLOCKS);
         }
     }
 

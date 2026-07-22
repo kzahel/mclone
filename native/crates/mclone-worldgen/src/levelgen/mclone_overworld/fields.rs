@@ -3,7 +3,7 @@ use mclone_core::ChunkPos;
 use crate::noise::{SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-3";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-4";
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
 const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
@@ -24,8 +24,8 @@ const RELIEF_DETAIL_SCALE: i32 = 128;
 const RELIEF_FINE_SCALE: i32 = 48;
 const RUGGEDNESS_LARGE_SCALE: i32 = 1_536;
 const RUGGEDNESS_DETAIL_SCALE: i32 = 512;
-const RIDGE_LARGE_SCALE: i32 = 768;
-const RIDGE_DETAIL_SCALE: i32 = 256;
+const RIDGE_LARGE_SCALE: i32 = 384;
+const RIDGE_DETAIL_SCALE: i32 = 128;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -235,7 +235,7 @@ fn surface_height(continentalness: f64, relief: f64, ruggedness: f64, ridges: f6
     let base = 64.0 + land_strength * 18.0;
     let rolling_relief = relief * (2.0 + land_strength * 7.0);
     let mountain_strength = mountain_strength(continentalness, ruggedness);
-    let ridge_shoulder = smoothstep(((ridges - 0.12) / 0.88).clamp(0.0, 1.0));
+    let ridge_shoulder = smoothstep(((ridges - 0.22) / 0.78).clamp(0.0, 1.0));
     let mountain_lift =
         mountain_strength * (4.0 + ridge_shoulder * 16.0 + ridge_shoulder * ridge_shoulder * 54.0);
     (base + rolling_relief + mountain_lift)
@@ -324,8 +324,8 @@ mod tests {
             samples,
             [
                 (13_826_408_511_758_480_080, 4_606_201_729_120_264_332),
-                (4_602_433_175_868_524_518, 4_598_042_119_136_150_074),
-                (13_827_819_183_377_043_075, 4_605_782_885_895_260_980),
+                (4_602_433_175_868_524_518, 4_605_762_744_906_985_117),
+                (13_827_819_183_377_043_075, 4_603_495_361_005_022_309),
             ]
         );
     }
