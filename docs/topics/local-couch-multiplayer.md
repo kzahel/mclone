@@ -11,10 +11,10 @@ helper/builder participation, and a mixed XR-plus-flat session.
 [`Tactical 216`](../tactical/216-controller-input-foundation.md) subsequently
 completed shared semantic controller sessions, controller-complete UI,
 desktop/browser/Android collectors, XR convergence, and automated platform
-gates; real-device acceptance remains open. Active
-[`Tactical 217`](../tactical/217-local-participant-foundation.md) owns the
-judgment-free participant/input/client/layout foundation while stopping before
-product couch enablement and unresolved profile/cache policy.
+gates; real-device acceptance remains open.
+[`Tactical 217`](../tactical/217-local-participant-foundation.md) completed the
+judgment-free participant/input/client/layout foundation on 2026-07-22 while
+stopping before product couch enablement and unresolved profile/cache policy.
 
 This topic owns local participant cardinality, participant-to-input assignment,
 participant-versus-view separation, shared split-screen presentation policy,
@@ -150,20 +150,30 @@ presentation:
   controller-complete menu navigation, preferences, and physical collectors
   for desktop, browser, Android, and both XR hosts, with hardware acceptance
   still outstanding;
+- `mclone-app-runtime` owns opaque local participant identity and a stable,
+  explicitly slotted 1-4 participant group, plus a scripted input group that
+  maps assigned sources to isolated semantic controller sessions;
+- the same shared runtime has a deterministic 1-4 local-client correctness
+  harness: distinct ordinary player identities and `SingleViewRuntime`
+  replicas join one `RealmServer`, retain private owner state and independent
+  publication streams, expand and contract interest, and leave independently;
 - renderer uniform identity admits four neutral presentation views while typed
-  stereo-eye identity remains XR-only; and
-- the scene admits one through four independent flat targets with one shared
-  preparation, and the inspected offscreen proof renders first-person plus
-  detached plan cameras in horizontal and vertical compositions.
+  stereo-eye identity remains XR-only;
+- `mclone-render-session` owns a validated, safe-area-aware 1-4 rectangle
+  layout with explicit horizontal and vertical two-pane constructors; and
+- the scene's current camera/interaction/player-model state is contained in a
+  cardinality-one participant envelope. The inspected scripted offscreen proof
+  drives two participant-local semantic sessions and renders independent
+  cameras through horizontal and vertical layouts with one shared preparation.
 
 The client/presentation side remains singleton in the places couch play must
 change:
 
-- one `DrawableWorldSlot` retains one camera, interaction controller, and
-  player model;
-- the preliminary multi-flat entry still targets complete textures rather than
-  viewport rectangles on one presentation surface, and rejects simultaneous
-  retained embedded-world preview composition;
+- one `DrawableWorldSlot` still retains exactly one participant presentation
+  envelope;
+- the shipping multi-flat entry still targets complete textures rather than
+  applying the new viewport layout to a presentation surface, and rejects
+  simultaneous retained embedded-world preview composition;
 - `LocalIntegratedSceneRuntime` owns one `SingleViewRuntime` and one
   `IntegratedRunnerConnection`;
 - the local profile layer exposes one installation/browser-origin profile,
@@ -291,9 +301,12 @@ conclusion from pixels and frame timing as inference.
 
 ## Single-Player Auxiliary Split Mode
 
-The first rendered proof should not wait for a second authoritative player.
-One participant can deliberately request two flat presentation views on one
-surface in vertical or horizontal layout. Useful panes include:
+The first rendered proof did not wait for a second authoritative player.
+Tactical 217 now proves two independently posed world cameras, horizontal and
+vertical surface layouts, aspect-correct pane targets, and one shared scene
+preparation without granting the auxiliary camera authority. Product work can
+use that seam for one participant requesting multiple flat presentation views.
+Useful panes include:
 
 - an overhead or angled minimap/world camera;
 - a renderer/traversal/streaming debug camera or detailed diagnostic pane;
@@ -467,19 +480,23 @@ The sequence is intentionally staged so each milestone is useful on its own:
    clearing, physical collectors, XR convergence, preferences, and automated
    validation. Real-device acceptance remains an explicit hardware gate.
 2. **Promote the flat-view proof to surface layout.** View and participant are
-   already separate, and the horizontal/vertical auxiliary proof prepares once
-   and renders twice without changing mono. Add viewport/scissor rectangles,
-   safe areas, per-pane HUD policy, and retained-preview composition only when
-   a product or diagnostic consumer needs them.
-3. **Participantize singleton client-experience state.** Active in Tactical
-   217: introduce a bounded local participant group, first migrate the current
-   camera/interaction/player-model envelope at cardinality one, and integrate
-   scripted source assignment with participant-local semantic input. Durable
-   profile and unresolved global UI policy remain outside that tactical.
+   already separate. Tactical 217 added validated viewport rectangles, safe
+   areas, explicit horizontal/vertical plans, and a diagnostic compositor that
+   prepares once and renders twice without changing mono. Shipping surface
+   scissor/composition, per-pane HUD policy, and retained-preview composition
+   remain consumer-driven follow-ups.
+3. **Participantize singleton client-experience state.** Tactical 217 completed
+   the bounded participant group, cardinality-one
+   camera/interaction/player-model envelope, and scripted source assignment to
+   isolated semantic input sessions. Expanding the scene beyond cardinality
+   one awaits an actual consumer; durable profiles and global UI policy remain
+   unresolved.
 4. **Add a local client group.** Join two distinct ordinary identities to one
-   integrated realm through independent logical endpoints; prove owner-only
-   updates, overlapping and separated interest, join/leave, save/reopen, death,
-   and respawn headlessly before rendering them as a product.
+   Tactical 217 now proves 1-4 distinct ordinary identities against one realm
+   through independent logical endpoints, including owner-only updates,
+   overlapping and separated interest, and independent leave. Extend this
+   harness with save/reopen, death, and respawn evidence before rendering two
+   authoritative clients as a product.
 5. **Ship two-player flat split screen.** Add device assignment, layout,
    per-pane HUD/inventory, controller-loss UI, shared render resources, fair
    preparation, and colocated/separated performance evidence on desktop
@@ -511,11 +528,12 @@ Shared contract tests must cover:
 - participant-independent presentation views, including one participant with
   two views.
 
-Rendered acceptance must begin with the single-player auxiliary proof and
-inspect screenshots at the first drawable milestone:
+Rendered acceptance began with the inspected Tactical 217 single-player
+auxiliary proof. It established horizontal and vertical layouts with
+aspect-correct independent cameras, separate depth targets, and layout-bound
+compositing. Remaining product acceptance includes:
 
-- horizontal and vertical layouts with aspect-correct independent cameras;
-- separate depth/effects and correct viewport/scissor containment;
+- shipping viewport/scissor containment and view-local effects;
 - per-pane HUD policy without cross-pane clipping;
 - one-view pixels and resource/cost behavior unchanged when auxiliary views
   are absent;
@@ -553,9 +571,17 @@ changing shared participant semantics.
 
 ## Code And Documentation Map
 
+- [`../../native/crates/mclone-app-runtime/src/local_participant.rs`](../../native/crates/mclone-app-runtime/src/local_participant.rs),
+  [`../../native/crates/mclone-app-runtime/src/local_participant_input.rs`](../../native/crates/mclone-app-runtime/src/local_participant_input.rs),
+  and [`../../native/crates/mclone-app-runtime/src/local_client_group.rs`](../../native/crates/mclone-app-runtime/src/local_client_group.rs)
+  — bounded participant ownership, isolated semantic input, and the ordinary
+  local-client correctness harness.
+- [`../../native/crates/mclone-render-session/src/flat_surface_layout.rs`](../../native/crates/mclone-render-session/src/flat_surface_layout.rs)
+  and [`../../native/apps/mclone-native-client/src/offscreen_scene_host.rs`](../../native/apps/mclone-native-client/src/offscreen_scene_host.rs)
+  — validated flat-surface layout and the scripted diagnostic compositor.
 - [`../../native/crates/mclone-scene/src/lib.rs`](../../native/crates/mclone-scene/src/lib.rs)
   and [`../../native/crates/mclone-scene/src/mono.rs`](../../native/crates/mclone-scene/src/mono.rs)
-  — current one-slot player/camera/UI ownership and mono frame path.
+  — cardinality-one participant presentation ownership and mono frame path.
 - [`../../native/crates/mclone-app-runtime/src/native_service_assembly.rs`](../../native/crates/mclone-app-runtime/src/native_service_assembly.rs)
   and [`../../native/crates/mclone-app-runtime/src/client_connection.rs`](../../native/crates/mclone-app-runtime/src/client_connection.rs)
   — current single local client runtime/connection and ordinary connection

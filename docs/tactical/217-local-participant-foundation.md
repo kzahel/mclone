@@ -1,6 +1,6 @@
 # Tactical 217: Local Participant Foundation
 
-Status: active 2026-07-22.
+Status: completed 2026-07-22.
 
 Topic: [`local-couch-multiplayer`](../topics/local-couch-multiplayer.md).
 
@@ -267,6 +267,33 @@ rather than accepted:
 - `/tmp/mclone-couch-foundation-20260722/vertical.png`
 
 Focused layout/compositor tests pass, as does the affected scene Wasm check.
+
+### Slice 5 — closeout
+
+Completed on 2026-07-22. The required final gate passed without changing any
+shipping host capability:
+
+- formatting is clean;
+- all 43 `mclone-input`, 303 `mclone-app-runtime`, 127 `mclone-scene` library,
+  and 536 `mclone-server` tests pass, along with each package's affected
+  contract and integration suites; one existing scene case remains ignored;
+- `mclone-app-runtime` and `mclone-scene` both check for
+  `wasm32-unknown-unknown`; only pre-existing target-conditional unused-code
+  warnings remain; and
+- the accepted offscreen command produced a 960x640 mono control, a 960x640
+  horizontal composite, and a 960x640 vertical composite. The horizontal
+  panes were 480x640 and the vertical panes were 960x320. The paired cameras
+  differed by 213,217 pixels while each composite reported one shared scene
+  preparation and two view renders.
+
+The platform matrix is unchanged because couch joining, multiple product
+participants, and a shipping split-surface compositor remain disabled. The
+next acceptance gate is the real-device controller ledger in Tactical 216.
+After that, product work needs explicit decisions for guest/profile lifetime,
+shared replica/GPU cache ownership, pane HUD and pause policy, audio, and a
+default layout. Further headless save/reopen, death, and respawn coverage can
+extend the ordinary-client harness without changing those policies, but is not
+required to establish this tactical's bounded foundation.
 
 ## Stop Conditions
 
